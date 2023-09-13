@@ -1,0 +1,16 @@
+# Data
+*.log*
+*.ini
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Debug
+debug.py
+test.py
+debugdb.py
+*.json
+
+# Other
+__pycache__
+nohup.out

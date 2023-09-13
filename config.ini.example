@@ -1,0 +1,46 @@
+[general]
+timezone = Europe/London
+debug = True
+port = 80
+
+[tradingview]
+# can be generated with 
+# https://www.uuidgenerator.net
+token = a1234567-b123-c123-d123-e1234567890a
+
+[exchange]
+exchange = binance
+# Test Futurenet
+key = insert your exchange key
+secret = insert your exchange secret
+sandbox = True
+currency = USDT
+market = spot
+# Futures settings
+leverage = 1
+
+[trading]
+# If DCA is false - no DCA is available - 
+# only open and close signals will be processed
+dca = False
+dynamic_tp = False
+# base order size
+bo = 100
+# safety order size
+so = 100
+# price deviation to open safety orders
+sos = 1
+# safety order step scale
+ss = 0.98
+# safety order volume scale
+os = 1.32
+# max safety orders count
+mstc = 5
+# max active safety orders count
+# max = 2
+# take profit
+tp = 1
+
+# Tradingview message examples (but into "message" field in the alert)
+# { "email_token": "a1234567-b123-c123-d123-e1234567890a", "ticker": "{{ticker}}", "action": "close_long", "botname": "ftm_usdt"}
+# { "email_token": "a1234567-b123-c123-d123-e1234567890a", "ticker": "{{ticker}}", "action": "open_long", "botname": "ftm_usdt"}
