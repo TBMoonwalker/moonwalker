@@ -1,12 +1,16 @@
 from quart import Quart, request
 import argparse
 import asyncio
+import importlib
 from config import Config
 from database import Database
 from dca import Dca
 from exchange import Exchange
 from watcher import Watcher
-from tradingview import TradingView
+
+# from tradingview import TradingView
+
+plugin = importlib.import_module("tradingview")
 
 # from order import Order
 from logger import Logger
@@ -39,7 +43,7 @@ dca_queue = asyncio.Queue()
 tickers_queue = asyncio.Queue()
 
 # Initialize TradingView module
-tradingview = TradingView(
+tradingview = plugin.TradingView(
     order_queue, token=attributes.get("token"), ordersize=attributes.get("bo")
 )
 

@@ -1,6 +1,6 @@
 [general]
 timezone = Europe/London
-debug = True
+debug = False
 port = 80
 
 [tradingview]

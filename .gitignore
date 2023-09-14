@@ -10,6 +10,7 @@ debug.py
 test.py
 debugdb.py
 *.json
+*.example
 
 # Other
 __pycache__
