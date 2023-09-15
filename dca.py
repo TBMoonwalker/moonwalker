@@ -72,7 +72,7 @@ class Dca:
                     sell = True
 
             # Actual PNL in percent
-            actual_pnl = (current_price - average_buy_price) * 100
+            actual_pnl = ((current_price - average_buy_price) / average_buy_price) * 100
 
             # TP reached - sell order
             if sell:

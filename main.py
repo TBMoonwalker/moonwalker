@@ -131,4 +131,4 @@ async def shutdown():
 ######################################################
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=attributes.get("port"))
+    app.run(host="0.0.0.0", port=attributes.get("port", "8130"))
