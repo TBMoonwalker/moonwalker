@@ -25,9 +25,12 @@ secret | string | YES | () | API Secret taken from the exchange you are using
 sandbox | string | YES | (True) | If true is configured, the exchange module trades on the exchange testnet (if the exchange has one)
 currency | string | YES | (USDT) | Trading pair to use
 market | string | YES | (spot) | You can choose between spot or future trading
+leverage | integer | NO | (1) | Leverage you like to use for future trading
 
+## TV signal setup
+In the message field you have to insert either the start or the stop signal (for DCA you only need the start signal). An example can be found in the ``config.ini.example``
 
-
+When you are ready with the configuration, copy the ``config.ini.example`` to ``config.ini`` and start the bot.
 
 ## Run
 ```python main.py```

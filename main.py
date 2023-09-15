@@ -57,7 +57,7 @@ exchange = Exchange(
     currency=attributes.get("currency"),
     sandbox=attributes.get("sandbox"),
     market=attributes.get("market"),
-    leverage=attributes.get("leverage"),
+    leverage=attributes.get("leverage", 1),
 )
 
 watcher = Watcher(
