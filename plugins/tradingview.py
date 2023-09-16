@@ -4,11 +4,12 @@ from tortoise.models import Q
 import json
 
 
-class TradingView:
-    def __init__(self, order, token, ordersize):
+class SignalPlugin:
+    def __init__(self, order, token, ordersize, max_bots):
         self.order = order
         self.token = token
         self.ordersize = ordersize
+        self.max_bots = max_bots
 
         # Logging
         self.logging = Logger("main")
@@ -20,6 +21,17 @@ class TradingView:
         else:
             return False
 
+    async def __check_max_bots(self):
+        result = False
+        try:
+            all_bots = await Trades.all().distinct().values_list("bot", flat=True)
+            if all_bots and (len(all_bots) >= self.max_bots):
+                result = True
+        except:
+            result = False
+
+        return result
+
     async def __process(self, signal):
         bot_name = signal["botname"]
         opentrade_short = await Trades.filter(
@@ -28,11 +40,13 @@ class TradingView:
         opentrade_long = await Trades.filter(
             Q(bot=bot_name), Q(direction="long"), join_type="AND"
         ).count()
+        max_bots = await self.__check_max_bots()
 
+        # ToDO - Checks for maximum bots reached - no new bots will be started!
         if "action" in signal:
             # Open Short
             if signal["action"] == "open_short" and not (
-                opentrade_short or opentrade_long
+                opentrade_short or opentrade_long or max_bots
             ):
                 order = {
                     "ordersize": self.ordersize,
@@ -58,7 +72,7 @@ class TradingView:
                 await self.order.put(order)
             # Open Long
             elif signal["action"] == "open_long" and not (
-                opentrade_long or opentrade_short
+                opentrade_long or opentrade_short or max_bots
             ):
                 order = {
                     "ordersize": self.ordersize,

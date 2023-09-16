@@ -1,3 +1,4 @@
+import requests
 from logger import Logger
 from models import Trades
 from tortoise.models import Q
@@ -8,6 +9,7 @@ class Dca:
         self,
         dca,
         dynamic_tp,
+        dynamic_dca,
         order,
         volume_scale,
         step_scale,
@@ -16,9 +18,11 @@ class Dca:
         so,
         tp,
         max,
+        ws_url,
     ):
         self.dca = dca
         self.dynamic_tp = dynamic_tp
+        self.dynamic_dca = dynamic_dca
         self.order = order
         self.volume_scale = volume_scale
         self.step_scale = step_scale
@@ -27,6 +31,7 @@ class Dca:
         self.so = so
         self.tp = tp
         self.max = max
+        self.ws_url = ws_url
 
         # Logging
         self.logging = Logger("main")
@@ -40,7 +45,14 @@ class Dca:
         if trades:
             return trades[0]
 
-    # def calculate_dca_settings(self):
+    def __dynamic_dca_strategy(self, symbol):
+        ema_cross_request = requests.get(f"{self.ws_url}/indicators/ema_cross/{symbol}")
+        ema_cross_response = ema_cross_request.json()
+        if ema_cross_response == "down":
+            # avoid SO order
+            return False
+        else:
+            return True
 
     async def __take_profit(self, symbol, tp_percentage, current_price):
         buy_orders = await Trades.filter(symbol=symbol).values()
@@ -110,18 +122,18 @@ class Dca:
             safety_order_size = self.so
             safety_order_iterations = 0
             # Apply price deviation for the first safety order
-            percentage_change = self.price_deviation
+            next_so_percentage = self.price_deviation
             bot_type = base_order[0]["direction"]
             bot_name = base_order[0]["bot"]
             last_price = float(base_order[0]["price"])
-            action = False
+            new_so = False
 
             # Check if safety orders exist yet
             if safety_orders:
                 safety_order_iterations = len(safety_orders)
 
                 safety_order_size = safety_orders[-1]["ordersize"] * self.volume_scale
-                percentage_change = (
+                next_so_percentage = (
                     float(safety_orders[-1]["so_percentage"]) * self.step_scale
                 )
                 last_price = float(safety_orders[-1]["price"])
@@ -141,8 +153,15 @@ class Dca:
                 if bot_type == "long":
                     price_change_percentage = abs(price_change_percentage)
 
-                if price_change_percentage >= percentage_change:
-                    action = True
+                # Trigger new safety order
+                if price_change_percentage >= next_so_percentage:
+                    # Dynamic safety orders
+                    if self.dynamic_dca:
+                        if self.__dynamic_dca_strategy(symbol):
+                            # ToDo
+                            new_so = True
+                    else:
+                        new_so = True
 
                     order = {
                         "ordersize": safety_order_size,
@@ -153,7 +172,7 @@ class Dca:
                         "safetyorder": True,
                         "order_count": safety_order_iterations + 1,
                         "ordertype": "market",
-                        "so_percentage": percentage_change,
+                        "so_percentage": next_so_percentage,
                         "side": "buy",
                     }
                     await self.order.put(order)
@@ -164,9 +183,9 @@ class Dca:
                 "so_orders": safety_order_iterations,
                 "last_price": last_price,
                 "new_so_size": safety_order_size,
-                "price_deviation": percentage_change,
+                "price_deviation": next_so_percentage,
                 "actual_deviation": round(price_change_percentage, 2),
-                "new_so": action,
+                "new_so": new_so,
             }
             self.logging.debug(f"DCA Check: {logging_json}")
 

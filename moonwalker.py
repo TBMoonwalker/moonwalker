@@ -7,12 +7,6 @@ from database import Database
 from dca import Dca
 from exchange import Exchange
 from watcher import Watcher
-
-# from tradingview import TradingView
-
-plugin = importlib.import_module("tradingview")
-
-# from order import Order
 from logger import Logger
 
 
@@ -25,7 +19,7 @@ attributes = Config()
 
 # Parse and interpret options
 parser = argparse.ArgumentParser(
-    description="TVBot bringing TradingView alerts to your exchange."
+    description="TVBot bringing Signals directly to your exchange."
 )
 
 logging = Logger("main")
@@ -33,6 +27,9 @@ logging = Logger("main")
 ######################################################
 #                        Init                        #
 ######################################################
+
+# Import configured plugin
+plugin = importlib.import_module(f"plugins.{attributes.get('plugin')}")
 
 # Initialize database
 database = Database("trades.sqlite")
@@ -42,9 +39,12 @@ order_queue = asyncio.Queue()
 dca_queue = asyncio.Queue()
 tickers_queue = asyncio.Queue()
 
-# Initialize TradingView module
-tradingview = plugin.TradingView(
-    order_queue, token=attributes.get("token"), ordersize=attributes.get("bo")
+# Initialize Signal plugin
+signal_plugin = plugin.SignalPlugin(
+    order_queue,
+    token=attributes.get("token"),
+    ordersize=attributes.get("bo"),
+    max_bots=attributes.get("max_bots"),
 )
 
 # Initialize Exchange module
@@ -74,7 +74,8 @@ watcher = Watcher(
 # Initialize DCA module
 dca = Dca(
     dca=dca_queue,
-    dynamic_tp=attributes.get("dynamic_tp"),
+    dynamic_tp=attributes.get("dynamic_tp", False),
+    dynamic_dca=attributes.get("dynamic_dca", False),
     order=order_queue,
     volume_scale=attributes.get("os"),
     step_scale=attributes.get("ss"),
@@ -83,6 +84,7 @@ dca = Dca(
     price_deviation=attributes.get("sos"),
     tp=attributes.get("tp"),
     max=attributes.get("max", 0),
+    ws_url=attributes.get("ws_url", None),
 )
 
 
@@ -98,7 +100,7 @@ app = Quart(__name__)
 @app.route("/tv", methods=["POST"])
 async def webhook():
     body = await request.get_data()
-    await tradingview.get(body)
+    await signal_plugin.get(body)
 
     return "ok"
 

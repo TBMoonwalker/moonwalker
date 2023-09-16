@@ -2,7 +2,7 @@ import logging.handlers
 
 
 class Logger(logging.Logger):
-    def __init__(self, name, log_file="tvbot.log", log_level=logging.DEBUG):
+    def __init__(self, name, log_file="moonwalker.log", log_level=logging.DEBUG):
         super().__init__(name, log_level)
         self.log_file = log_file
         self._create_logger()
