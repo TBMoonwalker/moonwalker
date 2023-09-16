@@ -1,4 +1,4 @@
-import logging.handlers
+import logging, logging.handlers
 import os
 
 
@@ -18,7 +18,7 @@ class Logger(logging.Logger):
         )
 
         if os.name == "nt":
-            file_handler = logging.handlers.FileHandler(self.log.file)
+            file_handler = logging.FileHandler(self.log.file)
 
         file_handler.setLevel(self.level)
         file_handler.setFormatter(formatter)
