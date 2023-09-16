@@ -3,7 +3,8 @@ timezone = Europe/London
 debug = False
 port = 80
 
-[tradingview]
+[signal]
+plugin = tradingview
 # can be generated with 
 # https://www.uuidgenerator.net
 token = a1234567-b123-c123-d123-e1234567890a
