@@ -18,6 +18,7 @@ Name | Type | Mandatory | Values(default) | Description
 timezone | string | YES | (Europe/London) | Timezone used by the logging framework
 debug | boolean | NO | (false) true  | Logging debugging information into the tvbot.log
 port | integer | NO | (80) | Port to use for the internal webserver (Must be port 80 for http and Tradingview use)
+plugin | string | YES | (tradingview) | Plugin to be used as signal for Moonwalker
 token | uuid | YES | (a1234567-b123-c123-d123-e1234567890a) | Authentication token between external Service (for example TradingView) and Moonwalker
 exchange | string | YES | (binance) | Used exchange for trading
 key | string | YES | () | API Key taken from the exchange you are using
