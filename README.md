@@ -19,11 +19,12 @@ timezone | string | YES | (Europe/London) | Timezone used by the logging framewo
 debug | boolean | NO | (false) true  | Logging debugging information into the tvbot.log
 port | integer | NO | (80) | Port to use for the internal webserver (Must be port 80 for http and Tradingview use)
 plugin | string | YES | (tradingview) | Plugin to be used as signal for Moonwalker
+plugin_type | string | YES | (external) | External is for plugins like Tradingview - which sends a signal to the bot
 token | uuid | YES | (a1234567-b123-c123-d123-e1234567890a) | Authentication token between external Service (for example TradingView) and Moonwalker
 exchange | string | YES | (binance) | Used exchange for trading
 key | string | YES | () | API Key taken from the exchange you are using
 secret | string | YES | () | API Secret taken from the exchange you are using
-sandbox | string | YES | (True) | If true is configured, the exchange module trades on the exchange testnet (if the exchange has one)
+sandbox | string | YES | (True) | If true is configured, the exchange module trades ‚on the exchange testnet (if the exchange has one)
 currency | string | YES | (USDT) | Trading pair to use
 market | string | YES | (spot) | You can choose between spot or future trading
 leverage | integer | NO | (1) | Leverage you like to use for future trading

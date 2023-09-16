@@ -5,7 +5,7 @@ port = 80
 
 [signal]
 plugin = tradingview
-plugin_type = internal
+plugin_type = external
 # can be generated with 
 # https://www.uuidgenerator.net
 token = a1234567-b123-c123-d123-e1234567890a
@@ -26,6 +26,7 @@ leverage = 1
 # only open and close signals will be processed
 dca = False
 dynamic_tp = False
+dynamic_dca = False
 max_bots = 1
 # base order size
 bo = 100
