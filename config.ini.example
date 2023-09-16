@@ -5,6 +5,7 @@ port = 80
 
 [signal]
 plugin = tradingview
+plugin_type = internal
 # can be generated with 
 # https://www.uuidgenerator.net
 token = a1234567-b123-c123-d123-e1234567890a

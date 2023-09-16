@@ -17,8 +17,9 @@ class Logger(logging.Logger):
             backupCount=5,
         )
 
+        # Windows has a problem with the RotatingFileHandler - so only one file
         if os.name == "nt":
-            file_handler = logging.FileHandler(self.log.file)
+            file_handler = logging.FileHandler(self.log_file)
 
         file_handler.setLevel(self.level)
         file_handler.setFormatter(formatter)
