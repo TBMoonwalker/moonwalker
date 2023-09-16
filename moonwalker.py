@@ -128,7 +128,12 @@ async def shutdown():
     await database.shutdown()
 
     if attributes.get("plugin_type") == "internal":
-        app.background_tasks.pop().cancel(signal_plugin.run)
+        try:
+            app.background_tasks.pop().cancel(signal_plugin.run)
+        except:
+            logging.info(
+                "Plugin seems not to be an internal one - please change your configuration to external."
+            )
 
     app.background_tasks.pop().cancel(exchange.run)
     if attributes.get("dca"):

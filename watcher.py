@@ -1,4 +1,5 @@
 import ccxt.pro as ccxtpro
+from asyncio import gather
 import asyncio
 
 from logger import Logger
@@ -46,37 +47,78 @@ class Watcher:
             try:
                 tickers = await self.tickers.get()
                 self.symbols = self.__convert_symbols(tickers)
+                for symbol in self.symbols:
+                    asyncio.create_task(self.__ticker_loop(symbol))
             except asyncio.QueueEmpty:
                 continue
 
-    async def watch_tickers(self):
+    async def __ticker_loop(self, symbol):
+        self.logging.info(f"Adding symbol: {symbol}")
         last_price = None
+        await self.exchange.throttle(
+            200 / self.exchange.rateLimit
+        )  # 1 subscription every 200 milliseconds
+        while True:
+            try:
+                ticker = await self.exchange.watch_ticker(symbol)
+                actual_price = float(ticker["last"])
+                if last_price:
+                    if float(actual_price) != float(last_price):
+                        ticker_price = {
+                            "type": "ticker_price",
+                            "ticker": {
+                                "symbol": ticker["symbol"],
+                                "price": ticker["last"],
+                            },
+                        }
+                        await self.dca.put(ticker_price)
+                        last_price = actual_price
+                else:
+                    last_price = actual_price
+            except Exception as e:
+                self.logging.error(
+                    f"Error running tickers websocket stream for symbol {symbol}: {e}"
+                )
+                break
+        await self.exchange.close()
 
+    async def watch_tickers(self):
         # Initial list for symbols in database
         symbols = await Trades.all().distinct().values_list("symbol", flat=True)
         if symbols:
             self.symbols = self.__convert_symbols(symbols)
 
-        while True:
-            try:
-                tickers = await self.exchange.watch_tickers(self.symbols)
-                for symbol in tickers:
-                    actual_price = float(tickers[symbol]["last"])
-                    if last_price:
-                        if float(actual_price) != float(last_price):
-                            ticker_price = {
-                                "type": "ticker_price",
-                                "ticker": {
-                                    "symbol": tickers[symbol]["symbol"],
-                                    "price": tickers[symbol]["last"],
-                                },
-                            }
-                            await self.dca.put(ticker_price)
-                            last_price = actual_price
-                    else:
-                        last_price = actual_price
-            except Exception as e:
-                self.logging.error(e)
+        for symbol in self.symbols:
+            asyncio.create_task(self.__ticker_loop(symbol))
+
+    # async def watch_tickers(self):
+    #     last_price = None
+
+    #     # Initial list for symbols in database
+    #     symbols = await Trades.all().distinct().values_list("symbol", flat=True)
+    #     if symbols:
+    #         self.symbols = self.__convert_symbols(symbols)
+
+    #     while True:
+    #         try:
+    #             tickers = await self.exchange.watch_tickers(self.symbols)
+    #             for symbol in tickers:
+    #                 actual_price = float(tickers[symbol]["last"])
+    #                 if last_price:
+    #                     if float(actual_price) != float(last_price):
+    #                         ticker_price = {
+    #                             "type": "ticker_price",
+    #                             "ticker": {
+    #                                 "symbol": tickers[symbol]["symbol"],
+    #                                 "price": tickers[symbol]["last"],
+    #                             },
+    #                         }
+    #                         await self.dca.put(ticker_price)
+    #                         last_price = actual_price
+    #                 else:
+    #                     last_price = actual_price
+    #         except Exception as e:
+    #             self.logging.error(e)
 
     async def watch_orders(self):
         while True:
