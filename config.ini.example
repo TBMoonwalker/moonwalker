@@ -25,6 +25,7 @@ leverage = 1
 # only open and close signals will be processed
 dca = False
 dynamic_tp = False
+max_bots = 1
 # base order size
 bo = 100
 # safety order size
@@ -41,7 +42,3 @@ mstc = 5
 # max = 2
 # take profit
 tp = 1
-
-# Tradingview message examples (but into "message" field in the alert)
-# { "email_token": "a1234567-b123-c123-d123-e1234567890a", "ticker": "{{ticker}}", "action": "close_long", "botname": "ftm_usdt"}
-# { "email_token": "a1234567-b123-c123-d123-e1234567890a", "ticker": "{{ticker}}", "action": "open_long", "botname": "ftm_usdt"}

@@ -17,7 +17,7 @@ class Dca:
         price_deviation,
         so,
         tp,
-        max,
+        max_active,
         ws_url,
     ):
         self.dca = dca
@@ -30,7 +30,7 @@ class Dca:
         self.price_deviation = price_deviation
         self.so = so
         self.tp = tp
-        self.max = max
+        self.max_active = max_active
         self.ws_url = ws_url
 
         # Logging
@@ -194,10 +194,10 @@ class Dca:
 
     async def __open_limit_orders(self, orderid, order_type, order_count):
         self.logging.debug(
-            f"Active safety orders enabled. Creating {self.max} limit orders for orderid {orderid}."
+            f"Active safety orders enabled. Creating {self.max_active} limit orders for orderid {orderid}."
         )
         if order_type == "baseorder":
-            self.logging.debug(f"Place first {self.max} limit safety orders")
+            self.logging.debug(f"Place first {self.max_active} limit safety orders")
         elif order_type == "safetyorder":
             if order_count < self.max_safety_orders:
                 self.logging.debug(f"Place additional limit safety orders")
@@ -209,14 +209,14 @@ class Dca:
             symbol = data["ticker"]["symbol"].split(":")
 
             # Check DCA
-            if self.max == 0:
+            if self.max_active == 0:
                 await self.__dca_strategy(symbol[0], price)
 
             # Check TP
             await self.__take_profit(symbol[0], self.tp, price)
 
         # New order (for active safety orders)
-        elif data["type"] == "new_order" and self.max != 0:
+        elif data["type"] == "new_order" and self.max_active != 0:
             orderid = data["order"]["orderid"]
             self.logging.debug(
                 f"Got new order for symbol {data['order']['symbol']} with orderid {orderid}"

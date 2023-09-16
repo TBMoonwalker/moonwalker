@@ -64,9 +64,6 @@ class Watcher:
                     actual_price = float(tickers[symbol]["last"])
                     if last_price:
                         if float(actual_price) != float(last_price):
-                            # self.logging.debug(
-                            #    f"Actual price changed for symbol {tickers[symbol]['symbol']}:  {tickers[symbol]['last']}"
-                            # )
                             ticker_price = {
                                 "type": "ticker_price",
                                 "ticker": {

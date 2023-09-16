@@ -27,13 +27,24 @@ sandbox | string | YES | (True) | If true is configured, the exchange module t
 currency | string | YES | (USDT) | Trading pair to use
 market | string | YES | (spot) | You can choose between spot or future trading
 leverage | integer | NO | (1) | Leverage you like to use for future trading
+max_bots | integer | NO | (1) | Number of bots that can be active at the same time
 
-## TV signal setup
-In the message field you have to insert either the start or the stop signal (for DCA you only need the start signal). An example can be found in the ``config.ini.example``
+## Tradingview signal setup
+### Examples for the "message" field in a TradingView alert:
+``{ "email_token": "a1234567-b123-c123-d123-e1234567890a", "ticker": "{{ticker}}", "action": "close_long", "botname": "ftm_usdt"}``
+
+``{ "email_token": "a1234567-b123-c123-d123-e1234567890a", "ticker": "{{ticker}}", "action": "open_long", "botname": "ftm_usdt"}``
+
+In the message field you have to insert either the start or the stop signal (for DCA you only need the start signal).
+
+In the webhook url of the alert you have to insert your bot ip - for example: http://yourip/tv Please take notice about the context /tv at the end!
 
 When you are ready with the configuration, copy the ``config.ini.example`` to ``config.ini`` and start the bot.
 
 ## Run
 ```python moonwalker.py```
+
+## Logging
+You can see information about the DCA and the TakeProfit (TP) status in the ``moonwalker.log``
 
 

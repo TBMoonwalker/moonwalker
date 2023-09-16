@@ -5,7 +5,7 @@ import json
 
 
 class SignalPlugin:
-    def __init__(self, order, token, ordersize, max_bots):
+    def __init__(self, order, token, ordersize, max_bots, symbol_list):
         self.order = order
         self.token = token
         self.ordersize = ordersize
@@ -13,7 +13,7 @@ class SignalPlugin:
 
         # Logging
         self.logging = Logger("main")
-        self.logging.info("Tradingview module: Initialized")
+        self.logging.info("Tradingview plugin: Initialized")
 
     def __authenticate(self, signal):
         if signal["email_token"] == self.token:

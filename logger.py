@@ -1,4 +1,5 @@
 import logging.handlers
+import os
 
 
 class Logger(logging.Logger):
@@ -15,6 +16,10 @@ class Logger(logging.Logger):
             maxBytes=200000,
             backupCount=5,
         )
+
+        if os.name == "nt":
+            file_handler = logging.handlers.FileHandler(self.log.file)
+
         file_handler.setLevel(self.level)
         file_handler.setFormatter(formatter)
 

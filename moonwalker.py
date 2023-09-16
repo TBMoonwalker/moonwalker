@@ -42,9 +42,10 @@ tickers_queue = asyncio.Queue()
 # Initialize Signal plugin
 signal_plugin = plugin.SignalPlugin(
     order_queue,
-    token=attributes.get("token"),
+    token=attributes.get("token", None),
     ordersize=attributes.get("bo"),
     max_bots=attributes.get("max_bots"),
+    symbol_list=attributes.get("symbol_list", None),
 )
 
 # Initialize Exchange module
@@ -83,7 +84,7 @@ dca = Dca(
     so=attributes.get("so"),
     price_deviation=attributes.get("sos"),
     tp=attributes.get("tp"),
-    max=attributes.get("max", 0),
+    max_active=attributes.get("max", 0),
     ws_url=attributes.get("ws_url", None),
 )
 
@@ -100,7 +101,9 @@ app = Quart(__name__)
 @app.route("/tv", methods=["POST"])
 async def webhook():
     body = await request.get_data()
-    await signal_plugin.get(body)
+    # Internal plugins don't need a weblistener
+    if attributes.get("plugin_type") == "external":
+        await signal_plugin.get(body)
 
     return "ok"
 
@@ -109,6 +112,10 @@ async def webhook():
 async def startup():
     await database.init()
     app.add_background_task(exchange.run)
+
+    if attributes.get("plugin_type") == "internal":
+        app.add_background_task(signal_plugin.run)
+
     if attributes.get("dca"):
         app.add_background_task(watcher.watch_tickers)
         app.add_background_task(watcher.watch_orders)
@@ -119,6 +126,10 @@ async def startup():
 @app.after_serving
 async def shutdown():
     await database.shutdown()
+
+    if attributes.get("plugin_type") == "internal":
+        app.background_tasks.pop().cancel(signal_plugin.run)
+
     app.background_tasks.pop().cancel(exchange.run)
     if attributes.get("dca"):
         app.background_tasks.pop().cancel(dca.run)
