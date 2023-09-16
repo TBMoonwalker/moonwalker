@@ -140,7 +140,6 @@ async def shutdown():
         app.background_tasks.pop().cancel(dca.run)
         app.background_tasks.pop().cancel(watcher.update_symbols)
         app.background_tasks.pop().cancel(watcher.watch_orders)
-        app.background_tasks.pop().cancel(watcher.watch_tickers)
         await watcher.shutdown()
 
 
