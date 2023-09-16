@@ -176,8 +176,8 @@ class Exchange:
 
     def __split_direction(self, direction):
         if "_" in direction:
-            direction = direction.split("_")
-        return direction[1]
+            type, direction = direction.split("_")
+        return direction
 
     async def __buy_order(self, order):
         self.logging.info(f"Open {order['direction']} trade for pair {order['symbol']}")
