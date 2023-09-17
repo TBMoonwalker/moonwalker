@@ -96,6 +96,10 @@ class SignalPlugin:
                     "side": "sell",
                 }
                 await self.order.put(order)
+            else:
+                self.logging.error(
+                    f"Trade with symbol {signal['ticker']} already running or wrong signal."
+                )
         else:
             self.logging.error(
                 "Tradingview module: Wrong signal syntax (no action attribute)!"
