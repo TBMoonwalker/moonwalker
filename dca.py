@@ -129,7 +129,8 @@ class Dca:
             next_so_percentage = self.price_deviation
             bot_type = base_order[0]["direction"]
             bot_name = base_order[0]["bot"]
-            last_price = float(base_order[0]["price"])
+            bo_price = float(base_order[0]["price"])
+            last_price = 0
             new_so = False
 
             # Check if safety orders exist yet
@@ -149,14 +150,19 @@ class Dca:
                         # ToDo - make it configurable
                         self.tp = 0.5
 
-            price_change_percentage = ((current_price - last_price) / last_price) * 100
+            price_change_percentage = ((current_price - bo_price) / bo_price) * 100
+
+            if price_change_percentage > 0:
+                price_change_percentage = -abs(price_change_percentage)
+            else:
+                price_change_percentage = abs(price_change_percentage)
 
             # Logging configuration
             logging_json = {
                 "symbol": symbol,
                 "botname": bot_name,
                 "so_orders": safety_order_iterations,
-                "last_price": last_price,
+                "last_so_price": last_price,
                 "new_so_size": safety_order_size,
                 "price_deviation": next_so_percentage,
                 "actual_deviation": round(price_change_percentage, 2),
@@ -166,8 +172,8 @@ class Dca:
             # We have not reached the max safety orders
             if safety_order_iterations < self.max_safety_orders:
                 # Check if new safety order is necessary
-                if bot_type == "long":
-                    price_change_percentage = abs(price_change_percentage)
+                # if bot_type == "long":
+                #     price_change_percentage = abs(price_change_percentage)
 
                 # Trigger new safety order
                 if price_change_percentage >= next_so_percentage:

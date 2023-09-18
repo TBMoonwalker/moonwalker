@@ -102,7 +102,7 @@ class SignalPlugin:
                 await self.order.put(order)
             else:
                 SignalPlugin.logging.error(
-                    f"Trade with symbol {signal['ticker']} already running or wrong signal."
+                    f"Trade with symbol {signal['ticker']} already running/closed or wrong signal."
                 )
         else:
             SignalPlugin.logging.error("Wrong signal syntax (no action attribute)!")
