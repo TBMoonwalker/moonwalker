@@ -7,7 +7,7 @@ from database import Database
 from dca import Dca
 from exchange import Exchange
 from watcher import Watcher
-from logger import Logger
+from logger import LoggerFactory
 
 
 ######################################################
@@ -28,7 +28,7 @@ if attributes.get("debug", False):
 else:
     loglevel = "INFO"
 
-logging = Logger("main", log_level=loglevel)
+logging = LoggerFactory.get_logger("moonwalker.log", "main", log_level=loglevel)
 
 ######################################################
 #                        Init                        #
@@ -38,7 +38,7 @@ logging = Logger("main", log_level=loglevel)
 plugin = importlib.import_module(f"plugins.{attributes.get('plugin')}")
 
 # Initialize database
-database = Database("trades.sqlite")
+database = Database("trades.sqlite", loglevel)
 
 # Initialize queues
 order_queue = asyncio.Queue()
@@ -51,6 +51,7 @@ signal_plugin = plugin.SignalPlugin(
     token=attributes.get("token", None),
     ordersize=attributes.get("bo"),
     max_bots=attributes.get("max_bots"),
+    loglevel=loglevel,
     symbol_list=attributes.get("symbol_list", None),
 )
 
@@ -66,6 +67,7 @@ exchange = Exchange(
     market=attributes.get("market"),
     leverage=attributes.get("leverage", 1),
     dry_run=attributes.get("dry_run"),
+    loglevel=loglevel,
 )
 
 watcher = Watcher(
@@ -135,8 +137,6 @@ async def startup():
 
 @app.after_serving
 async def shutdown():
-    await database.shutdown()
-
     if attributes.get("plugin_type") == "internal":
         try:
             app.background_tasks.pop().cancel(signal_plugin.run)
@@ -150,6 +150,7 @@ async def shutdown():
         app.background_tasks.pop().cancel(watcher.update_symbols)
         app.background_tasks.pop().cancel(watcher.watch_orders)
         await watcher.shutdown()
+        await database.shutdown()
 
     app.background_tasks.pop().cancel(exchange.run)
 
