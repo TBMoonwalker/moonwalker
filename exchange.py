@@ -5,7 +5,7 @@ import time
 from models import Trades
 from tortoise.functions import Sum
 
-from logger import Logger
+from logger import LoggerFactory
 
 
 class Exchange:
@@ -21,6 +21,7 @@ class Exchange:
         market,
         leverage,
         dry_run,
+        loglevel,
     ):
         self.currency = currency.upper()
         self.leverage = leverage
@@ -44,8 +45,10 @@ class Exchange:
         # Class Attributes
         Exchange.order = order
         Exchange.tickers = tickers
-        Exchange.logging = Logger("main")
-        Exchange.logging.info("Exchange module: Initialize exchange connection")
+        Exchange.logging = LoggerFactory.get_logger(
+            "exchange.log", "exchange", log_level=loglevel
+        )
+        Exchange.logging.info("Initialized")
 
     def __price(self, pair):
         try:
@@ -130,7 +133,6 @@ class Exchange:
         if self.market == "future" and self.exchange_id == "binance":
             parameter = {"positionSide": position}
 
-        Exchange.logging.info("Buy pair " + str(pair))
         if self.dry_run:
             order["info"] = {}
             order["info"]["orderId"] = uuid.uuid4()
@@ -180,8 +182,6 @@ class Exchange:
         if self.market == "future" and self.exchange_id == "binance":
             parameter = {"positionSide": position}
 
-        Exchange.logging.info("Sell pair " + str(pair))
-
         if self.dry_run:
             order["symbol"] = True
             time.sleep(0.2)
@@ -210,10 +210,6 @@ class Exchange:
         return results
 
     async def __buy_order(self, order):
-        Exchange.logging.info(
-            f"Open {order['direction']} trade for pair {order['symbol']}"
-        )
-
         trade = self.__buy(order["ordersize"], order["symbol"], order["direction"])
 
         if trade:
@@ -236,15 +232,14 @@ class Exchange:
                 side=order_status["side"],
             )
 
+            Exchange.logging.info(f"Opened order: {order}")
+
             # Update tickers for tickers watcher
             tickers = await self.__get_symbols()
             await Exchange.tickers.put(tickers)
 
     async def __sell_order(self, order):
         close = None
-        Exchange.logging.info(
-            f"Sell {order['direction']} order for pair {order['symbol']}"
-        )
 
         # Get token amount from trades
         amount = (
@@ -261,6 +256,8 @@ class Exchange:
             # Delete database entries
             await Trades.filter(bot=order["botname"]).delete()
 
+            Exchange.logging.info(f"Sold order: {order}")
+
             # Update tickers for tickers watcher
             tickers = await self.__get_symbols()
             # Not sending empty symbol list (watcher_tickes needs at least one!)
@@ -268,7 +265,7 @@ class Exchange:
                 await Exchange.tickers.put(tickers)
 
     async def __process_order(self, order):
-        Exchange.logging.debug(f"Exchange module: Got a new order! {order}")
+        Exchange.logging.debug(f"New order: {order}")
 
         order["symbol"] = self.__split_symbol(order["symbol"])
         order["direction"] = self.__split_direction(order["direction"])

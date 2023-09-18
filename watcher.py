@@ -2,7 +2,7 @@ import ccxt.pro as ccxtpro
 from asyncio import gather
 import asyncio
 
-from logger import Logger
+from logger import LoggerFactory
 from models import Trades
 
 
@@ -40,8 +40,10 @@ class Watcher:
         Watcher.dca = dca
         Watcher.tickers = tickers
         Watcher.symbols = []
-        Watcher.logging = Logger("main")
-        Watcher.logging.info("Websocket module: Initialize websocket connection")
+        Watcher.logging = LoggerFactory.get_logger(
+            "dca.log", "watcher", log_level=loglevel
+        )
+        Watcher.logging.info("Initialized")
 
     # def __convert_symbols(self, symbols):
     #     Watcher.logging.debug(symbols)

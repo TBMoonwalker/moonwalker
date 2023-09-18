@@ -1,19 +1,21 @@
-from logger import Logger
+from logger import LoggerFactory
 from models import Trades
 import json
 import asyncio
 
 
 class SignalPlugin:
-    def __init__(self, order, token, ordersize, max_bots, symbol_list):
+    def __init__(self, order, token, ordersize, max_bots, loglevel, symbol_list):
         self.order = order
         self.ordersize = ordersize
         self.max_bots = max_bots
         self.symbol_list = list(map(str, symbol_list.split(",")))
 
         # Logging
-        self.logging = Logger("main")
-        self.logging.info("ASAP plugin: Initialized")
+        SignalPlugin.logging = LoggerFactory.get_logger(
+            "moonwalker.log", "asap", log_level=loglevel
+        )
+        SignalPlugin.logging.info("Initialized")
 
     async def __check_max_bots(self):
         result = False

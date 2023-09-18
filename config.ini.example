@@ -12,6 +12,7 @@ token = a1234567-b123-c123-d123-e1234567890a
 
 [exchange]
 exchange = binance
+timeframe = 1m
 key = insert your exchange key
 secret = insert your exchange secret
 sandbox = false
