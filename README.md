@@ -24,7 +24,8 @@ token | uuid | YES | (a1234567-b123-c123-d123-e1234567890a) | Authentication t
 exchange | string | YES | (binance) | Used exchange for trading
 key | string | YES | () | API Key taken from the exchange you are using
 secret | string | YES | () | API Secret taken from the exchange you are using
-sandbox | string | YES | (True) | If true is configured, the exchange module trades ‚on the exchange testnet (if the exchange has one)
+sandbox | string | YES | (False) | If true is configured the exchange module trades on the exchange testnet (if the exchange has one)
+dry_run | string | YES | (False) | If set to true no exchange orders will be made and the trade will be simulated
 currency | string | YES | (USDT) | Trading pair to use
 market | string | YES | (spot) | You can choose between spot or future trading
 leverage | integer | NO | (1) | Leverage you like to use for future trading

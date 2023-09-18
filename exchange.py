@@ -1,5 +1,7 @@
 import asyncio
 import ccxt as ccxt
+import uuid
+import time
 from models import Trades
 from tortoise.functions import Sum
 
@@ -18,12 +20,12 @@ class Exchange:
         sandbox,
         market,
         leverage,
+        dry_run,
     ):
-        self.order = order
-        self.tickers = tickers
         self.currency = currency.upper()
         self.leverage = leverage
         self.market = market
+        self.dry_run = dry_run
 
         # Exchange configuration
         self.exchange_id = exchange
@@ -32,18 +34,18 @@ class Exchange:
             {
                 "apiKey": key,
                 "secret": secret,
-                "options": {
-                    "defaultType": market,
-                },
-            },
+            }
         )
         self.exchange.set_sandbox_mode(sandbox)
+        self.exchange.options["defaultType"] = market
         self.exchange.enableRateLimit = True
-        self.exchange.loadMarkets()
+        self.exchange.load_markets()
 
-        # Logging
-        self.logging = Logger("main")
-        self.logging.info("Exchange module: Initialize exchange connection")
+        # Class Attributes
+        Exchange.order = order
+        Exchange.tickers = tickers
+        Exchange.logging = Logger("main")
+        Exchange.logging.info("Exchange module: Initialize exchange connection")
 
     def __price(self, pair):
         try:
@@ -53,12 +55,12 @@ class Exchange:
             actual_price = ticker["last"]
             result = actual_price
         except ccxt.ExchangeError as e:
-            self.logging.error(
+            Exchange.logging.error(
                 f"Fetching ticker messages failed due to an exchange error: {e}"
             )
             result = None
         except ccxt.NetworkError as e:
-            self.logging.error(
+            Exchange.logging.error(
                 f"Fetching ticker messages failed due to a network error: {e}"
             )
             result = None
@@ -66,6 +68,13 @@ class Exchange:
         return result
 
     def __parse_order_status(self, order):
+        if order["price"] == None:
+            # Bybit does not send useful information as order response
+            # so we fetch it from the exchange
+            order = self.exchange.fetch_order(order["id"], order["symbol"])
+            order["amount"] = order["filled"]
+            Exchange.logging.debug(f"order status: {order}")
+
         data = {}
         if order["timestamp"]:
             data["timestamp"] = order["timestamp"]
@@ -89,89 +98,14 @@ class Exchange:
         data = await Trades.all().distinct().values_list("symbol", flat=True)
         return data
 
-    def __buy(self, ordersize, pair, positionSide):
-        results = None
-        position = {}
-        # Set leverage for futures
-        # if self.market == "future":
-        #     symbol = self.exchange.market(pair)
-        #     leverage = self.exchange.fapiPrivate_post_leverage(
-        #         {
-        #             "symbol": symbol["id"],
-        #             "leverage": self.leverage,
-        #         }
-        #     )
-
-        amount = self.__get_amount_from_symbol(ordersize, pair)
-        if self.market == "future":
-            position = {"positionSide": positionSide}
-            if self.leverage > 1:
-                # Adapt amount to reflect leverage
-                amount = amount * self.leverage
-
-        order = None
-        self.logging.info("Buy pair " + str(pair))
-        try:
-            if positionSide == "short":
-                order = self.exchange.createMarketSellOrder(pair, amount, position)
-            else:
-                order = self.exchange.createMarketBuyOrder(pair, amount, position)
-
-            if order:
-                results = order
-            else:
-                results = None
-        except ccxt.ExchangeError as e:
-            self.logging.error(
-                f"Buying pair {pair} failed due to an exchange error: {e}"
-            )
-            results = None
-        except ccxt.NetworkError as e:
-            self.logging.error(
-                f"Buying pair {pair} failed due to an network error: {e}"
-            )
-            results = None
-
-        return results
-
-    def __sell(self, amount, pair, positionSide):
-        results = None
-        order = None
-        position = {}
-
-        if self.market == "future":
-            position = {"positionSide": positionSide}
-
-        self.logging.info("Sell pair " + str(pair))
-
-        try:
-            if positionSide == "short":
-                order = self.exchange.createMarketBuyOrder(pair, amount, position)
-            else:
-                order = self.exchange.createMarketSellOrder(pair, amount, position)
-
-            if order:
-                results = order
-            else:
-                results = None
-        except ccxt.ExchangeError as e:
-            self.logging.error(
-                f"Selling pair {pair} failed due to an exchange error: {e}"
-            )
-            results = None
-        except ccxt.NetworkError as e:
-            self.logging.error(
-                f"Selling pair {pair} failed due to an network error: {e}"
-            )
-            results = None
-
-        return results
-
     def __split_symbol(self, pair):
         symbol = pair
         if not "/" in pair:
-            pair = pair.split(self.currency)
-            symbol = pair[0] + "/" + self.currency
+            pair, currency = pair.split(self.currency)
+            if self.market == "future":
+                symbol = f"{pair}/{self.currency}:{self.currency}"
+            else:
+                symbol = f"{pair}/{self.currency}"
         return symbol
 
     def __split_direction(self, direction):
@@ -179,8 +113,106 @@ class Exchange:
             type, direction = direction.split("_")
         return direction
 
+    def __buy(self, ordersize, pair, position):
+        # Variables
+        results = None
+        order = {}
+        parameter = {}
+        amount = self.__get_amount_from_symbol(ordersize, pair)
+        price = self.__price(pair)
+
+        if position == "short":
+            side = "sell"
+        else:
+            side = "buy"
+
+        # Future options
+        if self.market == "future" and self.exchange_id == "binance":
+            parameter = {"positionSide": position}
+
+        Exchange.logging.info("Buy pair " + str(pair))
+        if self.dry_run:
+            order["info"] = {}
+            order["info"]["orderId"] = uuid.uuid4()
+            order["timestamp"] = "dryrun"
+            order["amount"] = amount
+            order["price"] = price
+            order["symbol"] = pair
+            order["type"] = "market"
+            order["side"] = side
+            time.sleep(0.2)
+            results = order
+        else:
+            try:
+                order = self.exchange.create_order(
+                    pair, "market", side, amount, price, parameter
+                )
+
+                if order:
+                    results = order
+                else:
+                    results = None
+            except ccxt.ExchangeError as e:
+                Exchange.logging.error(
+                    f"Buying pair {pair} failed due to an exchange error: {e}"
+                )
+                results = None
+            except ccxt.NetworkError as e:
+                Exchange.logging.error(
+                    f"Buying pair {pair} failed due to an network error: {e}"
+                )
+                results = None
+
+        return results
+
+    def __sell(self, amount, pair, position):
+        results = None
+        order = {}
+        parameter = {}
+        price = self.__price(pair)
+
+        if position == "short":
+            side = "buy"
+        else:
+            side = "sell"
+
+        # Future options
+        if self.market == "future" and self.exchange_id == "binance":
+            parameter = {"positionSide": position}
+
+        Exchange.logging.info("Sell pair " + str(pair))
+
+        if self.dry_run:
+            order["symbol"] = True
+            time.sleep(0.2)
+            results = order
+        else:
+            try:
+                order = self.exchange.create_order(
+                    pair, "market", side, amount, price, parameter
+                )
+
+                if order:
+                    results = order
+                else:
+                    results = None
+            except ccxt.ExchangeError as e:
+                Exchange.logging.error(
+                    f"Selling pair {pair} failed due to an exchange error: {e}"
+                )
+                results = None
+            except ccxt.NetworkError as e:
+                Exchange.logging.error(
+                    f"Selling pair {pair} failed due to an network error: {e}"
+                )
+                results = None
+
+        return results
+
     async def __buy_order(self, order):
-        self.logging.info(f"Open {order['direction']} trade for pair {order['symbol']}")
+        Exchange.logging.info(
+            f"Open {order['direction']} trade for pair {order['symbol']}"
+        )
 
         trade = self.__buy(order["ordersize"], order["symbol"], order["direction"])
 
@@ -206,11 +238,13 @@ class Exchange:
 
             # Update tickers for tickers watcher
             tickers = await self.__get_symbols()
-            await self.tickers.put(tickers)
+            await Exchange.tickers.put(tickers)
 
     async def __sell_order(self, order):
         close = None
-        self.logging.info(f"Sell {order['direction']} order for pair {order['symbol']}")
+        Exchange.logging.info(
+            f"Sell {order['direction']} order for pair {order['symbol']}"
+        )
 
         # Get token amount from trades
         amount = (
@@ -231,10 +265,10 @@ class Exchange:
             tickers = await self.__get_symbols()
             # Not sending empty symbol list (watcher_tickes needs at least one!)
             if tickers:
-                await self.tickers.put(tickers)
+                await Exchange.tickers.put(tickers)
 
     async def __process_order(self, order):
-        self.logging.debug(f"Exchange module: Got a new order! {order}")
+        Exchange.logging.debug(f"Exchange module: Got a new order! {order}")
 
         order["symbol"] = self.__split_symbol(order["symbol"])
         order["direction"] = self.__split_direction(order["direction"])
@@ -246,5 +280,5 @@ class Exchange:
 
     async def run(self):
         while True:
-            order = await self.order.get()
+            order = await Exchange.order.get()
             await self.__process_order(order)

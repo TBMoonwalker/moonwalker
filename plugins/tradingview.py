@@ -44,6 +44,8 @@ class SignalPlugin:
 
         # ToDO - Checks for maximum bots reached - no new bots will be started!
         if "action" in signal:
+            print(max_bots)
+            print(opentrade_short)
             # Open Short
             if signal["action"] == "open_short" and not (
                 opentrade_short or opentrade_long or max_bots

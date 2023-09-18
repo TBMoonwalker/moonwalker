@@ -12,10 +12,10 @@ token = a1234567-b123-c123-d123-e1234567890a
 
 [exchange]
 exchange = binance
-# Test Futurenet
 key = insert your exchange key
 secret = insert your exchange secret
-sandbox = True
+sandbox = False
+dry_run = True
 currency = USDT
 market = spot
 # Futures settings
@@ -33,7 +33,7 @@ bo = 100
 # safety order size
 so = 100
 # price deviation to open safety orders
-sos = 1
+sos = 2
 # safety order step scale
 ss = 0.98
 # safety order volume scale

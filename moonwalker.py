@@ -22,7 +22,13 @@ parser = argparse.ArgumentParser(
     description="TVBot bringing Signals directly to your exchange."
 )
 
-logging = Logger("main")
+# Set logging facility
+if attributes.get("debug", False):
+    loglevel = "DEBUG"
+else:
+    loglevel = "INFO"
+
+logging = Logger("main", log_level=loglevel)
 
 ######################################################
 #                        Init                        #
@@ -59,6 +65,7 @@ exchange = Exchange(
     sandbox=attributes.get("sandbox"),
     market=attributes.get("market"),
     leverage=attributes.get("leverage", 1),
+    dry_run=attributes.get("dry_run"),
 )
 
 watcher = Watcher(
@@ -70,6 +77,8 @@ watcher = Watcher(
     currency=attributes.get("currency"),
     sandbox=attributes.get("sandbox"),
     market=attributes.get("market"),
+    loglevel=loglevel,
+    timeframe=attributes.get("timeframe"),
 )
 
 # Initialize DCA module
@@ -86,6 +95,7 @@ dca = Dca(
     tp=attributes.get("tp"),
     max_active=attributes.get("max", 0),
     ws_url=attributes.get("ws_url", None),
+    loglevel=loglevel,
 )
 
 
@@ -135,12 +145,13 @@ async def shutdown():
                 "Plugin seems not to be an internal one - please change your configuration to external."
             )
 
-    app.background_tasks.pop().cancel(exchange.run)
     if attributes.get("dca"):
         app.background_tasks.pop().cancel(dca.run)
         app.background_tasks.pop().cancel(watcher.update_symbols)
         app.background_tasks.pop().cancel(watcher.watch_orders)
         await watcher.shutdown()
+
+    app.background_tasks.pop().cancel(exchange.run)
 
 
 ######################################################

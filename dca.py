@@ -19,11 +19,10 @@ class Dca:
         tp,
         max_active,
         ws_url,
+        loglevel,
     ):
-        self.dca = dca
         self.dynamic_tp = dynamic_tp
         self.dynamic_dca = dynamic_dca
-        self.order = order
         self.volume_scale = volume_scale
         self.step_scale = step_scale
         self.max_safety_orders = max_safety_orders
@@ -33,9 +32,11 @@ class Dca:
         self.max_active = max_active
         self.ws_url = ws_url
 
-        # Logging
-        self.logging = Logger("main")
-        self.logging.info("Initialize DCA module")
+        # Class Attributes
+        Dca.dca = dca
+        Dca.order = order
+        Dca.logging = Logger("main")
+        Dca.logging.info("Initialize DCA module")
 
     async def __get_trades(self, field, value):
         if field == "symbol":
@@ -86,16 +87,7 @@ class Dca:
             # Actual PNL in percent
             actual_pnl = ((current_price - average_buy_price) / average_buy_price) * 100
 
-            # TP reached - sell order
-            if sell:
-                order = {
-                    "symbol": symbol,
-                    "direction": bot_type,
-                    "botname": bot_name,
-                    "side": "sell",
-                }
-                await self.order.put(order)
-
+            # Logging configuration
             logging_json = {
                 "symbol": symbol,
                 "botname": bot_name,
@@ -107,7 +99,19 @@ class Dca:
                 "actual_pnl": round(actual_pnl, 2),
                 "sell": sell,
             }
-            self.logging.debug(f"TP Check: {logging_json}")
+
+            # TP reached - sell order
+            if sell:
+                order = {
+                    "symbol": symbol,
+                    "direction": bot_type,
+                    "botname": bot_name,
+                    "side": "sell",
+                }
+                await Dca.order.put(order)
+                Dca.logging.info(f"TP Sell: {logging_json}")
+
+            Dca.logging.debug(f"TP Check: {logging_json}")
 
     async def __dca_strategy(self, symbol, current_price):
         # Initialize variables
@@ -147,6 +151,18 @@ class Dca:
 
             price_change_percentage = ((current_price - last_price) / last_price) * 100
 
+            # Logging configuration
+            logging_json = {
+                "symbol": symbol,
+                "botname": bot_name,
+                "so_orders": safety_order_iterations,
+                "last_price": last_price,
+                "new_so_size": safety_order_size,
+                "price_deviation": next_so_percentage,
+                "actual_deviation": round(price_change_percentage, 2),
+                "new_so": new_so,
+            }
+
             # We have not reached the max safety orders
             if safety_order_iterations < self.max_safety_orders:
                 # Check if new safety order is necessary
@@ -175,50 +191,44 @@ class Dca:
                         "so_percentage": next_so_percentage,
                         "side": "buy",
                     }
-                    await self.order.put(order)
+                    await Dca.order.put(order)
+                    Dca.logging.info(f"SO Buy: {logging_json}")
 
-            logging_json = {
-                "symbol": symbol,
-                "botname": bot_name,
-                "so_orders": safety_order_iterations,
-                "last_price": last_price,
-                "new_so_size": safety_order_size,
-                "price_deviation": next_so_percentage,
-                "actual_deviation": round(price_change_percentage, 2),
-                "new_so": new_so,
-            }
-            self.logging.debug(f"DCA Check: {logging_json}")
+            Dca.logging.debug(f"DCA Check: {logging_json}")
 
     async def __open_market_order(self, orderid, order_type, order_count):
-        self.logging.debug("Creating market order, because DCA triggered!")
+        Dca.logging.debug("Creating market order, because DCA triggered!")
 
     async def __open_limit_orders(self, orderid, order_type, order_count):
-        self.logging.debug(
+        Dca.logging.debug(
             f"Active safety orders enabled. Creating {self.max_active} limit orders for orderid {orderid}."
         )
         if order_type == "baseorder":
-            self.logging.debug(f"Place first {self.max_active} limit safety orders")
+            Dca.logging.debug(f"Place first {self.max_active} limit safety orders")
         elif order_type == "safetyorder":
             if order_count < self.max_safety_orders:
-                self.logging.debug(f"Place additional limit safety orders")
+                Dca.logging.debug(f"Place additional limit safety orders")
 
     async def __process_dca_signal(self, data):
         # New price action for DCA calculation
         if data["type"] == "ticker_price":
             price = data["ticker"]["price"]
-            symbol = data["ticker"]["symbol"].split(":")
+            # symbol = data["ticker"]["symbol"].split(":")
+            symbol = data["ticker"]["symbol"]
 
             # Check DCA
             if self.max_active == 0:
-                await self.__dca_strategy(symbol[0], price)
+                # await self.__dca_strategy(symbol[0], price)
+                await self.__dca_strategy(symbol, price)
 
             # Check TP
-            await self.__take_profit(symbol[0], self.tp, price)
+            # await self.__take_profit(symbol[0], self.tp, price)
+            await self.__take_profit(symbol, self.tp, price)
 
         # New order (for active safety orders)
         elif data["type"] == "new_order" and self.max_active != 0:
             orderid = data["order"]["orderid"]
-            self.logging.debug(
+            Dca.logging.debug(
                 f"Got new order for symbol {data['order']['symbol']} with orderid {orderid}"
             )
 
@@ -226,28 +236,28 @@ class Dca:
             if trade:
                 # New baseorder - ready for new open limit orders
                 if trade["baseorder"]:
-                    self.logging.debug(f"New baseorder!")
+                    Dca.logging.debug(f"New baseorder!")
                     # Open first limit orders (if activated)
                     await self.__open_limit_orders(orderid, "baseorder", 1)
 
                 # New opened safetyorder - nothing to do
                 elif trade["safetyorder"] and data["order"]["status"] == "open":
-                    self.logging.debug("New safetyorder successfully set.")
+                    Dca.logging.debug("New safetyorder successfully set.")
 
                 # Limit order reached - ready to open new limit orders
                 elif trade["safetyorder"] and data["order"]["status"] == "closed":
                     # New Safetyorder came from this modul - just spit out information - nothing to do.
-                    self.logging.debug("Existing safetyorder filled.")
+                    Dca.logging.debug("Existing safetyorder filled.")
                     await self.__open_limit_orders(
                         orderid, "safetyorder", trade["order_count"]
                     )
                 # Closed baseorder or other...
                 else:
-                    self.logging.debug(trade)
+                    Dca.logging.debug(trade)
             else:
-                self.logging.debug("Order was a sell order - nothing to do.")
+                Dca.logging.debug("Order was a sell order - nothing to do.")
 
     async def run(self):
         while True:
-            data = await self.dca.get()
+            data = await Dca.dca.get()
             await self.__process_dca_signal(data)

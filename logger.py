@@ -13,7 +13,7 @@ class Logger(logging.Logger):
 
         file_handler = logging.handlers.RotatingFileHandler(
             self.log_file,
-            maxBytes=200000,
+            maxBytes=5000000,
             backupCount=5,
         )
 

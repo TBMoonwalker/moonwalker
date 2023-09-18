@@ -7,7 +7,7 @@
 
 # Debug
 debug.py
-test.py
+test*.py
 debugdb.py
 *.json
 *.example
