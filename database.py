@@ -1,12 +1,14 @@
 from tortoise import Tortoise, run_async
-from logger import Logger
+from logger import LoggerFactory
 
 
 class Database:
-    def __init__(self, db_file):
+    def __init__(self, db_file, loglevel):
         # Logging
-        self.logging = Logger("main")
-        self.logging.info("Database module: Initialize database connection")
+        self.logging = LoggerFactory.get_logger(
+            "moonwalker.log", "database", log_level=loglevel
+        )
+        self.logging.info("Initialized")
         self.db_file = db_file
 
     async def init(self):

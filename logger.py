@@ -2,45 +2,51 @@ import logging, logging.handlers
 import os
 
 
-class Logger(logging.Logger):
-    def __init__(self, name, log_file="moonwalker.log", log_level=logging.DEBUG):
-        super().__init__(name, log_level)
-        self.log_file = log_file
-        self._create_logger()
+class LoggerFactory(object):
+    _LOG = None
 
-    def _create_logger(self):
-        formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+    @staticmethod
+    def __create_logger(log_file, name, log_level):
+        """
+        A private method that interacts with the python
+        logging module
+        """
+        # set the logging format
+        formatter = logging.Formatter(
+            "%(asctime)s - %(levelname)s - %(name)s : %(message)s"
+        )
 
         file_handler = logging.handlers.RotatingFileHandler(
-            self.log_file,
+            log_file,
             maxBytes=5000000,
             backupCount=5,
         )
 
         # Windows has a problem with the RotatingFileHandler - so only one file
         if os.name == "nt":
-            file_handler = logging.FileHandler(self.log_file)
+            file_handler = logging.FileHandler(log_file)
 
-        file_handler.setLevel(self.level)
+        # Initialize the class variable with logger object
+        LoggerFactory._LOG = logging.getLogger(name)
         file_handler.setFormatter(formatter)
+        LoggerFactory._LOG.addHandler(file_handler)
 
-        self.addHandler(file_handler)
+        # set the logging level based on the user selection
+        if log_level == "INFO":
+            LoggerFactory._LOG.setLevel(logging.INFO)
+        elif log_level == "ERROR":
+            LoggerFactory._LOG.setLevel(logging.ERROR)
+        elif log_level == "DEBUG":
+            LoggerFactory._LOG.setLevel(logging.DEBUG)
+        return LoggerFactory._LOG
 
-    def log(self, level, msg, *args, **kwargs):
-        if self.isEnabledFor(level):
-            self._log(level, msg, args, **kwargs)
+    @staticmethod
+    def get_logger(log_file, name, log_level):
+        """
+        A static method called by other modules to initialize logger in
+        their own module
+        """
+        logger = LoggerFactory.__create_logger(log_file, name, log_level)
 
-    def info(self, msg, *args, **kwargs):
-        self.log(logging.INFO, msg, *args, **kwargs)
-
-    def debug(self, msg, *args, **kwargs):
-        self.log(logging.DEBUG, msg, *args, **kwargs)
-
-    def warning(self, msg, *args, **kwargs):
-        self.log(logging.WARNING, msg, *args, **kwargs)
-
-    def error(self, msg, *args, **kwargs):
-        self.log(logging.ERROR, msg, *args, **kwargs)
-
-    def critical(self, msg, *args, **kwargs):
-        self.log(logging.CRITICAL, msg, *args, **kwargs)
+        # return the logger object
+        return logger

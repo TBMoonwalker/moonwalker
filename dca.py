@@ -1,5 +1,5 @@
 import requests
-from logger import Logger
+from logger import LoggerFactory
 from models import Trades
 from tortoise.models import Q
 
@@ -35,8 +35,8 @@ class Dca:
         # Class Attributes
         Dca.dca = dca
         Dca.order = order
-        Dca.logging = Logger("main")
-        Dca.logging.info("Initialize DCA module")
+        Dca.logging = LoggerFactory.get_logger("dca.log", "dca", log_level=loglevel)
+        Dca.logging.info("Initialized")
 
     async def __get_trades(self, field, value):
         if field == "symbol":

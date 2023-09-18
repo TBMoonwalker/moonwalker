@@ -1,19 +1,21 @@
-from logger import Logger
+from logger import LoggerFactory
 from models import Trades
 from tortoise.models import Q
 import json
 
 
 class SignalPlugin:
-    def __init__(self, order, token, ordersize, max_bots, symbol_list):
+    def __init__(self, order, token, ordersize, max_bots, loglevel, symbol_list):
         self.order = order
         self.token = token
         self.ordersize = ordersize
         self.max_bots = max_bots
 
         # Logging
-        self.logging = Logger("main")
-        self.logging.info("Tradingview plugin: Initialized")
+        SignalPlugin.logging = LoggerFactory.get_logger(
+            "moonwalker.log", "tradingview", log_level=loglevel
+        )
+        SignalPlugin.logging.info("Initialized")
 
     def __authenticate(self, signal):
         if signal["email_token"] == self.token:
@@ -99,13 +101,11 @@ class SignalPlugin:
                 }
                 await self.order.put(order)
             else:
-                self.logging.error(
+                SignalPlugin.logging.error(
                     f"Trade with symbol {signal['ticker']} already running or wrong signal."
                 )
         else:
-            self.logging.error(
-                "Tradingview module: Wrong signal syntax (no action attribute)!"
-            )
+            SignalPlugin.logging.error("Wrong signal syntax (no action attribute)!")
 
         return "ok"
 
@@ -113,10 +113,10 @@ class SignalPlugin:
         try:
             signal = json.loads(data)
         except ValueError as e:
-            self.logging.error("JSON Message is garbage: " + e)
+            SignalPlugin.logging.error(f"JSON Message is garbage: {e}")
 
         if self.__authenticate(signal):
-            self.logging.debug("Tradingview Module: Received signal:" + str(signal))
+            SignalPlugin.logging.debug(f"Received signal: {signal}")
             return await self.__process(signal)
         else:
-            self.logging.error("Failed authentication")
+            SignalPlugin.logging.error("Failed authentication")
