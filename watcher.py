@@ -148,11 +148,13 @@ class Watcher:
                                     last_price = actual_price
                     except Exception as e:
                         Watcher.logging.error(e)
+                        break
                 else:
                     actual_symbols = Watcher.symbols
                     continue
             else:
                 await asyncio.sleep(5)
+        await Watcher.exchange.close()
 
     async def watch_orders(self):
         while True:

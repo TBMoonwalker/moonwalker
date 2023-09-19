@@ -137,10 +137,16 @@ class Dca:
             if safety_orders:
                 safety_order_iterations = len(safety_orders)
 
+                # print(safety_orders)
                 safety_order_size = safety_orders[-1]["ordersize"] * self.volume_scale
-                next_so_percentage = (
-                    float(safety_orders[-1]["so_percentage"]) * self.step_scale
+                next_so_percentage = float(safety_orders[-1]["so_percentage"]) * float(
+                    self.step_scale
                 )
+                if len(safety_orders) >= 2:
+                    next_so_percentage = next_so_percentage + float(
+                        safety_orders[-2]["so_percentage"]
+                    )
+
                 last_price = float(safety_orders[-1]["price"])
 
                 # Dynamic TP

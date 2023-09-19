@@ -130,8 +130,24 @@ class Exchange:
             side = "buy"
 
         # Future options
-        if self.market == "future" and self.exchange_id == "binance":
-            parameter = {"positionSide": position}
+        if self.market == "future":
+            symbol = self.exchange.market(pair)
+            if self.exchange_id == "binance":
+                parameter = {"positionSide": position}
+                try:
+                    self.exchange.fapiprivate_post_leverage(
+                        {
+                            "symbol": symbol["id"],
+                            "leverage": self.leverage,
+                        }
+                    )
+                except ccxt.ExchangeError as e:
+                    self.logging.error(e)
+            else:
+                try:
+                    self.exchange.set_leverage(self.leverage, pair)
+                except ccxt.ExchangeError as e:
+                    self.logging.error(e)
 
         if self.dry_run:
             order["info"] = {}
