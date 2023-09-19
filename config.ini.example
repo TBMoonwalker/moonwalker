@@ -26,7 +26,7 @@ leverage = 1
 # If DCA is false - no DCA is available - 
 # only open and close signals will be processed
 dca = false
-dynamic_tp = false
+trailing_tp = 0
 dynamic_dca = false
 max_bots = 1
 # base order size
