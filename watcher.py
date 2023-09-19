@@ -45,17 +45,6 @@ class Watcher:
         )
         Watcher.logging.info("Initialized")
 
-    # def __convert_symbols(self, symbols):
-    #     Watcher.logging.debug(symbols)
-    #     if self.market == "future":
-    #         converted_symbols = []
-    #         for symbol in symbols:
-    #             symbol = f"{symbol}:{self.currency}"
-    #             converted_symbols.append(symbol)
-    #     else:
-    #         converted_symbols = symbols
-    #     return converted_symbols
-
     def __convert_symbols(self, symbols):
         symbol_list = []
         for symbol in symbols:
@@ -68,50 +57,9 @@ class Watcher:
             try:
                 tickers = await Watcher.tickers.get()
                 Watcher.symbols = self.__convert_symbols(tickers)
-                print(Watcher.symbols)
-                # for symbol in self.symbols:
-                #     asyncio.create_task(self.__ticker_loop(symbol))
+                self.logging.debug(f"Watching symbols: {Watcher.symbols}")
             except asyncio.QueueEmpty:
                 continue
-
-    # async def __ticker_loop(self, symbol):
-    #     Watcher.logging.info(f"Adding symbol: {symbol}")
-    #     last_price = None
-    #     await self.exchange.throttle(
-    #         200 / self.exchange.rateLimit
-    #     )  # 1 subscription every 200 milliseconds
-    #     while True:
-    #         try:
-    #             ticker = await self.exchange.watch_ticker(symbol)
-    #             actual_price = float(ticker["last"])
-    #             if last_price:
-    #                 if float(actual_price) != float(last_price):
-    #                     ticker_price = {
-    #                         "type": "ticker_price",
-    #                         "ticker": {
-    #                             "symbol": ticker["symbol"],
-    #                             "price": ticker["last"],
-    #                         },
-    #                     }
-    #                     await Watcher.dca.put(ticker_price)
-    #                     last_price = actual_price
-    #             else:
-    #                 last_price = actual_price
-    #         except Exception as e:
-    #             Watcher.logging.error(
-    #                 f"Error running tickers websocket stream for symbol {symbol}: {e}"
-    #             )
-    #             break
-    #     await self.exchange.close()
-
-    # async def watch_tickers(self):
-    #     # Initial list for symbols in database
-    #     symbols = await Trades.all().distinct().values_list("symbol", flat=True)
-    #     if symbols:
-    #         self.symbols = self.__convert_symbols(symbols)
-
-    #     for symbol in self.symbols:
-    #         asyncio.create_task(self.__ticker_loop(symbol))
 
     async def watch_tickers(self):
         last_price = None
