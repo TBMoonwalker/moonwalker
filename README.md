@@ -30,6 +30,7 @@ currency | string | YES | (USDT) | Trading pair to use
 market | string | YES | (spot) | You can choose between spot or future trading
 leverage | integer | NO | (1) | Leverage you like to use for future trading
 max_bots | integer | NO | (1) | Number of bots that can be active at the same time
+trailing_tp | float | NO | (0) | Deviation between TP and TTP. For example, if you set 0.5 with a tp of 1.0 in the worst case it should sell at 0.5
 
 ## Tradingview signal setup
 ### Examples for the "message" field in a TradingView alert:

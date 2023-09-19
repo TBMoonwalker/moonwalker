@@ -8,7 +8,7 @@ class Dca:
     def __init__(
         self,
         dca,
-        dynamic_tp,
+        trailing_tp,
         dynamic_dca,
         order,
         volume_scale,
@@ -21,7 +21,7 @@ class Dca:
         ws_url,
         loglevel,
     ):
-        self.dynamic_tp = dynamic_tp
+        self.trailing_tp = trailing_tp
         self.dynamic_dca = dynamic_dca
         self.volume_scale = volume_scale
         self.step_scale = step_scale
@@ -35,6 +35,7 @@ class Dca:
         # Class Attributes
         Dca.dca = dca
         Dca.order = order
+        Dca.pnl = 0.0
         Dca.logging = LoggerFactory.get_logger("dca.log", "dca", log_level=loglevel)
         Dca.logging.info("Initialized")
 
@@ -86,6 +87,28 @@ class Dca:
 
             # Actual PNL in percent
             actual_pnl = ((current_price - average_buy_price) / average_buy_price) * 100
+
+            # Trailing TP
+            if self.trailing_tp > 0:
+                if (sell and actual_pnl != Dca.pnl) and Dca.pnl != 0:
+                    diff = actual_pnl - Dca.pnl
+                    # self.logging.debug(
+                    #     f"TTP Check: {symbol} - Actual PNL: {actual_pnl}, Last PNL: {Dca.pnl}"
+                    # )
+                    diff_percentage = (diff / Dca.pnl) * 100
+                    # self.logging.debug(
+                    #     f"TTP Check: {symbol} - PNL Difference: {diff_percentage}"
+                    # )
+                    if diff_percentage < 0 and abs(diff_percentage) > self.trailing_tp:
+                        # self.logging.debug(
+                        #     f"TTP Check: {symbol} - Percentage decrease - Take profit: {diff_percentage}"
+                        # )
+                        sell = True
+                    else:
+                        sell = False
+                        Dca.pnl = actual_pnl
+                else:
+                    Dca.pnl = actual_pnl
 
             # Logging configuration
             logging_json = {
@@ -148,13 +171,6 @@ class Dca:
                     )
 
                 last_price = float(safety_orders[-1]["price"])
-
-                # Dynamic TP
-                if self.dynamic_tp:
-                    safety_order_threshold = self.max_safety_orders * 0.75
-                    if safety_order_iterations >= safety_order_threshold:
-                        # ToDo - make it configurable
-                        self.tp = 0.5
 
             price_change_percentage = ((current_price - bo_price) / bo_price) * 100
 

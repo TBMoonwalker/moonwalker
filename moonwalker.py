@@ -86,7 +86,7 @@ watcher = Watcher(
 # Initialize DCA module
 dca = Dca(
     dca=dca_queue,
-    dynamic_tp=attributes.get("dynamic_tp", False),
+    trailing_tp=attributes.get("trailing_tp", 0),
     dynamic_dca=attributes.get("dynamic_dca", False),
     order=order_queue,
     volume_scale=attributes.get("os"),
