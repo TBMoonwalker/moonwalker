@@ -76,6 +76,7 @@ class Exchange:
             # so we fetch it from the exchange
             order = self.exchange.fetch_order(order["id"], order["symbol"])
             order["amount"] = order["filled"]
+            order["price"] = order["average"]
             Exchange.logging.debug(f"order status: {order}")
 
         data = {}

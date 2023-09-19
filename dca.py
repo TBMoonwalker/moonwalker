@@ -88,6 +88,9 @@ class Dca:
             # Actual PNL in percent
             actual_pnl = ((current_price - average_buy_price) / average_buy_price) * 100
 
+            if bot_type == "short":
+                actual_pnl = abs(actual_pnl)
+
             # Trailing TP
             if self.trailing_tp > 0:
                 if (sell and actual_pnl != Dca.pnl) and Dca.pnl != 0:
