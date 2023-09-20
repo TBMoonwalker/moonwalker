@@ -172,6 +172,8 @@ class Dca:
                     next_so_percentage = next_so_percentage + float(
                         safety_orders[-2]["so_percentage"]
                     )
+                else:
+                    next_so_percentage = next_so_percentage + self.price_deviation
 
                 last_price = float(safety_orders[-1]["price"])
 
