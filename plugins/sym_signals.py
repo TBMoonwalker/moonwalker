@@ -11,7 +11,6 @@ class SignalPlugin:
     def __init__(
         self,
         order,
-        token,
         ordersize,
         max_bots,
         ws_url,

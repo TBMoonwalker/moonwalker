@@ -8,7 +8,6 @@ class SignalPlugin:
     def __init__(
         self,
         order,
-        token,
         ordersize,
         max_bots,
         ws_url,
@@ -18,9 +17,9 @@ class SignalPlugin:
         exchange,
     ):
         self.order = order
-        self.token = token
         self.ordersize = ordersize
         self.max_bots = max_bots
+        self.plugin_settings = eval(plugin_settings)
 
         # Logging
         SignalPlugin.logging = LoggerFactory.get_logger(
@@ -29,7 +28,7 @@ class SignalPlugin:
         SignalPlugin.logging.info("Initialized")
 
     def __authenticate(self, signal):
-        if signal["email_token"] == self.token:
+        if signal["email_token"] == self.plugin_settings["token"]:
             return True
         else:
             return False

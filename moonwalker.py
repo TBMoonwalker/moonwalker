@@ -63,7 +63,6 @@ stats_queue = asyncio.Queue()
 # Initialize Signal plugin
 signal_plugin = plugin.SignalPlugin(
     order_queue,
-    token=attributes.get("token", None),
     ordersize=attributes.get("bo"),
     max_bots=attributes.get("max_bots"),
     ws_url=attributes.get("ws_url"),
