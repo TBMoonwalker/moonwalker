@@ -5,10 +5,22 @@ port = 80
 
 [signal]
 plugin = tradingview
+# plugin = sym_signals
+# plugin = asap
 plugin_type = external
-# can be generated with 
-# https://www.uuidgenerator.net
-token = a1234567-b123-c123-d123-e1234567890a
+# plugin_type = internal
+
+
+[plugin]
+# Tradingview example
+# plugin_settings = {'token': "a1234567-b123-c123-d123-e1234567890a"}
+# Asap Plugin example
+#plugin_settings = {'symbol_list': "BTCUSDT,ETHUSDT"}
+#plugin_settings = {'symbol_list': "https://remotepairlist.com?q=d1716b384f6939f7"}
+# Sym Plugin example
+#plugin_settings = {'api_url': 'https://stream.3cqs.com', 'api_key': 'fillinyourkey', 'api_version': 'fillinavalue', 'allowed_signals': [39, 43, 44], 'volume_size': {'size': 2, 'range': 'M'}}
+filter = {'rsi': 55}
+
 
 [exchange]
 exchange = binance

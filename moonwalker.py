@@ -6,8 +6,9 @@ from config import Config
 from database import Database
 from dca import Dca
 from exchange import Exchange
-from watcher import Watcher
 from logger import LoggerFactory
+from statistic import Statistic
+from watcher import Watcher
 
 
 ######################################################
@@ -37,6 +38,19 @@ logging = LoggerFactory.get_logger("moonwalker.log", "main", log_level=loglevel)
 # Import configured plugin
 plugin = importlib.import_module(f"plugins.{attributes.get('plugin')}")
 
+# Import configured strategies
+if attributes.get("dca_strategy", None):
+    dca_strategy = importlib.import_module(
+        f"strategies.{attributes.get('dca_strategy')}"
+    )
+    dca_strategy_plugin = dca_strategy.Strategy(
+        ws_url=attributes.get("ws_url"), loglevel=loglevel
+    )
+if attributes.get("init_buy_strategy", None):
+    init_buy_strategy = importlib.import_module(
+        f"strategies.{attributes.get('init_buy_strategy')}"
+    )
+
 # Initialize database
 database = Database("trades.sqlite", loglevel)
 
@@ -44,6 +58,7 @@ database = Database("trades.sqlite", loglevel)
 order_queue = asyncio.Queue()
 dca_queue = asyncio.Queue()
 tickers_queue = asyncio.Queue()
+stats_queue = asyncio.Queue()
 
 # Initialize Signal plugin
 signal_plugin = plugin.SignalPlugin(
@@ -51,8 +66,12 @@ signal_plugin = plugin.SignalPlugin(
     token=attributes.get("token", None),
     ordersize=attributes.get("bo"),
     max_bots=attributes.get("max_bots"),
+    ws_url=attributes.get("ws_url"),
     loglevel=loglevel,
-    symbol_list=attributes.get("symbol_list", None),
+    plugin_settings=attributes.get("plugin_settings", None),
+    filter_values=attributes.get("filter", None),
+    exchange=attributes.get("exchange"),
+    currency=attributes.get("currency"),
 )
 
 # Initialize Exchange module
@@ -70,9 +89,11 @@ exchange = Exchange(
     loglevel=loglevel,
 )
 
+# Initialize Watcher module
 watcher = Watcher(
     dca=dca_queue,
     tickers=tickers_queue,
+    dynamic_dca=attributes.get("dynamic_dca"),
     exchange=attributes.get("exchange"),
     key=attributes.get("key"),
     secret=attributes.get("secret"),
@@ -88,6 +109,7 @@ dca = Dca(
     dca=dca_queue,
     trailing_tp=attributes.get("trailing_tp", 0),
     dynamic_dca=attributes.get("dynamic_dca", False),
+    strategy=dca_strategy_plugin,
     order=order_queue,
     volume_scale=attributes.get("os"),
     step_scale=attributes.get("ss"),
@@ -98,8 +120,11 @@ dca = Dca(
     max_active=attributes.get("max", 0),
     ws_url=attributes.get("ws_url", None),
     loglevel=loglevel,
+    statistic=stats_queue,
 )
 
+# Initialize Statistics module
+statistic = Statistic(stats=stats_queue, loglevel=loglevel)
 
 # Initialize app
 app = Quart(__name__)
@@ -124,6 +149,7 @@ async def webhook():
 async def startup():
     await database.init()
     app.add_background_task(exchange.run)
+    app.add_background_task(statistic.run)
 
     if attributes.get("plugin_type") == "internal":
         app.add_background_task(signal_plugin.run)
@@ -149,9 +175,11 @@ async def shutdown():
         app.background_tasks.pop().cancel(dca.run)
         app.background_tasks.pop().cancel(watcher.update_symbols)
         app.background_tasks.pop().cancel(watcher.watch_orders)
+        app.background_tasks.pop().cancel(watcher.watch_tickers)
         await watcher.shutdown()
         await database.shutdown()
 
+    app.background_tasks.pop().cancel(statistic.run)
     app.background_tasks.pop().cancel(exchange.run)
 
 

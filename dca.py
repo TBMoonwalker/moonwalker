@@ -10,6 +10,7 @@ class Dca:
         dca,
         trailing_tp,
         dynamic_dca,
+        strategy,
         order,
         volume_scale,
         step_scale,
@@ -20,21 +21,24 @@ class Dca:
         max_active,
         ws_url,
         loglevel,
+        statistic,
     ):
         self.trailing_tp = trailing_tp
         self.dynamic_dca = dynamic_dca
+        self.strategy = strategy
         self.volume_scale = volume_scale
         self.step_scale = step_scale
         self.max_safety_orders = max_safety_orders
         self.price_deviation = price_deviation
         self.so = so
-        self.tp = tp
         self.max_active = max_active
         self.ws_url = ws_url
 
         # Class Attributes
+        Dca.tp = tp
         Dca.dca = dca
         Dca.order = order
+        Dca.statistic = statistic
         Dca.pnl = 0.0
         Dca.logging = LoggerFactory.get_logger("dca.log", "dca", log_level=loglevel)
         Dca.logging.info("Initialized")
@@ -47,14 +51,15 @@ class Dca:
         if trades:
             return trades[0]
 
-    def __dynamic_dca_strategy(self, symbol):
-        ema_cross_request = requests.get(f"{self.ws_url}/indicators/ema_cross/{symbol}")
-        ema_cross_response = ema_cross_request.json()
-        if ema_cross_response == "down":
-            # avoid SO order
-            return False
-        else:
-            return True
+    def __dynamic_dca_strategy(self, symbol, price):
+        result = False
+
+        token, currency = symbol.split("/")
+        symbol = f"{token}{currency}"
+
+        result = self.strategy.run(symbol, price)
+
+        return result
 
     async def __take_profit(self, symbol, tp_percentage, current_price):
         buy_orders = await Trades.filter(symbol=symbol).values()
@@ -102,7 +107,10 @@ class Dca:
                     # self.logging.debug(
                     #     f"TTP Check: {symbol} - PNL Difference: {diff_percentage}"
                     # )
-                    if diff_percentage < 0 and abs(diff_percentage) > self.trailing_tp:
+                    # Sell if trailing deviation is reached or actual PNL is under minimum TP
+                    if (
+                        diff_percentage < 0 and abs(diff_percentage) > self.trailing_tp
+                    ) or actual_pnl < Dca.tp:
                         # self.logging.debug(
                         #     f"TTP Check: {symbol} - Percentage decrease - Take profit: {diff_percentage}"
                         # )
@@ -135,7 +143,7 @@ class Dca:
                     "side": "sell",
                 }
                 await Dca.order.put(order)
-                Dca.logging.info(f"TP Sell: {logging_json}")
+                await Dca.statistic.put(logging_json)
 
             Dca.logging.debug(f"TP Check: {logging_json}")
 
@@ -198,34 +206,34 @@ class Dca:
 
             # We have not reached the max safety orders
             if safety_order_iterations < self.max_safety_orders:
-                # Check if new safety order is necessary
-                # if bot_type == "long":
-                #     price_change_percentage = abs(price_change_percentage)
-
                 # Trigger new safety order
                 if price_change_percentage >= next_so_percentage:
                     # Dynamic safety orders
-                    if self.dynamic_dca:
-                        if self.__dynamic_dca_strategy(symbol):
-                            # ToDo
-                            new_so = True
-                    else:
+                    if self.dynamic_dca and self.__dynamic_dca_strategy(
+                        symbol, current_price
+                    ):
+                        # Set next_so_percentage to current percentage
+                        next_so_percentage = price_change_percentage
                         new_so = True
+                    else:
+                        new_so = False
 
-                    order = {
-                        "ordersize": safety_order_size,
-                        "symbol": symbol,
-                        "direction": bot_type,
-                        "botname": bot_name,
-                        "baseorder": False,
-                        "safetyorder": True,
-                        "order_count": safety_order_iterations + 1,
-                        "ordertype": "market",
-                        "so_percentage": next_so_percentage,
-                        "side": "buy",
-                    }
-                    await Dca.order.put(order)
-                    Dca.logging.info(f"SO Buy: {logging_json}")
+                    if new_so:
+                        order = {
+                            "ordersize": safety_order_size,
+                            "symbol": symbol,
+                            "direction": bot_type,
+                            "botname": bot_name,
+                            "baseorder": False,
+                            "safetyorder": True,
+                            "order_count": safety_order_iterations + 1,
+                            "ordertype": "market",
+                            "so_percentage": next_so_percentage,
+                            "side": "buy",
+                        }
+                        await Dca.order.put(order)
+                        await Dca.statistic.put(logging_json)
+                    # Dca.logging.info(f"SO Buy: {logging_json}")
 
             Dca.logging.debug(f"DCA Check: {logging_json}")
 
@@ -246,17 +254,14 @@ class Dca:
         # New price action for DCA calculation
         if data["type"] == "ticker_price":
             price = data["ticker"]["price"]
-            # symbol = data["ticker"]["symbol"].split(":")
             symbol = data["ticker"]["symbol"]
 
             # Check DCA
             if self.max_active == 0:
-                # await self.__dca_strategy(symbol[0], price)
                 await self.__dca_strategy(symbol, price)
 
             # Check TP
-            # await self.__take_profit(symbol[0], self.tp, price)
-            await self.__take_profit(symbol, self.tp, price)
+            await self.__take_profit(symbol, Dca.tp, price)
 
         # New order (for active safety orders)
         elif data["type"] == "new_order" and self.max_active != 0:

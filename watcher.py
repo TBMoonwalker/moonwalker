@@ -11,6 +11,7 @@ class Watcher:
         self,
         dca,
         tickers,
+        dynamic_dca,
         exchange,
         key,
         secret,
@@ -20,6 +21,7 @@ class Watcher:
         loglevel,
         timeframe,
     ):
+        self.dynamic_dca = dynamic_dca
         self.currency = currency
         self.exchange_id = exchange
         self.exchange_class = getattr(ccxtpro, self.exchange_id)

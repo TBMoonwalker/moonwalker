@@ -13,7 +13,7 @@ class Config:
         if len(self.dataset) != 1:
             sys.tracebacklimit = 0
             sys.exit(
-                "Cannot read config.ini! - Please make sure it exists in the folder where 3cqsbot.py is executed."
+                "Cannot read config.ini! - Please make sure it exists in the folder where moonwalker.py is executed."
             )
 
         sections = self.config.sections()

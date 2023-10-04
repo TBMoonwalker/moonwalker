@@ -5,7 +5,18 @@ import json
 
 
 class SignalPlugin:
-    def __init__(self, order, token, ordersize, max_bots, loglevel, symbol_list):
+    def __init__(
+        self,
+        order,
+        token,
+        ordersize,
+        max_bots,
+        ws_url,
+        loglevel,
+        plugin_settings,
+        filter_values,
+        exchange,
+    ):
         self.order = order
         self.token = token
         self.ordersize = ordersize
@@ -13,7 +24,7 @@ class SignalPlugin:
 
         # Logging
         SignalPlugin.logging = LoggerFactory.get_logger(
-            "moonwalker.log", "tradingview", log_level=loglevel
+            "signals.log", "tradingview", log_level=loglevel
         )
         SignalPlugin.logging.info("Initialized")
 
