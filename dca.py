@@ -75,7 +75,8 @@ class Dca:
             for order in buy_orders:
                 price = float(order["price"])
                 amount = float(order["amount"])
-                total_cost += price * amount
+                amount_fee = float(order["amount_fee"])
+                total_cost += price * (amount + amount_fee)
                 total_amount_purchased += amount
 
             average_buy_price = total_cost / total_amount_purchased

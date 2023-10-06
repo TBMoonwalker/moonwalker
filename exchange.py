@@ -22,11 +22,13 @@ class Exchange:
         leverage,
         dry_run,
         loglevel,
+        fee_deduction,
     ):
         self.currency = currency.upper()
         self.leverage = leverage
         self.market = market
         self.dry_run = dry_run
+        self.fee_deduction = fee_deduction
 
         # Exchange configuration
         self.exchange_id = exchange
@@ -55,7 +57,7 @@ class Exchange:
             # Fetch the ticker data for the trading pair
             ticker = self.exchange.fetch_ticker(pair)
             # Extract the actual price from the ticker data
-            actual_price = ticker["last"]
+            actual_price = float(ticker["last"])
             result = actual_price
         except ccxt.ExchangeError as e:
             Exchange.logging.error(
@@ -93,10 +95,10 @@ class Exchange:
 
         return data
 
-    def __get_amount_from_symbol(self, ordersize, symbol):
+    def __get_amount_from_symbol(self, ordersize, symbol) -> float:
         price = self.__price(symbol)
 
-        return ordersize / price
+        return float(ordersize) / float(price)
 
     async def __get_symbols(self):
         data = await Trades.all().distinct().values_list("symbol", flat=True)
@@ -189,6 +191,7 @@ class Exchange:
         order = {}
         parameter = {}
         price = self.__price(pair)
+        # amount = float(amount * 0.999)
 
         if position == "short":
             side = "buy"
@@ -230,12 +233,22 @@ class Exchange:
         trade = self.__buy(order["ordersize"], order["symbol"], order["direction"])
 
         if trade:
-            # Add database entries after exchange trade
             order_status = self.__parse_order_status(trade)
+            amount = float(order_status["amount"])
+            amount_fee = 0
+
+            # Substract the order fees
+            if not self.fee_deduction:
+                fees = self.exchange.fetch_trading_fee(symbol=order_status["symbol"])
+                amount_fee = amount * float(fees["taker"])
+                amount = float(order_status["amount"]) - amount_fee
+
+            # Add database entries after exchange trade
             await Trades.create(
                 timestamp=order_status["timestamp"],
                 ordersize=order["ordersize"],
-                amount=order_status["amount"],
+                amount_fee=amount_fee,
+                amount=amount,
                 price=order_status["price"],
                 symbol=order_status["symbol"],
                 orderid=order_status["orderid"],

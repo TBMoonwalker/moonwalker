@@ -15,6 +15,7 @@ class SignalPlugin:
         plugin_settings,
         filter_values,
         exchange,
+        pair_denylist,
     ):
         self.order = order
         self.ordersize = ordersize

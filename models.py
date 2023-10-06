@@ -7,6 +7,7 @@ class Trades(Model):
     timestamp = fields.TextField()
     ordersize = fields.IntField()
     amount = fields.FloatField()
+    amount_fee = fields.FloatField()
     price = fields.FloatField()
     symbol = fields.TextField()
     orderid = fields.TextField()

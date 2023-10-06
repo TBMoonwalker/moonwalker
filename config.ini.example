@@ -33,6 +33,9 @@ currency = USDT
 market = spot
 # Futures settings
 leverage = 1
+# If activated - fee calculation is disabled and full amount is considered
+# You can activate it, if you pay the fees with BNB or other exchange tokens
+fee_deduction = True
 
 [trading]
 # If DCA is false - no DCA is available - 

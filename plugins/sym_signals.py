@@ -1,8 +1,8 @@
 from logger import LoggerFactory
 from models import Trades
 from filter import Filter
-from cachetools import cached, TTLCache
-import re
+
+import asyncio
 import requests
 import socketio
 
@@ -19,6 +19,7 @@ class SignalPlugin:
         filter_values,
         exchange,
         currency,
+        pair_denylist,
     ):
         self.order = order
         self.ordersize = ordersize
@@ -29,6 +30,7 @@ class SignalPlugin:
         self.filter_values = eval(filter_values)
         self.exchange = exchange.upper()
         self.currency = currency.upper()
+        self.pair_denylist = pair_denylist.split(",")
 
         # Logging
         SignalPlugin.logging = LoggerFactory.get_logger(
@@ -106,6 +108,7 @@ class SignalPlugin:
         if (
             signal_id in self.plugin_settings["allowed_signals"]
             and symbol != self.currency
+            and symbol not in self.pair_denylist
         ):
             for exchange in volume_24h:
                 if exchange == self.exchange:
@@ -137,17 +140,29 @@ class SignalPlugin:
 
     async def run(self):
         async with socketio.AsyncSimpleClient() as sio:
-            await sio.connect(
-                self.plugin_settings["api_url"],
-                headers={
-                    "api-key": self.plugin_settings["api_key"],
-                    "user-agent": f"3CQS Signal Client/{self.plugin_settings['api_version']}",
-                },
-                transports=["websocket", "polling"],
-                socketio_path="/stream/v1/signals",
-            )
-
             while True:
+                if not sio.connected:
+                    try:
+                        self.logging.info(
+                            "Establish connection to sym signal websocket."
+                        )
+                        await sio.connect(
+                            self.plugin_settings["api_url"],
+                            headers={
+                                "api-key": self.plugin_settings["api_key"],
+                                "user-agent": f"3CQS Signal Client/{self.plugin_settings['api_version']}",
+                            },
+                            transports=["websocket", "polling"],
+                            socketio_path="/stream/v1/signals",
+                        )
+                    except Exception as e:
+                        self.logging.error(
+                            f"Failed to connect to sym signal websocket: {e}"
+                        )
+                    finally:
+                        self.logging.info(f"Reconnect attempt in 10 seconds")
+                        await asyncio.sleep(10)
+
                 event = await sio.receive()
                 if event[0] == "signal":
                     symbol = f"{event[1]['symbol'].upper()}USDT"

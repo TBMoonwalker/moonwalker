@@ -19,6 +19,7 @@ class SignalPlugin:
         filter_values,
         exchange,
         currency,
+        pair_denylist,
     ):
         self.order = order
         self.ordersize = ordersize

@@ -71,6 +71,7 @@ signal_plugin = plugin.SignalPlugin(
     filter_values=attributes.get("filter", None),
     exchange=attributes.get("exchange"),
     currency=attributes.get("currency"),
+    pair_denylist=attributes.get("pair_denylist", None),
 )
 
 # Initialize Exchange module
@@ -86,6 +87,7 @@ exchange = Exchange(
     leverage=attributes.get("leverage", 1),
     dry_run=attributes.get("dry_run"),
     loglevel=loglevel,
+    fee_deduction=attributes.get("fee_deduction", False),
 )
 
 # Initialize Watcher module
