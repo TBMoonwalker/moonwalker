@@ -193,24 +193,28 @@ class Exchange:
         price = self.__price(pair)
         # amount = float(amount * 0.999)
 
-        if position == "short":
-            side = "buy"
-        else:
-            side = "sell"
-
-        # Future options
-        if self.market == "future" and self.exchange_id == "binance":
-            parameter = {"positionSide": position}
-
         if self.dry_run:
             order["symbol"] = True
             time.sleep(0.2)
             results = order
         else:
             try:
-                order = self.exchange.create_order(
-                    pair, "market", side, amount, price, parameter
-                )
+                # Future order
+                if self.market == "future":
+                    if position == "short":
+                        side = "buy"
+                    else:
+                        side = "sell"
+
+                    if self.exchange_id == "binance":
+                        parameter = {"positionSide": position}
+
+                    order = self.exchange.create_order(
+                        pair, "market", side, amount, price, parameter
+                    )
+                # Spot order
+                else:
+                    order = self.exchange.create_market_sell_order(pair, amount)
 
                 if order:
                     results = order
