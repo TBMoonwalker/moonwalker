@@ -22,3 +22,17 @@ class Trades(Model):
 
     def __dict__(self):
         return f"'id': {self.id}, 'timestamp': {self.timestamp}, 'ordersize': {self.ordersize}, 'amount': {self.ordersize}, 'price': {self.price}, 'symbol': {self.symbol}, 'orderid': {self.orderid}, 'bot': {self.bot}, 'ordertype': {self.ordertype}, 'baseorder': {self.baseorder}, 'safetyorder': {self.safetyorder}, 'direction': {self.direction}, 'side': {self.side}"
+
+
+class Statistics(Model):
+    id = fields.IntField(pk=True)
+    symbol = fields.TextField()
+    so_count = fields.IntField()
+    profit = fields.FloatField()
+    profit_percent = fields.FloatField()
+    amount = fields.FloatField()
+    cost = fields.FloatField()
+    duration = fields.DateField()
+
+    def __dict__(self):
+        return f"id': {self.id}, 'symbol': {self.symbol}, 'so_count': {self.so_count}, 'profit': {self.profit}, 'profit_percent': {self.profit_percent}, 'amount': {self.amount}, 'cost': {self.cost}, 'duration': {self.duration},"

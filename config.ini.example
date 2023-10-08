@@ -20,6 +20,7 @@ plugin_type = external
 # Sym Plugin example
 #plugin_settings = {'api_url': 'https://stream.3cqs.com', 'api_key': 'fillinyourkey', 'api_version': 'fillinavalue', 'allowed_signals': [39, 43, 44], 'volume_size': {'size': 2, 'range': 'M'}}
 filter = {'rsi': 55}
+pair_denylist = USDC,DAI,TUSD,BUSD,FDUSD
 
 
 [exchange]

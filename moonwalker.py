@@ -1,7 +1,9 @@
-from quart import Quart, request
+from quart import Quart, request, websocket
 import argparse
 import asyncio
 import importlib
+import random
+import json
 from config import Config
 from database import Database
 from dca import Dca
@@ -144,6 +146,19 @@ async def webhook():
         await signal_plugin.get(body)
 
     return "ok"
+
+
+@app.websocket("/statistics")
+async def random_data():
+    try:
+        while True:
+            output = json.dumps([{"id": random.random(), "symbol": "BTCUSDT"}])
+            await websocket.send(output)
+            await asyncio.sleep(1)
+    except asyncio.CancelledError:
+        # Handle disconnection here
+        logging.info("Client disconnected")
+        raise
 
 
 @app.before_serving
