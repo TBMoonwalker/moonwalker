@@ -4,7 +4,9 @@ from filter import Filter
 from tenacity import retry, wait_fixed
 from cachetools import cached, TTLCache
 import asyncio
+import re
 import requests
+import json
 
 
 class SignalPlugin:
@@ -19,15 +21,27 @@ class SignalPlugin:
         filter_values,
         exchange,
         currency,
+        market,
         pair_denylist,
+        pair_allowlist,
+        topcoin_limit,
+        volume,
+        dynamic_dca,
+        btc_pulse,
     ):
         self.order = order
         self.ordersize = ordersize
         self.max_bots = max_bots
         self.ws_url = ws_url
-        self.plugin_settings = eval(plugin_settings)
-        self.filter = Filter(ws_url=ws_url)
-        self.filter_values = eval(filter_values)
+        self.plugin_settings = json.loads(plugin_settings)
+        self.filter = Filter(ws_url=ws_url, btc_pulse=btc_pulse)
+        if filter_values:
+            self.filter_values = json.loads(filter_values)
+        else:
+            self.filter_values = None
+        self.currency = currency
+        self.dynamic_dca = dynamic_dca
+        self.btc_pulse = btc_pulse
 
         # Logging
         SignalPlugin.logging = LoggerFactory.get_logger(
@@ -51,18 +65,16 @@ class SignalPlugin:
     def __get_new_symbol_list(self, running_list):
         # New symbols
         symbol_list = self.plugin_settings["symbol_list"]
-        new_list = []
+        new_symbol = []
         if "http" in symbol_list:
             symbol_list = requests.get(symbol_list).json()["pairs"]
 
-            new_list = [
+            new_symbol = [
                 f"{symbol}{currency}"
                 for symbol, currency in [item.split("/") for item in symbol_list]
             ]
-            self.logging.debug(f"Got new pairlist: {new_list}")
-
         else:
-            new_list = list(map(str, symbol_list.split(",")))
+            new_symbol = list(map(str, symbol_list.split(",")))
 
         # Running symbols
         running_symbols = [
@@ -70,50 +82,62 @@ class SignalPlugin:
             for botsuffix, symbol in [item.split("_") for item in running_list]
         ]
 
-        # Existing symbols
-        subscribed_symbols = list(map(str.upper, self.__get_symbol_subscription()))
+        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
+        if self.dynamic_dca:
+            subscribed_symbols, unsubscribe_symbols = self.filter.subscribe_new_symbols(
+                running_symbols, new_symbol
+            )
 
-        # Unsubscribe old symbols
-        temp_symbols = list(set(subscribed_symbols) - set(running_symbols))
-        unsubscribe_symbols = list(set(temp_symbols) - set(new_list))
-        for symbol in unsubscribe_symbols:
-            requests.get(f"{self.ws_url}/streams/remove/{symbol}")
+            self.logging.debug(f"Subscribed symbols: {subscribed_symbols}")
+            self.logging.debug(f"Unsubscribed symbols: {unsubscribe_symbols}")
 
-        # Subscribe new symbols
-        temp2_symbols = list(set(running_symbols) - set(subscribed_symbols))
-        subscribe_symbols = list(set(new_list) - set(temp_symbols))
-        if temp2_symbols:
-            subscribe_symbols = subscribe_symbols + temp2_symbols
-
-        for symbol in subscribe_symbols:
-            requests.get(f"{self.ws_url}/streams/add/{symbol}")
-
-        self.logging.debug(f"Subscribed symbols: {subscribed_symbols}")
-        self.logging.debug(f"Unsubscribed symbols: {unsubscribe_symbols}")
         self.logging.debug(f"Running symbols: {running_symbols}")
-        self.logging.debug(f"New symbols: {new_list}")
-        return new_list
-
-    def __get_symbol_subscription(self):
-        subscribed_list = requests.get(f"{self.ws_url}/status/symbols").json()["result"]
-        subscribed_symbols = [
-            f"{symbol}"
-            for symbol, kline in [item.split("@") for item in subscribed_list]
-        ]
-
-        return subscribed_symbols
+        self.logging.debug(f"New symbols: {new_symbol}")
+        return new_symbol
 
     @retry(wait=wait_fixed(3))
     def __check_entry_point(self, symbol):
-        try:
-            rsi_15m = self.filter.rsi(symbol, "15Min").json()
-            if rsi_15m["status"] < self.filter_values["rsi"]:
-                return True
-            else:
+        if self.filter_values and self.ws_url:
+            try:
+                # btc pulse check
+                btc_pulse = True
+                if self.btc_pulse:
+                    btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
+
+                if btc_pulse:
+                    # marketcap api needs the symbol without quote
+                    mc_symbol = re.split(self.currency, symbol, flags=re.IGNORECASE)[0]
+                    marketcap = self.filter.get_cmc_marketcap_rank(
+                        self.filter_values["marketcap_cmc_api_key"], mc_symbol
+                    )
+                    topcoin_limit = self.filter.is_within_topcoin_limit(
+                        marketcap, self.filter_values["rsi_max"]
+                    )
+                    if topcoin_limit:
+                        rsi = self.filter.get_rsi(symbol, "15Min").json()
+                        sma_slope = self.filter.sma_slope(symbol, "15Min").json()
+                        rsi_limit = self.filter.is_within_rsi_limit(
+                            rsi["status"], self.filter_values["rsi_max"]
+                        )
+
+                        self.logging.debug(
+                            f"SYMBOL: {symbol}, RSI: {rsi}, MARKETCAP: {marketcap}, BTC_PULSE: {btc_pulse}, SMA_SLOPE: {sma_slope}"
+                        )
+                        if rsi_limit and sma_slope["status"] == "upward":
+                            return True
+                        else:
+                            return False
+                    else:
+                        return False
+                else:
+                    return False
+            except Exception as e:
+                self.logging.debug(
+                    f"No data yet - you need to enable dynamic dca - error: {e}"
+                )
                 return False
-        except Exception as e:
-            self.logging.debug("No data yet - subscribe it")
-            return False
+        else:
+            return True
 
     async def run(self):
         while True:
@@ -123,9 +147,6 @@ class SignalPlugin:
                 for symbol in symbol_list:
                     max_bots = await self.__check_max_bots()
                     current_symbol = f"asap_{symbol}"
-                    self.logging.debug(
-                        f"Running trades: {running_trades}, Max Bots: {max_bots}"
-                    )
                     if (
                         current_symbol not in running_trades
                         and not max_bots
@@ -145,9 +166,14 @@ class SignalPlugin:
                             "side": "buy",
                         }
                         await self.order.put(order)
-                await asyncio.sleep(5)
+                        await asyncio.sleep(1)
+                        self.logging.debug(
+                            f"Running trades: {running_trades}, Max Bots: {max_bots}"
+                        )
+
             else:
                 self.logging.error(
                     "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
                 )
                 break
+            await asyncio.sleep(5)

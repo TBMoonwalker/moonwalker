@@ -98,7 +98,7 @@ class Watcher:
                                     last_price = actual_price
                     except Exception as e:
                         Watcher.logging.error(e)
-                        break
+                        pass
                 else:
                     actual_symbols = Watcher.symbols
                     continue

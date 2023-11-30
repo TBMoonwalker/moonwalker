@@ -1,63 +1,58 @@
 [general]
 timezone = Europe/London
 debug = true
-port = 80
+port = 8120
 
 [signal]
-plugin = tradingview
-# plugin = sym_signals
-# plugin = asap
-plugin_type = external
-# plugin_type = internal
-
+plugin = autocrypto
+plugin_type = internal
 
 [plugin]
-# Tradingview example
-# plugin_settings = {'token': "a1234567-b123-c123-d123-e1234567890a"}
-# Asap Plugin example
-#plugin_settings = {'symbol_list': "BTCUSDT,ETHUSDT"}
-#plugin_settings = {'symbol_list': "https://remotepairlist.com?q=d1716b384f6939f7"}
-# Sym Plugin example
-#plugin_settings = {'api_url': 'https://stream.3cqs.com', 'api_key': 'fillinyourkey', 'api_version': 'fillinavalue', 'allowed_signals': [39, 43, 44], 'volume_size': {'size': 2, 'range': 'M'}}
-filter = {'rsi': 55}
-pair_denylist = USDC,DAI,TUSD,BUSD,FDUSD
+plugin_settings = {"api_url": "wss://oy5v5kbdt3.execute-api.eu-west-1.amazonaws.com/production", "api_key": "fillinyourkey", "deny_bots": ["news-analyzer", "candle-surfer-public"]}
 
+[filter]
+pair_denylist = USDC,USTC,DAI,TUSD,BUSD,FDUSD
 
 [exchange]
 exchange = binance
 timeframe = 1m
 key = insert your exchange key
 secret = insert your exchange secret
-sandbox = false
 dry_run = true
 currency = USDT
+# future and spot is available for market
 market = spot
 # Futures settings
 leverage = 1
+# crossed and isolated is available for margin_type
+margin_type = isolated
 # If activated - fee calculation is disabled and full amount is considered
 # You can activate it, if you pay the fees with BNB or other exchange tokens
-fee_deduction = True
+# Activate it if you test with Binance Testnet too
+fee_deduction = False
 
 [trading]
-# If DCA is false - no DCA is available - 
-# only open and close signals will be processed
-dca = false
+# don't turn it of - if you like no safety orders - unset mstc (default)
+dca = true
+# in percent - if 0 trailing tp is disabled
 trailing_tp = 0
-dynamic_dca = false
+# Number of concurrent trades
 max_bots = 1
 # base order size
-bo = 100
+bo = 10
 # safety order size
-so = 100
+#so = 100
 # price deviation to open safety orders
-sos = 2
+#sos = 2
 # safety order step scale
-ss = 0.98
+#ss = 0.98
 # safety order volume scale
-os = 1.32
+#os = 1.32
 # max safety orders count
-mstc = 5
+#mstc = 5
 # max active safety orders count
 # max = 2
-# take profit
+# take profit in percent
 tp = 1
+# stop loss in percent
+sl = 1

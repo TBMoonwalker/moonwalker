@@ -12,6 +12,14 @@ debugdb.py
 *.json
 *.example
 
+# Strategies
+strategies/*.py
+
+# Plugins
+sym_signals.py
+asap.py
+
 # Other
 __pycache__
 nohup.out
+*.bak

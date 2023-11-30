@@ -16,12 +16,18 @@ class SignalPlugin:
         filter_values,
         exchange,
         currency,
+        market,
         pair_denylist,
+        pair_allowlist,
+        topcoin_limit,
+        volume,
+        dynamic_dca,
+        btc_pulse,
     ):
         self.order = order
         self.ordersize = ordersize
         self.max_bots = max_bots
-        self.plugin_settings = eval(plugin_settings)
+        self.plugin_settings = json.loads(plugin_settings)
 
         # Logging
         SignalPlugin.logging = LoggerFactory.get_logger(

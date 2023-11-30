@@ -5,6 +5,7 @@ from filter import Filter
 import asyncio
 import requests
 import socketio
+import json
 
 
 class SignalPlugin:
@@ -19,18 +20,34 @@ class SignalPlugin:
         filter_values,
         exchange,
         currency,
+        market,
         pair_denylist,
+        pair_allowlist,
+        topcoin_limit,
+        volume,
+        dynamic_dca,
+        btc_pulse,
     ):
         self.order = order
         self.ordersize = ordersize
         self.max_bots = max_bots
         self.ws_url = ws_url
-        self.plugin_settings = eval(plugin_settings)
-        self.filter = Filter(ws_url=ws_url)
-        self.filter_values = eval(filter_values)
+        self.plugin_settings = json.loads(plugin_settings)
+        self.filter = Filter(ws_url=ws_url, btc_pulse=btc_pulse)
+        self.filter_values = json.loads(filter_values)
         self.exchange = exchange.upper()
         self.currency = currency.upper()
-        self.pair_denylist = pair_denylist.split(",")
+        if pair_denylist:
+            self.pair_denylist = pair_denylist.split(",")
+        else:
+            self.pair_denylist = None
+        if pair_allowlist:
+            self.pair_allowlist = pair_allowlist.split(",")
+        else:
+            self.pair_allowlist = None
+        self.dynamic_dca = dynamic_dca
+        self.topcoin_limit = topcoin_limit
+        self.volume = json.loads(volume)
 
         # Logging
         SignalPlugin.logging = LoggerFactory.get_logger(
@@ -39,7 +56,7 @@ class SignalPlugin:
         SignalPlugin.logging.info("Initialized")
 
     def __get_new_symbol_list(self, running_list, new_symbol):
-        # New symbol
+        # New symbols
         new_symbol = [new_symbol]
 
         # Running symbols
@@ -48,37 +65,17 @@ class SignalPlugin:
             for botsuffix, symbol in [item.split("_") for item in running_list]
         ]
 
-        # Existing symbols
-        subscribed_symbols = list(map(str.upper, self.__get_symbol_subscription()))
+        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
+        if self.dynamic_dca:
+            subscribed_symbols, unsubscribe_symbols = self.filter.subscribe_new_symbols(
+                running_symbols, new_symbol
+            )
 
-        # Unsubscribe old symbols
-        temp_symbols = list(set(subscribed_symbols) - set(running_symbols))
-        unsubscribe_symbols = list(set(temp_symbols) - set(new_symbol))
-        for symbol in unsubscribe_symbols:
-            requests.get(f"{self.ws_url}/streams/remove/{symbol}")
+            self.logging.debug(f"Subscribed symbols: {subscribed_symbols}")
+            self.logging.debug(f"Unsubscribed symbols: {unsubscribe_symbols}")
 
-        # Subscribe new symbols
-        temp2_symbols = list(set(running_symbols) - set(subscribed_symbols))
-        subscribe_symbols = list(set(new_symbol) - set(temp_symbols))
-        if temp2_symbols:
-            subscribe_symbols = subscribe_symbols + temp2_symbols
-
-        for symbol in subscribe_symbols:
-            requests.get(f"{self.ws_url}/streams/add/{symbol}")
-
-        self.logging.debug(f"Subscribed symbols: {subscribed_symbols}")
-        self.logging.debug(f"Unsubscribed symbols: {unsubscribe_symbols}")
         self.logging.debug(f"Running symbols: {running_symbols}")
         self.logging.debug(f"New symbols: {new_symbol}")
-
-    def __get_symbol_subscription(self):
-        subscribed_list = requests.get(f"{self.ws_url}/status/symbols").json()["result"]
-        subscribed_symbols = [
-            f"{symbol}"
-            for symbol, kline in [item.split("@") for item in subscribed_list]
-        ]
-
-        return subscribed_symbols
 
     async def __check_max_bots(self):
         result = False
@@ -96,45 +93,37 @@ class SignalPlugin:
 
         signal_name = event["signal_name"]
         symbol = event["symbol"]
-        signal = event["signal"]
         signal_id = event["signal_name_id"]
         sym_rank = event["sym_rank"]
         sym_score = event["sym_score"]
         sym_sense = event["sym_sense"]
         vol_score = event["volatility_score"]
         price_action_score = event["price_action_score"]
+        market_cap_rank = event["market_cap_rank"]
         volume_24h = event["volume_24h"]
+        volume_range = None
+        volume_size = None
+
+        for exchange in volume_24h:
+            if exchange == self.exchange:
+                if volume_24h[exchange].get(self.currency) != None:
+                    # DirtyFix: Some volume data misses "k", "M" or "B"
+                    if isinstance(volume_24h[exchange].get(self.currency), float):
+                        volume_range = "k"
+                        volume_size = volume_24h[exchange][self.currency]
+                    else:
+                        volume_range = volume_24h[exchange][self.currency][-1]
+                        volume_size = float(volume_24h[exchange][self.currency][:-1])
+                break
 
         if (
             signal_id in self.plugin_settings["allowed_signals"]
-            and symbol != self.currency
-            and symbol not in self.pair_denylist
+            and self.filter.is_on_allowed_list(symbol, self.pair_allowlist)
+            and self.filter.is_within_topcoin_limit(market_cap_rank, self.topcoin_limit)
+            and self.filter.has_enough_volume(volume_range, volume_size, self.volume)
+            and not self.filter.is_on_deny_list(symbol, self.pair_denylist)
         ):
-            for exchange in volume_24h:
-                if exchange == self.exchange:
-                    if volume_24h[exchange].get(self.currency) != None:
-                        # DirtyFix: Some volume data misses "k", "M" or "B"
-                        if isinstance(volume_24h[exchange].get(self.currency), float):
-                            volume_range = "k"
-                            volume_size = volume_24h[exchange][self.currency]
-                        else:
-                            volume_range = volume_24h[exchange][self.currency][-1]
-                            volume_size = float(
-                                volume_24h[exchange][self.currency][:-1]
-                            )
-                        if (
-                            volume_size >= self.plugin_settings["volume_size"]["size"]
-                            and volume_range
-                            == self.plugin_settings["volume_size"]["range"]
-                            and signal == "BOT_START"
-                        ):
-                            self.logging.debug(
-                                f"{signal} - {signal_name} for symbol {symbol} with volume {volume_size}{volume_range}"
-                            )
-                            result = True
-                            break
-                else:
-                    result = False
+            return True
 
         return result
 
