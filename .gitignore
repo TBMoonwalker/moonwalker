@@ -16,8 +16,9 @@ debugdb.py
 strategies/*.py
 
 # Plugins
-sym_signals.py
-asap.py
+plugins/sym_signals.py
+plugins/asap.py
+plugins/tradingview.py
 
 # Other
 __pycache__
