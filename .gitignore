@@ -1,17 +1,25 @@
 # Data
 *.log*
-*.ini
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+config.ini
 
 # Debug
 debug.py
 test*.py
 debugdb.py
 *.json
-*.example
+
+# Strategies
+strategies/*.py
+
+# Plugins
+plugins/sym_signals.py
+plugins/asap.py
+plugins/tradingview.py
 
 # Other
 __pycache__
 nohup.out
+*.bak
