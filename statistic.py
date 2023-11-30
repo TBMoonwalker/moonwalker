@@ -81,8 +81,8 @@ class Statistic:
             if stats["sell"]:
                 # Sell PNL in percent
                 sell_pnl = ((current_price - avg_price) / avg_price) * 100
-                if sell_pnl < 0 and stats["direction"] == "short":
-                    sell_pnl = abs(sell_pnl)
+                # if sell_pnl > 0 and stats["direction"] == "short":
+                #     sell_pnl = abs(sell_pnl)
 
                 sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
                 sell_date = datetime.now()

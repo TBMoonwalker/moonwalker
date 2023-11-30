@@ -1,16 +1,15 @@
 # Data
 *.log*
-*.ini
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
+config.ini
 
 # Debug
 debug.py
 test*.py
 debugdb.py
 *.json
-*.example
 
 # Strategies
 strategies/*.py
