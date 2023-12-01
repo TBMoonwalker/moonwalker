@@ -1,5 +1,6 @@
 from logger import LoggerFactory
 from models import Trades
+from filter import Filter
 
 import asyncio
 import websockets
@@ -30,6 +31,7 @@ class SignalPlugin:
         self.ordersize = ordersize
         self.max_bots = max_bots
         self.plugin_settings = json.loads(plugin_settings)
+        self.filter = Filter(ws_url=ws_url, btc_pulse=btc_pulse)
         self.exchange = exchange
         self.currency = currency.upper()
         self.market = market
@@ -40,6 +42,8 @@ class SignalPlugin:
             self.pair_denylist = None
         if pair_allowlist:
             self.pair_allowlist = pair_allowlist.split(",")
+        else:
+            self.pair_allowlist = None
 
         # Logging
         SignalPlugin.logging = LoggerFactory.get_logger(
@@ -59,27 +63,23 @@ class SignalPlugin:
         return result
 
     def __check_entry_point(self, event):
-        result = False
+        result = True
 
         if not event["warning_message"]:
             bot = event["bot"]
             if self.plugin_settings["deny_bots"]:
                 if bot in self.plugin_settings["deny_bots"]:
+                    self.logging.debug(f"Denied bot: {bot}")
                     result = False
-                else:
-                    result = True
-            else:
-                result = True
 
             if event["investment_type"] == "SHORT" and self.market == "spot":
                 result = False
-            else:
-                result = True
 
-            # if self.filter.is_on_allowed_list(
-            #     event["coin"], self.pair_allowlist
-            # ) and not self.filter.is_on_deny_list(event["coin"], self.pair_denylist):
-            #     result = True
+            if not self.filter.is_on_allowed_list(
+                event["coin"], self.pair_allowlist
+            ) and self.filter.is_on_deny_list(event["coin"], self.pair_denylist):
+                self.logging.debug(f"Allowed coin: {event['coin']}")
+                result = False
 
         return result
 

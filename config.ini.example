@@ -15,6 +15,7 @@ exchange = binance
 timeframe = 1m
 key = insert your exchange key
 secret = insert your exchange secret
+password = insert your password (only okx exchange)
 dry_run = true
 currency = USDT
 # future and spot is available for market

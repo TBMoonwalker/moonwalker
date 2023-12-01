@@ -92,6 +92,7 @@ exchange = Exchange(
     exchange=attributes.get("exchange"),
     key=attributes.get("key"),
     secret=attributes.get("secret"),
+    password=attributes.get("password", None),
     currency=attributes.get("currency"),
     sandbox=attributes.get("sandbox", False),
     market=attributes.get("market"),
