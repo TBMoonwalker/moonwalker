@@ -8,6 +8,7 @@ Moonwalker can be used to trade on your exchange directly using various signal p
 ## Prerequisites
 - A Linux server with a static ip address and incoming access (if you like to use Tradingview)
 - Configured API access on your exchange
+- Python 3.10.x (not older - not newer for now)
 
 ## Installation
 ```pip install -r requirements.txt```
