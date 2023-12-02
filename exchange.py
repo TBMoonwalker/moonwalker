@@ -18,6 +18,7 @@ class Exchange:
         exchange,
         key,
         secret,
+        password,
         currency,
         sandbox,
         market,
@@ -36,14 +37,16 @@ class Exchange:
         self.fee_deduction = fee_deduction
 
         # Exchange configuration
+        login_params = {
+            "apiKey": key,
+            "secret": secret,
+        }
         self.exchange_id = exchange
         self.exchange_class = getattr(ccxt, self.exchange_id)
-        self.exchange = self.exchange_class(
-            {
-                "apiKey": key,
-                "secret": secret,
-            }
-        )
+        if self.exchange_id == "okx":
+            login_params.update({"password": password})
+
+        self.exchange = self.exchange_class(login_params)
         self.exchange.set_sandbox_mode(sandbox)
         self.exchange.options["defaultType"] = self.market
         self.exchange.enableRateLimit = True
@@ -62,8 +65,9 @@ class Exchange:
         try:
             # Fetch the ticker data for the trading pair
             ticker = self.exchange.fetch_ticker(pair)
+            self.logging.debug(ticker)
             # Extract the actual price from the ticker data
-            actual_price = float(ticker["close"])
+            actual_price = float(ticker["last"])
             result = self.exchange.price_to_precision(pair, actual_price)
         except ccxt.ExchangeError as e:
             Exchange.logging.error(

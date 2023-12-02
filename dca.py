@@ -129,10 +129,10 @@ class Dca:
             # Actual PNL in percent (value for profit calculation)
             actual_pnl = ((current_price - average_buy_price) / average_buy_price) * 100
 
-            if bot_type == "short" and actual_pnl < 0:
-                actual_pnl = abs(actual_pnl)
-            else:
-                actual_pnl = -abs(actual_pnl)
+            # if bot_type == "short" and actual_pnl < 0:
+            #     actual_pnl = abs(actual_pnl)
+            # else:
+            #     actual_pnl = -abs(actual_pnl)
 
             self.logging.debug(
                 f"current price: {current_price}, buy_price: {average_buy_price} = PNL: {actual_pnl}, Sell: {sell}"
