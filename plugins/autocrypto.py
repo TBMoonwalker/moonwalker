@@ -77,8 +77,8 @@ class SignalPlugin:
 
             if not self.filter.is_on_allowed_list(
                 event["coin"], self.pair_allowlist
-            ) and self.filter.is_on_deny_list(event["coin"], self.pair_denylist):
-                self.logging.debug(f"Allowed coin: {event['coin']}")
+            ) or self.filter.is_on_deny_list(event["coin"], self.pair_denylist):
+                self.logging.debug(f"Denied coin: {event['coin']}")
                 result = False
 
         return result

@@ -10,6 +10,10 @@ plugin_type = internal
 [plugin]
 plugin_settings = {"api_url": "wss://oy5v5kbdt3.execute-api.eu-west-1.amazonaws.com/production", "api_key": "fillinyourkey", "deny_bots": ["news-analyzer", "candle-surfer-public"]}
 
+[filter]
+#pair_allowlist =
+#pair_denylist = USDC,USTC,DAI,TUSD,BUSD,FDUSD
+
 [exchange]
 exchange = binance
 timeframe = 1m

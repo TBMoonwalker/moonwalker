@@ -65,6 +65,7 @@ class Exchange:
         try:
             # Fetch the ticker data for the trading pair
             ticker = self.exchange.fetch_ticker(pair)
+            self.logging.debug(ticker)
             # Extract the actual price from the ticker data
             actual_price = float(ticker["last"])
             result = self.exchange.price_to_precision(pair, actual_price)
