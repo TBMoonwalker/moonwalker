@@ -5,7 +5,7 @@ import time
 from datetime import datetime
 from models import Trades
 from tortoise.functions import Sum
-from tenacity import retry, stop_after_attempt
+from tenacity import retry, TryAgain, stop_after_attempt
 
 from logger import LoggerFactory
 
@@ -61,12 +61,15 @@ class Exchange:
         )
         Exchange.logging.info("Initialized")
 
+    @retry(stop=stop_after_attempt(10))
     def __get_price_for_symbol(self, pair):
         try:
             # Fetch the ticker data for the trading pair
             ticker = self.exchange.fetch_ticker(pair)
             self.logging.debug(ticker)
             # Extract the actual price from the ticker data
+            if not ticker["last"]:
+                raise TryAgain
             actual_price = float(ticker["last"])
             result = self.exchange.price_to_precision(pair, actual_price)
         except ccxt.ExchangeError as e:
@@ -321,10 +324,11 @@ class Exchange:
             order.update(order_status)
             order["precision"] = self.__get_precision_for_symbol(order_status["symbol"])
             order["amount"] = float(order_status["amount"])
-            order["amount_fee"] = 0
+            order["amount_fee"] = 0.0
+            order["fees"] = 0.0
 
             # Substract the order fees (on Future - Fees will be deducted in Quote not Base)
-            if not self.fee_deduction or self.market == "future":
+            if not self.fee_deduction or not self.market == "future":
                 order["fees"] = self.exchange.fetch_trading_fee(
                     symbol=order_status["symbol"]
                 )["taker"]
