@@ -37,12 +37,13 @@ class Dca:
         self.ws_url = ws_url
         self.market = market
         self.pnl = 0.0
-
-        # Class Attributes
-        Dca.tp = tp
+        self.tp = tp
         if not sl:
             sl = 10000
-        Dca.sl = sl
+        self.sl = sl
+
+        # Class Attributes
+
         Dca.dca = dca
         Dca.order = order
         Dca.statistic = statistic
@@ -68,8 +69,8 @@ class Dca:
         return result
 
     async def __take_profit(self, symbol, current_price):
-        tp_percentage = Dca.tp
-        sl_percentage = Dca.sl
+        tp_percentage = self.tp
+        sl_percentage = self.sl
         buy_orders = await Trades.filter(symbol=symbol).values()
         if buy_orders:
             cost = 0.0
@@ -149,7 +150,7 @@ class Dca:
                     # Sell if trailing deviation is reached or actual PNL is under minimum TP
                     if (
                         diff_percentage < 0 and abs(diff_percentage) > self.trailing_tp
-                    ) or actual_pnl < Dca.tp:
+                    ) or actual_pnl < self.tp:
                         # self.logging.debug(
                         #     f"TTP Check: {symbol} - Percentage decrease - Take profit: {diff_percentage}"
                         # )
