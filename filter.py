@@ -7,13 +7,6 @@ class Filter:
         self.ws_url = ws_url
         self.btc_pulse = btc_pulse
 
-    def ema(self, symbol, timeframe, length):
-        ema_response = requests.get(
-            f"{self.ws_url}/indicators/ema/{symbol}/{timeframe}/{length}"
-        )
-
-        return ema_response
-
     @cached(cache=TTLCache(maxsize=1024, ttl=60))
     def sma_slope(self, symbol, timeframe):
         sma_slope_response = requests.get(
@@ -22,20 +15,6 @@ class Filter:
 
         return sma_slope_response
 
-    def sma(self, symbol, timeframe):
-        sma_response = requests.get(
-            f"{self.ws_url}/indicators/sma/{symbol}/{timeframe}"
-        )
-
-        return sma_response
-
-    def ema(self, symbol, timeframe):
-        ema_response = requests.get(
-            f"{self.ws_url}/indicators/ema/{symbol}/{timeframe}"
-        )
-
-        return ema_response
-
     @cached(cache=TTLCache(maxsize=1024, ttl=60))
     def get_rsi(self, symbol, timeframe):
         rsi_response = requests.get(
@@ -43,6 +22,21 @@ class Filter:
         )
 
         return rsi_response
+
+    @cached(cache=TTLCache(maxsize=1024, ttl=60))
+    def ema_cross(self, symbol, timeframe):
+        ema_cross_response = requests.get(
+            f"{self.ws_url}/indicators/ema_cross/{symbol}/{timeframe}"
+        )
+
+        return ema_cross_response
+
+    def support_level(self, symbol, timeframe, num_level):
+        support_level_response = requests.get(
+            f"{self.ws_url}/indicators/support/{symbol}/{timeframe}/{num_level}"
+        )
+
+        return support_level_response
 
     def is_on_allowed_list(self, symbol, allow_list):
         result = False
@@ -131,7 +125,10 @@ class Filter:
             headers=headers,
         )
 
-        json_data = response.json()
+        try:
+            json_data = response.json()
+        except Exception as e:
+            print(e)
 
         if json_data["status"]["error_code"] == 0:
             for entry in json_data["data"]:
@@ -150,7 +147,7 @@ class Filter:
         temp_symbols = list(set(subscribed_symbols) - set(running_symbols))
         unsubscribe_symbols = list(set(temp_symbols) - set(new_symbol))
         for symbol in unsubscribe_symbols:
-            requests.get(f"{self.ws_url}/streams/remove/{symbol}")
+            requests.get(f"{self.ws_url}/symbol/remove/{symbol}")
 
         # Subscribe new symbols
         temp2_symbols = list(set(running_symbols) - set(subscribed_symbols))
@@ -159,12 +156,12 @@ class Filter:
             subscribe_symbols = subscribe_symbols + temp2_symbols
 
         for symbol in subscribe_symbols:
-            requests.get(f"{self.ws_url}/streams/add/{symbol}")
+            requests.get(f"{self.ws_url}/symbol/add/{symbol}")
 
-        return (subscribed_symbols, unsubscribe_symbols)
+        return (subscribed_symbols, unsubscribe_symbols, subscribe_symbols)
 
     def __get_symbol_subscription(self):
-        subscribed_list = requests.get(f"{self.ws_url}/status/symbols").json()["result"]
+        subscribed_list = requests.get(f"{self.ws_url}/symbol/list").json()["result"]
         subscribed_symbols = [
             f"{symbol}"
             for symbol, kline in [item.split("@") for item in subscribed_list]

@@ -2,8 +2,6 @@ from quart import Quart, request, websocket
 import argparse
 import asyncio
 import importlib
-import random
-import json
 from config import Config
 from database import Database
 from dca import Dca
@@ -11,6 +9,7 @@ from exchange import Exchange
 from logger import LoggerFactory
 from statistic import Statistic
 from watcher import Watcher
+from trading import Trading
 from quart_cors import route_cors
 
 
@@ -23,7 +22,7 @@ attributes = Config()
 
 # Parse and interpret options
 parser = argparse.ArgumentParser(
-    description="TVBot bringing Signals directly to your exchange."
+    description="Moonwalker brings Signals directly to your exchange."
 )
 
 # Set logging facility
@@ -32,7 +31,7 @@ if attributes.get("debug", False):
 else:
     loglevel = "INFO"
 
-logging = LoggerFactory.get_logger("moonwalker.log", "main", log_level=loglevel)
+logging = LoggerFactory.get_logger("logs/moonwalker.log", "main", log_level=loglevel)
 
 ######################################################
 #                        Init                        #
@@ -96,8 +95,6 @@ exchange = Exchange(
     currency=attributes.get("currency"),
     sandbox=attributes.get("sandbox", False),
     market=attributes.get("market"),
-    leverage=attributes.get("leverage", 1),
-    margin_type=attributes.get("margin_type", "isolated"),
     dry_run=attributes.get("dry_run"),
     loglevel=loglevel,
     fee_deduction=attributes.get("fee_deduction", False),
@@ -133,7 +130,6 @@ dca = Dca(
     price_deviation=attributes.get("sos", None),
     tp=attributes.get("tp"),
     sl=attributes.get("sl", None),
-    max_active=attributes.get("max", 0),
     ws_url=attributes.get("ws_url", None),
     loglevel=loglevel,
     market=attributes.get("market"),
@@ -142,6 +138,14 @@ dca = Dca(
 # Initialize Statistics module
 statistic = Statistic(
     stats=stats_queue, loglevel=loglevel, market=attributes.get("market")
+)
+
+# Initialize Trading module
+trading = Trading(
+    statistic=stats_queue,
+    loglevel=loglevel,
+    currency=attributes.get("currency"),
+    order=order_queue,
 )
 
 # Initialize app
@@ -153,20 +157,19 @@ app = Quart(__name__)
 ######################################################
 
 
-@app.route("/tv", methods=["POST"])
-async def webhook():
-    body = await request.get_data()
-    # Internal plugins don't need a weblistener
-    if attributes.get("plugin_type") == "external":
-        await signal_plugin.get(body)
-
-    return "ok"
-
-
 @app.route("/safety_orders/<symbol>", methods=["GET"])
 @route_cors(allow_origin="*")
 async def trades(symbol):
     response = await statistic.safety_orders(symbol)
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
+@app.route("/orders/sell/<symbol>", methods=["GET"])
+async def sell_order(symbol):
+    response = await trading.sell(symbol)
     if not response:
         response = {"result": ""}
 
@@ -199,14 +202,42 @@ async def closed_orders():
         raise
 
 
+@app.route("/orders/closed/length")
+@route_cors(allow_origin="*")
+async def closed_orders_length():
+    response = await statistic.closed_orders_length()
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
+@app.route("/orders/closed/<page>")
+@route_cors(allow_origin="*")
+async def closed_orders_pagination(page):
+    response = await statistic.closed_orders(int(page))
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
+@app.route("/profit/overall")
+@route_cors(allow_origin="*")
+async def profit_overall():
+    response = await statistic.sum_profit()
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
 @app.before_serving
 async def startup():
     await database.init()
     app.add_background_task(exchange.run)
     app.add_background_task(statistic.run)
-
-    if attributes.get("plugin_type") == "internal":
-        app.add_background_task(signal_plugin.run)
+    app.add_background_task(signal_plugin.run)
 
     if attributes.get("dca", None):
         app.add_background_task(watcher.watch_tickers)
@@ -217,24 +248,15 @@ async def startup():
 
 @app.after_serving
 async def shutdown():
-    if attributes.get("plugin_type") == "internal":
-        try:
-            app.background_tasks.pop().cancel(signal_plugin.run)
-        except:
-            logging.info(
-                "Plugin seems not to be an internal one - please change your configuration to external."
-            )
+    await signal_plugin.shutdown()
 
     if attributes.get("dca", None):
-        app.background_tasks.pop().cancel(dca.run)
-        app.background_tasks.pop().cancel(watcher.update_symbols)
-        app.background_tasks.pop().cancel(watcher.watch_orders)
-        app.background_tasks.pop().cancel(watcher.watch_tickers)
+        await dca.shutdown()
         await watcher.shutdown()
-        await database.shutdown()
 
-    app.background_tasks.pop().cancel(statistic.run)
-    app.background_tasks.pop().cancel(exchange.run)
+    await statistic.shutdown()
+    await exchange.shutdown()
+    await database.shutdown()
 
 
 ######################################################

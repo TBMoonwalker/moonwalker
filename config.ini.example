@@ -4,8 +4,7 @@ debug = true
 port = 8120
 
 [signal]
-plugin = autocrypto
-plugin_type = internal
+plugin = asap
 
 [plugin]
 plugin_settings = {"api_url": "wss://oy5v5kbdt3.execute-api.eu-west-1.amazonaws.com/production", "api_key": "fillinyourkey", "deny_bots": ["news-analyzer", "candle-surfer-public"]}
@@ -22,12 +21,8 @@ secret = insert your exchange secret
 password = insert your password (only okx exchange)
 dry_run = true
 currency = USDT
-# future and spot is available for market
+# only spot is available right now
 market = spot
-# Futures settings
-leverage = 1
-# crossed and isolated is available for margin_type
-margin_type = isolated
 # If activated - fee calculation is disabled and full amount is considered
 # You can activate it, if you pay the fees with BNB or other exchange tokens
 fee_deduction = False
@@ -35,6 +30,8 @@ fee_deduction = False
 [trading]
 # don't turn it of - if you like no safety orders - unset mstc (default)
 dca = true
+# Dynamic DCA - you need Moonloader for it
+dynamic_dca = False
 # in percent - if 0 trailing tp is disabled
 trailing_tp = 0
 # Number of concurrent trades
@@ -51,9 +48,12 @@ bo = 10
 #os = 1.32
 # max safety orders count
 #mstc = 5
-# max active safety orders count
-# max = 2
 # take profit in percent
 tp = 1
 # stop loss in percent
 sl = 1
+
+[indicators]
+# Only needed if you activate 
+# Only works with Moonloader! - see https://github.com/TBMoonwalker/moonloader
+ws_url = http://localhost:9130/api/v1

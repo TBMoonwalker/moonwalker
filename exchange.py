@@ -1,4 +1,3 @@
-import asyncio
 import ccxt as ccxt
 import uuid
 import time
@@ -22,16 +21,12 @@ class Exchange:
         currency,
         sandbox,
         market,
-        leverage,
-        margin_type,
         dry_run,
         loglevel,
         fee_deduction,
         statistic,
     ):
         self.currency = currency.upper()
-        self.leverage = leverage
-        self.margin_type = margin_type.upper()
         self.market = market
         self.dry_run = dry_run
         self.fee_deduction = fee_deduction
@@ -53,11 +48,12 @@ class Exchange:
         self.exchange.load_markets()
 
         # Class Attributes
+        Exchange.status = True
         Exchange.order = order
         Exchange.tickers = tickers
         Exchange.statistic = statistic
         Exchange.logging = LoggerFactory.get_logger(
-            "exchange.log", "exchange", log_level=loglevel
+            "logs/exchange.log", "exchange", log_level=loglevel
         )
         Exchange.logging.info("Initialized")
 
@@ -66,7 +62,6 @@ class Exchange:
         try:
             # Fetch the ticker data for the trading pair
             ticker = self.exchange.fetch_ticker(pair)
-            self.logging.debug(ticker)
             # Extract the actual price from the ticker data
             if not ticker["last"]:
                 raise TryAgain
@@ -89,14 +84,33 @@ class Exchange:
         market = self.exchange.market(pair)
         return market["precision"]["amount"]
 
+    def __get_trades_for_symbol(self, symbol):
+        time.sleep(1)
+        since = self.exchange.milliseconds() - 5000  # -5 seconds from now
+        orderlist = self.exchange.fetch_my_trades(symbol, since)
+        self.logging.debug(f"Orderlist: {orderlist}")
+        trade = {}
+        amount = 0.0
+        fee = 0.0
+        cost = 0.0
+        for order in orderlist:
+            amount += order["amount"]
+            fee += order["fee"]["cost"]
+            cost += order["cost"]
+
+        trade["cost"] = cost
+        trade["fee"] = fee
+        trade["amount"] = amount
+        trade["timestamp"] = orderlist[-1]["timestamp"]
+        trade["price"] = orderlist[-1]["price"]
+        trade["order"] = orderlist[-1]["order"]
+        trade["symbol"] = orderlist[-1]["symbol"]
+        trade["side"] = orderlist[-1]["side"]
+        trade["fee_cost"] = orderlist[-1]["fee"]
+
+        return trade
+
     def __parse_order_status(self, order):
-        # if order["price"] == None:
-        #     # Bybit does not send useful information as order response
-        #     # so we fetch it from the exchange
-        #     order = self.exchange.fetch_order(order["id"], order["symbol"])
-        #     order["amount"] = order["filled"]
-        #     order["price"] = order["average"]
-        #     Exchange.logging.debug(f"order status: {order}")
         data = {}
 
         if self.dry_run:
@@ -108,18 +122,15 @@ class Exchange:
             data["side"] = order["side"]
             data["type"] = order["type"]
         else:
-            since = self.exchange.milliseconds() - 5000  # -5 seconds from now
-            order = self.exchange.fetch_my_trades(order["symbol"], since)
-            data["timestamp"] = order[-1]["timestamp"]
-            data["amount"] = float(order[-1]["amount"]) - float(
-                order[-1]["fee"]["cost"]
-            )
-            data["price"] = order[-1]["price"]
-            data["orderid"] = order[-1]["order"]
-            data["symbol"] = order[-1]["symbol"]
-            data["side"] = order[-1]["side"]
-            data["amount_fee"] = order[-1]["fee"]["cost"]
-            data["ordersize"] = order[-1]["cost"]
+            trade = self.__get_trades_for_symbol(order["symbol"])
+            data["timestamp"] = trade["timestamp"]
+            data["amount"] = float(trade["amount"])
+            data["price"] = trade["price"]
+            data["orderid"] = trade["order"]
+            data["symbol"] = trade["symbol"]
+            data["side"] = trade["side"]
+            data["amount_fee"] = trade["fee_cost"]
+            data["ordersize"] = order["cost"]
 
         return data
 
@@ -139,10 +150,7 @@ class Exchange:
         symbol = pair
         if not "/" in pair:
             pair, currency = pair.split(self.currency)
-            if self.market == "future":
-                symbol = f"{pair}/{self.currency}:{self.currency}"
-            else:
-                symbol = f"{pair}/{self.currency}"
+            symbol = f"{pair}/{self.currency}"
         return symbol
 
     def __split_direction(self, direction):
@@ -207,32 +215,6 @@ class Exchange:
             side = "buy"
             dryrun_side = "sell"
 
-        # Future options
-        if self.market == "future":
-            symbol = self.exchange.market(pair)
-            if self.exchange_id == "binance":
-                parameter = {"positionSide": position}
-                try:
-                    self.exchange.fapiprivate_post_leverage(
-                        {
-                            "symbol": symbol["id"],
-                            "leverage": self.leverage,
-                        }
-                    )
-                    self.exchange.fapiprivate_post_margintype(
-                        {
-                            "symbol": symbol["id"],
-                            "marginType": self.margin_type,
-                        }
-                    )
-                except ccxt.ExchangeError as e:
-                    self.logging.error(e)
-            else:
-                try:
-                    self.exchange.set_leverage(self.leverage, pair)
-                except ccxt.ExchangeError as e:
-                    self.logging.error(e)
-
         if self.dry_run:
             order["info"] = {}
             order["info"]["orderId"] = uuid.uuid4()
@@ -246,7 +228,7 @@ class Exchange:
             results = order
         else:
             try:
-                self.logging.debug(f"Try to buy {amount} {pair}")
+                self.logging.info(f"Try to buy {amount} {pair}")
                 order = self.exchange.create_order(
                     pair, "market", side, amount, price, parameter
                 )
@@ -280,22 +262,7 @@ class Exchange:
             results = order
         else:
             try:
-                # Future order
-                if self.market == "future":
-                    if position == "short":
-                        side = "buy"
-                    else:
-                        side = "sell"
-
-                    if self.exchange_id == "binance":
-                        parameter = {"positionSide": position}
-
-                    order = self.exchange.create_order(
-                        pair, "market", side, amount, price, parameter
-                    )
-                # Spot order
-                else:
-                    order = self.exchange.create_market_sell_order(pair, amount)
+                order = self.exchange.create_market_sell_order(pair, amount)
 
                 if order:
                     results = order
@@ -318,7 +285,7 @@ class Exchange:
         trade = self.__buy(order["ordersize"], order["symbol"], order["direction"])
 
         if trade:
-            Exchange.logging.info(f"Opened order: {order}")
+            Exchange.logging.info(f"Opened trade: {trade}")
 
             order_status = self.__parse_order_status(trade)
             order.update(order_status)
@@ -327,13 +294,17 @@ class Exchange:
             order["amount_fee"] = 0.0
             order["fees"] = 0.0
 
-            # Substract the order fees (on Future - Fees will be deducted in Quote not Base)
-            if not self.fee_deduction or not self.market == "future":
+            # Substract the order fees
+            if not self.fee_deduction:
                 order["fees"] = self.exchange.fetch_trading_fee(
                     symbol=order_status["symbol"]
                 )["taker"]
                 order["amount_fee"] = order["amount"] * float(order["fees"])
                 order["amount"] = float(order_status["amount"]) - order["amount_fee"]
+
+                self.logging.debug(
+                    f"Fee Deduction not active. Real amount {order_status['amount']}, deducted amount {order['amount']}"
+                )
 
             # Add trade to database and push message to Watcher
             if await self.__add_trade(order):
@@ -355,7 +326,7 @@ class Exchange:
             .values("total_amount")
         )
         amount = amount[0]["total_amount"]
-        self.logging.debug(f"Selling {amount} {order['symbol']}")
+        self.logging.info(f"Selling {amount} {order['symbol']}")
 
         trade = self.__sell(amount, order["symbol"], order["direction"])
 
@@ -389,18 +360,22 @@ class Exchange:
                 )
 
     async def __process_order(self, data):
-        Exchange.logging.debug(f"New order: {data}")
 
         data["symbol"] = self.__split_symbol(data["symbol"])
         data["direction"] = self.__split_direction(data["direction"])
 
         if data["side"] == "buy":
             await self.__buy_order(data)
+            Exchange.logging.info(f"New buy request: {data}")
         if data["side"] == "sell" and "type_sell" in data:
-            self.logging.debug(f"Who likes to sell? {data}")
+            Exchange.logging.info(f"New sell request: {data}")
             await self.__sell_order(data)
 
     async def run(self):
-        while True:
+        while Exchange.status:
             data = await Exchange.order.get()
             await self.__process_order(data)
+
+    async def shutdown(self):
+        Exchange.status = False
+        await self.exchange.close()
