@@ -7,10 +7,14 @@ port = 8120
 plugin = asap
 
 [plugin]
-plugin_settings = {"api_url": "wss://oy5v5kbdt3.execute-api.eu-west-1.amazonaws.com/production", "api_key": "fillinyourkey", "deny_bots": ["news-analyzer", "candle-surfer-public"]}
+# asap plugin settings
+plugin_settings = {"symbol_list": "BTCUSDT,ETHUSDT"}
+# sym_signals plugin settings
+# plugin_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your-key-from-3CQS", "api_version": "api-version", "allowed_signals": [allowd signals from signal list]}
+
 
 [filter]
-#pair_allowlist =
+#pair_allowlist = 
 #pair_denylist = USDC,USTC,DAI,TUSD,BUSD,FDUSD
 
 [exchange]
@@ -28,8 +32,8 @@ market = spot
 fee_deduction = False
 
 [trading]
-# don't turn it of - if you like no safety orders - unset mstc (default)
-dca = true
+# don't turn it off - if you like no safety orders - unset mstc (default)
+dca = True
 # Dynamic DCA - you need Moonloader for it
 dynamic_dca = False
 # in percent - if 0 trailing tp is disabled
@@ -39,7 +43,7 @@ max_bots = 1
 # base order size
 bo = 10
 # safety order size
-#so = 100
+#so = 10
 # price deviation to open safety orders
 #sos = 2
 # safety order step scale
