@@ -34,7 +34,7 @@ pypika-tortoise==0.1.6
 pytz==2023.3.post1
 Quart==0.19.7
 quart-cors==0.7.0
-requests==2.31.0
+requests==2.32.2
 setuptools==70.0.0
 tenacity==8.2.3
 tortoise-orm==0.20.0
