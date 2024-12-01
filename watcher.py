@@ -1,5 +1,4 @@
 import ccxt.pro as ccxtpro
-from asyncio import gather
 import asyncio
 
 from logger import LoggerFactory
@@ -39,11 +38,12 @@ class Watcher:
         self.timeframe = timeframe
 
         # Class variables
+        Watcher.status = True
         Watcher.dca = dca
         Watcher.tickers = tickers
         Watcher.symbols = []
         Watcher.logging = LoggerFactory.get_logger(
-            "dca.log", "watcher", log_level=loglevel
+            "logs/dca.log", "watcher", log_level=loglevel
         )
         Watcher.logging.info("Initialized")
 
@@ -55,7 +55,7 @@ class Watcher:
 
     # Get Tickers from Exchange modules (buy/sell)
     async def update_symbols(self):
-        while True:
+        while Watcher.status:
             try:
                 tickers = await Watcher.tickers.get()
                 Watcher.symbols = self.__convert_symbols(tickers)
@@ -72,7 +72,7 @@ class Watcher:
             Watcher.symbols = self.__convert_symbols(symbols)
 
         actual_symbols = Watcher.symbols
-        while True:
+        while Watcher.status:
             if Watcher.symbols:
                 # Reload on symbol list change
                 if Watcher.symbols == actual_symbols:
@@ -97,17 +97,16 @@ class Watcher:
                                 else:
                                     last_price = actual_price
                     except Exception as e:
-                        Watcher.logging.error(e)
-                        pass
+                        Watcher.logging.error(f"CCXT websocket error. Cause: {e}")
+                        continue
                 else:
                     actual_symbols = Watcher.symbols
                     continue
             else:
                 await asyncio.sleep(5)
-        await Watcher.exchange.close()
 
     async def watch_orders(self):
-        while True:
+        while Watcher.status:
             try:
                 orders = await Watcher.exchange.watch_orders()
                 Watcher.logging.debug
@@ -127,8 +126,8 @@ class Watcher:
                     await Watcher.dca.put(order)
             except Exception as e:
                 Watcher.logging.error(e)
-                break
-        await Watcher.exchange.close()
+                continue
 
     async def shutdown(self):
+        Watcher.status = False
         await Watcher.exchange.close()
