@@ -75,12 +75,12 @@ class SignalPlugin:
                 self.filter.subscribe_new_symbols(running_symbols, add_symbol)
             )
 
-            # Check if new symbol has been subscribed - in case of error, don't create a deal with it!
-            if new_symbol not in subscribe_symbols:
-                self.logging.error(
-                    f"New symbol {new_symbol} couldn't be added - not in {subscribed_symbols}"
-                )
-                new_symbol = None
+            # # Check if new symbol has been subscribed - in case of error, don't create a deal with it!
+            # if new_symbol not in subscribe_symbols:
+            #     self.logging.error(
+            #         f"New symbol {new_symbol} couldn't be added - not in {subscribed_symbols}"
+            #     )
+            #     new_symbol = None
 
             self.logging.debug(f"Subscribed symbols: {subscribed_symbols}")
             self.logging.debug(f"Unsubscribed symbols: {unsubscribe_symbols}")
@@ -176,40 +176,36 @@ class SignalPlugin:
                                 .values_list("bot", flat=True)
                             )
 
-                            symbol = self.__get_new_symbol_list(running_trades, symbol)
+                            # symbol = self.__get_new_symbol_list(running_trades, symbol)
+                            self.__get_new_symbol_list(running_trades, symbol)
 
-                            if symbol:
-                                max_bots = await self.__check_max_bots()
-                                current_symbol = f"symsignal_{symbol}"
+                            # if symbol:
+                            max_bots = await self.__check_max_bots()
+                            current_symbol = f"symsignal_{symbol}"
 
-                                self.logging.debug(
-                                    f"Running trades: {running_trades}, Max Bots: {max_bots}"
-                                )
+                            self.logging.debug(
+                                f"Running trades: {running_trades}, Max Bots: {max_bots}"
+                            )
 
-                                if (
-                                    current_symbol not in running_trades
-                                    and not max_bots
-                                ):
-                                    self.logging.info(
-                                        f"Triggering new trade for {symbol}"
-                                    )
-                                    order = {
-                                        "ordersize": self.ordersize,
-                                        "symbol": symbol,
-                                        "direction": "open_long",
-                                        "botname": f"symsignal_{symbol}",
-                                        "baseorder": True,
-                                        "safetyorder": False,
-                                        "order_count": 0,
-                                        "ordertype": "market",
-                                        "so_percentage": None,
-                                        "side": "buy",
-                                    }
-                                    await self.order.put(order)
-                            else:
-                                self.logging.error(
-                                    "Error creating an order with symbol - seems to be an unsuccessful subscription on Moonloader"
-                                )
+                            if current_symbol not in running_trades and not max_bots:
+                                self.logging.info(f"Triggering new trade for {symbol}")
+                                order = {
+                                    "ordersize": self.ordersize,
+                                    "symbol": symbol,
+                                    "direction": "open_long",
+                                    "botname": f"symsignal_{symbol}",
+                                    "baseorder": True,
+                                    "safetyorder": False,
+                                    "order_count": 0,
+                                    "ordertype": "market",
+                                    "so_percentage": None,
+                                    "side": "buy",
+                                }
+                                await self.order.put(order)
+                            # else:
+                            #     self.logging.error(
+                            #         "Error creating an order with symbol - seems to be an unsuccessful subscription on Moonloader"
+                            #     )
                 except TimeoutError:
                     self.logging.error(
                         "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"
