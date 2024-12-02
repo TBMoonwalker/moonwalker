@@ -233,10 +233,10 @@ async def closed_orders_pagination(page):
     return response
 
 
-@app.route("/profit/overall")
+@app.route("/profit/statistics")
 @route_cors(allow_origin="*")
-async def profit_overall():
-    response = await statistic.sum_profit()
+async def profit_statistics():
+    response = await statistic.profit_statistics()
     if not response:
         response = {"result": ""}
 

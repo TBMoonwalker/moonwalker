@@ -248,34 +248,41 @@ class Statistic:
             return json.dumps([{}])
 
     async def profit_statistics(self):
-        # Profit overall
-        profit = 0
-        try:
-            profit = await ClosedTrades.annotate(total=Sum("profit")).values_list(
-                "total", flat=True
-            )
-        except Exception as e:
-            self.logging.error(f"Error getting profit: {e}")
+        profit_data = {}
 
         # uPNL
-        upnl = 0
+        profit_data["upnl"] = 0
         try:
             upnl = await OpenTrades.annotate(total=Sum("profit")).values_list(
                 "total", flat=True
             )
+            profit_data["upnl"] = upnl[0]
         except Exception as e:
             self.logging.error(f"Error getting losses: {e}")
 
-        # Funds locked in deals
-        funds_locked = 0
+        # Profit overall
+        profit_data["profit_overall"] = 0
         try:
-            loss = await OpenTrades.annotate(total=Sum("cost")).values_list(
+            profit = await ClosedTrades.annotate(total=Sum("profit")).values_list(
                 "total", flat=True
             )
+            profit_data["profit_overall"] = profit[0] - profit_data["upnl"]
+        except Exception as e:
+            self.logging.error(f"Error getting profit: {e}")
+
+        # Funds locked in deals
+        profit_data["funds_locked"] = 0
+        try:
+            funds_locked = await OpenTrades.annotate(total=Sum("cost")).values_list(
+                "total", flat=True
+            )
+            profit_data["funds_locked"] = funds_locked[0]
         except Exception as e:
             self.logging.error(f"Error getting funds: {e}")
 
-        # Profit per Day
+        # TBD - Profit per Day
+
+        return json.dumps(profit_data)
 
     async def sum_profit(self):
         try:
