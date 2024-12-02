@@ -20,7 +20,7 @@ timezone | string | YES | (Europe/London) | Timezone used by the logging framewo
 debug | boolean | NO | (false) true  | Logging debugging information into various logs
 port | integer | NO | (8120) | Port to use for the internal webserver (Must be port 80 for http and Tradingview use)
 plugin | string | YES | (sym_signals) | Plugin to be used as signal for Moonwalker
-plugin_settings | string | YES | . | Specific plugin settings for the chosen plugin
+plugin_settings | string | YES | . | Specific plugin settings for the chosen plugin (see SymSignals signal setup)
 pair_allowlist | string | NO |  | Specify which pairs are explicitely allowed for trading
 pair_denylist | string | NO |  | Specify which pairs are explicitely denied for trading
 exchange | string | YES | (binance) | Used exchange for trading
@@ -47,6 +47,11 @@ sl | integer | YES | (1) | Stop loss in percent
 ws_url | string | NO | (http://localhost:9130/api/v1) | URL of the Moonloader websocket api. Used for dynamic TP
 
 ## SymSignals signal setup
+plugin_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your api key", "api_version": "api version", "allowed_signals": [signalid, signalid]}
+
+The available signal id's for ``allowed_signals`` can be found from https://3cqs.com/home/faq/.
+
+For example, ``allowed_signals[12, 2]`` configures SymRank Top 10 and SymRank Top30 as available signals for trade.
 
 ## ASAP signal setup
 

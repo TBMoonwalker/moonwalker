@@ -99,9 +99,6 @@ class Statistic:
             if stats["sell"]:
                 # Sell PNL in percent
                 sell_pnl = ((current_price - avg_price) / avg_price) * 100
-                # if sell_pnl > 0 and stats["direction"] == "short":
-                #     sell_pnl = abs(sell_pnl)
-
                 sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
                 sell_date = datetime.now()
 
@@ -168,7 +165,6 @@ class Statistic:
                     self.logging.error(
                         f"Error updating open trade database entry. Cause {e}"
                     )
-                # Statistic.logging.debug(f"TP-Check: {stats}")
 
         elif stats["type"] == "dca_check":
             if stats["new_so"]:

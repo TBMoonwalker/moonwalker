@@ -59,6 +59,8 @@ class Exchange:
 
     @retry(stop=stop_after_attempt(10))
     def __get_price_for_symbol(self, pair):
+        result = None
+
         try:
             # Fetch the ticker data for the trading pair
             ticker = self.exchange.fetch_ticker(pair)
@@ -71,12 +73,12 @@ class Exchange:
             Exchange.logging.error(
                 f"Fetching ticker messages failed due to an exchange error: {e}"
             )
-            result = None
+            raise TryAgain
         except ccxt.NetworkError as e:
             Exchange.logging.error(
                 f"Fetching ticker messages failed due to a network error: {e}"
             )
-            result = None
+            raise TryAgain
 
         return result
 
@@ -191,12 +193,19 @@ class Exchange:
     @retry(stop=stop_after_attempt(3))
     async def __delete_trade(self, order):
         # Delete database entries after trade sell
+        result = False
+
         try:
             await Trades.filter(bot=order["botname"]).delete()
+            tickers = await self.__get_symbols()
+            # Check if trades has been closed (DirtyFixTry - sometimes trades are still in to DB!)
+            if order["symbol"] in tickers:
+                self.logging.error(f"Error deleting trade from database. Retrying")
+                raise TryAgain
             result = True
         except Exception as e:
             self.logging.error(f"Error deleting trade from database: {e}")
-            result = False
+            raise TryAgain
 
         return result
 
