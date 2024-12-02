@@ -31,7 +31,7 @@ market = spot
 # You can activate it, if you pay the fees with BNB or other exchange tokens
 fee_deduction = False
 
-[trading]
+[dca]
 # don't turn it off - if you like no safety orders - unset mstc (default)
 dca = True
 # Dynamic DCA - you need Moonloader for it

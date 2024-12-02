@@ -2,6 +2,7 @@ from quart import Quart, request, websocket
 import argparse
 import asyncio
 import importlib
+import os
 from config import Config
 from database import Database
 from dca import Dca
@@ -30,6 +31,16 @@ if attributes.get("debug", False):
     loglevel = "DEBUG"
 else:
     loglevel = "INFO"
+
+# Create db and logs directories if they don't exist already
+try:
+    os.makedirs("logs", exist_ok=True)
+    os.makedirs("db", exist_ok=True)
+except:
+    print(
+        "Error creating 'db' and 'logs' directory - please create them manually and report it as a bug!"
+    )
+    exit(1)
 
 logging = LoggerFactory.get_logger("logs/moonwalker.log", "main", log_level=loglevel)
 
@@ -70,11 +81,11 @@ signal_plugin = plugin.SignalPlugin(
     max_bots=attributes.get("max_bots"),
     ws_url=attributes.get("ws_url", None),
     loglevel=loglevel,
-    plugin_settings=attributes.get("plugin_settings", None),
+    plugin_settings=attributes.get("plugin_settings"),
     filter_values=attributes.get("filter", None),
     exchange=attributes.get("exchange"),
     currency=attributes.get("currency"),
-    market=attributes.get("market"),
+    market=attributes.get("market", "spot"),
     pair_denylist=attributes.get("pair_denylist", None),
     pair_allowlist=attributes.get("pair_allowlist", None),
     topcoin_limit=attributes.get("topcoin_limit", None),
@@ -94,8 +105,8 @@ exchange = Exchange(
     password=attributes.get("password", None),
     currency=attributes.get("currency"),
     sandbox=attributes.get("sandbox", False),
-    market=attributes.get("market"),
-    dry_run=attributes.get("dry_run"),
+    market=attributes.get("market", "spot"),
+    dry_run=attributes.get("dry_run", True),
     loglevel=loglevel,
     fee_deduction=attributes.get("fee_deduction", False),
 )
@@ -110,9 +121,9 @@ watcher = Watcher(
     secret=attributes.get("secret"),
     currency=attributes.get("currency"),
     sandbox=attributes.get("sandbox", False),
-    market=attributes.get("market"),
+    market=attributes.get("market", "spot"),
     loglevel=loglevel,
-    timeframe=attributes.get("timeframe"),
+    timeframe=attributes.get("timeframe", "1m"),
 )
 
 # Initialize DCA module
@@ -123,8 +134,8 @@ dca = Dca(
     dynamic_dca=attributes.get("dynamic_dca", False),
     strategy=dca_strategy_plugin,
     order=order_queue,
-    volume_scale=attributes.get("os", None),
-    step_scale=attributes.get("ss", None),
+    volume_scale=attributes.get("os"),
+    step_scale=attributes.get("ss"),
     max_safety_orders=attributes.get("mstc", None),
     so=attributes.get("so", None),
     price_deviation=attributes.get("sos", None),
@@ -132,12 +143,12 @@ dca = Dca(
     sl=attributes.get("sl", None),
     ws_url=attributes.get("ws_url", None),
     loglevel=loglevel,
-    market=attributes.get("market"),
+    market=attributes.get("market", "spot"),
 )
 
 # Initialize Statistics module
 statistic = Statistic(
-    stats=stats_queue, loglevel=loglevel, market=attributes.get("market")
+    stats=stats_queue, loglevel=loglevel, market=attributes.get("market", "spot")
 )
 
 # Initialize Trading module
