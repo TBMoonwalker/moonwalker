@@ -1,6 +1,7 @@
 from logger import LoggerFactory
 from models import Trades
 from filter import Filter
+from socketio.exceptions import TimeoutError
 
 import asyncio
 import socketio
@@ -163,45 +164,57 @@ class SignalPlugin:
                     finally:
                         self.logging.info(f"Reconnect attempt in 10 seconds")
                         await asyncio.sleep(10)
+                try:
+                    event = await sio.receive(timeout=30)
+                    if event[0] == "signal":
+                        symbol = f"{event[1]['symbol'].upper()}USDT"
 
-                event = await sio.receive()
-                if event[0] == "signal":
-                    symbol = f"{event[1]['symbol'].upper()}USDT"
-
-                    if self.__check_entry_point(event[1]):
-                        running_trades = (
-                            await Trades.all().distinct().values_list("bot", flat=True)
-                        )
-
-                        symbol = self.__get_new_symbol_list(running_trades, symbol)
-
-                        if symbol:
-                            max_bots = await self.__check_max_bots()
-                            current_symbol = f"symsignal_{symbol}"
-
-                            self.logging.debug(
-                                f"Running trades: {running_trades}, Max Bots: {max_bots}"
+                        if self.__check_entry_point(event[1]):
+                            running_trades = (
+                                await Trades.all()
+                                .distinct()
+                                .values_list("bot", flat=True)
                             )
 
-                            if current_symbol not in running_trades and not max_bots:
-                                self.logging.info(f"Triggering new trade for {symbol}")
-                                order = {
-                                    "ordersize": self.ordersize,
-                                    "symbol": symbol,
-                                    "direction": "open_long",
-                                    "botname": f"symsignal_{symbol}",
-                                    "baseorder": True,
-                                    "safetyorder": False,
-                                    "order_count": 0,
-                                    "ordertype": "market",
-                                    "so_percentage": None,
-                                    "side": "buy",
-                                }
-                                await self.order.put(order)
-                        else:
-                            self.logging.error(
-                                "Error creating an order with symbol - seems to be an unsuccessful subscription on Moonloader"
-                            )
+                            symbol = self.__get_new_symbol_list(running_trades, symbol)
 
-    async def shutdown():
+                            if symbol:
+                                max_bots = await self.__check_max_bots()
+                                current_symbol = f"symsignal_{symbol}"
+
+                                self.logging.debug(
+                                    f"Running trades: {running_trades}, Max Bots: {max_bots}"
+                                )
+
+                                if (
+                                    current_symbol not in running_trades
+                                    and not max_bots
+                                ):
+                                    self.logging.info(
+                                        f"Triggering new trade for {symbol}"
+                                    )
+                                    order = {
+                                        "ordersize": self.ordersize,
+                                        "symbol": symbol,
+                                        "direction": "open_long",
+                                        "botname": f"symsignal_{symbol}",
+                                        "baseorder": True,
+                                        "safetyorder": False,
+                                        "order_count": 0,
+                                        "ordertype": "market",
+                                        "so_percentage": None,
+                                        "side": "buy",
+                                    }
+                                    await self.order.put(order)
+                            else:
+                                self.logging.error(
+                                    "Error creating an order with symbol - seems to be an unsuccessful subscription on Moonloader"
+                                )
+                except TimeoutError:
+                    self.logging.error(
+                        "Didn't get any event after 5 seconds - SocketIO connection seems to hang. Try to reconnect"
+                    )
+                    await sio.disconnect()
+
+    async def shutdown(self):
         SignalPlugin.status = False
