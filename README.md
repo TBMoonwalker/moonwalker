@@ -47,7 +47,7 @@ sl | integer | YES | (1) | Stop loss in percent
 ws_url | string | NO | (http://localhost:9130/api/v1) | URL of the Moonloader websocket api. Used for dynamic TP
 
 ## SymSignals signal setup
-plugin_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your api key", "api_version": "api version", "allowed_signals": [signalid, signalid]}
+``plugin_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your api key", "api_version": "api version", "allowed_signals": [signalid, signalid]}``
 
 The available signal id's for ``allowed_signals`` can be found from https://3cqs.com/home/faq/.
 
