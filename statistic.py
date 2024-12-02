@@ -266,7 +266,7 @@ class Statistic:
             profit = await ClosedTrades.annotate(total=Sum("profit")).values_list(
                 "total", flat=True
             )
-            profit_data["profit_overall"] = profit[0] - profit_data["upnl"]
+            profit_data["profit_overall"] = profit[0] + profit_data["upnl"]
         except Exception as e:
             self.logging.error(f"Error getting profit: {e}")
 

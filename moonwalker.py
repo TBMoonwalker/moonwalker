@@ -233,6 +233,19 @@ async def closed_orders_pagination(page):
     return response
 
 
+@app.websocket("/profit")
+async def profit():
+    try:
+        while True:
+            output = await statistic.profit_statistics()
+            await websocket.send(output)
+            await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        # Handle disconnection here
+        logging.info("Client disconnected")
+        raise
+
+
 @app.route("/profit/statistics")
 @route_cors(allow_origin="*")
 async def profit_statistics():
