@@ -233,7 +233,7 @@ async def closed_orders_pagination(page):
     return response
 
 
-@app.websocket("/profit")
+@app.websocket("/statistics")
 async def profit():
     try:
         while True:

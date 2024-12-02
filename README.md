@@ -33,7 +33,8 @@ currency | string | YES | (USDT) | Trading pair to use
 market | string | NO | (spot) | Only spot trading is possible now (default value)
 fee_deduction | boolean | YES | (False) | If True - the exchange token for fee deduction is used for trading fees. For example BNB on Binance.
 dca | boolean | YES | (True) | Activates DCA
-dynamic_dca | boolean | YES | (False) | Activates dynamic DCA. Attention - this works together with the configuration setting "ws_url" and only works with Moonloader right now!
+dynamic_dca | boolean | NO | (False) | Activates dynamic DCA. Attention - this works together with the configuration setting "ws_url" and only works with Moonloader right now!
+dynamic_dca_strategy | boolean | NO | (tothemoon) | Configures the specific strategy for dynamic DCA
 trailing_tp | float | NO | (0) | Deviation between TP and TTP. For example, if you set 0.5 with a tp of 1.0 in the worst case it should sell at 0.5
 max_bots | integer | NO | (1) | Number of bots that can be active at the same time
 bo | integer | YES | (10) | Base Order amount
