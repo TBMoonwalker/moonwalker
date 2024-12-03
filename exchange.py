@@ -4,7 +4,7 @@ import time
 from datetime import datetime
 from models import Trades
 from tortoise.functions import Sum
-from tenacity import retry, TryAgain, stop_after_attempt
+from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
 
 from logger import LoggerFactory
 
@@ -57,7 +57,7 @@ class Exchange:
         )
         Exchange.logging.info("Initialized")
 
-    @retry(stop=stop_after_attempt(10))
+    @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_price_for_symbol(self, pair):
         result = None
 
@@ -79,18 +79,53 @@ class Exchange:
                 f"Fetching ticker messages failed due to a network error: {e}"
             )
             raise TryAgain
+        except Exception as e:
+            Exchange.logging.error(f"Fetching ticker messages failed with: {e}")
+            raise TryAgain
 
         return result
 
+    @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_precision_for_symbol(self, pair):
-        market = self.exchange.market(pair)
+        try:
+            market = self.exchange.market(pair)
+        except ccxt.ExchangeError as e:
+            Exchange.logging.error(
+                f"Fetching market data failed due to an exchange error: {e}"
+            )
+            raise TryAgain
+        except ccxt.NetworkError as e:
+            Exchange.logging.error(
+                f"Fetching market data failed due to a network error: {e}"
+            )
+            raise TryAgain
+        except Exception as e:
+            Exchange.logging.error(f"FFetching market data failed failed with: {e}")
+            raise TryAgain
+
         return market["precision"]["amount"]
 
+    @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_trades_for_symbol(self, symbol):
         time.sleep(1)
         since = self.exchange.milliseconds() - 5000  # -5 seconds from now
-        orderlist = self.exchange.fetch_my_trades(symbol, since)
-        self.logging.debug(f"Orderlist: {orderlist}")
+        try:
+            orderlist = self.exchange.fetch_my_trades(symbol, since)
+        except ccxt.NetworkError as e:
+            Exchange.logging.error(
+                f"Fetch trade order failed due to a network error: {e}"
+            )
+            raise TryAgain
+        except ccxt.ExchangeError as e:
+            Exchange.logging.error(
+                f"Fetch trade order failed due to an exchange error: {e}"
+            )
+            raise TryAgain
+        except Exception as e:
+            Exchange.logging.error(f"Fetch trade order failed with: {e}")
+            raise TryAgain
+
+        Exchange.logging.debug(f"Orderlist: {orderlist}")
         trade = {}
         amount = 0.0
         fee = 0.0
@@ -185,7 +220,7 @@ class Exchange:
             )
             result = True
         except Exception as e:
-            self.logging.error(f"Error adding trade to database: {e}")
+            Exchange.logging.error(f"Error adding trade to database: {e}")
             result = False
 
         return result
@@ -200,11 +235,11 @@ class Exchange:
             tickers = await self.__get_symbols()
             # Check if trades has been closed (DirtyFixTry - sometimes trades are still in to DB!)
             if order["symbol"] in tickers:
-                self.logging.error(f"Error deleting trade from database. Retrying")
+                Exchange.logging.error(f"Error deleting trade from database. Retrying")
                 raise TryAgain
             result = True
         except Exception as e:
-            self.logging.error(f"Error deleting trade from database: {e}")
+            Exchange.logging.error(f"Error deleting trade from database: {e}")
             raise TryAgain
 
         return result
@@ -237,7 +272,7 @@ class Exchange:
             results = order
         else:
             try:
-                self.logging.info(f"Try to buy {amount} {pair}")
+                Exchange.logging.info(f"Try to buy {amount} {pair}")
                 order = self.exchange.create_order(
                     pair, "market", side, amount, price, parameter
                 )
@@ -256,14 +291,15 @@ class Exchange:
                     f"Buying pair {pair} failed due to an network error: {e}"
                 )
                 results = None
+            except Exception as e:
+                Exchange.logging.error(f"Buying pair {pair} failed with: {e}")
+                results = None
 
         return results
 
     def __sell(self, amount, pair, position):
         results = None
         order = {}
-        parameter = {}
-        price = self.__get_price_for_symbol(pair)
 
         if self.dry_run:
             order["symbol"] = True
@@ -286,6 +322,9 @@ class Exchange:
                 Exchange.logging.error(
                     f"Selling pair {pair} failed due to an network error: {e}"
                 )
+                results = None
+            except Exception as e:
+                Exchange.logging.error(f"Selling pair {pair} failed with: {e}")
                 results = None
 
         return results
@@ -311,7 +350,7 @@ class Exchange:
                 order["amount_fee"] = order["amount"] * float(order["fees"])
                 order["amount"] = float(order_status["amount"]) - order["amount_fee"]
 
-                self.logging.debug(
+                Exchange.logging.debug(
                     f"Fee Deduction not active. Real amount {order_status['amount']}, deducted amount {order['amount']}"
                 )
 
@@ -321,7 +360,7 @@ class Exchange:
                 tickers = await self.__get_symbols()
                 await Exchange.tickers.put(tickers)
             else:
-                self.logging.error(
+                Exchange.logging.error(
                     "Error adding trade to database - trade will not automatically traded by Moonwalker!"
                 )
 
@@ -335,7 +374,7 @@ class Exchange:
             .values("total_amount")
         )
         amount = amount[0]["total_amount"]
-        self.logging.info(f"Selling {amount} {order['symbol']}")
+        Exchange.logging.info(f"Selling {amount} {order['symbol']}")
 
         trade = self.__sell(amount, order["symbol"], order["direction"])
 
@@ -364,7 +403,7 @@ class Exchange:
                 if tickers:
                     await Exchange.tickers.put(tickers)
             else:
-                self.logging.error(
+                Exchange.logging.error(
                     "Error deleting trade from database - trade is done on Exchange, but not on Moonwalker Bot"
                 )
 
@@ -384,6 +423,7 @@ class Exchange:
         while Exchange.status:
             data = await Exchange.order.get()
             await self.__process_order(data)
+            Exchange.order.task_done()
 
     async def shutdown(self):
         Exchange.status = False

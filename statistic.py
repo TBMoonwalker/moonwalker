@@ -315,6 +315,7 @@ class Statistic:
         while Statistic.status:
             stats = await Statistic.stats.get()
             await self.__process_stats(stats)
+            Statistic.stats.task_done()
 
     async def shutdown(self):
         Statistic.status = False

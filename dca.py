@@ -89,7 +89,7 @@ class Dca:
 
             return actual_pnl
         else:
-            self.logging.error("No actual buy orders.")
+            Dca.logging.error("No actual buy orders.")
 
     async def __take_profit(self, symbol, current_price, buy_orders):
         tp_percentage = self.tp
@@ -143,14 +143,14 @@ class Dca:
                 if (sell and actual_pnl != self.pnl) and self.pnl != 0:
                     diff = actual_pnl - self.pnl
                     diff_percentage = (diff / self.pnl) * 100
-                    self.logging.debug(
+                    Dca.logging.debug(
                         f"TTP Check: {symbol} - PNL Difference: {diff_percentage}, Actual PNL: {actual_pnl}, DCA-PNL: {self.pnl}"
                     )
                     # Sell if trailing deviation is reached or actual PNL is under minimum TP
                     if (
                         diff_percentage < 0 and abs(diff_percentage) > self.trailing_tp
                     ) or actual_pnl < self.tp:
-                        # self.logging.debug(
+                        # Dca.logging.debug(
                         #     f"TTP Check: {symbol} - Percentage decrease - Take profit: {diff_percentage}"
                         # )
                         sell = True
@@ -170,6 +170,7 @@ class Dca:
                     "type_sell": "order_sell",
                 }
                 # Send new take profit order to exchange module
+                self.logging.debug(f"Sending sell order to exchange module: {order}")
                 await Dca.order.put(order)
 
             # Logging configuration
@@ -187,6 +188,9 @@ class Dca:
                 "direction": bot_type,
             }
             # Send new DCA statistics to statistics module
+            self.logging.debug(
+                f"Sending sell order statistics to statistics module: {logging_json}"
+            )
             await Dca.statistic.put(logging_json)
 
     async def __dca_strategy(self, symbol, current_price, buy_orders):
@@ -298,6 +302,7 @@ class Dca:
         while True:
             data = await Dca.dca.get()
             await self.__process_dca_signal(data)
+            Dca.dca.task_done()
 
     async def shutdown(self):
         Dca.status = False
