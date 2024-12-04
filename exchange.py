@@ -188,7 +188,7 @@ class Exchange:
                 data["amount_fee"] = trade["fee_cost"]
                 data["ordersize"] = order["cost"]
             else:
-                self.logging.info(
+                Exchange.logging.info(
                     f"Getting trades for {order["symbol"]} failed - using information of order."
                 )
                 data["timestamp"] = order["timestamp"]
