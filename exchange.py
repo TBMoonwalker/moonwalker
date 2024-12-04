@@ -444,6 +444,7 @@ class Exchange:
                     data["current_price"] = order_status["price"]
                     data["tp_price"] = order_status["price"]
                     data["avg_price"] = data["total_cost"] / data["total_amount"]
+                    data["actual_pnl"] = order["actual_pnl"]
 
                     await Exchange.statistic.put(data)
 

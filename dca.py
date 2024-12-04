@@ -168,6 +168,7 @@ class Dca:
                     "botname": bot_name,
                     "side": "sell",
                     "type_sell": "order_sell",
+                    "actual_pnl": actual_pnl,
                 }
                 # Send new take profit order to exchange module
                 self.logging.debug(f"Sending sell order to exchange module: {order}")
