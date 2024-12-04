@@ -147,6 +147,7 @@ class Statistic:
             avg_price = stats["avg_price"]
             actual_pnl = stats["actual_pnl"]
             open_timestamp = 0.0
+            base_order = await self.__get_trade_data(symbol, baseorder=True)
 
             try:
                 open_timestamp = float(base_order[0]["timestamp"])
