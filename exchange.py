@@ -194,7 +194,7 @@ class Exchange:
                 data["timestamp"] = order["timestamp"]
                 data["amount"] = float(order["amount"])
                 data["price"] = order["price"]
-                data["orderid"] = order["orderId"]
+                data["orderid"] = order["id"]
                 data["symbol"] = order["symbol"]
                 data["side"] = order["side"]
                 data["amount_fee"] = order["fee"]
