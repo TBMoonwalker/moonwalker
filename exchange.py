@@ -128,25 +128,31 @@ class Exchange:
         since = self.exchange.milliseconds() - 5000  # -5 seconds from now
         try:
             orderlist = self.exchange.fetch_my_trades(symbol, since)
-            Exchange.logging.debug(f"Orderlist: {orderlist}")
-            trade = {}
-            amount = 0.0
-            fee = 0.0
-            cost = 0.0
-            for order in orderlist:
-                amount += order["amount"]
-                fee += order["fee"]["cost"]
-                cost += order["cost"]
+            if orderlist:
+                Exchange.logging.debug(f"Orderlist for {symbol}: {orderlist}")
+                trade = {}
+                amount = 0.0
+                fee = 0.0
+                cost = 0.0
+                for order in orderlist:
+                    amount += order["amount"]
+                    fee += order["fee"]["cost"]
+                    cost += order["cost"]
 
-            trade["cost"] = cost
-            trade["fee"] = fee
-            trade["amount"] = amount
-            trade["timestamp"] = orderlist[-1]["timestamp"]
-            trade["price"] = orderlist[-1]["price"]
-            trade["order"] = orderlist[-1]["order"]
-            trade["symbol"] = orderlist[-1]["symbol"]
-            trade["side"] = orderlist[-1]["side"]
-            trade["fee_cost"] = orderlist[-1]["fee"]
+                trade["cost"] = cost
+                trade["fee"] = fee
+                trade["amount"] = amount
+                trade["timestamp"] = orderlist[-1]["timestamp"]
+                trade["price"] = orderlist[-1]["price"]
+                trade["order"] = orderlist[-1]["order"]
+                trade["symbol"] = orderlist[-1]["symbol"]
+                trade["side"] = orderlist[-1]["side"]
+                trade["fee_cost"] = orderlist[-1]["fee"]
+            else:
+                Exchange.logging.error(
+                    f"Error getting Orderlist for {symbol}: {orderlist}"
+                )
+                raise TryAgain
         except ccxt.NetworkError as e:
             Exchange.logging.error(
                 f"Fetch trade order failed due to a network error: {e}"
