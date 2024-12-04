@@ -1,8 +1,8 @@
-from datetime import datetime, timedelta
 import json
 import time
 from asyncache import cached
 from cachetools import TTLCache
+from datetime import datetime, timedelta, timezone
 from logger import LoggerFactory
 from tortoise.functions import Sum
 from tortoise.models import Q
@@ -23,8 +23,8 @@ class Statistic:
 
     def __calculate_trade_duration(self, start_date, end_date):
         # Convert Unix timestamps to datetime objects
-        date1 = datetime.utcfromtimestamp(start_date / 1000.0)
-        date2 = datetime.utcfromtimestamp(end_date / 1000.0)
+        date1 = datetime.fromtimestamp((start_date / 1000.0), timezone.utc)
+        date2 = datetime.fromtimestamp(end_date / 1000.0, timezone.utc)
 
         # Calculate the time difference
         time_difference = date2 - date1
@@ -32,7 +32,6 @@ class Statistic:
         # Extract days, seconds, and microseconds
         days = time_difference.days
         seconds = time_difference.seconds
-        microseconds = time_difference.microseconds
 
         # Calculate hours, minutes, and seconds
         hours, remainder = divmod(seconds, 3600)
@@ -73,8 +72,9 @@ class Statistic:
         return trade
 
     async def __process_stats(self, stats):
+        # Comes from DCA module
         if stats["type"] == "tp_check":
-            Statistic.logging.debug(f"TP complete? {stats}")
+            Statistic.logging.debug(f"TP-Check: {stats}")
             symbol = stats["symbol"]
             profit = (
                 stats["current_price"] * stats["total_amount"] - stats["total_cost"]
@@ -95,8 +95,48 @@ class Statistic:
                     f"Did not found a timestamp - taking default value. Cause {e}"
                 )
 
-            open_date = datetime.utcfromtimestamp(open_timestamp / 1000.0)
+            open_date = datetime.fromtimestamp((open_timestamp / 1000.0), timezone.utc)
 
+            try:
+                # Update open trade statistics
+                await OpenTrades.update_or_create(
+                    defaults={
+                        "profit": profit,
+                        "profit_percent": actual_pnl,
+                        "amount": amount,
+                        "cost": cost,
+                        "current_price": current_price,
+                        "tp_price": tp_price,
+                        "avg_price": avg_price,
+                        "open_date": open_timestamp,
+                    },
+                    symbol=stats["symbol"],
+                )
+            except Exception as e:
+                Statistic.logging.error(
+                    f"Error updating open trade database entry. Cause {e}"
+                )
+
+        elif stats["type"] == "dca_check":
+            if stats["new_so"]:
+                Statistic.logging.debug(f"SO buy: {stats}")
+
+            # Update SO count statistics
+            try:
+                await OpenTrades.update_or_create(
+                    defaults={
+                        "so_count": stats["so_orders"],
+                    },
+                    symbol=stats["symbol"],
+                )
+            except Exception as e:
+                Statistic.logging.error(
+                    f"Error updating SO count for {stats["symbol"]}. Cause {e}"
+                )
+            Statistic.logging.debug(f"DCA-Check: {stats}")
+
+        elif stats["type"] == "sold_check":
+            # Comes from Exchange module
             if stats["sell"]:
                 # Sell PNL in percent
                 sell_pnl = ((current_price - avg_price) / avg_price) * 100
@@ -146,73 +186,33 @@ class Statistic:
                         f"Error writing closed trade database entry. Cause {e}"
                     )
 
-            else:
                 try:
-                    # Update open trade statistics
-                    await OpenTrades.update_or_create(
-                        defaults={
-                            "profit": profit,
-                            "profit_percent": actual_pnl,
-                            "amount": amount,
-                            "cost": cost,
-                            "current_price": current_price,
-                            "tp_price": tp_price,
-                            "avg_price": avg_price,
-                            "open_date": open_timestamp,
-                        },
-                        symbol=stats["symbol"],
+                    values = (
+                        await ClosedTrades.filter(symbol=stats["symbol"])
+                        .order_by("-id")
+                        .first()
+                        .values_list("id", "cost")
                     )
                 except Exception as e:
                     Statistic.logging.error(
-                        f"Error updating open trade database entry. Cause {e}"
+                        f"Error getting closed trades for {stats["symbol"]}. Cause {e}"
                     )
 
-        elif stats["type"] == "dca_check":
-            if stats["new_so"]:
-                Statistic.logging.debug(f"SO buy: {stats}")
-
-            # Update SO count statistics
-            try:
-                await OpenTrades.update_or_create(
-                    defaults={
-                        "so_count": stats["so_orders"],
-                    },
-                    symbol=stats["symbol"],
-                )
-            except Exception as e:
-                Statistic.logging.error(
-                    f"Error updating SO count for {stats["symbol"]}. Cause {e}"
-                )
-            Statistic.logging.debug(f"DCA-Check: {stats}")
-
-        elif stats["type"] == "sold_check":
-            try:
-                values = (
-                    await ClosedTrades.filter(symbol=stats["symbol"])
-                    .order_by("-id")
-                    .first()
-                    .values_list("id", "cost")
-                )
-            except Exception as e:
-                Statistic.logging.error(
-                    f"Error getting closed trades for {stats["symbol"]}. Cause {e}"
-                )
-
-            try:
-                await ClosedTrades.update_or_create(
-                    defaults={
-                        "amount": stats["total_amount"],
-                        "profit": float(stats["total_cost"]) - float(values[1]),
-                        "current_price": stats["current_price"],
-                        "tp_price": stats["tp_price"],
-                        "avg_price": stats["avg_price"],
-                    },
-                    id=values[0],
-                )
-            except Exception as e:
-                Statistic.logging.error(
-                    f"Error updating closed trades for {stats["symbol"]}. Cause {e}"
-                )
+                try:
+                    await ClosedTrades.update_or_create(
+                        defaults={
+                            "amount": stats["total_amount"],
+                            "profit": float(stats["total_cost"]) - float(values[1]),
+                            "current_price": stats["current_price"],
+                            "tp_price": stats["tp_price"],
+                            "avg_price": stats["avg_price"],
+                        },
+                        id=values[0],
+                    )
+                except Exception as e:
+                    Statistic.logging.error(
+                        f"Error updating closed trades for {stats["symbol"]}. Cause {e}"
+                    )
 
     async def open_orders(self):
         try:

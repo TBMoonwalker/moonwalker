@@ -187,10 +187,6 @@ class Dca:
                 "sell": sell,
                 "direction": bot_type,
             }
-            # Send new DCA statistics to statistics module
-            self.logging.debug(
-                f"Sending sell order statistics to statistics module: {logging_json}"
-            )
             await Dca.statistic.put(logging_json)
 
     async def __dca_strategy(self, symbol, current_price, buy_orders):

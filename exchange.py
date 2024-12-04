@@ -59,6 +59,18 @@ class Exchange:
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_price_for_symbol(self, pair):
+        """Gets the actual price for the given symbol/currency pair
+
+        Parameters
+        ----------
+        pair: string
+           Pair - has to be in format "symbol"/currency" (Example: BTC/USDT)
+
+        Returns
+        -------
+        int
+            Actual price with correct precision for that pair
+        """
         result = None
 
         try:
@@ -87,8 +99,12 @@ class Exchange:
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_precision_for_symbol(self, pair):
+
+        result = None
+
         try:
             market = self.exchange.market(pair)
+            result = market["precision"]["amount"]
         except ccxt.ExchangeError as e:
             Exchange.logging.error(
                 f"Fetching market data failed due to an exchange error: {e}"
@@ -103,14 +119,34 @@ class Exchange:
             Exchange.logging.error(f"FFetching market data failed failed with: {e}")
             raise TryAgain
 
-        return market["precision"]["amount"]
+        return result
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_trades_for_symbol(self, symbol):
+        trade = None
         time.sleep(1)
         since = self.exchange.milliseconds() - 5000  # -5 seconds from now
         try:
             orderlist = self.exchange.fetch_my_trades(symbol, since)
+            Exchange.logging.debug(f"Orderlist: {orderlist}")
+            trade = {}
+            amount = 0.0
+            fee = 0.0
+            cost = 0.0
+            for order in orderlist:
+                amount += order["amount"]
+                fee += order["fee"]["cost"]
+                cost += order["cost"]
+
+            trade["cost"] = cost
+            trade["fee"] = fee
+            trade["amount"] = amount
+            trade["timestamp"] = orderlist[-1]["timestamp"]
+            trade["price"] = orderlist[-1]["price"]
+            trade["order"] = orderlist[-1]["order"]
+            trade["symbol"] = orderlist[-1]["symbol"]
+            trade["side"] = orderlist[-1]["side"]
+            trade["fee_cost"] = orderlist[-1]["fee"]
         except ccxt.NetworkError as e:
             Exchange.logging.error(
                 f"Fetch trade order failed due to a network error: {e}"
@@ -124,26 +160,6 @@ class Exchange:
         except Exception as e:
             Exchange.logging.error(f"Fetch trade order failed with: {e}")
             raise TryAgain
-
-        Exchange.logging.debug(f"Orderlist: {orderlist}")
-        trade = {}
-        amount = 0.0
-        fee = 0.0
-        cost = 0.0
-        for order in orderlist:
-            amount += order["amount"]
-            fee += order["fee"]["cost"]
-            cost += order["cost"]
-
-        trade["cost"] = cost
-        trade["fee"] = fee
-        trade["amount"] = amount
-        trade["timestamp"] = orderlist[-1]["timestamp"]
-        trade["price"] = orderlist[-1]["price"]
-        trade["order"] = orderlist[-1]["order"]
-        trade["symbol"] = orderlist[-1]["symbol"]
-        trade["side"] = orderlist[-1]["side"]
-        trade["fee_cost"] = orderlist[-1]["fee"]
 
         return trade
 
@@ -171,11 +187,27 @@ class Exchange:
 
         return data
 
+    @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_amount_from_symbol(self, ordersize, symbol) -> float:
         price = self.__get_price_for_symbol(symbol)
-        amount = self.exchange.amount_to_precision(
-            symbol, float(ordersize) / float(price)
-        )
+        amount = None
+        try:
+            amount = self.exchange.amount_to_precision(
+                symbol, float(ordersize) / float(price)
+            )
+        except ccxt.NetworkError as e:
+            Exchange.logging.error(
+                f"Getting amount for {symbol} failed due to a network error: {e}"
+            )
+            raise TryAgain
+        except ccxt.ExchangeError as e:
+            Exchange.logging.error(
+                f"Getting amount for {symbol} failed due to an exchange error: {e}"
+            )
+            raise TryAgain
+        except Exception as e:
+            Exchange.logging.error(f"Getting amount for {symbol} failed with: {e}")
+            raise TryAgain
 
         return amount
 
@@ -227,10 +259,10 @@ class Exchange:
 
     @retry(stop=stop_after_attempt(3))
     async def __delete_trade(self, order):
-        # Delete database entries after trade sell
         result = False
 
         try:
+            # Delete database entries after trade sell
             await Trades.filter(bot=order["botname"]).delete()
             tickers = await self.__get_symbols()
             # Check if trades has been closed (DirtyFixTry - sometimes trades are still in to DB!)
@@ -374,15 +406,17 @@ class Exchange:
             .values("total_amount")
         )
         amount = amount[0]["total_amount"]
-        Exchange.logging.info(f"Selling {amount} {order['symbol']}")
 
+        # Sell order to exchange
         trade = self.__sell(amount, order["symbol"], order["direction"])
 
+        # Delete trade from database and push message to Statistics
         if trade:
-            Exchange.logging.info(f"Sold order: {order}")
-
-            # Delete trade from database and push message to Statistics
+            Exchange.logging.info(f"Sold {amount} {order['symbol']} on Exchange")
             if await self.__delete_trade(order):
+                Exchange.logging.info(
+                    f"Removed trades for {order['symbol']} in database"
+                )
                 # Update statistics
                 if not self.dry_run:
                     order_status = self.__parse_order_status(trade)
@@ -395,6 +429,7 @@ class Exchange:
                     data["current_price"] = order_status["price"]
                     data["tp_price"] = order_status["price"]
                     data["avg_price"] = data["total_cost"] / data["total_amount"]
+
                     await Exchange.statistic.put(data)
 
                 # Update tickers for tickers watcher
