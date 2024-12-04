@@ -208,33 +208,33 @@ class Statistic:
                         f"Error writing closed trade database entry. Cause {e}"
                     )
 
-                try:
-                    values = (
-                        await ClosedTrades.filter(symbol=stats["symbol"])
-                        .order_by("-id")
-                        .first()
-                        .values_list("id", "cost")
-                    )
-                except Exception as e:
-                    Statistic.logging.error(
-                        f"Error getting closed trades for {stats["symbol"]}. Cause {e}"
-                    )
+                # try:
+                #     values = (
+                #         await ClosedTrades.filter(symbol=stats["symbol"])
+                #         .order_by("-id")
+                #         .first()
+                #         .values_list("id", "cost")
+                #     )
+                # except Exception as e:
+                #     Statistic.logging.error(
+                #         f"Error getting closed trades for {stats["symbol"]}. Cause {e}"
+                #     )
 
-                try:
-                    await ClosedTrades.update_or_create(
-                        defaults={
-                            "amount": stats["total_amount"],
-                            "profit": float(stats["total_cost"]) - float(values[1]),
-                            "current_price": stats["current_price"],
-                            "tp_price": stats["tp_price"],
-                            "avg_price": stats["avg_price"],
-                        },
-                        id=values[0],
-                    )
-                except Exception as e:
-                    Statistic.logging.error(
-                        f"Error updating closed trades for {stats["symbol"]}. Cause {e}"
-                    )
+                # try:
+                #     await ClosedTrades.update_or_create(
+                #         defaults={
+                #             "amount": stats["total_amount"],
+                #             "profit": float(stats["total_cost"]) - float(values[1]),
+                #             "current_price": stats["current_price"],
+                #             "tp_price": stats["tp_price"],
+                #             "avg_price": stats["avg_price"],
+                #         },
+                #         id=values[0],
+                #     )
+                # except Exception as e:
+                #     Statistic.logging.error(
+                #         f"Error updating closed trades for {stats["symbol"]}. Cause {e}"
+                #     )
 
     async def open_orders(self):
         try:
