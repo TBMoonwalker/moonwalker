@@ -123,17 +123,17 @@ class Exchange:
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_trades_for_symbol(self, symbol):
-        trade = None
+        trade = {}
+        amount = 0.0
+        fee = 0.0
+        cost = 0.0
         time.sleep(1)
         since = self.exchange.milliseconds() - 5000  # -5 seconds from now
         try:
             orderlist = self.exchange.fetch_my_trades(symbol, since)
             if orderlist:
                 Exchange.logging.debug(f"Orderlist for {symbol}: {orderlist}")
-                trade = {}
-                amount = 0.0
-                fee = 0.0
-                cost = 0.0
+
                 for order in orderlist:
                     amount += order["amount"]
                     fee += order["fee"]["cost"]
@@ -150,8 +150,27 @@ class Exchange:
                 trade["fee_cost"] = orderlist[-1]["fee"]
             else:
                 Exchange.logging.error(
-                    f"Error getting Orderlist for {symbol}: {orderlist}"
+                    f"Error getting Orderlist for {symbol} - trying alternative method"
                 )
+                orderlist = self.exchange.fetch_orders(symbol, since)
+                if orderlist:
+                    trade["cost"] = orderlist[-1]["cost"]
+                    if orderlist[-1]["fee"]:
+                        trade["fee"] = orderlist[-1]["fee"]
+                        trade["fee_cost"] = orderlist[-1]["fee"]
+                    else:
+                        trade["fee"] = 0
+                        trade["fee_cost"] = 0
+                    trade["amount"] = orderlist[-1]["amount"]
+                    trade["timestamp"] = orderlist[-1]["timestamp"]
+                    trade["price"] = orderlist[-1]["average"]
+                    trade["order"] = orderlist[-1]["info"]["orderId"]
+                    trade["symbol"] = orderlist[-1]["symbol"]
+                    trade["side"] = orderlist[-1]["side"]
+                else:
+                    Exchange.logging.error(
+                        f"Error getting alternative methode for Orderlist for {symbol}"
+                    )
                 raise TryAgain
         except ccxt.NetworkError as e:
             Exchange.logging.error(
