@@ -169,6 +169,7 @@ class Dca:
                     "side": "sell",
                     "type_sell": "order_sell",
                     "actual_pnl": actual_pnl,
+                    "total_cost": cost,
                 }
                 # Send new take profit order to exchange module
                 self.logging.debug(f"Sending sell order to exchange module: {order}")
