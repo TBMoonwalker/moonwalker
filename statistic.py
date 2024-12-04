@@ -136,6 +136,27 @@ class Statistic:
             Statistic.logging.debug(f"DCA-Check: {stats}")
 
         elif stats["type"] == "sold_check":
+            symbol = stats["symbol"]
+            profit = (
+                stats["current_price"] * stats["total_amount"] - stats["total_cost"]
+            )
+            amount = stats["total_amount"]
+            cost = stats["total_cost"]
+            current_price = stats["current_price"]
+            tp_price = stats["tp_price"]
+            avg_price = stats["avg_price"]
+            actual_pnl = stats["actual_pnl"]
+            open_timestamp = 0.0
+
+            try:
+                open_timestamp = float(base_order[0]["timestamp"])
+            except Exception as e:
+                Statistic.logging.debug(
+                    f"Did not found a timestamp - taking default value. Cause {e}"
+                )
+
+            open_date = datetime.fromtimestamp((open_timestamp / 1000.0), timezone.utc)
+
             # Comes from Exchange module
             if stats["sell"]:
                 # Sell PNL in percent
