@@ -187,7 +187,7 @@ async def sell_order(symbol):
     return response
 
 
-@app.websocket("/open_orders/")
+@app.websocket("/open_orders")
 async def open_orders():
     try:
         while True:
