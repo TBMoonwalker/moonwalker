@@ -1,9 +1,8 @@
-from datetime import datetime
-import asyncio
 import json
 import time
 from asyncache import cached
 from cachetools import TTLCache
+from datetime import datetime, timedelta, timezone
 from logger import LoggerFactory
 from tortoise.functions import Sum
 from tortoise.models import Q
@@ -24,8 +23,8 @@ class Statistic:
 
     def __calculate_trade_duration(self, start_date, end_date):
         # Convert Unix timestamps to datetime objects
-        date1 = datetime.utcfromtimestamp(start_date / 1000.0)
-        date2 = datetime.utcfromtimestamp(end_date / 1000.0)
+        date1 = datetime.fromtimestamp((start_date / 1000.0), timezone.utc)
+        date2 = datetime.fromtimestamp(end_date / 1000.0, timezone.utc)
 
         # Calculate the time difference
         time_difference = date2 - date1
@@ -33,7 +32,6 @@ class Statistic:
         # Extract days, seconds, and microseconds
         days = time_difference.days
         seconds = time_difference.seconds
-        microseconds = time_difference.microseconds
 
         # Calculate hours, minutes, and seconds
         hours, remainder = divmod(seconds, 3600)
@@ -57,7 +55,9 @@ class Statistic:
                     Q(baseorder__gt=0), Q(symbol=symbol), join_type="AND"
                 ).values()
             except Exception as e:
-                self.logging.error(f"Error getting baseorders from database. Cause {e}")
+                Statistic.logging.error(
+                    f"Error getting baseorders from database. Cause {e}"
+                )
         # Get safetyorders
         else:
             try:
@@ -65,15 +65,16 @@ class Statistic:
                     Q(safetyorder__gt=0), Q(symbol=symbol), join_type="AND"
                 ).values()
             except Exception as e:
-                self.logging.error(
+                Statistic.logging.error(
                     f"Error getting safetyorders from database. Cause {e}"
                 )
 
         return trade
 
     async def __process_stats(self, stats):
+        # Comes from DCA module
         if stats["type"] == "tp_check":
-            Statistic.logging.debug(f"TP complete? {stats}")
+            Statistic.logging.debug(f"TP-Check: {stats}")
             symbol = stats["symbol"]
             profit = (
                 stats["current_price"] * stats["total_amount"] - stats["total_cost"]
@@ -90,18 +91,77 @@ class Statistic:
             try:
                 open_timestamp = float(base_order[0]["timestamp"])
             except Exception as e:
-                self.logging.debug(
+                Statistic.logging.debug(
                     f"Did not found a timestamp - taking default value. Cause {e}"
                 )
 
-            open_date = datetime.utcfromtimestamp(open_timestamp / 1000.0)
+            open_date = datetime.fromtimestamp((open_timestamp / 1000.0), timezone.utc)
 
+            try:
+                # Update open trade statistics
+                await OpenTrades.update_or_create(
+                    defaults={
+                        "profit": profit,
+                        "profit_percent": actual_pnl,
+                        "amount": amount,
+                        "cost": cost,
+                        "current_price": current_price,
+                        "tp_price": tp_price,
+                        "avg_price": avg_price,
+                        "open_date": open_timestamp,
+                    },
+                    symbol=stats["symbol"],
+                )
+            except Exception as e:
+                Statistic.logging.error(
+                    f"Error updating open trade database entry. Cause {e}"
+                )
+
+        elif stats["type"] == "dca_check":
+            if stats["new_so"]:
+                Statistic.logging.debug(f"SO buy: {stats}")
+
+            # Update SO count statistics
+            try:
+                await OpenTrades.update_or_create(
+                    defaults={
+                        "so_count": stats["so_orders"],
+                    },
+                    symbol=stats["symbol"],
+                )
+            except Exception as e:
+                Statistic.logging.error(
+                    f"Error updating SO count for {stats["symbol"]}. Cause {e}"
+                )
+            Statistic.logging.debug(f"DCA-Check: {stats}")
+
+        elif stats["type"] == "sold_check":
+            symbol = stats["symbol"]
+            profit = (
+                stats["current_price"] * stats["total_amount"] - stats["total_cost"]
+            )
+            amount = stats["total_amount"]
+            cost = stats["total_cost"]
+            current_price = stats["current_price"]
+            tp_price = stats["tp_price"]
+            avg_price = stats["avg_price"]
+            actual_pnl = stats["actual_pnl"]
+            open_timestamp = 0.0
+            base_order = await self.__get_trade_data(symbol, baseorder=True)
+
+            try:
+                open_timestamp = float(base_order[0]["timestamp"])
+            except Exception as e:
+                Statistic.logging.debug(
+                    f"Did not found a timestamp - taking default value. Cause {e}"
+                )
+
+            open_date = datetime.fromtimestamp((open_timestamp / 1000.0), timezone.utc)
+
+            # Comes from Exchange module
             if stats["sell"]:
                 # Sell PNL in percent
                 sell_pnl = ((current_price - avg_price) / avg_price) * 100
-                # if sell_pnl > 0 and stats["direction"] == "short":
-                #     sell_pnl = abs(sell_pnl)
-
                 sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
                 sell_date = datetime.now()
 
@@ -114,7 +174,7 @@ class Statistic:
                 try:
                     open_trade = await OpenTrades.filter(symbol=symbol).values()
                 except Exception as e:
-                    self.logging.error(
+                    Statistic.logging.error(
                         f"Error getting open trades from database. Cause {e}"
                     )
 
@@ -144,85 +204,44 @@ class Statistic:
 
                     Statistic.logging.debug(f"Profit sell: {stats}")
                 except Exception as e:
-                    self.logging.error(
+                    Statistic.logging.error(
                         f"Error writing closed trade database entry. Cause {e}"
                     )
 
-            else:
-                try:
-                    # Update open trade statistics
-                    await OpenTrades.update_or_create(
-                        defaults={
-                            "profit": profit,
-                            "profit_percent": actual_pnl,
-                            "amount": amount,
-                            "cost": cost,
-                            "current_price": current_price,
-                            "tp_price": tp_price,
-                            "avg_price": avg_price,
-                            "open_date": open_timestamp,
-                        },
-                        symbol=stats["symbol"],
-                    )
-                except Exception as e:
-                    self.logging.error(
-                        f"Error updating open trade database entry. Cause {e}"
-                    )
-                # Statistic.logging.debug(f"TP-Check: {stats}")
+                # try:
+                #     values = (
+                #         await ClosedTrades.filter(symbol=stats["symbol"])
+                #         .order_by("-id")
+                #         .first()
+                #         .values_list("id", "cost")
+                #     )
+                # except Exception as e:
+                #     Statistic.logging.error(
+                #         f"Error getting closed trades for {stats["symbol"]}. Cause {e}"
+                #     )
 
-        elif stats["type"] == "dca_check":
-            if stats["new_so"]:
-                Statistic.logging.debug(f"SO buy: {stats}")
-
-            # Update SO count statistics
-            try:
-                await OpenTrades.update_or_create(
-                    defaults={
-                        "so_count": stats["so_orders"],
-                    },
-                    symbol=stats["symbol"],
-                )
-            except Exception as e:
-                self.logging.error(
-                    f"Error updating SO count for {stats["symbol"]}. Cause {e}"
-                )
-            Statistic.logging.debug(f"DCA-Check: {stats}")
-
-        elif stats["type"] == "sold_check":
-            try:
-                values = (
-                    await ClosedTrades.filter(symbol=stats["symbol"])
-                    .order_by("-id")
-                    .first()
-                    .values_list("id", "cost")
-                )
-            except Exception as e:
-                self.logging.error(
-                    f"Error getting closed trades for {stats["symbol"]}. Cause {e}"
-                )
-
-            try:
-                await ClosedTrades.update_or_create(
-                    defaults={
-                        "amount": stats["total_amount"],
-                        "profit": float(stats["total_cost"]) - float(values[1]),
-                        "current_price": stats["current_price"],
-                        "tp_price": stats["tp_price"],
-                        "avg_price": stats["avg_price"],
-                    },
-                    id=values[0],
-                )
-            except Exception as e:
-                self.logging.error(
-                    f"Error updating closed trades for {stats["symbol"]}. Cause {e}"
-                )
+                # try:
+                #     await ClosedTrades.update_or_create(
+                #         defaults={
+                #             "amount": stats["total_amount"],
+                #             "profit": float(stats["total_cost"]) - float(values[1]),
+                #             "current_price": stats["current_price"],
+                #             "tp_price": stats["tp_price"],
+                #             "avg_price": stats["avg_price"],
+                #         },
+                #         id=values[0],
+                #     )
+                # except Exception as e:
+                #     Statistic.logging.error(
+                #         f"Error updating closed trades for {stats["symbol"]}. Cause {e}"
+                #     )
 
     async def open_orders(self):
         try:
             orders = await OpenTrades.all().values()
             return json.dumps(orders)
         except Exception as e:
-            self.logging.error(f"Error getting open trades: {e}")
+            Statistic.logging.error(f"Error getting open trades: {e}")
             return json.dumps([{}])
 
     async def closed_orders_length(self):
@@ -230,7 +249,7 @@ class Statistic:
             order_length = await ClosedTrades.all().count()
             return json.dumps(order_length)
         except Exception as e:
-            self.logging.error(f"Error getting closed trades: {e}")
+            Statistic.logging.error(f"Error getting closed trades: {e}")
             return json.dumps([{}])
 
     async def closed_orders(self, page=0):
@@ -248,48 +267,61 @@ class Statistic:
                 )
             return json.dumps(orders)
         except Exception as e:
-            self.logging.error(f"Error getting closed trades: {e}")
+            Statistic.logging.error(f"Error getting closed trades: {e}")
             return json.dumps([{}])
 
     async def profit_statistics(self):
-        # Profit overall
-        profit = 0
-        try:
-            profit = await ClosedTrades.annotate(total=Sum("profit")).values_list(
-                "total", flat=True
-            )
-        except Exception as e:
-            self.logging.error(f"Error getting profit: {e}")
+        profit_data = {}
 
         # uPNL
-        upnl = 0
+        profit_data["upnl"] = 0
         try:
             upnl = await OpenTrades.annotate(total=Sum("profit")).values_list(
                 "total", flat=True
             )
+            profit_data["upnl"] = upnl[0]
         except Exception as e:
-            self.logging.error(f"Error getting losses: {e}")
+            Statistic.logging.error(f"Error getting losses: {e}")
 
-        # Funds locked in deals
-        funds_locked = 0
-        try:
-            loss = await OpenTrades.annotate(total=Sum("cost")).values_list(
-                "total", flat=True
-            )
-        except Exception as e:
-            self.logging.error(f"Error getting funds: {e}")
-
-        # Profit per Day
-
-    async def sum_profit(self):
+        # Profit overall
+        profit_data["profit_overall"] = 0
         try:
             profit = await ClosedTrades.annotate(total=Sum("profit")).values_list(
                 "total", flat=True
             )
-            return json.dumps(profit)
+            profit_data["profit_overall"] = profit[0] + profit_data["upnl"]
         except Exception as e:
-            self.logging.error(f"Error getting closed trades: {e}")
-            return json.dumps([{}])
+            Statistic.logging.error(f"Error getting profit: {e}")
+
+        # Funds locked in deals
+        profit_data["funds_locked"] = 0
+        try:
+            funds_locked = await OpenTrades.annotate(total=Sum("cost")).values_list(
+                "total", flat=True
+            )
+            profit_data["funds_locked"] = funds_locked[0]
+        except Exception as e:
+            Statistic.logging.error(f"Error getting funds: {e}")
+
+        # TBD - Profit per Day
+        profit_data["profit_week"] = {}
+        begin_week = (
+            datetime.now() + timedelta(days=(0 - datetime.now().weekday()))
+        ).date()
+        try:
+            profit_week = await ClosedTrades.filter(
+                close_date__gt=begin_week
+            ).values_list("close_date", "profit")
+            for timestamp, profit_day in profit_week:
+                date = (datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")).date()
+                if str(date) not in profit_data["profit_week"]:
+                    profit_data["profit_week"][str(date)] = profit_day
+                else:
+                    profit_data["profit_week"][str(date)] += profit_day
+        except Exception as e:
+            Statistic.logging.error(f"Error getting profits for the week: {e}")
+
+        return json.dumps(profit_data)
 
     async def safety_orders(self, pair):
         try:
@@ -298,13 +330,14 @@ class Statistic:
             safety_orders = await self.__get_trade_data(symbol, baseorder=False)
             return json.dumps(safety_orders)
         except Exception as e:
-            self.logging.error(f"Error getting safety orders: {e}")
+            Statistic.logging.error(f"Error getting safety orders: {e}")
             return json.dumps([{}])
 
     async def run(self):
         while Statistic.status:
             stats = await Statistic.stats.get()
             await self.__process_stats(stats)
+            Statistic.stats.task_done()
 
     async def shutdown(self):
         Statistic.status = False

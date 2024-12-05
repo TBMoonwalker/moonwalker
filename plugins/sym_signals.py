@@ -1,6 +1,7 @@
 from logger import LoggerFactory
 from models import Trades
 from filter import Filter
+from socketio.exceptions import TimeoutError
 
 import asyncio
 import socketio
@@ -74,12 +75,12 @@ class SignalPlugin:
                 self.filter.subscribe_new_symbols(running_symbols, add_symbol)
             )
 
-            # Check if new symbol has been subscribed - in case of error, don't create a deal with it!
-            if new_symbol not in subscribe_symbols:
-                self.logging.error(
-                    f"New symbol {new_symbol} couldn't be added - not in {subscribed_symbols}"
-                )
-                new_symbol = None
+            # # Check if new symbol has been subscribed - in case of error, don't create a deal with it!
+            # if new_symbol not in subscribe_symbols:
+            #     self.logging.error(
+            #         f"New symbol {new_symbol} couldn't be added - not in {subscribed_symbols}"
+            #     )
+            #     new_symbol = None
 
             self.logging.debug(f"Subscribed symbols: {subscribed_symbols}")
             self.logging.debug(f"Unsubscribed symbols: {unsubscribe_symbols}")
@@ -163,19 +164,22 @@ class SignalPlugin:
                     finally:
                         self.logging.info(f"Reconnect attempt in 10 seconds")
                         await asyncio.sleep(10)
+                try:
+                    event = await sio.receive(timeout=300)
+                    if event[0] == "signal":
+                        symbol = f"{event[1]['symbol'].upper()}USDT"
 
-                event = await sio.receive()
-                if event[0] == "signal":
-                    symbol = f"{event[1]['symbol'].upper()}USDT"
+                        if self.__check_entry_point(event[1]):
+                            running_trades = (
+                                await Trades.all()
+                                .distinct()
+                                .values_list("bot", flat=True)
+                            )
 
-                    if self.__check_entry_point(event[1]):
-                        running_trades = (
-                            await Trades.all().distinct().values_list("bot", flat=True)
-                        )
+                            # symbol = self.__get_new_symbol_list(running_trades, symbol)
+                            self.__get_new_symbol_list(running_trades, symbol)
 
-                        symbol = self.__get_new_symbol_list(running_trades, symbol)
-
-                        if symbol:
+                            # if symbol:
                             max_bots = await self.__check_max_bots()
                             current_symbol = f"symsignal_{symbol}"
 
@@ -198,10 +202,15 @@ class SignalPlugin:
                                     "side": "buy",
                                 }
                                 await self.order.put(order)
-                        else:
-                            self.logging.error(
-                                "Error creating an order with symbol - seems to be an unsuccessful subscription on Moonloader"
-                            )
+                            # else:
+                            #     self.logging.error(
+                            #         "Error creating an order with symbol - seems to be an unsuccessful subscription on Moonloader"
+                            #     )
+                except TimeoutError:
+                    self.logging.error(
+                        "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"
+                    )
+                    await sio.disconnect()
 
-    async def shutdown():
+    async def shutdown(self):
         SignalPlugin.status = False

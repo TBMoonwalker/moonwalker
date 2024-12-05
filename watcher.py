@@ -59,7 +59,8 @@ class Watcher:
             try:
                 tickers = await Watcher.tickers.get()
                 Watcher.symbols = self.__convert_symbols(tickers)
-                self.logging.debug(f"Watching symbols: {Watcher.symbols}")
+                Watcher.tickers.task_done()
+                Watcher.logging.debug(f"Watching symbols: {Watcher.symbols}")
             except asyncio.QueueEmpty:
                 continue
 
