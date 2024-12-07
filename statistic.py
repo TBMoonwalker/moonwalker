@@ -34,8 +34,8 @@ class Statistic:
         seconds = time_difference.seconds
 
         # Calculate hours, minutes, and seconds
-        hours, remainder = divmod(seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
+        hours, reminder = divmod(seconds, 3600)
+        minutes, seconds = divmod(reminder, 60)
 
         return json.dumps(
             {
@@ -151,6 +151,7 @@ class Statistic:
 
             try:
                 open_timestamp = float(base_order[0]["timestamp"])
+                self.logging.debug(f"Analyse timestamp for baseorder: {open_timestamp}")
             except Exception as e:
                 Statistic.logging.debug(
                     f"Did not found a timestamp - taking default value. Cause {e}"
@@ -207,34 +208,6 @@ class Statistic:
                     Statistic.logging.error(
                         f"Error writing closed trade database entry. Cause {e}"
                     )
-
-                # try:
-                #     values = (
-                #         await ClosedTrades.filter(symbol=stats["symbol"])
-                #         .order_by("-id")
-                #         .first()
-                #         .values_list("id", "cost")
-                #     )
-                # except Exception as e:
-                #     Statistic.logging.error(
-                #         f"Error getting closed trades for {stats["symbol"]}. Cause {e}"
-                #     )
-
-                # try:
-                #     await ClosedTrades.update_or_create(
-                #         defaults={
-                #             "amount": stats["total_amount"],
-                #             "profit": float(stats["total_cost"]) - float(values[1]),
-                #             "current_price": stats["current_price"],
-                #             "tp_price": stats["tp_price"],
-                #             "avg_price": stats["avg_price"],
-                #         },
-                #         id=values[0],
-                #     )
-                # except Exception as e:
-                #     Statistic.logging.error(
-                #         f"Error updating closed trades for {stats["symbol"]}. Cause {e}"
-                #     )
 
     async def open_orders(self):
         try:

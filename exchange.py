@@ -202,7 +202,7 @@ class Exchange:
 
         return data
 
-    @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
     def __get_amount_from_symbol(self, ordersize, symbol) -> float:
         price = self.__get_price_for_symbol(symbol)
         amount = None
@@ -242,8 +242,9 @@ class Exchange:
             type, direction = direction.split("_")
         return direction
 
-    @retry(stop=stop_after_attempt(3))
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(3))
     async def __add_trade(self, order):
+        result = False
         # Add database entries on successful trade order
         try:
             await Trades.create(
@@ -268,11 +269,11 @@ class Exchange:
             result = True
         except Exception as e:
             Exchange.logging.error(f"Error adding trade to database: {e}")
-            result = False
+            raise TryAgain
 
         return result
 
-    @retry(stop=stop_after_attempt(3))
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(3))
     async def __delete_trade(self, order):
         result = False
 
