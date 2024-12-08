@@ -10,7 +10,7 @@ class Strategy:
         self.logging = LoggerFactory.get_logger(
             "logs/strategies.log", "tothemoon", log_level=loglevel
         )
-        self.filter = Filter(ws_url=ws_url)
+        self.filter = Filter(ws_url=ws_url, loglevel=loglevel)
         self.logging.info("Initialized")
 
     def run(self, symbol, price):
