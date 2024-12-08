@@ -7,6 +7,7 @@ from logger import LoggerFactory
 from tortoise.functions import Sum
 from tortoise.models import Q
 from models import Trades, OpenTrades, ClosedTrades
+from decimal import Decimal
 
 
 class Statistic:
@@ -210,9 +211,27 @@ class Statistic:
                     )
 
     async def open_orders(self):
+
+        def decimal_serializer(obj):
+            if isinstance(obj, Decimal):
+                return str(obj)
+
         try:
             orders = await OpenTrades.all().values()
-            return json.dumps(orders)
+            for order in orders:
+
+                baseorder = await self.__get_trade_data(
+                    symbol=order["symbol"], baseorder=True
+                )
+                if baseorder:
+                    order["baseorder"] = baseorder[0]
+
+                safetyorders = await self.__get_trade_data(
+                    symbol=order["symbol"], baseorder=False
+                )
+                if safetyorders:
+                    order["safetyorders"] = safetyorders[0]
+            return json.dumps(orders, default=decimal_serializer)
         except Exception as e:
             Statistic.logging.error(f"Error getting open trades: {e}")
             return json.dumps([{}])
@@ -295,16 +314,6 @@ class Statistic:
             Statistic.logging.error(f"Error getting profits for the week: {e}")
 
         return json.dumps(profit_data)
-
-    async def safety_orders(self, pair):
-        try:
-            symbol, currency = pair.split("_")
-            symbol = f"{symbol}/{currency}"
-            safety_orders = await self.__get_trade_data(symbol, baseorder=False)
-            return json.dumps(safety_orders)
-        except Exception as e:
-            Statistic.logging.error(f"Error getting safety orders: {e}")
-            return json.dumps([{}])
 
     async def run(self):
         while Statistic.status:

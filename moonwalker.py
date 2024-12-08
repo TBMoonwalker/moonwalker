@@ -168,25 +168,6 @@ app = Quart(__name__)
 ######################################################
 
 
-@app.route("/safety_orders/<symbol>", methods=["GET"])
-@route_cors(allow_origin="*")
-async def trades(symbol):
-    response = await statistic.safety_orders(symbol)
-    if not response:
-        response = {"result": ""}
-
-    return response
-
-
-@app.route("/orders/sell/<symbol>", methods=["GET"])
-async def sell_order(symbol):
-    response = await trading.sell(symbol)
-    if not response:
-        response = {"result": ""}
-
-    return response
-
-
 @app.websocket("/open_orders")
 async def open_orders():
     try:
@@ -213,6 +194,28 @@ async def closed_orders():
         raise
 
 
+@app.websocket("/statistics")
+async def profit():
+    try:
+        while True:
+            output = await statistic.profit_statistics()
+            await websocket.send(output)
+            await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        # Handle disconnection here
+        logging.info("Client disconnected")
+        raise
+
+
+@app.route("/orders/sell/<symbol>", methods=["GET"])
+async def sell_order(symbol):
+    response = await trading.sell(symbol)
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
 @app.route("/orders/closed/length")
 @route_cors(allow_origin="*")
 async def closed_orders_length():
@@ -231,19 +234,6 @@ async def closed_orders_pagination(page):
         response = {"result": ""}
 
     return response
-
-
-@app.websocket("/statistics")
-async def profit():
-    try:
-        while True:
-            output = await statistic.profit_statistics()
-            await websocket.send(output)
-            await asyncio.sleep(5)
-    except asyncio.CancelledError:
-        # Handle disconnection here
-        logging.info("Client disconnected")
-        raise
 
 
 @app.route("/profit/statistics")
