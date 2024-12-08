@@ -230,7 +230,7 @@ class Statistic:
                     symbol=order["symbol"], baseorder=False
                 )
                 if safetyorders:
-                    order["safetyorders"] = safetyorders[0]
+                    order["safetyorders"] = safetyorders
             return json.dumps(orders, default=decimal_serializer)
         except Exception as e:
             Statistic.logging.error(f"Error getting open trades: {e}")
