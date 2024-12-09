@@ -51,6 +51,7 @@ class SignalPlugin:
         self.dynamic_dca = dynamic_dca
         self.topcoin_limit = topcoin_limit
         self.volume = json.loads(volume)
+        self.btc_pulse = btc_pulse
 
         # Class Attributes
         SignalPlugin.status = True
@@ -104,41 +105,56 @@ class SignalPlugin:
     def __check_entry_point(self, event):
         result = False
 
-        signal_name = event["signal_name"]
-        symbol = event["symbol"]
-        signal_id = event["signal_name_id"]
-        sym_rank = event["sym_rank"]
-        sym_score = event["sym_score"]
-        sym_sense = event["sym_sense"]
-        vol_score = event["volatility_score"]
-        price_action_score = event["price_action_score"]
-        market_cap_rank = event["market_cap_rank"]
-        volume_24h = event["volume_24h"]
-        volume_range = None
-        volume_size = None
+        # btc pulse check
+        btc_pulse = True
+        if self.btc_pulse:
+            btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
 
-        for exchange in volume_24h:
-            if exchange == self.exchange:
-                if volume_24h[exchange].get(self.currency) != None:
-                    # DirtyFix: Some volume data misses "k", "M" or "B"
-                    if isinstance(volume_24h[exchange].get(self.currency), float):
-                        volume_range = "k"
-                        volume_size = volume_24h[exchange][self.currency]
-                    else:
-                        volume_range = volume_24h[exchange][self.currency][-1]
-                        volume_size = float(volume_24h[exchange][self.currency][:-1])
-                break
+        if btc_pulse:
+            signal_name = event["signal_name"]
+            symbol = event["symbol"]
+            signal_id = event["signal_name_id"]
+            sym_rank = event["sym_rank"]
+            sym_score = event["sym_score"]
+            sym_sense = event["sym_sense"]
+            vol_score = event["volatility_score"]
+            price_action_score = event["price_action_score"]
+            market_cap_rank = event["market_cap_rank"]
+            volume_24h = event["volume_24h"]
+            volume_range = None
+            volume_size = None
 
-        if (
-            signal_id in self.plugin_settings["allowed_signals"]
-            and self.filter.is_on_allowed_list(symbol, self.pair_allowlist)
-            and self.filter.is_within_topcoin_limit(market_cap_rank, self.topcoin_limit)
-            and self.filter.has_enough_volume(volume_range, volume_size, self.volume)
-            and not self.filter.is_on_deny_list(symbol, self.pair_denylist)
-        ):
-            return True
+            for exchange in volume_24h:
+                if exchange == self.exchange:
+                    if volume_24h[exchange].get(self.currency) != None:
+                        # DirtyFix: Some volume data misses "k", "M" or "B"
+                        if isinstance(volume_24h[exchange].get(self.currency), float):
+                            volume_range = "k"
+                            volume_size = volume_24h[exchange][self.currency]
+                        else:
+                            volume_range = volume_24h[exchange][self.currency][-1]
+                            volume_size = float(
+                                volume_24h[exchange][self.currency][:-1]
+                            )
+                    break
 
-        return False
+            if (
+                signal_id in self.plugin_settings["allowed_signals"]
+                and self.filter.is_on_allowed_list(symbol, self.pair_allowlist)
+                and self.filter.is_within_topcoin_limit(
+                    market_cap_rank, self.topcoin_limit
+                )
+                and self.filter.has_enough_volume(
+                    volume_range, volume_size, self.volume
+                )
+                and not self.filter.is_on_deny_list(symbol, self.pair_denylist)
+            ):
+                return True
+
+            return False
+        else:
+            self.logging.info("BTC-Pulse is in downtrend - not starting new deals!")
+            return False
 
     async def run(self):
         async with socketio.AsyncSimpleClient() as sio:

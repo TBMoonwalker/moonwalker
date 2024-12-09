@@ -110,6 +110,17 @@ class Filter:
     @cached(cache=TTLCache(maxsize=1024, ttl=300))
     def btc_pulse_status(self, timeframe, timeframe_uptrend=None):
         response = True
+
+        # Subscribe BTC symbol if not available
+        subscribed_symbols = self.__get_symbols()
+        if subscribed_symbols:
+            for symbol in subscribed_symbols:
+                if "btcusdt" not in symbol:
+                    self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
+                    break
+        else:
+            self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
+
         btc_pulse = self.__request_api_endpoint(
             f"{self.ws_url}/indicators/btc_pulse/{timeframe}"
         ).json()
@@ -178,7 +189,7 @@ class Filter:
 
         return (subscribed_symbols, unsubscribe_symbols, subscribe_symbols)
 
-    def __get_symbol_subscription(self):
+    def __get_symbols(self):
         subscribed_list = self.__request_api_endpoint(
             f"{self.ws_url}/symbol/list"
         ).json()["result"]
@@ -186,6 +197,11 @@ class Filter:
             f"{symbol}"
             for symbol, kline in [item.split("@") for item in subscribed_list]
         ]
+
+        return subscribed_list
+
+    def __get_symbol_subscription(self):
+        subscribed_symbols = self.__get_symbols()
 
         if self.btc_pulse:
             for symbol in subscribed_symbols:
