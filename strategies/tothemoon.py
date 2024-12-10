@@ -4,8 +4,9 @@ from filter import Filter
 
 
 class Strategy:
-    def __init__(self, ws_url, loglevel):
+    def __init__(self, ws_url, loglevel, btc_pulse):
         self.ws_url = ws_url
+        self.btc_pulse = btc_pulse
 
         self.logging = LoggerFactory.get_logger(
             "logs/strategies.log", "tothemoon", log_level=loglevel

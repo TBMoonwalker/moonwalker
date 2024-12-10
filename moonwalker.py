@@ -58,7 +58,9 @@ if attributes.get("dca_strategy", None):
         f"strategies.{attributes.get('dca_strategy')}"
     )
     dca_strategy_plugin = dca_strategy.Strategy(
-        ws_url=attributes.get("ws_url", None), loglevel=loglevel
+        ws_url=attributes.get("ws_url", None),
+        loglevel=loglevel,
+        btc_pulse=attributes.get("ws_url", None),
     )
 if attributes.get("init_buy_strategy", None):
     init_buy_strategy = importlib.import_module(
