@@ -17,15 +17,20 @@ class Strategy:
         result = False
 
         try:
-            support_level_30m = self.filter.support_level(symbol, "4h", 10).json()
-            support_level = support_level_30m["status"]
+            btc_pulse = True
+            if self.btc_pulse:
+                btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
 
-            self.logging.debug(f"Symbol: {symbol}")
-            self.logging.debug(f"Support Level: {support_level}")
+            if btc_pulse:
+                support_level_30m = self.filter.support_level(symbol, "4h", 10).json()
+                support_level = support_level_30m["status"]
 
-            if support_level == "True":
-                # create SO
-                result = True
+                self.logging.debug(f"Symbol: {symbol}")
+                self.logging.debug(f"Support Level: {support_level}")
+
+                if support_level == "True":
+                    # create SO
+                    result = True
 
         except ValueError as e:
             self.logging.error(f"JSON Message is garbage: {e}")
