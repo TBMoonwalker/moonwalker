@@ -169,18 +169,26 @@ class Filter:
     def subscribe_new_symbols(self, running_symbols, new_symbol):
         # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
 
-        # Subscribed symbols
+        # Subscribed symbols (in Moonloader)
         subscribed_symbols = list(map(str.upper, self.__get_symbol_subscription()))
+        Filter.logging.debug(f"Subscribed Symbols: {subscribed_symbols}")
+        Filter.logging.debug(f"Running Symbols: {subscribed_symbols}")
 
         # Unsubscribe old symbols
+        # Running Symbols = running in Moonwalker
+        # Subscribed Symbols = subscribed in Moonloader
         temp_symbols = list(set(subscribed_symbols) - set(running_symbols))
+        Filter.logging.debug(f"Diff Subscribed/Running: {temp_symbols}")
         unsubscribe_symbols = list(set(temp_symbols) - set(new_symbol))
+        Filter.logging.debug(f"Unsubscribe: {subscribed_symbols}")
         for symbol in unsubscribe_symbols:
             self.__request_api_endpoint(f"{self.ws_url}/symbol/remove/{symbol}")
 
         # Subscribe new symbols
         temp2_symbols = list(set(running_symbols) - set(subscribed_symbols))
+        Filter.logging.debug(f"Diff Running/Subscribed: {temp2_symbols}")
         subscribe_symbols = list(set(new_symbol) - set(temp_symbols))
+        Filter.logging.debug(f"Subscribe: {subscribed_symbols}")
         if temp2_symbols:
             subscribe_symbols = subscribe_symbols + temp2_symbols
 
