@@ -23,7 +23,7 @@ class Strategy:
                 btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
 
             if btc_pulse:
-                support_level_30m = self.filter.support_level(symbol, "4h", 10).json()
+                support_level_30m = self.filter.support_level(symbol, "1d", 10).json()
                 support_level = support_level_30m["status"]
 
                 Strategy.logging.debug(f"Symbol: {symbol}")
