@@ -8,10 +8,11 @@ from tortoise.functions import Sum
 from tortoise.models import Q
 from models import Trades, OpenTrades, ClosedTrades
 from decimal import Decimal
+from filter import Filter
 
 
 class Statistic:
-    def __init__(self, stats, loglevel, market):
+    def __init__(self, stats, loglevel, market, ws_url):
         Statistic.stats = stats
         Statistic.status = True
 
@@ -21,6 +22,7 @@ class Statistic:
         Statistic.logging.info("Initialized")
 
         self.market = market
+        self.filter = Filter(ws_url=ws_url, loglevel=loglevel)
 
     def __calculate_trade_duration(self, start_date, end_date):
         # Convert Unix timestamps to datetime objects
@@ -203,6 +205,12 @@ class Statistic:
 
                     # Remove open trade entry
                     await OpenTrades.filter(symbol=symbol).delete()
+
+                    # Remove from Moonloader subscription
+                    if self.dynamic_dca:
+                        symbol, currency = symbol.split("/")
+
+                        self.filter.subscribe_symbol(symbol.lower())
 
                     Statistic.logging.debug(f"Profit sell: {stats}")
                 except Exception as e:

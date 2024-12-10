@@ -193,7 +193,7 @@ class SignalPlugin:
                             )
 
                             # symbol = self.__get_new_symbol_list(running_trades, symbol)
-                            self.__get_new_symbol_list(running_trades, symbol)
+                            # self.__get_new_symbol_list(running_trades, symbol)
 
                             # if symbol:
                             max_bots = await self.__check_max_bots()
@@ -205,6 +205,11 @@ class SignalPlugin:
 
                             if current_symbol not in running_trades and not max_bots:
                                 self.logging.info(f"Triggering new trade for {symbol}")
+
+                                # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
+                                if self.dynamic_dca:
+                                    self.filter.subscribe_symbol(symbol)
+
                                 order = {
                                     "ordersize": self.ordersize,
                                     "symbol": symbol,

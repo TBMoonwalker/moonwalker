@@ -150,7 +150,9 @@ dca = Dca(
 
 # Initialize Statistics module
 statistic = Statistic(
-    stats=stats_queue, loglevel=loglevel, market=attributes.get("market", "spot")
+    stats=stats_queue,
+    loglevel=loglevel,
+    market=attributes.get("market", "spot", ws_url=attributes.get("ws_url", None)),
 )
 
 # Initialize Trading module

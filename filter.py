@@ -208,6 +208,22 @@ class Filter:
 
         return subscribed_list
 
+    def subscribe_symbol(self, symbol):
+        try:
+            self.__request_api_endpoint(f"{self.ws_url}/symbol/add/{symbol}")
+        except Exception as e:
+            Filter.logging.error(
+                f"Error adding {symbol} to Moonloader subscription list. Cause {e}"
+            )
+
+    def unsubscribe_symbol(self, symbol):
+        try:
+            self.__request_api_endpoint(f"{self.ws_url}/symbol/remove/{symbol}")
+        except Exception as e:
+            Filter.logging.error(
+                f"Error removing {symbol} from Moonloader subscription list. Cause {e}"
+            )
+
     def __get_symbol_subscription(self):
         subscribed_symbols = self.__get_symbols()
 
