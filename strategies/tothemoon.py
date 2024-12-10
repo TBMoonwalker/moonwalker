@@ -8,11 +8,11 @@ class Strategy:
         self.ws_url = ws_url
         self.btc_pulse = btc_pulse
 
-        self.logging = LoggerFactory.get_logger(
+        Strategy.logging = LoggerFactory.get_logger(
             "logs/strategies.log", "tothemoon", log_level=loglevel
         )
         self.filter = Filter(ws_url=ws_url, loglevel=loglevel)
-        self.logging.info("Initialized")
+        Strategy.logging.info("Initialized")
 
     def run(self, symbol, price):
         result = False
@@ -26,14 +26,18 @@ class Strategy:
                 support_level_30m = self.filter.support_level(symbol, "4h", 10).json()
                 support_level = support_level_30m["status"]
 
-                self.logging.debug(f"Symbol: {symbol}")
-                self.logging.debug(f"Support Level: {support_level}")
+                Strategy.logging.debug(f"Symbol: {symbol}")
+                Strategy.logging.debug(f"Support Level: {support_level}")
 
                 if support_level == "True":
                     # create SO
                     result = True
+            else:
+                Strategy.logging.info(
+                    "BTC-Pulse is in downtrend - not creating new safety orders"
+                )
 
         except ValueError as e:
-            self.logging.error(f"JSON Message is garbage: {e}")
+            Strategy.logging.error(f"JSON Message is garbage: {e}")
 
         return result
