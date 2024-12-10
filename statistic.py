@@ -210,7 +210,7 @@ class Statistic:
                     if self.dynamic_dca:
                         symbol, currency = symbol.split("/")
 
-                        self.filter.subscribe_symbol(symbol.lower())
+                        self.filter.subscribe_symbol(symbol)
 
                     Statistic.logging.debug(f"Profit sell: {stats}")
                 except Exception as e:
