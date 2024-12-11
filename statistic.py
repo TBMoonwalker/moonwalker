@@ -155,7 +155,9 @@ class Statistic:
 
             try:
                 open_timestamp = float(base_order[0]["timestamp"])
-                self.logging.debug(f"Analyse timestamp for baseorder: {open_timestamp}")
+                Statistic.logging.debug(
+                    f"Analyse timestamp for baseorder: {base_order}"
+                )
             except Exception as e:
                 Statistic.logging.debug(
                     f"Did not found a timestamp - taking default value. Cause {e}"
