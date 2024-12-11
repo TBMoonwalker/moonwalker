@@ -12,7 +12,7 @@ from filter import Filter
 
 
 class Statistic:
-    def __init__(self, stats, loglevel, market, ws_url):
+    def __init__(self, stats, loglevel, market, ws_url, dynamic_dca):
         Statistic.stats = stats
         Statistic.status = True
 
@@ -22,6 +22,7 @@ class Statistic:
         Statistic.logging.info("Initialized")
 
         self.market = market
+        self.dynamic_dca = dynamic_dca
         self.filter = Filter(ws_url=ws_url, loglevel=loglevel)
 
     def __calculate_trade_duration(self, start_date, end_date):

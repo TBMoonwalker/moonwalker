@@ -154,6 +154,7 @@ statistic = Statistic(
     loglevel=loglevel,
     market=attributes.get("market", "spot"),
     ws_url=attributes.get("ws_url", None),
+    dynamic_dca=attributes.get("dynamic_dca", False),
 )
 
 # Initialize Trading module
