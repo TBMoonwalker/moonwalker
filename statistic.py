@@ -155,10 +155,10 @@ class Statistic:
 
             try:
                 open_timestamp = float(base_order[0]["timestamp"])
+            except Exception as e:
                 Statistic.logging.debug(
                     f"Analyse timestamp for baseorder: {base_order}"
                 )
-            except Exception as e:
                 Statistic.logging.debug(
                     f"Did not found a timestamp - taking default value. Cause {e}"
                 )
@@ -221,14 +221,25 @@ class Statistic:
                         f"Error writing closed trade database entry. Cause {e}"
                     )
 
-    async def open_orders(self):
+    async def open_orders(self, page=0):
 
         def decimal_serializer(obj):
             if isinstance(obj, Decimal):
                 return str(obj)
 
         try:
-            orders = await OpenTrades.all().values()
+            size = 10
+            if page == 0:
+                orders = await OpenTrades.all().order_by("-id").limit(size).values()
+            else:
+                orders = (
+                    await OpenTrades.all()
+                    .order_by("-id")
+                    .offset(page)
+                    .limit(size)
+                    .values()
+                )
+
             for order in orders:
 
                 baseorder = await self.__get_trade_data(
@@ -243,6 +254,14 @@ class Statistic:
                 if safetyorders:
                     order["safetyorders"] = safetyorders
             return json.dumps(orders, default=decimal_serializer)
+        except Exception as e:
+            Statistic.logging.error(f"Error getting open trades: {e}")
+            return json.dumps([{}])
+
+    async def open_orders_length(self):
+        try:
+            order_length = await OpenTrades.all().count()
+            return json.dumps(order_length)
         except Exception as e:
             Statistic.logging.error(f"Error getting open trades: {e}")
             return json.dumps([{}])
@@ -272,6 +291,29 @@ class Statistic:
         except Exception as e:
             Statistic.logging.error(f"Error getting closed trades: {e}")
             return json.dumps([{}])
+
+    # WIP
+    async def safeguard_sell_status(self):
+        profit_data = self.profit_statistics()
+
+        if self.safeguard:
+            # sell everything if we still have 25% to 20% of profit
+            if self.safeguard == "profit":
+                if profit_data["upnl"] > 0 and profit_data["profit_overall"] != 0:
+                    minimum_profit_min = (20 * profit_data["upnl"]) / 100
+                    minimum_profit_max = (25 * profit_data["upnl"]) / 100
+                    if (
+                        profit_data["profit_overall"] > minimum_profit_min
+                        and profit_data["profit_overall"] < minimum_profit_max
+                    ):
+                        self.logging.info(
+                            f"Panic sell everything, because we reached the safeguard levels for profit between {minimum_profit_min} and {minimum_profit_max}"
+                        )
+            # sell everything if we reached a stoploss level of 10% from used budget
+            elif self.safeguard == "stoploss":
+                self.logging.info(
+                    f"Panic sell everything, because we reached the safeguard levels for profit between {minimum_profit_min} and {minimum_profit_max}"
+                )
 
     async def profit_statistics(self):
         profit_data = {}

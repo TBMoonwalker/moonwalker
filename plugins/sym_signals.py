@@ -60,37 +60,6 @@ class SignalPlugin:
         )
         SignalPlugin.logging.info("Initialized")
 
-    def __get_new_symbol_list(self, running_list, new_symbol):
-        # New symbols
-        add_symbol = [new_symbol]
-
-        # Running symbols
-        running_symbols = [
-            f"{symbol.upper()}"
-            for botsuffix, symbol in [item.split("_") for item in running_list]
-        ]
-
-        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
-        if self.dynamic_dca:
-            subscribed_symbols, unsubscribe_symbols, subscribe_symbols = (
-                self.filter.subscribe_new_symbols(running_symbols, add_symbol)
-            )
-
-            # # Check if new symbol has been subscribed - in case of error, don't create a deal with it!
-            # if new_symbol not in subscribe_symbols:
-            #     self.logging.error(
-            #         f"New symbol {new_symbol} couldn't be added - not in {subscribed_symbols}"
-            #     )
-            #     new_symbol = None
-
-            self.logging.debug(f"Subscribed symbols: {subscribed_symbols}")
-            self.logging.debug(f"Unsubscribed symbols: {unsubscribe_symbols}")
-
-        self.logging.debug(f"Running symbols: {running_symbols}")
-        self.logging.debug(f"New symbols: {new_symbol}")
-
-        return new_symbol
-
     async def __check_max_bots(self):
         result = False
         try:
@@ -153,7 +122,9 @@ class SignalPlugin:
 
             return False
         else:
-            self.logging.info("BTC-Pulse is in downtrend - not starting new deals!")
+            SignalPlugin.logging.info(
+                "BTC-Pulse is in downtrend - not starting new deals!"
+            )
             return False
 
     async def run(self):
@@ -161,7 +132,7 @@ class SignalPlugin:
             while SignalPlugin.status:
                 if not sio.connected:
                     try:
-                        self.logging.info(
+                        SignalPlugin.logging.info(
                             "Establish connection to sym signal websocket."
                         )
                         await sio.connect(
@@ -174,11 +145,11 @@ class SignalPlugin:
                             socketio_path="/stream/v1/signals",
                         )
                     except Exception as e:
-                        self.logging.error(
+                        SignalPlugin.logging.error(
                             f"Failed to connect to sym signal websocket: {e}"
                         )
                     finally:
-                        self.logging.info(f"Reconnect attempt in 10 seconds")
+                        SignalPlugin.logging.info(f"Reconnect attempt in 10 seconds")
                         await asyncio.sleep(10)
                 try:
                     event = await sio.receive(timeout=300)
@@ -192,19 +163,17 @@ class SignalPlugin:
                                 .values_list("bot", flat=True)
                             )
 
-                            # symbol = self.__get_new_symbol_list(running_trades, symbol)
-                            # self.__get_new_symbol_list(running_trades, symbol)
-
-                            # if symbol:
                             max_bots = await self.__check_max_bots()
                             current_symbol = f"symsignal_{symbol}"
 
-                            self.logging.debug(
-                                f"Running trades: {running_trades}, Max Bots: {max_bots}"
-                            )
-
                             if current_symbol not in running_trades and not max_bots:
-                                self.logging.info(f"Triggering new trade for {symbol}")
+                                SignalPlugin.logging.debug(
+                                    f"Running trades: {running_trades}, Max Bots: {max_bots}"
+                                )
+
+                                SignalPlugin.logging.info(
+                                    f"Triggering new trade for {symbol}"
+                                )
 
                                 # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
                                 if self.dynamic_dca:
@@ -223,12 +192,8 @@ class SignalPlugin:
                                     "side": "buy",
                                 }
                                 await self.order.put(order)
-                            # else:
-                            #     self.logging.error(
-                            #         "Error creating an order with symbol - seems to be an unsuccessful subscription on Moonloader"
-                            #     )
                 except TimeoutError:
-                    self.logging.error(
+                    SignalPlugin.logging.error(
                         "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"
                     )
                     await sio.disconnect()
