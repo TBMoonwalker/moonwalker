@@ -232,30 +232,10 @@ async def closed_orders_length():
     return response
 
 
-@app.route("/orders/open/length")
-@route_cors(allow_origin="*")
-async def open_orders_length():
-    response = await statistic.open_orders_length()
-    if not response:
-        response = {"result": ""}
-
-    return response
-
-
 @app.route("/orders/closed/<page>")
 @route_cors(allow_origin="*")
 async def closed_orders_pagination(page):
     response = await statistic.closed_orders(int(page))
-    if not response:
-        response = {"result": ""}
-
-    return response
-
-
-@app.route("/orders/open/<page>")
-@route_cors(allow_origin="*")
-async def open_orders_pagination(page):
-    response = await statistic.open_orders(int(page))
     if not response:
         response = {"result": ""}
 

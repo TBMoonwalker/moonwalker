@@ -221,25 +221,14 @@ class Statistic:
                         f"Error writing closed trade database entry. Cause {e}"
                     )
 
-    async def open_orders(self, page=0):
+    async def open_orders(self):
 
         def decimal_serializer(obj):
             if isinstance(obj, Decimal):
                 return str(obj)
 
         try:
-            size = 10
-            if page == 0:
-                orders = await OpenTrades.all().order_by("-id").limit(size).values()
-            else:
-                orders = (
-                    await OpenTrades.all()
-                    .order_by("-id")
-                    .offset(page)
-                    .limit(size)
-                    .values()
-                )
-
+            orders = await OpenTrades.all().values()
             for order in orders:
 
                 baseorder = await self.__get_trade_data(
@@ -254,14 +243,6 @@ class Statistic:
                 if safetyorders:
                     order["safetyorders"] = safetyorders
             return json.dumps(orders, default=decimal_serializer)
-        except Exception as e:
-            Statistic.logging.error(f"Error getting open trades: {e}")
-            return json.dumps([{}])
-
-    async def open_orders_length(self):
-        try:
-            order_length = await OpenTrades.all().count()
-            return json.dumps(order_length)
         except Exception as e:
             Statistic.logging.error(f"Error getting open trades: {e}")
             return json.dumps([{}])
