@@ -49,6 +49,7 @@ class Filter:
 
         return ema_cross_response
 
+    @cached(cache=TTLCache(maxsize=1024, ttl=300))
     def support_level(self, symbol, timeframe, num_level):
         support_level_response = self.__request_api_endpoint(
             f"{self.ws_url}/indicators/support/{symbol}/{timeframe}/{num_level}"

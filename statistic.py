@@ -329,7 +329,6 @@ class Statistic:
         except Exception as e:
             Statistic.logging.error(f"Error getting funds: {e}")
 
-        # TBD - Profit per Day
         profit_data["profit_week"] = {}
         begin_week = (
             datetime.now() + timedelta(days=(0 - datetime.now().weekday()))
