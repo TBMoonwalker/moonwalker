@@ -116,7 +116,7 @@ class Filter:
         subscribed_symbols = self.__get_symbols()
         if subscribed_symbols:
             for symbol in subscribed_symbols:
-                if "BTCUSDT" not in symbol:
+                if "BTCUSDT@15m" not in symbol:
                     self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
                     break
         else:
