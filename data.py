@@ -32,13 +32,11 @@ class Data:
 
                 # Safetyorder data
                 if order["safetyorder"] == 1:
-                    safetyorder = [
-                        {
-                            "price": order["price"],
-                            "so_percentage": order["so_percentage"],
-                            "ordersize": order["ordersize"],
-                        }
-                    ]
+                    safetyorder = {
+                        "price": order["price"],
+                        "so_percentage": order["so_percentage"],
+                        "ordersize": order["ordersize"],
+                    }
                     safetyorders.append(safetyorder)
 
             trade_data = {
