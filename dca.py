@@ -1,6 +1,5 @@
 from logger import LoggerFactory
-from models import Trades
-from tortoise.models import Q
+from data import Data
 
 
 class Dca:
@@ -35,9 +34,8 @@ class Dca:
         self.market = market
         self.pnl = 0.0
         self.tp = tp
-        if not sl:
-            sl = 10000
         self.sl = sl
+        self.data = Data(loglevel)
 
         # Class Attributes
         Dca.status = True
@@ -49,14 +47,6 @@ class Dca:
         )
         Dca.logging.info("Initialized")
 
-    async def __get_trades(self, field, value):
-        if field == "symbol":
-            trades = await Trades.filter(symbol=value).values()
-        elif field == "orderid":
-            trades = await Trades.filter(orderid=value).values()
-        if trades:
-            return trades[0]
-
     def __dynamic_dca_strategy(self, symbol, price):
         result = False
 
@@ -67,76 +57,31 @@ class Dca:
 
         return result
 
-    async def __calc_pnl(self, buy_orders, current_price):
-        fee = buy_orders[-1]["fee"]
-        cost = 0.0
-        total_amount_purchased = 0.0
-
-        if buy_orders:
-            for order in buy_orders:
-                amount = float(order["amount"])
-                amount_fee = float(order["amount_fee"])
-                cost += float(order["ordersize"])
-                total_amount_purchased += amount + amount_fee
-
-            # Last sell fee has to be considered
-            total_cost = cost + (cost * fee)
-
-            # Calculate average buy price
-            average_buy_price = total_cost / total_amount_purchased
-
-            actual_pnl = ((current_price - average_buy_price) / average_buy_price) * 100
-
-            return actual_pnl
-        else:
-            Dca.logging.error("No actual buy orders.")
-
-    async def __take_profit(self, symbol, current_price, buy_orders):
-        tp_percentage = self.tp
-        sl_percentage = self.sl
-        if buy_orders:
-            cost = 0.0
-            total_amount_purchased = 0.0
-            take_profit_price = 0.0
-            average_buy_price = 0.0
-            symbol = buy_orders[-1]["symbol"]
-            bot_type = buy_orders[-1]["direction"]
-            bot_name = buy_orders[-1]["bot"]
-            fee = buy_orders[-1]["fee"]
+    async def __take_profit(self, symbol, current_price):
+        trades = await self.data.get_trades(symbol)
+        if trades:
+            tp_percentage = self.tp
+            sl_percentage = self.sl
+            cost = trades["total_cost"]
+            fee = trades["fee"]
+            total_amount_purchased = trades["total_amount"]
+            symbol = trades["symbol"]
+            bot_type = trades["direction"]
+            bot_name = trades["bot"]
             sell = False
 
-            # Calculate total_investment
-            for order in buy_orders:
-                amount = float(order["amount"])
-                amount_fee = float(order["amount_fee"])
-                cost += float(order["ordersize"])
-                total_amount_purchased += amount + amount_fee
-
             # Last sell fee has to be considered
             total_cost = cost + (cost * fee)
-
             average_buy_price = total_cost / total_amount_purchased
 
             # Calculate TP-Price
-            if bot_type == "short":
-                take_profit_price = average_buy_price * (1 - (tp_percentage / 100))
-                stop_loss_price = average_buy_price * (1 + (sl_percentage / 100))
-                if (
-                    current_price <= take_profit_price
-                    or current_price >= stop_loss_price
-                ):
-                    sell = True
-            else:
-                take_profit_price = average_buy_price * (1 + (tp_percentage / 100))
-                stop_loss_price = average_buy_price * (1 - (sl_percentage / 100))
-                if (
-                    current_price >= take_profit_price
-                    or current_price <= stop_loss_price
-                ):
-                    sell = True
+            take_profit_price = average_buy_price * (1 + (tp_percentage / 100))
+            stop_loss_price = average_buy_price * (1 - (sl_percentage / 100))
+            if current_price >= take_profit_price or current_price <= stop_loss_price:
+                sell = True
 
             # Actual PNL in percent (value for profit calculation)
-            actual_pnl = await self.__calc_pnl(buy_orders, current_price)
+            actual_pnl = self.data.calculate_actual_pnl(trades, current_price)
 
             # Trailing TP
             if self.trailing_tp > 0:
@@ -170,6 +115,7 @@ class Dca:
                     "type_sell": "order_sell",
                     "actual_pnl": actual_pnl,
                     "total_cost": cost,
+                    "current_price": current_price,
                 }
                 # Send new take profit order to exchange module
                 self.logging.debug(f"Sending sell order to exchange module: {order}")
@@ -191,30 +137,22 @@ class Dca:
             }
             await Dca.statistic.put(logging_json)
 
-    async def __dca_strategy(self, symbol, current_price, buy_orders):
-        # Initialize variables
-        base_order = await Trades.filter(
-            Q(baseorder__gt=0), Q(symbol=symbol), join_type="AND"
-        ).values()
+    async def __dca_strategy(self, symbol, current_price):
+        trades = await self.data.get_trades(symbol)
 
-        if base_order:
-            safety_orders = await Trades.filter(
-                Q(safetyorder__gt=0), Q(symbol=symbol), join_type="AND"
-            ).values()
+        if trades:
+            safety_orders = trades["safetyorders"]
+            safety_order_count = len(safety_orders)
 
-            safety_order_iterations = 0
             # Apply price deviation for the first safety order
             next_so_percentage = self.price_deviation
-            bot_type = base_order[0]["direction"]
-            bot_name = base_order[0]["bot"]
-            bo_price = float(base_order[0]["price"])
-            last_price = 0
+            bot_type = trades["direction"]
+            bot_name = trades["bot"]
             new_so = False
             safety_order_size = self.so
 
             # Check if safety orders exist yet
             if safety_orders and self.max_safety_orders:
-                safety_order_iterations = len(safety_orders)
                 safety_order_size = safety_orders[-1]["ordersize"] * self.volume_scale
                 next_so_percentage = float(safety_orders[-1]["so_percentage"]) * float(
                     self.step_scale
@@ -228,16 +166,15 @@ class Dca:
                         self.price_deviation
                     )
 
-                last_price = float(safety_orders[-1]["price"])
+                last_so_price = float(safety_orders[-1]["price"])
+            else:
+                last_so_price = 0
 
             # Actual PNL in percent
-            actual_pnl = await self.__calc_pnl(buy_orders, current_price)
+            actual_pnl = self.data.calculate_actual_pnl(trades, current_price)
 
             # We have not reached the max safety orders
-            if (
-                self.max_safety_orders
-                and safety_order_iterations < self.max_safety_orders
-            ):
+            if self.max_safety_orders and (safety_order_count < self.max_safety_orders):
                 # Trigger new safety order
                 if actual_pnl <= -abs(next_so_percentage):
                     # Dynamic safety orders
@@ -258,7 +195,7 @@ class Dca:
                             "botname": bot_name,
                             "baseorder": False,
                             "safetyorder": True,
-                            "order_count": safety_order_iterations + 1,
+                            "order_count": safety_order_count + 1,
                             "ordertype": "market",
                             "so_percentage": next_so_percentage,
                             "side": "buy",
@@ -271,8 +208,8 @@ class Dca:
                     "type": "dca_check",
                     "symbol": symbol,
                     "botname": bot_name,
-                    "so_orders": safety_order_iterations,
-                    "last_so_price": last_price,
+                    "so_orders": safety_order_count,
+                    "last_so_price": last_so_price,
                     "new_so_size": safety_order_size,
                     "price_deviation": next_so_percentage,
                     "actual_pnl": actual_pnl,
@@ -281,25 +218,21 @@ class Dca:
                 # Send new DCA statistics to statistics module
                 await Dca.statistic.put(logging_json)
 
-    async def __process_dca_signal(self, data):
-        # New price action for DCA calculation
-        if data["type"] == "ticker_price":
-            price = data["ticker"]["price"]
-            symbol = data["ticker"]["symbol"]
-
-            # Get buy orders from db for calculations
-            buy_orders = await Trades.filter(symbol=symbol).values()
-
-            # Check DCA
-            await self.__dca_strategy(symbol, price, buy_orders)
-
-            # Check TP
-            await self.__take_profit(symbol, price, buy_orders)
-
     async def run(self):
         while True:
             data = await Dca.dca.get()
-            await self.__process_dca_signal(data)
+
+            # New price action for DCA calculation
+            if data["type"] == "ticker_price":
+                price = data["ticker"]["price"]
+                symbol = data["ticker"]["symbol"]
+
+                # Check DCA
+                await self.__dca_strategy(symbol, price)
+
+                # Check TP
+                await self.__take_profit(symbol, price)
+
             Dca.dca.task_done()
 
     async def shutdown(self):

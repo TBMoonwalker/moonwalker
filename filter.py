@@ -15,10 +15,13 @@ class Filter:
         Filter.logging.info("Initialized")
 
     @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
-    def __request_api_endpoint(self, request):
+    def __request_api_endpoint(self, request, headers=None):
         response = None
         try:
-            response = requests.get(f"{request}")
+            if headers:
+                response = requests.get(url=request, headers=headers)
+            else:
+                response = requests.get(url=request)
         except requests.exceptions.RequestException as e:
             Filter.logging.error(f"Error getting response for {request}. Cause: {e}")
             raise TryAgain
@@ -115,10 +118,8 @@ class Filter:
         # Subscribe BTC symbol if not available
         subscribed_symbols = self.__get_symbols()
         if subscribed_symbols:
-            for symbol in subscribed_symbols:
-                if "BTCUSDT@15m" not in symbol:
-                    self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
-                    break
+            if "BTCUSDT" not in subscribed_symbols:
+                self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
         else:
             self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
 
@@ -152,13 +153,13 @@ class Filter:
         url = f"https://{ws_endpoint}/{ws_context}?start={start}&limit={limit}&sort={sort}"
         response = self.__request_api_endpoint(
             url,
-            headers=headers,
+            headers,
         )
 
         try:
             json_data = response.json()
         except Exception as e:
-            print(e)
+            Filter.logging.error(f"Error getting CMC data. Cause: {e}")
 
         if json_data["status"]["error_code"] == 0:
             for entry in json_data["data"]:
@@ -166,37 +167,6 @@ class Filter:
                     marketcap = entry["rank"]
 
         return marketcap
-
-    def subscribe_new_symbols(self, running_symbols, new_symbol):
-        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
-
-        # Subscribed symbols (in Moonloader)
-        subscribed_symbols = list(map(str.upper, self.__get_symbol_subscription()))
-        Filter.logging.debug(f"Subscribed Symbols: {subscribed_symbols}")
-        Filter.logging.debug(f"Running Symbols: {subscribed_symbols}")
-
-        # Unsubscribe old symbols
-        # Running Symbols = running in Moonwalker
-        # Subscribed Symbols = subscribed in Moonloader
-        temp_symbols = list(set(subscribed_symbols) - set(running_symbols))
-        Filter.logging.debug(f"Diff Subscribed/Running: {temp_symbols}")
-        unsubscribe_symbols = list(set(temp_symbols) - set(new_symbol))
-        Filter.logging.debug(f"Unsubscribe: {subscribed_symbols}")
-        for symbol in unsubscribe_symbols:
-            self.__request_api_endpoint(f"{self.ws_url}/symbol/remove/{symbol}")
-
-        # Subscribe new symbols
-        temp2_symbols = list(set(running_symbols) - set(subscribed_symbols))
-        Filter.logging.debug(f"Diff Running/Subscribed: {temp2_symbols}")
-        subscribe_symbols = list(set(new_symbol) - set(temp_symbols))
-        Filter.logging.debug(f"Subscribe: {subscribed_symbols}")
-        if temp2_symbols:
-            subscribe_symbols = subscribe_symbols + temp2_symbols
-
-        for symbol in subscribe_symbols:
-            self.__request_api_endpoint(f"{self.ws_url}/symbol/add/{symbol}")
-
-        return (subscribed_symbols, unsubscribe_symbols, subscribe_symbols)
 
     def __get_symbols(self):
         subscribed_list = self.__request_api_endpoint(
@@ -207,7 +177,7 @@ class Filter:
             for symbol, kline in [item.split("@") for item in subscribed_list]
         ]
 
-        return subscribed_list
+        return subscribed_symbols
 
     def subscribe_symbol(self, symbol):
         try:
@@ -224,14 +194,3 @@ class Filter:
             Filter.logging.error(
                 f"Error removing {symbol} from Moonloader subscription list. Cause {e}"
             )
-
-    def __get_symbol_subscription(self):
-        subscribed_symbols = self.__get_symbols()
-
-        if self.btc_pulse:
-            for symbol in subscribed_symbols:
-                if "btcusdt" in symbol:
-                    subscribed_symbols.remove(symbol)
-                    break
-
-        return subscribed_symbols

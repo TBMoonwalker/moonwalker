@@ -34,7 +34,7 @@ class SignalPlugin:
         self.max_bots = max_bots
         self.ws_url = ws_url
         self.plugin_settings = json.loads(plugin_settings)
-        self.filter = Filter(ws_url=ws_url, btc_pulse=btc_pulse)
+        self.filter = Filter(ws_url=ws_url, loglevel=loglevel, btc_pulse=btc_pulse)
         if filter_values:
             self.filter_values = json.loads(filter_values)
         else:
@@ -42,6 +42,7 @@ class SignalPlugin:
         self.currency = currency
         self.dynamic_dca = dynamic_dca
         self.btc_pulse = btc_pulse
+        self.topcoin_limit = topcoin_limit
 
         # Class Attributes
         SignalPlugin.status = True
@@ -83,16 +84,6 @@ class SignalPlugin:
             for botsuffix, symbol in [item.split("_") for item in running_list]
         ]
 
-        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
-        if self.dynamic_dca:
-            if running_symbols != new_symbol:
-                subscribed_symbols, unsubscribe_symbols = (
-                    self.filter.subscribe_new_symbols(running_symbols, new_symbol)
-                )
-
-                self.logging.debug(f"Subscribed symbols: {subscribed_symbols}")
-                self.logging.debug(f"Unsubscribed symbols: {unsubscribe_symbols}")
-
         self.logging.debug(f"Running symbols: {running_symbols}")
         self.logging.debug(f"New symbols: {new_symbol}")
         return new_symbol
@@ -109,13 +100,20 @@ class SignalPlugin:
                 if btc_pulse:
                     # marketcap api needs the symbol without quote
                     mc_symbol = re.split(self.currency, symbol, flags=re.IGNORECASE)[0]
+
                     marketcap = self.filter.get_cmc_marketcap_rank(
                         self.filter_values["marketcap_cmc_api_key"], mc_symbol
                     )
+
                     topcoin_limit = self.filter.is_within_topcoin_limit(
-                        marketcap, self.filter_values["rsi_max"]
+                        marketcap, self.topcoin_limit
                     )
+
                     if topcoin_limit:
+                        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
+                        if self.dynamic_dca:
+                            self.filter.subscribe_symbol(mc_symbol)
+
                         rsi = self.filter.get_rsi(symbol, "15Min").json()
                         sma_slope = self.filter.sma_slope(symbol, "15Min").json()
                         ema_cross_15m = self.filter.ema_cross(symbol, "15Min").json()
@@ -123,7 +121,7 @@ class SignalPlugin:
                             rsi["status"], self.filter_values["rsi_max"]
                         )
                         support_level = self.filter.support_level(
-                            symbol, "4h", 10
+                            symbol, "1d", 10
                         ).json()
 
                         self.logging.debug(
@@ -165,6 +163,7 @@ class SignalPlugin:
                         and not max_bots
                         and self.__check_entry_point(symbol)
                     ):
+
                         self.logging.info(f"Triggering new trade for {symbol}")
                         order = {
                             "ordersize": self.ordersize,
