@@ -21,7 +21,7 @@ class Trading:
         self.data = Data(loglevel)
         Trading.logging.info("Initialized")
 
-    async def sell(self, symbol):
+    async def manual_sell(self, symbol):
         symbol = self.data.split_symbol(symbol.upper(), self.currency)
         trades = await self.data.get_trades(symbol)
         if trades:
@@ -63,4 +63,54 @@ class Trading:
 
             await Trading.statistic.put(logging_json)
             return logging_json
+        return None
+
+    async def manual_buy(self, symbol, ordersize):
+        symbol = self.data.split_symbol(symbol.upper(), self.currency)
+        trades = await self.data.get_trades(symbol)
+        if trades:
+            bot = trades["bot"]
+            direction = trades["direction"]
+            actual_pnl = self.data.calculate_actual_pnl(trades)
+            if trades["safetyorders"]:
+                safety_order_count = len(trades["safetyorders"])
+                last_so_price = float(trades["safetyorders"][-1]["price"])
+            else:
+                safety_order_count = 0
+                last_so_price = 0
+
+            order = {
+                "ordersize": ordersize,
+                "symbol": symbol,
+                "direction": direction,
+                "botname": bot,
+                "baseorder": False,
+                "safetyorder": True,
+                "order_count": safety_order_count + 1,
+                "ordertype": "market",
+                "so_percentage": actual_pnl,
+                "side": "buy",
+            }
+            # Send new safety order request to exchange module
+            await Trading.order.put(order)
+
+            # Logging configuration
+            logging_json = {
+                "type": "dca_check",
+                "symbol": symbol,
+                "botname": bot,
+                "so_orders": safety_order_count,
+                "last_so_price": last_so_price,
+                "new_so_size": ordersize,
+                "price_deviation": actual_pnl,
+                "actual_pnl": actual_pnl,
+                "new_so": True,
+            }
+            # Send new DCA statistics to statistics module
+            await Trading.statistic.put(logging_json)
+            return logging_json
+        else:
+            Trading.logging.error(
+                f"Manual trade is only for new safety orders right now! No trade for {symbol} found."
+            )
         return None

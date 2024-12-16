@@ -215,7 +215,16 @@ async def profit():
 
 @app.route("/orders/sell/<symbol>", methods=["GET"])
 async def sell_order(symbol):
-    response = await trading.sell(symbol)
+    response = await trading.manual_sell(symbol)
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
+@app.route("/orders/buy/<symbol>/<ordersize>", methods=["GET"])
+async def buy_order(symbol, ordersize):
+    response = await trading.manual_buy(symbol, ordersize)
     if not response:
         response = {"result": ""}
 
