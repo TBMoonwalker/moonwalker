@@ -39,7 +39,7 @@ class Trading:
                 "symbol": symbol,
                 "botname": bot,
                 "direction": direction,
-                "side": trades["side"],
+                "side": "sell",
                 "actual_pnl": actual_pnl,  # actual_pnl is wrong calculated trades table - must be taken from open trades or better after order
                 "total_cost": total_cost,
                 "current_price": current_price,
