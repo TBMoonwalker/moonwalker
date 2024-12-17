@@ -152,9 +152,8 @@ class Statistic:
             tp_price = stats["tp_price"]
             avg_price = stats["avg_price"]
             actual_pnl = stats["actual_pnl"]
-            open_date = datetime.fromtimestamp(
-                (float(stats["timestamp"]) / 1000.0), timezone.utc
-            )
+            open_timestamp = float(stats["timestamp"])
+            open_date = datetime.fromtimestamp((open_timestamp / 1000.0), timezone.utc)
 
             # Comes from Exchange module
             if stats["sell"]:
