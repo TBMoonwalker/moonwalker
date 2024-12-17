@@ -39,7 +39,10 @@ class Data:
                     }
                     safetyorders.append(safetyorder)
 
+            safetyorders_count = len(safetyorders)
+
             trade_data = {
+                "timestamp": trades[-1]["timestamp"],
                 "fee": trades[-1]["fee"],
                 "total_cost": total_cost,
                 "total_amount": total_amount,
@@ -49,6 +52,7 @@ class Data:
                 "bot": trades[-1]["bot"],
                 "current_price": current_price,
                 "safetyorders": safetyorders,
+                "safetyorders_count": safetyorders_count,
             }
 
             return trade_data

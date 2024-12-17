@@ -59,6 +59,7 @@ class Dca:
 
     async def __take_profit(self, symbol, current_price):
         trades = await self.data.get_trades(symbol)
+
         if trades:
             cost = trades["total_cost"]
             fee = trades["fee"]
@@ -66,6 +67,7 @@ class Dca:
             symbol = trades["symbol"]
             bot_type = trades["direction"]
             bot_name = trades["bot"]
+            safety_order_count = trades["safetyorders_count"]
             sell = False
 
             # Last sell fee has to be considered
@@ -75,10 +77,10 @@ class Dca:
             # Calculate TP-Price
             take_profit_price = average_buy_price * (1 + (self.tp / 100))
             stop_loss_price = average_buy_price * (1 - (self.sl / 100))
-            if current_price >= take_profit_price or current_price <= stop_loss_price:
-                Dca.logging.debug(
-                    f"Current price: {current_price}, Take profit price: {take_profit_price}, Stop Loss Price: {stop_loss_price}"
-                )
+            if (current_price >= take_profit_price) or (
+                current_price <= stop_loss_price
+                and self.max_safety_orders == safety_order_count
+            ):
                 sell = True
 
             # Actual PNL in percent (value for profit calculation)
@@ -143,7 +145,7 @@ class Dca:
 
         if trades:
             safety_orders = trades["safetyorders"]
-            safety_order_count = len(safety_orders)
+            safety_order_count = trades["safetyorders_count"]
 
             # Apply price deviation for the first safety order
             next_so_percentage = self.price_deviation

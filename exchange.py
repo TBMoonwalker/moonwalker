@@ -433,9 +433,9 @@ class Exchange:
                 data["type"] = "sold_check"
                 data["sell"] = True
                 data["symbol"] = order_status["symbol"]
+                data["timestamp"] = trades["timestamp"]
                 data["total_amount"] = order_status["amount"]
                 data["total_cost"] = order["total_cost"]
-                # data["total_cost"] = order_status["ordersize"] --> uses wrong ordersize
                 data["current_price"] = order_status["price"]
                 data["tp_price"] = order_status["price"]
                 data["avg_price"] = data["total_cost"] / data["total_amount"]

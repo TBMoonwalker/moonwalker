@@ -9,6 +9,7 @@ from tortoise.models import Q
 from models import Trades, OpenTrades, ClosedTrades
 from decimal import Decimal
 from filter import Filter
+from data import Data
 
 
 class Statistic:
@@ -24,6 +25,7 @@ class Statistic:
         self.market = market
         self.dynamic_dca = dynamic_dca
         self.filter = Filter(ws_url=ws_url, loglevel=loglevel)
+        self.data = Data(loglevel)
 
     def __calculate_trade_duration(self, start_date, end_date):
         # Convert Unix timestamps to datetime objects
@@ -150,20 +152,9 @@ class Statistic:
             tp_price = stats["tp_price"]
             avg_price = stats["avg_price"]
             actual_pnl = stats["actual_pnl"]
-            open_timestamp = 0.0
-            base_order = await self.__get_trade_data(symbol, baseorder=True)
-
-            try:
-                open_timestamp = float(base_order[0]["timestamp"])
-            except Exception as e:
-                Statistic.logging.debug(
-                    f"Analyse timestamp for baseorder: {base_order}"
-                )
-                Statistic.logging.debug(
-                    f"Did not found a timestamp - taking default value. Cause {e}"
-                )
-
-            open_date = datetime.fromtimestamp((open_timestamp / 1000.0), timezone.utc)
+            open_date = datetime.fromtimestamp(
+                (stats["timestamp"] / 1000.0), timezone.utc
+            )
 
             # Comes from Exchange module
             if stats["sell"]:

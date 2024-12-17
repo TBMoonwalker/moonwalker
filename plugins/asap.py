@@ -92,6 +92,8 @@ class SignalPlugin:
     def __check_entry_point(self, symbol):
         if self.filter_values and self.ws_url:
             try:
+                topcoin_limit = True
+                marketcap = "N/A"
                 # btc pulse check
                 btc_pulse = True
                 if self.btc_pulse:
@@ -101,13 +103,14 @@ class SignalPlugin:
                     # marketcap api needs the symbol without quote
                     mc_symbol = re.split(self.currency, symbol, flags=re.IGNORECASE)[0]
 
-                    marketcap = self.filter.get_cmc_marketcap_rank(
-                        self.filter_values["marketcap_cmc_api_key"], mc_symbol
-                    )
+                    if self.topcoin_limit:
+                        marketcap = self.filter.get_cmc_marketcap_rank(
+                            self.filter_values["marketcap_cmc_api_key"], mc_symbol
+                        )
 
-                    topcoin_limit = self.filter.is_within_topcoin_limit(
-                        marketcap, self.topcoin_limit
-                    )
+                        topcoin_limit = self.filter.is_within_topcoin_limit(
+                            marketcap, self.topcoin_limit
+                        )
 
                     if topcoin_limit:
                         # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
