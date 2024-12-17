@@ -60,8 +60,6 @@ class Dca:
     async def __take_profit(self, symbol, current_price):
         trades = await self.data.get_trades(symbol)
         if trades:
-            tp_percentage = self.tp
-            sl_percentage = self.sl
             cost = trades["total_cost"]
             fee = trades["fee"]
             total_amount_purchased = trades["total_amount"]
@@ -75,9 +73,12 @@ class Dca:
             average_buy_price = total_cost / total_amount_purchased
 
             # Calculate TP-Price
-            take_profit_price = average_buy_price * (1 + (tp_percentage / 100))
-            stop_loss_price = average_buy_price * (1 - (sl_percentage / 100))
+            take_profit_price = average_buy_price * (1 + (self.tp / 100))
+            stop_loss_price = average_buy_price * (1 - (self.sl / 100))
             if current_price >= take_profit_price or current_price <= stop_loss_price:
+                Dca.logging.debug(
+                    f"Current price: {current_price}, Take profit price: {take_profit_price}, Stop Loss Price: {stop_loss_price}"
+                )
                 sell = True
 
             # Actual PNL in percent (value for profit calculation)
