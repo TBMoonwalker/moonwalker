@@ -153,7 +153,7 @@ class Statistic:
             avg_price = stats["avg_price"]
             actual_pnl = stats["actual_pnl"]
             open_date = datetime.fromtimestamp(
-                (stats["timestamp"] / 1000.0), timezone.utc
+                (float(stats["timestamp"]) / 1000.0), timezone.utc
             )
 
             # Comes from Exchange module
