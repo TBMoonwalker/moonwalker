@@ -24,7 +24,6 @@ class Strategy:
 
             if btc_pulse:
                 rsi = self.filter.get_rsi(symbol, "15Min").json()
-                print(rsi)
                 rsi_value = float(rsi["status"])
                 support_level_30m = self.filter.support_level(symbol, "1d", 10).json()
                 support_level = support_level_30m["status"]
