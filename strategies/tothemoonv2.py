@@ -29,10 +29,10 @@ class Strategy:
                 support_level = support_level_30m["status"]
 
                 Strategy.logging.debug(f"Symbol: {symbol}")
-                Strategy.logging.debug(f"Support Level: {support_level}")
+                # Strategy.logging.debug(f"Support Level: {support_level}")
                 Strategy.logging.debug(f"RSI value: {rsi_value}")
 
-                if support_level == "True" or rsi_value <= 30:
+                if rsi_value <= 30:
                     # create SO
                     result = True
             else:
