@@ -9,6 +9,7 @@ class Dca:
         statistic,
         trailing_tp,
         dynamic_dca,
+        dynamic_tp,
         strategy,
         order,
         volume_scale,
@@ -24,6 +25,7 @@ class Dca:
     ):
         self.trailing_tp = trailing_tp
         self.dynamic_dca = dynamic_dca
+        self.dynamic_tp = dynamic_tp
         self.strategy = strategy
         self.volume_scale = volume_scale
         self.step_scale = step_scale
@@ -74,8 +76,20 @@ class Dca:
             total_cost = cost + (cost * fee)
             average_buy_price = total_cost / total_amount_purchased
 
-            # Calculate TP-Price
+            # Calculate static TP-Price
             take_profit_price = average_buy_price * (1 + (self.tp / 100))
+
+            # Calculate dynamic TP-Price
+            if self.dynamic_tp > 0:
+                effective_take_profit = max(
+                    0,
+                    self.tp - (safety_order_count * self.dynamic_tp),
+                )
+                # Calculate the take profit price
+                take_profit_price = average_buy_price * (
+                    1 + (effective_take_profit / 100)
+                )
+
             stop_loss_price = average_buy_price * (1 - (self.sl / 100))
             if (current_price >= take_profit_price) or (
                 current_price <= stop_loss_price

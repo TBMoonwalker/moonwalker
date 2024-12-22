@@ -37,6 +37,14 @@ class Filter:
         return sma_slope_response
 
     @cached(cache=TTLCache(maxsize=1024, ttl=60))
+    def ema_slope(self, symbol, timeframe, length):
+        ema_slope_response = self.__request_api_endpoint(
+            f"{self.ws_url}/indicators/ema_slope/{symbol}/{timeframe}/{length}"
+        )
+
+        return ema_slope_response
+
+    @cached(cache=TTLCache(maxsize=1024, ttl=60))
     def get_rsi(self, symbol, timeframe):
         rsi_response = self.__request_api_endpoint(
             f"{self.ws_url}/indicators/rsi/{symbol}/{timeframe}"

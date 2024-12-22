@@ -60,7 +60,7 @@ if attributes.get("dca_strategy", None):
     dca_strategy_plugin = dca_strategy.Strategy(
         ws_url=attributes.get("ws_url", None),
         loglevel=loglevel,
-        btc_pulse=attributes.get("ws_url", None),
+        btc_pulse=attributes.get("btc_pulse", False),
     )
 if attributes.get("init_buy_strategy", None):
     init_buy_strategy = importlib.import_module(
@@ -134,6 +134,7 @@ dca = Dca(
     statistic=stats_queue,
     trailing_tp=attributes.get("trailing_tp", 0),
     dynamic_dca=attributes.get("dynamic_dca", False),
+    dynamic_tp=attributes.get("dynamic_tp", 0),
     strategy=dca_strategy_plugin,
     order=order_queue,
     volume_scale=attributes.get("os"),
