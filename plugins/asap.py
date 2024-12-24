@@ -131,7 +131,7 @@ class SignalPlugin:
                         ).json()
 
                         self.logging.debug(
-                            f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_9["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
+                            f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_50["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
                         )
                         if (
                             rsi_limit
