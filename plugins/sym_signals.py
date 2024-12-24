@@ -33,7 +33,9 @@ class SignalPlugin:
         self.max_bots = max_bots
         self.ws_url = ws_url
         self.plugin_settings = json.loads(plugin_settings)
-        self.filter = Filter(ws_url=ws_url, loglevel=loglevel, btc_pulse=btc_pulse)
+        self.filter = Filter(
+            ws_url=ws_url, loglevel=loglevel, btc_pulse=btc_pulse, currency=currency
+        )
         if filter_values:
             self.filter_values = json.loads(filter_values)
         else:

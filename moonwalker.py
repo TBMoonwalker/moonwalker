@@ -61,6 +61,7 @@ if attributes.get("dca_strategy", None):
         ws_url=attributes.get("ws_url", None),
         loglevel=loglevel,
         btc_pulse=attributes.get("btc_pulse", False),
+        currency=attributes.get("currency"),
     )
 if attributes.get("init_buy_strategy", None):
     init_buy_strategy = importlib.import_module(

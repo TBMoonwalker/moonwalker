@@ -5,9 +5,10 @@ from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
 
 
 class Filter:
-    def __init__(self, ws_url, loglevel, btc_pulse=None):
+    def __init__(self, ws_url, loglevel, btc_pulse=None, currency=None):
         self.ws_url = ws_url
         self.btc_pulse = btc_pulse
+        self.currency = currency
 
         Filter.logging = LoggerFactory.get_logger(
             "logs/filter.log", "filter", log_level=loglevel
@@ -126,7 +127,7 @@ class Filter:
         # Subscribe BTC symbol if not available
         subscribed_symbols = self.__get_symbols()
         if subscribed_symbols:
-            if "BTCUSDT" not in subscribed_symbols:
+            if f"BTC{self.currency}" not in subscribed_symbols:
                 self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
         else:
             self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")

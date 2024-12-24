@@ -4,14 +4,14 @@ from filter import Filter
 
 
 class Strategy:
-    def __init__(self, ws_url, loglevel, btc_pulse):
+    def __init__(self, ws_url, loglevel, btc_pulse, currency):
         self.ws_url = ws_url
         self.btc_pulse = btc_pulse
 
         Strategy.logging = LoggerFactory.get_logger(
             "logs/strategies.log", "tothemoon", log_level=loglevel
         )
-        self.filter = Filter(ws_url=ws_url, loglevel=loglevel)
+        self.filter = Filter(ws_url=ws_url, loglevel=loglevel, currency=currency)
         Strategy.logging.info("Initialized")
 
     def run(self, symbol, price):

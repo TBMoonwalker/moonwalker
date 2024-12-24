@@ -34,7 +34,9 @@ class SignalPlugin:
         self.max_bots = max_bots
         self.ws_url = ws_url
         self.plugin_settings = json.loads(plugin_settings)
-        self.filter = Filter(ws_url=ws_url, loglevel=loglevel, btc_pulse=btc_pulse)
+        self.filter = Filter(
+            ws_url=ws_url, loglevel=loglevel, btc_pulse=btc_pulse, currency=currency
+        )
         if filter_values:
             self.filter_values = json.loads(filter_values)
         else:
@@ -118,7 +120,8 @@ class SignalPlugin:
                             self.filter.subscribe_symbol(mc_symbol)
 
                         rsi = self.filter.get_rsi(symbol, "15Min").json()
-                        sma_slope = self.filter.sma_slope(symbol, "15Min").json()
+                        ema_slope_50 = self.filter.ema_slope(symbol, "15Min", 50).json()
+                        ema_slope_9 = self.filter.ema_slope(symbol, "15Min", 9).json()
                         ema_cross_15m = self.filter.ema_cross(symbol, "15Min").json()
                         rsi_limit = self.filter.is_within_rsi_limit(
                             rsi["status"], self.filter_values["rsi_max"]
@@ -128,11 +131,14 @@ class SignalPlugin:
                         ).json()
 
                         self.logging.debug(
-                            f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, SMA_SLOPE: {sma_slope["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
+                            f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_9["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
                         )
                         if (
                             rsi_limit
-                            and sma_slope["status"] == "upward"
+                            and (
+                                ema_slope_9["status"] == "upward"
+                                and ema_slope_50["status"] == "upward"
+                            )
                             and ema_cross_15m["status"] == "up"
                         ) or support_level["status"] == "True":
                             return True
@@ -142,7 +148,7 @@ class SignalPlugin:
                         return False
                 else:
                     self.logging.debug(
-                        f"Not starting trade for {symbol}, because BTC is going down"
+                        f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
                     )
                     return False
             except Exception as e:
