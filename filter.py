@@ -45,6 +45,13 @@ class Filter:
 
         return ema_slope_response
 
+    def rsi_slope(self, symbol, timeframe, length):
+        rsi_slope_response = self.__request_api_endpoint(
+            f"{self.ws_url}/indicators/rsi_slope/{symbol}/{timeframe}/{length}"
+        )
+
+        return rsi_slope_response
+
     @cached(cache=TTLCache(maxsize=1024, ttl=60))
     def get_rsi(self, symbol, timeframe):
         rsi_response = self.__request_api_endpoint(

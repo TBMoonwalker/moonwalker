@@ -25,6 +25,7 @@ class Strategy:
             if btc_pulse:
                 ema_slope_50 = self.filter.ema_slope(symbol, "15Min", 50).json()
                 ema_slope_9 = self.filter.ema_slope(symbol, "15Min", 9).json()
+                rsi_slope_14 = self.filter.rsi_slope(symbol, "15Min", 14).json()
                 ema_cross_15m = self.filter.ema_cross(symbol, "15Min").json()
                 # rsi = self.filter.get_rsi(symbol, "15Min").json()
                 # rsi_value = float(rsi["status"])
@@ -34,7 +35,9 @@ class Strategy:
                 Strategy.logging.debug(f"Symbol: {symbol}")
                 Strategy.logging.debug(f"EMA slope 9: {ema_slope_9}")
                 Strategy.logging.debug(f"EMA slope 50: {ema_slope_50}")
+                Strategy.logging.debug(f"RSI slope 14: {rsi_slope_14}")
                 Strategy.logging.debug(f"EMA cross: {ema_cross_15m}")
+                # TODO: Implement extreme wick detection (high percentage down in one candle)
                 # Strategy.logging.debug(f"Support Level: {support_level}")
                 # Strategy.logging.debug(f"RSI value: {rsi_value}")
 
@@ -42,6 +45,7 @@ class Strategy:
                 if (
                     ema_slope_9["status"] == "upward"
                     and ema_slope_50["status"] == "upward"
+                    and rsi_slope_14["status"] == "upward"
                 ) and ema_cross_15m["status"] == "up":
                     # create SO
                     result = True

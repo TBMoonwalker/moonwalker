@@ -123,6 +123,7 @@ class SignalPlugin:
                         ema_slope_50 = self.filter.ema_slope(symbol, "15Min", 50).json()
                         ema_slope_9 = self.filter.ema_slope(symbol, "15Min", 9).json()
                         ema_cross_15m = self.filter.ema_cross(symbol, "15Min").json()
+                        rsi_slope_14 = self.filter.rsi_slope(symbol, "15Min", 14).json()
                         rsi_limit = self.filter.is_within_rsi_limit(
                             rsi["status"], self.filter_values["rsi_max"]
                         )
@@ -131,13 +132,14 @@ class SignalPlugin:
                         ).json()
 
                         self.logging.debug(
-                            f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_50["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
+                            f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_50["status"]}, RSI_SLOPE_14: {rsi_slope_14["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
                         )
                         if (
                             rsi_limit
                             and (
                                 ema_slope_9["status"] == "upward"
                                 and ema_slope_50["status"] == "upward"
+                                and rsi_slope_14["status"] == "upward"
                             )
                             and ema_cross_15m["status"] == "up"
                         ) or support_level["status"] == "True":
