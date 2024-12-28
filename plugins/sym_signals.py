@@ -95,6 +95,9 @@ class SignalPlugin:
             volume_range = None
             volume_size = None
 
+            if signal_id in self.plugin_settings["allowed_signals"]:
+                print(f"Symbol: {symbol}, Volume: {volume_24h}")
+
             for exchange in volume_24h:
                 if exchange == self.exchange:
                     if volume_24h[exchange].get(self.currency) != None:
