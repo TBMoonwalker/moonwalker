@@ -137,7 +137,7 @@ class Statistic:
                 )
             except Exception as e:
                 Statistic.logging.error(
-                    f"Error updating SO count for {stats["symbol"]}. Cause {e}"
+                    f"Error updating SO count for {stats['symbol']}. Cause {e}"
                 )
             Statistic.logging.debug(f"DCA-Check: {stats}")
 
