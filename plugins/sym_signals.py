@@ -52,7 +52,10 @@ class SignalPlugin:
             self.pair_allowlist = None
         self.dynamic_dca = dynamic_dca
         self.topcoin_limit = topcoin_limit
-        self.volume = json.loads(volume)
+        if volume:
+            self.volume = json.loads(volume)
+        else:
+            self.volume = None
         self.btc_pulse = btc_pulse
 
         # Class Attributes
@@ -94,9 +97,6 @@ class SignalPlugin:
             volume_24h = event["volume_24h"]
             volume_range = None
             volume_size = None
-
-            if signal_id in self.plugin_settings["allowed_signals"]:
-                print(f"Symbol: {symbol}, Volume: {volume_24h}")
 
             for exchange in volume_24h:
                 if exchange == self.exchange:
@@ -159,7 +159,7 @@ class SignalPlugin:
                 try:
                     event = await sio.receive(timeout=300)
                     if event[0] == "signal":
-                        symbol = f"{event[1]['symbol'].upper()}USDT"
+                        symbol = f"{event[1]['symbol'].upper()}{self.currency}"
 
                         if self.__check_entry_point(event[1]):
                             running_trades = (

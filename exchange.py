@@ -29,7 +29,7 @@ class Exchange:
         self.market = market
         self.dry_run = dry_run
         self.fee_deduction = fee_deduction
-        self.data = Data(loglevel)
+        self.data = Data(loglevel, dry_run)
 
         # Exchange configuration
         login_params = {
