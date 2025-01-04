@@ -2,7 +2,7 @@ import json
 import time
 from asyncache import cached
 from cachetools import TTLCache
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from logger import LoggerFactory
 from tortoise.functions import Sum
 from tortoise.models import Q
@@ -29,8 +29,8 @@ class Statistic:
 
     def __calculate_trade_duration(self, start_date, end_date):
         # Convert Unix timestamps to datetime objects
-        date1 = datetime.fromtimestamp((start_date / 1000.0), timezone.utc)
-        date2 = datetime.fromtimestamp(end_date / 1000.0, timezone.utc)
+        date1 = datetime.fromtimestamp((start_date / 1000.0))
+        date2 = datetime.fromtimestamp(end_date / 1000.0)
 
         # Calculate the time difference
         time_difference = date2 - date1
@@ -99,7 +99,7 @@ class Statistic:
                     f"Did not found a timestamp - taking default value. Cause {e}"
                 )
 
-            open_date = datetime.fromtimestamp((open_timestamp / 1000.0), timezone.utc)
+            open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
         else:
             if stats["new_so"]:
                 Statistic.logging.debug(f"SO buy: {stats}")

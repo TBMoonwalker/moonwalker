@@ -112,6 +112,7 @@ exchange = Exchange(
     dry_run=attributes.get("dry_run", True),
     loglevel=loglevel,
     fee_deduction=attributes.get("fee_deduction", False),
+    order_check_range=attributes.get("order_check_range", 5),
 )
 
 # Initialize Watcher module

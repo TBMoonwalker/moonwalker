@@ -24,12 +24,14 @@ class Exchange:
         loglevel,
         fee_deduction,
         statistic,
+        order_check_range,
     ):
         self.currency = currency.upper()
         self.market = market
         self.dry_run = dry_run
         self.fee_deduction = fee_deduction
         self.data = Data(loglevel, dry_run)
+        self.order_check_range = order_check_range
 
         # Exchange configuration
         login_params = {
@@ -125,7 +127,9 @@ class Exchange:
     def __get_trades_for_symbol(self, symbol):
         trade = None
         time.sleep(1)
-        since = self.exchange.milliseconds() - 5000  # -5 seconds from now
+        since = self.exchange.milliseconds() - (
+            self.order_check_range * 1000
+        )  # X seconds from now
         try:
             trade = {}
             amount = 0.0
