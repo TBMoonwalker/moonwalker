@@ -53,9 +53,9 @@ class Filter:
         return rsi_slope_response
 
     @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def get_rsi(self, symbol, timeframe):
+    def get_rsi(self, symbol, timeframe, length):
         rsi_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/rsi/{symbol}/{timeframe}"
+            f"{self.ws_url}/indicators/rsi/{symbol}/{timeframe}/{length}"
         )
 
         return rsi_response
@@ -67,6 +67,14 @@ class Filter:
         )
 
         return ema_cross_response
+
+    @cached(cache=TTLCache(maxsize=1024, ttl=60))
+    def ema_distance(self, symbol, timeframe, length):
+        ema_distance_response = self.__request_api_endpoint(
+            f"{self.ws_url}/indicators/ema_distance/{symbol}/{timeframe}/{length}"
+        )
+
+        return ema_distance_response
 
     @cached(cache=TTLCache(maxsize=1024, ttl=300))
     def support_level(self, symbol, timeframe, num_level):

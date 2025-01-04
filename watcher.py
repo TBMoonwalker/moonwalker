@@ -111,7 +111,7 @@ class Watcher:
         while Watcher.status:
             try:
                 orders = await Watcher.exchange.watch_orders()
-                Watcher.logging.debug
+                Watcher.logging.debug(orders)
                 if orders[0]["trades"]:
                     order = {
                         "type": "new_order",

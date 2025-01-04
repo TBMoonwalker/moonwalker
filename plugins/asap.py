@@ -119,21 +119,28 @@ class SignalPlugin:
                         if self.dynamic_dca:
                             self.filter.subscribe_symbol(mc_symbol)
 
-                        rsi = self.filter.get_rsi(symbol, "15Min").json()
-                        ema_slope_30 = self.filter.ema_slope(symbol, "15Min", 30).json()
+                        rsi_14 = self.filter.get_rsi(symbol, "15Min", "14").json()
+                        ema_slope_30 = self.filter.ema_slope(symbol, "15min", 30).json()
+                        ema_distance = self.filter.ema_distance(
+                            symbol, "15min", 30
+                        ).json()
                         # ema_slope_50 = self.filter.ema_slope(symbol, "15Min", 50).json()
                         # ema_slope_9 = self.filter.ema_slope(symbol, "15Min", 9).json()
                         # ema_cross_15m = self.filter.ema_cross(symbol, "15Min").json()
                         # rsi_slope_14 = self.filter.rsi_slope(symbol, "15Min", 14).json()
                         rsi_limit = self.filter.is_within_rsi_limit(
-                            rsi["status"], self.filter_values["rsi_max"]
+                            rsi_14["status"], self.filter_values["rsi_max"]
                         )
 
                         self.logging.debug(
                             # f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_50["status"]}, RSI_SLOPE_14: {rsi_slope_14["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
-                            f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30["status"]})"
+                            f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30["status"]}, EMA_DISTANCE_30: {ema_distance["status"]})"
                         )
-                        if rsi_limit and ema_slope_30["status"] == "downward":
+                        if (
+                            rsi_limit
+                            and ema_slope_30["status"] == "upward"
+                            and ema_distance["status"]
+                        ):
                             return True
                         else:
                             return False
@@ -146,7 +153,7 @@ class SignalPlugin:
                     return False
             except Exception as e:
                 self.logging.debug(
-                    f"No data yet - you need to enable dynamic dca - error: {e}"
+                    f"No data yet for {symbol} - you need to enable dynamic dca - error: {e}"
                 )
                 return False
         else:
