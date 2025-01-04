@@ -136,11 +136,7 @@ class SignalPlugin:
                             # f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_50["status"]}, RSI_SLOPE_14: {rsi_slope_14["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
                             f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30["status"]}, EMA_DISTANCE_30: {ema_distance["status"]})"
                         )
-                        if (
-                            rsi_limit
-                            and ema_slope_30["status"] == "upward"
-                            and ema_distance["status"]
-                        ):
+                        if rsi_limit and ema_distance["status"]:
                             return True
                         else:
                             return False
@@ -165,6 +161,7 @@ class SignalPlugin:
             symbol_list = self.__get_new_symbol_list(tuple(running_trades))
             if symbol_list:
                 for symbol in symbol_list:
+                    self.logging.debug(f"Checking entry signal for {symbol}")
                     max_bots = await self.__check_max_bots()
                     current_symbol = f"asap_{symbol}"
                     if (

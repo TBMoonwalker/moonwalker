@@ -275,7 +275,8 @@ async def startup():
 
     if attributes.get("dca", None):
         app.add_background_task(watcher.watch_tickers)
-        app.add_background_task(watcher.watch_orders)
+        if not attributes.get("dry_run", True):
+            app.add_background_task(watcher.watch_orders)
         app.add_background_task(watcher.update_symbols)
         app.add_background_task(dca.run)
 
