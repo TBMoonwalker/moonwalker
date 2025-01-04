@@ -161,7 +161,6 @@ class SignalPlugin:
             symbol_list = self.__get_new_symbol_list(tuple(running_trades))
             if symbol_list:
                 for symbol in symbol_list:
-                    self.logging.debug(f"Checking entry signal for {symbol}")
                     max_bots = await self.__check_max_bots()
                     current_symbol = f"asap_{symbol}"
                     if (
