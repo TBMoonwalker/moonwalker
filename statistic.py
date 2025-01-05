@@ -273,10 +273,12 @@ class Statistic:
                     f"Panic sell everything, because we reached the safeguard levels for profit between {minimum_profit_min} and {minimum_profit_max}"
                 )
 
-    async def profits_overall(self):
+    async def profits_overall(self, timestamp: None):
         profit_data = {}
         profit_data["profit_month"] = {}
         begin_month = (datetime.now().replace(day=1)).date()
+        if timestamp:
+            begin_month = (datetime.fromtimestamp(timestamp).replace(day=1)).date()
         try:
             profit_month = await ClosedTrades.filter(
                 close_date__gt=begin_month
