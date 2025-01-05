@@ -95,6 +95,7 @@ class Statistic:
             try:
                 open_timestamp = float(base_order[0]["timestamp"])
             except Exception as e:
+                open_timestamp = datetime.timestamp(datetime.now())
                 Statistic.logging.debug(
                     f"Did not found a timestamp - taking default value. Cause {e}"
                 )
