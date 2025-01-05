@@ -12,6 +12,20 @@ class Data:
         )
         Data.logging.info("Initialized")
 
+    async def stop_trade(self, symbol, bot):
+        result = False
+        try:
+            # Remove open trade entry
+            await OpenTrades.filter(symbol=symbol).delete()
+            # Remove trades
+            await Trades.filter(bot=bot).delete()
+            result = True
+        except Exception as e:
+            Data.logging.error(
+                f"Could not remove entries in database for {symbol}. Cause {e}"
+            )
+        return result
+
     async def get_trades(self, symbol):
         trade_data = []
         total_cost = 0

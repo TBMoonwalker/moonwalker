@@ -236,6 +236,16 @@ async def buy_order(symbol, ordersize):
     return response
 
 
+@app.route("/orders/stop/<symbol>", methods=["GET"])
+@route_cors(allow_origin="*")
+async def stop_order(symbol):
+    response = await trading.manual_stop(symbol)
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
 @app.route("/orders/closed/length")
 @route_cors(allow_origin="*")
 async def closed_orders_length():

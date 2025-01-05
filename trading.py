@@ -114,3 +114,14 @@ class Trading:
                 f"Manual trade is only for new safety orders right now! No trade for {symbol} found."
             )
         return None
+
+    async def manual_stop(self, symbol):
+        symbol = self.data.split_symbol(symbol.upper(), self.currency)
+        trades = await self.data.get_trades(symbol)
+        bot = trades["bot"]
+        if trades:
+            result = await self.data.stop_trade(symbol, bot)
+            if result:
+                return {"status": "ok"}
+        else:
+            Trading.logging.error(f"Cannot stop trade for {symbol} - No trade found.")
