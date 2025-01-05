@@ -71,8 +71,11 @@ class SignalPlugin:
             all_bots = await Trades.all().distinct().values_list("bot", flat=True)
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True
-        except:
-            result = False
+        except Exception as e:
+            SignalPlugin.logging.error(
+                f"Couldn't get actual list of bots - not starting new deals! Cause: {e}"
+            )
+            result = True
 
         return result
 

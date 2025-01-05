@@ -52,7 +52,7 @@ class SignalPlugin:
             "logs/signals.log", "asap", log_level=loglevel
         )
         SignalPlugin.logging.info("Initialized")
-        self.logging.debug(self.plugin_settings["symbol_list"])
+        SignalPlugin.logging.debug(self.plugin_settings["symbol_list"])
 
     async def __check_max_bots(self):
         result = False
@@ -60,8 +60,11 @@ class SignalPlugin:
             all_bots = await Trades.all().distinct().values_list("bot", flat=True)
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True
-        except:
-            result = False
+        except Exception as e:
+            SignalPlugin.logging.error(
+                f"Couldn't get actual list of bots - not starting new deals! Cause: {e}"
+            )
+            result = True
 
         return result
 
@@ -86,8 +89,8 @@ class SignalPlugin:
             for botsuffix, symbol in [item.split("_") for item in running_list]
         ]
 
-        self.logging.debug(f"Running symbols: {running_symbols}")
-        self.logging.debug(f"New symbols: {new_symbol}")
+        SignalPlugin.logging.debug(f"Running symbols: {running_symbols}")
+        SignalPlugin.logging.debug(f"New symbols: {new_symbol}")
         return new_symbol
 
     @retry(wait=wait_fixed(3))
@@ -132,7 +135,7 @@ class SignalPlugin:
                             rsi_14["status"], self.filter_values["rsi_max"]
                         )
 
-                        self.logging.debug(
+                        SignalPlugin.logging.debug(
                             # f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_50["status"]}, RSI_SLOPE_14: {rsi_slope_14["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
                             f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30["status"]}, EMA_DISTANCE_30: {ema_distance["status"]})"
                         )
@@ -143,12 +146,12 @@ class SignalPlugin:
                     else:
                         return False
                 else:
-                    self.logging.debug(
+                    SignalPlugin.logging.debug(
                         f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
                     )
                     return False
             except Exception as e:
-                self.logging.debug(
+                SignalPlugin.logging.debug(
                     f"No data yet for {symbol} - you need to enable dynamic dca - error: {e}"
                 )
                 return False
@@ -169,7 +172,7 @@ class SignalPlugin:
                         and self.__check_entry_point(symbol)
                     ):
 
-                        self.logging.info(f"Triggering new trade for {symbol}")
+                        SignalPlugin.logging.info(f"Triggering new trade for {symbol}")
                         order = {
                             "ordersize": self.ordersize,
                             "symbol": symbol,
@@ -184,12 +187,12 @@ class SignalPlugin:
                         }
                         await self.order.put(order)
                         await asyncio.sleep(1)
-                        self.logging.debug(
+                        SignalPlugin.logging.debug(
                             f"Running trades: {running_trades}, Max Bots: {max_bots}"
                         )
 
             else:
-                self.logging.error(
+                SignalPlugin.logging.error(
                     "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
                 )
                 break
