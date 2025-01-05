@@ -278,7 +278,7 @@ class Statistic:
         profit_data["profit_month"] = {}
         begin_month = (datetime.now().replace(day=1)).date()
         if timestamp:
-            begin_month = (datetime.fromtimestamp(timestamp).replace(day=1)).date()
+            begin_month = (datetime.fromtimestamp(int(timestamp)).replace(day=1)).date()
         try:
             profit_month = await ClosedTrades.filter(
                 close_date__gt=begin_month
