@@ -12,13 +12,16 @@ class Data:
         )
         Data.logging.info("Initialized")
 
-    async def stop_trade(self, symbol, bot):
+    async def stop_trade(self, symbol, bot, tickers):
         result = False
         try:
             # Remove open trade entry
             await OpenTrades.filter(symbol=symbol).delete()
             # Remove trades
             await Trades.filter(bot=bot).delete()
+            # Inform watcher about new symbol list
+            symbols = await self.data.get_symbols()
+            await tickers.put(symbols)
             result = True
         except Exception as e:
             Data.logging.error(

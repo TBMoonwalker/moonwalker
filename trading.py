@@ -9,12 +9,14 @@ class Trading:
         loglevel,
         currency,
         order,
+        tickers,
     ):
         self.currency = currency
 
         # Class Attributes
         Trading.statistic = statistic
         Trading.order = order
+        Trading.tickers = tickers
         Trading.logging = LoggerFactory.get_logger(
             "logs/trading.log", "trading", log_level=loglevel
         )
@@ -120,7 +122,7 @@ class Trading:
         trades = await self.data.get_trades(symbol)
         bot = trades["bot"]
         if trades:
-            result = await self.data.stop_trade(symbol, bot)
+            result = await self.data.stop_trade(symbol, bot, self.tickers)
             if result:
                 return {"status": "ok"}
         else:

@@ -166,6 +166,7 @@ trading = Trading(
     loglevel=loglevel,
     currency=attributes.get("currency"),
     order=order_queue,
+    tickers=tickers_queue,
 )
 
 # Initialize app
