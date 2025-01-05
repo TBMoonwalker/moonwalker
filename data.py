@@ -20,7 +20,7 @@ class Data:
             # Remove trades
             await Trades.filter(bot=bot).delete()
             # Inform watcher about new symbol list
-            symbols = await self.data.get_symbols()
+            symbols = await self.get_symbols()
             await tickers.put(symbols)
             result = True
         except Exception as e:
