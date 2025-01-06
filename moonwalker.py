@@ -218,7 +218,10 @@ async def profit():
 
 
 @app.route("/orders/sell/<symbol>", methods=["GET"])
-@route_cors(allow_origin="*")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
 async def sell_order(symbol):
     response = await trading.manual_sell(symbol)
     if not response:
@@ -228,7 +231,10 @@ async def sell_order(symbol):
 
 
 @app.route("/orders/buy/<symbol>/<ordersize>", methods=["GET"])
-@route_cors(allow_origin="*")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
 async def buy_order(symbol, ordersize):
     response = await trading.manual_buy(symbol, ordersize)
     if not response:
@@ -238,7 +244,10 @@ async def buy_order(symbol, ordersize):
 
 
 @app.route("/orders/stop/<symbol>", methods=["GET"])
-@route_cors(allow_origin="*")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
 async def stop_order(symbol):
     response = await trading.manual_stop(symbol)
     if not response:
@@ -248,7 +257,10 @@ async def stop_order(symbol):
 
 
 @app.route("/orders/closed/length")
-@route_cors(allow_origin="*")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
 async def closed_orders_length():
     response = await statistic.closed_orders_length()
     if not response:
@@ -258,7 +270,10 @@ async def closed_orders_length():
 
 
 @app.route("/orders/closed/<page>")
-@route_cors(allow_origin="*")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
 async def closed_orders_pagination(page):
     response = await statistic.closed_orders(int(page))
     if not response:
@@ -268,7 +283,10 @@ async def closed_orders_pagination(page):
 
 
 @app.route("/profit/statistics/<timestamp>")
-@route_cors(allow_origin="*")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
 async def profit_statistics(timestamp=None):
     response = await statistic.profits_overall(timestamp)
     if not response:
