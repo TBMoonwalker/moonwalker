@@ -7,6 +7,7 @@ import asyncio
 import re
 import requests
 import json
+import random
 
 
 class SignalPlugin:
@@ -163,6 +164,8 @@ class SignalPlugin:
             running_trades = await Trades.all().distinct().values_list("bot", flat=True)
             symbol_list = self.__get_new_symbol_list(tuple(running_trades))
             if symbol_list:
+                # Randomize symbols for new deals
+                random.shuffle(symbol_list)
                 for symbol in symbol_list:
                     max_bots = await self.__check_max_bots()
                     current_symbol = f"asap_{symbol}"
