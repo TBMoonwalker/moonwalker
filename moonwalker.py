@@ -95,6 +95,7 @@ signal_plugin = plugin.SignalPlugin(
     volume=attributes.get("volume", None),
     dynamic_dca=attributes.get("dynamic_dca", False),
     btc_pulse=attributes.get("btc_pulse", False),
+    timeframe=attributes.get("timeframe", "1m"),
 )
 
 # Initialize Exchange module

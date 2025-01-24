@@ -29,6 +29,7 @@ class SignalPlugin:
         volume,
         dynamic_dca,
         btc_pulse,
+        timeframe,
     ):
         self.order = order
         self.ordersize = ordersize
@@ -46,6 +47,7 @@ class SignalPlugin:
         self.dynamic_dca = dynamic_dca
         self.btc_pulse = btc_pulse
         self.topcoin_limit = topcoin_limit
+        self.timeframe = timeframe
 
         # Class Attributes
         SignalPlugin.status = True
@@ -123,15 +125,19 @@ class SignalPlugin:
                         if self.dynamic_dca:
                             self.filter.subscribe_symbol(mc_symbol)
 
-                        rsi_14 = self.filter.get_rsi(symbol, "15Min", "14").json()
-                        ema_slope_30 = self.filter.ema_slope(symbol, "15min", 30).json()
-                        ema_distance = self.filter.ema_distance(
-                            symbol, "15min", 30
+                        rsi_14 = self.filter.get_rsi(
+                            symbol, self.timeframe, "14"
                         ).json()
-                        # ema_slope_50 = self.filter.ema_slope(symbol, "15Min", 50).json()
-                        # ema_slope_9 = self.filter.ema_slope(symbol, "15Min", 9).json()
-                        # ema_cross_15m = self.filter.ema_cross(symbol, "15Min").json()
-                        # rsi_slope_14 = self.filter.rsi_slope(symbol, "15Min", 14).json()
+                        ema_slope_30 = self.filter.ema_slope(
+                            symbol, self.timeframe, 30
+                        ).json()
+                        ema_distance = self.filter.ema_distance(
+                            symbol, self.timeframe, 30
+                        ).json()
+                        # ema_slope_50 = self.filter.ema_slope(symbol, self.timeframe, 50).json()
+                        # ema_slope_9 = self.filter.ema_slope(symbol, self.timeframe, 9).json()
+                        # ema_cross_15m = self.filter.ema_cross(symbol, self.timeframe).json()
+                        # rsi_slope_14 = self.filter.rsi_slope(symbol, self.timeframe, 14).json()
                         rsi_limit = self.filter.is_within_rsi_limit(
                             rsi_14["status"], self.filter_values["rsi_max"]
                         )
