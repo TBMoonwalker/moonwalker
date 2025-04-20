@@ -1,8 +1,8 @@
 import ccxt.pro as ccxtpro
 import asyncio
 
+from data import Data
 from logger import LoggerFactory
-from models import Trades
 
 
 class Watcher:
@@ -22,6 +22,7 @@ class Watcher:
     ):
         self.dynamic_dca = dynamic_dca
         self.currency = currency
+        self.data = Data(loglevel)
         self.exchange_id = exchange
         self.exchange_class = getattr(ccxtpro, self.exchange_id)
         Watcher.exchange = self.exchange_class(
@@ -68,7 +69,7 @@ class Watcher:
         last_price = None
 
         # Initial list for symbols in database
-        symbols = await Trades.all().distinct().values_list("symbol", flat=True)
+        symbols = await self.data.get_symbols()
         if symbols:
             Watcher.symbols = self.__convert_symbols(symbols)
 
@@ -110,7 +111,7 @@ class Watcher:
         while Watcher.status:
             try:
                 orders = await Watcher.exchange.watch_orders()
-                Watcher.logging.debug
+                Watcher.logging.debug(orders)
                 if orders[0]["trades"]:
                     order = {
                         "type": "new_order",

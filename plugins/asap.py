@@ -7,6 +7,7 @@ import asyncio
 import re
 import requests
 import json
+import random
 
 
 class SignalPlugin:
@@ -28,13 +29,16 @@ class SignalPlugin:
         volume,
         dynamic_dca,
         btc_pulse,
+        timeframe,
     ):
         self.order = order
         self.ordersize = ordersize
         self.max_bots = max_bots
         self.ws_url = ws_url
         self.plugin_settings = json.loads(plugin_settings)
-        self.filter = Filter(ws_url=ws_url, btc_pulse=btc_pulse)
+        self.filter = Filter(
+            ws_url=ws_url, loglevel=loglevel, btc_pulse=btc_pulse, currency=currency
+        )
         if filter_values:
             self.filter_values = json.loads(filter_values)
         else:
@@ -42,6 +46,8 @@ class SignalPlugin:
         self.currency = currency
         self.dynamic_dca = dynamic_dca
         self.btc_pulse = btc_pulse
+        self.topcoin_limit = topcoin_limit
+        self.timeframe = timeframe
 
         # Class Attributes
         SignalPlugin.status = True
@@ -49,7 +55,7 @@ class SignalPlugin:
             "logs/signals.log", "asap", log_level=loglevel
         )
         SignalPlugin.logging.info("Initialized")
-        self.logging.debug(self.plugin_settings["symbol_list"])
+        SignalPlugin.logging.debug(self.plugin_settings["symbol_list"])
 
     async def __check_max_bots(self):
         result = False
@@ -57,8 +63,11 @@ class SignalPlugin:
             all_bots = await Trades.all().distinct().values_list("bot", flat=True)
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True
-        except:
-            result = False
+        except Exception as e:
+            SignalPlugin.logging.error(
+                f"Couldn't get actual list of bots - not starting new deals! Cause: {e}"
+            )
+            result = True
 
         return result
 
@@ -83,24 +92,16 @@ class SignalPlugin:
             for botsuffix, symbol in [item.split("_") for item in running_list]
         ]
 
-        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
-        if self.dynamic_dca:
-            if running_symbols != new_symbol:
-                subscribed_symbols, unsubscribe_symbols = (
-                    self.filter.subscribe_new_symbols(running_symbols, new_symbol)
-                )
-
-                self.logging.debug(f"Subscribed symbols: {subscribed_symbols}")
-                self.logging.debug(f"Unsubscribed symbols: {unsubscribe_symbols}")
-
-        self.logging.debug(f"Running symbols: {running_symbols}")
-        self.logging.debug(f"New symbols: {new_symbol}")
+        SignalPlugin.logging.debug(f"Running symbols: {running_symbols}")
+        SignalPlugin.logging.debug(f"New symbols: {new_symbol}")
         return new_symbol
 
     @retry(wait=wait_fixed(3))
     def __check_entry_point(self, symbol):
         if self.filter_values and self.ws_url:
             try:
+                topcoin_limit = True
+                marketcap = "N/A"
                 # btc pulse check
                 btc_pulse = True
                 if self.btc_pulse:
@@ -109,44 +110,56 @@ class SignalPlugin:
                 if btc_pulse:
                     # marketcap api needs the symbol without quote
                     mc_symbol = re.split(self.currency, symbol, flags=re.IGNORECASE)[0]
-                    marketcap = self.filter.get_cmc_marketcap_rank(
-                        self.filter_values["marketcap_cmc_api_key"], mc_symbol
-                    )
-                    topcoin_limit = self.filter.is_within_topcoin_limit(
-                        marketcap, self.filter_values["rsi_max"]
-                    )
-                    if topcoin_limit:
-                        rsi = self.filter.get_rsi(symbol, "15Min").json()
-                        sma_slope = self.filter.sma_slope(symbol, "15Min").json()
-                        ema_cross_15m = self.filter.ema_cross(symbol, "15Min").json()
-                        rsi_limit = self.filter.is_within_rsi_limit(
-                            rsi["status"], self.filter_values["rsi_max"]
-                        )
-                        support_level = self.filter.support_level(
-                            symbol, "4h", 10
-                        ).json()
 
-                        self.logging.debug(
-                            f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, SMA_SLOPE: {sma_slope["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
+                    if self.topcoin_limit:
+                        marketcap = self.filter.get_cmc_marketcap_rank(
+                            self.filter_values["marketcap_cmc_api_key"], mc_symbol
                         )
-                        if (
-                            rsi_limit
-                            and sma_slope["status"] == "upward"
-                            and ema_cross_15m["status"] == "up"
-                        ) or support_level["status"] == "True":
+
+                        topcoin_limit = self.filter.is_within_topcoin_limit(
+                            marketcap, self.topcoin_limit
+                        )
+
+                    if topcoin_limit:
+                        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
+                        if self.dynamic_dca:
+                            self.filter.subscribe_symbol(mc_symbol)
+
+                        rsi_14 = self.filter.get_rsi(
+                            symbol, self.timeframe, "14"
+                        ).json()
+                        ema_slope_30 = self.filter.ema_slope(
+                            symbol, self.timeframe, 30
+                        ).json()
+                        ema_distance = self.filter.ema_distance(
+                            symbol, self.timeframe, 30
+                        ).json()
+                        # ema_slope_50 = self.filter.ema_slope(symbol, self.timeframe, 50).json()
+                        # ema_slope_9 = self.filter.ema_slope(symbol, self.timeframe, 9).json()
+                        # ema_cross_15m = self.filter.ema_cross(symbol, self.timeframe).json()
+                        # rsi_slope_14 = self.filter.rsi_slope(symbol, self.timeframe, 14).json()
+                        rsi_limit = self.filter.is_within_rsi_limit(
+                            rsi_14["status"], self.filter_values["rsi_max"]
+                        )
+
+                        SignalPlugin.logging.debug(
+                            # f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_50["status"]}, RSI_SLOPE_14: {rsi_slope_14["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
+                            f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30["status"]}, EMA_DISTANCE_30: {ema_distance["status"]})"
+                        )
+                        if rsi_limit and ema_distance["status"]:
                             return True
                         else:
                             return False
                     else:
                         return False
                 else:
-                    self.logging.debug(
-                        f"Not starting trade for {symbol}, because BTC is going down"
+                    SignalPlugin.logging.debug(
+                        f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
                     )
                     return False
             except Exception as e:
-                self.logging.debug(
-                    f"No data yet - you need to enable dynamic dca - error: {e}"
+                SignalPlugin.logging.debug(
+                    f"No data yet for {symbol} - you need to enable dynamic dca - error: {e}"
                 )
                 return False
         else:
@@ -157,6 +170,8 @@ class SignalPlugin:
             running_trades = await Trades.all().distinct().values_list("bot", flat=True)
             symbol_list = self.__get_new_symbol_list(tuple(running_trades))
             if symbol_list:
+                # Randomize symbols for new deals
+                random.shuffle(symbol_list)
                 for symbol in symbol_list:
                     max_bots = await self.__check_max_bots()
                     current_symbol = f"asap_{symbol}"
@@ -165,7 +180,8 @@ class SignalPlugin:
                         and not max_bots
                         and self.__check_entry_point(symbol)
                     ):
-                        self.logging.info(f"Triggering new trade for {symbol}")
+
+                        SignalPlugin.logging.info(f"Triggering new trade for {symbol}")
                         order = {
                             "ordersize": self.ordersize,
                             "symbol": symbol,
@@ -180,12 +196,12 @@ class SignalPlugin:
                         }
                         await self.order.put(order)
                         await asyncio.sleep(1)
-                        self.logging.debug(
+                        SignalPlugin.logging.debug(
                             f"Running trades: {running_trades}, Max Bots: {max_bots}"
                         )
 
             else:
-                self.logging.error(
+                SignalPlugin.logging.error(
                     "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
                 )
                 break

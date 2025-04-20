@@ -1,38 +1,84 @@
 import requests
 from cachetools import cached, TTLCache
+from logger import LoggerFactory
+from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
 
 
 class Filter:
-    def __init__(self, ws_url, btc_pulse=None):
+    def __init__(self, ws_url, loglevel, btc_pulse=None, currency=None):
         self.ws_url = ws_url
         self.btc_pulse = btc_pulse
+        self.currency = currency
+
+        Filter.logging = LoggerFactory.get_logger(
+            "logs/filter.log", "filter", log_level=loglevel
+        )
+        Filter.logging.info("Initialized")
+
+    @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
+    def __request_api_endpoint(self, request, headers=None):
+        response = None
+        try:
+            if headers:
+                response = requests.get(url=request, headers=headers)
+            else:
+                response = requests.get(url=request)
+        except requests.exceptions.RequestException as e:
+            Filter.logging.error(f"Error getting response for {request}. Cause: {e}")
+            raise TryAgain
+
+        return response
 
     @cached(cache=TTLCache(maxsize=1024, ttl=60))
     def sma_slope(self, symbol, timeframe):
-        sma_slope_response = requests.get(
+        sma_slope_response = self.__request_api_endpoint(
             f"{self.ws_url}/indicators/sma_slope/{symbol}/{timeframe}"
         )
 
         return sma_slope_response
 
     @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def get_rsi(self, symbol, timeframe):
-        rsi_response = requests.get(
-            f"{self.ws_url}/indicators/rsi/{symbol}/{timeframe}"
+    def ema_slope(self, symbol, timeframe, length):
+        ema_slope_response = self.__request_api_endpoint(
+            f"{self.ws_url}/indicators/ema_slope/{symbol}/{timeframe}/{length}"
+        )
+
+        return ema_slope_response
+
+    def rsi_slope(self, symbol, timeframe, length):
+        rsi_slope_response = self.__request_api_endpoint(
+            f"{self.ws_url}/indicators/rsi_slope/{symbol}/{timeframe}/{length}"
+        )
+
+        return rsi_slope_response
+
+    @cached(cache=TTLCache(maxsize=1024, ttl=60))
+    def get_rsi(self, symbol, timeframe, length):
+        rsi_response = self.__request_api_endpoint(
+            f"{self.ws_url}/indicators/rsi/{symbol}/{timeframe}/{length}"
         )
 
         return rsi_response
 
     @cached(cache=TTLCache(maxsize=1024, ttl=60))
     def ema_cross(self, symbol, timeframe):
-        ema_cross_response = requests.get(
+        ema_cross_response = self.__request_api_endpoint(
             f"{self.ws_url}/indicators/ema_cross/{symbol}/{timeframe}"
         )
 
         return ema_cross_response
 
+    @cached(cache=TTLCache(maxsize=1024, ttl=60))
+    def ema_distance(self, symbol, timeframe, length):
+        ema_distance_response = self.__request_api_endpoint(
+            f"{self.ws_url}/indicators/ema_distance/{symbol}/{timeframe}/{length}"
+        )
+
+        return ema_distance_response
+
+    @cached(cache=TTLCache(maxsize=1024, ttl=300))
     def support_level(self, symbol, timeframe, num_level):
-        support_level_response = requests.get(
+        support_level_response = self.__request_api_endpoint(
             f"{self.ws_url}/indicators/support/{symbol}/{timeframe}/{num_level}"
         )
 
@@ -92,14 +138,23 @@ class Filter:
     @cached(cache=TTLCache(maxsize=1024, ttl=300))
     def btc_pulse_status(self, timeframe, timeframe_uptrend=None):
         response = True
-        btc_pulse = requests.get(
+
+        # Subscribe BTC symbol if not available
+        subscribed_symbols = self.__get_symbols()
+        if subscribed_symbols:
+            if f"BTC{self.currency}" not in subscribed_symbols:
+                self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
+        else:
+            self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
+
+        btc_pulse = self.__request_api_endpoint(
             f"{self.ws_url}/indicators/btc_pulse/{timeframe}"
         ).json()
         if btc_pulse["status"] == "downtrend":
             response = False
         elif btc_pulse["status"] == "uptrend":
             if timeframe_uptrend:
-                btc_pulse_uptrend = requests.get(
+                btc_pulse_uptrend = self.__request_api_endpoint(
                     f"{self.ws_url}/indicators/btc_pulse/{timeframe_uptrend}"
                 ).json()
                 if btc_pulse_uptrend["status"] == "downtrend":
@@ -120,15 +175,15 @@ class Filter:
         limit = 5000
         sort = "cmc_rank"
         url = f"https://{ws_endpoint}/{ws_context}?start={start}&limit={limit}&sort={sort}"
-        response = requests.get(
+        response = self.__request_api_endpoint(
             url,
-            headers=headers,
+            headers,
         )
 
         try:
             json_data = response.json()
         except Exception as e:
-            print(e)
+            Filter.logging.error(f"Error getting CMC data. Cause: {e}")
 
         if json_data["status"]["error_code"] == 0:
             for entry in json_data["data"]:
@@ -137,40 +192,29 @@ class Filter:
 
         return marketcap
 
-    def subscribe_new_symbols(self, running_symbols, new_symbol):
-        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
-
-        # Subscribed symbols
-        subscribed_symbols = list(map(str.upper, self.__get_symbol_subscription()))
-
-        # Unsubscribe old symbols
-        temp_symbols = list(set(subscribed_symbols) - set(running_symbols))
-        unsubscribe_symbols = list(set(temp_symbols) - set(new_symbol))
-        for symbol in unsubscribe_symbols:
-            requests.get(f"{self.ws_url}/symbol/remove/{symbol}")
-
-        # Subscribe new symbols
-        temp2_symbols = list(set(running_symbols) - set(subscribed_symbols))
-        subscribe_symbols = list(set(new_symbol) - set(temp_symbols))
-        if temp2_symbols:
-            subscribe_symbols = subscribe_symbols + temp2_symbols
-
-        for symbol in subscribe_symbols:
-            requests.get(f"{self.ws_url}/symbol/add/{symbol}")
-
-        return (subscribed_symbols, unsubscribe_symbols, subscribe_symbols)
-
-    def __get_symbol_subscription(self):
-        subscribed_list = requests.get(f"{self.ws_url}/symbol/list").json()["result"]
+    def __get_symbols(self):
+        subscribed_list = self.__request_api_endpoint(
+            f"{self.ws_url}/symbol/list"
+        ).json()["result"]
         subscribed_symbols = [
             f"{symbol}"
             for symbol, kline in [item.split("@") for item in subscribed_list]
         ]
 
-        if self.btc_pulse:
-            for symbol in subscribed_symbols:
-                if "btcusdt" in symbol:
-                    subscribed_symbols.remove(symbol)
-                    break
-
         return subscribed_symbols
+
+    def subscribe_symbol(self, symbol):
+        try:
+            self.__request_api_endpoint(f"{self.ws_url}/symbol/add/{symbol}")
+        except Exception as e:
+            Filter.logging.error(
+                f"Error adding {symbol} to Moonloader subscription list. Cause {e}"
+            )
+
+    def unsubscribe_symbol(self, symbol):
+        try:
+            self.__request_api_endpoint(f"{self.ws_url}/symbol/remove/{symbol}")
+        except Exception as e:
+            Filter.logging.error(
+                f"Error removing {symbol} from Moonloader subscription list. Cause {e}"
+            )

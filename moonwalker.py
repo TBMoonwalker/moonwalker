@@ -58,7 +58,11 @@ if attributes.get("dca_strategy", None):
         f"strategies.{attributes.get('dca_strategy')}"
     )
     dca_strategy_plugin = dca_strategy.Strategy(
-        ws_url=attributes.get("ws_url", None), loglevel=loglevel
+        ws_url=attributes.get("ws_url", None),
+        loglevel=loglevel,
+        btc_pulse=attributes.get("btc_pulse", False),
+        currency=attributes.get("currency"),
+        timeframe=attributes.get("timeframe", "1m"),
     )
 if attributes.get("init_buy_strategy", None):
     init_buy_strategy = importlib.import_module(
@@ -92,6 +96,7 @@ signal_plugin = plugin.SignalPlugin(
     volume=attributes.get("volume", None),
     dynamic_dca=attributes.get("dynamic_dca", False),
     btc_pulse=attributes.get("btc_pulse", False),
+    timeframe=attributes.get("timeframe", "1m"),
 )
 
 # Initialize Exchange module
@@ -109,6 +114,7 @@ exchange = Exchange(
     dry_run=attributes.get("dry_run", True),
     loglevel=loglevel,
     fee_deduction=attributes.get("fee_deduction", False),
+    order_check_range=attributes.get("order_check_range", 5),
 )
 
 # Initialize Watcher module
@@ -132,6 +138,7 @@ dca = Dca(
     statistic=stats_queue,
     trailing_tp=attributes.get("trailing_tp", 0),
     dynamic_dca=attributes.get("dynamic_dca", False),
+    dynamic_tp=attributes.get("dynamic_tp", 0),
     strategy=dca_strategy_plugin,
     order=order_queue,
     volume_scale=attributes.get("os"),
@@ -140,7 +147,7 @@ dca = Dca(
     so=attributes.get("so", None),
     price_deviation=attributes.get("sos", None),
     tp=attributes.get("tp"),
-    sl=attributes.get("sl", None),
+    sl=attributes.get("sl", 10000),
     ws_url=attributes.get("ws_url", None),
     loglevel=loglevel,
     market=attributes.get("market", "spot"),
@@ -148,7 +155,11 @@ dca = Dca(
 
 # Initialize Statistics module
 statistic = Statistic(
-    stats=stats_queue, loglevel=loglevel, market=attributes.get("market", "spot")
+    stats=stats_queue,
+    loglevel=loglevel,
+    market=attributes.get("market", "spot"),
+    ws_url=attributes.get("ws_url", None),
+    dynamic_dca=attributes.get("dynamic_dca", False),
 )
 
 # Initialize Trading module
@@ -157,6 +168,7 @@ trading = Trading(
     loglevel=loglevel,
     currency=attributes.get("currency"),
     order=order_queue,
+    tickers=tickers_queue,
 )
 
 # Initialize app
@@ -166,25 +178,6 @@ app = Quart(__name__)
 ######################################################
 #                     Main methods                   #
 ######################################################
-
-
-@app.route("/safety_orders/<symbol>", methods=["GET"])
-@route_cors(allow_origin="*")
-async def trades(symbol):
-    response = await statistic.safety_orders(symbol)
-    if not response:
-        response = {"result": ""}
-
-    return response
-
-
-@app.route("/orders/sell/<symbol>", methods=["GET"])
-async def sell_order(symbol):
-    response = await trading.sell(symbol)
-    if not response:
-        response = {"result": ""}
-
-    return response
 
 
 @app.websocket("/open_orders")
@@ -213,26 +206,6 @@ async def closed_orders():
         raise
 
 
-@app.route("/orders/closed/length")
-@route_cors(allow_origin="*")
-async def closed_orders_length():
-    response = await statistic.closed_orders_length()
-    if not response:
-        response = {"result": ""}
-
-    return response
-
-
-@app.route("/orders/closed/<page>")
-@route_cors(allow_origin="*")
-async def closed_orders_pagination(page):
-    response = await statistic.closed_orders(int(page))
-    if not response:
-        response = {"result": ""}
-
-    return response
-
-
 @app.websocket("/statistics")
 async def profit():
     try:
@@ -246,10 +219,78 @@ async def profit():
         raise
 
 
-@app.route("/profit/statistics")
-@route_cors(allow_origin="*")
-async def profit_statistics():
-    response = await statistic.profit_statistics()
+@app.route("/orders/sell/<symbol>", methods=["GET"])
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
+async def sell_order(symbol):
+    response = await trading.manual_sell(symbol)
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
+@app.route("/orders/buy/<symbol>/<ordersize>", methods=["GET"])
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
+async def buy_order(symbol, ordersize):
+    response = await trading.manual_buy(symbol, ordersize)
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
+@app.route("/orders/stop/<symbol>", methods=["GET"])
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
+async def stop_order(symbol):
+    response = await trading.manual_stop(symbol)
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
+@app.route("/orders/closed/length")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
+async def closed_orders_length():
+    response = await statistic.closed_orders_length()
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
+@app.route("/orders/closed/<page>")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
+async def closed_orders_pagination(page):
+    response = await statistic.closed_orders(int(page))
+    if not response:
+        response = {"result": ""}
+
+    return response
+
+
+@app.route("/profit/statistics/<timestamp>")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
+async def profit_statistics(timestamp=None):
+    response = await statistic.profits_overall(timestamp)
     if not response:
         response = {"result": ""}
 
@@ -265,7 +306,8 @@ async def startup():
 
     if attributes.get("dca", None):
         app.add_background_task(watcher.watch_tickers)
-        app.add_background_task(watcher.watch_orders)
+        if not attributes.get("dry_run", True):
+            app.add_background_task(watcher.watch_orders)
         app.add_background_task(watcher.update_symbols)
         app.add_background_task(dca.run)
 

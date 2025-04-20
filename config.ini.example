@@ -16,6 +16,9 @@ plugin_settings = {"symbol_list": "BTCUSDT,ETHUSDT"}
 [filter]
 #pair_allowlist = 
 #pair_denylist = USDC,USTC,DAI,TUSD,BUSD,FDUSD
+#topcoin_limit = 300
+#filter = {"rsi_max": 45, "marketcap_cmc_api_key": "only needed in combination with topcoin_limit"}
+#volume = {"size": 60, "range": "k"}
 
 [exchange]
 exchange = binance
@@ -30,6 +33,7 @@ market = spot
 # If activated - fee calculation is disabled and full amount is considered
 # You can activate it, if you pay the fees with BNB or other exchange tokens
 fee_deduction = False
+order_check_range = 5
 
 [dca]
 # don't turn it off - if you like no safety orders - unset mstc (default)

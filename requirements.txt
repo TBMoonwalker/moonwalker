@@ -8,12 +8,12 @@ atlastk==0.13.3
 attrs==24.2.0
 blinker==1.9.0
 cachetools==5.5.0
-ccxt==4.4.34
+ccxt==4.4.43
 certifi==2024.8.30
 cffi==1.17.1
 charset-normalizer==3.4.0
 click==8.1.7
-cryptography==44.0.0
+cryptography==44.0.1
 Flask==3.1.0
 frozenlist==1.5.0
 h11==0.14.0
@@ -33,8 +33,8 @@ pycparser==2.22
 python-socketio==5.11.4
 pypika-tortoise==0.3.1
 pytz==2024.2
-Quart==0.19.9
-quart-cors==0.7.0
+Quart==0.20.0
+quart-cors==0.8.0
 requests==2.32.3
 setuptools==75.6.0
 tenacity==9.0.0

@@ -2,15 +2,18 @@ import json
 import time
 from asyncache import cached
 from cachetools import TTLCache
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from logger import LoggerFactory
 from tortoise.functions import Sum
 from tortoise.models import Q
 from models import Trades, OpenTrades, ClosedTrades
+from decimal import Decimal
+from filter import Filter
+from data import Data
 
 
 class Statistic:
-    def __init__(self, stats, loglevel, market):
+    def __init__(self, stats, loglevel, market, ws_url, dynamic_dca):
         Statistic.stats = stats
         Statistic.status = True
 
@@ -20,11 +23,14 @@ class Statistic:
         Statistic.logging.info("Initialized")
 
         self.market = market
+        self.dynamic_dca = dynamic_dca
+        self.filter = Filter(ws_url=ws_url, loglevel=loglevel)
+        self.data = Data(loglevel)
 
     def __calculate_trade_duration(self, start_date, end_date):
         # Convert Unix timestamps to datetime objects
-        date1 = datetime.fromtimestamp((start_date / 1000.0), timezone.utc)
-        date2 = datetime.fromtimestamp(end_date / 1000.0, timezone.utc)
+        date1 = datetime.fromtimestamp((start_date / 1000.0))
+        date2 = datetime.fromtimestamp(end_date / 1000.0)
 
         # Calculate the time difference
         time_difference = date2 - date1
@@ -34,8 +40,8 @@ class Statistic:
         seconds = time_difference.seconds
 
         # Calculate hours, minutes, and seconds
-        hours, remainder = divmod(seconds, 3600)
-        minutes, seconds = divmod(remainder, 60)
+        hours, reminder = divmod(seconds, 3600)
+        minutes, seconds = divmod(reminder, 60)
 
         return json.dumps(
             {
@@ -72,9 +78,7 @@ class Statistic:
         return trade
 
     async def __process_stats(self, stats):
-        # Comes from DCA module
-        if stats["type"] == "tp_check":
-            Statistic.logging.debug(f"TP-Check: {stats}")
+        if stats["type"] != "dca_check":
             symbol = stats["symbol"]
             profit = (
                 stats["current_price"] * stats["total_amount"] - stats["total_cost"]
@@ -91,11 +95,33 @@ class Statistic:
             try:
                 open_timestamp = float(base_order[0]["timestamp"])
             except Exception as e:
+                open_timestamp = datetime.timestamp(datetime.now())
                 Statistic.logging.debug(
                     f"Did not found a timestamp - taking default value. Cause {e}"
                 )
 
-            open_date = datetime.fromtimestamp((open_timestamp / 1000.0), timezone.utc)
+            open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
+        else:
+            if stats["new_so"]:
+                Statistic.logging.debug(f"SO buy: {stats}")
+
+            # Update SO count statistics
+            try:
+                await OpenTrades.update_or_create(
+                    defaults={
+                        "so_count": stats["so_orders"],
+                    },
+                    symbol=stats["symbol"],
+                )
+            except Exception as e:
+                Statistic.logging.error(
+                    f"Error updating SO count for {stats['symbol']}. Cause {e}"
+                )
+            Statistic.logging.debug(f"DCA-Check: {stats}")
+
+        # Comes from DCA module
+        if stats["type"] == "tp_check":
+            Statistic.logging.debug(f"TP-Check: {stats}")
 
             try:
                 # Update open trade statistics
@@ -116,49 +142,8 @@ class Statistic:
                 Statistic.logging.error(
                     f"Error updating open trade database entry. Cause {e}"
                 )
-
-        elif stats["type"] == "dca_check":
-            if stats["new_so"]:
-                Statistic.logging.debug(f"SO buy: {stats}")
-
-            # Update SO count statistics
-            try:
-                await OpenTrades.update_or_create(
-                    defaults={
-                        "so_count": stats["so_orders"],
-                    },
-                    symbol=stats["symbol"],
-                )
-            except Exception as e:
-                Statistic.logging.error(
-                    f"Error updating SO count for {stats["symbol"]}. Cause {e}"
-                )
-            Statistic.logging.debug(f"DCA-Check: {stats}")
-
+        # Comes from Exchange module
         elif stats["type"] == "sold_check":
-            symbol = stats["symbol"]
-            profit = (
-                stats["current_price"] * stats["total_amount"] - stats["total_cost"]
-            )
-            amount = stats["total_amount"]
-            cost = stats["total_cost"]
-            current_price = stats["current_price"]
-            tp_price = stats["tp_price"]
-            avg_price = stats["avg_price"]
-            actual_pnl = stats["actual_pnl"]
-            open_timestamp = 0.0
-            base_order = await self.__get_trade_data(symbol, baseorder=True)
-
-            try:
-                open_timestamp = float(base_order[0]["timestamp"])
-            except Exception as e:
-                Statistic.logging.debug(
-                    f"Did not found a timestamp - taking default value. Cause {e}"
-                )
-
-            open_date = datetime.fromtimestamp((open_timestamp / 1000.0), timezone.utc)
-
-            # Comes from Exchange module
             if stats["sell"]:
                 # Sell PNL in percent
                 sell_pnl = ((current_price - avg_price) / avg_price) * 100
@@ -202,44 +187,40 @@ class Statistic:
                     # Remove open trade entry
                     await OpenTrades.filter(symbol=symbol).delete()
 
+                    # Remove from Moonloader subscription
+                    if self.dynamic_dca:
+                        symbol, currency = symbol.split("/")
+
+                        self.filter.unsubscribe_symbol(symbol)
+
                     Statistic.logging.debug(f"Profit sell: {stats}")
                 except Exception as e:
                     Statistic.logging.error(
                         f"Error writing closed trade database entry. Cause {e}"
                     )
 
-                # try:
-                #     values = (
-                #         await ClosedTrades.filter(symbol=stats["symbol"])
-                #         .order_by("-id")
-                #         .first()
-                #         .values_list("id", "cost")
-                #     )
-                # except Exception as e:
-                #     Statistic.logging.error(
-                #         f"Error getting closed trades for {stats["symbol"]}. Cause {e}"
-                #     )
-
-                # try:
-                #     await ClosedTrades.update_or_create(
-                #         defaults={
-                #             "amount": stats["total_amount"],
-                #             "profit": float(stats["total_cost"]) - float(values[1]),
-                #             "current_price": stats["current_price"],
-                #             "tp_price": stats["tp_price"],
-                #             "avg_price": stats["avg_price"],
-                #         },
-                #         id=values[0],
-                #     )
-                # except Exception as e:
-                #     Statistic.logging.error(
-                #         f"Error updating closed trades for {stats["symbol"]}. Cause {e}"
-                #     )
-
     async def open_orders(self):
+
+        def decimal_serializer(obj):
+            if isinstance(obj, Decimal):
+                return str(obj)
+
         try:
             orders = await OpenTrades.all().values()
-            return json.dumps(orders)
+            for order in orders:
+
+                baseorder = await self.__get_trade_data(
+                    symbol=order["symbol"], baseorder=True
+                )
+                if baseorder:
+                    order["baseorder"] = baseorder[0]
+
+                safetyorders = await self.__get_trade_data(
+                    symbol=order["symbol"], baseorder=False
+                )
+                if safetyorders:
+                    order["safetyorders"] = safetyorders
+            return json.dumps(orders, default=decimal_serializer)
         except Exception as e:
             Statistic.logging.error(f"Error getting open trades: {e}")
             return json.dumps([{}])
@@ -270,6 +251,50 @@ class Statistic:
             Statistic.logging.error(f"Error getting closed trades: {e}")
             return json.dumps([{}])
 
+    # WIP
+    async def safeguard_sell_status(self):
+        profit_data = self.profit_statistics()
+
+        if self.safeguard:
+            # sell everything if we still have 25% to 20% of profit
+            if self.safeguard == "profit":
+                if profit_data["upnl"] > 0 and profit_data["profit_overall"] != 0:
+                    minimum_profit_min = (20 * profit_data["upnl"]) / 100
+                    minimum_profit_max = (25 * profit_data["upnl"]) / 100
+                    if (
+                        profit_data["profit_overall"] > minimum_profit_min
+                        and profit_data["profit_overall"] < minimum_profit_max
+                    ):
+                        self.logging.info(
+                            f"Panic sell everything, because we reached the safeguard levels for profit between {minimum_profit_min} and {minimum_profit_max}"
+                        )
+            # sell everything if we reached a stoploss level of 10% from used budget
+            elif self.safeguard == "stoploss":
+                self.logging.info(
+                    f"Panic sell everything, because we reached the safeguard levels for profit between {minimum_profit_min} and {minimum_profit_max}"
+                )
+
+    async def profits_overall(self, timestamp: None):
+        profit_data = {}
+        profit_data["profit_month"] = {}
+        begin_month = (datetime.now().replace(day=1)).date()
+        if timestamp:
+            begin_month = (datetime.fromtimestamp(int(timestamp)).replace(day=1)).date()
+        try:
+            profit_month = await ClosedTrades.filter(
+                close_date__gt=begin_month
+            ).values_list("close_date", "profit")
+            for timestamp, profit_day in profit_month:
+                date = (datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")).date()
+                if str(date) not in profit_data["profit_month"]:
+                    profit_data["profit_month"][str(date)] = profit_day
+                else:
+                    profit_data["profit_month"][str(date)] += profit_day
+        except Exception as e:
+            Statistic.logging.error(f"Error getting profits for the month: {e}")
+
+        return json.dumps(profit_data)
+
     async def profit_statistics(self):
         profit_data = {}
 
@@ -289,7 +314,9 @@ class Statistic:
             profit = await ClosedTrades.annotate(total=Sum("profit")).values_list(
                 "total", flat=True
             )
-            profit_data["profit_overall"] = profit[0] + profit_data["upnl"]
+            if profit[0] and profit_data["upnl"]:
+                profit_data["profit_overall"] = profit[0] + profit_data["upnl"]
+
         except Exception as e:
             Statistic.logging.error(f"Error getting profit: {e}")
 
@@ -303,7 +330,6 @@ class Statistic:
         except Exception as e:
             Statistic.logging.error(f"Error getting funds: {e}")
 
-        # TBD - Profit per Day
         profit_data["profit_week"] = {}
         begin_week = (
             datetime.now() + timedelta(days=(0 - datetime.now().weekday()))
@@ -322,16 +348,6 @@ class Statistic:
             Statistic.logging.error(f"Error getting profits for the week: {e}")
 
         return json.dumps(profit_data)
-
-    async def safety_orders(self, pair):
-        try:
-            symbol, currency = pair.split("_")
-            symbol = f"{symbol}/{currency}"
-            safety_orders = await self.__get_trade_data(symbol, baseorder=False)
-            return json.dumps(safety_orders)
-        except Exception as e:
-            Statistic.logging.error(f"Error getting safety orders: {e}")
-            return json.dumps([{}])
 
     async def run(self):
         while Statistic.status:

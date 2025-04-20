@@ -3,9 +3,8 @@ import uuid
 import time
 from datetime import datetime
 from models import Trades
-from tortoise.functions import Sum
+from data import Data
 from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
-
 from logger import LoggerFactory
 
 
@@ -25,11 +24,14 @@ class Exchange:
         loglevel,
         fee_deduction,
         statistic,
+        order_check_range,
     ):
         self.currency = currency.upper()
         self.market = market
         self.dry_run = dry_run
         self.fee_deduction = fee_deduction
+        self.data = Data(loglevel, dry_run)
+        self.order_check_range = order_check_range
 
         # Exchange configuration
         login_params = {
@@ -125,7 +127,9 @@ class Exchange:
     def __get_trades_for_symbol(self, symbol):
         trade = None
         time.sleep(1)
-        since = self.exchange.milliseconds() - 5000  # -5 seconds from now
+        since = self.exchange.milliseconds() - (
+            self.order_check_range * 1000
+        )  # X seconds from now
         try:
             trade = {}
             amount = 0.0
@@ -189,7 +193,7 @@ class Exchange:
                 data["ordersize"] = order["cost"]
             else:
                 Exchange.logging.info(
-                    f"Getting trades for {order["symbol"]} failed - using information of order."
+                    f"Getting trades for {order['symbol']} failed - using information of order."
                 )
                 data["timestamp"] = order["timestamp"]
                 data["amount"] = float(order["amount"])
@@ -202,7 +206,7 @@ class Exchange:
 
         return data
 
-    @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
     def __get_amount_from_symbol(self, ordersize, symbol) -> float:
         price = self.__get_price_for_symbol(symbol)
         amount = None
@@ -226,24 +230,14 @@ class Exchange:
 
         return amount
 
-    async def __get_symbols(self):
-        data = await Trades.all().distinct().values_list("symbol", flat=True)
-        return data
-
-    def __split_symbol(self, pair):
-        symbol = pair
-        if not "/" in pair:
-            pair, currency = pair.split(self.currency)
-            symbol = f"{pair}/{self.currency}"
-        return symbol
-
     def __split_direction(self, direction):
         if "_" in direction:
             type, direction = direction.split("_")
         return direction
 
-    @retry(stop=stop_after_attempt(3))
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(3))
     async def __add_trade(self, order):
+        result = False
         # Add database entries on successful trade order
         try:
             await Trades.create(
@@ -268,18 +262,18 @@ class Exchange:
             result = True
         except Exception as e:
             Exchange.logging.error(f"Error adding trade to database: {e}")
-            result = False
+            raise TryAgain
 
         return result
 
-    @retry(stop=stop_after_attempt(3))
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(3))
     async def __delete_trade(self, order):
         result = False
 
         try:
             # Delete database entries after trade sell
             await Trades.filter(bot=order["botname"]).delete()
-            tickers = await self.__get_symbols()
+            tickers = await self.data.get_symbols()
             # Check if trades has been closed (DirtyFixTry - sometimes trades are still in to DB!)
             if order["symbol"] in tickers:
                 Exchange.logging.error(f"Error deleting trade from database. Retrying")
@@ -344,12 +338,19 @@ class Exchange:
 
         return results
 
-    def __sell(self, amount, pair, position):
+    def __sell(self, amount, pair, position, current_price=0):
         results = None
         order = {}
+        order["info"] = {}
 
         if self.dry_run:
-            order["symbol"] = True
+            order["symbol"] = pair
+            order["side"] = position
+            order["timestamp"] = time.mktime(datetime.now().timetuple()) * 1000
+            order["type"] = "market"
+            order["amount"] = amount
+            order["info"]["orderId"] = uuid.uuid4()
+            order["price"] = current_price
             time.sleep(0.2)
             results = order
         else:
@@ -404,7 +405,7 @@ class Exchange:
             # Add trade to database and push message to Watcher
             if await self.__add_trade(order):
                 # Update tickers for tickers watcher
-                tickers = await self.__get_symbols()
+                tickers = await self.data.get_symbols()
                 await Exchange.tickers.put(tickers)
             else:
                 Exchange.logging.error(
@@ -415,15 +416,13 @@ class Exchange:
         close = None
 
         # Get token amount from trades
-        amount = (
-            await Trades.filter(bot=order["botname"])
-            .annotate(total_amount=Sum("amount"))
-            .values("total_amount")
-        )
-        amount = amount[0]["total_amount"]
+        trades = await self.data.get_trades(order["symbol"])
+        amount = trades["total_amount"]
 
         # Sell order to exchange
-        trade = self.__sell(amount, order["symbol"], order["direction"])
+        trade = self.__sell(
+            amount, order["symbol"], order["direction"], order["current_price"]
+        )
 
         # Delete trade from database and push message to Statistics
         if trade:
@@ -433,24 +432,23 @@ class Exchange:
                     f"Removed trades for {order['symbol']} in database"
                 )
                 # Update statistics
-                if not self.dry_run:
-                    order_status = self.__parse_order_status(trade)
-                    data = {}
-                    data["type"] = "sold_check"
-                    data["sell"] = True
-                    data["symbol"] = order_status["symbol"]
-                    data["total_amount"] = order_status["amount"]
-                    data["total_cost"] = order["total_cost"]
-                    # data["total_cost"] = order_status["ordersize"] --> uses wrong ordersize
-                    data["current_price"] = order_status["price"]
-                    data["tp_price"] = order_status["price"]
-                    data["avg_price"] = data["total_cost"] / data["total_amount"]
-                    data["actual_pnl"] = order["actual_pnl"]
+                order_status = self.__parse_order_status(trade)
+                data = {}
+                data["type"] = "sold_check"
+                data["sell"] = True
+                data["symbol"] = order_status["symbol"]
+                data["timestamp"] = trades["timestamp"]
+                data["total_amount"] = order_status["amount"]
+                data["total_cost"] = order["total_cost"]
+                data["current_price"] = order_status["price"]
+                data["tp_price"] = order_status["price"]
+                data["avg_price"] = data["total_cost"] / data["total_amount"]
+                data["actual_pnl"] = order["actual_pnl"]
 
-                    await Exchange.statistic.put(data)
+                await Exchange.statistic.put(data)
 
                 # Update tickers for tickers watcher
-                tickers = await self.__get_symbols()
+                tickers = await self.data.get_symbols()
                 # Not sending empty symbol list (watcher_tickes needs at least one!)
                 if tickers:
                     await Exchange.tickers.put(tickers)
@@ -460,8 +458,7 @@ class Exchange:
                 )
 
     async def __process_order(self, data):
-
-        data["symbol"] = self.__split_symbol(data["symbol"])
+        data["symbol"] = self.data.split_symbol(data["symbol"], self.currency)
         data["direction"] = self.__split_direction(data["direction"])
 
         if data["side"] == "buy":
