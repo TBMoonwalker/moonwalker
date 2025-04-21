@@ -38,7 +38,7 @@ quart-cors==0.8.0
 requests==2.32.3
 setuptools==75.6.0
 tenacity==9.0.0
-tortoise-orm==0.22.1
+tortoise-orm==0.25.0
 typing_extensions==4.12.2
 urllib3==2.2.3
 websockets==14.1
