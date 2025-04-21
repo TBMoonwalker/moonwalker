@@ -68,7 +68,7 @@ class Data:
                 "direction": trades[-1]["direction"],
                 "side": trades[-1]["side"],
                 "bot": trades[-1]["bot"],
-                "bo_price": trades[-1]["price"],
+                "bo_price": trades[0]["price"],
                 "current_price": current_price,
                 "safetyorders": safetyorders,
                 "safetyorders_count": safetyorders_count,
