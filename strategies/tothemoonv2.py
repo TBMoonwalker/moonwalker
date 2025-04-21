@@ -9,11 +9,11 @@ class Strategy:
         self.btc_pulse = btc_pulse
         self.timeframe = timeframe
 
-        Strategy.logging = LoggerFactory.get_logger(
-            "logs/strategies.log", "tothemoon", log_level=loglevel
+        self.logging = LoggerFactory.get_logger(
+            "logs/strategies.log", "tothemoonv2", log_level=loglevel
         )
         self.filter = Filter(ws_url=ws_url, loglevel=loglevel, currency=currency)
-        Strategy.logging.info("Initialized")
+        self.logging.info("Initialized")
 
     def run(self, symbol, price):
         result = False
@@ -33,29 +33,32 @@ class Strategy:
                 # support_level_30m = self.filter.support_level(symbol, "1d", 10).json()
                 # support_level = support_level_30m["status"]
 
-                Strategy.logging.debug(f"Symbol: {symbol}")
-                Strategy.logging.debug(f"EMA slope 9: {ema_slope_9}")
-                Strategy.logging.debug(f"EMA slope 50: {ema_slope_50}")
-                Strategy.logging.debug(f"RSI slope 14: {rsi_slope_14}")
-                Strategy.logging.debug(f"EMA cross: {ema_cross}")
+                self.logging.debug(f"Symbol: {symbol}")
+                self.logging.debug(f"EMA slope 9: {ema_slope_9}")
+                self.logging.debug(f"EMA slope 50: {ema_slope_50}")
+                self.logging.debug(f"RSI slope 14: {rsi_slope_14}")
+                self.logging.debug(f"EMA cross: {ema_cross}")
                 # TODO: Implement extreme wick detection (high percentage down in one candle)
-                # Strategy.logging.debug(f"Support Level: {support_level}")
-                # Strategy.logging.debug(f"RSI value: {rsi_value}")
+                # self.logging.debug(f"Support Level: {support_level}")
+                # self.logging.debug(f"RSI value: {rsi_value}")
 
                 # if rsi_value <= 30:
                 if (
                     ema_slope_9["status"] == "upward"
                     and ema_slope_50["status"] == "upward"
                     and rsi_slope_14["status"] == "upward"
-                ) and ema_cross["status"] == "up":
+                    and ema_cross["status"] == "up"
+                ):
                     # create SO
                     result = True
             else:
-                Strategy.logging.info(
+                self.logging.info(
                     "BTC-Pulse is in downtrend - not creating new safety orders"
                 )
 
         except ValueError as e:
-            Strategy.logging.error(f"JSON Message is garbage: {e}")
+            self.logging.error(f"JSON Message is garbage: {e}")
+
+        self.logging.debug(f"Creating SO: {result}")
 
         return result
