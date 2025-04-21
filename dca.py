@@ -40,14 +40,14 @@ class Dca:
         self.data = Data(loglevel)
 
         # Class Attributes
-        Dca.status = True
-        Dca.dca = dca
-        Dca.order = order
-        Dca.statistic = statistic
-        Dca.logging = LoggerFactory.get_logger(
+        self.status = True
+        self.dca = dca
+        self.order = order
+        self.statistic = statistic
+        self.logging = LoggerFactory.get_logger(
             "logs/dca.log", "dca", log_level=loglevel
         )
-        Dca.logging.info("Initialized")
+        self.logging.info("Initialized")
 
     def __dynamic_dca_strategy(self, symbol, price):
         result = False
@@ -105,14 +105,14 @@ class Dca:
                 if (sell and actual_pnl != self.pnl) and self.pnl != 0:
                     diff = actual_pnl - self.pnl
                     diff_percentage = (diff / self.pnl) * 100
-                    Dca.logging.debug(
+                    self.logging.debug(
                         f"TTP Check: {symbol} - PNL Difference: {diff_percentage}, Actual PNL: {actual_pnl}, DCA-PNL: {self.pnl}"
                     )
                     # Sell if trailing deviation is reached or actual PNL is under minimum TP
                     if (
                         diff_percentage < 0 and abs(diff_percentage) > self.trailing_tp
                     ) or actual_pnl < self.tp:
-                        # Dca.logging.debug(
+                        # self.logging.debug(
                         #     f"TTP Check: {symbol} - Percentage decrease - Take profit: {diff_percentage}"
                         # )
                         sell = True
@@ -136,7 +136,7 @@ class Dca:
                 }
                 # Send new take profit order to exchange module
                 self.logging.debug(f"Sending sell order to exchange module: {order}")
-                await Dca.order.put(order)
+                await self.order.put(order)
 
             # Logging configuration
             logging_json = {
@@ -152,7 +152,7 @@ class Dca:
                 "sell": sell,
                 "direction": bot_type,
             }
-            await Dca.statistic.put(logging_json)
+            await self.statistic.put(logging_json)
 
     async def __dca_strategy(self, symbol, current_price):
         trades = await self.data.get_trades(symbol)
@@ -218,7 +218,7 @@ class Dca:
                             "side": "buy",
                         }
                         # Send new safety order request to exchange module
-                        await Dca.order.put(order)
+                        await self.order.put(order)
 
                 # Logging configuration
                 logging_json = {
@@ -232,12 +232,12 @@ class Dca:
                     "actual_pnl": actual_pnl,
                     "new_so": new_so,
                 }
-                # Send new DCA statistics to statistics module
-                await Dca.statistic.put(logging_json)
+                # Send new statistics to statistics module
+                await self.statistic.put(logging_json)
 
     async def run(self):
         while True:
-            data = await Dca.dca.get()
+            data = await self.dca.get()
 
             # New price action for DCA calculation
             if data["type"] == "ticker_price":
@@ -250,7 +250,7 @@ class Dca:
                 # Check TP
                 await self.__take_profit(symbol, price)
 
-            Dca.dca.task_done()
+            self.dca.task_done()
 
     async def shutdown(self):
-        Dca.status = False
+        self.status = False

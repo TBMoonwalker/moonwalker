@@ -27,6 +27,7 @@ class SignalPlugin:
         volume,
         dynamic_dca,
         btc_pulse,
+        timeframe,
     ):
         self.order = order
         self.ordersize = ordersize

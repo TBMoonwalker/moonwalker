@@ -14,14 +14,14 @@ class Trading:
         self.currency = currency
 
         # Class Attributes
-        Trading.statistic = statistic
-        Trading.order = order
-        Trading.tickers = tickers
-        Trading.logging = LoggerFactory.get_logger(
+        self.statistic = statistic
+        self.order = order
+        self.tickers = tickers
+        self.logging = LoggerFactory.get_logger(
             "logs/trading.log", "trading", log_level=loglevel
         )
         self.data = Data(loglevel)
-        Trading.logging.info("Initialized")
+        self.logging.info("Initialized")
 
     async def manual_sell(self, symbol):
         symbol = self.data.split_symbol(symbol.upper(), self.currency)
@@ -46,8 +46,8 @@ class Trading:
                 "total_cost": total_cost,
                 "current_price": current_price,
             }
-            await Trading.order.put(order)
-            Trading.logging.debug(f"Manual sell request for {symbol}")
+            await self.order.put(order)
+            self.logging.debug(f"Manual sell request for {symbol}")
 
             logging_json = {
                 "type": "tp_check",
@@ -63,7 +63,7 @@ class Trading:
                 "direction": direction,
             }
 
-            await Trading.statistic.put(logging_json)
+            await self.statistic.put(logging_json)
             return logging_json
         return None
 
@@ -94,7 +94,7 @@ class Trading:
                 "side": "buy",
             }
             # Send new safety order request to exchange module
-            await Trading.order.put(order)
+            await self.order.put(order)
 
             # Logging configuration
             logging_json = {
@@ -109,10 +109,10 @@ class Trading:
                 "new_so": True,
             }
             # Send new DCA statistics to statistics module
-            await Trading.statistic.put(logging_json)
+            await self.statistic.put(logging_json)
             return logging_json
         else:
-            Trading.logging.error(
+            self.logging.error(
                 f"Manual trade is only for new safety orders right now! No trade for {symbol} found."
             )
         return None
@@ -126,4 +126,4 @@ class Trading:
             if result:
                 return {"status": "ok"}
         else:
-            Trading.logging.error(f"Cannot stop trade for {symbol} - No trade found.")
+            self.logging.error(f"Cannot stop trade for {symbol} - No trade found.")

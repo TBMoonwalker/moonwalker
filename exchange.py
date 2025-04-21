@@ -50,14 +50,14 @@ class Exchange:
         self.exchange.load_markets()
 
         # Class Attributes
-        Exchange.status = True
-        Exchange.order = order
-        Exchange.tickers = tickers
-        Exchange.statistic = statistic
-        Exchange.logging = LoggerFactory.get_logger(
+        self.status = True
+        self.order = order
+        self.tickers = tickers
+        self.statistic = statistic
+        self.logging = LoggerFactory.get_logger(
             "logs/exchange.log", "exchange", log_level=loglevel
         )
-        Exchange.logging.info("Initialized")
+        self.logging.info("Initialized")
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_price_for_symbol(self, pair):
@@ -84,17 +84,17 @@ class Exchange:
             actual_price = float(ticker["last"])
             result = self.exchange.price_to_precision(pair, actual_price)
         except ccxt.ExchangeError as e:
-            Exchange.logging.error(
+            self.logging.error(
                 f"Fetching ticker messages failed due to an exchange error: {e}"
             )
             raise TryAgain
         except ccxt.NetworkError as e:
-            Exchange.logging.error(
+            self.logging.error(
                 f"Fetching ticker messages failed due to a network error: {e}"
             )
             raise TryAgain
         except Exception as e:
-            Exchange.logging.error(f"Fetching ticker messages failed with: {e}")
+            self.logging.error(f"Fetching ticker messages failed with: {e}")
             raise TryAgain
 
         return result
@@ -108,17 +108,17 @@ class Exchange:
             market = self.exchange.market(pair)
             result = market["precision"]["amount"]
         except ccxt.ExchangeError as e:
-            Exchange.logging.error(
+            self.logging.error(
                 f"Fetching market data failed due to an exchange error: {e}"
             )
             raise TryAgain
         except ccxt.NetworkError as e:
-            Exchange.logging.error(
+            self.logging.error(
                 f"Fetching market data failed due to a network error: {e}"
             )
             raise TryAgain
         except Exception as e:
-            Exchange.logging.error(f"FFetching market data failed failed with: {e}")
+            self.logging.error(f"FFetching market data failed failed with: {e}")
             raise TryAgain
 
         return result
@@ -137,7 +137,7 @@ class Exchange:
             cost = 0.0
             orderlist = self.exchange.fetch_my_trades(symbol, since)
             if orderlist:
-                Exchange.logging.debug(f"Orderlist for {symbol}: {orderlist}")
+                self.logging.debug(f"Orderlist for {symbol}: {orderlist}")
 
                 for order in orderlist:
                     amount += order["amount"]
@@ -154,17 +154,15 @@ class Exchange:
                 trade["side"] = orderlist[-1]["side"]
                 trade["fee_cost"] = orderlist[-1]["fee"]
         except ccxt.NetworkError as e:
-            Exchange.logging.error(
-                f"Fetch trade order failed due to a network error: {e}"
-            )
+            self.logging.error(f"Fetch trade order failed due to a network error: {e}")
             raise TryAgain
         except ccxt.ExchangeError as e:
-            Exchange.logging.error(
+            self.logging.error(
                 f"Fetch trade order failed due to an exchange error: {e}"
             )
             raise TryAgain
         except Exception as e:
-            Exchange.logging.error(f"Fetch trade order failed with: {e}")
+            self.logging.error(f"Fetch trade order failed with: {e}")
             raise TryAgain
 
         return trade
@@ -192,7 +190,7 @@ class Exchange:
                 data["amount_fee"] = trade["fee_cost"]
                 data["ordersize"] = order["cost"]
             else:
-                Exchange.logging.info(
+                self.logging.info(
                     f"Getting trades for {order['symbol']} failed - using information of order."
                 )
                 data["timestamp"] = order["timestamp"]
@@ -215,17 +213,17 @@ class Exchange:
                 symbol, float(ordersize) / float(price)
             )
         except ccxt.NetworkError as e:
-            Exchange.logging.error(
+            self.logging.error(
                 f"Getting amount for {symbol} failed due to a network error: {e}"
             )
             raise TryAgain
         except ccxt.ExchangeError as e:
-            Exchange.logging.error(
+            self.logging.error(
                 f"Getting amount for {symbol} failed due to an exchange error: {e}"
             )
             raise TryAgain
         except Exception as e:
-            Exchange.logging.error(f"Getting amount for {symbol} failed with: {e}")
+            self.logging.error(f"Getting amount for {symbol} failed with: {e}")
             raise TryAgain
 
         return amount
@@ -261,7 +259,7 @@ class Exchange:
             )
             result = True
         except Exception as e:
-            Exchange.logging.error(f"Error adding trade to database: {e}")
+            self.logging.error(f"Error adding trade to database: {e}")
             raise TryAgain
 
         return result
@@ -276,11 +274,11 @@ class Exchange:
             tickers = await self.data.get_symbols()
             # Check if trades has been closed (DirtyFixTry - sometimes trades are still in to DB!)
             if order["symbol"] in tickers:
-                Exchange.logging.error(f"Error deleting trade from database. Retrying")
+                self.logging.error(f"Error deleting trade from database. Retrying")
                 raise TryAgain
             result = True
         except Exception as e:
-            Exchange.logging.error(f"Error deleting trade from database: {e}")
+            self.logging.error(f"Error deleting trade from database: {e}")
             raise TryAgain
 
         return result
@@ -313,7 +311,7 @@ class Exchange:
             results = order
         else:
             try:
-                Exchange.logging.info(f"Try to buy {amount} {pair}")
+                self.logging.info(f"Try to buy {amount} {pair}")
                 order = self.exchange.create_order(
                     pair, "market", side, amount, price, parameter
                 )
@@ -323,17 +321,17 @@ class Exchange:
                 else:
                     results = None
             except ccxt.ExchangeError as e:
-                Exchange.logging.error(
+                self.logging.error(
                     f"Buying pair {pair} failed due to an exchange error: {e}"
                 )
                 results = None
             except ccxt.NetworkError as e:
-                Exchange.logging.error(
+                self.logging.error(
                     f"Buying pair {pair} failed due to an network error: {e}"
                 )
                 results = None
             except Exception as e:
-                Exchange.logging.error(f"Buying pair {pair} failed with: {e}")
+                self.logging.error(f"Buying pair {pair} failed with: {e}")
                 results = None
 
         return results
@@ -362,17 +360,17 @@ class Exchange:
                 else:
                     results = None
             except ccxt.ExchangeError as e:
-                Exchange.logging.error(
+                self.logging.error(
                     f"Selling pair {pair} failed due to an exchange error: {e}"
                 )
                 results = None
             except ccxt.NetworkError as e:
-                Exchange.logging.error(
+                self.logging.error(
                     f"Selling pair {pair} failed due to an network error: {e}"
                 )
                 results = None
             except Exception as e:
-                Exchange.logging.error(f"Selling pair {pair} failed with: {e}")
+                self.logging.error(f"Selling pair {pair} failed with: {e}")
                 results = None
 
         return results
@@ -381,7 +379,7 @@ class Exchange:
         trade = self.__buy(order["ordersize"], order["symbol"], order["direction"])
 
         if trade:
-            Exchange.logging.info(f"Opened trade: {trade}")
+            self.logging.info(f"Opened trade: {trade}")
 
             order_status = self.__parse_order_status(trade)
             order.update(order_status)
@@ -398,7 +396,7 @@ class Exchange:
                 order["amount_fee"] = order["amount"] * float(order["fees"])
                 order["amount"] = float(order_status["amount"]) - order["amount_fee"]
 
-                Exchange.logging.debug(
+                self.logging.debug(
                     f"Fee Deduction not active. Real amount {order_status['amount']}, deducted amount {order['amount']}"
                 )
 
@@ -406,9 +404,9 @@ class Exchange:
             if await self.__add_trade(order):
                 # Update tickers for tickers watcher
                 tickers = await self.data.get_symbols()
-                await Exchange.tickers.put(tickers)
+                await self.tickers.put(tickers)
             else:
-                Exchange.logging.error(
+                self.logging.error(
                     "Error adding trade to database - trade will not automatically traded by Moonwalker!"
                 )
 
@@ -426,11 +424,9 @@ class Exchange:
 
         # Delete trade from database and push message to Statistics
         if trade:
-            Exchange.logging.info(f"Sold {amount} {order['symbol']} on Exchange")
+            self.logging.info(f"Sold {amount} {order['symbol']} on Exchange")
             if await self.__delete_trade(order):
-                Exchange.logging.info(
-                    f"Removed trades for {order['symbol']} in database"
-                )
+                self.logging.info(f"Removed trades for {order['symbol']} in database")
                 # Update statistics
                 order_status = self.__parse_order_status(trade)
                 data = {}
@@ -445,15 +441,15 @@ class Exchange:
                 data["avg_price"] = data["total_cost"] / data["total_amount"]
                 data["actual_pnl"] = order["actual_pnl"]
 
-                await Exchange.statistic.put(data)
+                await self.statistic.put(data)
 
                 # Update tickers for tickers watcher
                 tickers = await self.data.get_symbols()
                 # Not sending empty symbol list (watcher_tickes needs at least one!)
                 if tickers:
-                    await Exchange.tickers.put(tickers)
+                    await self.tickers.put(tickers)
             else:
-                Exchange.logging.error(
+                self.logging.error(
                     "Error deleting trade from database - trade is done on Exchange, but not on Moonwalker Bot"
                 )
 
@@ -463,17 +459,17 @@ class Exchange:
 
         if data["side"] == "buy":
             await self.__buy_order(data)
-            Exchange.logging.info(f"New buy request: {data}")
+            self.logging.info(f"New buy request: {data}")
         if data["side"] == "sell" and "type_sell" in data:
-            Exchange.logging.info(f"New sell request: {data}")
+            self.logging.info(f"New sell request: {data}")
             await self.__sell_order(data)
 
     async def run(self):
-        while Exchange.status:
-            data = await Exchange.order.get()
+        while self.status:
+            data = await self.order.get()
             await self.__process_order(data)
-            Exchange.order.task_done()
+            self.order.task_done()
 
     async def shutdown(self):
-        Exchange.status = False
+        self.status = False
         await self.exchange.close()

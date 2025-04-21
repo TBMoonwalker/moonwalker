@@ -14,13 +14,13 @@ from data import Data
 
 class Statistic:
     def __init__(self, stats, loglevel, market, ws_url, dynamic_dca):
-        Statistic.stats = stats
-        Statistic.status = True
+        self.stats = stats
+        self.status = True
 
-        Statistic.logging = LoggerFactory.get_logger(
+        self.logging = LoggerFactory.get_logger(
             "logs/statistics.log", "statistic", log_level=loglevel
         )
-        Statistic.logging.info("Initialized")
+        self.logging.info("Initialized")
 
         self.market = market
         self.dynamic_dca = dynamic_dca
@@ -61,9 +61,7 @@ class Statistic:
                     Q(baseorder__gt=0), Q(symbol=symbol), join_type="AND"
                 ).values()
             except Exception as e:
-                Statistic.logging.error(
-                    f"Error getting baseorders from database. Cause {e}"
-                )
+                self.logging.error(f"Error getting baseorders from database. Cause {e}")
         # Get safetyorders
         else:
             try:
@@ -71,7 +69,7 @@ class Statistic:
                     Q(safetyorder__gt=0), Q(symbol=symbol), join_type="AND"
                 ).values()
             except Exception as e:
-                Statistic.logging.error(
+                self.logging.error(
                     f"Error getting safetyorders from database. Cause {e}"
                 )
 
@@ -96,14 +94,14 @@ class Statistic:
                 open_timestamp = float(base_order[0]["timestamp"])
             except Exception as e:
                 open_timestamp = datetime.timestamp(datetime.now())
-                Statistic.logging.debug(
+                self.logging.debug(
                     f"Did not found a timestamp - taking default value. Cause {e}"
                 )
 
             open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
         else:
             if stats["new_so"]:
-                Statistic.logging.debug(f"SO buy: {stats}")
+                self.logging.debug(f"SO buy: {stats}")
 
             # Update SO count statistics
             try:
@@ -114,14 +112,14 @@ class Statistic:
                     symbol=stats["symbol"],
                 )
             except Exception as e:
-                Statistic.logging.error(
+                self.logging.error(
                     f"Error updating SO count for {stats['symbol']}. Cause {e}"
                 )
-            Statistic.logging.debug(f"DCA-Check: {stats}")
+            self.logging.debug(f"DCA-Check: {stats}")
 
         # Comes from DCA module
         if stats["type"] == "tp_check":
-            Statistic.logging.debug(f"TP-Check: {stats}")
+            self.logging.debug(f"TP-Check: {stats}")
 
             try:
                 # Update open trade statistics
@@ -139,7 +137,7 @@ class Statistic:
                     symbol=stats["symbol"],
                 )
             except Exception as e:
-                Statistic.logging.error(
+                self.logging.error(
                     f"Error updating open trade database entry. Cause {e}"
                 )
         # Comes from Exchange module
@@ -159,7 +157,7 @@ class Statistic:
                 try:
                     open_trade = await OpenTrades.filter(symbol=symbol).values()
                 except Exception as e:
-                    Statistic.logging.error(
+                    self.logging.error(
                         f"Error getting open trades from database. Cause {e}"
                     )
 
@@ -193,9 +191,9 @@ class Statistic:
 
                         self.filter.unsubscribe_symbol(symbol)
 
-                    Statistic.logging.debug(f"Profit sell: {stats}")
+                    self.logging.debug(f"Profit sell: {stats}")
                 except Exception as e:
-                    Statistic.logging.error(
+                    self.logging.error(
                         f"Error writing closed trade database entry. Cause {e}"
                     )
 
@@ -222,7 +220,7 @@ class Statistic:
                     order["safetyorders"] = safetyorders
             return json.dumps(orders, default=decimal_serializer)
         except Exception as e:
-            Statistic.logging.error(f"Error getting open trades: {e}")
+            self.logging.error(f"Error getting open trades: {e}")
             return json.dumps([{}])
 
     async def closed_orders_length(self):
@@ -230,7 +228,7 @@ class Statistic:
             order_length = await ClosedTrades.all().count()
             return json.dumps(order_length)
         except Exception as e:
-            Statistic.logging.error(f"Error getting closed trades: {e}")
+            self.logging.error(f"Error getting closed trades: {e}")
             return json.dumps([{}])
 
     async def closed_orders(self, page=0):
@@ -248,7 +246,7 @@ class Statistic:
                 )
             return json.dumps(orders)
         except Exception as e:
-            Statistic.logging.error(f"Error getting closed trades: {e}")
+            self.logging.error(f"Error getting closed trades: {e}")
             return json.dumps([{}])
 
     # WIP
@@ -291,7 +289,7 @@ class Statistic:
                 else:
                     profit_data["profit_month"][str(date)] += profit_day
         except Exception as e:
-            Statistic.logging.error(f"Error getting profits for the month: {e}")
+            self.logging.error(f"Error getting profits for the month: {e}")
 
         return json.dumps(profit_data)
 
@@ -306,7 +304,7 @@ class Statistic:
             )
             profit_data["upnl"] = upnl[0]
         except Exception as e:
-            Statistic.logging.error(f"Error getting losses: {e}")
+            self.logging.error(f"Error getting losses: {e}")
 
         # Profit overall
         profit_data["profit_overall"] = 0
@@ -318,7 +316,7 @@ class Statistic:
                 profit_data["profit_overall"] = profit[0] + profit_data["upnl"]
 
         except Exception as e:
-            Statistic.logging.error(f"Error getting profit: {e}")
+            self.logging.error(f"Error getting profit: {e}")
 
         # Funds locked in deals
         profit_data["funds_locked"] = 0
@@ -328,7 +326,7 @@ class Statistic:
             )
             profit_data["funds_locked"] = funds_locked[0]
         except Exception as e:
-            Statistic.logging.error(f"Error getting funds: {e}")
+            self.logging.error(f"Error getting funds: {e}")
 
         profit_data["profit_week"] = {}
         begin_week = (
@@ -345,15 +343,15 @@ class Statistic:
                 else:
                     profit_data["profit_week"][str(date)] += profit_day
         except Exception as e:
-            Statistic.logging.error(f"Error getting profits for the week: {e}")
+            self.logging.error(f"Error getting profits for the week: {e}")
 
         return json.dumps(profit_data)
 
     async def run(self):
-        while Statistic.status:
-            stats = await Statistic.stats.get()
+        while self.status:
+            stats = await self.stats.get()
             await self.__process_stats(stats)
-            Statistic.stats.task_done()
+            self.stats.task_done()
 
     async def shutdown(self):
-        Statistic.status = False
+        self.status = False

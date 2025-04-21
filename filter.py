@@ -10,10 +10,10 @@ class Filter:
         self.btc_pulse = btc_pulse
         self.currency = currency
 
-        Filter.logging = LoggerFactory.get_logger(
+        self.logging = LoggerFactory.get_logger(
             "logs/filter.log", "filter", log_level=loglevel
         )
-        Filter.logging.info("Initialized")
+        self.logging.info("Initialized")
 
     @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
     def __request_api_endpoint(self, request, headers=None):
@@ -24,7 +24,7 @@ class Filter:
             else:
                 response = requests.get(url=request)
         except requests.exceptions.RequestException as e:
-            Filter.logging.error(f"Error getting response for {request}. Cause: {e}")
+            self.logging.error(f"Error getting response for {request}. Cause: {e}")
             raise TryAgain
 
         return response
@@ -183,7 +183,7 @@ class Filter:
         try:
             json_data = response.json()
         except Exception as e:
-            Filter.logging.error(f"Error getting CMC data. Cause: {e}")
+            self.logging.error(f"Error getting CMC data. Cause: {e}")
 
         if json_data["status"]["error_code"] == 0:
             for entry in json_data["data"]:
@@ -207,7 +207,7 @@ class Filter:
         try:
             self.__request_api_endpoint(f"{self.ws_url}/symbol/add/{symbol}")
         except Exception as e:
-            Filter.logging.error(
+            self.logging.error(
                 f"Error adding {symbol} to Moonloader subscription list. Cause {e}"
             )
 
@@ -215,6 +215,6 @@ class Filter:
         try:
             self.__request_api_endpoint(f"{self.ws_url}/symbol/remove/{symbol}")
         except Exception as e:
-            Filter.logging.error(
+            self.logging.error(
                 f"Error removing {symbol} from Moonloader subscription list. Cause {e}"
             )
