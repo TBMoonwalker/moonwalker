@@ -175,12 +175,13 @@ class Dca:
             # Total PNL from base order
             total_pnl = ((current_price - bo_price) / bo_price) * 100
 
+            # Evaluate max deviation and actual deviation from base order
             if self.step_scale == 1:
-                # Total deviation from base order
+                # If step scale equals 1
                 max_deviation = self.price_deviation * (safety_order_count + 1)
-                max_deviation = round(max_deviation, 2)
                 actual_deviation = self.price_deviation * safety_order_count
             else:
+                # If step scale is other than 1
                 max_deviation = (
                     self.price_deviation
                     * (1 - self.step_scale ** (safety_order_count + 1))
@@ -226,6 +227,7 @@ class Dca:
                 else:
                     # Trigger new safety order for static dca
                     if total_pnl <= -abs(max_deviation):
+                        # Set next_so_percentage to diffence between max deviation and actual deviation
                         next_so_percentage = max_deviation - actual_deviation
                         next_so_percentage = round(next_so_percentage, 2)
                         new_so = True
