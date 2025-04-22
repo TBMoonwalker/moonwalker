@@ -175,12 +175,6 @@ class Dca:
             # Total PNL from base order
             total_pnl = ((current_price - bo_price) / bo_price) * 100
 
-            # Total deviation from base order
-            max_deviation = (
-                self.price_deviation * (1 - self.step_scale ** (safety_order_count + 1))
-            ) / (1 - self.step_scale)
-            max_deviation = round(max_deviation, 2)
-
             # Check if safety orders exist yet
             if safety_orders and self.max_safety_orders:
                 safety_order_size = safety_orders[-1]["ordersize"] * self.volume_scale
@@ -219,14 +213,17 @@ class Dca:
                     if total_pnl <= -abs(max_deviation):
                         # Deviation for the actual safety order
                         if self.step_scale == 1:
-                            max_deviation = self.price_deviation * (safety_order_count + 1)
+                            max_deviation = self.price_deviation * (
+                                safety_order_count + 1
+                            )
                             actual_deviation = self.price_deviation * safety_order_count
                             next_so_percentage = max_deviation - actual_deviation
                             next_so_percentage = round(next_so_percentage, 2)
                             new_so = True
                         else:
                             actual_deviation = (
-                                self.price_deviation * (1 - self.step_scale ** safety_order_count)
+                                self.price_deviation
+                                * (1 - self.step_scale**safety_order_count)
                             ) / (1 - self.step_scale)
                             next_so_percentage = max_deviation - actual_deviation
                             next_so_percentage = round(next_so_percentage, 2)
