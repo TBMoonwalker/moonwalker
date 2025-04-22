@@ -33,11 +33,6 @@ class Strategy:
                 # support_level_30m = self.filter.support_level(symbol, "1d", 10).json()
                 # support_level = support_level_30m["status"]
 
-                self.logging.debug(f"Symbol: {symbol}")
-                self.logging.debug(f"EMA slope 9: {ema_slope_9}")
-                self.logging.debug(f"EMA slope 50: {ema_slope_50}")
-                self.logging.debug(f"RSI slope 14: {rsi_slope_14}")
-                self.logging.debug(f"EMA cross: {ema_cross}")
                 # TODO: Implement extreme wick detection (high percentage down in one candle)
                 # self.logging.debug(f"Support Level: {support_level}")
                 # self.logging.debug(f"RSI value: {rsi_value}")
@@ -59,6 +54,14 @@ class Strategy:
         except ValueError as e:
             self.logging.error(f"JSON Message is garbage: {e}")
 
-        self.logging.debug(f"Creating SO: {result}")
+        logging_json = {
+            "symbol": symbol,
+            "ema_slope_9": ema_slope_9["status"],
+            "ema_slope_50": ema_slope_50["status"],
+            "rsi_slope_14": rsi_slope_14["status"],
+            "ema_cross": ema_cross["status"],
+            "creating_so": result,
+        }
+        self.logging.debug(f"{logging_json}")
 
         return result
