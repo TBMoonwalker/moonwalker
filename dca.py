@@ -217,7 +217,12 @@ class Dca:
                 else:
                     # Trigger new safety order for static dca
                     if total_pnl <= -abs(max_deviation):
-                        next_so_percentage = -abs(self.price_deviation)
+                        # Deviation for the actual safety order
+                        actual_deviation = (
+                            self.price_deviation * (1 - self.step_scale ** safety_order_count)
+                        ) / (1 - self.step_scale)
+                        next_so_percentage = max_deviation - actual_deviation
+                        next_so_percentage = round(next_so_percentage, 2)
                         new_so = True
 
                 if new_so:
