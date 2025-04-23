@@ -160,6 +160,7 @@ class Dca:
         if trades:
             safety_orders = trades["safetyorders"]
             safety_order_count = trades["safetyorders_count"]
+            bo_price = trades["bo_price"]
 
             # Apply price deviation for the first safety order
             next_so_percentage = self.price_deviation
@@ -167,6 +168,28 @@ class Dca:
             bot_name = trades["bot"]
             new_so = False
             safety_order_size = self.so
+
+            # Actual PNL in percent
+            actual_pnl = self.data.calculate_actual_pnl(trades, current_price)
+
+            # Total PNL from base order
+            total_pnl = ((current_price - bo_price) / bo_price) * 100
+
+            # Evaluate max deviation and actual deviation from base order
+            if self.step_scale == 1:
+                # If step scale equals 1
+                max_deviation = self.price_deviation * (safety_order_count + 1)
+                actual_deviation = self.price_deviation * safety_order_count
+            else:
+                # If step scale is other than 1
+                max_deviation = (
+                    self.price_deviation
+                    * (1 - self.step_scale ** (safety_order_count + 1))
+                ) / (1 - self.step_scale)
+                max_deviation = round(max_deviation, 2)
+                actual_deviation = (
+                    self.price_deviation * (1 - self.step_scale**safety_order_count)
+                ) / (1 - self.step_scale)
 
             # Check if safety orders exist yet
             if safety_orders and self.max_safety_orders:
@@ -187,38 +210,43 @@ class Dca:
             else:
                 last_so_price = 0
 
-            # Actual PNL in percent
-            actual_pnl = self.data.calculate_actual_pnl(trades, current_price)
-
             # We have not reached the max safety orders
             if self.max_safety_orders and (safety_order_count < self.max_safety_orders):
-                # Trigger new safety order
-                if actual_pnl <= -abs(next_so_percentage):
-                    # Dynamic safety orders
-                    if self.dynamic_dca and self.__dynamic_dca_strategy(
-                        symbol, current_price
-                    ):
-                        # Set next_so_percentage to current percentage
-                        next_so_percentage = actual_pnl
-                        new_so = True
-                    else:
-                        new_so = False
 
-                    if new_so:
-                        order = {
-                            "ordersize": safety_order_size,
-                            "symbol": symbol,
-                            "direction": bot_type,
-                            "botname": bot_name,
-                            "baseorder": False,
-                            "safetyorder": True,
-                            "order_count": safety_order_count + 1,
-                            "ordertype": "market",
-                            "so_percentage": next_so_percentage,
-                            "side": "buy",
-                        }
-                        # Send new safety order request to exchange module
-                        await self.order.put(order)
+                new_so = False
+
+                if self.dynamic_dca:
+                    # Trigger new safety order for dynamic dca
+                    if actual_pnl <= -abs(next_so_percentage):
+                        if self.dynamic_dca and self.__dynamic_dca_strategy(
+                            symbol, current_price
+                        ):
+                            # Set next_so_percentage to current percentage
+                            next_so_percentage = actual_pnl
+                            new_so = True
+                else:
+                    # Trigger new safety order for static dca
+                    if total_pnl <= -abs(max_deviation):
+                        # Set next_so_percentage to diffence between max deviation and actual deviation
+                        next_so_percentage = max_deviation - actual_deviation
+                        next_so_percentage = round(next_so_percentage, 2)
+                        new_so = True
+
+                if new_so:
+                    order = {
+                        "ordersize": safety_order_size,
+                        "symbol": symbol,
+                        "direction": bot_type,
+                        "botname": bot_name,
+                        "baseorder": False,
+                        "safetyorder": True,
+                        "order_count": safety_order_count + 1,
+                        "ordertype": "market",
+                        "so_percentage": next_so_percentage,
+                        "side": "buy",
+                    }
+                    # Send new safety order request to exchange module
+                    await self.order.put(order)
 
                 # Logging configuration
                 logging_json = {
