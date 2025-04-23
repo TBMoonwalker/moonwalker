@@ -91,6 +91,7 @@ class SignalPlugin:
         if btc_pulse:
             signal_name = event["signal_name"]
             symbol = event["symbol"]
+            signal = event["signal"]
             signal_id = event["signal_name_id"]
             sym_rank = event["sym_rank"]
             sym_score = event["sym_score"]
@@ -115,7 +116,6 @@ class SignalPlugin:
                                 volume_24h[exchange][self.currency][:-1]
                             )
                     break
-
             if (
                 signal_id in self.plugin_settings["allowed_signals"]
                 and self.filter.is_on_allowed_list(symbol, self.pair_allowlist)
@@ -126,6 +126,7 @@ class SignalPlugin:
                     volume_range, volume_size, self.volume
                 )
                 and not self.filter.is_on_deny_list(symbol, self.pair_denylist)
+                and signal == "BOT_START"
             ):
                 return True
 
