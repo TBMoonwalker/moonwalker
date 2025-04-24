@@ -93,6 +93,11 @@ class Watcher:
                             f"Error watching websocket data from Exchange due to a exchange error: {e}"
                         )
                         continue
+                    except ccxt.BaseError as e:
+                        self.logging.error(
+                            f"Error watching websocket data from Exchange: {e}"
+                        )
+                        continue
                     except Exception as e:
                         self.logging.error(f"CCXT websocket error. Cause: {e}")
                         continue
