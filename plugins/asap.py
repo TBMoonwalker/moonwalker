@@ -44,6 +44,14 @@ class SignalPlugin:
         else:
             self.filter_values = None
         self.currency = currency
+        if pair_denylist:
+            self.pair_denylist = pair_denylist.split(",")
+        else:
+            self.pair_denylist = None
+        if pair_allowlist:
+            self.pair_allowlist = pair_allowlist.split(",")
+        else:
+            self.pair_allowlist = None
         self.dynamic_dca = dynamic_dca
         self.btc_pulse = btc_pulse
         self.topcoin_limit = topcoin_limit
@@ -102,6 +110,7 @@ class SignalPlugin:
             try:
                 topcoin_limit = True
                 marketcap = "N/A"
+
                 # btc pulse check
                 btc_pulse = True
                 if self.btc_pulse:
@@ -146,7 +155,16 @@ class SignalPlugin:
                             # f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_50["status"]}, RSI_SLOPE_14: {rsi_slope_14["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
                             f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30["status"]}, EMA_DISTANCE_30: {ema_distance["status"]})"
                         )
-                        if rsi_limit and ema_distance["status"]:
+                        if (
+                            rsi_limit
+                            and ema_distance["status"]
+                            and self.filter.is_on_allowed_list(
+                                symbol, self.pair_allowlist
+                            )
+                            and not self.filter.is_on_deny_list(
+                                symbol, self.pair_denylist
+                            )
+                        ):
                             return True
                         else:
                             return False
