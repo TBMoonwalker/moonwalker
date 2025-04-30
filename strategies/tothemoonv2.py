@@ -1,19 +1,15 @@
-import requests
-from logger import LoggerFactory
-from filter import Filter
+import helper
+from service.filter import Filter
+
+logging = helper.LoggerFactory.get_logger("logs/strategies.log", "tothemoonv2")
 
 
 class Strategy:
-    def __init__(self, ws_url, loglevel, btc_pulse, currency, timeframe):
-        self.ws_url = ws_url
+    def __init__(self, btc_pulse, timeframe):
         self.btc_pulse = btc_pulse
         self.timeframe = timeframe
-
-        self.logging = LoggerFactory.get_logger(
-            "logs/strategies.log", "tothemoonv2", log_level=loglevel
-        )
-        self.filter = Filter(ws_url=ws_url, loglevel=loglevel, currency=currency)
-        self.logging.info("Initialized")
+        self.filter = Filter()
+        logging.info("Initialized")
 
     def run(self, symbol, price):
         result = False
@@ -34,8 +30,8 @@ class Strategy:
                 # support_level = support_level_30m["status"]
 
                 # TODO: Implement extreme wick detection (high percentage down in one candle)
-                # self.logging.debug(f"Support Level: {support_level}")
-                # self.logging.debug(f"RSI value: {rsi_value}")
+                # logging.debug(f"Support Level: {support_level}")
+                # logging.debug(f"RSI value: {rsi_value}")
 
                 # if rsi_value <= 30:
                 if (
@@ -47,12 +43,12 @@ class Strategy:
                     # create SO
                     result = True
             else:
-                self.logging.info(
+                logging.info(
                     "BTC-Pulse is in downtrend - not creating new safety orders"
                 )
 
         except ValueError as e:
-            self.logging.error(f"JSON Message is garbage: {e}")
+            logging.error(f"JSON Message is garbage: {e}")
 
         logging_json = {
             "symbol": symbol,
@@ -62,6 +58,6 @@ class Strategy:
             "ema_cross": ema_cross["status"],
             "creating_so": result,
         }
-        self.logging.debug(f"{logging_json}")
+        logging.debug(f"{logging_json}")
 
         return result

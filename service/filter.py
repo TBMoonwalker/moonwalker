@@ -1,19 +1,17 @@
 import requests
+import helper
 from cachetools import cached, TTLCache
-from logger import LoggerFactory
 from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
+
+logging = helper.LoggerFactory.get_logger("logs/filter.log", "filter")
 
 
 class Filter:
-    def __init__(self, ws_url, loglevel, btc_pulse=None, currency=None):
-        self.ws_url = ws_url
-        self.btc_pulse = btc_pulse
-        self.currency = currency
-
-        self.logging = LoggerFactory.get_logger(
-            "logs/filter.log", "filter", log_level=loglevel
-        )
-        self.logging.info("Initialized")
+    def __init__(self):
+        config = helper.Config()
+        self.ws_url = config.get("ws_url", None)
+        self.btc_pulse = config.get("btc_pulse", False)
+        self.currency = config.get("currency").upper()
 
     @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
     def __request_api_endpoint(self, request, headers=None):
@@ -24,7 +22,7 @@ class Filter:
             else:
                 response = requests.get(url=request)
         except requests.exceptions.RequestException as e:
-            self.logging.error(f"Error getting response for {request}. Cause: {e}")
+            logging.error(f"Error getting response for {request}. Cause: {e}")
             raise TryAgain
 
         return response
@@ -183,7 +181,7 @@ class Filter:
         try:
             json_data = response.json()
         except Exception as e:
-            self.logging.error(f"Error getting CMC data. Cause: {e}")
+            logging.error(f"Error getting CMC data. Cause: {e}")
 
         if json_data["status"]["error_code"] == 0:
             for entry in json_data["data"]:
@@ -207,7 +205,7 @@ class Filter:
         try:
             self.__request_api_endpoint(f"{self.ws_url}/symbol/add/{symbol}")
         except Exception as e:
-            self.logging.error(
+            logging.error(
                 f"Error adding {symbol} to Moonloader subscription list. Cause {e}"
             )
 
@@ -215,6 +213,6 @@ class Filter:
         try:
             self.__request_api_endpoint(f"{self.ws_url}/symbol/remove/{symbol}")
         except Exception as e:
-            self.logging.error(
+            logging.error(
                 f"Error removing {symbol} from Moonloader subscription list. Cause {e}"
             )

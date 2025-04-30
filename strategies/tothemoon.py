@@ -1,17 +1,16 @@
-import requests
-from logger import LoggerFactory
-from filter import Filter
+import helper
+from service.filter import Filter
 
 
 class Strategy:
-    def __init__(self, ws_url, loglevel, btc_pulse, currency):
+    def __init__(self, ws_url, btc_pulse, currency):
         self.ws_url = ws_url
         self.btc_pulse = btc_pulse
 
-        Strategy.logging = LoggerFactory.get_logger(
-            "logs/strategies.log", "tothemoon", log_level=loglevel
+        Strategy.logging = helper.LoggerFactory.get_logger(
+            "logs/strategies.log", "tothemoon"
         )
-        self.filter = Filter(ws_url=ws_url, loglevel=loglevel, currency=currency)
+        self.filter = Filter(ws_url=ws_url, currency=currency)
         Strategy.logging.info("Initialized")
 
     def run(self, symbol, price):

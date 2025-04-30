@@ -1,0 +1,77 @@
+from quart import Quart
+import asyncio
+import importlib
+import os
+import helper
+from controller import controller
+from service.database import Database
+from service.watcher import Watcher
+
+
+######################################################
+#                       Config                       #
+######################################################
+
+# load configuration file
+attributes = helper.Config()
+
+# Create db and logs directories if they don't exist already
+try:
+    os.makedirs("logs", exist_ok=True)
+    os.makedirs("db", exist_ok=True)
+except:
+    print(
+        "Error creating 'db' and 'logs' directory - please create them manually and report it as a bug!"
+    )
+    exit(1)
+
+logging = helper.LoggerFactory.get_logger("logs/moonwalker.log", "main")
+
+######################################################
+#                        Init                        #
+######################################################
+
+# Import configured plugin
+plugin = importlib.import_module(f"plugins.{attributes.get('plugin')}")
+
+# Initialize database
+database = Database()
+
+# Initialize Signal plugin
+signal_plugin = plugin.SignalPlugin()
+
+# Initialize Watcher module
+watcher = Watcher()
+
+# Queues
+watcher_queue = asyncio.Queue()
+
+# Initialize app
+app = Quart(__name__)
+app.register_blueprint(controller)
+
+
+@app.before_serving
+async def startup():
+    await database.init()
+    app.add_background_task(signal_plugin.run)
+
+    if attributes.get("dca", None):
+        app.add_background_task(watcher.watch_tickers)
+
+
+@app.after_serving
+async def shutdown():
+    await signal_plugin.shutdown()
+
+    if attributes.get("dca", None):
+        await watcher.shutdown()
+    await database.shutdown()
+
+
+######################################################
+#                     Main                           #
+######################################################
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=attributes.get("port", "8130"))
