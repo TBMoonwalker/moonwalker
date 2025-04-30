@@ -60,7 +60,7 @@ For example, ``allowed_signals[12, 2]`` configures SymRank Top 10 and SymRank To
 When you are ready with the configuration, copy the ``config.ini.example`` to ``config.ini`` and start the bot.
 
 ## Run
-```python moonwalker.py```
+```python app.py```
 
 ## Logging
 You can see information about the DCA and the TakeProfit (TP) status in the statistics.log. Other logs are available too (for exchange ...)
