@@ -177,6 +177,37 @@ class Transactions:
             await self.trades.delete_open_trades(symbol)
             return False
 
+    async def receive_buy_signal(self, symbol, ordersize):
+        symbol = symbol.upper()
+        token, currency = symbol.split("-")
+        symbol = f"{token}/{currency}"
+        trades = await self.trades.get_trades_for_orders(symbol)
+
+        if trades:
+            actual_pnl = self.utils.calculate_actual_pnl(trades)
+            if trades["safetyorders"]:
+                safety_order_count = len(trades["safetyorders"])
+            else:
+                safety_order_count = 0
+
+            order = {
+                "ordersize": ordersize,
+                "symbol": symbol,
+                "direction": trades["direction"],
+                "botname": trades["bot"],
+                "baseorder": False,
+                "safetyorder": True,
+                "order_count": safety_order_count + 1,
+                "ordertype": "market",
+                "so_percentage": actual_pnl,
+                "side": "buy",
+            }
+
+            await self.receive_buy_order(order)
+            return True
+        else:
+            return False
+
     def __calculate_trade_duration(self, start_date, end_date):
         # Convert Unix timestamps to datetime objects
         date1 = datetime.fromtimestamp((start_date / 1000.0))

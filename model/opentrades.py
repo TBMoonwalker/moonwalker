@@ -4,14 +4,14 @@ from tortoise.models import Model
 
 class OpenTrades(Model):
     symbol = fields.CharField(max_length=50, unique=True)
-    so_count = fields.IntField(null=True)
-    profit = fields.FloatField(null=True)
-    profit_percent = fields.FloatField(null=True)
-    amount = fields.FloatField(null=True)
-    cost = fields.FloatField(null=True)
-    current_price = fields.FloatField(null=True)
-    tp_price = fields.FloatField(null=True)
-    avg_price = fields.FloatField(null=True)
+    so_count = fields.IntField(default=0)
+    profit = fields.FloatField(default=0.0)
+    profit_percent = fields.FloatField(default=0.0)
+    amount = fields.FloatField(default=0.0)
+    cost = fields.FloatField(default=0.0)
+    current_price = fields.FloatField(default=0.0)
+    tp_price = fields.FloatField(default=0.0)
+    avg_price = fields.FloatField(default=0.0)
     open_date = fields.TextField(null=True)
 
     def __dict__(self):
