@@ -219,8 +219,8 @@ class Exchange:
                 parameter = {}
                 order = self.exchange.create_order(
                     order["symbol"],
-                    "market",
-                    order["direction"],
+                    order["ordertype"],
+                    order["side"],
                     order["amount"],
                     order["price"],
                     parameter,
