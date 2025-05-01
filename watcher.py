@@ -67,7 +67,7 @@ class Watcher:
                 continue
 
     async def watch_tickers(self):
-        last_price = None
+        last_price = {}
 
         # Initial list for symbols in database
         symbols = await self.data.get_symbols()
@@ -104,8 +104,8 @@ class Watcher:
                     for symbol in tickers:
                         for ticker in tickers[symbol]:
                             actual_price = float(tickers[symbol][ticker][0][4])
-                            if last_price:
-                                if float(actual_price) != float(last_price):
+                            if symbol in last_price:
+                                if float(actual_price) != float(last_price[symbol]):
                                     ticker_price = {
                                         "type": "ticker_price",
                                         "ticker": {
@@ -114,9 +114,9 @@ class Watcher:
                                         },
                                     }
                                     await self.dca.put(ticker_price)
-                                    last_price = actual_price
+                                    last_price[symbol] = actual_price
                             else:
-                                last_price = actual_price
+                                last_price[symbol] = actual_price
                 else:
                     actual_symbols = self.symbols
                     continue
