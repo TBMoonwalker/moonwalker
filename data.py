@@ -101,9 +101,9 @@ class Data:
         #            buy_prices.append(trade["price"])
         #    if buy_prices:
         #        average_buy_price = sum(buy_prices) / len(buy_prices)
-        else:
-            total_cost = trades["total_cost"] + trades["fee"]
-            average_buy_price = total_cost / trades["total_amount"]
+        #else:
+        total_cost = trades["total_cost"] + trades["fee"]
+        average_buy_price = total_cost / trades["total_amount"]
 
         actual_pnl = ((current_price - average_buy_price) / average_buy_price) * 100
 
