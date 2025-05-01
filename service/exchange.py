@@ -210,8 +210,6 @@ class Exchange:
             order["info"] = {}
             order["info"]["orderId"] = uuid.uuid4()
             order["timestamp"] = time.mktime(datetime.now().timetuple()) * 1000
-            order["type"] = order["ordertype"]
-            order["side"] = order["direction"]
             time.sleep(0.2)
         else:
             try:
