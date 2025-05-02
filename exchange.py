@@ -124,7 +124,7 @@ class Exchange:
         return result
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
-    def __get_trades_for_symbol(self, symbol):
+    def __get_trades_for_symbol(self, symbol, orderid):
         trade = None
         time.sleep(1)
         since = self.exchange.milliseconds() - (
@@ -137,12 +137,14 @@ class Exchange:
             cost = 0.0
             orderlist = self.exchange.fetch_my_trades(symbol, since)
             if orderlist:
-                self.logging.debug(f"Orderlist for {symbol}: {orderlist}")
-
+                self.logging.debug(f"Orderlist for {symbol} with orderid: {orderid}: {orderlist}")
+                
                 for order in orderlist:
-                    amount += order["amount"]
-                    fee += order["fee"]["cost"]
-                    cost += order["cost"]
+                    # Avoid merging different orders in high volatility scenarios
+                    if order["amount"] == orderid:
+                        amount += order["amount"]
+                        fee += order["fee"]["cost"]
+                        cost += order["cost"]
 
                 trade["cost"] = cost
                 trade["fee"] = fee
@@ -179,7 +181,7 @@ class Exchange:
             data["side"] = order["side"]
             data["type"] = order["type"]
         else:
-            trade = self.__get_trades_for_symbol(order["symbol"])
+            trade = self.__get_trades_for_symbol(order["symbol"], order["id"])
             if trade:
                 data["timestamp"] = trade["timestamp"]
                 data["amount"] = float(trade["amount"])
