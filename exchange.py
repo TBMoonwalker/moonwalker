@@ -141,7 +141,7 @@ class Exchange:
                 
                 for order in orderlist:
                     # Avoid merging different orders in high volatility scenarios
-                    if order["amount"] == orderid:
+                    if order["order"] == orderid:
                         amount += order["amount"]
                         fee += order["fee"]["cost"]
                         cost += order["cost"]
