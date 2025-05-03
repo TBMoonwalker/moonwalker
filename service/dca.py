@@ -199,7 +199,7 @@ class Dca:
                 if self.dynamic_dca:
                     # Trigger new safety order for dynamic dca
                     if actual_pnl <= -abs(next_so_percentage):
-                        if self.dynamic_dca and self.__dynamic_dca_strategy(
+                        if self.dynamic_dca and await self.__dynamic_dca_strategy(
                             trades["symbol"], current_price
                         ):
                             # Set next_so_percentage to current percentage

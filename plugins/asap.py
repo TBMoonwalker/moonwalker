@@ -6,6 +6,7 @@ import requests
 import json
 import random
 from service.filter import Filter
+from service.indicators import Indicators
 from service.orders import Orders
 from service.data import Data
 from tenacity import retry, wait_fixed
@@ -19,12 +20,14 @@ class SignalPlugin:
         config = helper.Config()
         self.utils = helper.Utils()
         self.orders = Orders()
+        self.filter = Filter()
+        self.indicators = Indicators()
         self.ordersize = config.get("bo")
         self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
         self.ws_url = config.get("ws_url", None)
         self.plugin_settings = json.loads(config.get("plugin_settings"))
-        self.filter = Filter()
+
         self.filter_values = json.loads(config.get("filter", None))
         self.currency = config.get("currency")
         self.pair_denylist = (
@@ -112,31 +115,27 @@ class SignalPlugin:
                     if topcoin_limit:
                         # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
                         if self.dynamic_dca:
-
                             await Data().add_history_data_for_symbol(symbol)
 
-                            # TODO - remove after merge
-                            self.filter.subscribe_symbol(mc_symbol)
-
-                        rsi_14 = self.filter.get_rsi(
-                            symbol, self.timeframe, "14"
-                        ).json()
-                        ema_slope_30 = self.filter.ema_slope(
+                        rsi_14 = await self.indicators.calculate_rsi(
+                            symbol, self.timeframe, 14
+                        )
+                        ema_slope_30 = await self.indicators.calculate_ema_slope(
                             symbol, self.timeframe, 30
-                        ).json()
-                        ema_distance = self.filter.ema_distance(
+                        )
+                        ema_distance_30 = await self.indicators.calculate_ema_distance(
                             symbol, self.timeframe, 30
-                        ).json()
+                        )
                         rsi_limit = self.filter.is_within_rsi_limit(
-                            rsi_14["status"], self.filter_values["rsi_max"]
+                            rsi_14, self.filter_values["rsi_max"]
                         )
 
                         logging.debug(
-                            f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30["status"]}, EMA_DISTANCE_30: {ema_distance["status"]})"
+                            f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30}, EMA_DISTANCE_30: {ema_distance_30})"
                         )
                         if (
                             rsi_limit
-                            and ema_distance["status"]
+                            and ema_distance_30
                             and self.filter.is_on_allowed_list(
                                 symbol, self.pair_allowlist
                             )

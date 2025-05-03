@@ -3,6 +3,7 @@ import ccxt as ccxt
 import helper
 import model
 import pandas as pd
+from datetime import datetime, timedelta
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
 
@@ -33,6 +34,38 @@ class Data:
     async def __get_ticker_symbol_list(self):
         symbols = await model.Tickers.all().distinct().values_list("symbol", flat=True)
         return symbols
+
+    def __calculate_min_candle_date(self, timerange, length):
+        # Convert timerange with buffer
+        match timerange:
+            case "1d":
+                length_minutes = 2880
+            case "4h":
+                length_minutes = 480
+            case "1h":
+                length_minutes = 120
+            case "15min":
+                length_minutes = 30
+            case "10min":
+                length_minutes = 20
+            case "5min":
+                length_minutes = 10
+
+            # If an exact match is not confirmed, this last case will be used if provided
+            case _:
+                length_minutes = 30
+
+        # Input parameters
+        num_candles = length  # Number of candles with buffer
+        end_time = datetime.now()
+
+        # Calculate the total look-back duration
+        lookback_duration = timedelta(minutes=length_minutes * num_candles)
+
+        # Calculate the minimum date
+        min_date = end_time - lookback_duration
+
+        return datetime.timestamp(min_date)
 
     async def add_history_data_for_symbol(self, symbol):
         symbol_list = await self.__get_ticker_symbol_list()
@@ -115,6 +148,24 @@ class Data:
             ohlcv = df.to_json(orient="records")
 
         return ohlcv
+
+    async def get_data_for_pair(self, pair, timerange, length):
+        symbol = self.utils.split_symbol(pair, self.currency)
+        start_date = self.__calculate_min_candle_date(timerange, length)
+        query = (
+            await model.Tickers.filter(symbol=symbol)
+            .filter(timestamp__gt=start_date)
+            .values()
+        )
+
+        if query:
+            df = pd.DataFrame(query)
+
+            df.dropna(inplace=True)
+        else:
+            df = None
+
+        return df
 
     def resample_data(self, ohlcv, timerange):
         df = pd.DataFrame(ohlcv)

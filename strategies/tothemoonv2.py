@@ -1,5 +1,6 @@
 import helper
 from service.filter import Filter
+from service.indicators import Indicators
 
 logging = helper.LoggerFactory.get_logger("logs/strategies.log", "tothemoonv2")
 
@@ -9,9 +10,10 @@ class Strategy:
         self.btc_pulse = btc_pulse
         self.timeframe = timeframe
         self.filter = Filter()
+        self.indicators = Indicators()
         logging.info("Initialized")
 
-    def run(self, symbol, price):
+    async def run(self, symbol, price):
         result = False
 
         try:
@@ -19,10 +21,18 @@ class Strategy:
             if self.btc_pulse:
                 btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
 
-            ema_slope_50 = self.filter.ema_slope(symbol, self.timeframe, 50).json()
-            ema_slope_9 = self.filter.ema_slope(symbol, self.timeframe, 9).json()
-            rsi_slope_14 = self.filter.rsi_slope(symbol, self.timeframe, 14).json()
-            ema_cross = self.filter.ema_cross(symbol, self.timeframe).json()
+            ema_slope_50 = await self.indicators.calculate_ema_slope(
+                symbol, self.timeframe, 50
+            )
+            ema_slope_9 = await self.indicators.calculate_ema_slope(
+                symbol, self.timeframe, 9
+            )
+            rsi_slope_14 = await self.indicators.calculate_rsi_slope(
+                symbol, self.timeframe, 14
+            )
+            ema_cross = await self.indicators.calculate_ema_cross(
+                symbol, self.timeframe
+            )
 
             if btc_pulse:
                 # rsi = self.filter.get_rsi(symbol, self.timeframe).json()
@@ -36,10 +46,10 @@ class Strategy:
 
                 # if rsi_value <= 30:
                 if (
-                    ema_slope_9["status"] == "upward"
-                    and ema_slope_50["status"] == "upward"
-                    and rsi_slope_14["status"] == "upward"
-                    and ema_cross["status"] == "up"
+                    ema_slope_9 == "upward"
+                    and ema_slope_50 == "upward"
+                    and rsi_slope_14 == "upward"
+                    and ema_cross == "up"
                 ):
                     # create SO
                     result = True
@@ -50,10 +60,10 @@ class Strategy:
 
             logging_json = {
                 "symbol": symbol,
-                "ema_slope_9": ema_slope_9["status"],
-                "ema_slope_50": ema_slope_50["status"],
-                "rsi_slope_14": rsi_slope_14["status"],
-                "ema_cross": ema_cross["status"],
+                "ema_slope_9": ema_slope_9,
+                "ema_slope_50": ema_slope_50,
+                "rsi_slope_14": rsi_slope_14,
+                "ema_cross": ema_cross,
                 "creating_so": result,
             }
             logging.debug(f"{logging_json}")
