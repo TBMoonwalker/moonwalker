@@ -19,11 +19,12 @@ class Strategy:
             if self.btc_pulse:
                 btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
 
+            ema_slope_50 = self.filter.ema_slope(symbol, self.timeframe, 50).json()
+            ema_slope_9 = self.filter.ema_slope(symbol, self.timeframe, 9).json()
+            rsi_slope_14 = self.filter.rsi_slope(symbol, self.timeframe, 14).json()
+            ema_cross = self.filter.ema_cross(symbol, self.timeframe).json()
+
             if btc_pulse:
-                ema_slope_50 = self.filter.ema_slope(symbol, self.timeframe, 50).json()
-                ema_slope_9 = self.filter.ema_slope(symbol, self.timeframe, 9).json()
-                rsi_slope_14 = self.filter.rsi_slope(symbol, self.timeframe, 14).json()
-                ema_cross = self.filter.ema_cross(symbol, self.timeframe).json()
                 # rsi = self.filter.get_rsi(symbol, self.timeframe).json()
                 # rsi_value = float(rsi["status"])
                 # support_level_30m = self.filter.support_level(symbol, "1d", 10).json()
@@ -47,17 +48,17 @@ class Strategy:
                     "BTC-Pulse is in downtrend - not creating new safety orders"
                 )
 
+            logging_json = {
+                "symbol": symbol,
+                "ema_slope_9": ema_slope_9["status"],
+                "ema_slope_50": ema_slope_50["status"],
+                "rsi_slope_14": rsi_slope_14["status"],
+                "ema_cross": ema_cross["status"],
+                "creating_so": result,
+            }
+            logging.debug(f"{logging_json}")
+
+            return result
+
         except ValueError as e:
             logging.error(f"JSON Message is garbage: {e}")
-
-        logging_json = {
-            "symbol": symbol,
-            "ema_slope_9": ema_slope_9["status"],
-            "ema_slope_50": ema_slope_50["status"],
-            "rsi_slope_14": rsi_slope_14["status"],
-            "ema_cross": ema_cross["status"],
-            "creating_so": result,
-        }
-        logging.debug(f"{logging_json}")
-
-        return result

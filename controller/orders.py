@@ -1,10 +1,10 @@
 import helper
-from service.transactions import Transactions
+from service.orders import Orders
 from controller import controller
 from quart_cors import route_cors
 
-logging = helper.LoggerFactory.get_logger("logs/orders.log", "controller_orders")
-transactions = Transactions()
+logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_orders")
+orders = Orders()
 
 
 @controller.route("/orders/sell/<symbol>", methods=["GET"])
@@ -13,7 +13,7 @@ transactions = Transactions()
     allow_origin=["*"],
 )
 async def sell_order(symbol):
-    if await transactions.receive_sell_signal(symbol):
+    if await orders.receive_sell_signal(symbol):
         return {"result": "sell"}
     else:
         return {"result": ""}
@@ -25,7 +25,7 @@ async def sell_order(symbol):
     allow_origin=["*"],
 )
 async def buy_order(symbol, ordersize):
-    if await transactions.receive_buy_signal(symbol, ordersize):
+    if await orders.receive_buy_signal(symbol, ordersize):
         return {"result": "new_so"}
     else:
         return {"result": ""}
@@ -37,7 +37,7 @@ async def buy_order(symbol, ordersize):
     allow_origin=["*"],
 )
 async def stop_order(symbol):
-    if await transactions.receive_stop_signal(symbol):
+    if await orders.receive_stop_signal(symbol):
         return {"result": "stop"}
     else:
         return {"result": ""}

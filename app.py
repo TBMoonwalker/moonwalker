@@ -6,6 +6,7 @@ import helper
 from controller import controller
 from service.database import Database
 from service.watcher import Watcher
+from service.housekeeper import Housekeeper
 
 
 ######################################################
@@ -43,8 +44,8 @@ signal_plugin = plugin.SignalPlugin()
 # Initialize Watcher module
 watcher = Watcher()
 
-# Queues
-watcher_queue = asyncio.Queue()
+# Initialize Housekeeper module
+housekeeper = Housekeeper()
 
 # Initialize app
 app = Quart(__name__)
@@ -57,6 +58,7 @@ async def startup():
     app.add_background_task(signal_plugin.run)
 
     if attributes.get("dca", None):
+        app.add_background_task(housekeeper.cleanup_ticker_database)
         app.add_background_task(watcher.watch_tickers)
 
 
@@ -66,6 +68,7 @@ async def shutdown():
 
     if attributes.get("dca", None):
         await watcher.shutdown()
+        await housekeeper.shutdown()
     await database.shutdown()
 
 

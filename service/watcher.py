@@ -2,6 +2,7 @@ import ccxt.pro as ccxtpro
 import ccxt as ccxt
 import asyncio
 import helper
+import model
 from service.trades import Trades
 from service.dca import Dca
 
@@ -30,9 +31,12 @@ class Watcher:
         self.market = config.get("market", "spot")
         self.timeframe = config.get("timeframe", "1m")
         self.status = True
+        # TODO - create a method for the timerange
+        self.history_data = "2025-04-10T00:00:00Z"
 
         # Class Variables
         Watcher.symbols = []
+        Watcher.candles = {}
 
     def __convert_symbols(self, symbols):
         symbol_list = []
@@ -40,12 +44,88 @@ class Watcher:
             symbol_list.append([symbol, self.timeframe])
         return symbol_list
 
+    async def __update_historical_data(self, symbol):
+        ohlcv = []
+        try:
+            from_ts = self.exchange.parse8601(self.history_data)
+            ohlcv_data = await self.exchange.fetch_ohlcv(
+                symbol, self.timeframe, since=from_ts, limit=1000
+            )
+            while True:
+                from_ts = ohlcv_data[-1][0]
+                new_ohlcv = await self.exchange.fetch_ohlcv(
+                    symbol, self.timeframe, since=from_ts, limit=1000
+                )
+                ohlcv_data.extend(new_ohlcv)
+                if len(new_ohlcv) != 1000:
+                    break
+            symbol, market = symbol.split("/")
+
+            for ticker in ohlcv_data:
+                ticker = model.Tickers(
+                    timestamp=ticker[0],
+                    symbol=symbol + market,
+                    open=ticker[1],
+                    high=ticker[2],
+                    low=ticker[3],
+                    close=ticker[4],
+                    volume=ticker[5],
+                )
+                ohlcv.append(ticker)
+
+            await model.Tickers.bulk_create(ohlcv)
+
+        except ccxt.NetworkError as e:
+            logging.error(
+                f"Error fetching historical data from Exchange due to a network error: {e}"
+            )
+        except ccxt.ExchangeError as e:
+            logging.error(
+                f"Error fetching historical data from Exchange due to an exchange error: {e}"
+            )
+        except Exception as e:
+            logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
+
+    async def __write_ohlcv_data(self, symbol, ticker):
+        current_candle = ticker[-1]
+        timestamp, open, high, low, close, volume = current_candle
+        if symbol in Watcher.candles:
+            if (
+                Watcher.candles[symbol] is None
+                or Watcher.candles[symbol][0] < timestamp
+            ):
+                # The previous candle for this symbol has closed; write it to the database
+                if Watcher.candles[symbol]:
+                    (
+                        timestamp,
+                        open,
+                        high,
+                        low,
+                        close,
+                        volume,
+                    ) = Watcher.candles[symbol]
+                    ohlcv = {
+                        "timestamp": timestamp,
+                        "symbol": symbol,
+                        "open": open,
+                        "high": high,
+                        "low": low,
+                        "close": close,
+                        "volume": volume,
+                    }
+                    logging.debug(ohlcv)
+                    await model.Tickers.create(**ohlcv)
+                Watcher.candles[symbol] = current_candle
+        # Add new initial symbol for candle
+        else:
+            Watcher.candles[symbol] = None
+
     # Get Tickers from Exchange modules (buy/sell)
     async def get_updated_symbols(self, tickers):
         try:
             Watcher.symbols = self.__convert_symbols(tickers)
             logging.debug(f"Watching symbols: {Watcher.symbols}")
-        except Exception:
+        except Exception as e:
             logging.error(f"Error update symbols: {tickers}. Cause: {e}")
 
     async def watch_tickers(self):
@@ -55,6 +135,7 @@ class Watcher:
         symbols = await self.trades.get_symbols()
         if symbols:
             Watcher.symbols = self.__convert_symbols(symbols)
+            Watcher.candles = {symbol: None for symbol in symbols}
 
         actual_symbols = Watcher.symbols
         while self.status:
@@ -96,6 +177,9 @@ class Watcher:
                                         },
                                     }
                                     await self.dca.process_ticker_data(ticker_price)
+                                    await self.__write_ohlcv_data(
+                                        symbol, tickers[symbol][ticker]
+                                    )
                                     last_price[symbol] = actual_price
                             else:
                                 last_price[symbol] = actual_price

@@ -2,7 +2,7 @@ import helper
 import importlib
 import helper
 from service.statistic import Statistic
-from service.transactions import Transactions
+from service.orders import Orders
 from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
@@ -11,7 +11,7 @@ logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 class Dca:
     def __init__(self):
 
-        self.transactions = Transactions()
+        self.orders = Orders()
         self.statistic = Statistic()
         self.trades = Trades()
         self.utils = helper.Utils()
@@ -116,7 +116,7 @@ class Dca:
                     "total_cost": trades["total_cost"],
                     "current_price": current_price,
                 }
-                await self.transactions.receive_sell_order(order)
+                await self.orders.receive_sell_order(order)
 
             # Logging configuration
             logging_json = {
@@ -226,7 +226,7 @@ class Dca:
                         "so_percentage": next_so_percentage,
                         "side": "buy",
                     }
-                    await self.transactions.receive_buy_order(order)
+                    await self.orders.receive_buy_order(order)
 
                 # Logging configuration
                 logging_json = {

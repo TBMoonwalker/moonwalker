@@ -3,7 +3,7 @@ import helper
 import asyncio
 import socketio
 import json
-from service.transactions import Transactions
+from service.orders import Orders
 from service.filter import Filter
 from socketio.exceptions import TimeoutError
 
@@ -14,7 +14,7 @@ class SignalPlugin:
     def __init__(self):
         config = helper.Config()
         self.utils = helper.Utils()
-        self.transactions = Transactions()
+        self.orders = Orders()
         self.ordersize = config.get("bo")
         self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
@@ -180,7 +180,7 @@ class SignalPlugin:
                                     "so_percentage": None,
                                     "side": "buy",
                                 }
-                                await self.transactions.receive_buy_order(order)
+                                await self.orders.receive_buy_order(order)
                 except TimeoutError:
                     logging.error(
                         "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"

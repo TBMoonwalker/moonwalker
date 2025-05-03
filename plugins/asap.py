@@ -6,7 +6,8 @@ import requests
 import json
 import random
 from service.filter import Filter
-from service.transactions import Transactions
+from service.orders import Orders
+from service.data import Data
 from tenacity import retry, wait_fixed
 from cachetools import cached, TTLCache
 
@@ -17,7 +18,7 @@ class SignalPlugin:
     def __init__(self):
         config = helper.Config()
         self.utils = helper.Utils()
-        self.transactions = Transactions()
+        self.orders = Orders()
         self.ordersize = config.get("bo")
         self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
@@ -84,7 +85,7 @@ class SignalPlugin:
         return new_symbol
 
     @retry(wait=wait_fixed(3))
-    def __check_entry_point(self, symbol):
+    async def __check_entry_point(self, symbol):
         if self.filter_values and self.ws_url:
             try:
                 topcoin_limit = True
@@ -111,6 +112,10 @@ class SignalPlugin:
                     if topcoin_limit:
                         # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
                         if self.dynamic_dca:
+
+                            await Data().add_history_data_for_symbol(symbol)
+
+                            # TODO - remove after merge
                             self.filter.subscribe_symbol(mc_symbol)
 
                         rsi_14 = self.filter.get_rsi(
@@ -122,16 +127,11 @@ class SignalPlugin:
                         ema_distance = self.filter.ema_distance(
                             symbol, self.timeframe, 30
                         ).json()
-                        # ema_slope_50 = self.filter.ema_slope(symbol, self.timeframe, 50).json()
-                        # ema_slope_9 = self.filter.ema_slope(symbol, self.timeframe, 9).json()
-                        # ema_cross_15m = self.filter.ema_cross(symbol, self.timeframe).json()
-                        # rsi_slope_14 = self.filter.rsi_slope(symbol, self.timeframe, 14).json()
                         rsi_limit = self.filter.is_within_rsi_limit(
                             rsi_14["status"], self.filter_values["rsi_max"]
                         )
 
                         logging.debug(
-                            # f"Waiting for Entry: SYMBOL: {symbol}, RSI: {rsi["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_9: {ema_slope_9["status"]}, EMA_SLOPE_50: {ema_slope_50["status"]}, RSI_SLOPE_14: {rsi_slope_14["status"]}, EMA_CROSS: {ema_cross_15m["status"]}"
                             f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14["status"]}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30["status"]}, EMA_DISTANCE_30: {ema_distance["status"]})"
                         )
                         if (
@@ -174,11 +174,8 @@ class SignalPlugin:
                 for symbol in symbol_list:
                     max_bots = await self.__check_max_bots()
                     current_symbol = f"asap_{symbol}"
-                    if (
-                        current_symbol not in running_trades
-                        and not max_bots
-                        and self.__check_entry_point(symbol)
-                    ):
+                    signal = await self.__check_entry_point(symbol)
+                    if current_symbol not in running_trades and not max_bots and signal:
                         # Backend needs symbol with /
                         symbol_full = self.utils.split_symbol(symbol, self.currency)
 
@@ -195,7 +192,7 @@ class SignalPlugin:
                             "so_percentage": None,
                             "side": "buy",
                         }
-                        await self.transactions.receive_buy_order(order)
+                        await self.orders.receive_buy_order(order)
                         logging.debug(
                             f"Running trades: {running_trades}, Max Bots: {max_bots}"
                         )

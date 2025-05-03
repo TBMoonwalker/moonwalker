@@ -2,25 +2,23 @@ import helper
 import json
 import time
 from datetime import datetime
-from service.filter import Filter
 from service.trades import Trades
 from service.exchange import Exchange
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
 
 
-class Transactions:
+class Orders:
     def __init__(self):
         config = helper.Config()
         self.utils = helper.Utils()
-        self.filter = Filter()
         self.exchange = Exchange()
         self.trades = Trades()
         self.currency = config.get("currency").upper()
         self.dynamic_dca = config.get("dynamic_dca", False)
 
     async def receive_sell_order(self, order):
-        logging.info("Incoming sell order")
+        logging.info(f"Incoming sell order for {order["symbol"]}")
 
         order["total_amount"] = await self.trades.get_token_amount_from_trades(
             order["symbol"]
@@ -85,13 +83,8 @@ class Transactions:
         # 5. Delete Open trades
         await self.trades.delete_open_trades(order["symbol"])
 
-        # 6. Remove from Moonloader subscription (TODO - Change when migrated)
-        if self.dynamic_dca:
-            symbol, currency = order_status["symbol"].split("/")
-            self.filter.unsubscribe_symbol(symbol)
-
     async def receive_buy_order(self, order):
-        logging.info("Incoming buy order")
+        logging.info(f"Incoming buy order for {order["symbol"]}")
 
         # 1. Create exchange order
         order_status = await self.exchange.create_spot_market_buy(order)
@@ -128,6 +121,7 @@ class Transactions:
 
         # 4. Create open trade
         payload = {"symbol": order_status["symbol"]}
+        # TODO - needs a full payload or notnull default values in model - without UI throws errors
         await self.trades.create_open_trades(payload)
 
     async def receive_stop_signal(self, symbol):

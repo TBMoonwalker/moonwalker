@@ -64,6 +64,5 @@ tp = 1
 sl = 1
 
 [indicators]
-# Only needed if you activate 
-# Only works with Moonloader! - see https://github.com/TBMoonwalker/moonloader
-ws_url = http://localhost:9130/api/v1
+# in hours
+housekeeping_interval = 10
