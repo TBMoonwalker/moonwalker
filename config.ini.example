@@ -66,4 +66,5 @@ sl = 1
 [indicators]
 # in hours - please use 48 hours as minimum for indicators
 housekeeping_interval = 48
-history_from_data = 2025-04-10T00:00:00Z
+# in days
+history_from_data = 3

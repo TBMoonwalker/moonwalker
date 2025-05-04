@@ -14,7 +14,7 @@ class Data:
         utils = helper.Utils()
         # TODO - create a method for the timerange
         self.utils = utils
-        self.history_data = config.get("history_from_data")
+        self.history_data = config.get("history_from_data", 3)
         self.exchange_id = config.get("exchange")
         self.exchange_class = getattr(ccxtpro, self.exchange_id)
         self.exchange = self.exchange_class(
@@ -69,15 +69,17 @@ class Data:
 
     async def add_history_data_for_symbol(self, symbol):
         symbol_list = await self.get_ticker_symbol_list()
-        # symbol = self.utils.split_symbol(symbol, self.currency)
         if symbol not in symbol_list:
             await self.fetch_history_data_for_symbol(symbol)
             logging.debug(f"Added history for {symbol}")
 
     async def fetch_history_data_for_symbol(self, symbol):
         ohlcv = []
+        from_date = "{:%Y-%m-%d %H:%M:%S}".format(
+            datetime.now() - timedelta(days=self.history_data)
+        )
         try:
-            from_ts = self.exchange.parse8601(self.history_data)
+            from_ts = self.exchange.parse8601(from_date)
             ohlcv_data = await self.exchange.fetch_ohlcv(
                 symbol, self.timeframe, since=from_ts, limit=1000
             )
