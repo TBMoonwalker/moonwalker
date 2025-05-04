@@ -5,6 +5,7 @@ import socketio
 import json
 from service.orders import Orders
 from service.filter import Filter
+from service.data import Data
 from socketio.exceptions import TimeoutError
 
 logging = helper.LoggerFactory.get_logger("logs/signals.log", "sym_signals")
@@ -166,6 +167,9 @@ class SignalPlugin:
 
                                 # Automatically subscribe to reduce load
                                 if self.dynamic_dca:
+                                    await Data().add_history_data_for_symbol(
+                                        symbol_full
+                                    )
                                     await self.watcher_queue.put([symbol_full])
 
                                 order = {

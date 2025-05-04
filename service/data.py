@@ -14,7 +14,7 @@ class Data:
         utils = helper.Utils()
         # TODO - create a method for the timerange
         self.utils = utils
-        self.history_data = "2025-04-10T00:00:00Z"
+        self.history_data = config.get("history_from_data")
         self.exchange_id = config.get("exchange")
         self.exchange_class = getattr(ccxtpro, self.exchange_id)
         self.exchange = self.exchange_class(
