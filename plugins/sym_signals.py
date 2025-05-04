@@ -159,9 +159,9 @@ class SignalPlugin:
 
                                 logging.info(f"Triggering new trade for {symbol}")
 
-                                # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
+                                # Automatically subscribe to reduce load
                                 if self.dynamic_dca:
-                                    self.filter.subscribe_symbol(symbol)
+                                    await self.watcher_queue.put([symbol_full])
 
                                 # Backend needs symbol with /
                                 symbol_full = self.utils.split_symbol(
