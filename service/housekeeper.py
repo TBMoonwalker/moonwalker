@@ -9,7 +9,7 @@ logging = helper.LoggerFactory.get_logger("logs/housekeeper.log", "housekeeper")
 class Housekeeper:
     def __init__(self):
         config = helper.Config()
-        self.housekeeping_interval = config.get("housekeeping_interval", 10)
+        self.housekeeping_interval = config.get("housekeeping_interval", 48)
 
         # Class variables
         Housekeeper.status = True

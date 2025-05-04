@@ -32,6 +32,9 @@ logging = helper.LoggerFactory.get_logger("logs/moonwalker.log", "main")
 #                        Init                        #
 ######################################################
 
+# Queues
+watcher_queue = asyncio.Queue()
+
 # Import configured plugin
 plugin = importlib.import_module(f"plugins.{attributes.get('plugin')}")
 
@@ -39,7 +42,7 @@ plugin = importlib.import_module(f"plugins.{attributes.get('plugin')}")
 database = Database()
 
 # Initialize Signal plugin
-signal_plugin = plugin.SignalPlugin()
+signal_plugin = plugin.SignalPlugin(watcher_queue)
 
 # Initialize Watcher module
 watcher = Watcher()
@@ -55,6 +58,7 @@ app.register_blueprint(controller)
 @app.before_serving
 async def startup():
     await database.init()
+    app.add_background_task(watcher.watch_incoming_symbols, watcher_queue)
     app.add_background_task(signal_plugin.run)
 
     if attributes.get("dca", None):

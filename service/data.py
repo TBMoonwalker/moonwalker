@@ -31,7 +31,7 @@ class Data:
         self.timeframe = config.get("timeframe", "1m")
         self.currency = config.get("currency").upper()
 
-    async def __get_ticker_symbol_list(self):
+    async def get_ticker_symbol_list(self):
         symbols = await model.Tickers.all().distinct().values_list("symbol", flat=True)
         return symbols
 
@@ -68,8 +68,8 @@ class Data:
         return datetime.timestamp(min_date)
 
     async def add_history_data_for_symbol(self, symbol):
-        symbol_list = await self.__get_ticker_symbol_list()
-        symbol = self.utils.split_symbol(symbol, self.currency)
+        symbol_list = await self.get_ticker_symbol_list()
+        # symbol = self.utils.split_symbol(symbol, self.currency)
         if symbol not in symbol_list:
             await self.fetch_history_data_for_symbol(symbol)
             logging.debug(f"Added history for {symbol}")
@@ -116,6 +116,8 @@ class Data:
             )
         except Exception as e:
             logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
+
+        await self.exchange.close()
 
     async def get_ohlcv_for_pair(self, pair, timerange, timestamp_start, offset):
         # 600000 --> 60 minutes in milliseconds before

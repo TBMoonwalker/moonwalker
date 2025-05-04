@@ -27,7 +27,10 @@ class Orders:
         # 1. Create exchange order
         order_status = await self.exchange.create_spot_market_sell(order)
 
-        # 2. Create closed trade
+        # 2. Delete trade
+        await self.trades.delete_trades(order["symbol"])
+
+        # 3. Create closed trade
         open_timestamp = 0.0
         base_order = await self.trades.get_trade_by_ordertype(
             order_status["symbol"], baseorder=True
@@ -69,18 +72,7 @@ class Orders:
         }
         await self.trades.create_closed_trades(payload)
 
-        # 3. Delete trade
-        await self.trades.delete_trades(order["symbol"])
-
-        # 4. Remove symbol from watcher
-        tickers = await self.trades.get_symbols()
-        if tickers:
-            # TODO: Try to avoid direct import
-            from service.watcher import Watcher
-
-            await Watcher().get_updated_symbols(tickers)
-
-        # 5. Delete Open trades
+        # 4. Delete Open trades
         await self.trades.delete_open_trades(order["symbol"])
 
     async def receive_buy_order(self, order):
@@ -111,15 +103,7 @@ class Orders:
         }
         await self.trades.create_trades(payload)
 
-        # 3. Add symbol from watcher
-        tickers = await self.trades.get_symbols()
-        if tickers:
-            # TODO: Try to avoid direct import
-            from service.watcher import Watcher
-
-            await Watcher().get_updated_symbols(tickers)
-
-        # 4. Create open trade
+        # 3. Create open trade
         payload = {"symbol": order_status["symbol"]}
         # TODO - needs a full payload or notnull default values in model - without UI throws errors
         await self.trades.create_open_trades(payload)
@@ -130,11 +114,6 @@ class Orders:
         token, currency = symbol.split("-")
         symbol = f"{token}/{currency}"
         if await self.trades.stop_trade(symbol):
-            # TODO: Try to avoid direct import
-            tickers = await self.trades.get_symbols()
-            from service.watcher import Watcher
-
-            await Watcher().get_updated_symbols(tickers)
             return True
         else:
             logging.error(f"Cannot stop trade for {symbol}. See trade logs for errors.")

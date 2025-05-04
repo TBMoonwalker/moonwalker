@@ -11,7 +11,7 @@ logging = helper.LoggerFactory.get_logger("logs/signals.log", "sym_signals")
 
 
 class SignalPlugin:
-    def __init__(self):
+    def __init__(self, watcher_queue):
         config = helper.Config()
         self.utils = helper.Utils()
         self.orders = Orders()

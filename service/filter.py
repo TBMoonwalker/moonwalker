@@ -27,61 +27,6 @@ class Filter:
 
         return response
 
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def sma_slope(self, symbol, timeframe):
-        sma_slope_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/sma_slope/{symbol}/{timeframe}"
-        )
-
-        return sma_slope_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def ema_slope(self, symbol, timeframe, length):
-        ema_slope_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/ema_slope/{symbol}/{timeframe}/{length}"
-        )
-
-        return ema_slope_response
-
-    def rsi_slope(self, symbol, timeframe, length):
-        rsi_slope_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/rsi_slope/{symbol}/{timeframe}/{length}"
-        )
-
-        return rsi_slope_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def get_rsi(self, symbol, timeframe, length):
-        rsi_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/rsi/{symbol}/{timeframe}/{length}"
-        )
-
-        return rsi_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def ema_cross(self, symbol, timeframe):
-        ema_cross_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/ema_cross/{symbol}/{timeframe}"
-        )
-
-        return ema_cross_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def ema_distance(self, symbol, timeframe, length):
-        ema_distance_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/ema_distance/{symbol}/{timeframe}/{length}"
-        )
-
-        return ema_distance_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=300))
-    def support_level(self, symbol, timeframe, num_level):
-        support_level_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/support/{symbol}/{timeframe}/{num_level}"
-        )
-
-        return support_level_response
-
     def is_on_allowed_list(self, symbol, allow_list):
         result = False
         if allow_list:
@@ -200,19 +145,3 @@ class Filter:
         ]
 
         return subscribed_symbols
-
-    def subscribe_symbol(self, symbol):
-        try:
-            self.__request_api_endpoint(f"{self.ws_url}/symbol/add/{symbol}")
-        except Exception as e:
-            logging.error(
-                f"Error adding {symbol} to Moonloader subscription list. Cause {e}"
-            )
-
-    def unsubscribe_symbol(self, symbol):
-        try:
-            self.__request_api_endpoint(f"{self.ws_url}/symbol/remove/{symbol}")
-        except Exception as e:
-            logging.error(
-                f"Error removing {symbol} from Moonloader subscription list. Cause {e}"
-            )

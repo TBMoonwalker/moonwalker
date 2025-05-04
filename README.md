@@ -46,7 +46,7 @@ os | integer | YES | () | Safety order volume scale
 mstc | integer | NO | () | Max safety orders count
 tp | integer | YES | (1) | Take profit in percent
 sl | integer | NO | (1) | Stop loss in percent
-ws_url | string | NO | (http://localhost:9130/api/v1) | URL of the Moonloader websocket api. Used for dynamic TP
+housekeeping_interval | integer | NO | 48 | Minimum interval for indicator ticker caching
 
 ## SymSignals signal setup
 ``plugin_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your api key", "api_version": "api version", "allowed_signals": [signalid, signalid]}``

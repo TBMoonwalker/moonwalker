@@ -64,5 +64,5 @@ tp = 1
 sl = 1
 
 [indicators]
-# in hours
-housekeeping_interval = 10
+# in hours - please use 48 hours as minimum for indicators
+housekeeping_interval = 48

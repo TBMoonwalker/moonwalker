@@ -1,7 +1,6 @@
 import model
 import helper
 import asyncio
-import re
 import requests
 import json
 import random
@@ -10,13 +9,14 @@ from service.indicators import Indicators
 from service.orders import Orders
 from service.data import Data
 from tenacity import retry, wait_fixed
-from cachetools import cached, TTLCache
+from asyncache import cached
+from cachetools import TTLCache
 
 logging = helper.LoggerFactory.get_logger("logs/signals.log", "asap")
 
 
 class SignalPlugin:
-    def __init__(self):
+    def __init__(self, watcher_queue):
         config = helper.Config()
         self.utils = helper.Utils()
         self.orders = Orders()
@@ -27,7 +27,6 @@ class SignalPlugin:
         self.btc_pulse = config.get("btc_pulse", False)
         self.ws_url = config.get("ws_url", None)
         self.plugin_settings = json.loads(config.get("plugin_settings"))
-
         self.filter_values = json.loads(config.get("filter", None))
         self.currency = config.get("currency")
         self.pair_denylist = (
@@ -45,7 +44,7 @@ class SignalPlugin:
         self.topcoin_limit = config.get("topcoin_limit", None)
         self.timeframe = config.get("timeframe", "1m")
         self.status = True
-        logging.info("Initialized")
+        self.watcher_queue = watcher_queue
         logging.debug(self.plugin_settings["symbol_list"])
 
     async def __check_max_bots(self):
@@ -63,19 +62,16 @@ class SignalPlugin:
         return result
 
     @cached(cache=TTLCache(maxsize=1024, ttl=900))
-    def __get_new_symbol_list(self, running_list):
+    async def __get_new_symbol_list(self, running_list):
         # New symbols
         symbol_list = self.plugin_settings["symbol_list"]
-        new_symbol = []
         if "http" in symbol_list:
             symbol_list = requests.get(symbol_list).json()["pairs"]
 
-            new_symbol = [
-                f"{symbol}{currency}"
-                for symbol, currency in [item.split("/") for item in symbol_list]
-            ]
-        else:
-            new_symbol = list(map(str, symbol_list.split(",")))
+        # Add history data for indicators
+        for symbol in symbol_list:
+            await Data().add_history_data_for_symbol(symbol)
+        await self.watcher_queue.put(symbol_list)
 
         # Running symbols
         running_symbols = [
@@ -84,8 +80,8 @@ class SignalPlugin:
         ]
 
         logging.debug(f"Running symbols: {running_symbols}")
-        logging.debug(f"New symbols: {new_symbol}")
-        return new_symbol
+        logging.debug(f"New symbols: {symbol_list}")
+        return symbol_list
 
     @retry(wait=wait_fixed(3))
     async def __check_entry_point(self, symbol):
@@ -101,7 +97,7 @@ class SignalPlugin:
 
                 if btc_pulse:
                     # marketcap api needs the symbol without quote
-                    mc_symbol = re.split(self.currency, symbol, flags=re.IGNORECASE)[0]
+                    mc_symbol, currency = symbol.split("/")
 
                     if self.topcoin_limit:
                         marketcap = self.filter.get_cmc_marketcap_rank(
@@ -113,10 +109,6 @@ class SignalPlugin:
                         )
 
                     if topcoin_limit:
-                        # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
-                        if self.dynamic_dca:
-                            await Data().add_history_data_for_symbol(symbol)
-
                         rsi_14 = await self.indicators.calculate_rsi(
                             symbol, self.timeframe, 14
                         )
@@ -166,7 +158,7 @@ class SignalPlugin:
             running_trades = (
                 await model.Trades.all().distinct().values_list("bot", flat=True)
             )
-            symbol_list = self.__get_new_symbol_list(tuple(running_trades))
+            symbol_list = await self.__get_new_symbol_list(tuple(running_trades))
             if symbol_list:
                 # Randomize symbols for new deals
                 random.shuffle(symbol_list)
@@ -176,12 +168,12 @@ class SignalPlugin:
                     signal = await self.__check_entry_point(symbol)
                     if current_symbol not in running_trades and not max_bots and signal:
                         # Backend needs symbol with /
-                        symbol_full = self.utils.split_symbol(symbol, self.currency)
+                        # symbol_full = self.utils.split_symbol(symbol, self.currency)
 
                         logging.info(f"Triggering new trade for {symbol}")
                         order = {
                             "ordersize": self.ordersize,
-                            "symbol": symbol_full,
+                            "symbol": symbol,
                             "direction": "long",
                             "botname": f"asap_{symbol}",
                             "baseorder": True,

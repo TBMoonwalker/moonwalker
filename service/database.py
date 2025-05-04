@@ -1,7 +1,7 @@
 import helper
 from tortoise import Tortoise
 
-logging = helper.LoggerFactory.get_logger("logs/moonwalker.log", "database")
+logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
 
 
 class Database:
