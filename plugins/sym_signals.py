@@ -46,7 +46,7 @@ class SignalPlugin:
             else None
         )
         self.status = True
-        logging.info("Initialized")
+        self.watcher_queue = watcher_queue
 
     async def __check_max_bots(self):
         result = False
@@ -159,14 +159,14 @@ class SignalPlugin:
 
                                 logging.info(f"Triggering new trade for {symbol}")
 
-                                # Automatically subscribe to reduce load
-                                if self.dynamic_dca:
-                                    await self.watcher_queue.put([symbol_full])
-
                                 # Backend needs symbol with /
                                 symbol_full = self.utils.split_symbol(
                                     symbol, self.currency
                                 )
+
+                                # Automatically subscribe to reduce load
+                                if self.dynamic_dca:
+                                    await self.watcher_queue.put([symbol_full])
 
                                 order = {
                                     "ordersize": self.ordersize,

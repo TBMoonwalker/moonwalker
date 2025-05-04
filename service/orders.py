@@ -27,9 +27,6 @@ class Orders:
         # 1. Create exchange order
         order_status = await self.exchange.create_spot_market_sell(order)
 
-        # 2. Delete trade
-        await self.trades.delete_trades(order["symbol"])
-
         # 3. Create closed trade
         open_timestamp = 0.0
         base_order = await self.trades.get_trade_by_ordertype(
@@ -44,6 +41,9 @@ class Orders:
                 f"Did not found a timestamp - taking default value. Cause {e}"
             )
             pass
+
+        # Delete trade
+        await self.trades.delete_trades(order["symbol"])
 
         open_trade = await self.trades.get_open_trades_by_symbol(order_status["symbol"])
         # ToDo - why is it sometimes emtpy? Race condition?
