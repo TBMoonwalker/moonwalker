@@ -103,7 +103,5 @@ class Indicators:
             result = categories
         except Exception as e:
             result = None
-            Indicators.logging.info(
-                f"RSI SLOPE cannot be calculated for {symbol}. Cause: {e}"
-            )
+            logging.error(f"RSI SLOPE cannot be calculated for {symbol}. Cause: {e}")
         return result
