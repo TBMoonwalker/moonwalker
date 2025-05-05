@@ -25,7 +25,6 @@ class SignalPlugin:
         self.ordersize = config.get("bo")
         self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
-        self.ws_url = config.get("ws_url", None)
         self.plugin_settings = json.loads(config.get("plugin_settings"))
         self.filter_values = json.loads(config.get("filter", None))
         self.currency = config.get("currency")
@@ -85,73 +84,68 @@ class SignalPlugin:
 
     @retry(wait=wait_fixed(3))
     async def __check_entry_point(self, symbol):
-        if self.filter_values and self.ws_url:
-            try:
-                topcoin_limit = True
-                marketcap = "N/A"
+        # allow/denylist check
+        # we only need the plain symbol here:
+        symbol_only, currency = symbol.split("/")
+        if not self.filter.is_on_allowed_list(
+            symbol_only, self.pair_allowlist
+        ) and self.filter.is_on_deny_list(symbol_only, self.pair_denylist):
+            logging.info(
+                f"{symbol} is not on your allowlist or on your denylist. Ignoring it."
+            )
+            return False
 
-                # btc pulse check
-                btc_pulse = True
-                if self.btc_pulse:
-                    btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
+        if not self.filter_values:
+            return True
 
-                if btc_pulse:
-                    # marketcap api needs the symbol without quote
-                    mc_symbol, currency = symbol.split("/")
-
-                    if self.topcoin_limit:
-                        marketcap = self.filter.get_cmc_marketcap_rank(
-                            self.filter_values["marketcap_cmc_api_key"], mc_symbol
-                        )
-
-                        topcoin_limit = self.filter.is_within_topcoin_limit(
-                            marketcap, self.topcoin_limit
-                        )
-
-                    if topcoin_limit:
-                        rsi_14 = await self.indicators.calculate_rsi(
-                            symbol, self.timeframe, 14
-                        )
-                        ema_slope_30 = await self.indicators.calculate_ema_slope(
-                            symbol, self.timeframe, 30
-                        )
-                        ema_distance_30 = await self.indicators.calculate_ema_distance(
-                            symbol, self.timeframe, 30
-                        )
-                        rsi_limit = self.filter.is_within_rsi_limit(
-                            rsi_14, self.filter_values["rsi_max"]
-                        )
-
-                        logging.debug(
-                            f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30}, EMA_DISTANCE_30: {ema_distance_30})"
-                        )
-                        if (
-                            rsi_limit
-                            and ema_distance_30
-                            and self.filter.is_on_allowed_list(
-                                symbol, self.pair_allowlist
-                            )
-                            and not self.filter.is_on_deny_list(
-                                symbol, self.pair_denylist
-                            )
-                        ):
-                            return True
-                        else:
-                            return False
-                    else:
-                        return False
-                else:
-                    logging.debug(
-                        f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
-                    )
-                    return False
-            except Exception as e:
-                logging.debug(
-                    f"No data yet for {symbol} - you need to enable dynamic dca - error: {e}"
+        try:
+            # btc pulse check
+            if self.btc_pulse and not self.filter.btc_pulse_status("5Min", "10Min"):
+                logging.info(
+                    f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
                 )
                 return False
-        else:
-            return True
+
+            # topcoin limit check
+            if self.topcoin_limit:
+                marketcap = self.filter.get_cmc_marketcap_rank(
+                    self.filter_values["marketcap_cmc_api_key"],
+                    symbol_only,
+                )
+                if marketcap:
+                    if not self.filter.is_within_topcoin_limit(
+                        marketcap, self.topcoin_limit
+                    ):
+                        logging.info(
+                            f"{symbol} is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
+                        )
+                        return False
+
+            # strategy entry check
+            rsi_14 = await self.indicators.calculate_rsi(symbol, self.timeframe, 14)
+            ema_slope_30 = await self.indicators.calculate_ema_slope(
+                symbol, self.timeframe, 30
+            )
+            ema_distance_30 = await self.indicators.calculate_ema_distance(
+                symbol, self.timeframe, 30
+            )
+            rsi_limit = self.filter.is_within_rsi_limit(
+                rsi_14, self.filter_values["rsi_max"]
+            )
+
+            logging.debug(
+                f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30}, EMA_DISTANCE_30: {ema_distance_30})"
+            )
+            if rsi_limit and ema_distance_30:
+                return True
+            else:
+                return False
+
+        except Exception as e:
+            logging.debug(
+                f"No data yet for {symbol} - you need to enable dynamic dca - error: {e}"
+            )
+            return False
 
     async def run(self):
         while self.status:

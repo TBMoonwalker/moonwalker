@@ -105,7 +105,6 @@ class Orders:
 
         # 3. Create open trade
         payload = {"symbol": order_status["symbol"]}
-        # TODO - needs a full payload or notnull default values in model - without UI throws errors
         await self.trades.create_open_trades(payload)
 
     async def receive_stop_signal(self, symbol):

@@ -12,7 +12,6 @@ class Data:
     def __init__(self):
         config = helper.Config()
         utils = helper.Utils()
-        # TODO - create a method for the timerange
         self.utils = utils
         self.history_data = config.get("history_from_data", 3)
         self.exchange_id = config.get("exchange")

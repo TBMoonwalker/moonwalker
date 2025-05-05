@@ -8,7 +8,7 @@ plugin = asap
 
 [plugin]
 # asap plugin settings
-plugin_settings = {"symbol_list": "BTCUSDT,ETHUSDT"}
+plugin_settings = {"symbol_list": "BTC/USDT,ETH/USDT"}
 # sym_signals plugin settings
 # plugin_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your-key-from-3CQS", "api_version": "api-version", "allowed_signals": [allowd signals from signal list]}
 
