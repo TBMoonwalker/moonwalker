@@ -24,10 +24,10 @@ class Dca:
                 f"strategies.{config.get('dca_strategy')}"
             )
             dca_strategy_plugin = dca_strategy.Strategy(
+                timeframe=config.get("dca_strategy_timeframe", "1m"),
                 btc_pulse=config.get("btc_pulse", False),
-                timeframe=config.get("dca_timeframe", "1m"),
             )
-
+        self.strategy = dca_strategy_plugin
         self.trailing_tp = config.get("trailing_tp", 0)
         self.dynamic_dca = config.get("dynamic_dca", False)
         self.dynamic_tp = config.get("dynamic_tp", 0)
@@ -39,15 +39,15 @@ class Dca:
         self.tp = config.get("tp")
         self.sl = config.get("sl", 10000)
         self.market = config.get("market", "spot")
-        self.strategy = dca_strategy_plugin
 
-    def __dynamic_dca_strategy(self, symbol, price):
+    def __dynamic_dca_strategy(self, symbol):
         result = False
 
         token, currency = symbol.split("/")
         symbol = f"{token}{currency}"
 
-        result = self.strategy.run(symbol, price)
+        if self.strategy:
+            result = self.strategy.run(symbol)
 
         return result
 
@@ -200,7 +200,7 @@ class Dca:
                     # Trigger new safety order for dynamic dca
                     if actual_pnl <= -abs(next_so_percentage):
                         if self.dynamic_dca and await self.__dynamic_dca_strategy(
-                            trades["symbol"], current_price
+                            trades["symbol"]
                         ):
                             # Set next_so_percentage to current percentage
                             next_so_percentage = actual_pnl

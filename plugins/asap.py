@@ -4,6 +4,7 @@ import asyncio
 import requests
 import json
 import random
+import importlib
 from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
@@ -38,6 +39,16 @@ class SignalPlugin:
             if config.get("pair_allowlist", None)
             else None
         )
+        # Import configured strategies
+        signal_strategy_plugin = None
+        if config.get("signal_strategy", None):
+            signal_strategy = importlib.import_module(
+                f"strategies.{config.get('signal_strategy')}"
+            )
+            signal_strategy_plugin = signal_strategy.Strategy(
+                timeframe=config.get("signal_strategy_timeframe", "1m"),
+            )
+        self.strategy = signal_strategy_plugin
         self.dynamic_dca = config.get("dynamic_dca", False)
         self.btc_pulse = config.get("btc_pulse", False)
         self.topcoin_limit = config.get("topcoin_limit", None)
@@ -122,24 +133,8 @@ class SignalPlugin:
                         return False
 
             # strategy entry check
-            rsi_14 = await self.indicators.calculate_rsi(symbol, self.timeframe, 14)
-            ema_slope_30 = await self.indicators.calculate_ema_slope(
-                symbol, self.timeframe, 30
-            )
-            ema_distance_30 = await self.indicators.calculate_ema_distance(
-                symbol, self.timeframe, 30
-            )
-            rsi_limit = self.filter.is_within_rsi_limit(
-                rsi_14, self.filter_values["rsi_max"]
-            )
-
-            logging.debug(
-                f"Waiting for Entry: SYMBOL: {symbol}, RSI_14: {rsi_14}, MARKETCAP: {marketcap}, EMA_SLOPE_30: {ema_slope_30}, EMA_DISTANCE_30: {ema_distance_30})"
-            )
-            if rsi_limit and ema_distance_30:
-                return True
-            else:
-                return False
+            if self.strategy:
+                return await self.strategy.run(symbol)
 
         except Exception as e:
             logging.debug(

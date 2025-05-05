@@ -5,6 +5,8 @@ port = 8120
 
 [signal]
 plugin = asap
+signal_strategy = tothemoonv2
+signal_strategy_timeframe = 15m
 
 [plugin]
 # asap plugin settings
@@ -41,7 +43,8 @@ dca = True
 # Dynamic DCA - you need Moonloader for it
 dynamic_dca = False
 # Dynamic DCA strategy
-dca_strategy = tothemoon
+dca_strategy = tothemoonv2
+dca_strategy_timeframe = 15m
 # in percent - if 0 trailing tp is disabled
 trailing_tp = 0
 # Number of concurrent trades

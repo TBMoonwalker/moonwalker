@@ -6,14 +6,14 @@ logging = helper.LoggerFactory.get_logger("logs/strategies.log", "tothemoonv2")
 
 
 class Strategy:
-    def __init__(self, btc_pulse, timeframe):
+    def __init__(self, timeframe, btc_pulse=None):
         self.btc_pulse = btc_pulse
         self.timeframe = timeframe
         self.filter = Filter()
         self.indicators = Indicators()
         logging.info("Initialized")
 
-    async def run(self, symbol, price):
+    async def run(self, symbol):
         result = False
 
         try:
@@ -64,11 +64,11 @@ class Strategy:
                 "ema_slope_50": ema_slope_50,
                 "rsi_slope_14": rsi_slope_14,
                 "ema_cross": ema_cross,
-                "creating_so": result,
+                "creating_order": result,
             }
             logging.debug(f"{logging_json}")
 
-            return result
-
         except ValueError as e:
             logging.error(f"JSON Message is garbage: {e}")
+
+        return result

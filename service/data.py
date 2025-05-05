@@ -43,11 +43,11 @@ class Data:
                 length_minutes = 480
             case "1h":
                 length_minutes = 120
-            case "15min":
-                length_minutes = 30
-            case "10min":
+            case "15m":
+                length_minutes = 45
+            case "10m":
                 length_minutes = 20
-            case "5min":
+            case "5m":
                 length_minutes = 10
 
             # If an exact match is not confirmed, this last case will be used if provided

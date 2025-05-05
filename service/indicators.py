@@ -1,5 +1,6 @@
 import helper
 import talib
+import pandas as pd
 from service.data import Data
 
 data = Data()
