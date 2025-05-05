@@ -16,7 +16,7 @@ class Indicators:
 
         try:
             ema = talib.EMA(df["close"], timeperiod=length)
-            ema = ema.dropna().iloc[-1]
+            ema = ema.dropna()
         except Exception as e:
             logging.error(f"EMA cannot be calculated for {symbol}. Cause: {e}")
             ema = None
@@ -63,16 +63,27 @@ class Indicators:
 
     async def calculate_ema_cross(self, symbol, timerange):
         result = None
-        ema_9 = await self.calculate_ema(symbol, timerange, 9)
-        ema_50 = await self.calculate_ema(symbol, timerange, 50)
-
-        logging.debug(f"EMA20: {ema_9}, EMA50: {ema_50}")
+        df_raw = await data.get_data_for_pair(symbol, timerange, 21)
+        df = data.resample_data(df_raw, timerange)
+        df["ema_short"] = talib.EMA(df["close"], timeperiod=9)
+        df["ema_long"] = talib.EMA(df["close"], timeperiod=21)
+        df.dropna(subset=["ema_short", "ema_long"], inplace=True)
 
         try:
-            if ema_9 > ema_50:
+
+            if (
+                df.iloc[-2]["ema_short"] <= df.iloc[-2]["ema_long"]
+                and df.iloc[-1]["ema_short"] >= df.iloc[-1]["ema_long"]
+            ):
                 result = "up"
-            elif ema_9 < ema_50:
+            elif (
+                df.iloc[-2]["ema_short"] >= df.iloc[-2]["ema_long"]
+                and df.iloc[-1]["ema_short"] <= df.iloc[-1]["ema_long"]
+            ):
                 result = "down"
+            else:
+                result = "none"
+
         except Exception as e:
             logging.error(f"EMA Cross cannot be calculated for {symbol}. Cause: {e}")
 

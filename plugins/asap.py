@@ -156,9 +156,6 @@ class SignalPlugin:
                     current_symbol = f"asap_{symbol}"
                     signal = await self.__check_entry_point(symbol)
                     if current_symbol not in running_trades and not max_bots and signal:
-                        # Backend needs symbol with /
-                        # symbol_full = self.utils.split_symbol(symbol, self.currency)
-
                         logging.info(f"Triggering new trade for {symbol}")
                         order = {
                             "ordersize": self.ordersize,
