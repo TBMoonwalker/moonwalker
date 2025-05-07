@@ -76,6 +76,7 @@ class Orders:
         await self.trades.delete_open_trades(order["symbol"])
 
     async def receive_buy_order(self, order):
+
         logging.info(f"Incoming buy order for {order["symbol"]}")
 
         # 1. Create exchange order
@@ -103,9 +104,10 @@ class Orders:
         }
         await self.trades.create_trades(payload)
 
-        # 3. Create open trade
-        payload = {"symbol": order_status["symbol"]}
-        await self.trades.create_open_trades(payload)
+        # 3. Create open trade (only for base order)
+        if not order_status["safetyorder"]:
+            payload = {"symbol": order_status["symbol"]}
+            await self.trades.create_open_trades(payload)
 
     async def receive_stop_signal(self, symbol):
         logging.info("Incoming stop order")
