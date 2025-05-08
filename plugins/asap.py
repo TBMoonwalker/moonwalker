@@ -128,7 +128,7 @@ class SignalPlugin:
                         marketcap, self.topcoin_limit
                     ):
                         logging.info(
-                            f"{symbol} is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
+                            f"{symbol} has {marketcap} and is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
                         )
                         return False
 

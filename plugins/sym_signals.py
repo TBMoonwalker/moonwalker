@@ -64,8 +64,6 @@ class SignalPlugin:
         return result
 
     def __check_entry_point(self, event):
-        result = False
-
         # btc pulse check
         btc_pulse = True
         if self.btc_pulse:
