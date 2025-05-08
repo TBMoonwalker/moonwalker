@@ -138,6 +138,7 @@ class SignalPlugin:
                     finally:
                         logging.info(f"Reconnect attempt in 10 seconds")
                         await asyncio.sleep(10)
+                        continue
                 try:
                     event = await sio.receive(timeout=300)
                     if event[0] == "signal":
@@ -190,6 +191,7 @@ class SignalPlugin:
                         "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"
                     )
                     await sio.disconnect()
+                    continue
 
     async def shutdown(self):
         self.status = False
