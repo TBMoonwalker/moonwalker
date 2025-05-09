@@ -86,7 +86,7 @@ class Indicators:
         return result
 
     async def calculate_ema_cross(self, symbol, timerange):
-        result = None
+        result = "none"
         df_raw = await data.get_data_for_pair(symbol, timerange, 21)
         df = data.resample_data(df_raw, timerange)
         df["ema_short"] = talib.EMA(df["close"], timeperiod=9)
