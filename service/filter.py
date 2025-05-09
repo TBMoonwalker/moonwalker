@@ -124,11 +124,27 @@ class Filter:
         )
 
         try:
+            symbol_count = 0
             json_data = response.json()
             if json_data["status"]["error_code"] == 0:
                 for entry in json_data["data"]:
                     if entry["symbol"] == symbol:
-                        marketcap = entry["rank"]
+                        symbol_count += 1
+                        if symbol_count > 1:
+                            continue
+                # Find specific symbol
+                for entry in json_data["data"]:
+                    if symbol_count > 1:
+                        if (
+                            entry["symbol"] == symbol
+                            and entry["name"].upper() == symbol
+                        ):
+                            marketcap = entry["rank"]
+                            continue
+                    else:
+                        if entry["symbol"] == symbol:
+                            marketcap = entry["rank"]
+                            continue
         except Exception as e:
             logging.error(f"Error getting CMC data. Cause: {e}")
 
