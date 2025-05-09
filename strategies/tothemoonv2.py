@@ -51,17 +51,17 @@ class Strategy:
                     "BTC-Pulse is in downtrend - not creating new safety orders"
                 )
 
+            logging_json = {
+                "symbol": symbol,
+                "ema_slope_9": ema_slope_9["status"],
+                "ema_slope_50": ema_slope_50["status"],
+                "rsi_slope_14": rsi_slope_14["status"],
+                "ema_cross": ema_cross["status"],
+                "creating_so": result,
+            }
+            self.logging.debug(f"{logging_json}")
+
         except ValueError as e:
             self.logging.error(f"JSON Message is garbage: {e}")
-
-        logging_json = {
-            "symbol": symbol,
-            "ema_slope_9": ema_slope_9["status"],
-            "ema_slope_50": ema_slope_50["status"],
-            "rsi_slope_14": rsi_slope_14["status"],
-            "ema_cross": ema_cross["status"],
-            "creating_so": result,
-        }
-        self.logging.debug(f"{logging_json}")
 
         return result
