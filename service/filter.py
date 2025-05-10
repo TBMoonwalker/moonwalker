@@ -69,9 +69,16 @@ class Filter:
 
     def has_enough_volume(self, range, size, volume):
         result = False
+        volume_ranges = ["k", "M", "B", "T"]
+        volume_position_in = volume_ranges.index(volume["range"])
+        volume_position_out = volume_ranges.index(range)
+
         if volume:
             if size and range:
-                if float(size) >= float(volume["size"]) and range == volume["range"]:
+                if (
+                    float(size) >= float(volume["size"])
+                    and volume_position_out >= volume_position_in
+                ):
                     result = True
         else:
             result = True
