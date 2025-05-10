@@ -48,6 +48,7 @@ class Indicators:
         return result
 
     async def calculate_ema_slope(self, symbol, timerange, length):
+        result = "none"
         try:
             df_raw = await data.get_data_for_pair(symbol, timerange, length)
             df = data.resample_data(df_raw, timerange)
@@ -63,7 +64,6 @@ class Indicators:
                     categories = "flat"
             result = categories
         except Exception as e:
-            result = None
             logging.error(f"EMA SLOPE cannot be calculated for {symbol}. Cause: {e}")
         return result
 
@@ -113,16 +113,17 @@ class Indicators:
         return result
 
     async def calculate_rsi(self, symbol, timerange, length):
+        result = "none"
         try:
             df_raw = await data.get_data_for_pair(symbol, timerange, length)
             df = data.resample_data(df_raw, timerange)
             rsi = talib.RSI(df["close"], timeperiod=length).dropna().iloc[-1]
         except Exception as e:
             logging.error("Error getting RSI data. Cause: {e}")
-            rsi = None
         return rsi
 
     async def calculate_rsi_slope(self, symbol, timerange, length):
+        result = "none"
         try:
             df_raw = await data.get_data_for_pair(symbol, timerange, length)
             df = data.resample_data(df_raw, timerange)
@@ -137,6 +138,5 @@ class Indicators:
                     categories = "downward"
             result = categories
         except Exception as e:
-            result = None
             logging.error(f"RSI SLOPE cannot be calculated for {symbol}. Cause: {e}")
         return result
