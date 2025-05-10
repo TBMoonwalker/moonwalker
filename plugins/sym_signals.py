@@ -1,79 +1,62 @@
-from logger import LoggerFactory
-from models import Trades
-from filter import Filter
-from socketio.exceptions import TimeoutError
-
+import model
+import helper
 import asyncio
 import socketio
 import json
+from service.orders import Orders
+from service.filter import Filter
+from service.data import Data
+from socketio.exceptions import TimeoutError
+
+logging = helper.LoggerFactory.get_logger("logs/signals.log", "sym_signals")
 
 
 class SignalPlugin:
-    def __init__(
-        self,
-        order,
-        ordersize,
-        max_bots,
-        ws_url,
-        loglevel,
-        plugin_settings,
-        filter_values,
-        exchange,
-        currency,
-        market,
-        pair_denylist,
-        pair_allowlist,
-        topcoin_limit,
-        volume,
-        dynamic_dca,
-        btc_pulse,
-        timeframe,
-    ):
-        self.order = order
-        self.ordersize = ordersize
-        self.max_bots = max_bots
-        self.ws_url = ws_url
-        self.plugin_settings = json.loads(plugin_settings)
-        self.filter = Filter(
-            ws_url=ws_url, loglevel=loglevel, btc_pulse=btc_pulse, currency=currency
+    def __init__(self, watcher_queue):
+        config = helper.Config()
+        self.utils = helper.Utils()
+        self.orders = Orders()
+        self.ordersize = config.get("bo")
+        self.max_bots = config.get("max_bots")
+        self.btc_pulse = config.get("btc_pulse", False)
+        self.plugin_settings = json.loads(config.get("plugin_settings"))
+        self.filter = Filter()
+        self.filter_values = (
+            json.loads(config.get("filter", None))
+            if config.get("filter", None)
+            else None
         )
-        if filter_values:
-            self.filter_values = json.loads(filter_values)
-        else:
-            self.filter_values = None
-        self.exchange = exchange.upper()
-        self.currency = currency.upper()
-        if pair_denylist:
-            self.pair_denylist = pair_denylist.split(",")
-        else:
-            self.pair_denylist = None
-        if pair_allowlist:
-            self.pair_allowlist = pair_allowlist.split(",")
-        else:
-            self.pair_allowlist = None
-        self.dynamic_dca = dynamic_dca
-        self.topcoin_limit = topcoin_limit
-        if volume:
-            self.volume = json.loads(volume)
-        else:
-            self.volume = None
-        self.btc_pulse = btc_pulse
-
-        # Class Attributes
-        SignalPlugin.status = True
-        SignalPlugin.logging = LoggerFactory.get_logger(
-            "logs/signals.log", "sym_signals", log_level=loglevel
+        self.currency = config.get("currency").upper()
+        self.pair_denylist = (
+            config.get("pair_denylist", None).split(",")
+            if config.get("pair_denylist", None)
+            else None
         )
-        SignalPlugin.logging.info("Initialized")
+        self.pair_allowlist = (
+            config.get("pair_allowlist", None).split(",")
+            if config.get("pair_allowlist", None)
+            else None
+        )
+        self.dynamic_dca = config.get("dynamic_dca", False)
+        self.topcoin_limit = config.get("topcoin_limit", None)
+        self.timeframe = config.get("timeframe", "1m")
+        self.exchange_name = config.get("exchange").upper()
+        self.volume = (
+            json.loads(config.get("volume", None))
+            if config.get("volume", None)
+            else None
+        )
+        self.status = True
+        self.watcher_queue = watcher_queue
 
     async def __check_max_bots(self):
         result = False
         try:
-            all_bots = await Trades.all().distinct().values_list("bot", flat=True)
+            all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True
         except Exception as e:
-            SignalPlugin.logging.error(
+            logging.error(
                 f"Couldn't get actual list of bots - not starting new deals! Cause: {e}"
             )
             result = True
@@ -81,8 +64,6 @@ class SignalPlugin:
         return result
 
     def __check_entry_point(self, event):
-        result = False
-
         # btc pulse check
         btc_pulse = True
         if self.btc_pulse:
@@ -104,7 +85,7 @@ class SignalPlugin:
             volume_size = None
 
             for exchange in volume_24h:
-                if exchange == self.exchange:
+                if exchange == self.exchange_name:
                     if volume_24h[exchange].get(self.currency) != None:
                         # DirtyFix: Some volume data misses "k", "M" or "B"
                         if isinstance(volume_24h[exchange].get(self.currency), float):
@@ -132,19 +113,15 @@ class SignalPlugin:
 
             return False
         else:
-            SignalPlugin.logging.info(
-                "BTC-Pulse is in downtrend - not starting new deals!"
-            )
+            logging.info("BTC-Pulse is in downtrend - not starting new deals!")
             return False
 
     async def run(self):
         async with socketio.AsyncSimpleClient() as sio:
-            while SignalPlugin.status:
+            while self.status:
                 if not sio.connected:
                     try:
-                        SignalPlugin.logging.info(
-                            "Establish connection to sym signal websocket."
-                        )
+                        logging.info("Establish connection to sym signal websocket.")
                         await sio.connect(
                             self.plugin_settings["api_url"],
                             headers={
@@ -155,12 +132,11 @@ class SignalPlugin:
                             socketio_path="/stream/v1/signals",
                         )
                     except Exception as e:
-                        SignalPlugin.logging.error(
-                            f"Failed to connect to sym signal websocket: {e}"
-                        )
+                        logging.error(f"Failed to connect to sym signal websocket: {e}")
                     finally:
-                        SignalPlugin.logging.info(f"Reconnect attempt in 10 seconds")
+                        logging.info(f"Reconnect attempt in 10 seconds")
                         await asyncio.sleep(10)
+                        continue
                 try:
                     event = await sio.receive(timeout=300)
                     if event[0] == "signal":
@@ -168,7 +144,7 @@ class SignalPlugin:
 
                         if self.__check_entry_point(event[1]):
                             running_trades = (
-                                await Trades.all()
+                                await model.Trades.all()
                                 .distinct()
                                 .values_list("bot", flat=True)
                             )
@@ -177,22 +153,28 @@ class SignalPlugin:
                             current_symbol = f"symsignal_{symbol}"
 
                             if current_symbol not in running_trades and not max_bots:
-                                SignalPlugin.logging.debug(
+                                logging.debug(
                                     f"Running trades: {running_trades}, Max Bots: {max_bots}"
                                 )
 
-                                SignalPlugin.logging.info(
-                                    f"Triggering new trade for {symbol}"
+                                logging.info(f"Triggering new trade for {symbol}")
+
+                                # Backend needs symbol with /
+                                symbol_full = self.utils.split_symbol(
+                                    symbol, self.currency
                                 )
 
-                                # Automatically subscribe/unsubscribe symbols in Moonloader to reduce load
+                                # Automatically subscribe to reduce load
                                 if self.dynamic_dca:
-                                    self.filter.subscribe_symbol(symbol)
+                                    await Data().add_history_data_for_symbol(
+                                        symbol_full
+                                    )
+                                    await self.watcher_queue.put([symbol_full])
 
                                 order = {
                                     "ordersize": self.ordersize,
-                                    "symbol": symbol,
-                                    "direction": "open_long",
+                                    "symbol": symbol_full,
+                                    "direction": "long",
                                     "botname": f"symsignal_{symbol}",
                                     "baseorder": True,
                                     "safetyorder": False,
@@ -201,12 +183,13 @@ class SignalPlugin:
                                     "so_percentage": None,
                                     "side": "buy",
                                 }
-                                await self.order.put(order)
+                                await self.orders.receive_buy_order(order)
                 except TimeoutError:
-                    SignalPlugin.logging.error(
+                    logging.error(
                         "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"
                     )
                     await sio.disconnect()
+                    continue
 
     async def shutdown(self):
-        SignalPlugin.status = False
+        self.status = False

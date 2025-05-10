@@ -1,21 +1,19 @@
-import requests
-from logger import LoggerFactory
-from filter import Filter
+import helper
+from service.filter import Filter
+from service.indicators import Indicators
+
+logging = helper.LoggerFactory.get_logger("logs/strategies.log", "tothemoonv2")
 
 
 class Strategy:
-    def __init__(self, ws_url, loglevel, btc_pulse, currency, timeframe):
-        self.ws_url = ws_url
+    def __init__(self, timeframe, btc_pulse=None):
         self.btc_pulse = btc_pulse
         self.timeframe = timeframe
+        self.filter = Filter()
+        self.indicators = Indicators()
+        logging.info("Initialized")
 
-        self.logging = LoggerFactory.get_logger(
-            "logs/strategies.log", "tothemoonv2", log_level=loglevel
-        )
-        self.filter = Filter(ws_url=ws_url, loglevel=loglevel, currency=currency)
-        self.logging.info("Initialized")
-
-    def run(self, symbol, price):
+    async def run(self, symbol):
         result = False
 
         try:
@@ -23,45 +21,54 @@ class Strategy:
             if self.btc_pulse:
                 btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
 
+            ema_slope_50 = await self.indicators.calculate_ema_slope(
+                symbol, self.timeframe, 50
+            )
+            ema_slope_9 = await self.indicators.calculate_ema_slope(
+                symbol, self.timeframe, 9
+            )
+            rsi_slope_14 = await self.indicators.calculate_rsi_slope(
+                symbol, self.timeframe, 14
+            )
+            ema_cross = await self.indicators.calculate_ema_cross(
+                symbol, self.timeframe
+            )
+
             if btc_pulse:
-                ema_slope_50 = self.filter.ema_slope(symbol, self.timeframe, 50).json()
-                ema_slope_9 = self.filter.ema_slope(symbol, self.timeframe, 9).json()
-                rsi_slope_14 = self.filter.rsi_slope(symbol, self.timeframe, 14).json()
-                ema_cross = self.filter.ema_cross(symbol, self.timeframe).json()
                 # rsi = self.filter.get_rsi(symbol, self.timeframe).json()
                 # rsi_value = float(rsi["status"])
                 # support_level_30m = self.filter.support_level(symbol, "1d", 10).json()
                 # support_level = support_level_30m["status"]
 
                 # TODO: Implement extreme wick detection (high percentage down in one candle)
-                # self.logging.debug(f"Support Level: {support_level}")
-                # self.logging.debug(f"RSI value: {rsi_value}")
+                # logging.debug(f"Support Level: {support_level}")
+                # logging.debug(f"RSI value: {rsi_value}")
 
                 # if rsi_value <= 30:
                 if (
-                    ema_slope_9["status"] == "upward"
-                    and ema_slope_50["status"] == "upward"
-                    and rsi_slope_14["status"] == "upward"
-                    and ema_cross["status"] == "up"
+                    ema_slope_9 == "upward"
+                    and ema_slope_50 == "upward"
+                    and rsi_slope_14 == "upward"
+                    and ema_cross == "up"
                 ):
                     # create SO
                     result = True
             else:
-                self.logging.info(
+                logging.info(
                     "BTC-Pulse is in downtrend - not creating new safety orders"
                 )
 
             logging_json = {
                 "symbol": symbol,
-                "ema_slope_9": ema_slope_9["status"],
-                "ema_slope_50": ema_slope_50["status"],
-                "rsi_slope_14": rsi_slope_14["status"],
-                "ema_cross": ema_cross["status"],
-                "creating_so": result,
+                "ema_slope_9": ema_slope_9,
+                "ema_slope_50": ema_slope_50,
+                "rsi_slope_14": rsi_slope_14,
+                "ema_cross": ema_cross,
+                "creating_order": result,
             }
-            self.logging.debug(f"{logging_json}")
+            logging.debug(f"{logging_json}")
 
         except ValueError as e:
-            self.logging.error(f"JSON Message is garbage: {e}")
+            logging.error(f"JSON Message is garbage: {e}")
 
         return result

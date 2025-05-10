@@ -1,4 +1,5 @@
 import logging, logging.handlers
+import helper
 import os
 
 
@@ -6,11 +7,16 @@ class LoggerFactory(object):
     _LOG = None
 
     @staticmethod
-    def __create_logger(log_file, name, log_level):
+    def __create_logger(log_file, name):
         """
         A private method that interacts with the python
         logging module
         """
+        # set the loglevel
+        log_level = "INFO"
+        if helper.Config().get("debug", False):
+            log_level = "DEBUG"
+
         # set the logging format
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(name)s : %(message)s"
@@ -41,12 +47,12 @@ class LoggerFactory(object):
         return LoggerFactory._LOG
 
     @staticmethod
-    def get_logger(log_file, name, log_level):
+    def get_logger(log_file, name):
         """
         A static method called by other modules to initialize logger in
         their own module
         """
-        logger = LoggerFactory.__create_logger(log_file, name, log_level)
+        logger = LoggerFactory.__create_logger(log_file, name)
 
         # return the logger object
         return logger

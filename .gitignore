@@ -4,6 +4,7 @@
 *.sqlite-wal
 *.sqlite-shm
 config.ini
+config.ini.*
 nohup.out
 *.bak
 debug.py

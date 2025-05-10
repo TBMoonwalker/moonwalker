@@ -1,19 +1,17 @@
 import requests
+import helper
 from cachetools import cached, TTLCache
-from logger import LoggerFactory
 from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
+
+logging = helper.LoggerFactory.get_logger("logs/filter.log", "filter")
 
 
 class Filter:
-    def __init__(self, ws_url, loglevel, btc_pulse=None, currency=None):
-        self.ws_url = ws_url
-        self.btc_pulse = btc_pulse
-        self.currency = currency
-
-        self.logging = LoggerFactory.get_logger(
-            "logs/filter.log", "filter", log_level=loglevel
-        )
-        self.logging.info("Initialized")
+    def __init__(self):
+        config = helper.Config()
+        self.ws_url = config.get("ws_url", None)
+        self.btc_pulse = config.get("btc_pulse", False)
+        self.currency = config.get("currency").upper()
 
     @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
     def __request_api_endpoint(self, request, headers=None):
@@ -24,65 +22,10 @@ class Filter:
             else:
                 response = requests.get(url=request)
         except requests.exceptions.RequestException as e:
-            self.logging.error(f"Error getting response for {request}. Cause: {e}")
+            logging.error(f"Error getting response for {request}. Cause: {e}")
             raise TryAgain
 
         return response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def sma_slope(self, symbol, timeframe):
-        sma_slope_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/sma_slope/{symbol}/{timeframe}"
-        )
-
-        return sma_slope_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def ema_slope(self, symbol, timeframe, length):
-        ema_slope_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/ema_slope/{symbol}/{timeframe}/{length}"
-        )
-
-        return ema_slope_response
-
-    def rsi_slope(self, symbol, timeframe, length):
-        rsi_slope_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/rsi_slope/{symbol}/{timeframe}/{length}"
-        )
-
-        return rsi_slope_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def get_rsi(self, symbol, timeframe, length):
-        rsi_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/rsi/{symbol}/{timeframe}/{length}"
-        )
-
-        return rsi_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def ema_cross(self, symbol, timeframe):
-        ema_cross_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/ema_cross/{symbol}/{timeframe}"
-        )
-
-        return ema_cross_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    def ema_distance(self, symbol, timeframe, length):
-        ema_distance_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/ema_distance/{symbol}/{timeframe}/{length}"
-        )
-
-        return ema_distance_response
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=300))
-    def support_level(self, symbol, timeframe, num_level):
-        support_level_response = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/support/{symbol}/{timeframe}/{num_level}"
-        )
-
-        return support_level_response
 
     def is_on_allowed_list(self, symbol, allow_list):
         result = False
@@ -182,13 +125,13 @@ class Filter:
 
         try:
             json_data = response.json()
+            if json_data["status"]["error_code"] == 0:
+                for entry in json_data["data"]:
+                    if entry["symbol"] == symbol:
+                        marketcap = entry["rank"]
+                        break
         except Exception as e:
-            self.logging.error(f"Error getting CMC data. Cause: {e}")
-
-        if json_data["status"]["error_code"] == 0:
-            for entry in json_data["data"]:
-                if entry["symbol"] == symbol:
-                    marketcap = entry["rank"]
+            logging.error(f"Error getting CMC data. Cause: {e}")
 
         return marketcap
 
@@ -202,19 +145,3 @@ class Filter:
         ]
 
         return subscribed_symbols
-
-    def subscribe_symbol(self, symbol):
-        try:
-            self.__request_api_endpoint(f"{self.ws_url}/symbol/add/{symbol}")
-        except Exception as e:
-            self.logging.error(
-                f"Error adding {symbol} to Moonloader subscription list. Cause {e}"
-            )
-
-    def unsubscribe_symbol(self, symbol):
-        try:
-            self.__request_api_endpoint(f"{self.ws_url}/symbol/remove/{symbol}")
-        except Exception as e:
-            self.logging.error(
-                f"Error removing {symbol} from Moonloader subscription list. Cause {e}"
-            )

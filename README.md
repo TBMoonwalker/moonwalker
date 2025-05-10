@@ -13,6 +13,10 @@ Moonwalker can be used to trade on your exchange directly using various signal p
 ## Installation
 ```pip install -r requirements.txt```
 
+### TA-Lib dependency
+
+You also need to install the ta-lib library for your OS. Please see - https://ta-lib.org/install/#linux-debian-packages
+
 ## Configuration (config.ini)
 Name | Type | Mandatory | Values(default) | Description
 ------------ | ------------ | ------------ | ------------ | ------------
@@ -46,7 +50,8 @@ os | integer | YES | () | Safety order volume scale
 mstc | integer | NO | () | Max safety orders count
 tp | integer | YES | (1) | Take profit in percent
 sl | integer | NO | (1) | Stop loss in percent
-ws_url | string | NO | (http://localhost:9130/api/v1) | URL of the Moonloader websocket api. Used for dynamic TP
+housekeeping_interval | integer | NO | 48 | Minimum interval for indicator ticker caching
+history_data | integer | NO | 3 | Minimum interval for history data - needed for dynamic dca
 
 ## SymSignals signal setup
 ``plugin_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your api key", "api_version": "api version", "allowed_signals": [signalid, signalid]}``
@@ -60,7 +65,7 @@ For example, ``allowed_signals[12, 2]`` configures SymRank Top 10 and SymRank To
 When you are ready with the configuration, copy the ``config.ini.example`` to ``config.ini`` and start the bot.
 
 ## Run
-```python moonwalker.py```
+```python app.py```
 
 ## Logging
 You can see information about the DCA and the TakeProfit (TP) status in the statistics.log. Other logs are available too (for exchange ...)

@@ -5,10 +5,12 @@ port = 8120
 
 [signal]
 plugin = asap
+signal_strategy = tothemoonv2
+signal_strategy_timeframe = 15m
 
 [plugin]
 # asap plugin settings
-plugin_settings = {"symbol_list": "BTCUSDT,ETHUSDT"}
+plugin_settings = {"symbol_list": "BTC/USDT,ETH/USDT"}
 # sym_signals plugin settings
 # plugin_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your-key-from-3CQS", "api_version": "api-version", "allowed_signals": [allowd signals from signal list]}
 
@@ -41,7 +43,8 @@ dca = True
 # Dynamic DCA - you need Moonloader for it
 dynamic_dca = False
 # Dynamic DCA strategy
-dca_strategy = tothemoon
+dca_strategy = tothemoonv2
+dca_strategy_timeframe = 15m
 # in percent - if 0 trailing tp is disabled
 trailing_tp = 0
 # Number of concurrent trades
@@ -64,6 +67,7 @@ tp = 1
 sl = 1
 
 [indicators]
-# Only needed if you activate 
-# Only works with Moonloader! - see https://github.com/TBMoonwalker/moonloader
-ws_url = http://localhost:9130/api/v1
+# in hours - please use 48 hours as minimum for indicators
+housekeeping_interval = 48
+# in days
+history_from_data = 3
