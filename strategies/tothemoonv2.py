@@ -6,12 +6,10 @@ logging = helper.LoggerFactory.get_logger("logs/strategies.log", "tothemoonv2")
 
 
 class Strategy:
-    def __init__(self, timeframe, btc_pulse=None):
-        self.btc_pulse = btc_pulse
+    def __init__(self, timeframe):
         self.timeframe = timeframe
         self.filter = Filter()
         self.indicators = Indicators()
-        logging.info("Initialized")
 
     async def run(self, symbol):
         result = False
