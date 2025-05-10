@@ -24,8 +24,7 @@ class Dca:
                 f"strategies.{config.get('dca_strategy')}"
             )
             dca_strategy_plugin = dca_strategy.Strategy(
-                timeframe=config.get("dca_strategy_timeframe", "1m"),
-                btc_pulse=config.get("btc_pulse", False),
+                timeframe=config.get("dca_strategy_timeframe", "1m")
             )
         self.strategy = dca_strategy_plugin
         self.trailing_tp = config.get("trailing_tp", 0)
