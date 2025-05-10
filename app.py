@@ -25,19 +25,19 @@ logging = helper.LoggerFactory.get_logger("logs/moonwalker.log", "main")
 # Queues
 watcher_queue = asyncio.Queue()
 
-# Import configured plugin
-plugin = importlib.import_module(f"plugins.{attributes.get('plugin')}")
+# Import configured signal plugins
+signals = importlib.import_module(f"signals.{attributes.get('signal')}")
 
 # Initialize database
 database = Database()
 
-# Initialize Signal plugin
-signal_plugin = plugin.SignalPlugin(watcher_queue)
+# Initialize signal plugin
+signal_plugin = signals.SignalPlugin(watcher_queue)
 
-# Initialize Watcher module
+# Initialize watcher module
 watcher = Watcher()
 
-# Initialize Housekeeper module
+# Initialize housekeeper module
 housekeeper = Housekeeper()
 
 # Initialize app

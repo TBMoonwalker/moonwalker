@@ -23,8 +23,8 @@ Name | Type | Mandatory | Values(default) | Description
 timezone | string | YES | (Europe/London) | Timezone used by the logging framework
 debug | boolean | NO | (false) true  | Logging debugging information into various logs
 port | integer | NO | (8120) | Port to use for the internal webserver (Must be port 80 for http and Tradingview use)
-plugin | string | YES | (sym_signals) | Plugin to be used as signal for Moonwalker
-plugin_settings | string | YES | . | Specific plugin settings for the chosen plugin (see SymSignals signal setup)
+signal | string | YES | (sym_signals) | Signal plugin to be used as signal for Moonwalker
+signal_settings | string | YES | . | Specific signal settings for the chosen plugin (see SymSignals signal setup)
 pair_allowlist | string | NO |  | Specify which pairs are explicitely allowed for trading
 pair_denylist | string | NO |  | Specify which pairs are explicitely denied for trading
 exchange | string | YES | (binance) | Used exchange for trading
@@ -54,7 +54,7 @@ housekeeping_interval | integer | NO | 48 | Minimum interval for indicator tic
 history_data | integer | NO | 3 | Minimum interval for history data - needed for dynamic dca
 
 ## SymSignals signal setup
-``plugin_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your api key", "api_version": "api version", "allowed_signals": [signalid, signalid]}``
+``signal_settings = {"api_url": "https://stream.3cqs.com", "api_key": "your api key", "api_version": "api version", "allowed_signals": [signalid, signalid]}``
 
 The available signal id's for ``allowed_signals`` can be found from https://3cqs.com/home/faq/.
 
