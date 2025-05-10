@@ -140,3 +140,13 @@ class Indicators:
         except Exception as e:
             logging.error(f"RSI SLOPE cannot be calculated for {symbol}. Cause: {e}")
         return result
+
+    async def calculate_24h_volume(self, symbol):
+        result = "none"
+        try:
+            df_raw = await data.get_data_for_pair(symbol, "1D", 1)
+            df = data.resample_data(df_raw, "1h").rolling(window=24).sum()
+            result = df["volume"].dropna().iloc[-1]
+        except Exception as e:
+            logging.error(f"24h volume cannot be calculated for {symbol}. Cause: {e}")
+        return result

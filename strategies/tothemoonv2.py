@@ -19,7 +19,7 @@ class Strategy:
         try:
             btc_pulse = True
             if self.btc_pulse:
-                btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
+                btc_pulse = self.filter.btc_pulse_status("5min", "10min")
 
             ema_slope_50 = await self.indicators.calculate_ema_slope(
                 symbol, self.timeframe, 50

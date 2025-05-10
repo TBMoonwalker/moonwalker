@@ -37,17 +37,17 @@ class Data:
     def __calculate_min_candle_date(self, timerange, length):
         # Convert timerange with buffer
         match timerange:
-            case "1d":
+            case "1D":
                 length_minutes = 2880
             case "4h":
                 length_minutes = 480
             case "1h":
                 length_minutes = 120
-            case "15m":
+            case "15min":
                 length_minutes = 45
-            case "10m":
+            case "10min":
                 length_minutes = 20
-            case "5m":
+            case "5min":
                 length_minutes = 10
 
             # If an exact match is not confirmed, this last case will be used if provided

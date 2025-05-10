@@ -39,7 +39,7 @@ class SignalPlugin:
         )
         self.dynamic_dca = config.get("dynamic_dca", False)
         self.topcoin_limit = config.get("topcoin_limit", None)
-        self.timeframe = config.get("timeframe", "1m")
+        self.timeframe = config.get("timeframe", "1min")
         self.exchange_name = config.get("exchange").upper()
         self.volume = (
             json.loads(config.get("volume", None))

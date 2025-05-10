@@ -6,7 +6,7 @@ port = 8120
 [signal]
 signal = asap
 signal_strategy = tothemoonv2
-signal_strategy_timeframe = 15m
+signal_strategy_timeframe = 15min
 # asap plugin settings
 # signal_settings = {"symbol_list": "BTC/USDT,ETH/USDT"}
 # sym_signals plugin settings
@@ -41,7 +41,7 @@ dca = True
 dynamic_dca = False
 # Dynamic DCA strategy
 dca_strategy = tothemoonv2
-dca_strategy_timeframe = 15m
+dca_strategy_timeframe = 15min
 # in percent - if 0 trailing tp is disabled
 trailing_tp = 0
 # Number of concurrent trades
