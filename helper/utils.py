@@ -1,4 +1,5 @@
 import helper
+import math
 
 
 class Utils:
@@ -21,3 +22,16 @@ class Utils:
             pair, market = pair.split(currency)
             symbol = f"{pair}/{currency}"
         return symbol
+
+    def convert_numbers(self, number):
+        millnames = ["", "k", "M", "B", " T"]
+        n = float(number)
+        millidx = max(
+            0,
+            min(
+                len(millnames) - 1,
+                int(math.floor(0 if n == 0 else math.log10(abs(n)) / 3)),
+            ),
+        )
+
+        return "{:.0f} {}".format(n / 10 ** (3 * millidx), millnames[millidx])

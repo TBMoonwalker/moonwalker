@@ -39,6 +39,11 @@ class SignalPlugin:
             if config.get("pair_allowlist", None)
             else None
         )
+        self.volume = (
+            json.loads(config.get("volume", None))
+            if config.get("volume", None)
+            else None
+        )
         # Import configured strategies
         signal_strategy_plugin = None
         if config.get("signal_strategy", None):
@@ -46,13 +51,13 @@ class SignalPlugin:
                 f"strategies.{config.get('signal_strategy')}"
             )
             signal_strategy_plugin = signal_strategy.Strategy(
-                timeframe=config.get("signal_strategy_timeframe", "1m"),
+                timeframe=config.get("signal_strategy_timeframe", "1min"),
             )
         self.strategy = signal_strategy_plugin
         self.dynamic_dca = config.get("dynamic_dca", False)
         self.btc_pulse = config.get("btc_pulse", False)
         self.topcoin_limit = config.get("topcoin_limit", None)
-        self.timeframe = config.get("timeframe", "1m")
+        self.timeframe = config.get("timeframe", "1min")
         self.status = True
         self.watcher_queue = watcher_queue
         logging.debug(self.signal_settings["symbol_list"])
@@ -111,11 +116,25 @@ class SignalPlugin:
 
         try:
             # btc pulse check
-            if self.btc_pulse and not self.filter.btc_pulse_status("5Min", "10Min"):
+            if self.btc_pulse and not self.filter.btc_pulse_status("5min", "10min"):
                 logging.info(
                     f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
                 )
                 return False
+
+            # volume check
+            if self.volume:
+                volume_size, volume_range = self.utils.convert_numbers(
+                    await self.indicators.calculate_24h_volume(symbol)
+                ).split(" ")
+
+                if not self.filter.has_enough_volume(
+                    volume_range, volume_size, self.volume
+                ):
+                    logging.info(
+                        f"Symbol: {symbol} has a 24h volume of {volume_size}{volume_range}, which is under the configured volume of {self.volume['size']}{self.volume['range']}"
+                    )
+                    return False
 
             # topcoin limit check
             if self.topcoin_limit:
