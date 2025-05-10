@@ -26,7 +26,7 @@ class SignalPlugin:
         self.ordersize = config.get("bo")
         self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
-        self.plugin_settings = json.loads(config.get("plugin_settings"))
+        self.signal_settings = json.loads(config.get("signal_settings"))
         self.filter_values = json.loads(config.get("filter", None))
         self.currency = config.get("currency")
         self.pair_denylist = (
@@ -55,7 +55,7 @@ class SignalPlugin:
         self.timeframe = config.get("timeframe", "1m")
         self.status = True
         self.watcher_queue = watcher_queue
-        logging.debug(self.plugin_settings["symbol_list"])
+        logging.debug(self.signal_settings["symbol_list"])
 
     async def __check_max_bots(self):
         result = False
@@ -74,7 +74,7 @@ class SignalPlugin:
     @cached(cache=TTLCache(maxsize=1024, ttl=900))
     async def __get_new_symbol_list(self, running_list):
         # New symbols
-        symbol_list = self.plugin_settings["symbol_list"]
+        symbol_list = self.signal_settings["symbol_list"]
         if "http" in symbol_list:
             symbol_list = requests.get(symbol_list).json()["pairs"]
 

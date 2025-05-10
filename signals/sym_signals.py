@@ -19,7 +19,7 @@ class SignalPlugin:
         self.ordersize = config.get("bo")
         self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
-        self.plugin_settings = json.loads(config.get("plugin_settings"))
+        self.signal_settings = json.loads(config.get("signal_settings"))
         self.filter = Filter()
         self.filter_values = (
             json.loads(config.get("filter", None))
@@ -98,7 +98,7 @@ class SignalPlugin:
                             )
                     break
             if (
-                signal_id in self.plugin_settings["allowed_signals"]
+                signal_id in self.signal_settings["allowed_signals"]
                 and self.filter.is_on_allowed_list(symbol, self.pair_allowlist)
                 and self.filter.is_within_topcoin_limit(
                     market_cap_rank, self.topcoin_limit
@@ -123,10 +123,10 @@ class SignalPlugin:
                     try:
                         logging.info("Establish connection to sym signal websocket.")
                         await sio.connect(
-                            self.plugin_settings["api_url"],
+                            self.signal_settings["api_url"],
                             headers={
-                                "api-key": self.plugin_settings["api_key"],
-                                "user-agent": f"3CQS Signal Client/{self.plugin_settings['api_version']}",
+                                "api-key": self.signal_settings["api_key"],
+                                "user-agent": f"3CQS Signal Client/{self.signal_settings['api_version']}",
                             },
                             transports=["websocket", "polling"],
                             socketio_path="/stream/v1/signals",
