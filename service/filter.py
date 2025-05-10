@@ -56,17 +56,6 @@ class Filter:
 
         return result
 
-    def is_within_rsi_limit(self, rsi_value, rsi_limit_max):
-        result = False
-        if rsi_limit_max:
-            if rsi_value:
-                if rsi_value <= rsi_limit_max:
-                    result = True
-        else:
-            result = True
-
-        return result
-
     def has_enough_volume(self, range, size, volume):
         result = False
         volume_ranges = ["k", "M", "B", "T"]
@@ -84,36 +73,6 @@ class Filter:
             result = True
 
         return result
-
-    @cached(cache=TTLCache(maxsize=1024, ttl=300))
-    def btc_pulse_status(self, timeframe, timeframe_uptrend=None):
-        response = True
-
-        # Subscribe BTC symbol if not available
-        subscribed_symbols = self.__get_symbols()
-        if subscribed_symbols:
-            if f"BTC{self.currency}" not in subscribed_symbols:
-                self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
-        else:
-            self.__request_api_endpoint(f"{self.ws_url}/symbol/add/BTC")
-
-        btc_pulse = self.__request_api_endpoint(
-            f"{self.ws_url}/indicators/btc_pulse/{timeframe}"
-        ).json()
-        if btc_pulse["status"] == "downtrend":
-            response = False
-        elif btc_pulse["status"] == "uptrend":
-            if timeframe_uptrend:
-                btc_pulse_uptrend = self.__request_api_endpoint(
-                    f"{self.ws_url}/indicators/btc_pulse/{timeframe_uptrend}"
-                ).json()
-                if btc_pulse_uptrend["status"] == "downtrend":
-                    response = False
-                elif btc_pulse_uptrend["status"] == "uptrend":
-                    response = True
-            else:
-                response = True
-        return response
 
     @cached(cache=TTLCache(maxsize=1024, ttl=86400))
     def get_cmc_marketcap_rank(self, api_key, symbol):
@@ -141,14 +100,3 @@ class Filter:
             logging.error(f"Error getting CMC data. Cause: {e}")
 
         return marketcap
-
-    def __get_symbols(self):
-        subscribed_list = self.__request_api_endpoint(
-            f"{self.ws_url}/symbol/list"
-        ).json()["result"]
-        subscribed_symbols = [
-            f"{symbol}"
-            for symbol, kline in [item.split("@") for item in subscribed_list]
-        ]
-
-        return subscribed_symbols

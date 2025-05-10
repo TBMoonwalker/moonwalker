@@ -34,4 +34,4 @@ class Utils:
             ),
         )
 
-        return "{:.0f} {}".format(n / 10 ** (3 * millidx), millnames[millidx])
+        return "{:.00f} {}".format(n / 10 ** (3 * millidx), millnames[millidx])

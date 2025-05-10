@@ -54,10 +54,10 @@ class SignalPlugin:
                 timeframe=config.get("signal_strategy_timeframe", "1min"),
             )
         self.strategy = signal_strategy_plugin
+        self.strategy_timeframe = config.get("signal_strategy_timeframe", "1min")
         self.dynamic_dca = config.get("dynamic_dca", False)
         self.btc_pulse = config.get("btc_pulse", False)
         self.topcoin_limit = config.get("topcoin_limit", None)
-        self.timeframe = config.get("timeframe", "1min")
         self.status = True
         self.watcher_queue = watcher_queue
         logging.debug(self.signal_settings["symbol_list"])
@@ -83,6 +83,10 @@ class SignalPlugin:
         if "http" in symbol_list:
             symbol_list = requests.get(symbol_list).json()["pairs"]
 
+        # Add BTC to list if BTC-Pulse is activated
+        if self.btc_pulse and "BTC" not in symbol_list:
+            symbol_list.append(("BTC" + "/" + self.currency).upper())
+
         # Add history data for indicators
         for symbol in symbol_list:
             await Data().add_history_data_for_symbol(symbol)
@@ -103,11 +107,11 @@ class SignalPlugin:
         # allow/denylist check
         # we only need the plain symbol here:
         symbol_only, currency = symbol.split("/")
-        if not self.filter.is_on_allowed_list(
+        if self.filter.is_on_allowed_list(
             symbol_only, self.pair_allowlist
         ) and self.filter.is_on_deny_list(symbol_only, self.pair_denylist):
             logging.info(
-                f"{symbol} is not on your allowlist or on your denylist. Ignoring it."
+                f"Symbol {symbol} is not in your allowlist or is set in your denylist. Ignoring it."
             )
             return False
 
@@ -116,11 +120,14 @@ class SignalPlugin:
 
         try:
             # btc pulse check
-            if self.btc_pulse and not self.filter.btc_pulse_status("5min", "10min"):
-                logging.info(
-                    f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
-                )
-                return False
+            if self.btc_pulse:
+                if not await self.indicators.calculate_btc_pulse(
+                    self.currency, self.strategy_timeframe
+                ):
+                    logging.info(
+                        f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
+                    )
+                    return False
 
             # volume check
             if self.volume:
@@ -132,7 +139,7 @@ class SignalPlugin:
                     volume_range, volume_size, self.volume
                 ):
                     logging.info(
-                        f"Symbol: {symbol} has a 24h volume of {volume_size}{volume_range}, which is under the configured volume of {self.volume['size']}{self.volume['range']}"
+                        f"Symbol {symbol} has a 24h volume of {volume_size}{volume_range}, which is under the configured volume of {self.volume['size']}{self.volume['range']}"
                     )
                     return False
 
@@ -147,7 +154,7 @@ class SignalPlugin:
                         marketcap, self.topcoin_limit
                     ):
                         logging.info(
-                            f"{symbol} has {marketcap} and is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
+                            f"Symbol {symbol} has a marketcap of {marketcap} and is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
                         )
                         return False
 
