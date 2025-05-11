@@ -86,6 +86,8 @@ class SignalPlugin:
         symbol_list = self.signal_settings["symbol_list"]
         if "http" in symbol_list:
             symbol_list = requests.get(symbol_list).json()["pairs"]
+        else:
+            symbol_list = self.signal_settings["symbol_list"].split(",")
 
         # Add BTC to list if BTC-Pulse is activated
         if self.btc_pulse and "BTC" not in symbol_list:
