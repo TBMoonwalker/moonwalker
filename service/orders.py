@@ -94,12 +94,12 @@ class Orders:
             "symbol": order_status["symbol"],
             "orderid": order_status["orderid"],
             "bot": order["botname"],
-            "ordertype": order_status["ordertype"],
-            "baseorder": order_status["baseorder"],
-            "safetyorder": order_status["safetyorder"],
-            "order_count": order_status["order_count"],
-            "so_percentage": order_status["so_percentage"],
-            "direction": order_status["direction"],
+            "ordertype": order["ordertype"],
+            "baseorder": order["baseorder"],
+            "safetyorder": order["safetyorder"],
+            "order_count": order["order_count"],
+            "so_percentage": order["so_percentage"],
+            "direction": order["direction"],
             "side": order_status["side"],
         }
         await self.trades.create_trades(payload)
