@@ -105,7 +105,7 @@ class Orders:
         await self.trades.create_trades(payload)
 
         # 3. Create open trade (only for base order)
-        if not order_status["safetyorder"]:
+        if not order["safetyorder"]:
             payload = {"symbol": order_status["symbol"]}
             await self.trades.create_open_trades(payload)
 
