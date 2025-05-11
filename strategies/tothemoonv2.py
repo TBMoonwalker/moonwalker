@@ -32,8 +32,7 @@ class Strategy:
                 ema_slope_9 == "upward"
                 and ema_slope_50 == "upward"
                 and rsi_slope_14 == "upward"
-                and ema_cross == "up"
-            ):
+            ) or ema_cross == "up":
                 # create SO
                 result = True
 
