@@ -14,40 +14,43 @@ logging = helper.LoggerFactory.get_logger("logs/indicators.log", "indicators")
 class Indicators:
 
     async def calculate_bbands_cross(self, symbol, timerange, length):
-        result = False
-        df_raw = await data.get_data_for_pair(symbol, timerange, length)
-        df = data.resample_data(df_raw, timerange)
-        df["upper_band"], df["middle_band"], df["lower_band"] = talib.BBANDS(
-            df["close"], timeperiod=length
-        )
-        df.dropna(subset=["upper_band", "middle_band", "lower_band"], inplace=True)
-        percent_difference_downtrend = 0
-        percent_difference_uptrend = 0
-        if df["close"].iloc[-2] < df["lower_band"].iloc[-2]:
-            percent_difference_downtrend = (
-                abs(df["lower_band"].iloc[-2] - df["close"].iloc[-2])
-                / ((df["lower_band"].iloc[-2] + df["close"].iloc[-2]) / 2)
-                * 10
+        result = "none"
+        try:
+            df_raw = await data.get_data_for_pair(symbol, timerange, length)
+            df = data.resample_data(df_raw, timerange)
+            df["upper_band"], df["middle_band"], df["lower_band"] = talib.BBANDS(
+                df["close"], timeperiod=length
             )
-        if df["close"].iloc[-1] > df["lower_band"].iloc[-1]:
-            percent_difference_uptrend = (
-                abs(df["lower_band"].iloc[-1] - df["close"].iloc[-1])
-                / ((df["lower_band"].iloc[-1] + df["close"].iloc[-1]) / 2)
-                * 100
-            )
-        if percent_difference_downtrend > 0.1 and (
-            percent_difference_uptrend > 0.1 and percent_difference_uptrend < 0.5
-        ):
+            df.dropna(subset=["upper_band", "middle_band", "lower_band"], inplace=True)
+            percent_difference_downtrend = 0
+            percent_difference_uptrend = 0
+            if df["close"].iloc[-2] < df["lower_band"].iloc[-2]:
+                percent_difference_downtrend = (
+                    abs(df["lower_band"].iloc[-2] - df["close"].iloc[-2])
+                    / ((df["lower_band"].iloc[-2] + df["close"].iloc[-2]) / 2)
+                    * 10
+                )
+            if df["close"].iloc[-1] > df["lower_band"].iloc[-1]:
+                percent_difference_uptrend = (
+                    abs(df["lower_band"].iloc[-1] - df["close"].iloc[-1])
+                    / ((df["lower_band"].iloc[-1] + df["close"].iloc[-1]) / 2)
+                    * 100
+                )
+
             logging.debug(
                 f"Symbol: {symbol}, Price: {df["close"].iloc[-1]}, LowerBand: {df["lower_band"].iloc[-1]}"
             )
             logging.debug(
                 f"Symbol: {symbol}, downtrend: {percent_difference_downtrend}, uptrend: {percent_difference_uptrend}"
             )
-            result = True
-            # logging.debug(
-            #     f"Symbol: {symbol}, UpperBand: {df["upper_band"].iloc[-1]}, MiddleBand: {df["middle_band"].iloc[-1]}, LowerBand: {df["lower_band"].iloc[-1]}"
-            # )
+
+            if percent_difference_downtrend > 0.1 and (
+                percent_difference_uptrend > 0.1 and percent_difference_uptrend < 0.5
+            ):
+                result = True
+        except Exception as e:
+            logging.error(f"BBANDS cross cannot be calculated for {symbol}. Cause: {e}")
+
         return result
 
     async def calculate_ema_slope(self, symbol, timerange, length):
