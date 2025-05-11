@@ -27,7 +27,11 @@ class SignalPlugin:
         self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
         self.signal_settings = json.loads(config.get("signal_settings"))
-        self.filter_values = json.loads(config.get("filter", None))
+        self.filter_values = (
+            json.loads(config.get("filter", None))
+            if config.get("filter", None)
+            else None
+        )
         self.currency = config.get("currency")
         self.pair_denylist = (
             config.get("pair_denylist", None).split(",")
@@ -124,7 +128,7 @@ class SignalPlugin:
                 if not await self.indicators.calculate_btc_pulse(
                     self.currency, self.strategy_timeframe
                 ):
-                    logging.info(
+                    logging.debug(
                         f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
                     )
                     return False
