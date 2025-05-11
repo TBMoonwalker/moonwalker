@@ -121,9 +121,6 @@ class SignalPlugin:
             )
             return False
 
-        if not self.filter_values:
-            return True
-
         try:
             # btc pulse check
             if self.btc_pulse:
@@ -150,7 +147,7 @@ class SignalPlugin:
                     return False
 
             # topcoin limit check
-            if self.topcoin_limit:
+            if self.topcoin_limit and self.filter_values:
                 marketcap = self.filter.get_cmc_marketcap_rank(
                     self.filter_values["marketcap_cmc_api_key"],
                     symbol_only,
