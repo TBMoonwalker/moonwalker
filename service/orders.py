@@ -93,7 +93,7 @@ class Orders:
             "price": order_status["price"],
             "symbol": order_status["symbol"],
             "orderid": order_status["orderid"],
-            "bot": order_status["botname"],
+            "bot": order["botname"],
             "ordertype": order_status["ordertype"],
             "baseorder": order_status["baseorder"],
             "safetyorder": order_status["safetyorder"],
