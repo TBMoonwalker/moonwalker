@@ -219,7 +219,7 @@ class Exchange:
             try:
                 logging.info(f"Try to buy {order["amount"]} {order["symbol"]}")
                 parameter = {}
-                order = self.exchange.create_order(
+                trade = self.exchange.create_order(
                     order["symbol"],
                     order["ordertype"],
                     order["side"],
@@ -227,6 +227,7 @@ class Exchange:
                     order["price"],
                     parameter,
                 )
+                order.update(trade)
             except ccxt.ExchangeError as e:
                 logging.error(
                     f"Buying pair {order["symbol"]} failed due to an exchange error: {e}"
@@ -273,9 +274,10 @@ class Exchange:
             time.sleep(0.2)
         else:
             try:
-                order = self.exchange.create_market_sell_order(
+                trade = self.exchange.create_market_sell_order(
                     order["symbol"], order["total_amount"]
                 )
+                order.update(trade)
             except ccxt.ExchangeError as e:
                 logging.error(
                     f"Selling pair {order["symbol"]} failed due to an exchange error: {e}"
