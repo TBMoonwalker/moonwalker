@@ -1,4 +1,5 @@
 import ccxt as ccxt
+import decimal
 import uuid
 import time
 import helper
@@ -6,6 +7,7 @@ from datetime import datetime
 from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
 
 logging = helper.LoggerFactory.get_logger("logs/exchange.log", "exchange")
+sell_retry_count = 0
 
 
 class Exchange:
@@ -262,6 +264,7 @@ class Exchange:
 
         return order
 
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
     async def create_spot_market_sell(self, order):
         order["info"] = {}
 
@@ -274,14 +277,32 @@ class Exchange:
             time.sleep(0.2)
         else:
             try:
+                # Implement sell safeguard, if we cannot sell full amount
+                if sell_retry_count > 0:
+                    decimal_places = abs(
+                        decimal.Decimal(str(order["total_amount"])).as_tuple().exponent
+                    )
+                    reduce_amount = sell_retry_count * (10**-decimal_places)
+                    order["total_amount"] = order["total_amount"] - reduce_amount
+                    logging.info(
+                        f"Reducing amount for sell to: {order["total_amount"]}"
+                    )
+
                 trade = self.exchange.create_market_sell_order(
                     order["symbol"], order["total_amount"]
                 )
+                # TODO: Check if there is dust left to sell
+                # 1. fetch the amount left
+                # 2. createConvertTrade (ccxt)
+                # 3. fetchConvertTrade (ccxt)
                 order.update(trade)
             except ccxt.ExchangeError as e:
                 logging.error(
                     f"Selling pair {order["symbol"]} failed due to an exchange error: {e}"
                 )
+                if "insufficient balance" in e:
+                    raise TryAgain
+
             except ccxt.NetworkError as e:
                 logging.error(
                     f"Selling pair {order["symbol"]} failed due to an network error: {e}"
@@ -289,7 +310,9 @@ class Exchange:
             except Exception as e:
                 logging.error(f"Selling pair {order["symbol"]} failed with: {e}")
 
-        logging.info(f"Sold {order["total_amount"]} {order['symbol']} on Exchange")
+        logging.info(
+            f"Sold {order["total_amount"]} {order['symbol']} on Exchange. Retry count: {sell_retry_count}"
+        )
 
         order_status = self.__parse_order_status(order)
         order_status["type"] = "sold_check"
