@@ -300,7 +300,7 @@ class Exchange:
                 logging.error(
                     f"Selling pair {order["symbol"]} failed due to an exchange error: {e}"
                 )
-                if "insufficient balance" in e:
+                if "insufficient balance" in str(e):
                     raise TryAgain
 
             except ccxt.NetworkError as e:
