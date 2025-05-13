@@ -7,7 +7,6 @@ from datetime import datetime
 from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
 
 logging = helper.LoggerFactory.get_logger("logs/exchange.log", "exchange")
-sell_retry_count = 0
 
 
 class Exchange:
@@ -38,6 +37,7 @@ class Exchange:
         self.exchange.enableRateLimit = True
         self.exchange.load_markets()
         self.status = True
+        Exchange.sell_retry_count = 0
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_price_for_symbol(self, pair):
@@ -278,7 +278,7 @@ class Exchange:
         else:
             try:
                 # Implement sell safeguard, if we cannot sell full amount
-                if sell_retry_count > 0:
+                if Exchange.sell_retry_count > 0:
                     decimal_places = abs(
                         decimal.Decimal(str(order["total_amount"])).as_tuple().exponent
                     )
@@ -298,10 +298,10 @@ class Exchange:
                 order.update(trade)
             except ccxt.ExchangeError as e:
                 logging.error(
-                    f"Selling {order["total_amount"]} of pair {order["symbol"]} failed due to an exchange error. Retry count: {sell_retry_count}: {e}"
+                    f"Selling {order["total_amount"]} of pair {order["symbol"]} failed due to an exchange error. Retry count: {Exchange.sell_retry_count}: {e}"
                 )
                 if "insufficient balance" in str(e):
-                    sell_retry_count += 1
+                    Exchange.sell_retry_count += 1
                     raise TryAgain
 
             except ccxt.NetworkError as e:
