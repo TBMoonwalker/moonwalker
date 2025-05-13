@@ -298,9 +298,10 @@ class Exchange:
                 order.update(trade)
             except ccxt.ExchangeError as e:
                 logging.error(
-                    f"Selling {order["total_amount"]} of pair {order["symbol"]} failed due to an exchange error: {e}"
+                    f"Selling {order["total_amount"]} of pair {order["symbol"]} failed due to an exchange error. Retry count: {sell_retry_count}: {e}"
                 )
                 if "insufficient balance" in str(e):
+                    sell_retry_count += 1
                     raise TryAgain
 
             except ccxt.NetworkError as e:
