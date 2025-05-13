@@ -312,7 +312,7 @@ class Exchange:
                 logging.error(f"Selling pair {order["symbol"]} failed with: {e}")
 
         logging.info(
-            f"Sold {order["total_amount"]} {order['symbol']} on Exchange. Retry count: {sell_retry_count}"
+            f"Sold {order["total_amount"]} {order['symbol']} on Exchange. Retry count: {Exchange.sell_retry_count}"
         )
 
         order_status = self.__parse_order_status(order)
