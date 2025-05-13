@@ -297,12 +297,16 @@ class Exchange:
                 # 3. fetchConvertTrade (ccxt)
                 order.update(trade)
             except ccxt.ExchangeError as e:
-                logging.error(
-                    f"Selling {order["total_amount"]} of pair {order["symbol"]} failed due to an exchange error. Retry count: {Exchange.sell_retry_count}: {e}"
-                )
                 if "insufficient balance" in str(e):
+                    logging.error(
+                        f"Trying to sell {order["total_amount"]} of pair {order["symbol"]} failed due insufficient balance."
+                    )
                     Exchange.sell_retry_count += 1
                     raise TryAgain
+                else:
+                    logging.error(
+                        f"Selling pair {order["symbol"]} failed due to an exchange error: {e}"
+                    )
 
             except ccxt.NetworkError as e:
                 logging.error(
@@ -311,9 +315,7 @@ class Exchange:
             except Exception as e:
                 logging.error(f"Selling pair {order["symbol"]} failed with: {e}")
 
-        logging.info(
-            f"Sold {order["total_amount"]} {order['symbol']} on Exchange. Retry count: {Exchange.sell_retry_count}"
-        )
+        logging.info(f"Sold {order["total_amount"]} {order['symbol']} on Exchange.")
 
         order_status = self.__parse_order_status(order)
         order_status["type"] = "sold_check"
