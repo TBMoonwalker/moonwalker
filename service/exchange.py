@@ -282,7 +282,7 @@ class Exchange:
                     decimal_places = abs(
                         decimal.Decimal(str(order["total_amount"])).as_tuple().exponent
                     )
-                    reduce_amount = sell_retry_count * (10**-decimal_places)
+                    reduce_amount = Exchange.sell_retry_count * (10**-decimal_places)
                     order["total_amount"] = order["total_amount"] - reduce_amount
                     logging.info(
                         f"Reducing amount for sell to: {order["total_amount"]}"
