@@ -264,7 +264,7 @@ class Exchange:
 
         return order
 
-    @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(100))
     async def create_spot_market_sell(self, order):
         order["info"] = {}
 
@@ -298,7 +298,7 @@ class Exchange:
                 order.update(trade)
             except ccxt.ExchangeError as e:
                 logging.error(
-                    f"Selling pair {order["symbol"]} failed due to an exchange error: {e}"
+                    f"Selling order["total_amount"] of pair {order["symbol"]} failed due to an exchange error: {e}"
                 )
                 if "insufficient balance" in str(e):
                     raise TryAgain
