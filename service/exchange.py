@@ -279,10 +279,16 @@ class Exchange:
             try:
                 # Implement sell safeguard, if we cannot sell full amount
                 if Exchange.sell_retry_count > 0:
+                    int_amount = len(str(int(order["total_amount"])))
                     decimal_places = abs(
                         decimal.Decimal(str(order["total_amount"])).as_tuple().exponent
                     )
-                    reduce_amount = Exchange.sell_retry_count * (10**-decimal_places)
+                    if int_amount >= 4:
+                        reduce_amount = Exchange.sell_retry_count
+                    else:
+                        reduce_amount = Exchange.sell_retry_count * (
+                            10**-decimal_places
+                        )
                     order["total_amount"] = order["total_amount"] - reduce_amount
                     logging.info(
                         f"Reducing amount for sell to: {order["total_amount"]}"
