@@ -27,53 +27,60 @@ class Orders:
         # 1. Create exchange order
         order_status = await self.exchange.create_spot_market_sell(order)
 
-        # 3. Create closed trade
-        open_timestamp = 0.0
-        base_order = await self.trades.get_trade_by_ordertype(
-            order_status["symbol"], baseorder=True
-        )
-
-        try:
-            open_timestamp = float(base_order[0]["timestamp"])
-        except Exception as e:
-            open_timestamp = datetime.timestamp(datetime.now())
-            logging.debug(
-                f"Did not found a timestamp - taking default value. Cause {e}"
+        if order_status:
+            # 2. Create closed trade
+            open_timestamp = 0.0
+            base_order = await self.trades.get_trade_by_ordertype(
+                order_status["symbol"], baseorder=True
             )
-            pass
 
-        # Delete trade
-        await self.trades.delete_trades(order["symbol"])
+            try:
+                open_timestamp = float(base_order[0]["timestamp"])
+            except Exception as e:
+                open_timestamp = datetime.timestamp(datetime.now())
+                logging.debug(
+                    f"Did not found a timestamp - taking default value. Cause {e}"
+                )
+                pass
 
-        open_trade = await self.trades.get_open_trades_by_symbol(order_status["symbol"])
-        # ToDo - why is it sometimes emtpy? Race condition?
-        so_count = 0
-        if open_trade:
-            so_count = open_trade[0]["so_count"]
+            # 3. Delete trade
+            await self.trades.delete_trades(order["symbol"])
 
-        sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
-        sell_date = datetime.now()
-        open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
+            open_trade = await self.trades.get_open_trades_by_symbol(
+                order_status["symbol"]
+            )
+            # ToDo - why is it sometimes emtpy? Race condition?
+            so_count = 0
+            if open_trade:
+                so_count = open_trade[0]["so_count"]
 
-        # Calculate trade duration
-        duration_data = self.__calculate_trade_duration(open_timestamp, sell_timestamp)
-        payload = {
-            "symbol": order_status["symbol"],
-            "so_count": so_count,
-            "profit": order_status["profit"],
-            "profit_percent": order_status["profit_percent"],
-            "amount": order_status["total_amount"],
-            "cost": order_status["total_cost"],
-            "tp_price": order_status["tp_price"],
-            "avg_price": order_status["avg_price"],
-            "open_date": open_date,
-            "close_date": sell_date,
-            "duration": duration_data,
-        }
-        await self.trades.create_closed_trades(payload)
+            sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
+            sell_date = datetime.now()
+            open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
 
-        # 4. Delete Open trades
-        await self.trades.delete_open_trades(order["symbol"])
+            # Calculate trade duration
+            duration_data = self.__calculate_trade_duration(
+                open_timestamp, sell_timestamp
+            )
+            payload = {
+                "symbol": order_status["symbol"],
+                "so_count": so_count,
+                "profit": order_status["profit"],
+                "profit_percent": order_status["profit_percent"],
+                "amount": order_status["total_amount"],
+                "cost": order_status["total_cost"],
+                "tp_price": order_status["tp_price"],
+                "avg_price": order_status["avg_price"],
+                "open_date": open_date,
+                "close_date": sell_date,
+                "duration": duration_data,
+            }
+            await self.trades.create_closed_trades(payload)
+
+            # 4. Delete Open trades
+            await self.trades.delete_open_trades(order["symbol"])
+        else:
+            logging.error(f"Failed creating sell order for {order["symbol"]}")
 
     async def receive_buy_order(self, order):
 
@@ -82,32 +89,35 @@ class Orders:
         # 1. Create exchange order
         order_status = await self.exchange.create_spot_market_buy(order)
 
-        # 2. Create trade
-        payload = {
-            "timestamp": order_status["timestamp"],
-            "ordersize": order_status["ordersize"],
-            "fee": order_status["fees"],
-            "precision": order_status["precision"],
-            "amount_fee": order_status["amount_fee"],
-            "amount": order_status["amount"],
-            "price": order_status["price"],
-            "symbol": order_status["symbol"],
-            "orderid": order_status["orderid"],
-            "bot": order_status["botname"],
-            "ordertype": order_status["ordertype"],
-            "baseorder": order_status["baseorder"],
-            "safetyorder": order_status["safetyorder"],
-            "order_count": order_status["order_count"],
-            "so_percentage": order_status["so_percentage"],
-            "direction": order_status["direction"],
-            "side": order_status["side"],
-        }
-        await self.trades.create_trades(payload)
+        if order_status:
+            # 2. Create trade
+            payload = {
+                "timestamp": order_status["timestamp"],
+                "ordersize": order_status["ordersize"],
+                "fee": order_status["fees"],
+                "precision": order_status["precision"],
+                "amount_fee": order_status["amount_fee"],
+                "amount": order_status["amount"],
+                "price": order_status["price"],
+                "symbol": order_status["symbol"],
+                "orderid": order_status["orderid"],
+                "bot": order_status["botname"],
+                "ordertype": order_status["ordertype"],
+                "baseorder": order_status["baseorder"],
+                "safetyorder": order_status["safetyorder"],
+                "order_count": order_status["order_count"],
+                "so_percentage": order_status["so_percentage"],
+                "direction": order_status["direction"],
+                "side": order_status["side"],
+            }
+            await self.trades.create_trades(payload)
 
-        # 3. Create open trade (only for base order)
-        if not order["safetyorder"]:
-            payload = {"symbol": order_status["symbol"]}
-            await self.trades.create_open_trades(payload)
+            # 3. Create open trade (only for base order)
+            if not order["safetyorder"]:
+                payload = {"symbol": order_status["symbol"]}
+                await self.trades.create_open_trades(payload)
+        else:
+            logging.error(f"Failed creating buy order for {order["symbol"]}")
 
     async def receive_stop_signal(self, symbol):
         logging.info("Incoming stop order")
