@@ -19,7 +19,7 @@ class Strategy:
                 symbol, self.timeframe, 50
             )
 
-            if bbands:
+            if bbands != "none":
                 # create SO
                 result = True
 
