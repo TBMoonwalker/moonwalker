@@ -41,7 +41,7 @@ class Data:
                 length_minutes = 2880
             case "4h":
                 length_minutes = 480
-            case "1h":
+            case "60min":
                 length_minutes = 120
             case "15min":
                 length_minutes = 45
