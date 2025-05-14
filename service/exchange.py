@@ -234,35 +234,39 @@ class Exchange:
                 logging.error(
                     f"Buying pair {order["symbol"]} failed due to an exchange error: {e}"
                 )
+                order = None
             except ccxt.NetworkError as e:
                 logging.error(
                     f"Buying pair {order["symbol"]} failed due to an network error: {e}"
                 )
+                order = None
             except Exception as e:
                 logging.error(f"Buying pair {order["symbol"]} failed with: {e}")
+                order = None
 
-        logging.info(f"Opened trade: {order}")
+        if order:
+            logging.info(f"Opened trade: {order}")
 
-        order_status = self.__parse_order_status(order)
-        order.update(order_status)
-        order["precision"] = self.__get_precision_for_symbol(order_status["symbol"])
-        order["amount"] = float(order_status["amount"])
-        order["amount_fee"] = 0.0
-        order["fees"] = 0.0
+            order_status = self.__parse_order_status(order)
+            order.update(order_status)
+            order["precision"] = self.__get_precision_for_symbol(order_status["symbol"])
+            order["amount"] = float(order_status["amount"])
+            order["amount_fee"] = 0.0
+            order["fees"] = 0.0
 
-        # Substract the order fees
-        if not self.fee_deduction:
-            order["fees"] = self.exchange.fetch_trading_fee(
-                symbol=order_status["symbol"]
-            )["taker"]
-            order["amount_fee"] = order["amount"] * float(order["fees"])
-            order["amount"] = float(order_status["amount"]) - order["amount_fee"]
+            # Substract the order fees
+            if not self.fee_deduction:
+                order["fees"] = self.exchange.fetch_trading_fee(
+                    symbol=order_status["symbol"]
+                )["taker"]
+                order["amount_fee"] = order["amount"] * float(order["fees"])
+                order["amount"] = float(order_status["amount"]) - order["amount_fee"]
 
-            logging.debug(
-                f"Fee Deduction not active. Real amount {order_status['amount']}, deducted amount {order['amount']}"
-            )
+                logging.debug(
+                    f"Fee Deduction not active. Real amount {order_status['amount']}, deducted amount {order['amount']}"
+                )
 
-        return order
+            return order
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(100))
     async def create_spot_market_sell(self, order):
@@ -313,33 +317,36 @@ class Exchange:
                     logging.error(
                         f"Selling pair {order["symbol"]} failed due to an exchange error: {e}"
                     )
-
+                    order = None
             except ccxt.NetworkError as e:
                 logging.error(
                     f"Selling pair {order["symbol"]} failed due to an network error: {e}"
                 )
+                order = None
             except Exception as e:
                 logging.error(f"Selling pair {order["symbol"]} failed with: {e}")
+                order = None
 
-        logging.info(f"Sold {order["total_amount"]} {order['symbol']} on Exchange.")
-        Exchange.sell_retry_count = 0
+        if order:
+            logging.info(f"Sold {order["total_amount"]} {order['symbol']} on Exchange.")
+            Exchange.sell_retry_count = 0
 
-        order_status = self.__parse_order_status(order)
-        order_status["type"] = "sold_check"
-        order_status["sell"] = True
-        order_status["total_cost"] = order["total_cost"]
-        order_status["actual_pnl"] = order["actual_pnl"]
-        order_status["avg_price"] = (
-            order_status["total_cost"] / order_status["total_amount"]
-        )
-        order_status["tp_price"] = order_status["price"]
-        order_status["profit"] = (
-            order_status["price"] * order_status["total_amount"]
-            - order_status["total_cost"]
-        )
-        order_status["profit_percent"] = (
-            (order_status["price"] - order_status["avg_price"])
-            / order_status["avg_price"]
-        ) * 100
+            order_status = self.__parse_order_status(order)
+            order_status["type"] = "sold_check"
+            order_status["sell"] = True
+            order_status["total_cost"] = order["total_cost"]
+            order_status["actual_pnl"] = order["actual_pnl"]
+            order_status["avg_price"] = (
+                order_status["total_cost"] / order_status["total_amount"]
+            )
+            order_status["tp_price"] = order_status["price"]
+            order_status["profit"] = (
+                order_status["price"] * order_status["total_amount"]
+                - order_status["total_cost"]
+            )
+            order_status["profit_percent"] = (
+                (order_status["price"] - order_status["avg_price"])
+                / order_status["avg_price"]
+            ) * 100
 
-        return order_status
+            return order_status
