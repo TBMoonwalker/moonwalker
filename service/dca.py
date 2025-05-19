@@ -241,6 +241,10 @@ class Dca:
                 }
                 # Send new statistics to statistics module
                 await self.statistic.update_statistic_data(logging_json)
+            else:
+                logging.info(
+                    f"Max safety orders reached for {trades["symbol"]}. Not opening more."
+                )
 
     async def process_ticker_data(self, ticker):
         # New price action for DCA calculation

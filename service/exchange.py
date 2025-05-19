@@ -287,7 +287,7 @@ class Exchange:
                     decimal_places = abs(
                         decimal.Decimal(str(order["total_amount"])).as_tuple().exponent
                     )
-                    if int_amount >= 4:
+                    if int_amount >= 3:
                         reduce_amount = Exchange.sell_retry_count
                     else:
                         reduce_amount = Exchange.sell_retry_count * (
