@@ -182,3 +182,58 @@ class Indicators:
             )
 
         return result
+
+    async def calculate_ichimoku_cross(self, symbol, timerange):
+        result = "none"
+        try:
+            # Data
+            df_raw = await data.get_data_for_pair(symbol, timerange, 200)
+            df = data.resample_data(df_raw, timerange)
+            # Tenkan Sen (Conversation line)
+            tenkan_sen_length = 20
+            tenkan_sen_high = df["high"].rolling(tenkan_sen_length).max()
+            tenkan_sen_low = df["low"].rolling(tenkan_sen_length).min()
+            df["tenkan_sen"] = (tenkan_sen_high + tenkan_sen_low) / 2
+            # Kijun Sen (Base Line)
+            kijun_sen_length = 60
+            kijun_sen_high = df["high"].rolling(kijun_sen_length).max()
+            kijun_sen_low = df["low"].rolling(kijun_sen_length).min()
+            df["kijun_sen"] = (kijun_sen_high + kijun_sen_low) / 2
+            # Senkou Span A (Leading Span A)
+            senkou_span_a_ahead = 60
+            df["senkou_span_a"] = ((df["tenkan_sen"] + df["kijun_sen"]) / 2).shift(
+                senkou_span_a_ahead
+            )
+            # Senkou Span B (Leading Span B)
+            senkou_span_b_length = 120
+            senkou_span_b_ahead = 60
+            senkou_span_b_high = df["high"].rolling(senkou_span_b_length).max()
+            senkou_span_b_low = df["low"].rolling(senkou_span_b_length).min()
+            df["senkou_span_b"] = ((senkou_span_b_high + senkou_span_b_low) / 2).shift(
+                senkou_span_b_ahead
+            )
+
+            # Leading Span A > Leading Span B --> Bullish
+            # Baseline > Leading Span A
+            # Conversation Line > Base Line
+            # Close Price > Conversation Line
+            if (
+                (df["senkou_span_a"].iloc[-1] > df["senkou_span_b"].iloc[-1])
+                and (df["kijun_sen"].iloc[-1] > df["senkou_span_a"].iloc[-1])
+                and (df["tenkan_sen"].iloc[-1] > df["kijun_sen"].iloc[-1])
+            ):
+
+                if (df["close"].iloc[-2] < df["tenkan_sen"].iloc[-2]) and (
+                    df["close"].iloc[-1] > df["tenkan_sen"].iloc[-1]
+                ):
+                    self.logging.debug(f"Price crossed Tenkan sen for {symbol}")
+                    result = "up"
+
+            logging.debug(
+                f"Base Line: {df["kijun_sen"].iloc[-1]} Conversation Line: {df["tenkan_sen"].iloc[-1]} Leading Span A: {df["senkou_span_a"].iloc[-1]} Leading Span B: {df["senkou_span_b"].iloc[-1]}"
+            )
+        except Exception as e:
+            logging.error(
+                f"Ichimoku Cross cannot be calculated for {symbol}. Cause: {e}"
+            )
+        return result

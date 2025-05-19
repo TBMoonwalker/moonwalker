@@ -23,8 +23,8 @@ class Housekeeper:
                 hours=self.housekeeping_interval
             )
             try:
-                active_symbols = Trades().get_symbols()
-                ticker_symbols = Data().get_ticker_symbol_list()
+                active_symbols = await Trades().get_symbols()
+                ticker_symbols = await Data().get_ticker_symbol_list()
                 # Do not housekeep active trades
                 for symbol in ticker_symbols:
                     if symbol not in active_symbols:
