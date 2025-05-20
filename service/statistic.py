@@ -1,4 +1,3 @@
-import json
 import model
 import helper
 from service.trades import Trades
@@ -14,29 +13,6 @@ class Statistic:
 
         self.trades = Trades()
         self.dynamic_dca = config.get("dynamic_dca", False)
-
-    # WIP
-    async def safeguard_sell_status(self):
-        profit_data = self.profit_statistics()
-
-        if self.safeguard:
-            # sell everything if we still have 25% to 20% of profit
-            if self.safeguard == "profit":
-                if profit_data["upnl"] > 0 and profit_data["profit_overall"] != 0:
-                    minimum_profit_min = (20 * profit_data["upnl"]) / 100
-                    minimum_profit_max = (25 * profit_data["upnl"]) / 100
-                    if (
-                        profit_data["profit_overall"] > minimum_profit_min
-                        and profit_data["profit_overall"] < minimum_profit_max
-                    ):
-                        logging.info(
-                            f"Panic sell everything, because we reached the safeguard levels for profit between {minimum_profit_min} and {minimum_profit_max}"
-                        )
-            # sell everything if we reached a stoploss level of 10% from used budget
-            elif self.safeguard == "stoploss":
-                logging.info(
-                    f"Panic sell everything, because we reached the safeguard levels for profit between {minimum_profit_min} and {minimum_profit_max}"
-                )
 
     async def get_profits_overall(self, timestamp: None):
         profit_data = {}
@@ -57,7 +33,7 @@ class Statistic:
         except Exception as e:
             logging.error(f"Error getting profits for the month: {e}")
 
-        return json.dumps(profit_data)
+        return profit_data
 
     async def get_profit(self):
         profit_data = {}
@@ -111,7 +87,7 @@ class Statistic:
         except Exception as e:
             logging.error(f"Error getting profits for the week: {e}")
 
-        return json.dumps(profit_data)
+        return profit_data
 
     async def update_statistic_data(self, stats):
         if stats["type"] != "dca_check":

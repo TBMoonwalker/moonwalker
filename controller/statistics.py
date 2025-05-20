@@ -1,5 +1,6 @@
 import asyncio
 import helper
+import json
 from service.statistic import Statistic
 from controller import controller
 from quart import websocket
@@ -16,7 +17,7 @@ statistic = Statistic()
 async def profit():
     try:
         while True:
-            output = await statistic.get_profit()
+            output = json.dumps(await statistic.get_profit())
             await websocket.send(output)
             await asyncio.sleep(5)
     except asyncio.CancelledError:
@@ -31,7 +32,7 @@ async def profit():
     allow_origin=["*"],
 )
 async def profit_statistics(timestamp=None):
-    response = await statistic.get_profits_overall(timestamp)
+    response = json.dumps(await statistic.get_profits_overall(timestamp))
     if not response:
         response = {"result": ""}
 

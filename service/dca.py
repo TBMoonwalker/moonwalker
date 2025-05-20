@@ -1,6 +1,6 @@
 import helper
 import importlib
-import helper
+from service.autopilot import Autopilot
 from service.statistic import Statistic
 from service.orders import Orders
 from service.trades import Trades
@@ -11,6 +11,7 @@ logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 class Dca:
     def __init__(self):
 
+        self.autopilot = Autopilot()
         self.orders = Orders()
         self.statistic = Statistic()
         self.trades = Trades()
@@ -251,6 +252,14 @@ class Dca:
         if ticker["type"] == "ticker_price":
             price = ticker["ticker"]["price"]
             trades = await self.trades.get_trades_for_orders(ticker["ticker"]["symbol"])
+
+            profit = await self.statistic.get_profit()
+            trading_settings = await self.autopilot.calculate_trading_settings(
+                profit["funds_locked"]
+            )
+            if trading_settings:
+                self.tp = trading_settings["tp"]
+                self.sl = trading_settings["sl"]
 
             # Check DCA
             await self.__calculate_dca(price, trades)

@@ -3,9 +3,11 @@ import helper
 import asyncio
 import socketio
 import json
+from service.autopilot import Autopilot
 from service.orders import Orders
 from service.filter import Filter
 from service.data import Data
+from service.statistic import Statistic
 from socketio.exceptions import TimeoutError
 
 logging = helper.LoggerFactory.get_logger("logs/signals.log", "sym_signals")
@@ -15,7 +17,9 @@ class SignalPlugin:
     def __init__(self, watcher_queue):
         config = helper.Config()
         self.utils = helper.Utils()
+        self.autopilot = Autopilot()
         self.orders = Orders()
+        self.statistic = Statistic()
         self.ordersize = config.get("bo")
         self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
@@ -53,6 +57,14 @@ class SignalPlugin:
         result = False
         try:
             all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
+            profit = await self.statistic.get_profit()
+            if profit["funds_locked"] and profit["funds_locked"] > 0:
+                trading_settings = await self.autopilot.calculate_trading_settings(
+                    profit["funds_locked"]
+                )
+                if trading_settings:
+                    self.max_bots = trading_settings["mad"]
+
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True
         except Exception as e:

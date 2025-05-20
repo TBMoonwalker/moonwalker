@@ -63,6 +63,19 @@ tp = 1
 # stop loss in percent
 sl = 1
 
+[autopilot]
+autopilot = False
+autopilot_max_fund = 5000
+autopilot_high_mad = 0
+autopilot_high_tp = 0.2
+autopilot_high_sl = True
+autopilot_high_sl_timeout = 24
+autopilot_high_threshold = 50
+autopilot_medium_mad = 5
+autopilot_medium_tp = 0.6
+autopilot_medium_sl = False
+autopilot_medium_threshold = 20
+
 [indicators]
 # in hours - please use 48 hours as minimum for indicators
 housekeeping_interval = 48
