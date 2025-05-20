@@ -27,6 +27,7 @@ class Dca:
             dca_strategy_plugin = dca_strategy.Strategy(
                 timeframe=config.get("dca_strategy_timeframe", "1m")
             )
+        self.config = config
         self.strategy = dca_strategy_plugin
         self.trailing_tp = config.get("trailing_tp", 0)
         self.dynamic_dca = config.get("dynamic_dca", False)
@@ -36,8 +37,6 @@ class Dca:
         self.max_safety_orders = config.get("mstc", None)
         self.so = config.get("so", None)
         self.price_deviation = config.get("sos", None)
-        self.tp = config.get("tp")
-        self.sl = config.get("sl", 10000)
         self.market = config.get("market", "spot")
 
     def __dynamic_dca_strategy(self, symbol):
@@ -253,13 +252,19 @@ class Dca:
             price = ticker["ticker"]["price"]
             trades = await self.trades.get_trades_for_orders(ticker["ticker"]["symbol"])
 
+            # Check Autopilot
             profit = await self.statistic.get_profit()
             trading_settings = await self.autopilot.calculate_trading_settings(
                 profit["funds_locked"]
             )
+            # Use Autopilots settings
             if trading_settings:
                 self.tp = trading_settings["tp"]
                 self.sl = trading_settings["sl"]
+            # Use base settings
+            else:
+                self.tp = self.config.get("tp")
+                self.sl = self.config.get("sl", 10000)
 
             # Check DCA
             await self.__calculate_dca(price, trades)
