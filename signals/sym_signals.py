@@ -20,6 +20,7 @@ class SignalPlugin:
         self.autopilot = Autopilot()
         self.orders = Orders()
         self.statistic = Statistic()
+        self.config = config
         self.ordersize = config.get("bo")
         self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
@@ -64,6 +65,8 @@ class SignalPlugin:
                 )
                 if trading_settings:
                     self.max_bots = trading_settings["mad"]
+                else:
+                    self.max_bots = self.config.get("max_bots")
 
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True

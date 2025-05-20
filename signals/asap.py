@@ -27,8 +27,9 @@ class SignalPlugin:
         self.filter = Filter()
         self.indicators = Indicators()
         self.statistic = Statistic()
+        self.config = config
+        self.max_bots = self.config.get("max_bots")
         self.ordersize = config.get("bo")
-        self.max_bots = config.get("max_bots")
         self.btc_pulse = config.get("btc_pulse", False)
         self.signal_settings = json.loads(config.get("signal_settings"))
         self.filter_values = (
@@ -82,6 +83,8 @@ class SignalPlugin:
                 )
                 if trading_settings:
                     self.max_bots = trading_settings["mad"]
+                else:
+                    self.max_bots = self.config.get("max_bots")
 
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True
