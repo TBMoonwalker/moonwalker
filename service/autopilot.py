@@ -43,9 +43,5 @@ class Autopilot:
                 trading_settings["mad"] = self.autopilot_medium_mad
                 trading_settings["tp"] = self.autopilot_medium_tp
                 trading_settings["sl"] = self.autopilot_medium_sl
-            elif threshold_percent < self.autopilot_medium_threshold:
-                logging.debug(
-                    f"we are not in autopilot mode - threshold: {threshold_percent}%"
-                )
 
         return trading_settings
