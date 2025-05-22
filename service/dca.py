@@ -38,6 +38,7 @@ class Dca:
         self.so = config.get("so", None)
         self.price_deviation = config.get("sos", None)
         self.market = config.get("market", "spot")
+        self.pnl = 0.0
 
     def __dynamic_dca_strategy(self, symbol):
         result = False
