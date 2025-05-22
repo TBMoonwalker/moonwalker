@@ -116,7 +116,7 @@ class Dca:
             # Sell if Autopilot is enabled and SL is set
             if self.sl_timeout > 0:
                 last_trade_date = datetime.fromtimestamp(
-                    int(int(trades["timestamp"]) / 1000)
+                    int(float(trades["timestamp"]) / 1000)
                 )
                 trade_duration_max_date = datetime.now() - timedelta(
                     days=self.sl_timeout
