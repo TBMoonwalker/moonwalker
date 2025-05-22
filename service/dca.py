@@ -1,5 +1,6 @@
 import helper
 import importlib
+from datetime import datetime, timedelta
 from service.autopilot import Autopilot
 from service.statistic import Statistic
 from service.orders import Orders
@@ -111,6 +112,22 @@ class Dca:
                             Dca.pnl[trades["symbol"]] = actual_pnl
                     else:
                         Dca.pnl[trades["symbol"]] = actual_pnl
+
+            # Sell if Autopilot is enabled and SL is set
+            if self.sl_timeout > 0:
+                last_trade_date = datetime.fromtimestamp(
+                    int(trades["timestamp"] / 1000)
+                )
+                trade_duration_max_date = datetime.now() - timedelta(
+                    days=self.sl_timeout
+                )
+                if trade_duration_max_date < last_trade_date and actual_pnl >= -abs(
+                    self.sl
+                ):
+                    logging.debug(
+                        f"Selling {trades["symbol"]} because of autopilot settings"
+                    )
+                    # sell = True
 
             # TP reached - sell order (market)
             if sell:
@@ -269,10 +286,14 @@ class Dca:
             if trading_settings:
                 self.tp = trading_settings["tp"]
                 self.sl = trading_settings["sl"]
+                self.sl_timeout = trading_settings["sl_timeout"]
+                self.autopilot_mode = trading_settings["mode"]
             # Use base settings
             else:
                 self.tp = self.config.get("tp")
                 self.sl = self.config.get("sl", 10000)
+                self.sl_timeout = 0
+                self.autopilot_mode = None
 
             # Check DCA
             await self.__calculate_dca(price, trades)

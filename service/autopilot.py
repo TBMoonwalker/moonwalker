@@ -18,6 +18,7 @@ class Autopilot:
         self.autopilot_medium_mad = config.get("autopilot_medium_mad", 0)
         self.autopilot_medium_tp = config.get("autopilot_medium_tp", 0)
         self.autopilot_medium_sl = config.get("autopilot_medium_sl", 0)
+        self.autopilot_medium_sl_timeout = config.get("autopilot_medium_sl_timeout", 0)
         self.autopilot_medium_threshold = config.get(
             "autopilot_medium_threshold", False
         )
@@ -36,6 +37,7 @@ class Autopilot:
                 trading_settings["tp"] = self.autopilot_high_tp
                 trading_settings["sl"] = self.autopilot_high_sl
                 trading_settings["sl_timeout"] = self.autopilot_high_sl_timeout
+                trading_settings["mode"] = "high"
             elif threshold_percent >= self.autopilot_medium_threshold:
                 logging.debug(
                     f"we reached autopilot medium values - threshold: {threshold_percent}%"
@@ -43,5 +45,7 @@ class Autopilot:
                 trading_settings["mad"] = self.autopilot_medium_mad
                 trading_settings["tp"] = self.autopilot_medium_tp
                 trading_settings["sl"] = self.autopilot_medium_sl
+                trading_settings["sl_timeout"] = self.autopilot_medium_sl_timeout
+                trading_settings["mode"] = "medium"
 
         return trading_settings
