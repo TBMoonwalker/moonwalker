@@ -38,7 +38,7 @@ class Dca:
         self.so = config.get("so", None)
         self.price_deviation = config.get("sos", None)
         self.market = config.get("market", "spot")
-        self.pnl = 0.0
+        Dca.pnl = {}
 
     def __dynamic_dca_strategy(self, symbol):
         result = False
@@ -85,10 +85,14 @@ class Dca:
 
             # Trailing TP
             if self.trailing_tp > 0:
-                if (sell and actual_pnl != self.pnl) and self.pnl != 0:
-                    diff = actual_pnl - self.pnl
+                if sell:
+                    if not trades["symbol"] in Dca.pnl:
+                        Dca.pnl["symbol"] = 0.0
+
+                if actual_pnl != Dca.pnl["symbol"] and Dca.pnl["symbol"] != 0.0:
+                    diff = actual_pnl - Dca.pnl["symbol"]
                     logging.debug(
-                        f"TTP Check: {trades["symbol"]} - PNL Difference: {diff}, Actual PNL: {actual_pnl}, DCA-PNL: {self.pnl}"
+                        f"TTP Check: {trades["symbol"]} - PNL Difference: {diff}, Actual PNL: {actual_pnl}, DCA-PNL: {Dca.pnl["symbol"]}"
                     )
                     # Sell if trailing deviation is reached or actual PNL is under minimum TP
                     if (
@@ -98,11 +102,12 @@ class Dca:
                         #     f"TTP Check: {symbol} - Percentage decrease - Take profit: {diff_percentage}"
                         # )
                         sell = True
+                        Dca.pnl.pop("symbol")
                     else:
                         sell = False
-                        self.pnl = actual_pnl
+                        Dca.pnl["symbol"] = actual_pnl
                 else:
-                    self.pnl = actual_pnl
+                    Dca.pnl["symbol"] = actual_pnl
 
             # TP reached - sell order (market)
             if sell:
