@@ -87,7 +87,7 @@ class Dca:
             if self.trailing_tp > 0:
                 if sell:
                     if not trades["symbol"] in Dca.pnl:
-                        Dca.pnl["symbol"] = 0.0
+                        Dca.pnl[trades["symbol"]] = 0.0
 
                     if actual_pnl != Dca.pnl["symbol"] and Dca.pnl["symbol"] != 0.0:
                         diff = actual_pnl - Dca.pnl["symbol"]
