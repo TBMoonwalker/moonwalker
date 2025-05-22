@@ -121,11 +121,11 @@ class Dca:
                 trade_duration_max_date = datetime.now() - timedelta(
                     days=self.sl_timeout
                 )
-                if trade_duration_max_date < last_trade_date and actual_pnl >= -abs(
+                if last_trade_date < trade_duration_max_date and actual_pnl >= -abs(
                     self.sl
                 ):
                     logging.debug(
-                        f"Selling {trades["symbol"]} because of autopilot settings"
+                        f"Selling {trades["symbol"]} because of autopilot settings. "
                     )
                     sell = True
 
