@@ -127,7 +127,7 @@ class Dca:
                     logging.debug(
                         f"Selling {trades["symbol"]} because of autopilot settings"
                     )
-                    # sell = True
+                    sell = True
 
             # TP reached - sell order (market)
             if sell:
