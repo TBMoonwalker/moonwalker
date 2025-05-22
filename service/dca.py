@@ -89,25 +89,25 @@ class Dca:
                     if not trades["symbol"] in Dca.pnl:
                         Dca.pnl["symbol"] = 0.0
 
-                if actual_pnl != Dca.pnl["symbol"] and Dca.pnl["symbol"] != 0.0:
-                    diff = actual_pnl - Dca.pnl["symbol"]
-                    logging.debug(
-                        f"TTP Check: {trades["symbol"]} - PNL Difference: {diff}, Actual PNL: {actual_pnl}, DCA-PNL: {Dca.pnl["symbol"]}"
-                    )
-                    # Sell if trailing deviation is reached or actual PNL is under minimum TP
-                    if (
-                        diff < 0 and abs(diff) > self.trailing_tp
-                    ) or actual_pnl < self.tp:
-                        # logging.debug(
-                        #     f"TTP Check: {symbol} - Percentage decrease - Take profit: {diff_percentage}"
-                        # )
-                        sell = True
-                        Dca.pnl.pop("symbol")
+                    if actual_pnl != Dca.pnl["symbol"] and Dca.pnl["symbol"] != 0.0:
+                        diff = actual_pnl - Dca.pnl["symbol"]
+                        logging.debug(
+                            f"TTP Check: {trades["symbol"]} - PNL Difference: {diff}, Actual PNL: {actual_pnl}, DCA-PNL: {Dca.pnl["symbol"]}"
+                        )
+                        # Sell if trailing deviation is reached or actual PNL is under minimum TP
+                        if (
+                            diff < 0 and abs(diff) > self.trailing_tp
+                        ) or actual_pnl < self.tp:
+                            # logging.debug(
+                            #     f"TTP Check: {symbol} - Percentage decrease - Take profit: {diff_percentage}"
+                            # )
+                            sell = True
+                            Dca.pnl.pop("symbol")
+                        else:
+                            sell = False
+                            Dca.pnl["symbol"] = actual_pnl
                     else:
-                        sell = False
                         Dca.pnl["symbol"] = actual_pnl
-                else:
-                    Dca.pnl["symbol"] = actual_pnl
 
             # TP reached - sell order (market)
             if sell:
