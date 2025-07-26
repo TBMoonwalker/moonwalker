@@ -126,6 +126,9 @@ class SignalPlugin:
 
     @retry(wait=wait_fixed(3))
     async def __check_entry_point(self, symbol):
+        # Initial state
+        check = True
+
         # allow/denylist check
         # we only need the plain symbol here:
         symbol_only, currency = symbol.split("/")
@@ -135,7 +138,7 @@ class SignalPlugin:
             logging.info(
                 f"Symbol {symbol} is not in your allowlist or is set in your denylist. Ignoring it."
             )
-            return False
+            check = False
 
         try:
             # btc pulse check
@@ -146,7 +149,7 @@ class SignalPlugin:
                     logging.debug(
                         f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
                     )
-                    return False
+                    check = False
 
             # volume check
             if self.volume:
@@ -160,7 +163,7 @@ class SignalPlugin:
                     logging.info(
                         f"Symbol {symbol} has a 24h volume of {volume_size}{volume_range}, which is under the configured volume of {self.volume['size']}{self.volume['range']}"
                     )
-                    return False
+                    check = False
 
             # topcoin limit check
             if self.topcoin_limit and self.filter_values:
@@ -175,11 +178,13 @@ class SignalPlugin:
                         logging.info(
                             f"Symbol {symbol} has a marketcap of {marketcap} and is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
                         )
-                        return False
+                        check = False
 
             # strategy entry check
             if self.strategy:
-                return await self.strategy.run(symbol)
+                check = await self.strategy.run(symbol)
+
+            return check
 
         except Exception as e:
             logging.debug(
