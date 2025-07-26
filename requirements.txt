@@ -30,7 +30,7 @@ multidict==6.1.0
 numpy==2.2.5
 pandas==2.2.3
 priority==2.0.0
-pycares==4.5.0
+pycares==4.9.0
 pycparser==2.22
 python-socketio==5.11.4
 pytz==2024.2
