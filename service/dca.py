@@ -142,21 +142,11 @@ class Dca:
                 }
                 await self.orders.receive_sell_order(order)
 
-            # Logging configuration
-            logging_json = {
-                "type": "tp_check",
-                "symbol": trades["symbol"],
-                "botname": trades["bot"],
-                "total_cost": trades["total_cost"],
-                "total_amount": trades["total_amount"],
-                "current_price": current_price,
-                "avg_price": average_buy_price,
-                "tp_price": take_profit_price,
-                "actual_pnl": actual_pnl,
-                "sell": sell,
-                "direction": trades["direction"],
-            }
-            await self.statistic.update_statistic_data(logging_json)
+            await self.__log_statistic(
+                trades,
+                "tp",
+                {current_price, average_buy_price, take_profit_price, actual_pnl, sell},
+            )
 
     async def __calculate_dca(self, current_price, trades):
         if trades:
@@ -223,9 +213,7 @@ class Dca:
                 if self.dynamic_dca:
                     # Trigger new safety order for dynamic dca
                     if actual_pnl <= -abs(next_so_percentage):
-                        if self.dynamic_dca and await self.__dynamic_dca_strategy(
-                            trades["symbol"]
-                        ):
+                        if await self.__dynamic_dca_strategy(trades["symbol"]):
                             # Set next_so_percentage to current percentage
                             next_so_percentage = actual_pnl
                             new_so = True
@@ -252,24 +240,33 @@ class Dca:
                     }
                     await self.orders.receive_buy_order(order)
 
-                # Logging configuration
-                logging_json = {
-                    "type": "dca_check",
-                    "symbol": trades["symbol"],
-                    "botname": trades["bot"],
-                    "so_orders": trades["safetyorders_count"],
-                    "last_so_price": last_so_price,
-                    "new_so_size": safety_order_size,
-                    "price_deviation": next_so_percentage,
-                    "actual_pnl": actual_pnl,
-                    "new_so": new_so,
-                }
-                # Send new statistics to statistics module
-                await self.statistic.update_statistic_data(logging_json)
+                await self.__log_statistic(
+                    trades,
+                    "dca",
+                    {
+                        safety_order_size,
+                        last_so_price,
+                        next_so_percentage,
+                        actual_pnl,
+                        new_so,
+                    },
+                )
             else:
                 logging.info(
                     f"Max safety orders reached for {trades["symbol"]}. Not opening more."
                 )
+
+    async def __log_statistic(self, trades, log_type, extra=None):
+        logging_json = {
+            "type": f"{log_type}_check",
+            "symbol": trades["symbol"],
+            "botname": trades["bot"],
+            "so_orders": trades.get("safetyorders_count", 0),
+            **(extra if extra else {}),
+        }
+
+        # Send new statistics to statistics module
+        self.statistic.update_statistic_data(logging_json)
 
     async def process_ticker_data(self, ticker):
         # New price action for DCA calculation
