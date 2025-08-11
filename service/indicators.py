@@ -242,6 +242,7 @@ class Indicators:
                 (df["senkou_span_a"].iloc[-1] > df["senkou_span_b"].iloc[-1])
                 and (df["kijun_sen"].iloc[-1] > df["senkou_span_a"].iloc[-1])
                 and (df["tenkan_sen"].iloc[-1] > df["kijun_sen"].iloc[-1])
+                and (df["close"].iloc[-1] > df["tenkan_sen"].iloc[-1])
             ):
                 logging.debug(
                     "Reached strategy goals checking if crossed previous candle..."
