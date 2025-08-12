@@ -54,13 +54,16 @@ class Indicators:
         return result
 
     async def calculate_ema(self, symbol, timerange, lengths):
-        ema = []
+        ema = {}
         try:
-            df_raw = await data.get_data_for_pair(symbol, timerange, length)
+            max_length = max(lengths)
+            df_raw = await data.get_data_for_pair(symbol, timerange, max_length)
             df = data.resample_data(df_raw, timerange)
             for length in lengths:
                 length_key = f"ema_{str(length)}"
-                ema[length_key] = talib.EMA(df["close"], timeperiod=length)
+                ema[length_key] = (
+                    talib.EMA(df["close"], timeperiod=length).dropna().iloc[-1]
+                )
         except Exception as e:
             logging.error(f"EMA cannot be calculated for {symbol}. Cause: {e}")
         return ema
@@ -220,19 +223,21 @@ class Indicators:
             df["kijun_sen"] = (kijun_sen_high + kijun_sen_low) / 2
 
             # Senkou Span A (Leading Span A)
-            senkou_span_a_ahead = 60
+            senkou_span_a_ahead = 30
             df["senkou_span_a"] = ((df["tenkan_sen"] + df["kijun_sen"]) / 2).shift(
                 senkou_span_a_ahead
             )
+            # df["senkou_span_a"] = (df["tenkan_sen"] + df["kijun_sen"]) / 2
 
             # Senkou Span B (Leading Span B)
             senkou_span_b_length = 120
-            senkou_span_b_ahead = 60
+            senkou_span_b_ahead = 30
             senkou_span_b_high = df["high"].rolling(senkou_span_b_length).max()
             senkou_span_b_low = df["low"].rolling(senkou_span_b_length).min()
             df["senkou_span_b"] = ((senkou_span_b_high + senkou_span_b_low) / 2).shift(
                 senkou_span_b_ahead
             )
+            # df["senkou_span_b"] = (senkou_span_b_high + senkou_span_b_low) / 2
 
             # Leading Span A > Leading Span B --> Bullish
             # Baseline > Leading Span A
