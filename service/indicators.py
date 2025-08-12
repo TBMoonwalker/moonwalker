@@ -260,7 +260,7 @@ class Indicators:
                     df["kijun_sen"].iloc[-2] > df["senkou_span_a"].iloc[-2]
                     and df["kijun_sen"].iloc[-2] > df["senkou_span_b"].iloc[-2]
                 ):
-                    self.logging.debug(
+                    logging.debug(
                         f"Baseline/Conversation line crossed leading spans for {symbol}"
                     )
                     result = "up"
