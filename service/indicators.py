@@ -257,8 +257,8 @@ class Indicators:
                 )
                 # Check if baseline crossed one of the leading spans in the last candle
                 if (
-                    df["kijun_sen"].iloc[-2] > df["senkou_span_a"].iloc[-2]
-                    and df["kijun_sen"].iloc[-2] > df["senkou_span_b"].iloc[-2]
+                    df["kijun_sen"].iloc[-2] < df["senkou_span_a"].iloc[-2]
+                    and df["kijun_sen"].iloc[-2] < df["senkou_span_b"].iloc[-2]
                 ):
                     logging.debug(
                         f"Baseline/Conversation line crossed leading spans for {symbol}"
