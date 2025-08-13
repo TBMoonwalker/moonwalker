@@ -258,9 +258,10 @@ class Indicators:
             if df["signal"].iloc[-1]:
                 result = "up"
 
-            logging.debug(
-                f"Base Line: {df["kijun_sen"].iloc[-1]} Conversation Line: {df["tenkan_sen"].iloc[-1]} Leading Span A: {df["senkou_span_a"].iloc[-1]} Leading Span B: {df["senkou_span_b"].iloc[-1]}"
-            )
+            logging.debug(df.to_string(max_rows=5))
+            # logging.debug(
+            #     f"Base Line: {df["kijun_sen"].iloc[-1]} Conversation Line: {df["tenkan_sen"].iloc[-1]} Leading Span A: {df["senkou_span_a"].iloc[-1]} Leading Span B: {df["senkou_span_b"].iloc[-1]}"
+            # )
 
             # if (
             #     # Baseline > Leading Span A and Leading Span B
