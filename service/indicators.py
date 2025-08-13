@@ -250,7 +250,7 @@ class Indicators:
             all_now = cond1 & cond2 & cond3
 
             # All conditions previous
-            all_prev = all_now.shift(1).fillna(False, downcast="infer")
+            all_prev = all_now.shift(1).fillna(False).astype(bool)
 
             # Trigger only when going from False → True
             df["signal"] = all_now & (~all_prev)
