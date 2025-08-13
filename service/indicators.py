@@ -256,6 +256,11 @@ class Indicators:
             df["signal"] = all_now & (~all_prev)
 
             if df["signal"].iloc[-1]:
+                if (
+                    df["kijun_sen"].iloc[-2] < df["senkou_span_a"].iloc[-2]
+                    or df["kijun_sen"].iloc[-2] < df["senkou_span_b"].iloc[-2]
+                ):
+                    logging.debug("Buy signal")
                 result = "up"
 
             logging.debug(
