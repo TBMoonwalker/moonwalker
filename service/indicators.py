@@ -223,21 +223,21 @@ class Indicators:
             df["kijun_sen"] = (kijun_sen_high + kijun_sen_low) / 2
 
             # Senkou Span A (Leading Span A)
-            # senkou_span_a_ahead = 30
-            # df["senkou_span_a"] = ((df["tenkan_sen"] + df["kijun_sen"]) / 2).shift(
-            #     senkou_span_a_ahead
-            # )
-            df["senkou_span_a"] = (df["tenkan_sen"] + df["kijun_sen"]) / 2
+            senkou_span_a_ahead = 30
+            df["senkou_span_a"] = ((df["tenkan_sen"] + df["kijun_sen"]) / 2).shift(
+                senkou_span_a_ahead
+            )
+            # df["senkou_span_a"] = (df["tenkan_sen"] + df["kijun_sen"]) / 2
 
             # Senkou Span B (Leading Span B)
             senkou_span_b_length = 120
-            # senkou_span_b_ahead = 30
+            senkou_span_b_ahead = 30
             senkou_span_b_high = df["high"].rolling(senkou_span_b_length).max()
             senkou_span_b_low = df["low"].rolling(senkou_span_b_length).min()
-            # df["senkou_span_b"] = ((senkou_span_b_high + senkou_span_b_low) / 2).shift(
-            #     senkou_span_b_ahead
-            # )
-            df["senkou_span_b"] = (senkou_span_b_high + senkou_span_b_low) / 2
+            df["senkou_span_b"] = ((senkou_span_b_high + senkou_span_b_low) / 2).shift(
+                senkou_span_b_ahead
+            )
+            # df["senkou_span_b"] = (senkou_span_b_high + senkou_span_b_low) / 2
 
             # Conditions
             cond1 = (df["kijun_sen"] > df["senkou_span_a"]) & (

@@ -30,7 +30,7 @@ class Strategy:
         ):
             # Check if rebound happened
             if close.dropna().iloc[-1] > close.dropna().iloc[-2]:
-                self.logging.debug(f"Price rebound from EMA down for {symbol}")
+                logging.debug(f"Price rebound from EMA down for {symbol}")
                 result = True
 
         logging_json = {
