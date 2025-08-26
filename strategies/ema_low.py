@@ -29,8 +29,10 @@ class Strategy:
             and ema["ema_100"] < ema["ema_200"]
         ):
             # Check if rebound happened
-            if close.dropna().iloc[-1] > close.dropna().iloc[-2]:
-                logging.debug(f"Price rebound from EMA down for {symbol}")
+            if close.dropna().iloc[-2] > close.dropna().iloc[-3]:
+                logging.debug(
+                    f"Price rebound from EMA down for {symbol} Close: {close.dropna().iloc[-2]} Previous close: {close.dropna().iloc[-3]}"
+                )
                 result = True
 
         logging_json = {
