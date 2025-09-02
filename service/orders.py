@@ -79,6 +79,9 @@ class Orders:
 
             # 4. Delete Open trades
             await self.trades.delete_open_trades(order["symbol"])
+
+            # 5. Delete old ticker data
+            await self.trades.delete_ticker_data_for_trades(order["symbol"])
         else:
             logging.error(f"Failed creating sell order for {order["symbol"]}")
 

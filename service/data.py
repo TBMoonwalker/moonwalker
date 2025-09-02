@@ -72,6 +72,15 @@ class Data:
             await self.fetch_history_data_for_symbol(symbol)
             logging.debug(f"Added history for {symbol}")
 
+    async def delete_history_data_for_symbol(self, symbol):
+        try:
+            query = await model.Tickers.filter(symbol=f"{symbol}").delete()
+            logging.info(f"Delete {query} entries for deleted symbol {symbol}")
+            return True
+        except Exception as e:
+            logging.error(f"Error deleting old ticker data for symbol {symbol}: {e}")
+            return False
+
     async def fetch_history_data_for_symbol(self, symbol):
         ohlcv = []
         from_date = "{:%Y-%m-%d %H:%M:%S}".format(

@@ -149,6 +149,13 @@ class Trades:
         except Exception as e:
             logging.error(f"Error deleting trades for {symbol}. Cause {e}")
 
+    async def delete_ticker_data_for_trades(self, symbol):
+        try:
+            query = await model.Tickers.filter(symbol=f"{symbol}").delete()
+            logging.info(f"Delete {query} entries for deleted symbol {symbol}")
+        except Exception as e:
+            logging.error(f"Error deleting old ticker data for symbol {symbol}: {e}")
+
     async def create_closed_trades(self, payload):
         try:
             await model.ClosedTrades.create(**payload)
