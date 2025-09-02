@@ -69,9 +69,13 @@ class Indicators:
         return ema
 
     async def get_close_price(self, symbol, timerange, length):
-        df_raw = await data.get_data_for_pair(symbol, timerange, length)
-        df = data.resample_data(df_raw, timerange)
-        return df["close"]
+        try:
+            df_raw = await data.get_data_for_pair(symbol, timerange, length)
+            df = data.resample_data(df_raw, timerange)
+            return df["close"]
+        except Exception as e:
+            logging.error(f"Close price cannot be calculated for {symbol}. Cause: {e}")
+            return None
 
     async def calculate_ema_slope(self, symbol, timerange, length):
         result = "none"
