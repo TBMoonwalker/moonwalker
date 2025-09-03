@@ -10,6 +10,7 @@ from tortoise import BaseDBAsyncClient
 from tortoise.signals import post_save
 
 logging = helper.LoggerFactory.get_logger("logs/watcher.log", "watcher")
+utils = helper.Utils()
 
 
 class Watcher:
@@ -38,14 +39,7 @@ class Watcher:
 
         # Class Variables
         Watcher.ticker_symbols = []
-        Watcher.trade_symbols = []
         Watcher.candles = {}
-
-    def __convert_symbols(self, symbols):
-        symbol_list = []
-        for symbol in symbols:
-            symbol_list.append([symbol, self.timeframe])
-        return symbol_list
 
     async def __write_ohlcv_data(self, symbol, ticker):
         current_candle = ticker[-1]
@@ -88,13 +82,12 @@ class Watcher:
             try:
                 new_symbol_list = await watcher_queue.get()
                 # Take care of running trades
-                for trade in Watcher.trade_symbols:
-                    if trade not in new_symbol_list:
-                        new_symbol_list.append(trade)
-                        logging.debug(
-                            f"{trade} not in new watchlist anymore, adding it."
-                        )
-                Watcher.ticker_symbols = self.__convert_symbols(new_symbol_list)
+                trades = await Trades().get_symbols()
+                for new_symbol in new_symbol_list:
+                    if new_symbol not in trades:
+                        trades.append(new_symbol)
+                        logging.debug(f"{new_symbol} not in trades, adding it.")
+                Watcher.ticker_symbols = utils.convert_symbols(trades)
                 logging.debug(f"Watching ticker symbols: {Watcher.ticker_symbols}")
                 watcher_queue.task_done()
             except asyncio.QueueEmpty:
@@ -110,10 +103,10 @@ class Watcher:
     ) -> None:
         if created:
             try:
-                Watcher.trade_symbols = await Trades().get_symbols()
-                logging.debug(
-                    f"Adding trade symbols to watcher: {Watcher.trade_symbols}"
-                )
+                new_symbol_list = await Trades().get_symbols()
+                Watcher.ticker_symbols = utils.convert_symbols(new_symbol_list)
+                logging.debug(f"Added symbols. New list: {Watcher.ticker_symbols}")
+
             except Exception as e:
                 logging.error(f"Error adding trade symbols to watcher. Cause: {e}")
 
@@ -127,10 +120,9 @@ class Watcher:
     ) -> None:
         if created:
             try:
-                Watcher.trade_symbols = await Trades().get_symbols()
-                logging.debug(
-                    f"Remove trade symbols from watcher: {Watcher.trade_symbols}"
-                )
+                new_symbol_list = await Trades().get_symbols()
+                Watcher.ticker_symbols = utils.convert_symbols(new_symbol_list)
+                logging.debug(f"Removed symbols. New list: {Watcher.ticker_symbols}")
             except Exception as e:
                 logging.error(f"Error removing trade symbols from watcher. Cause: {e}")
 
@@ -138,11 +130,10 @@ class Watcher:
         last_price = {}
 
         # Initial list for symbols in database
-        ticker_symbols = await self.data.get_ticker_symbol_list()
-        Watcher.trade_symbols = await self.trades.get_symbols()
+        ticker_symbols = await Trades().get_symbols()
 
         if ticker_symbols:
-            Watcher.ticker_symbols = self.__convert_symbols(ticker_symbols)
+            Watcher.ticker_symbols = utils.convert_symbols(ticker_symbols)
             Watcher.candles = {symbol: None for symbol in ticker_symbols}
 
         actual_symbols = Watcher.ticker_symbols
@@ -184,8 +175,7 @@ class Watcher:
                                             "price": actual_price,
                                         },
                                     }
-                                    if symbol in Watcher.trade_symbols:
-                                        await self.dca.process_ticker_data(ticker_price)
+                                    await self.dca.process_ticker_data(ticker_price)
                                     await self.__write_ohlcv_data(
                                         symbol, tickers[symbol][ticker]
                                     )
@@ -194,6 +184,7 @@ class Watcher:
                                 last_price[symbol] = actual_price
                 else:
                     actual_symbols = Watcher.ticker_symbols
+
                     continue
             else:
                 await asyncio.sleep(5)

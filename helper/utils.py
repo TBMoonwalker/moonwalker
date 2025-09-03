@@ -6,6 +6,7 @@ class Utils:
     def __init__(self):
         config = helper.Config()
         self.dry_run = config.get("dry_run", True)
+        self.timeframe = config.get("timeframe", "1m")
 
     def calculate_actual_pnl(self, trades, current_price=None):
         if not current_price:
@@ -22,6 +23,12 @@ class Utils:
             pair, market = pair.split(currency)
             symbol = f"{pair}/{currency}"
         return symbol
+
+    def convert_symbols(self, symbols):
+        symbol_list = []
+        for symbol in symbols:
+            symbol_list.append([symbol, self.timeframe])
+        return symbol_list
 
     def convert_numbers(self, number):
         millnames = ["", "k", "M", "B", " T"]

@@ -68,7 +68,7 @@ class Data:
 
     async def add_history_data_for_symbol(self, symbol):
         symbol_list = await self.get_ticker_symbol_list()
-        self.logging.debug(f"Symbol list: {symbol_list}")
+        logging.debug(f"Symbol list: {symbol_list}")
         if symbol not in symbol_list:
             await self.fetch_history_data_for_symbol(symbol)
             logging.debug(f"Added history for {symbol}")
