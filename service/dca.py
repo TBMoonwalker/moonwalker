@@ -6,6 +6,7 @@ from service.statistic import Statistic
 from service.orders import Orders
 from service.trades import Trades
 
+
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 
 
@@ -32,7 +33,6 @@ class Dca:
         self.strategy = dca_strategy_plugin
         self.trailing_tp = config.get("trailing_tp", 0)
         self.dynamic_dca = config.get("dynamic_dca", False)
-        self.dynamic_tp = config.get("dynamic_tp", 0)
         self.volume_scale = config.get("os")
         self.step_scale = config.get("ss")
         self.max_safety_orders = config.get("mstc", None)
@@ -60,20 +60,8 @@ class Dca:
             total_cost = trades["total_cost"] + (trades["total_cost"] * trades["fee"])
             average_buy_price = total_cost / trades["total_amount"]
 
-            # Calculate static TP-Price
+            # Calculate TP/SL
             take_profit_price = average_buy_price * (1 + (self.tp / 100))
-
-            # Calculate dynamic TP-Price
-            if self.dynamic_tp > 0:
-                effective_take_profit = max(
-                    0,
-                    self.tp - (trades["safetyorders_count"] * self.dynamic_tp),
-                )
-                # Calculate the take profit price
-                take_profit_price = average_buy_price * (
-                    1 + (effective_take_profit / 100)
-                )
-
             stop_loss_price = average_buy_price * (1 - (self.sl / 100))
             if (current_price >= take_profit_price) or (
                 current_price <= stop_loss_price
@@ -87,6 +75,7 @@ class Dca:
             # Trailing TP
             if self.trailing_tp > 0:
                 if sell:
+                    # Initialize new symbols
                     if not trades["symbol"] in Dca.pnl:
                         Dca.pnl[trades["symbol"]] = 0.0
 
@@ -96,15 +85,15 @@ class Dca:
                     ):
                         diff = actual_pnl - Dca.pnl[trades["symbol"]]
                         logging.debug(
-                            f"TTP Check: {trades["symbol"]} - PNL Difference: {diff}, Actual PNL: {actual_pnl}, DCA-PNL: {Dca.pnl[trades["symbol"]]}"
+                            f"TTP Check: {trades["symbol"]} - Actual PNL: {actual_pnl}, Last-PNL: {Dca.pnl[trades["symbol"]]}, PNL Difference: {diff}"
                         )
                         # Sell if trailing deviation is reached or actual PNL is under minimum TP
                         if (
                             diff < 0 and abs(diff) > self.trailing_tp
                         ) or actual_pnl < self.tp:
-                            # logging.debug(
-                            #     f"TTP Check: {symbol} - Percentage decrease - Take profit: {diff_percentage}"
-                            # )
+                            logging.debug(
+                                f"TTP Sell: {trades["symbol"]} - Percentage decreased - Take profit with difference: {diff}"
+                            )
                             sell = True
                             Dca.pnl.pop(trades["symbol"])
                         else:
