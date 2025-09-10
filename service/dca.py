@@ -101,6 +101,7 @@ class Dca:
                             Dca.pnl[trades["symbol"]] = actual_pnl
                     else:
                         Dca.pnl[trades["symbol"]] = actual_pnl
+                        sell = False
 
             # Sell if Autopilot is enabled and SL is set
             if self.sl_timeout > 0:
