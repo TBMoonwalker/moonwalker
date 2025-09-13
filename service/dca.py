@@ -105,7 +105,7 @@ class Dca:
                             Dca.pnl.pop(trades["symbol"])
                         else:
                             sell = False
-                            if actual_pnl > Dca.pnl[trades["symbol"]]
+                            if actual_pnl > Dca.pnl[trades["symbol"]
                                 Dca.pnl[trades["symbol"]] = actual_pnl
                     else:
                         Dca.pnl[trades["symbol"]] = actual_pnl
