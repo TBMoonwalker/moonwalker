@@ -40,6 +40,7 @@ class Dca:
         self.price_deviation = config.get("sos", None)
         self.market = config.get("market", "spot")
         Dca.pnl = {}
+        Dca.diff = {}
 
     def __dynamic_dca_strategy(self, symbol):
         result = False
@@ -78,21 +79,27 @@ class Dca:
                     # Initialize new symbols
                     if not trades["symbol"] in Dca.pnl:
                         Dca.pnl[trades["symbol"]] = 0.0
-
                     if (
                         actual_pnl != Dca.pnl[trades["symbol"]]
                         and Dca.pnl[trades["symbol"]] != 0.0
                     ):
                         diff = actual_pnl - Dca.pnl[trades["symbol"]]
+                        if not trades["symbol"] in Dca.diff:
+                            Dca.diff[trades["symbol"]] = abs(diff)
+                        if diff < 0 and abs(diff) > Dca.diff[trades["symbol"]]:
+                            Dca.diff[trades["symbol"]] = abs(diff)
+
                         logging.debug(
-                            f"TTP Check: {trades["symbol"]} - Actual PNL: {actual_pnl}, Last-PNL: {Dca.pnl[trades["symbol"]]}, PNL Difference: {diff}"
+                            f"TTP Check: {trades["symbol"]} - Actual PNL: {actual_pnl}, Last-PNL: {Dca.pnl[trades["symbol"]]}, PNL Difference: {Dca.diff[trades["symbol"]]}"
                         )
+
                         # Sell if trailing deviation is reached or actual PNL is under minimum TP
                         if (
-                            diff < 0 and abs(diff) > self.trailing_tp
+                            Dca.diff[trades["symbol"]] < 0
+                            and abs(Dca.diff[trades["symbol"]]) > self.trailing_tp
                         ) or actual_pnl < self.tp:
                             logging.debug(
-                                f"TTP Sell: {trades["symbol"]} - Percentage decreased - Take profit with difference: {diff}"
+                                f"TTP Sell: {trades["symbol"]} - Percentage decreased - Take profit with difference: {Dca.diff[trades["symbol"]]}"
                             )
                             sell = True
                             Dca.pnl.pop(trades["symbol"])

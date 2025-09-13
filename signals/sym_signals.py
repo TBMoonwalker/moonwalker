@@ -185,6 +185,7 @@ class SignalPlugin:
                                         symbol_full
                                     )
                                     await self.watcher_queue.put([symbol_full])
+                                    # ToDo - Catch error if symbol is not yet available in Websocket History
 
                                 order = {
                                     "ordersize": self.ordersize,
