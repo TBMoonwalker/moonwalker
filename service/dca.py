@@ -40,7 +40,6 @@ class Dca:
         self.price_deviation = config.get("sos", None)
         self.market = config.get("market", "spot")
         Dca.pnl = {}
-        Dca.diff = {}
 
     def __dynamic_dca_strategy(self, symbol):
         result = False
@@ -75,19 +74,16 @@ class Dca:
 
             # Trailing TP
             if self.trailing_tp > 0:
-                if sell:
+                if sell or trades["symbol"] in Dca.pnl:
                     # Initialize new symbols
                     if not trades["symbol"] in Dca.pnl:
                         Dca.pnl[trades["symbol"]] = 0.0
+
                     if (
                         actual_pnl != Dca.pnl[trades["symbol"]]
                         and Dca.pnl[trades["symbol"]] != 0.0
                     ):
                         diff = actual_pnl - Dca.pnl[trades["symbol"]]
-                        # if not trades["symbol"] in Dca.diff:
-                        #     Dca.diff[trades["symbol"]] = abs(diff)
-                        # if diff < 0 and abs(diff) > Dca.diff[trades["symbol"]]:
-                        #     Dca.diff[trades["symbol"]] = abs(diff)
 
                         logging.debug(
                             f"TTP Check: {trades["symbol"]} - Actual PNL: {actual_pnl}, Top-PNL: {Dca.pnl[trades["symbol"]]}, PNL Difference: {diff}"
