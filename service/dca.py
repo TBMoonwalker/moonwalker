@@ -95,8 +95,7 @@ class Dca:
 
                         # Sell if trailing deviation is reached or actual PNL is under minimum TP
                         if (
-                            diff < 0
-                            and abs(diff) > self.trailing_tp
+                            diff < 0 and abs(diff) > self.trailing_tp
                         ) or actual_pnl < self.tp:
                             logging.debug(
                                 f"TTP Sell: {trades["symbol"]} - Percentage decreased - Take profit with difference: {diff}"
@@ -105,7 +104,7 @@ class Dca:
                             Dca.pnl.pop(trades["symbol"])
                         else:
                             sell = False
-                            if actual_pnl > Dca.pnl[trades["symbol"]
+                            if actual_pnl > Dca.pnl[trades["symbol"]]:
                                 Dca.pnl[trades["symbol"]] = actual_pnl
                     else:
                         Dca.pnl[trades["symbol"]] = actual_pnl
