@@ -84,28 +84,29 @@ class Dca:
                         and Dca.pnl[trades["symbol"]] != 0.0
                     ):
                         diff = actual_pnl - Dca.pnl[trades["symbol"]]
-                        if not trades["symbol"] in Dca.diff:
-                            Dca.diff[trades["symbol"]] = abs(diff)
-                        if diff < 0 and abs(diff) > Dca.diff[trades["symbol"]]:
-                            Dca.diff[trades["symbol"]] = abs(diff)
+                        # if not trades["symbol"] in Dca.diff:
+                        #     Dca.diff[trades["symbol"]] = abs(diff)
+                        # if diff < 0 and abs(diff) > Dca.diff[trades["symbol"]]:
+                        #     Dca.diff[trades["symbol"]] = abs(diff)
 
                         logging.debug(
-                            f"TTP Check: {trades["symbol"]} - Actual PNL: {actual_pnl}, Last-PNL: {Dca.pnl[trades["symbol"]]}, PNL Difference: {Dca.diff[trades["symbol"]]}"
+                            f"TTP Check: {trades["symbol"]} - Actual PNL: {actual_pnl}, Top-PNL: {Dca.pnl[trades["symbol"]]}, PNL Difference: {diff}"
                         )
 
                         # Sell if trailing deviation is reached or actual PNL is under minimum TP
                         if (
-                            Dca.diff[trades["symbol"]] < 0
-                            and abs(Dca.diff[trades["symbol"]]) > self.trailing_tp
+                            diff < 0
+                            and abs(diff) > self.trailing_tp
                         ) or actual_pnl < self.tp:
                             logging.debug(
-                                f"TTP Sell: {trades["symbol"]} - Percentage decreased - Take profit with difference: {Dca.diff[trades["symbol"]]}"
+                                f"TTP Sell: {trades["symbol"]} - Percentage decreased - Take profit with difference: {diff}"
                             )
                             sell = True
                             Dca.pnl.pop(trades["symbol"])
                         else:
                             sell = False
-                            Dca.pnl[trades["symbol"]] = actual_pnl
+                            if actual_pnl > Dca.pnl[trades["symbol"]]
+                                Dca.pnl[trades["symbol"]] = actual_pnl
                     else:
                         Dca.pnl[trades["symbol"]] = actual_pnl
                         sell = False
