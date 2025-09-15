@@ -86,7 +86,7 @@ class Dca:
                         diff = actual_pnl - Dca.pnl[trades["symbol"]]
 
                         logging.debug(
-                            f"TTP Check: {trades["symbol"]} - Actual PNL: {actual_pnl}, Top-PNL: {Dca.pnl[trades["symbol"]]}, PNL Difference: {diff}"
+                            f"TTP Check: {trades['symbol']} - Actual PNL: {actual_pnl}, Top-PNL: {Dca.pnl[trades['symbol']]}, PNL Difference: {diff}"
                         )
 
                         # Sell if trailing deviation is reached or actual PNL is under minimum TP
@@ -94,7 +94,7 @@ class Dca:
                             actual_pnl < self.tp and actual_pnl > self.trailing_tp
                         ):
                             logging.debug(
-                                f"TTP Sell: {trades["symbol"]} - Percentage decreased - Take profit with difference: {diff}"
+                                f"TTP Sell: {trades['symbol']} - Percentage decreased - Take profit with difference: {diff}"
                             )
                             sell = True
                             Dca.pnl.pop(trades["symbol"])
@@ -118,7 +118,7 @@ class Dca:
                     self.sl
                 ):
                     logging.debug(
-                        f"Selling {trades["symbol"]} because of autopilot settings. "
+                        f"Selling {trades['symbol']} because of autopilot settings. "
                     )
                     sell = True
 
@@ -259,7 +259,7 @@ class Dca:
                 await self.statistic.update_statistic_data(logging_json)
             else:
                 logging.info(
-                    f"Max safety orders reached for {trades["symbol"]}. Not opening more."
+                    f"Max safety orders reached for {trades['symbol']}. Not opening more."
                 )
 
     async def process_ticker_data(self, ticker):

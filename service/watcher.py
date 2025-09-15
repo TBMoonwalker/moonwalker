@@ -69,7 +69,6 @@ class Watcher:
                         "close": close,
                         "volume": volume,
                     }
-                    logging.debug(ohlcv)
                     await model.Tickers.create(**ohlcv)
                 Watcher.candles[symbol] = current_candle
         # Add new initial symbol for candle
