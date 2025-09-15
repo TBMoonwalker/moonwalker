@@ -113,7 +113,7 @@ class Trades:
     async def create_open_trades(self, payload):
         try:
             await model.OpenTrades.create(**payload)
-            logging.debug(f"Added open trade for {payload["symbol"]}.")
+            logging.debug(f"Added open trade for {payload['symbol']}.")
         except Exception as e:
             logging.error(f"Error creating open trade. Cause {e}")
 
@@ -131,7 +131,7 @@ class Trades:
     async def create_trades(self, payload):
         try:
             await model.Trades.create(**payload)
-            logging.debug(f"Added trade for {payload["symbol"]}.")
+            logging.debug(f"Added trade for {payload['symbol']}.")
         except Exception as e:
             logging.error(f"Error creating trade. Cause {e}")
 
