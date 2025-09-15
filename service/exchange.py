@@ -219,7 +219,7 @@ class Exchange:
             time.sleep(0.2)
         else:
             try:
-                logging.info(f"Try to buy {order["amount"]} {order["symbol"]}")
+                logging.info(f"Try to buy {order['amount']} {order['symbol']}")
                 parameter = {}
                 trade = self.exchange.create_order(
                     order["symbol"],
@@ -232,16 +232,16 @@ class Exchange:
                 order.update(trade)
             except ccxt.ExchangeError as e:
                 logging.error(
-                    f"Buying pair {order["symbol"]} failed due to an exchange error: {e}"
+                    f"Buying pair {order['symbol']} failed due to an exchange error: {e}"
                 )
                 order = None
             except ccxt.NetworkError as e:
                 logging.error(
-                    f"Buying pair {order["symbol"]} failed due to an network error: {e}"
+                    f"Buying pair {order['symbol']} failed due to an network error: {e}"
                 )
                 order = None
             except Exception as e:
-                logging.error(f"Buying pair {order["symbol"]} failed with: {e}")
+                logging.error(f"Buying pair {order['symbol']} failed with: {e}")
                 order = None
 
         if order:
@@ -295,7 +295,7 @@ class Exchange:
                         )
                     order["total_amount"] = order["total_amount"] - reduce_amount
                     logging.info(
-                        f"Reducing amount for sell to: {order["total_amount"]}"
+                        f"Reducing amount for sell to: {order['total_amount']}"
                     )
 
                 trade = self.exchange.create_market_sell_order(
@@ -309,26 +309,26 @@ class Exchange:
             except ccxt.ExchangeError as e:
                 if "insufficient balance" in str(e):
                     logging.error(
-                        f"Trying to sell {order["total_amount"]} of pair {order["symbol"]} failed due insufficient balance."
+                        f"Trying to sell {order['total_amount']} of pair {order['symbol']} failed due insufficient balance."
                     )
                     Exchange.sell_retry_count += 1
                     raise TryAgain
                 else:
                     logging.error(
-                        f"Selling pair {order["symbol"]} failed due to an exchange error: {e}"
+                        f"Selling pair {order['symbol']} failed due to an exchange error: {e}"
                     )
                     order = None
             except ccxt.NetworkError as e:
                 logging.error(
-                    f"Selling pair {order["symbol"]} failed due to an network error: {e}"
+                    f"Selling pair {order['symbol']} failed due to an network error: {e}"
                 )
                 order = None
             except Exception as e:
-                logging.error(f"Selling pair {order["symbol"]} failed with: {e}")
+                logging.error(f"Selling pair {order['symbol']} failed with: {e}")
                 order = None
 
         if order:
-            logging.info(f"Sold {order["total_amount"]} {order['symbol']} on Exchange.")
+            logging.info(f"Sold {order['total_amount']} {order['symbol']} on Exchange.")
             Exchange.sell_retry_count = 0
 
             order_status = self.__parse_order_status(order)
