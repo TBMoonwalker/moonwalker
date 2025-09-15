@@ -38,7 +38,7 @@ class Indicators:
                 )
 
             logging.debug(
-                f"Symbol: {symbol}, Price: {df["close"].iloc[-1]}, LowerBand: {df["lower_band"].iloc[-1]}"
+                f"Symbol: {symbol}, Price: {df['close'].iloc[-1]}, LowerBand: {df['lower_band'].iloc[-1]}"
             )
             logging.debug(
                 f"Symbol: {symbol}, downtrend: {percent_difference_downtrend}, uptrend: {percent_difference_uptrend}"
@@ -268,7 +268,7 @@ class Indicators:
                 result = "up"
 
             logging.debug(
-                f"Base Line: {df["kijun_sen"].iloc[-1]} Conversation Line: {df["tenkan_sen"].iloc[-1]} Leading Span A: {df["senkou_span_a"].iloc[-1]} Leading Span B: {df["senkou_span_b"].iloc[-1]} Signal: {df["signal"].iloc[-1]}"
+                f"Base Line: {df['kijun_sen'].iloc[-1]} Conversation Line: {df['tenkan_sen'].iloc[-1]} Leading Span A: {df['senkou_span_a'].iloc[-1]} Leading Span B: {df['senkou_span_b'].iloc[-1]} Signal: {df['signal'].iloc[-1]}"
             )
 
             # if (
