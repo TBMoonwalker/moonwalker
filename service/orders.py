@@ -18,7 +18,7 @@ class Orders:
         self.dynamic_dca = config.get("dynamic_dca", False)
 
     async def receive_sell_order(self, order):
-        logging.info(f"Incoming sell order for {order["symbol"]}")
+        logging.info(f"Incoming sell order for {order['symbol']}")
 
         order["total_amount"] = await self.trades.get_token_amount_from_trades(
             order["symbol"]
@@ -83,11 +83,11 @@ class Orders:
             # 5. Delete old ticker data
             await self.trades.delete_ticker_data_for_trades(order["symbol"])
         else:
-            logging.error(f"Failed creating sell order for {order["symbol"]}")
+            logging.error(f"Failed creating sell order for {order['symbol']}")
 
     async def receive_buy_order(self, order):
 
-        logging.info(f"Incoming buy order for {order["symbol"]}")
+        logging.info(f"Incoming buy order for {order['symbol']}")
 
         # 1. Create exchange order
         order_status = await self.exchange.create_spot_market_buy(order)
@@ -120,7 +120,7 @@ class Orders:
                 payload = {"symbol": order_status["symbol"]}
                 await self.trades.create_open_trades(payload)
         else:
-            logging.error(f"Failed creating buy order for {order["symbol"]}")
+            logging.error(f"Failed creating buy order for {order['symbol']}")
 
     async def receive_stop_signal(self, symbol):
         logging.info("Incoming stop order")
