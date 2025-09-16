@@ -1,5 +1,6 @@
 import model
 import helper
+import pandas as pd
 from service.trades import Trades
 from datetime import datetime, timedelta
 from tortoise.functions import Sum
@@ -14,24 +15,52 @@ class Statistic:
         self.trades = Trades()
         self.dynamic_dca = config.get("dynamic_dca", False)
 
-    async def get_profits_overall(self, timestamp: None):
+    async def get_profits_overall(self, timestamp: None, period="daily"):
         profit_data = {}
-        profit_data["profit_month"] = {}
-        begin_month = (datetime.now().replace(day=1)).date()
+        date = datetime.now()
         if timestamp:
-            begin_month = (datetime.fromtimestamp(int(timestamp)).replace(day=1)).date()
+            date = datetime.fromtimestamp(int(timestamp))
+        match period:
+            case "daily":
+                begin_datetime = (date.replace(day=1)).date()
+            case "monthly":
+                begin_datetime = (date.replace(month=1)).date()
+            case "yearly":
+                begin_datetime = (date.replace(year=1)).date()
+            case _:
+                return None
         try:
-            profit_month = await model.ClosedTrades.filter(
-                close_date__gt=begin_month
+            data = await model.ClosedTrades.filter(
+                close_date__gt=begin_datetime
             ).values_list("close_date", "profit")
-            for timestamp, profit_day in profit_month:
+
+            for timestamp, profit_unit in data:
                 date = (datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")).date()
-                if str(date) not in profit_data["profit_month"]:
-                    profit_data["profit_month"][str(date)] = profit_day
+                if str(date) not in profit_data:
+                    profit_data[str(date)] = profit_unit
                 else:
-                    profit_data["profit_month"][str(date)] += profit_day
+                    profit_data[str(date)] += profit_unit
+
+            # Resample data
+            s = pd.Series(profit_data)
+            s.index = pd.to_datetime(s.index)
+
+            match period:
+                case "monthly":
+                    result = s.resample("ME").sum().reset_index()
+                    result.columns = ["Month", "Sum"]
+                    profit_data = dict(
+                        zip(result["Month"].dt.strftime("%Y-%m"), result["Sum"])
+                    )
+                case "yearly":
+                    result = s.resample("YE").sum().reset_index()
+                    result.columns = ["Year", "Sum"]
+                    profit_data = dict(
+                        zip(result["Year"].dt.strftime("%Y"), result["Sum"])
+                    )
+
         except Exception as e:
-            logging.error(f"Error getting profits for the month: {e}")
+            logging.error(f"Error getting profits for {period} data: {e}")
 
         return profit_data
 

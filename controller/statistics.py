@@ -26,13 +26,13 @@ async def profit():
         raise
 
 
-@controller.route("/statistic/profit/<timestamp>")
+@controller.route("/statistic/profit/<timestamp>/<period>")
 @route_cors(
     allow_methods=["GET"],
     allow_origin=["*"],
 )
-async def profit_statistics(timestamp=None):
-    response = json.dumps(await statistic.get_profits_overall(timestamp))
+async def profit_statistics(timestamp, period):
+    response = json.dumps(await statistic.get_profits_overall(timestamp, period))
     if not response:
         response = {"result": ""}
 

@@ -271,30 +271,6 @@ class Indicators:
                 f"Base Line: {df['kijun_sen'].iloc[-1]} Conversation Line: {df['tenkan_sen'].iloc[-1]} Leading Span A: {df['senkou_span_a'].iloc[-1]} Leading Span B: {df['senkou_span_b'].iloc[-1]} Signal: {df['signal'].iloc[-1]}"
             )
 
-            # if (
-            #     # Baseline > Leading Span A and Leading Span B
-            #     (
-            #         df["kijun_sen"].iloc[-1] > df["senkou_span_a"].iloc[-1]
-            #         and df["kijun_sen"].iloc[-1] > df["senkou_span_b"].iloc[-1]
-            #     )
-            #     # Conversation Line > Base Line
-            #     and (df["tenkan_sen"].iloc[-1] > df["kijun_sen"].iloc[-1])
-            #     # Close Price > Conversation Line
-            #     and (df["close"].iloc[-2] > df["tenkan_sen"].iloc[-2])
-            # ):
-            #     logging.debug(
-            #         "Reached strategy goals checking if crossed previous candle..."
-            #     )
-            #     # Check if baseline crossed one of the leading spans in the last candle
-            #     # TODO Check works if going down too - check with low and close to find out if chart goes up or down!
-            #     if (
-            #         df["kijun_sen"].iloc[-2] < df["senkou_span_a"].iloc[-2]
-            #         or df["kijun_sen"].iloc[-2] < df["senkou_span_b"].iloc[-2]
-            #     ) or (df["low"].iloc[-2] < df["tenkan_sen"].iloc[-2]):
-            #         logging.debug(
-            #             f"Baseline/Conversation line crossed leading spans for {symbol}"
-            #         )
-            #         result = "up"
         except Exception as e:
             logging.error(
                 f"Ichimoku Cross cannot be calculated for {symbol}. Cause: {e}"
