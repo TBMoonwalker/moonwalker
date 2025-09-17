@@ -7,6 +7,7 @@ from controller import controller
 from service.database import Database
 from service.watcher import Watcher
 from service.housekeeper import Housekeeper
+from pathlib import Path
 
 
 ######################################################
@@ -15,8 +16,6 @@ from service.housekeeper import Housekeeper
 
 # load configuration file
 attributes = helper.Config()
-
-logging = helper.LoggerFactory.get_logger("logs/moonwalker.log", "main")
 
 ######################################################
 #                        Init                        #

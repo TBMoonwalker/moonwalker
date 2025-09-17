@@ -3,7 +3,12 @@ from importlib import import_module
 from pathlib import Path
 from quart import Blueprint
 
-controller = Blueprint("controller", __name__)
+controller = Blueprint(
+    "controller",
+    __name__,
+    static_folder="../static",
+    template_folder="../templates",
+)
 
 # Load controller modules
 for mod in __loader__.get_resource_reader().contents():
