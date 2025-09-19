@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -e
+export npm_config_loglevel=info
 
 echo "📂 Copying config..."
 rm -rf backend/config.ini
