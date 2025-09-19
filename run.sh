@@ -1,6 +1,5 @@
 #!/usr/bin/env bash
 set -e
-export npm_config_loglevel=info
 
 echo "📂 Copying config..."
 rm -rf backend/config.ini
@@ -31,4 +30,4 @@ echo "🐍 Installing Python venv and deps & starting Quart..."
 python3 -m venv .venv
 cd backend
 ../.venv/bin/pip install -r requirements.txt
-../.venv/bin/python app.py
+nohup ../.venv/bin/python app.py &
