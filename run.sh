@@ -26,7 +26,8 @@ rm -rf backend/static/* backend/templates/*
 cp -r frontend/dist/assets backend/static/
 cp frontend/dist/index.html backend/templates/
 
-echo "🐍 Installing Python deps & starting Quart..."
+echo "🐍 Installing Python venv and deps & starting Quart..."
+python3 -m venv .venv
 cd backend
-pip install -r requirements.txt
-python app.py
+../.venv/bin/pip install -r requirements.txt
+../.venv/bin/python app.py
