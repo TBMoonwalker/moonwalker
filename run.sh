@@ -2,8 +2,8 @@
 set -e
 
 echo "📂 Copying config..."
-rm -rf backend/config.ini
-rm -rf frontend/src/config.ts
+rm backend/config.ini
+rm frontend/src/config.ts
 cp config.ini backend/
 cp config.ts frontend/src/
 

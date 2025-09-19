@@ -73,6 +73,9 @@ class Exchange:
                 f"Fetching ticker messages failed due to a network error: {e}"
             )
             raise TryAgain
+        except ccxt.BaseError as e:
+            logging.error(f"Fetching ticker messages failed due to an error: {e}")
+            raise TryAgain
         except Exception as e:
             logging.error(f"Fetching ticker messages failed with: {e}")
             raise TryAgain
@@ -92,6 +95,9 @@ class Exchange:
             raise TryAgain
         except ccxt.NetworkError as e:
             logging.error(f"Fetching market data failed due to a network error: {e}")
+            raise TryAgain
+        except ccxt.BaseError as e:
+            logging.error(f"Fetching market data failed due to an error: {e}")
             raise TryAgain
         except Exception as e:
             logging.error(f"FFetching market data failed failed with: {e}")
@@ -138,6 +144,9 @@ class Exchange:
             raise TryAgain
         except ccxt.ExchangeError as e:
             logging.error(f"Fetch trade order failed due to an exchange error: {e}")
+            raise TryAgain
+        except ccxt.BaseError as e:
+            logging.error(f"Fetch trade order failed due to an error: {e}")
             raise TryAgain
         except Exception as e:
             logging.error(f"Fetch trade order failed with: {e}")
@@ -200,6 +209,9 @@ class Exchange:
                 f"Getting amount for {symbol} failed due to an exchange error: {e}"
             )
             raise TryAgain
+        except ccxt.BaseError as e:
+            logging.error(f"Getting amount for {symbol} failed due to an error: {e}")
+            raise TryAgain
         except Exception as e:
             logging.error(f"Getting amount for {symbol} failed with: {e}")
             raise TryAgain
@@ -238,6 +250,11 @@ class Exchange:
             except ccxt.NetworkError as e:
                 logging.error(
                     f"Buying pair {order['symbol']} failed due to an network error: {e}"
+                )
+                order = None
+            except ccxt.BaseError as e:
+                logging.error(
+                    f"Buying pair {order['symbol']} failed due to an error: {e}"
                 )
                 order = None
             except Exception as e:
@@ -321,6 +338,11 @@ class Exchange:
             except ccxt.NetworkError as e:
                 logging.error(
                     f"Selling pair {order['symbol']} failed due to an network error: {e}"
+                )
+                order = None
+            except ccxt.BaseError as e:
+                logging.error(
+                    f"Selling pair {order['symbol']} failed due to an error: {e}"
                 )
                 order = None
             except Exception as e:
