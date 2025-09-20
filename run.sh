@@ -1,9 +1,16 @@
 #!/usr/bin/env bash
 set -e
 
+BACKEND_CONFIG=backend/config.ini
+FRONTEND_CONFIG=frontend/src/config.ts
+
 echo "📂 Copying config..."
-rm backend/config.ini
-rm frontend/src/config.ts
+if [ -f "$BACKEND_FILE" ]; then
+    rm backend/config.ini
+fi
+if [ -f "$FRONTEND_FILE" ]; then
+    rm frontend/src/config.ts
+fi
 cp config.ini backend/
 cp config.ts frontend/src/
 
