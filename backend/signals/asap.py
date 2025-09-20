@@ -69,7 +69,6 @@ class SignalPlugin:
         self.topcoin_limit = config.get("topcoin_limit", None)
         self.status = True
         self.watcher_queue = watcher_queue
-        logging.debug(self.signal_settings["symbol_list"])
 
     async def __check_max_bots(self):
         result = False
@@ -222,17 +221,15 @@ class SignalPlugin:
                                 "side": "buy",
                             }
                             await self.orders.receive_buy_order(order)
-                            logging.debug(
-                                f"Running trades: {running_trades}, Max Bots: {max_bots}"
-                            )
-
                 else:
                     logging.error(
                         "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
                     )
                     break
             else:
-                logging.debug("Max bots reached, waiting for a new slot")
+                logging.debug(
+                    f"Running trades: {running_trades}, Max Bots: {max_bots}. Max bots reached, waiting for a new slot"
+                )
             await asyncio.sleep(5)
 
     async def shutdown(self):
