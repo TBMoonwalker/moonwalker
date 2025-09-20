@@ -194,41 +194,45 @@ class SignalPlugin:
 
     async def run(self):
         while self.status:
-            running_trades = (
-                await model.Trades.all().distinct().values_list("bot", flat=True)
-            )
-            symbol_list = await self.__get_new_symbol_list(tuple(running_trades))
-            if symbol_list:
-                # Randomize symbols for new deals
-                random.shuffle(symbol_list)
-                for symbol in symbol_list:
-                    max_bots = await self.__check_max_bots()
-                    current_symbol = f"asap_{symbol}"
-                    signal = await self.__check_entry_point(symbol)
-                    if current_symbol not in running_trades and not max_bots and signal:
-                        logging.info(f"Triggering new trade for {symbol}")
-                        order = {
-                            "ordersize": self.ordersize,
-                            "symbol": symbol,
-                            "direction": "long",
-                            "botname": f"asap_{symbol}",
-                            "baseorder": True,
-                            "safetyorder": False,
-                            "order_count": 0,
-                            "ordertype": "market",
-                            "so_percentage": None,
-                            "side": "buy",
-                        }
-                        await self.orders.receive_buy_order(order)
-                        logging.debug(
-                            f"Running trades: {running_trades}, Max Bots: {max_bots}"
-                        )
-
-            else:
-                logging.error(
-                    "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
+            max_bots = await self.__check_max_bots()
+            if not max_bots:
+                running_trades = (
+                    await model.Trades.all().distinct().values_list("bot", flat=True)
                 )
-                break
+                symbol_list = await self.__get_new_symbol_list(tuple(running_trades))
+                if symbol_list:
+                    # Randomize symbols for new deals
+                    random.shuffle(symbol_list)
+                    for symbol in symbol_list:
+
+                        current_symbol = f"asap_{symbol}"
+                        signal = await self.__check_entry_point(symbol)
+                        if current_symbol not in running_trades and signal:
+                            logging.info(f"Triggering new trade for {symbol}")
+                            order = {
+                                "ordersize": self.ordersize,
+                                "symbol": symbol,
+                                "direction": "long",
+                                "botname": f"asap_{symbol}",
+                                "baseorder": True,
+                                "safetyorder": False,
+                                "order_count": 0,
+                                "ordertype": "market",
+                                "so_percentage": None,
+                                "side": "buy",
+                            }
+                            await self.orders.receive_buy_order(order)
+                            logging.debug(
+                                f"Running trades: {running_trades}, Max Bots: {max_bots}"
+                            )
+
+                else:
+                    logging.error(
+                        "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
+                    )
+                    break
+            else:
+                logging.debug("Max bots reached, waiting for a new slot")
             await asyncio.sleep(5)
 
     async def shutdown(self):
