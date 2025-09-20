@@ -29,8 +29,17 @@ class Dca:
             dca_strategy_plugin = dca_strategy.Strategy(
                 timeframe=config.get("dca_strategy_timeframe", "1m")
             )
+        tp_strategy_plugin = None
+        if config.get("tp_strategy", None):
+            tp_strategy = importlib.import_module(
+                f"strategies.{config.get('tp_strategy')}"
+            )
+            tp_strategy_plugin = tp_strategy.Strategy(
+                timeframe=config.get("tp_strategy_timeframe", "1m")
+            )
         self.config = config
-        self.strategy = dca_strategy_plugin
+        self.dca_strategy = dca_strategy_plugin
+        self.tp_strategy = tp_strategy_plugin
         self.trailing_tp = config.get("trailing_tp", 0)
         self.dynamic_dca = config.get("dynamic_dca", False)
         self.volume_scale = config.get("os")
@@ -47,8 +56,19 @@ class Dca:
         token, currency = symbol.split("/")
         symbol = f"{token}{currency}"
 
-        if self.strategy:
-            result = self.strategy.run(symbol)
+        if self.dca_strategy:
+            result = self.dca_strategy.run(symbol)
+
+        return result
+
+    def __tp_strategy(self, symbol):
+        result = False
+
+        token, currency = symbol.split("/")
+        symbol = f"{token}{currency}"
+
+        if self.tp_strategy:
+            result = self.dca_strategy.run(symbol)
 
         return result
 
@@ -71,6 +91,12 @@ class Dca:
 
             # Actual PNL in percent (value for profit calculation)
             actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
+
+            # TP strategy
+            if self.tp_strategy and sell:
+                logging.debug("Check if we should sell ...")
+                if await self.__tp_strategy(trades["symbol"]):
+                    sell = True
 
             # Trailing TP
             if self.trailing_tp > 0:
