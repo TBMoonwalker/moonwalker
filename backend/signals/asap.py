@@ -228,7 +228,7 @@ class SignalPlugin:
                     break
             else:
                 logging.debug(
-                    f"Running trades: {running_trades}, Max Bots: {max_bots}. Max bots reached, waiting for a new slot"
+                    f"Max Bots: {max_bots}. Max bots reached, waiting for a new slot"
                 )
             await asyncio.sleep(5)
 
