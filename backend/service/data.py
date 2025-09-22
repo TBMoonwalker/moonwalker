@@ -84,9 +84,9 @@ class Data:
         # if symbol not in symbol_list:
         if await self.delete_ticker_data_for_trades(symbol):
             try:
-                await self.fetch_history_data_for_symbol(symbol)
-                logging.info(f"Added history for {symbol}")
-                return True
+                if await self.fetch_history_data_for_symbol(symbol):
+                    logging.info(f"Added history for {symbol}")
+                    return True
             except Exception as e:
                 logging.error(f"Error adding history for {symbol}. Cause: {e}")
 
@@ -127,6 +127,8 @@ class Data:
 
             await model.Tickers.bulk_create(ohlcv)
 
+            return True
+
         except ccxt.NetworkError as e:
             logging.error(
                 f"Error fetching historical data from Exchange due to a network error: {e}"
@@ -135,10 +137,16 @@ class Data:
             logging.error(
                 f"Error fetching historical data from Exchange due to an exchange error: {e}"
             )
+        except ccxt.BaseError as e:
+            logging.error(
+                f"Error fetching historical data from Exchange due to an error: {e}"
+            )
         except Exception as e:
             logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
 
         await self.exchange.close()
+
+        return False
 
     async def get_ohlcv_for_pair(self, pair, timerange, timestamp_start, offset):
         # 600000 --> 60 minutes in milliseconds before
