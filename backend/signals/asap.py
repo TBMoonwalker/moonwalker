@@ -110,7 +110,12 @@ class SignalPlugin:
 
         # Add history data for indicators
         for symbol in symbol_list:
-            await Data().add_history_data_for_symbol(symbol)
+            if not await Data().add_history_data_for_symbol(symbol):
+                logging.error(
+                    f"Not trading {symbol} because history add failed. Please check data.log."
+                )
+                symbol_list.pop(symbol)
+
         await self.watcher_queue.put(symbol_list)
 
         # Running symbols

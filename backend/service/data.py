@@ -43,6 +43,8 @@ class Data:
                 length_minutes = 480
             case "60min":
                 length_minutes = 120
+            case "30min":
+                length_minutes = 90
             case "15min":
                 length_minutes = 45
             case "10min":
@@ -66,12 +68,29 @@ class Data:
 
         return datetime.timestamp(min_date)
 
+    async def delete_ticker_data_for_trades(self, symbol):
+        try:
+            query = await model.Tickers.filter(symbol=f"{symbol}").delete()
+            logging.info(f"Delete {query} entries for sold symbol {symbol}")
+            return True
+        except Exception as e:
+            logging.error(f"Error deleting old ticker data for symbol {symbol}: {e}")
+
+        return False
+
     async def add_history_data_for_symbol(self, symbol):
-        symbol_list = await self.get_ticker_symbol_list()
-        logging.debug(f"Symbol list: {symbol_list}")
-        if symbol not in symbol_list:
-            await self.fetch_history_data_for_symbol(symbol)
-            logging.debug(f"Added history for {symbol}")
+        # symbol_list = await self.get_ticker_symbol_list()
+        # logging.debug(f"Symbol list: {symbol_list}")
+        # if symbol not in symbol_list:
+        if await self.delete_ticker_data_for_trades(symbol):
+            try:
+                await self.fetch_history_data_for_symbol(symbol)
+                logging.info(f"Added history for {symbol}")
+                return True
+            except Exception as e:
+                logging.error(f"Error adding history for {symbol}. Cause: {e}")
+
+        return False
 
     async def fetch_history_data_for_symbol(self, symbol):
         ohlcv = []

@@ -156,50 +156,57 @@ class SignalPlugin:
                     event = await sio.receive(timeout=300)
                     if event[0] == "signal":
                         symbol = f"{event[1]['symbol'].upper()}{self.currency}"
+                        max_bots = await self.__check_max_bots()
 
-                        if self.__check_entry_point(event[1]):
-                            running_trades = (
-                                await model.Trades.all()
-                                .distinct()
-                                .values_list("bot", flat=True)
-                            )
-
-                            max_bots = await self.__check_max_bots()
-                            current_symbol = f"symsignal_{symbol}"
-
-                            if current_symbol not in running_trades and not max_bots:
-                                logging.debug(
-                                    f"Running trades: {running_trades}, Max Bots: {max_bots}"
+                        if not max_bots:
+                            if self.__check_entry_point(event[1]):
+                                running_trades = (
+                                    await model.Trades.all()
+                                    .distinct()
+                                    .values_list("bot", flat=True)
                                 )
 
-                                logging.info(f"Triggering new trade for {symbol}")
+                                current_symbol = f"symsignal_{symbol}"
 
-                                # Backend needs symbol with /
-                                symbol_full = self.utils.split_symbol(
-                                    symbol, self.currency
-                                )
+                                if current_symbol not in running_trades:
+                                    logging.debug(f"Running trades: {running_trades}")
 
-                                # Automatically subscribe to reduce load
-                                if self.dynamic_dca:
-                                    await Data().add_history_data_for_symbol(
-                                        symbol_full
+                                    logging.info(f"Triggering new trade for {symbol}")
+
+                                    # Backend needs symbol with /
+                                    symbol_full = self.utils.split_symbol(
+                                        symbol, self.currency
                                     )
-                                    await self.watcher_queue.put([symbol_full])
-                                    # ToDo - Catch error if symbol is not yet available in Websocket History
 
-                                order = {
-                                    "ordersize": self.ordersize,
-                                    "symbol": symbol_full,
-                                    "direction": "long",
-                                    "botname": f"symsignal_{symbol}",
-                                    "baseorder": True,
-                                    "safetyorder": False,
-                                    "order_count": 0,
-                                    "ordertype": "market",
-                                    "so_percentage": None,
-                                    "side": "buy",
-                                }
-                                await self.orders.receive_buy_order(order)
+                                    # Automatically subscribe to reduce load
+                                    if self.dynamic_dca:
+                                        if not await Data().add_history_data_for_symbol(
+                                            symbol_full
+                                        ):
+                                            logging.error(
+                                                f"Not trading {symbol} because history add failed. Please check data.log."
+                                            )
+                                            continue
+
+                                    await self.watcher_queue.put([symbol_full])
+
+                                    order = {
+                                        "ordersize": self.ordersize,
+                                        "symbol": symbol_full,
+                                        "direction": "long",
+                                        "botname": f"symsignal_{symbol}",
+                                        "baseorder": True,
+                                        "safetyorder": False,
+                                        "order_count": 0,
+                                        "ordertype": "market",
+                                        "so_percentage": None,
+                                        "side": "buy",
+                                    }
+                                    await self.orders.receive_buy_order(order)
+                        else:
+                            logging.debug(
+                                f"Max Bots: {max_bots}. Max bots reached, waiting for a new slot"
+                            )
                 except TimeoutError:
                     logging.error(
                         "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"

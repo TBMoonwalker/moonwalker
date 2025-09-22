@@ -46,6 +46,6 @@ class Strategy:
             }
             logging.debug(f"{logging_json}")
         except:
-            logging.error("Cannot run strategy, check indicators.log")
+            logging.error(f"Cannot run strategy for {symbol}, check indicators.log")
             return False
         return result
