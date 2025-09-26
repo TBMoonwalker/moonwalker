@@ -285,7 +285,7 @@ class Exchange:
 
             return order
 
-    @retry(wait=wait_fixed(1), stop=stop_after_attempt(100))
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(200))
     async def create_spot_market_sell(self, order):
         order["info"] = {}
 
