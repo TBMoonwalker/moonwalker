@@ -143,8 +143,8 @@ class Data:
             )
         except Exception as e:
             logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
-
-        await self.exchange.close()
+        finally:
+            await self.exchange.close()
 
         return False
 

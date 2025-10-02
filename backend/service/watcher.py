@@ -174,22 +174,19 @@ class Watcher:
                         logging.error(
                             f"Error watching websocket data from Exchange due to a network error: {e}"
                         )
-                        continue
                     except ccxt.ExchangeError as e:
                         logging.error(
                             f"Error watching websocket data from Exchange due to an exchange error: {e}"
                         )
-                        continue
                     except ccxt.BaseError as e:
                         logging.error(
                             f"Error watching websocket data from Exchange: {e}"
                         )
-                        continue
                     except Exception as e:
                         logging.error(f"CCXT websocket error. Cause: {e}")
-                        continue
                     finally:
                         await self.exchange.close()
+                        continue
 
                 else:
                     actual_symbols = Watcher.ticker_symbols
