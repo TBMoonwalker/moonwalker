@@ -3,7 +3,7 @@ import ccxt as ccxt
 import helper
 import model
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
 
@@ -13,7 +13,7 @@ class Data:
         config = helper.Config()
         utils = helper.Utils()
         self.utils = utils
-        self.history_data = config.get("history_from_data", 3)
+        self.history_data = config.get("history_from_data", 30)
         self.exchange_id = config.get("exchange")
         self.exchange_class = getattr(ccxtpro, self.exchange_id)
         self.exchange = self.exchange_class(
@@ -29,6 +29,47 @@ class Data:
         self.market = config.get("market", "spot")
         self.timeframe = config.get("timeframe", "1m")
         self.currency = config.get("currency").upper()
+
+    async def get_listing_date(self, symbol: str) -> datetime:
+        """
+        Fetch the listing date of a token, using SQLite cache with Tortoise ORM.
+        """
+        # Check cache first
+        listing = await model.Listings.get_or_none(symbol=symbol)
+        if listing:
+            return listing.listing_date
+
+        # If not cached → fetch from exchange
+        await self.exchange.load_markets()
+        if symbol not in self.exchange.markets:
+            logging.error(f"{symbol} not found")
+        try:
+            ohlcv = await self.exchange.fetch_ohlcv(
+                symbol, timeframe="1d", limit=1, since=0
+            )
+            if not ohlcv:
+                logging.error(f"No OHLCV data available for {symbol}")
+            await self.exchange.close()
+        except Exception as e:
+            logging.error(f"Error fetching OHLCV for {symbol}: {e}")
+        finally:
+            await self.exchange.close()
+
+        first_timestamp = ohlcv[0][0]
+        listing_date = datetime.fromtimestamp(first_timestamp / 1000, tz=timezone.utc)
+
+        # Save to DB cache
+        await model.Listings.create(symbol=symbol, listing_date=listing_date)
+
+        return listing_date
+
+    async def is_token_old_enough(self, symbol: str, threshold_days: int) -> bool:
+        """
+        Return False if token is newer than threshold_days, True otherwise.
+        """
+        listing_date = await self.get_listing_date(symbol)
+        threshold_date = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+        return listing_date <= threshold_date
 
     async def get_ticker_symbol_list(self):
         symbols = await model.Tickers.all().distinct().values_list("symbol", flat=True)

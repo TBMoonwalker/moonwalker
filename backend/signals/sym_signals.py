@@ -20,6 +20,7 @@ class SignalPlugin:
         self.autopilot = Autopilot()
         self.orders = Orders()
         self.statistic = Statistic()
+        self.data = Data()
         self.config = config
         self.ordersize = config.get("bo")
         self.max_bots = config.get("max_bots")
@@ -42,6 +43,7 @@ class SignalPlugin:
             if config.get("pair_allowlist", None)
             else None
         )
+        self.pair_age = config.get("pair_age", 30)
         self.dynamic_dca = config.get("dynamic_dca", False)
         self.topcoin_limit = config.get("topcoin_limit", None)
         self.timeframe = config.get("timeframe", "1min")
@@ -159,7 +161,12 @@ class SignalPlugin:
                         max_bots = await self.__check_max_bots()
 
                         if not max_bots:
-                            if self.__check_entry_point(event[1]):
+                            if self.__check_entry_point(
+                                event[1]
+                            ) and await self.data.is_token_old_enough(
+                                self.utils.split_symbol(symbol, self.currency),
+                                self.pair_age,
+                            ):
                                 running_trades = (
                                     await model.Trades.all()
                                     .distinct()
