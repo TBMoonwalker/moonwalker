@@ -149,6 +149,27 @@ class Watcher:
                         trades = await self.exchange.watch_trades_for_symbols(
                             Watcher.ticker_symbols
                         )
+                        for trade in trades:
+                            ohlcvc = self.exchange.build_ohlcvc([trade], "1m")
+                            actual_price = float(ohlcvc[0][4])
+                            if trade["symbol"] in last_price:
+                                if float(actual_price) != float(
+                                    last_price[trade["symbol"]]
+                                ):
+                                    ticker_price = {
+                                        "type": "ticker_price",
+                                        "ticker": {
+                                            "symbol": trade["symbol"],
+                                            "price": actual_price,
+                                        },
+                                    }
+                                    await self.dca.process_ticker_data(ticker_price)
+                                    await self.__write_ohlcv_data(
+                                        trade["symbol"], ohlcvc
+                                    )
+                                    last_price[trade["symbol"]] = actual_price
+                            else:
+                                last_price[trade["symbol"]] = actual_price
                     except ccxt.NetworkError as e:
                         logging.error(
                             f"Error watching websocket data from Exchange due to a network error: {e}"
@@ -167,25 +188,9 @@ class Watcher:
                     except Exception as e:
                         logging.error(f"CCXT websocket error. Cause: {e}")
                         continue
-                    for trade in trades:
-                        ohlcvc = self.exchange.build_ohlcvc([trade], "1m")
-                        actual_price = float(ohlcvc[0][4])
-                        if trade["symbol"] in last_price:
-                            if float(actual_price) != float(
-                                last_price[trade["symbol"]]
-                            ):
-                                ticker_price = {
-                                    "type": "ticker_price",
-                                    "ticker": {
-                                        "symbol": trade["symbol"],
-                                        "price": actual_price,
-                                    },
-                                }
-                                await self.dca.process_ticker_data(ticker_price)
-                                await self.__write_ohlcv_data(trade["symbol"], ohlcvc)
-                                last_price[trade["symbol"]] = actual_price
-                        else:
-                            last_price[trade["symbol"]] = actual_price
+                    finally:
+                        await self.exchange.close()
+
                 else:
                     actual_symbols = Watcher.ticker_symbols
 
