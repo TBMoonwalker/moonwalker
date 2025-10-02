@@ -68,7 +68,7 @@ class Dca:
         symbol = f"{token}{currency}"
 
         if self.tp_strategy:
-            result = self.dca_strategy.run(symbol)
+            result = self.tp_strategy.run(symbol)
 
         return result
 
@@ -97,6 +97,8 @@ class Dca:
                 logging.debug("Check if we should sell ...")
                 if await self.__tp_strategy(trades["symbol"]):
                     sell = True
+                else:
+                    sell = False
 
             # Trailing TP
             if self.trailing_tp > 0:
