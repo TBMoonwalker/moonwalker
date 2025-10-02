@@ -24,11 +24,11 @@ autopilot_mode.value = "Medium"
 watch(statistics_data.json, async (newData) => {
     if (newData !== undefined) {
         const websocket_data = JSON.parse(newData)
-        upnl.value = websocket_data.upnl.toFixed(2)
+        upnl.value = websocket_data.upnl.toFixed(2) ?? 0
         upnl_class.value = row_classes(upnl.value)
-        profit_overall.value = websocket_data.profit_overall.toFixed(2)
+        profit_overall.value = websocket_data.profit_overall.toFixed(2) ?? 0
         profit_class.value = row_classes(profit_overall.value)
-        funds_locked.value = websocket_data.funds_locked.toFixed(2)
+        funds_locked.value = websocket_data.funds_locked.toFixed(2) ?? 0
     }
 
 }, { immediate: true })
