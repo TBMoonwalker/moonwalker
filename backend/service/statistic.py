@@ -73,7 +73,8 @@ class Statistic:
             upnl = await model.OpenTrades.annotate(total=Sum("profit")).values_list(
                 "total", flat=True
             )
-            profit_data["upnl"] = upnl[0]
+            if upnl[0]:
+                profit_data["upnl"] = upnl[0]
         except Exception as e:
             logging.error(f"Error getting losses: {e}")
 
@@ -83,8 +84,10 @@ class Statistic:
             profit = await model.ClosedTrades.annotate(total=Sum("profit")).values_list(
                 "total", flat=True
             )
-            if profit[0] and profit_data["upnl"]:
+            if profit[0] and profit_data["upnl"] != 0:
                 profit_data["profit_overall"] = profit[0] + profit_data["upnl"]
+            else:
+                profit_data["profit_overall"] = profit[0]
 
         except Exception as e:
             logging.error(f"Error getting profit: {e}")
