@@ -105,13 +105,8 @@ class Statistic:
         # Autopilot mode
         profit_data["autopilot"] = "none"
         try:
-            autopilot_mode = (
-                await model.Autopilot.all()
-                .order_by("-id")
-                .values_list("mode", flat=True)
-                .first()
-            )
-            profit_data["autopilot"] = autopilot_mode
+            autopilot = await model.Autopilot.all().order_by("-id").first()
+            profit_data["autopilot"] = autopilot.mode if autopilot else "none"
         except Exception as e:
             logging.error(f"Error getting autopilot mode: {e}")
 
