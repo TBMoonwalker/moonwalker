@@ -77,7 +77,6 @@ class Watcher:
 
     # Get new Ticker symbols from signal plugin
     async def watch_incoming_symbols(self, watcher_queue):
-        current_symbols = []
         while self.status:
             try:
                 new_symbol_list = await watcher_queue.get()

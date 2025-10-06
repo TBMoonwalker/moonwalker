@@ -102,6 +102,14 @@ class Statistic:
         except Exception as e:
             logging.error(f"Error getting funds: {e}")
 
+        # Autopilot mode
+        profit_data["autopilot"] = "none"
+        try:
+            autopilot_mode = await model.Autopilot.all().order_by("-id").first()
+            profit_data["autopilot"] = autopilot_mode[0]
+        except Exception as e:
+            logging.error(f"Error getting autopilot mode: {e}")
+
         profit_data["profit_week"] = {}
         begin_week = (
             datetime.now() + timedelta(days=(0 - datetime.now().weekday()))

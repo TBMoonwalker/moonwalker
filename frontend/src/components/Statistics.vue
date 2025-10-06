@@ -1,7 +1,7 @@
 <template>
     <n-statistic :class="profit_class" label="Profit overall" :value="profit_overall" />
     <n-statistic :class="upnl_class" label="UPNL" :value="upnl" />
-    <n-statistic label="Autopilot mode" :value="autopilot_mode" />
+    <n-statistic :class="autopilot_class" label="Autopilot mode" :value="autopilot_mode" />
     <n-statistic label="Funds locked" :value="funds_locked" />
 </template>
 
@@ -18,7 +18,7 @@ const upnl = ref()
 const upnl_class = ref()
 const funds_locked = ref()
 const autopilot_mode = ref()
-autopilot_mode.value = "Medium"
+const autopilot_class = ref()
 
 // Get new statistics data
 watch(statistics_data.json, async (newData) => {
@@ -37,11 +37,30 @@ watch(statistics_data.json, async (newData) => {
         } else {
             funds_locked.value = websocket_data.funds_locked.toFixed(2)
         }
+        if (websocket_data.autopilot == "high") {
+            autopilot_mode.value = "High"
+            autopilot_class.value = "red"
+        } else if (websocket_data.autopilot == "medium") {
+            autopilot_mode.value = "Medium"
+            autopilot_class.value = "orange"
+        } else {
+            autopilot_mode.value = "Not running"
+            autopilot_class.value = "green"
+        }
+
     }
 
 }, { immediate: true })
 
 function row_classes(data: any) {
+    if (Math.sign(data) >= 0) {
+        return 'green'
+    } else {
+        return 'red'
+    }
+}
+
+function autopilot_classes(data: any) {
     if (Math.sign(data) >= 0) {
         return 'green'
     } else {
