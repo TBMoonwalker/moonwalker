@@ -184,7 +184,8 @@ class SignalPlugin:
 
             # strategy entry check
             if self.strategy:
-                return await self.strategy.run(symbol)
+                if not await self.strategy.run(symbol):
+                    return False
 
             return True
 
