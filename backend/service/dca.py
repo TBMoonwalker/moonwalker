@@ -298,9 +298,12 @@ class Dca:
 
             # Check Autopilot
             profit = await self.statistic.get_profit()
-            trading_settings = await self.autopilot.calculate_trading_settings(
-                profit["funds_locked"]
-            )
+            trading_settings = None
+
+            if profit["funds_locked"]:
+                trading_settings = await self.autopilot.calculate_trading_settings(
+                    profit["funds_locked"]
+                )
             # Use Autopilots settings
             if trading_settings:
                 self.tp = trading_settings["tp"]

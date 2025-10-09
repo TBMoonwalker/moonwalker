@@ -114,8 +114,7 @@ class SignalPlugin:
                 logging.error(
                     f"Not trading {symbol} because history add failed. Please check data.log."
                 )
-                symbol_list.pop(symbol)
-
+                symbol_list.pop(str(symbol))
         await self.watcher_queue.put(symbol_list)
 
         # Running symbols
