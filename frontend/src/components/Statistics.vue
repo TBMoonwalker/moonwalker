@@ -30,7 +30,11 @@ watch(statistics_data.json, async (newData) => {
             upnl.value = websocket_data.upnl.toFixed(2)
         }
         upnl_class.value = row_classes(upnl.value)
-        profit_overall.value = websocket_data.profit_overall.toFixed(2)
+        if (websocket_data.profit_overall === null) {
+            profit_overall.value = 0.0
+        } else {
+            profit_overall.value = websocket_data.profit_overall.toFixed(2)
+        }
         profit_class.value = row_classes(profit_overall.value)
         if (websocket_data.funds_locked === null) {
             funds_locked.value = 0.0
