@@ -184,7 +184,12 @@ class Watcher:
                     except Exception as e:
                         logging.error(f"CCXT websocket error. Cause: {e}")
                     finally:
-                        await self.exchange.close()
+                        try:
+                            await self.exchange.close()
+                        except Exception as e:
+                            logging.error(
+                                f"Error closing Exchange connection. Cause: {e}"
+                            )
                         continue
 
                 else:
