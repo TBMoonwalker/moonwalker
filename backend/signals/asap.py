@@ -130,19 +130,17 @@ class SignalPlugin:
 
     @retry(wait=wait_fixed(3))
     async def __check_entry_point(self, symbol):
-        # Initial state
-        check = True
-
         # allow/denylist check
         # we only need the plain symbol here:
         symbol_only, currency = symbol.split("/")
+
         if self.filter.is_on_allowed_list(
             symbol_only, self.pair_allowlist
         ) and self.filter.is_on_deny_list(symbol_only, self.pair_denylist):
             logging.info(
                 f"Symbol {symbol} is not in your allowlist or is set in your denylist. Ignoring it."
             )
-            check = False
+            return False
 
         try:
             # btc pulse check
@@ -153,7 +151,7 @@ class SignalPlugin:
                     logging.debug(
                         f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
                     )
-                    check = False
+                    return False
 
             # volume check
             if self.volume:
@@ -167,7 +165,7 @@ class SignalPlugin:
                     logging.info(
                         f"Symbol {symbol} has a 24h volume of {volume_size}{volume_range}, which is under the configured volume of {self.volume['size']}{self.volume['range']}"
                     )
-                    check = False
+                    return False
 
             # topcoin limit check
             if self.topcoin_limit and self.filter_values:
@@ -182,13 +180,13 @@ class SignalPlugin:
                         logging.info(
                             f"Symbol {symbol} has a marketcap of {marketcap} and is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
                         )
-                        check = False
+                        return False
 
             # strategy entry check
             if self.strategy:
-                check = await self.strategy.run(symbol)
+                return await self.strategy.run(symbol)
 
-            return check
+            return True
 
         except Exception as e:
             logging.debug(
