@@ -209,7 +209,13 @@ class SignalPlugin:
 
                         current_symbol = f"asap_{symbol}"
                         signal = await self.__check_entry_point(symbol)
-                        if current_symbol not in running_trades and signal:
+                        # Check max bots again
+                        max_bots = await self.__check_max_bots()
+                        if (
+                            current_symbol not in running_trades
+                            and not max_bots
+                            and signal
+                        ):
                             logging.info(f"Triggering new trade for {symbol}")
                             order = {
                                 "ordersize": self.ordersize,
@@ -224,6 +230,8 @@ class SignalPlugin:
                                 "side": "buy",
                             }
                             await self.orders.receive_buy_order(order)
+                        # Slow down on many symbols at once
+                        asyncio.sleep(1)
                 else:
                     logging.error(
                         "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
