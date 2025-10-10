@@ -143,13 +143,13 @@ class Indicators:
         return result
 
     async def calculate_rsi(self, symbol, timerange, length):
-        result = "none"
         try:
             df_raw = await data.get_data_for_pair(symbol, timerange, length)
             df = data.resample_data(df_raw, timerange)
             rsi = talib.RSI(df["close"], timeperiod=length).dropna().iloc[-1]
         except Exception as e:
             logging.error("Error getting RSI data. Cause: {e}")
+            return None
         return rsi
 
     async def calculate_rsi_slope(self, symbol, timerange, length):

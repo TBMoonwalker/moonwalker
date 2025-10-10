@@ -114,7 +114,7 @@ class SignalPlugin:
                 logging.error(
                     f"Not trading {symbol} because history add failed. Please check data.log."
                 )
-                symbol_list.pop(str(symbol))
+                symbol_list.remove(symbol)
         await self.watcher_queue.put(symbol_list)
 
         # Running symbols
@@ -168,16 +168,27 @@ class SignalPlugin:
 
             # topcoin limit check
             if self.topcoin_limit and self.filter_values:
-                marketcap = self.filter.get_cmc_marketcap_rank(
-                    self.filter_values["marketcap_cmc_api_key"],
-                    symbol_only,
-                )
-                if marketcap:
-                    if not self.filter.is_within_topcoin_limit(
-                        marketcap, self.topcoin_limit
-                    ):
+                if self.filter_values["marketcap_cmc_api_key"]:
+                    marketcap = self.filter.get_cmc_marketcap_rank(
+                        self.filter_values["marketcap_cmc_api_key"],
+                        symbol_only,
+                    )
+                    if marketcap:
+                        if not self.filter.is_within_topcoin_limit(
+                            marketcap, self.topcoin_limit
+                        ):
+                            logging.info(
+                                f"Symbol {symbol} has a marketcap of {marketcap} and is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
+                            )
+                            return False
+
+                if self.filter_values["rsi_max"]:
+                    rsi = await self.indicators.calculate_rsi(
+                        symbol, self.strategy_timeframe, 14
+                    )
+                    if rsi and rsi > self.filter_values["rsi_max"]:
                         logging.info(
-                            f"Symbol {symbol} has a marketcap of {marketcap} and is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
+                            f"Symbol {symbol} has a rsi of {rsi} and is not within your topcoin limit of the top {self.filter_values["rsi_max"]}. Ignoring it."
                         )
                         return False
 
