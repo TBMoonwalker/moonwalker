@@ -188,7 +188,7 @@ class SignalPlugin:
                     )
                     if rsi and rsi > self.filter_values["rsi_max"]:
                         logging.info(
-                            f"Symbol {symbol} has a rsi of {rsi} and is not within your topcoin limit of the top {self.filter_values["rsi_max"]}. Ignoring it."
+                            f"Symbol {symbol} has a rsi of {rsi} and is not within your rsi limit of {self.filter_values["rsi_max"]}. Ignoring it."
                         )
                         return False
 
