@@ -183,7 +183,11 @@ class SignalPlugin:
 
             # strategy entry check
             if self.strategy:
-                if not await self.strategy.run(symbol):
+                try:
+                    if not await self.strategy.run(symbol):
+                        return False
+                except Exception as e:
+                    logging.error(f"Error running buy strategy. Cause: {e}")
                     return False
 
             return True
@@ -231,7 +235,7 @@ class SignalPlugin:
                             }
                             await self.orders.receive_buy_order(order)
                         # Slow down on many symbols at once
-                        asyncio.sleep(1)
+                        await asyncio.sleep(1)
                 else:
                     logging.error(
                         "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
