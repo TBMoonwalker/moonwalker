@@ -108,20 +108,22 @@ class SignalPlugin:
         if self.btc_pulse and "BTC" not in symbol_list:
             symbol_list.append(("BTC" + "/" + self.currency).upper())
 
-        # Add history data for indicators
-        for symbol in symbol_list:
-            if not await Data().add_history_data_for_symbol(symbol):
-                logging.error(
-                    f"Not trading {symbol} because history add failed. Please check data.log."
-                )
-                symbol_list.remove(symbol)
-        await self.watcher_queue.put(symbol_list)
-
         # Running symbols
         running_symbols = [
             f"{symbol.upper()}"
             for botsuffix, symbol in [item.split("_") for item in running_list]
         ]
+
+        # Add history data for indicators
+        for symbol in symbol_list:
+            if symbol not in running_symbols:
+                if await Data().count_history_data_for_symbol(symbol) < 1:
+                    if not await Data().add_history_data_for_symbol(symbol):
+                        logging.error(
+                            f"Not trading {symbol} because history add failed. Please check data.log."
+                        )
+                        symbol_list.remove(symbol)
+        await self.watcher_queue.put(symbol_list)
 
         logging.debug(f"Running symbols: {running_symbols}")
         logging.debug(f"New symbols: {symbol_list}")
