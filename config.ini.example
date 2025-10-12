@@ -33,6 +33,7 @@ market = spot
 # You can activate it, if you pay the fees with BNB or other exchange tokens
 fee_deduction = False
 order_check_range = 5
+watcher_ohlcv = True
 
 [dca]
 # don't turn it off - if you like no safety orders - unset mstc (default)

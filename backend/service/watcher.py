@@ -38,12 +38,16 @@ class Watcher:
         self.status = True
 
         # Class Variables
+        Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
         Watcher.ticker_symbols = []
         Watcher.candles = {}
 
     async def __write_ohlcv_data(self, symbol, ticker):
         current_candle = ticker[-1]
-        timestamp, open, high, low, close, volume, check = current_candle
+        if Watcher.exchange_watcher_ohlcv:
+            timestamp, open, high, low, close, volume = current_candle
+        else:
+            timestamp, open, high, low, close, volume, check = current_candle
         if symbol in Watcher.candles:
             if (
                 Watcher.candles[symbol] is None
@@ -51,15 +55,25 @@ class Watcher:
             ):
                 # The previous candle for this symbol has closed; write it to the database
                 if Watcher.candles[symbol]:
-                    (
-                        timestamp,
-                        open,
-                        high,
-                        low,
-                        close,
-                        volume,
-                        check,
-                    ) = Watcher.candles[symbol]
+                    if Watcher.exchange_watcher_ohlcv:
+                        (
+                            timestamp,
+                            open,
+                            high,
+                            low,
+                            close,
+                            volume,
+                        ) = Watcher.candles[symbol]
+                    else:
+                        (
+                            timestamp,
+                            open,
+                            high,
+                            low,
+                            close,
+                            volume,
+                            check,
+                        ) = Watcher.candles[symbol]
                     ohlcv = {
                         "timestamp": timestamp,
                         "symbol": symbol,
@@ -86,8 +100,9 @@ class Watcher:
                     if new_symbol not in trades:
                         trades.append(new_symbol)
                         logging.debug(f"{new_symbol} not in trades, adding it.")
-                # Watcher.ticker_symbols = utils.convert_symbols(trades)
                 Watcher.ticker_symbols = trades
+                if Watcher.exchange_watcher_ohlcv:
+                    Watcher.ticker_symbols = utils.convert_symbols(trades)
                 logging.debug(f"Watching ticker symbols: {Watcher.ticker_symbols}")
                 watcher_queue.task_done()
             except asyncio.QueueEmpty:
@@ -104,8 +119,9 @@ class Watcher:
         if created:
             try:
                 new_symbol_list = await Trades().get_symbols()
-                # Watcher.ticker_symbols = utils.convert_symbols(new_symbol_list)
                 Watcher.ticker_symbols = new_symbol_list
+                if Watcher.exchange_watcher_ohlcv:
+                    Watcher.ticker_symbols = utils.convert_symbols(new_symbol_list)
                 logging.debug(f"Added symbols. New list: {Watcher.ticker_symbols}")
 
             except Exception as e:
@@ -122,8 +138,9 @@ class Watcher:
         if created:
             try:
                 new_symbol_list = await Trades().get_symbols()
-                # Watcher.ticker_symbols = utils.convert_symbols(new_symbol_list)
                 Watcher.ticker_symbols = new_symbol_list
+                if Watcher.exchange_watcher_ohlcv:
+                    Watcher.ticker_symbols = utils.convert_symbols(new_symbol_list)
                 logging.debug(f"Removed symbols. New list: {Watcher.ticker_symbols}")
             except Exception as e:
                 logging.error(f"Error removing trade symbols from watcher. Cause: {e}")
@@ -135,8 +152,9 @@ class Watcher:
         ticker_symbols = await Trades().get_symbols()
 
         if ticker_symbols:
-            # Watcher.ticker_symbols = utils.convert_symbols(ticker_symbols)
             Watcher.ticker_symbols = ticker_symbols
+            if Watcher.exchange_watcher_ohlcv:
+                Watcher.ticker_symbols = utils.convert_symbols(ticker_symbols)
             Watcher.candles = {symbol: None for symbol in ticker_symbols}
 
         actual_symbols = Watcher.ticker_symbols
@@ -145,30 +163,59 @@ class Watcher:
                 # Reload on symbol list change
                 if Watcher.ticker_symbols == actual_symbols:
                     try:
-                        trades = await self.exchange.watch_trades_for_symbols(
-                            Watcher.ticker_symbols
-                        )
-                        for trade in trades:
-                            ohlcvc = self.exchange.build_ohlcvc([trade], "1m")
-                            actual_price = float(ohlcvc[0][4])
-                            if trade["symbol"] in last_price:
-                                if float(actual_price) != float(
-                                    last_price[trade["symbol"]]
-                                ):
-                                    ticker_price = {
-                                        "type": "ticker_price",
-                                        "ticker": {
-                                            "symbol": trade["symbol"],
-                                            "price": actual_price,
-                                        },
-                                    }
-                                    await self.dca.process_ticker_data(ticker_price)
-                                    await self.__write_ohlcv_data(
-                                        trade["symbol"], ohlcvc
-                                    )
-                                    last_price[trade["symbol"]] = actual_price
-                            else:
-                                last_price[trade["symbol"]] = actual_price
+                        if Watcher.exchange_watcher_ohlcv:
+                            trades = await self.exchange.watch_ohlcv_for_symbols(
+                                Watcher.ticker_symbols
+                            )
+                            for symbol in trades:
+                                for ticker in trades[symbol]:
+                                    actual_price = float(trades[symbol][ticker][-1][4])
+                                    if symbol in last_price:
+                                        if float(actual_price) != float(
+                                            last_price[symbol]
+                                        ):
+                                            ticker_price = {
+                                                "type": "ticker_price",
+                                                "ticker": {
+                                                    "symbol": symbol,
+                                                    "price": actual_price,
+                                                },
+                                            }
+                                            await self.dca.process_ticker_data(
+                                                ticker_price
+                                            )
+                                            await self.__write_ohlcv_data(
+                                                symbol, trades[symbol][ticker]
+                                            )
+                                            last_price[symbol] = actual_price
+                                    else:
+                                        last_price[symbol] = actual_price
+                        else:
+                            trades = await self.exchange.watch_trades_for_symbols(
+                                Watcher.ticker_symbols
+                            )
+                            for trade in trades:
+                                if trade["symbol"] in last_price:
+                                    if float(trade["price"]) != float(
+                                        last_price[trade["symbol"]]
+                                    ):
+                                        ticker_price = {
+                                            "type": "ticker_price",
+                                            "ticker": {
+                                                "symbol": trade["symbol"],
+                                                "price": trade["price"],
+                                            },
+                                        }
+                                        await self.dca.process_ticker_data(ticker_price)
+                                        ohlcvc = self.exchange.build_ohlcvc(
+                                            [trade], "1m"
+                                        )
+                                        await self.__write_ohlcv_data(
+                                            trade["symbol"], ohlcvc
+                                        )
+                                        last_price[trade["symbol"]] = trade["price"]
+                                else:
+                                    last_price[trade["symbol"]] = trade["price"]
                     except ccxt.NetworkError as e:
                         logging.error(
                             f"Error watching websocket data from Exchange due to a network error: {e}"
@@ -191,10 +238,8 @@ class Watcher:
                                 f"Error closing Exchange connection. Cause: {e}"
                             )
                         continue
-
                 else:
                     actual_symbols = Watcher.ticker_symbols
-
                     continue
             else:
                 await asyncio.sleep(5)
