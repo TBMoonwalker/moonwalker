@@ -164,7 +164,9 @@ class Watcher:
                 flat_symbols.extend(s)
             elif isinstance(s, str):
                 flat_symbols.append(s)
-        Watcher.ticker_symbols = flat_symbols
+            # Filter out timeframe-like entries or other invalid strings
+            valid_symbols = [s for s in flat_symbols if "/" in s and not s.isnumeric()]
+        Watcher.ticker_symbols = valid_symbols
 
         desired_symbols = set(Watcher.ticker_symbols)
 
