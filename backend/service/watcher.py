@@ -156,6 +156,16 @@ class Watcher:
     async def sync_symbol_tasks(self):
         """Ensure we have a watcher task for every active symbol."""
         current_symbols = set(self.symbol_tasks.keys())
+
+        # Ensure ticker list is flat and contains only strings
+        flat_symbols = []
+        for s in Watcher.ticker_symbols:
+            if isinstance(s, list):
+                flat_symbols.extend(s)
+            elif isinstance(s, str):
+                flat_symbols.append(s)
+        Watcher.ticker_symbols = flat_symbols
+
         desired_symbols = set(Watcher.ticker_symbols)
 
         # Add new
