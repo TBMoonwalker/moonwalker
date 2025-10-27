@@ -49,48 +49,34 @@ class Watcher:
         Watcher.symbol_update_event = asyncio.Event()
 
     # ------------------------------------------------------------------- #
-    #               1️⃣ Queue-based external symbol updates               #
+    #                Queue-based symbol updates from app.py               #
     # ------------------------------------------------------------------- #
 
     async def watch_incoming_symbols(self, watcher_queue: asyncio.Queue):
-        """
-        Listen for symbol list updates from other parts of the app.
-        This runs as a background task (started from app.py).
-        """
+        """Watch for new symbol lists pushed from the app."""
         logging.info("Started watching incoming symbol updates...")
         while self.status:
             try:
                 new_symbol_list = await watcher_queue.get()
-
-                # Merge with current trades (so we don’t lose existing ones)
                 trades = await self.trades.get_symbols()
-                for new_symbol in new_symbol_list:
-                    if new_symbol not in trades:
-                        trades.append(new_symbol)
-                        logging.debug(f"Added new symbol from queue: {new_symbol}")
-
+                for s in new_symbol_list:
+                    if s not in trades:
+                        trades.append(s)
                 if Watcher.exchange_watcher_ohlcv:
                     trades = utils.convert_symbols(trades)
-
                 Watcher.ticker_symbols = trades
                 logging.info(f"Updated symbol list via queue: {Watcher.ticker_symbols}")
-
-                # Notify the main watcher loop
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
-
                 watcher_queue.task_done()
-
             except asyncio.CancelledError:
                 break
             except Exception as e:
                 logging.error(f"Error in watch_incoming_symbols: {e}")
                 await asyncio.sleep(2)
 
-        logging.info("Stopped watching incoming symbol updates.")
-
     # ------------------------------------------------------------------- #
-    #               2️⃣ ORM post_save hooks for Trades tables             #
+    #                    ORM post_save hooks (DB updates)                 #
     # ------------------------------------------------------------------- #
 
     @post_save(model.Trades)
@@ -101,7 +87,6 @@ class Watcher:
         using_db: BaseDBAsyncClient | None,
         update_fields: list[str],
     ) -> None:
-        """Triggered when a new trade is opened."""
         if created:
             try:
                 new_symbols = await Trades().get_symbols()
@@ -122,7 +107,6 @@ class Watcher:
         using_db: BaseDBAsyncClient | None,
         update_fields: list[str],
     ) -> None:
-        """Triggered when a trade is closed."""
         if created:
             try:
                 new_symbols = await Trades().get_symbols()
@@ -136,70 +120,90 @@ class Watcher:
                 logging.error(f"Error removing trade symbols: {e}")
 
     # ------------------------------------------------------------------- #
-    #                        3️⃣ Main watch loop                         #
+    #                           Main Watch Loop                           #
     # ------------------------------------------------------------------- #
 
     async def watch_tickers(self):
-        """Main entrypoint for managing symbol watcher tasks."""
+        """Main loop that syncs symbol watchers and restarts them if needed."""
         logging.info("Starting Watcher...")
 
         Watcher.ticker_symbols = await self.trades.get_symbols()
         if Watcher.exchange_watcher_ohlcv:
             Watcher.ticker_symbols = utils.convert_symbols(Watcher.ticker_symbols)
 
-        # Start consumer for DCA + DB writes
         consumer_task = asyncio.create_task(self.process_events())
 
         while self.status:
             try:
-                # Start/stop per-symbol watcher tasks
                 await self.sync_symbol_tasks()
 
-                # Wait for either DB signal or queue signal
+                # Wait for event or periodically refresh
                 await asyncio.wait_for(Watcher.symbol_update_event.wait(), timeout=30)
                 Watcher.symbol_update_event.clear()
 
             except asyncio.TimeoutError:
-                continue
+                # Regular refresh to detect crashed tasks
+                await self.sync_symbol_tasks()
             except Exception as e:
-                logging.error(f"Error in main watcher loop: {e}")
+                logging.error(f"Error in watch_tickers: {e}")
                 await asyncio.sleep(5)
 
-        # Cleanup
         for task in self.symbol_tasks.values():
             task.cancel()
         await self.exchange.close()
         await consumer_task
 
     async def sync_symbol_tasks(self):
-        """Compare active vs current symbols and update watchers."""
+        """Ensure we have a watcher task for every active symbol."""
         current_symbols = set(self.symbol_tasks.keys())
-        new_symbols = set(Watcher.ticker_symbols)
+        desired_symbols = set(Watcher.ticker_symbols)
 
         # Add new
-        for symbol in new_symbols - current_symbols:
-            logging.info(f"Adding new symbol watcher: {symbol}")
-            Watcher.candles.setdefault(symbol, None)
-            task = asyncio.create_task(self.watch_symbol(symbol))
-            self.symbol_tasks[symbol] = task
+        for sym in desired_symbols - current_symbols:
+            logging.info(f"Starting new watcher for {sym}")
+            task = asyncio.create_task(self.watch_symbol_with_reconnect(sym))
+            self.symbol_tasks[sym] = task
 
-        # Remove old
-        for symbol in current_symbols - new_symbols:
-            logging.info(f"Removing symbol watcher: {symbol}")
-            self.symbol_tasks[symbol].cancel()
-            del self.symbol_tasks[symbol]
-            Watcher.candles.pop(symbol, None)
-            self.last_price.pop(symbol, None)
+        # Remove stopped or outdated
+        for sym in current_symbols - desired_symbols:
+            logging.info(f"Stopping watcher for {sym}")
+            task = self.symbol_tasks.pop(sym)
+            task.cancel()
+
+        # Restart crashed tasks
+        for sym, task in list(self.symbol_tasks.items()):
+            if task.done() and not task.cancelled():
+                logging.warning(f"Watcher for {sym} crashed — restarting...")
+                self.symbol_tasks[sym] = asyncio.create_task(
+                    self.watch_symbol_with_reconnect(sym)
+                )
 
     # ------------------------------------------------------------------- #
-    #                    4️⃣ Symbol-specific watchers                     #
+    #                    Symbol watcher with reconnection                 #
     # ------------------------------------------------------------------- #
+
+    async def watch_symbol_with_reconnect(self, symbol: str):
+        """Wrapper that restarts the watcher on connection failures."""
+        reconnect_delay = 5
+        while self.status:
+            try:
+                await self.watch_symbol(symbol)
+            except asyncio.CancelledError:
+                logging.info(f"Watcher cancelled for {symbol}")
+                break
+            except Exception as e:
+                logging.warning(
+                    f"{symbol} watcher error: {e} — reconnecting in {reconnect_delay}s"
+                )
+                await asyncio.sleep(reconnect_delay)
+                # Exponential backoff up to 60s
+                reconnect_delay = min(reconnect_delay * 2, 60)
 
     async def watch_symbol(self, symbol: str):
-        """Run websocket stream for one symbol."""
-        logging.info(f"Started watcher for {symbol}")
-        try:
-            while self.status:
+        """Actual exchange streaming for one symbol."""
+        logging.info(f"Started websocket stream for {symbol}")
+        while self.status:
+            try:
                 if Watcher.exchange_watcher_ohlcv:
                     ohlcv = await self.exchange.watch_ohlcv(symbol, self.timeframe)
                     price = float(ohlcv[-1][4])
@@ -211,14 +215,23 @@ class Watcher:
                         price = float(trade["price"])
                         ohlcvc = self.exchange.build_ohlcvc([trade], self.timeframe)
                         await self.push_event(symbol, price, ohlcvc)
-        except asyncio.CancelledError:
-            logging.info(f"Watcher cancelled for {symbol}")
-        except Exception as e:
-            logging.error(f"Error in watcher for {symbol}: {e}")
-            await asyncio.sleep(2)
+            except ccxtpro.NetworkError as e:
+                logging.warning(f"{symbol}: network error {e}, reconnecting...")
+                await asyncio.sleep(5)
+            except ccxtpro.ExchangeError as e:
+                logging.warning(f"{symbol}: exchange error {e}, reconnecting...")
+                await asyncio.sleep(10)
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logging.error(f"Unexpected error for {symbol}: {e}")
+                await asyncio.sleep(5)
+
+    # ------------------------------------------------------------------- #
+    #                         Event processing                            #
+    # ------------------------------------------------------------------- #
 
     async def push_event(self, symbol, price, ohlcv):
-        """Enqueue price update if it changed."""
         last = self.last_price.get(symbol)
         if last != price:
             self.last_price[symbol] = price
@@ -226,20 +239,12 @@ class Watcher:
                 {"symbol": symbol, "price": price, "ohlcv": ohlcv}
             )
 
-    # ------------------------------------------------------------------- #
-    #                     5️⃣ Processing of events                        #
-    # ------------------------------------------------------------------- #
-
     async def process_events(self):
-        """Consumer for ticker events — handles DCA and DB writes."""
+        """Consumer that handles all incoming ticker events."""
         while self.status:
             try:
                 event = await self.event_queue.get()
-                symbol, price, ohlcv = (
-                    event["symbol"],
-                    event["price"],
-                    event["ohlcv"],
-                )
+                symbol, price, ohlcv = event["symbol"], event["price"], event["ohlcv"]
                 ticker_price = {
                     "type": "ticker_price",
                     "ticker": {"symbol": symbol, "price": price},
@@ -254,27 +259,27 @@ class Watcher:
     async def __write_ohlcv_data(self, symbol, ticker):
         current_candle = ticker[-1]
         if Watcher.exchange_watcher_ohlcv:
-            timestamp, open_, high, low, close, volume = current_candle
+            timestamp, o, h, l, c, v = current_candle
         else:
-            timestamp, open_, high, low, close, volume, _ = current_candle
+            timestamp, o, h, l, c, v, _ = current_candle
 
         last = Watcher.candles.get(symbol)
         if not last or last[0] < timestamp:
             if last:
-                t, o, h, l, c, v = last[:6]
+                t, o1, h1, l1, c1, v1 = last[:6]
                 await model.Tickers.create(
                     timestamp=t,
                     symbol=symbol,
-                    open=o,
-                    high=h,
-                    low=l,
-                    close=c,
-                    volume=v,
+                    open=o1,
+                    high=h1,
+                    low=l1,
+                    close=c1,
+                    volume=v1,
                 )
             Watcher.candles[symbol] = current_candle
 
     # ------------------------------------------------------------------- #
-    #                         6️⃣ Shutdown                                #
+    #                              Shutdown                               #
     # ------------------------------------------------------------------- #
 
     async def shutdown(self):
