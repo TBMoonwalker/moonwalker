@@ -153,30 +153,53 @@ class Watcher:
         await self.exchange.close()
         await consumer_task
 
+    @staticmethod
+    def normalize_symbols(symbols):
+        """
+        Flatten nested symbol lists, filter out invalid entries,
+        and always return a valid list of trading pair strings.
+        """
+        if not symbols:
+            return []
+
+        flat = []
+        for s in symbols:
+            if isinstance(s, list):
+                flat.extend(s)
+            elif isinstance(s, str):
+                flat.append(s)
+
+        # Keep only real trading pairs (strings containing "/")
+        valid = [s for s in flat if isinstance(s, str) and "/" in s]
+        # Remove duplicates while preserving order
+        return list(dict.fromkeys(valid))
+
     async def sync_symbol_tasks(self):
-        """Ensure we have a watcher task for every active symbol."""
+        # Ensure we have watcher tasks for all active symbols.
         current_symbols = set(self.symbol_tasks.keys())
 
-        # Ensure ticker list is flat and contains only strings
-        flat_symbols = []
-        for s in Watcher.ticker_symbols:
-            if isinstance(s, list):
-                flat_symbols.extend(s)
-            elif isinstance(s, str):
-                flat_symbols.append(s)
-            # Filter out timeframe-like entries or other invalid strings
-            valid_symbols = [s for s in flat_symbols if "/" in s and not s.isnumeric()]
-        Watcher.ticker_symbols = valid_symbols
+        # Normalize and sanitize ticker symbols
+        flat_symbols = self.normalize_symbols(Watcher.ticker_symbols)
+        Watcher.ticker_symbols = flat_symbols  # keep class-level in sync
+        desired_symbols = set(flat_symbols)
 
-        desired_symbols = set(Watcher.ticker_symbols)
+        # Nothing to do if there are no valid symbols yet
+        if not desired_symbols:
+            logging.info("No active symbols to watch. Waiting for new trades...")
+            # Optional: cancel existing tasks if any remain
+            for sym, task in list(self.symbol_tasks.items()):
+                task.cancel()
+                del self.symbol_tasks[sym]
+            await asyncio.sleep(5)
+            return
 
-        # Add new
+        # Add new watcher tasks
         for sym in desired_symbols - current_symbols:
             logging.info(f"Starting new watcher for {sym}")
             task = asyncio.create_task(self.watch_symbol_with_reconnect(sym))
             self.symbol_tasks[sym] = task
 
-        # Remove stopped or outdated
+        # Remove watchers for symbols that are no longer active
         for sym in current_symbols - desired_symbols:
             logging.info(f"Stopping watcher for {sym}")
             task = self.symbol_tasks.pop(sym)
