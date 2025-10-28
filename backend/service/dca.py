@@ -83,7 +83,13 @@ class Dca:
             # Calculate TP/SL
             take_profit_price = average_buy_price * (1 + (self.tp / 100))
             stop_loss_price = average_buy_price * (1 - (self.sl / 100))
-            if (current_price >= take_profit_price) or (
+
+            # Check if TP is reached
+            if current_price >= take_profit_price:
+                sell = True
+
+            # Check if SL is reached
+            if (
                 current_price <= stop_loss_price
                 and self.max_safety_orders == trades["safetyorders_count"]
             ):
