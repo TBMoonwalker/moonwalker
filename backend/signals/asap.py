@@ -197,7 +197,7 @@ class SignalPlugin:
             # strategy entry check
             if self.strategy:
                 try:
-                    if not await self.strategy.run(symbol):
+                    if not await self.strategy.run(symbol, "buy"):
                         return False
                 except Exception as e:
                     logging.error(f"Error running buy strategy. Cause: {e}")

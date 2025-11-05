@@ -49,27 +49,33 @@ class Data:
             )
             if not ohlcv:
                 logging.error(f"No OHLCV data available for {symbol}")
-            await self.exchange.close()
+            else:
+                first_timestamp = ohlcv[0][0]
+                listing_date = datetime.fromtimestamp(
+                    first_timestamp / 1000, tz=timezone.utc
+                )
+
+                # Save to DB cache
+                await model.Listings.create(symbol=symbol, listing_date=listing_date)
+                await self.exchange.close()
+                return listing_date
         except Exception as e:
             logging.error(f"Error fetching OHLCV for {symbol}: {e}")
         finally:
             await self.exchange.close()
 
-        first_timestamp = ohlcv[0][0]
-        listing_date = datetime.fromtimestamp(first_timestamp / 1000, tz=timezone.utc)
-
-        # Save to DB cache
-        await model.Listings.create(symbol=symbol, listing_date=listing_date)
-
-        return listing_date
+        return None
 
     async def is_token_old_enough(self, symbol: str, threshold_days: int) -> bool:
         """
         Return False if token is newer than threshold_days, True otherwise.
         """
         listing_date = await self.get_listing_date(symbol)
-        threshold_date = datetime.now(timezone.utc) - timedelta(days=threshold_days)
-        return listing_date <= threshold_date
+        if listing_date:
+            threshold_date = datetime.now(timezone.utc) - timedelta(days=threshold_days)
+            return listing_date <= threshold_date
+        else:
+            return False
 
     async def get_ticker_symbol_list(self):
         symbols = await model.Tickers.all().distinct().values_list("symbol", flat=True)

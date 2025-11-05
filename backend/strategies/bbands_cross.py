@@ -11,7 +11,7 @@ class Strategy:
         self.filter = Filter()
         self.indicators = Indicators()
 
-    async def run(self, symbol):
+    async def run(self, symbol, type):
         result = False
 
         try:

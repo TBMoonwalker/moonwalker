@@ -119,7 +119,6 @@ class Trades:
 
     async def update_open_trades(self, payload, symbol):
         try:
-            # await model.OpenTrades.update_from_dict()
             if await self.get_open_trades_by_symbol(symbol):
                 await model.OpenTrades.update_or_create(
                     defaults=payload,
@@ -215,7 +214,7 @@ class Trades:
 
             return trade_data
         except Exception as e:
-            logging.debug(f"No trade for symbol {symbol} - Cause: {e}")
+            # logging.debug(f"No trade for symbol {symbol} - Cause: {e}")
             return None
 
     async def stop_trade(self, symbol):
