@@ -198,7 +198,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
                             h(NCard, {}, {
                                 default: () =>
                                     h(NTimeline, {
-                                        horizontal: true
+                                        horizontal: false
                                     }, () => {
                                         let timeline_items: Array<any> = []
                                         // Baseorder
