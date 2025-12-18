@@ -14,6 +14,10 @@ utils = helper.Utils()
 
 
 class Watcher:
+    TICKER_PRICE_TYPE = "ticker_price"
+    RECONNECT_DELAY = 5
+    MAX_RECONNECT_DELAY = 60
+    REFRESH_TIMEOUT = 30
     ticker_symbols = []
     candles = {}
     exchange_watcher_ohlcv = True
@@ -21,7 +25,6 @@ class Watcher:
 
     def __init__(self):
         config = helper.Config()
-
         self.trades = Trades()
         self.dca = Dca()
 
@@ -123,6 +126,18 @@ class Watcher:
     #                           Main Watch Loop                           #
     # ------------------------------------------------------------------- #
 
+    async def __wait_for_updates(self):
+        await asyncio.wait_for(
+            self.symbol_update_event.wait(), timeout=self.REFRESH_TIMEOUT
+        )
+        Watcher.symbol_update_event.clear()
+
+    async def __cleanup_tasks(self, consumer_task):
+        for task in self.symbol_tasks.values():
+            task.cancel()
+        await self.exchange.close()
+        await consumer_task
+
     async def watch_tickers(self):
         """Main loop that syncs symbol watchers and restarts them if needed."""
         logging.info("Starting Watcher...")
@@ -135,26 +150,22 @@ class Watcher:
 
         while self.status:
             try:
-                await self.sync_symbol_tasks()
+                await self.__sync_symbol_tasks()
 
                 # Wait for event or periodically refresh
-                await asyncio.wait_for(Watcher.symbol_update_event.wait(), timeout=30)
-                Watcher.symbol_update_event.clear()
+                await self.__wait_for_updates()
 
             except asyncio.TimeoutError:
                 # Regular refresh to detect crashed tasks
-                await self.sync_symbol_tasks()
+                await self.__sync_symbol_tasks()
             except Exception as e:
                 logging.error(f"Error in watch_tickers: {e}")
                 await asyncio.sleep(5)
 
-        for task in self.symbol_tasks.values():
-            task.cancel()
-        await self.exchange.close()
-        await consumer_task
+        await self.__cleanup_tasks(consumer_task)
 
     @staticmethod
-    def normalize_symbols(symbols):
+    def __normalize_symbols(symbols):
         """
         Flatten nested symbol lists, filter out invalid entries,
         and always return a valid list of trading pair strings.
@@ -171,15 +182,16 @@ class Watcher:
 
         # Keep only real trading pairs (strings containing "/")
         valid = [s for s in flat if isinstance(s, str) and "/" in s]
+
         # Remove duplicates while preserving order
         return list(dict.fromkeys(valid))
 
-    async def sync_symbol_tasks(self):
+    async def __sync_symbol_tasks(self):
         # Ensure we have watcher tasks for all active symbols.
         current_symbols = set(self.symbol_tasks.keys())
 
         # Normalize and sanitize ticker symbols
-        flat_symbols = self.normalize_symbols(Watcher.ticker_symbols)
+        flat_symbols = self.__normalize_symbols(Watcher.ticker_symbols)
         Watcher.ticker_symbols = flat_symbols  # keep class-level in sync
         desired_symbols = set(flat_symbols)
 
@@ -219,7 +231,6 @@ class Watcher:
 
     async def watch_symbol_with_reconnect(self, symbol: str):
         """Wrapper that restarts the watcher on connection failures."""
-        reconnect_delay = 5
         while self.status:
             try:
                 await self.watch_symbol(symbol)
@@ -228,11 +239,23 @@ class Watcher:
                 break
             except Exception as e:
                 logging.warning(
-                    f"{symbol} watcher error: {e} — reconnecting in {reconnect_delay}s"
+                    f"{symbol} watcher error: {e} — reconnecting in {self.RECONNECT_DELAY}s"
                 )
-                await asyncio.sleep(reconnect_delay)
+                await asyncio.sleep(self.RECONNECT_DELAY)
                 # Exponential backoff up to 60s
-                reconnect_delay = min(reconnect_delay * 2, 60)
+                self.RECONNECT_DELAY = min(
+                    self.RECONNECT_DELAY * 2, self.MAX_RECONNECT_DELAY
+                )
+
+    async def __process_ohlcv_data(self, symbol, ohlcv):
+        price = float(ohlcv[-1][4])
+        await self.push_event(symbol, price, ohlcv)
+
+    async def __process_trade_data(self, symbol, trades):
+        trade = trades[-1]
+        price = float(trade["price"])
+        ohlcvc = self.exchange.build_ohlcvc([trade], self.timeframe)
+        await self.push_event(symbol, price, ohlcvc)
 
     async def watch_symbol(self, symbol: str):
         """Actual exchange streaming for one symbol."""
@@ -241,15 +264,11 @@ class Watcher:
             try:
                 if Watcher.exchange_watcher_ohlcv:
                     ohlcv = await self.exchange.watch_ohlcv(symbol, self.timeframe)
-                    price = float(ohlcv[-1][4])
-                    await self.push_event(symbol, price, ohlcv)
+                    await self.__process_ohlcv_data(symbol, ohlcv)
                 else:
                     trades = await self.exchange.watch_trades(symbol)
                     if trades:
-                        trade = trades[-1]
-                        price = float(trade["price"])
-                        ohlcvc = self.exchange.build_ohlcvc([trade], self.timeframe)
-                        await self.push_event(symbol, price, ohlcvc)
+                        await self.__process_trade_data(symbol, trades)
             except ccxtpro.NetworkError as e:
                 logging.warning(f"{symbol}: network error {e}, reconnecting...")
                 await asyncio.sleep(5)
@@ -281,7 +300,7 @@ class Watcher:
                 event = await self.event_queue.get()
                 symbol, price, ohlcv = event["symbol"], event["price"], event["ohlcv"]
                 ticker_price = {
-                    "type": "ticker_price",
+                    "type": self.TICKER_PRICE_TYPE,
                     "ticker": {"symbol": symbol, "price": price},
                 }
                 await asyncio.gather(
