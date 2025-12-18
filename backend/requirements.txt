@@ -1,9 +1,11 @@
 asyncache==0.3.1
-ccxt==4.5.5
-pandas==2.3.2
+ccxt==4.5.28
+pandas==2.3.3
 Quart==0.20.0
 quart-cors==0.8.0
-python-socketio==5.14.0
-ta-lib==0.6.7
+python-socketio==5.15.1
+ta-lib==0.6.8
 tenacity==9.1.2
-tortoise-orm==0.25.1
+tortoise-orm==0.25.2
+anyio==4.12.0
+aiosqlite==0.21.0
