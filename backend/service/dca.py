@@ -18,61 +18,50 @@ class Dca:
         self.statistic = Statistic()
         self.trades = Trades()
         self.utils = helper.Utils()
-        config = helper.Config()
+        self.config = None
 
-        # Import configured strategies
-        dca_strategy_plugin = None
-        if config.get("dca_strategy", None):
-            dca_strategy = importlib.import_module(
-                f"strategies.{config.get('dca_strategy')}"
-            )
-            dca_strategy_plugin = dca_strategy.Strategy(
-                timeframe=config.get("dca_strategy_timeframe", "1m")
-            )
-        tp_strategy_plugin = None
-        if config.get("tp_strategy", None):
-            tp_strategy = importlib.import_module(
-                f"strategies.{config.get('tp_strategy')}"
-            )
-            tp_strategy_plugin = tp_strategy.Strategy(
-                timeframe=config.get("tp_strategy_timeframe", "1m")
-            )
-        self.config = config
-        self.dca_strategy = dca_strategy_plugin
-        self.tp_strategy = tp_strategy_plugin
-        self.trailing_tp = config.get("trailing_tp", 0)
-        self.dynamic_dca = config.get("dynamic_dca", False)
-        self.volume_scale = config.get("os")
-        self.step_scale = config.get("ss")
-        self.max_safety_orders = config.get("mstc", None)
-        self.so = config.get("so", None)
-        self.price_deviation = config.get("sos", None)
-        self.market = config.get("market", "spot")
+        # Class attributes
         Dca.pnl = {}
 
-    def __dynamic_dca_strategy(self, symbol):
+    async def __dynamic_dca_strategy(self, symbol):
         result = False
 
-        token, currency = symbol.split("/")
-        symbol = f"{token}{currency}"
+        if self.config.get("dca_strategy", None):
+            dca_strategy = importlib.import_module(
+                f"strategies.{self.config.get('dca_strategy')}"
+            )
+            dca_strategy_plugin = dca_strategy.Strategy(
+                timeframe=self.config.get("dca_strategy_timeframe", "1m")
+            )
 
-        if self.dca_strategy:
-            result = self.dca_strategy.run(symbol, "buy")
+            token, currency = symbol.split("/")
+            symbol = f"{token}{currency}"
+
+            result = await dca_strategy_plugin.run(symbol, "buy")
 
         return result
 
     def __tp_strategy(self, symbol):
         result = False
 
-        token, currency = symbol.split("/")
-        symbol = f"{token}{currency}"
+        if self.config.get("tp_strategy", None):
+            tp_strategy = importlib.import_module(
+                f"strategies.{self.config.get('tp_strategy')}"
+            )
+            tp_strategy_plugin = tp_strategy.Strategy(
+                timeframe=self.config.get("tp_strategy_timeframe", "1m")
+            )
 
-        if self.tp_strategy:
-            result = self.tp_strategy.run(symbol, "sell")
+            token, currency = symbol.split("/")
+            symbol = f"{token}{currency}"
+
+            result = tp_strategy_plugin.run(symbol, "sell")
 
         return result
 
     async def __calculate_tp(self, current_price, trades):
+        trailing_tp = self.config.get("trailing_tp", 0)
+        max_safety_orders = self.config.get("mstc", 0)
         sell = False
 
         # Last sell fee has to be considered
@@ -90,7 +79,7 @@ class Dca:
         # Check if SL is reached
         if (
             current_price <= stop_loss_price
-            and self.max_safety_orders == trades["safetyorders_count"]
+            and max_safety_orders == trades["safetyorders_count"]
         ):
             sell = True
 
@@ -98,15 +87,15 @@ class Dca:
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
 
         # TP strategy
-        if self.tp_strategy and sell:
+        if self.config.get("tp_strategy", None) and sell:
             logging.debug("Check if we should sell ...")
-            if await self.__tp_strategy(trades["symbol"]):
+            if self.__tp_strategy(trades["symbol"]):
                 sell = True
             else:
                 sell = False
 
         # Trailing TP
-        if self.trailing_tp > 0:
+        if trailing_tp > 0:
             if sell or trades["symbol"] in Dca.pnl:
                 # Initialize new symbols
                 if not trades["symbol"] in Dca.pnl:
@@ -123,8 +112,8 @@ class Dca:
                     )
 
                     # Sell if trailing deviation is reached or actual PNL is under minimum TP
-                    if (diff < 0 and abs(diff) > self.trailing_tp) or (
-                        actual_pnl < self.tp and actual_pnl > self.trailing_tp
+                    if (diff < 0 and abs(diff) > trailing_tp) or (
+                        actual_pnl < self.tp and actual_pnl > trailing_tp
                     ):
                         logging.debug(
                             f"TTP Sell: {trades['symbol']} - Percentage decreased - Take profit with difference: {diff}"
@@ -164,7 +153,7 @@ class Dca:
                 "total_cost": trades["total_cost"],
                 "current_price": current_price,
             }
-            await self.orders.receive_sell_order(order)
+            await self.orders.receive_sell_order(order, self.config)
 
         # Logging configuration
         logging_json = {
@@ -183,9 +172,14 @@ class Dca:
         await self.statistic.update_statistic_data(logging_json)
 
     async def __calculate_dca(self, current_price, trades):
+        dynamic_dca = self.config.get("dynamic_dca", False)
+        volume_scale = self.config.get("os", 0)
+        step_scale = self.config.get("ss", 0)
+        max_safety_orders = self.config.get("mstc", 0)
+        price_deviation = self.config.get("sos")
         # Apply price deviation for the first safety order
-        next_so_percentage = self.price_deviation
-        safety_order_size = self.so
+        next_so_percentage = price_deviation
+        safety_order_size = self.config.get("so", None)
         new_so = False
 
         # Actual PNL in percent
@@ -195,51 +189,43 @@ class Dca:
         total_pnl = ((current_price - trades["bo_price"]) / trades["bo_price"]) * 100
 
         # Evaluate max deviation and actual deviation from base order
-        if self.step_scale == 1:
+        if step_scale == 1:
             # If step scale equals 1
-            max_deviation = self.price_deviation * (trades["safetyorders_count"] + 1)
-            actual_deviation = self.price_deviation * trades["safetyorders_count"]
+            max_deviation = price_deviation * (trades["safetyorders_count"] + 1)
+            actual_deviation = price_deviation * trades["safetyorders_count"]
         else:
             # If step scale is other than 1
             max_deviation = (
-                self.price_deviation
-                * (1 - self.step_scale ** (trades["safetyorders_count"] + 1))
-            ) / (1 - self.step_scale)
+                price_deviation * (1 - step_scale ** (trades["safetyorders_count"] + 1))
+            ) / (1 - step_scale)
             max_deviation = round(max_deviation, 2)
             actual_deviation = (
-                self.price_deviation
-                * (1 - self.step_scale ** trades["safetyorders_count"])
-            ) / (1 - self.step_scale)
+                price_deviation * (1 - step_scale ** trades["safetyorders_count"])
+            ) / (1 - step_scale)
 
         # Check if safety orders exist yet
-        if trades["safetyorders"] and self.max_safety_orders:
-            safety_order_size = (
-                trades["safetyorders"][-1]["ordersize"] * self.volume_scale
-            )
+        if trades["safetyorders"] and max_safety_orders:
+            safety_order_size = trades["safetyorders"][-1]["ordersize"] * volume_scale
             next_so_percentage = float(
                 trades["safetyorders"][-1]["so_percentage"]
-            ) * float(self.step_scale)
+            ) * step_scale
             if len(trades["safetyorders"]) >= 2:
                 next_so_percentage = -abs(next_so_percentage) + -abs(
                     float(trades["safetyorders"][-2]["so_percentage"])
                 )
             else:
-                next_so_percentage = -abs(next_so_percentage) + -abs(
-                    self.price_deviation
-                )
+                next_so_percentage = -abs(next_so_percentage) + -abs(price_deviation)
 
             last_so_price = float(trades["safetyorders"][-1]["price"])
         else:
             last_so_price = 0
 
         # We have not reached the max safety orders
-        if self.max_safety_orders and (
-            trades["safetyorders_count"] < self.max_safety_orders
-        ):
+        if max_safety_orders and (trades["safetyorders_count"] < max_safety_orders):
 
             new_so = False
 
-            if self.dynamic_dca:
+            if dynamic_dca:
                 # Trigger new safety order for dynamic dca
                 if actual_pnl <= -abs(next_so_percentage):
                     if await self.__dynamic_dca_strategy(trades["symbol"]):
@@ -267,7 +253,7 @@ class Dca:
                     "so_percentage": next_so_percentage,
                     "side": "buy",
                 }
-                await self.orders.receive_buy_order(order)
+                await self.orders.receive_buy_order(order, self.config)
 
             # Logging configuration
             logging_json = {
@@ -288,7 +274,10 @@ class Dca:
                 f"Max safety orders reached for {trades['symbol']}. Not opening more."
             )
 
-    async def process_ticker_data(self, ticker):
+    async def process_ticker_data(self, ticker, config):
+        # Get config
+        self.config = config
+
         # New price action for DCA calculation
         if ticker["type"] == "ticker_price":
             price = ticker["ticker"]["price"]
@@ -301,7 +290,7 @@ class Dca:
 
                 if profit["funds_locked"]:
                     trading_settings = await self.autopilot.calculate_trading_settings(
-                        profit["funds_locked"]
+                        profit["funds_locked"], self.config
                     )
                 # Use Autopilots settings
                 if trading_settings:
@@ -311,7 +300,7 @@ class Dca:
                     self.autopilot_mode = trading_settings["mode"]
                 # Use base settings
                 else:
-                    self.tp = self.config.get("tp")
+                    self.tp = self.config.get("tp", 10000)
                     self.sl = self.config.get("sl", 10000)
                     self.sl_timeout = 0
                     self.autopilot_mode = None

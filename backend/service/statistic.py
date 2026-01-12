@@ -10,10 +10,7 @@ logging = helper.LoggerFactory.get_logger("logs/statistics.log", "statistic")
 
 class Statistic:
     def __init__(self):
-        config = helper.Config()
-
         self.trades = Trades()
-        self.dynamic_dca = config.get("dynamic_dca", False)
 
     async def get_profits_overall(self, timestamp: None, period="daily"):
         profit_data = {}

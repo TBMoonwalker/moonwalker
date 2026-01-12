@@ -14,3 +14,18 @@ export function isFloat(n: any) {
 export function createDecimal(precision: number): number {
     return 1 / Math.pow(10, precision + 2);
 }
+
+export function parseBooleanString(value: string) {
+    if (typeof value === 'string') {
+        switch (value.toLowerCase()) {
+            case 'true':
+                return true;
+            case 'false':
+                return false;
+            default:
+                throw new Error(`Cannot convert "${value}" to boolean`)
+        }
+    }
+
+
+}

@@ -8,6 +8,7 @@ import helper
 import model
 from service.trades import Trades
 from service.dca import Dca
+from service.config import Config
 
 logging = helper.LoggerFactory.get_logger("logs/watcher.log", "watcher")
 utils = helper.Utils()
@@ -20,29 +21,13 @@ class Watcher:
     REFRESH_TIMEOUT = 30
     ticker_symbols = []
     candles = {}
-    exchange_watcher_ohlcv = True
     symbol_update_event: asyncio.Event | None = None
 
     def __init__(self):
-        config = helper.Config()
         self.trades = Trades()
         self.dca = Dca()
-
-        self.exchange_id = config.get("exchange")
-        self.exchange_class = getattr(ccxtpro, self.exchange_id)
-        self.exchange = self.exchange_class(
-            {
-                "apiKey": config.get("key"),
-                "secret": config.get("secret"),
-                "options": {"defaultType": config.get("market", "spot")},
-            }
-        )
-        self.exchange.set_sandbox_mode(config.get("sandbox", False))
-
-        self.market = config.get("market", "spot")
-        self.timeframe = config.get("timeframe", "1m")
-        Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
-
+        self.config = None
+        self.exchange = None
         self.status = True
         self.symbol_tasks: dict[str, asyncio.Task] = {}
         self.event_queue = asyncio.Queue()
@@ -50,13 +35,35 @@ class Watcher:
 
         # Used for cross-task signaling
         Watcher.symbol_update_event = asyncio.Event()
+        Watcher.exchange_watcher_ohlcv = True
+
+    async def init(self):
+        config = await Config.instance()
+        config.subscribe(self.on_config_change)
+        self.on_config_change(config._cache)
+
+    def on_config_change(self, config):
+        logging.info(f"Reload watcher")
+        self.config = config
+        if config.get("exchange", None):
+            self.exchange_class = getattr(ccxtpro, config.get("exchange"))
+            self.exchange = self.exchange_class(
+                {
+                    "apiKey": config.get("key"),
+                    "secret": config.get("secret"),
+                    "options": {"defaultType": config.get("market", "spot")},
+                }
+            )
+            self.exchange.set_sandbox_mode(config.get("sandbox", False))
+
+        Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
 
     # ------------------------------------------------------------------- #
     #                Queue-based symbol updates from app.py               #
     # ------------------------------------------------------------------- #
 
     async def watch_incoming_symbols(self, watcher_queue: asyncio.Queue):
-        """Watch for new symbol lists pushed from the app."""
+        """Watch for new symbol lists pushed from the configured signal plugin."""
         logging.info("Started watching incoming symbol updates...")
         while self.status:
             try:
@@ -254,31 +261,39 @@ class Watcher:
     async def __process_trade_data(self, symbol, trades):
         trade = trades[-1]
         price = float(trade["price"])
-        ohlcvc = self.exchange.build_ohlcvc([trade], self.timeframe)
+        ohlcvc = self.exchange.build_ohlcvc([trade], self.config.get("timeframe", "1m"))
         await self.push_event(symbol, price, ohlcvc)
 
     async def watch_symbol(self, symbol: str):
         """Actual exchange streaming for one symbol."""
         logging.info(f"Started websocket stream for {symbol}")
         while self.status:
-            try:
-                if Watcher.exchange_watcher_ohlcv:
-                    ohlcv = await self.exchange.watch_ohlcv(symbol, self.timeframe)
-                    await self.__process_ohlcv_data(symbol, ohlcv)
-                else:
-                    trades = await self.exchange.watch_trades(symbol)
-                    if trades:
-                        await self.__process_trade_data(symbol, trades)
-            except ccxtpro.NetworkError as e:
-                logging.warning(f"{symbol}: network error {e}, reconnecting...")
-                await asyncio.sleep(5)
-            except ccxtpro.ExchangeError as e:
-                logging.warning(f"{symbol}: exchange error {e}, reconnecting...")
-                await asyncio.sleep(10)
-            except asyncio.CancelledError:
-                raise
-            except Exception as e:
-                logging.error(f"Unexpected error for {symbol}: {e}")
+            if self.exchange:
+                try:
+                    if Watcher.exchange_watcher_ohlcv:
+                        ohlcv = await self.exchange.watch_ohlcv(
+                            symbol, self.config.get("timeframe", "1m")
+                        )
+                        await self.__process_ohlcv_data(symbol, ohlcv)
+                    else:
+                        trades = await self.exchange.watch_trades(symbol)
+                        if trades:
+                            await self.__process_trade_data(symbol, trades)
+                except ccxtpro.NetworkError as e:
+                    logging.warning(f"{symbol}: network error {e}, reconnecting...")
+                    await asyncio.sleep(5)
+                except ccxtpro.ExchangeError as e:
+                    logging.warning(f"{symbol}: exchange error {e}, reconnecting...")
+                    await asyncio.sleep(10)
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    logging.error(f"Unexpected error for {symbol}: {e}")
+                    await asyncio.sleep(5)
+            else:
+                logging.error(
+                    "No exchange has been configured yet. Please finalize your configuration."
+                )
                 await asyncio.sleep(5)
 
     # ------------------------------------------------------------------- #
@@ -304,7 +319,7 @@ class Watcher:
                     "ticker": {"symbol": symbol, "price": price},
                 }
                 await asyncio.gather(
-                    self.dca.process_ticker_data(ticker_price),
+                    self.dca.process_ticker_data(ticker_price, self.config),
                     self.__write_ohlcv_data(symbol, ohlcv),
                 )
             except Exception as e:

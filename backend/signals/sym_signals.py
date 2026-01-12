@@ -10,49 +10,19 @@ from service.data import Data
 from service.statistic import Statistic
 from socketio.exceptions import TimeoutError
 
-logging = helper.LoggerFactory.get_logger("logs/signals.log", "sym_signals")
+logging = helper.LoggerFactory.get_logger("logs/signal.log", "sym_signals")
 
 
 class SignalPlugin:
     def __init__(self, watcher_queue):
-        config = helper.Config()
+        # config = helper.Config()
         self.utils = helper.Utils()
         self.autopilot = Autopilot()
         self.orders = Orders()
         self.statistic = Statistic()
         self.data = Data()
-        self.config = config
-        self.ordersize = config.get("bo")
-        self.max_bots = config.get("max_bots")
-        self.btc_pulse = config.get("btc_pulse", False)
-        self.signal_settings = json.loads(config.get("signal_settings"))
         self.filter = Filter()
-        self.filter_values = (
-            json.loads(config.get("filter", None))
-            if config.get("filter", None)
-            else None
-        )
-        self.currency = config.get("currency").upper()
-        self.pair_denylist = (
-            config.get("pair_denylist", None).split(",")
-            if config.get("pair_denylist", None)
-            else None
-        )
-        self.pair_allowlist = (
-            config.get("pair_allowlist", None).split(",")
-            if config.get("pair_allowlist", None)
-            else None
-        )
-        self.pair_age = config.get("pair_age", 30)
-        self.dynamic_dca = config.get("dynamic_dca", False)
-        self.topcoin_limit = config.get("topcoin_limit", None)
-        self.timeframe = config.get("timeframe", "1min")
-        self.exchange_name = config.get("exchange").upper()
-        self.volume = (
-            json.loads(config.get("volume", None))
-            if config.get("volume", None)
-            else None
-        )
+        self.config = None
         self.status = True
         self.watcher_queue = watcher_queue
 
@@ -63,7 +33,7 @@ class SignalPlugin:
             profit = await self.statistic.get_profit()
             if profit["funds_locked"] and profit["funds_locked"] > 0:
                 trading_settings = await self.autopilot.calculate_trading_settings(
-                    profit["funds_locked"]
+                    profit["funds_locked"], self.config
                 )
                 if trading_settings:
                     self.max_bots = trading_settings["mad"]
@@ -81,9 +51,26 @@ class SignalPlugin:
         return result
 
     def __check_entry_point(self, event):
+        currency = self.config.get("currency").upper()
+        signal_settings = json.loads(json.dumps(eval(self.config.get("signal_settings"))))
+        pair_denylist = (
+            self.config.get("pair_denylist", None).split(",")
+            if self.config.get("pair_denylist", None)
+            else None
+        )
+        pair_allowlist = (
+            self.config.get("pair_allowlist", None).split(",")
+            if self.config.get("pair_allowlist", None)
+            else None
+        )
+        volume = (
+            json.loads(self.config.get("volume", None))
+            if self.config.get("volume", None)
+            else None
+        )
         # btc pulse check
         btc_pulse = True
-        if self.btc_pulse:
+        if self.config.get("btc_pulse", False):
             btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
 
         if btc_pulse:
@@ -102,28 +89,28 @@ class SignalPlugin:
             volume_size = None
 
             for exchange in volume_24h:
-                if exchange == self.exchange_name:
-                    if volume_24h[exchange].get(self.currency) != None:
+                if exchange == self.config.get("exchange").upper():
+                    if volume_24h[exchange].get(currency) != None:
                         # DirtyFix: Some volume data misses "k", "M" or "B"
-                        if isinstance(volume_24h[exchange].get(self.currency), float):
+                        if isinstance(volume_24h[exchange].get(currency), float):
                             volume_range = "k"
-                            volume_size = volume_24h[exchange][self.currency]
+                            volume_size = volume_24h[exchange][currency]
                         else:
-                            volume_range = volume_24h[exchange][self.currency][-1]
+                            volume_range = volume_24h[exchange][currency][-1]
                             volume_size = float(
-                                volume_24h[exchange][self.currency][:-1]
+                                volume_24h[exchange][currency][:-1]
                             )
                     break
             if (
-                signal_id in self.signal_settings["allowed_signals"]
-                and self.filter.is_on_allowed_list(symbol, self.pair_allowlist)
+                signal_id in signal_settings["allowed_signals"]
+                and self.filter.is_on_allowed_list(symbol, pair_allowlist)
                 and self.filter.is_within_topcoin_limit(
-                    market_cap_rank, self.topcoin_limit
+                    market_cap_rank, self.config.get("topcoin_limit", None)
                 )
                 and self.filter.has_enough_volume(
-                    volume_range, volume_size, self.volume
+                    volume_range, volume_size, volume
                 )
-                and not self.filter.is_on_deny_list(symbol, self.pair_denylist)
+                and not self.filter.is_on_deny_list(symbol, pair_denylist)
                 and signal == "BOT_START"
             ):
                 return True
@@ -133,17 +120,20 @@ class SignalPlugin:
             logging.info("BTC-Pulse is in downtrend - not starting new deals!")
             return False
 
-    async def run(self):
+    async def run(self, config):
+        self.config = config
+        currency = self.config.get("currency").upper()
+        signal_settings = json.loads(json.dumps(eval(self.config.get("signal_settings"))))
         async with socketio.AsyncSimpleClient() as sio:
             while self.status:
                 if not sio.connected:
                     try:
                         logging.info("Establish connection to sym signal websocket.")
                         await sio.connect(
-                            self.signal_settings["api_url"],
+                            signal_settings["api_url"],
                             headers={
-                                "api-key": self.signal_settings["api_key"],
-                                "user-agent": f"3CQS Signal Client/{self.signal_settings['api_version']}",
+                                "api-key": signal_settings["api_key"],
+                                "user-agent": f"3CQS Signal Client/{signal_settings['api_version']}",
                             },
                             transports=["websocket", "polling"],
                             socketio_path="/stream/v1/signals",
@@ -157,15 +147,14 @@ class SignalPlugin:
                 try:
                     event = await sio.receive(timeout=300)
                     if event[0] == "signal":
-                        symbol = f"{event[1]['symbol'].upper()}{self.currency}"
+                        symbol = f"{event[1]['symbol'].upper()}{currency}"
                         max_bots = await self.__check_max_bots()
-
                         if not max_bots:
                             if self.__check_entry_point(
                                 event[1]
                             ) and await self.data.is_token_old_enough(
-                                self.utils.split_symbol(symbol, self.currency),
-                                self.pair_age,
+                                self.utils.split_symbol(symbol, currency),
+                                self.config.get("pair_age", 30),
                             ):
                                 running_trades = (
                                     await model.Trades.all()
@@ -182,11 +171,11 @@ class SignalPlugin:
 
                                     # Backend needs symbol with /
                                     symbol_full = self.utils.split_symbol(
-                                        symbol, self.currency
+                                        symbol, currency
                                     )
 
                                     # Automatically subscribe to reduce load
-                                    if self.dynamic_dca:
+                                    if self.config.get("dynamic_dca", False):
                                         if not await Data().add_history_data_for_symbol(
                                             symbol_full
                                         ):
@@ -198,7 +187,7 @@ class SignalPlugin:
                                     await self.watcher_queue.put([symbol_full])
 
                                     order = {
-                                        "ordersize": self.ordersize,
+                                        "ordersize": self.config.get("bo"),
                                         "symbol": symbol_full,
                                         "direction": "long",
                                         "botname": f"symsignal_{symbol}",
@@ -209,7 +198,7 @@ class SignalPlugin:
                                         "so_percentage": None,
                                         "side": "buy",
                                     }
-                                    await self.orders.receive_buy_order(order)
+                                    await self.orders.receive_buy_order(order, self.config)
                         else:
                             logging.debug(
                                 f"Max Bots: {max_bots}. Max bots reached, waiting for a new slot"

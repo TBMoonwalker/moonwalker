@@ -13,29 +13,10 @@ class Exchange:
     def __init__(
         self,
     ):
-        config = helper.Config()
-        self.dry_run = config.get("dry_run", True)
+        # config = helper.Config()
         self.utils = helper.Utils()
-        self.currency = config.get("currency").upper()
-        self.dry_run = config.get("dry_run", True)
-        self.fee_deduction = config.get("fee_deduction", False)
-        self.order_check_range = config.get("order_check_range", 5)
-
-        # Exchange configuration
-        login_params = {
-            "apiKey": config.get("key"),
-            "secret": config.get("secret"),
-        }
-        exchange = config.get("exchange")
-        self.exchange_id = exchange
-        self.exchange_class = getattr(ccxt, self.exchange_id)
-        if self.exchange_id == "okx":
-            login_params.update({"password": config.get("password", None)})
-        self.exchange = self.exchange_class(login_params)
-        self.exchange.set_sandbox_mode(config.get("sandbox", False))
-        self.exchange.options["defaultType"] = config.get("market", "spot")
-        self.exchange.enableRateLimit = True
-        self.exchange.load_markets()
+        self.exchange = None
+        self.config = None
         self.status = True
         Exchange.sell_retry_count = 0
 
@@ -110,7 +91,7 @@ class Exchange:
         trade = None
         time.sleep(1)
         since = self.exchange.milliseconds() - (
-            self.order_check_range * 1000
+            self.config.get("order_check_range", 5) * 1000
         )  # X seconds from now
         try:
             trade = {}
@@ -157,7 +138,7 @@ class Exchange:
     def __parse_order_status(self, order):
         data = {}
 
-        if self.dry_run:
+        if self.config.get("dry_run", True):
             data["timestamp"] = order["timestamp"]
             data["amount"] = order["amount"]
             data["price"] = order["price"]
@@ -218,13 +199,35 @@ class Exchange:
 
         return amount
 
-    async def create_spot_market_buy(self, order):
+    def __init_exchange(self, config):
+        exchange = None
+
+        if config.get("exchange", None):
+            exchange_class = getattr(ccxt, config.get("exchange"))
+            exchange = exchange_class(
+                {
+                    "apiKey": config.get("key"),
+                    "secret": config.get("secret"),
+                    "options": {"defaultType": config.get("market", "spot")},
+                }
+            )
+            exchange.set_sandbox_mode(config.get("sandbox", False))
+            exchange.enableRateLimit = True
+
+        return exchange
+
+    def __close_exchange(self):
+        self.exchange.close()
+
+    async def create_spot_market_buy(self, order, config):
+        self.exchange = self.__init_exchange(config)
+        self.exchange.load_markets()
+        self.config = config
         order["amount"] = self.__get_amount_from_symbol(
             order["ordersize"], order["symbol"]
         )
         order["price"] = self.__get_price_for_symbol(order["symbol"])
-
-        if self.dry_run:
+        if self.config.get("dry_run", True):
             order["info"] = {}
             order["info"]["orderId"] = uuid.uuid4()
             order["timestamp"] = time.mktime(datetime.now().timetuple()) * 1000
@@ -272,10 +275,29 @@ class Exchange:
             order["fees"] = 0.0
 
             # Substract the order fees
-            if not self.fee_deduction:
-                order["fees"] = self.exchange.fetch_trading_fee(
-                    symbol=order_status["symbol"]
-                )["taker"]
+            if not self.config.get("fee_deduction", False):
+                try:
+                    order["fees"] = self.exchange.fetch_trading_fee(
+                        symbol=order_status["symbol"]
+                    )["taker"]
+                except ccxt.ExchangeError as e:
+                    logging.error(
+                        f"Buying pair {order['symbol']} failed due to an exchange error: {e}"
+                    )
+                    order = None
+                except ccxt.NetworkError as e:
+                    logging.error(
+                        f"Buying pair {order['symbol']} failed due to an network error: {e}"
+                    )
+                    order = None
+                except ccxt.BaseError as e:
+                    logging.error(
+                        f"Buying pair {order['symbol']} failed due to an error: {e}"
+                    )
+                    order = None
+                except Exception as e:
+                    logging.error(f"Buying pair {order['symbol']} failed with: {e}")
+                    order = None
                 order["amount_fee"] = order["amount"] * float(order["fees"])
                 order["amount"] = float(order_status["amount"]) - order["amount_fee"]
 
@@ -283,13 +305,19 @@ class Exchange:
                     f"Fee Deduction not active. Real amount {order_status['amount']}, deducted amount {order['amount']}"
                 )
 
+            logging.debug(order)
+
             return order
 
+        self.__close_exchange()
+
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(200))
-    async def create_spot_market_sell(self, order):
+    async def create_spot_market_sell(self, order, config):
+        self.exchange = self.__init_exchange(config)
+        self.config = config
         order["info"] = {}
 
-        if self.dry_run:
+        if self.config.get("dry_run", True):
             order["side"] = order["direction"]
             order["timestamp"] = time.mktime(datetime.now().timetuple()) * 1000
             order["amount"] = order["total_amount"]
@@ -372,3 +400,5 @@ class Exchange:
             ) * 100
 
             return order_status
+
+        self.__close_exchange()

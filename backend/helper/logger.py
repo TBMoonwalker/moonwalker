@@ -13,7 +13,7 @@ class LoggerFactory(object):
         logging module
         """
         # set the loglevel
-        log_level = "INFO"
+        log_level = "DEBUG"
         if helper.Config().get("debug", False):
             log_level = "DEBUG"
 

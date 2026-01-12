@@ -69,6 +69,8 @@ class Filter:
                     and volume_position_out == volume_position_in
                 ) or volume_position_out > volume_position_in:
                     result = True
+        else:
+            result = True
 
         return result
 

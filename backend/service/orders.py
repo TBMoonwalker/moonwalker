@@ -10,14 +10,11 @@ logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
 
 class Orders:
     def __init__(self):
-        config = helper.Config()
         self.utils = helper.Utils()
         self.exchange = Exchange()
         self.trades = Trades()
-        self.currency = config.get("currency").upper()
-        self.dynamic_dca = config.get("dynamic_dca", False)
 
-    async def receive_sell_order(self, order):
+    async def receive_sell_order(self, order, config):
         logging.info(f"Incoming sell order for {order['symbol']}")
 
         order["total_amount"] = await self.trades.get_token_amount_from_trades(
@@ -25,7 +22,7 @@ class Orders:
         )
 
         # 1. Create exchange order
-        order_status = await self.exchange.create_spot_market_sell(order)
+        order_status = await self.exchange.create_spot_market_sell(order, config)
 
         if order_status:
             # 2. Create closed trade
@@ -82,13 +79,13 @@ class Orders:
         else:
             logging.error(f"Failed creating sell order for {order['symbol']}")
 
-    async def receive_buy_order(self, order):
+    async def receive_buy_order(self, order, config):
 
         logging.info(f"Incoming buy order for {order['symbol']}")
 
         # 1. Create exchange order
-        order_status = await self.exchange.create_spot_market_buy(order)
-
+        order_status = await self.exchange.create_spot_market_buy(order, config)
+        logging.debug(order_status)
         if order_status:
             # 2. Create trade
             payload = {
@@ -130,7 +127,7 @@ class Orders:
             logging.error(f"Cannot stop trade for {symbol}. See trade logs for errors.")
         return False
 
-    async def receive_sell_signal(self, symbol):
+    async def receive_sell_signal(self, symbol, config):
         symbol = symbol.upper()
         token, currency = symbol.split("-")
         symbol = f"{token}/{currency}"
@@ -150,7 +147,7 @@ class Orders:
                 "current_price": trades["current_price"],
             }
 
-            await self.receive_sell_order(order)
+            await self.receive_sell_order(order, config)
             return True
 
         # If OpenTrade remove hasn't worked
@@ -161,7 +158,7 @@ class Orders:
             await self.trades.delete_open_trades(symbol)
             return False
 
-    async def receive_buy_signal(self, symbol, ordersize):
+    async def receive_buy_signal(self, symbol, ordersize, config):
         symbol = symbol.upper()
         token, currency = symbol.split("-")
         symbol = f"{token}/{currency}"
@@ -187,7 +184,7 @@ class Orders:
                 "side": "buy",
             }
 
-            await self.receive_buy_order(order)
+            await self.receive_buy_order(order, config)
             return True
         else:
             return False
