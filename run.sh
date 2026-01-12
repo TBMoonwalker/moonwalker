@@ -40,7 +40,6 @@ start_services() {
     if [ -f "$FRONTEND_FILE" ]; then
         rm frontend/src/config.ts
     fi
-    cp config.ini backend/
     cp config.ts frontend/src/
 
     echo "📦 Checking npm-run-all..."
