@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-BACKEND_CONFIG=backend/config.ini
 FRONTEND_CONFIG=frontend/src/config.ts
 PID_FILE="moonwalker.pid"
 LOCK_FILE="moonwalker.lock"
@@ -38,9 +37,6 @@ start_services() {
     touch "$LOCK_FILE"
 
     echo "📂 Copying config..."
-    if [ -f "$BACKEND_FILE" ]; then
-        rm backend/config.ini
-    fi
     if [ -f "$FRONTEND_FILE" ]; then
         rm frontend/src/config.ts
     fi
