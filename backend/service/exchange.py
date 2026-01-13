@@ -335,17 +335,19 @@ class Exchange:
                     logging.error(
                         f"Buying pair {order['symbol']} failed due to an exchange error: {e}"
                     )
+                    order = None
                 except ccxt.NetworkError as e:
                     logging.error(
                         f"Buying pair {order['symbol']} failed due to an network error: {e}"
                     )
+                    order = None
                 except ccxt.BaseError as e:
                     logging.error(
                         f"Buying pair {order['symbol']} failed due to an error: {e}"
                     )
+                    order = None
                 except Exception as e:
                     logging.error(f"Buying pair {order['symbol']} failed with: {e}")
-                finally:
                     order = None
                 order["amount_fee"] = order["amount"] * float(order["fees"])
                 order["amount"] = float(order_status["amount"]) - order["amount_fee"]
