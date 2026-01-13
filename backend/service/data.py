@@ -46,7 +46,7 @@ class Data:
         """
         Return False if token is newer than threshold_days, True otherwise.
         """
-        threshold_days = config.get("pair_age", 30),
+        threshold_days = config.get("pair_age", 30)
         listing_date = await self.get_listing_date(config, symbol)
         if listing_date:
             threshold_date = datetime.now(timezone.utc) - timedelta(days=threshold_days)

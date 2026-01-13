@@ -75,8 +75,6 @@ class Config:
         """
         for key, value in updates.items():
             value = json.loads(value)
-            logging.info(value["value"])
-            logging.info(value["type"])
             if value["value"]:
                 await AppConfig.update_or_create(key=key, defaults={"value": value["value"], "value_type": value["type"]})
         # Notify all subscribers across processes
