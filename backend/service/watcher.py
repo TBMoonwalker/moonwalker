@@ -58,6 +58,7 @@ class Watcher:
 
         Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
 
+
     # ------------------------------------------------------------------- #
     #                Queue-based symbol updates from app.py               #
     # ------------------------------------------------------------------- #
@@ -73,7 +74,7 @@ class Watcher:
                     if s not in trades:
                         trades.append(s)
                 if Watcher.exchange_watcher_ohlcv:
-                    trades = utils.convert_symbols(trades)
+                    trades = utils.convert_symbols(trades, self.config.get("timeframe", "1m"))
                 Watcher.ticker_symbols = trades
                 logging.info(f"Updated symbol list via queue: {Watcher.ticker_symbols}")
                 if Watcher.symbol_update_event:
@@ -151,7 +152,7 @@ class Watcher:
 
         Watcher.ticker_symbols = await self.trades.get_symbols()
         if Watcher.exchange_watcher_ohlcv:
-            Watcher.ticker_symbols = utils.convert_symbols(Watcher.ticker_symbols)
+            Watcher.ticker_symbols = utils.convert_symbols(Watcher.ticker_symbols, self.config.get("timeframe", "1m"))
 
         consumer_task = asyncio.create_task(self.process_events())
 

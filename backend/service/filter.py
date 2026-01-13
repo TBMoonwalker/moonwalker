@@ -7,12 +7,6 @@ logging = helper.LoggerFactory.get_logger("logs/filter.log", "filter")
 
 
 class Filter:
-    def __init__(self):
-        config = helper.Config()
-        self.ws_url = config.get("ws_url", None)
-        self.btc_pulse = config.get("btc_pulse", False)
-        self.currency = config.get("currency").upper()
-
     @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
     def __request_api_endpoint(self, request, headers=None):
         response = None

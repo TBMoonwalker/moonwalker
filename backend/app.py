@@ -1,6 +1,5 @@
 from quart import Quart
 import asyncio
-import importlib
 from controller import controller
 from service.database import Database
 from service.watcher import Watcher

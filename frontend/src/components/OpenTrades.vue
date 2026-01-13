@@ -277,7 +277,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             })
 
                                             // OHLCV data from Moonwalker
-                                            const ticker_data = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/data/ohlcv/${symbol + currency.toUpperCase()}/15min/${begin_timestamp}/${timezoneOffset()}`).then((response) =>
+                                            const ticker_data = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/data/ohlcv/${symbol + "-" + currency.toUpperCase()}/15min/${begin_timestamp}/${timezoneOffset()}`).then((response) =>
                                                 response.json()
                                             )
                                             candlestickSeries.setData(ticker_data)

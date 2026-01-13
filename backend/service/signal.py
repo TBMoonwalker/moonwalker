@@ -1,7 +1,6 @@
 import asyncio
 import helper
 import importlib
-import time
 from service.config import Config
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal")

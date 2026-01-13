@@ -1,36 +1,20 @@
-import ccxt.pro as ccxtpro
-import ccxt as ccxt
+
 import helper
 import model
 import pandas as pd
 from datetime import datetime, timedelta, timezone
+from service.exchange import Exchange
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
 
 
 class Data:
     def __init__(self):
-        config = helper.Config()
         utils = helper.Utils()
+        self.exchange = Exchange()
         self.utils = utils
-        self.history_data = config.get("history_from_data", 30)
-        self.exchange_id = config.get("exchange")
-        self.exchange_class = getattr(ccxtpro, self.exchange_id)
-        self.exchange = self.exchange_class(
-            {
-                "apiKey": config.get("key"),
-                "secret": config.get("secret"),
-                "options": {
-                    "defaultType": config.get("market", "spot"),
-                },
-            },
-        )
-        self.exchange.set_sandbox_mode(config.get("sandbox", False))
-        self.market = config.get("market", "spot")
-        self.timeframe = config.get("timeframe", "1m")
-        self.currency = config.get("currency").upper()
 
-    async def get_listing_date(self, symbol: str) -> datetime:
+    async def get_listing_date(self, config, symbol: str) -> datetime:
         """
         Fetch the listing date of a token, using SQLite cache with Tortoise ORM.
         """
@@ -39,14 +23,9 @@ class Data:
         if listing:
             return listing.listing_date
 
-        # If not cached → fetch from exchange
-        await self.exchange.load_markets()
-        if symbol not in self.exchange.markets:
-            logging.error(f"{symbol} not found")
+        # If not cached → fetch from exchange        
         try:
-            ohlcv = await self.exchange.fetch_ohlcv(
-                symbol, timeframe="1d", limit=1, since=0
-            )
+            ohlcv = self.exchange.get_history_for_symbol(config, symbol, timeframe="1d")
             if not ohlcv:
                 logging.error(f"No OHLCV data available for {symbol}")
             else:
@@ -57,20 +36,18 @@ class Data:
 
                 # Save to DB cache
                 await model.Listings.create(symbol=symbol, listing_date=listing_date)
-                await self.exchange.close()
                 return listing_date
         except Exception as e:
             logging.error(f"Error fetching OHLCV for {symbol}: {e}")
-        finally:
-            await self.exchange.close()
 
         return None
 
-    async def is_token_old_enough(self, symbol: str, threshold_days: int) -> bool:
+    async def is_token_old_enough(self, config, symbol: str) -> bool:
         """
         Return False if token is newer than threshold_days, True otherwise.
         """
-        listing_date = await self.get_listing_date(symbol)
+        threshold_days = config.get("pair_age", 30),
+        listing_date = await self.get_listing_date(config, symbol)
         if listing_date:
             threshold_date = datetime.now(timezone.utc) - timedelta(days=threshold_days)
             return listing_date <= threshold_date
@@ -135,10 +112,10 @@ class Data:
 
         return False
 
-    async def add_history_data_for_symbol(self, symbol):
+    async def add_history_data_for_symbol(self, symbol, history_data, config):
         if await self.delete_ticker_data_for_trades(symbol):
             try:
-                if await self.fetch_history_data_for_symbol(symbol):
+                if await self.__fetch_history_data_for_symbol(symbol, history_data, config):
                     logging.info(f"Added history for {symbol}")
                     return True
             except Exception as e:
@@ -146,21 +123,20 @@ class Data:
 
         return False
 
-    async def fetch_history_data_for_symbol(self, symbol):
+    async def __fetch_history_data_for_symbol(self, symbol, history_data, config):
         ohlcv = []
         from_date = "{:%Y-%m-%d %H:%M:%S}".format(
-            datetime.now() - timedelta(days=self.history_data)
+            datetime.now() - timedelta(days=history_data)
         )
         try:
-            from_ts = self.exchange.parse8601(from_date)
-            ohlcv_data = await self.exchange.fetch_ohlcv(
-                symbol, self.timeframe, since=from_ts, limit=1000
+            from_ts = self.exchange.parse_iso_timestamp(config, from_date)
+            ohlcv_data = self.exchange.get_history_for_symbol(
+                config, symbol, since=from_ts, limit=1000,
             )
-            await self.exchange.close()
             while True:
                 from_ts = ohlcv_data[-1][0]
-                new_ohlcv = await self.exchange.fetch_ohlcv(
-                    symbol, self.timeframe, since=from_ts, limit=1000
+                new_ohlcv = self.exchange.get_history_for_symbol(
+                    config, symbol, since=from_ts, limit=1000
                 )
                 ohlcv_data.extend(new_ohlcv)
                 if len(new_ohlcv) != 1000:
@@ -183,29 +159,15 @@ class Data:
 
             return True
 
-        except ccxt.NetworkError as e:
-            logging.error(
-                f"Error fetching historical data from Exchange due to a network error: {e}"
-            )
-        except ccxt.ExchangeError as e:
-            logging.error(
-                f"Error fetching historical data from Exchange due to an exchange error: {e}"
-            )
-        except ccxt.BaseError as e:
-            logging.error(
-                f"Error fetching historical data from Exchange due to an error: {e}"
-            )
         except Exception as e:
             logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
-        finally:
-            await self.exchange.close()
 
         return False
 
     async def get_ohlcv_for_pair(self, pair, timerange, timestamp_start, offset):
         # 600000 --> 60 minutes in milliseconds before
         # start_date = datetime.fromtimestamp(((float(timestamp_start) - 600000) / 1000.0),UTC,)
-        symbol = self.utils.split_symbol(pair, self.currency)
+        symbol = self.utils.split_symbol(pair)
         start_timestamp = float(timestamp_start) - 60000
         ohlcv = {}
         query = (
@@ -235,7 +197,7 @@ class Data:
         return ohlcv
 
     async def get_data_for_pair(self, pair, timerange, length):
-        symbol = self.utils.split_symbol(pair, self.currency)
+        symbol = self.utils.split_symbol(pair)
         start_date = self.__calculate_min_candle_date(timerange, length)
         query = (
             await model.Tickers.filter(symbol=symbol)

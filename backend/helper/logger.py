@@ -1,5 +1,4 @@
 import logging, logging.handlers
-import helper
 import os
 
 
@@ -12,11 +11,17 @@ class LoggerFactory(object):
         A private method that interacts with the python
         logging module
         """
-        # set the loglevel
-        log_level = "DEBUG"
-        if helper.Config().get("debug", False):
-            log_level = "DEBUG"
+        debug = None
+        try:
+            debug = os.environ["MOONWALKER_DEBUG"]
+        except:
+            pass
 
+        if debug:
+            loglevel="DEBUG"
+        else:
+            loglevel="INFO"
+        
         # set the logging format
         formatter = logging.Formatter(
             "%(asctime)s - %(levelname)s - %(name)s : %(message)s"
@@ -38,11 +43,11 @@ class LoggerFactory(object):
         LoggerFactory._LOG.addHandler(file_handler)
 
         # set the logging level based on the user selection
-        if log_level == "INFO":
+        if loglevel == "INFO":
             LoggerFactory._LOG.setLevel(logging.INFO)
-        elif log_level == "ERROR":
+        elif loglevel == "ERROR":
             LoggerFactory._LOG.setLevel(logging.ERROR)
-        elif log_level == "DEBUG":
+        elif loglevel == "DEBUG":
             LoggerFactory._LOG.setLevel(logging.DEBUG)
         return LoggerFactory._LOG
 

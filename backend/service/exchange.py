@@ -13,12 +13,66 @@ class Exchange:
     def __init__(
         self,
     ):
-        # config = helper.Config()
         self.utils = helper.Utils()
         self.exchange = None
         self.config = None
         self.status = True
         Exchange.sell_retry_count = 0
+
+
+    @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
+    def parse_iso_timestamp(self, config, date):
+        self.exchange = self.__init_exchange(config)
+        timestamp = None
+        try:
+            self.exchange.parse8601(date)
+        except ccxt.ExchangeError as e:
+            logging.error(
+                f"Error converting timestamp due to an exchange error: {e}"
+            )
+            raise TryAgain
+        except ccxt.NetworkError as e:
+            logging.error(
+                f"Error converting timestamp due to a network error: {e}"
+            )
+            raise TryAgain
+        except ccxt.BaseError as e:
+            logging.error(f"Converting timestamp failed due to an error: {e}")
+            raise TryAgain
+        except Exception as e:
+            logging.error(f"Converting timestamp failed with: {e}")
+            raise TryAgain
+        
+        return timestamp
+
+    def get_history_for_symbol(self, config, symbol, timeframe=None, limit=1, since=0):
+        self.exchange = self.__init_exchange(config)
+        self.exchange.load_markets()
+        if not timeframe:
+            timeframe = config.get("timeframe", "1m")
+        ohlcv = None
+        if symbol not in self.exchange.markets:
+            logging.error(f"{symbol} not found")
+            return ohlcv
+
+        try:
+            ohlcv = self.exchange.fetch_ohlcv(
+                    symbol, timeframe=timeframe, limit=limit, since=since
+                )
+            return ohlcv
+        except ccxt.ExchangeError as e:
+            logging.error(
+                f"Error fetching historical data from Exchange due to an exchange error: {e}"
+            )
+        except ccxt.NetworkError as e:
+            logging.error(
+                f"Error fetching historical data from Exchange due to a network error: {e}"
+            )
+        except ccxt.BaseError as e:
+            logging.error(f"Fetching historical data failed due to an error: {e}")
+        except Exception as e:
+            logging.error(f"Fetching historical data failed with: {e}")
+        
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     def __get_price_for_symbol(self, pair):
@@ -216,9 +270,6 @@ class Exchange:
 
         return exchange
 
-    def __close_exchange(self):
-        self.exchange.close()
-
     async def create_spot_market_buy(self, order, config):
         self.exchange = self.__init_exchange(config)
         self.exchange.load_markets()
@@ -284,19 +335,17 @@ class Exchange:
                     logging.error(
                         f"Buying pair {order['symbol']} failed due to an exchange error: {e}"
                     )
-                    order = None
                 except ccxt.NetworkError as e:
                     logging.error(
                         f"Buying pair {order['symbol']} failed due to an network error: {e}"
                     )
-                    order = None
                 except ccxt.BaseError as e:
                     logging.error(
                         f"Buying pair {order['symbol']} failed due to an error: {e}"
                     )
-                    order = None
                 except Exception as e:
                     logging.error(f"Buying pair {order['symbol']} failed with: {e}")
+                finally:
                     order = None
                 order["amount_fee"] = order["amount"] * float(order["fees"])
                 order["amount"] = float(order_status["amount"]) - order["amount_fee"]
@@ -308,8 +357,6 @@ class Exchange:
             logging.debug(order)
 
             return order
-
-        self.__close_exchange()
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(200))
     async def create_spot_market_sell(self, order, config):
@@ -400,5 +447,3 @@ class Exchange:
             ) * 100
 
             return order_status
-
-        self.__close_exchange()

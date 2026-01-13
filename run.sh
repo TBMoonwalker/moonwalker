@@ -7,6 +7,10 @@ LOCK_FILE="moonwalker.lock"
 
 # Function to stop all services
 stop_services() {
+
+    if [ -z "${MOONWALKER_DEBUG}" ]; then
+        unset MOONWALKER_DEBUG
+
     if [ -f "$LOCK_FILE" ]; then
         echo "🛑 Stopping services..."
         if [ -f "$PID_FILE" ]; then
@@ -27,6 +31,11 @@ stop_services() {
 
 # Function to start all services
 start_services() {
+    # Set Debug Logging
+    if [ $2 == "DEBUG ]; then
+        export MOONWALKER_DEBUG=True
+    fi
+
     # Check if services are already running
     if [ -f "$LOCK_FILE" ]; then
         echo "❌ Services are already running"
@@ -81,7 +90,7 @@ case "$1" in
         stop_services
         ;;
     *)
-        echo "Usage: $0 {start|stop}"
+        echo "Usage: $0 {start|stop} (debug)"
         exit 1
         ;;
 esac

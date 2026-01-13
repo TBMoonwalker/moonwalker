@@ -58,6 +58,7 @@ class SignalPlugin:
     async def __get_new_symbol_list(self, running_list):
         # New symbols
         symbol_list = self.config.get("symbol_list", None)
+        history_data = self.config.get("history_from_data", 30)
         if symbol_list:
             if "http" in symbol_list:
                 symbol_list = requests.get(symbol_list).json()["pairs"]
@@ -82,7 +83,7 @@ class SignalPlugin:
             for symbol in symbol_list:
                 if symbol not in running_symbols:
                     if await Data().count_history_data_for_symbol(symbol) < 1:
-                        if not await Data().add_history_data_for_symbol(symbol):
+                        if not await Data().add_history_data_for_symbol(symbol, history_data, self.config):
                             logging.error(
                                 f"Not trading {symbol} because history add failed. Please check data.log."
                             )

@@ -15,7 +15,6 @@ logging = helper.LoggerFactory.get_logger("logs/signal.log", "sym_signals")
 
 class SignalPlugin:
     def __init__(self, watcher_queue):
-        # config = helper.Config()
         self.utils = helper.Utils()
         self.autopilot = Autopilot()
         self.orders = Orders()
@@ -148,13 +147,13 @@ class SignalPlugin:
                     event = await sio.receive(timeout=300)
                     if event[0] == "signal":
                         symbol = f"{event[1]['symbol'].upper()}{currency}"
+                        history_data = self.config.get("history_from_data", 30)
                         max_bots = await self.__check_max_bots()
                         if not max_bots:
                             if self.__check_entry_point(
                                 event[1]
-                            ) and await self.data.is_token_old_enough(
-                                self.utils.split_symbol(symbol, currency),
-                                self.config.get("pair_age", 30),
+                            ) and await self.data.is_token_old_enough(self.config,
+                                self.utils.split_symbol(symbol, currency)
                             ):
                                 running_trades = (
                                     await model.Trades.all()
@@ -177,7 +176,7 @@ class SignalPlugin:
                                     # Automatically subscribe to reduce load
                                     if self.config.get("dynamic_dca", False):
                                         if not await Data().add_history_data_for_symbol(
-                                            symbol_full
+                                            symbol_full, history_data, self.config
                                         ):
                                             logging.error(
                                                 f"Not trading {symbol} because history add failed. Please check data.log."

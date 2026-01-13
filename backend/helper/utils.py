@@ -1,12 +1,7 @@
-import helper
 import math
 
 
 class Utils:
-    def __init__(self):
-        config = helper.Config()
-        self.dry_run = config.get("dry_run", True)
-        self.timeframe = config.get("timeframe", "1m")
 
     def calculate_actual_pnl(self, trades, current_price=None):
         if not current_price:
@@ -16,19 +11,26 @@ class Utils:
         actual_pnl = ((current_price - average_buy_price) / average_buy_price) * 100
 
         return actual_pnl
+    
+    def convert_symbols(self, symbols, timeframe=None):
+        symbol_list = []
+        if not timeframe:
+            # ToDo - how get it from the config
+            timeframe = "1m"
+        for symbol in symbols:
+            symbol_list.append([symbol, timeframe])
+        return symbol_list
 
-    def split_symbol(self, pair, currency):
+    def split_symbol(self, pair, currency=None):
         symbol = pair
-        if not "/" in pair:
+        if "-" in pair:
+            pair, market = pair.split("-")
+            symbol = f"{pair}/{market}"
+        elif not "/" in pair:
             pair, market = pair.split(currency)
             symbol = f"{pair}/{currency}"
-        return symbol
 
-    def convert_symbols(self, symbols):
-        symbol_list = []
-        for symbol in symbols:
-            symbol_list.append([symbol, self.timeframe])
-        return symbol_list
+        return symbol
 
     def convert_numbers(self, number):
         millnames = ["", "k", "M", "B", " T"]
