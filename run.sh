@@ -31,11 +31,6 @@ stop_services() {
 
 # Function to start all services
 start_services() {
-    # Set Debug Logging
-    if [ $# -eq 2 && $2 eq "DEBUG"]; then
-        export MOONWALKER_DEBUG=True
-    fi
-
     # Check if services are already running
     if [ -f "$LOCK_FILE" ]; then
         echo "❌ Services are already running"
@@ -74,7 +69,11 @@ start_services() {
     python3 -m venv .venv
     cd backend
     ../.venv/bin/pip install -r requirements.txt
-    MOONWALKER_DEBUG=True ../.venv/bin/python app.py > ../run.log 2>&1 &
+    if [ $# -eq 2 ]; then
+        MOONWALKER_DEBUG=True ../.venv/bin/python app.py > ../run.log 2>&1 &
+    else
+        ../.venv/bin/python app.py > ../run.log 2>&1 &
+    fi
     echo $! > ../$PID_FILE
     cd ..
 
