@@ -45,33 +45,40 @@ class Exchange:
         
         return timestamp
 
-    def get_history_for_symbol(self, config, symbol, timeframe=None, limit=1, since=0):
+    def get_history_for_symbol(self, config, symbol, timeframe, limit=1, since=0):
         self.exchange = self.__init_exchange(config)
         self.exchange.load_markets()
-        if not timeframe:
-            timeframe = config.get("timeframe", "1m")
         ohlcv = None
         if symbol not in self.exchange.markets:
             logging.error(f"{symbol} not found")
             return ohlcv
+        
+        timeframe_ms = self.exchange.parse_timeframe(timeframe) * 1000
+        now = self.exchange.milliseconds()
 
-        try:
-            ohlcv = self.exchange.fetch_ohlcv(
-                    symbol, timeframe=timeframe, limit=limit, since=since
+        all_candles = []
+        retries = 0
+
+        while since < now:
+            try:
+                candles = self.exchange.fetch_ohlcv(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    since=since,
+                    limit=limit,
                 )
-            return ohlcv
-        except ccxt.ExchangeError as e:
-            logging.error(
-                f"Error fetching historical data from Exchange due to an exchange error: {e}"
-            )
-        except ccxt.NetworkError as e:
-            logging.error(
-                f"Error fetching historical data from Exchange due to a network error: {e}"
-            )
-        except ccxt.BaseError as e:
-            logging.error(f"Fetching historical data failed due to an error: {e}")
-        except Exception as e:
-            logging.error(f"Fetching historical data failed with: {e}")
+
+                if not candles:
+                    break
+
+                all_candles.extend(candles)
+
+                since = candles[-1][0] + timeframe_ms
+
+            except (Exception, ccxt.NetworkError, ccxt.ExchangeError, ccxt.BaseError) as e:
+                logging.error(f"Fetching historical data failed due to an error: {e}")
+
+        return all_candles
         
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))

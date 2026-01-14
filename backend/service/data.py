@@ -59,6 +59,7 @@ class Data:
         return symbols
 
     def __calculate_min_candle_date(self, timerange, length):
+
         # Convert timerange with buffer
         match timerange:
             case "1D":
@@ -125,22 +126,12 @@ class Data:
 
     async def __fetch_history_data_for_symbol(self, symbol, history_data, config):
         ohlcv = []
-        from_date = "{:%Y-%m-%d %H:%M:%S}".format(
-            datetime.now() - timedelta(days=history_data)
-        )
         try:
-            from_ts = self.exchange.parse_iso_timestamp(config, from_date)
+            since = int((datetime.now(timezone.utc) - timedelta(days=history_data)).timestamp() * 1000)
             ohlcv_data = self.exchange.get_history_for_symbol(
-                config, symbol, since=from_ts, limit=1000,
+                config, symbol, config.get("strategy_timeframe", "1m"), limit=1000, since=since
             )
-            while True:
-                from_ts = ohlcv_data[-1][0]
-                new_ohlcv = self.exchange.get_history_for_symbol(
-                    config, symbol, since=from_ts, limit=1000
-                )
-                ohlcv_data.extend(new_ohlcv)
-                if len(new_ohlcv) != 1000:
-                    break
+            
             symbol, market = symbol.split("/")
 
             for ticker in ohlcv_data:
@@ -197,17 +188,19 @@ class Data:
         return ohlcv
 
     async def get_data_for_pair(self, pair, timerange, length):
-        symbol = self.utils.split_symbol(pair)
-        start_date = self.__calculate_min_candle_date(timerange, length)
-        query = (
-            await model.Tickers.filter(symbol=symbol)
-            .filter(timestamp__gt=start_date)
-            .values()
-        )
+        try:
+            symbol = self.utils.split_symbol(pair)
+            start_date = self.__calculate_min_candle_date(timerange, length)
+            query = (
+                await model.Tickers.filter(symbol=symbol)
+                .filter(timestamp__gt=start_date)
+                .values()
+            )
+        except Exception as e:
+            raise(e)
 
         if query:
             df = pd.DataFrame(query)
-
             df.dropna(inplace=True)
         else:
             df = None

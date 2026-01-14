@@ -34,8 +34,8 @@ class Dca:
                 timeframe=self.config.get("dca_strategy_timeframe", "1m")
             )
 
-            token, currency = symbol.split("/")
-            symbol = f"{token}{currency}"
+            #token, currency = symbol.split("/")
+            #symbol = f"{token}{currency}"
 
             result = await dca_strategy_plugin.run(symbol, "buy")
 
