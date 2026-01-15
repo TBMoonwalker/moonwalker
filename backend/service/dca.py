@@ -31,7 +31,7 @@ class Dca:
                 f"strategies.{self.config.get('dca_strategy')}"
             )
             dca_strategy_plugin = dca_strategy.Strategy(
-                timeframe=self.config.get("dca_strategy_timeframe", "1m")
+                timeframe=self.config.get("strategy_timeframe", "1m")
             )
 
             #token, currency = symbol.split("/")

@@ -188,16 +188,14 @@ class Data:
         return ohlcv
 
     async def get_data_for_pair(self, pair, timerange, length):
-        try:
-            symbol = self.utils.split_symbol(pair)
-            start_date = self.__calculate_min_candle_date(timerange, length)
-            query = (
-                await model.Tickers.filter(symbol=symbol)
-                .filter(timestamp__gt=start_date)
-                .values()
-            )
-        except Exception as e:
-            raise(e)
+        symbol = self.utils.split_symbol(pair)
+        start_date = self.__calculate_min_candle_date(timerange, length)
+
+        query = (
+            await model.Tickers.filter(symbol=symbol)
+            .filter(timestamp__gt=start_date)
+            .values()
+        )
 
         if query:
             df = pd.DataFrame(query)
@@ -210,14 +208,12 @@ class Data:
     def resample_data(self, ohlcv, timerange):
         df = pd.DataFrame(ohlcv)
         if not df.empty:
-
             # Convert unix timestamp to datetime object
             df["timestamp"] = pd.to_datetime(
                 df["timestamp"].astype(float), utc=True, origin="unix", unit="ms"
             )
             # Set datetime index
             df = df.set_index("timestamp")
-
             # Resample to the configured timerange
             if "m" in timerange:
                 interval, range = timerange.split("m")
@@ -237,12 +233,12 @@ class Data:
             df_resample.reset_index(inplace=True)
 
             # Convert datetime object back to a unix timestamp
-            df_resample["timestamp"] = df_resample["timestamp"].astype(int)
-            df_resample["timestamp"] = df_resample["timestamp"].div(10**9)
+            #df_resample["timestamp"] = df_resample["timestamp"].astype(int)
+            #df_resample["timestamp"] = df_resample["timestamp"].div(10**9)
 
             # Clear empty values
             df_resample.dropna(inplace=True)
-
+            logging.info(df_resample.head)
             return df_resample
         else:
             logging.error("No historic data available yet for symbol")

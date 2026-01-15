@@ -30,7 +30,7 @@ class Housekeeper:
             if self.config:
                 actual_timestamp = datetime.now()
                 cleanup_timestamp = actual_timestamp - timedelta(
-                    hours=int(self.config.get("housekeeping_interval", 48))
+                    days=int(self.config.get("housekeeping_interval", 48))
                 )
                 try:
                     active_symbols = await Trades().get_symbols()

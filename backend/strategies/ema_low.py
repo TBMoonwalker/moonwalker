@@ -1,5 +1,4 @@
 import helper
-from service.filter import Filter
 from service.indicators import Indicators
 
 logging = helper.LoggerFactory.get_logger("logs/strategies.log", "ema_low")
@@ -8,7 +7,6 @@ logging = helper.LoggerFactory.get_logger("logs/strategies.log", "ema_low")
 class Strategy:
     def __init__(self, timeframe, btc_pulse=None):
         self.timeframe = timeframe
-        self.filter = Filter()
         self.indicators = Indicators()
 
     async def run(self, symbol, type):
@@ -45,7 +43,7 @@ class Strategy:
                 "creating_order": result,
             }
             logging.debug(f"{logging_json}")
-        except:
-            logging.error(f"Cannot run strategy for {symbol}, check indicators.log")
+        except Exception as e:
+            logging.error(f"Cannot run strategy for {symbol}, check indicators.log: {e}")
             return False
         return result
