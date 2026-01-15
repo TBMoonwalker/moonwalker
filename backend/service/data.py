@@ -238,7 +238,6 @@ class Data:
 
             # Clear empty values
             df_resample.dropna(inplace=True)
-            logging.info(df_resample.head)
             return df_resample
         else:
             logging.error("No historic data available yet for symbol")
