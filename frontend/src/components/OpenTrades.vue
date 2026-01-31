@@ -203,7 +203,6 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                         let timeline_items: Array<any> = []
                                         // Baseorder
                                         let timestamp = new Date(Math.trunc(parseFloat(rowData.baseorder.timestamp)))
-                                        //console.log(timestamp)
                                         let date = timestamp.toLocaleString()
                                         timeline_items[0] = h(NTimelineItem, {
                                             title: "Baseorder",
