@@ -25,6 +25,33 @@ const ohlcvStore = useOhlcvStore()
 const dialog = useDialog()
 const message = useMessage()
 
+const MAX_VISIBLE_CANDLES = 500
+
+type TimeframeChoice = {
+    timerange: string
+    seconds: number
+}
+
+function selectTimeframe(beginTimestamp: string | number): TimeframeChoice {
+    const beginMs = Number(beginTimestamp)
+    const nowMs = Date.now()
+    const durationSeconds = Math.max(0, Math.floor((nowMs - beginMs) / 1000))
+
+    const choices: TimeframeChoice[] = [
+        { timerange: "15min", seconds: 15 * 60 },
+        { timerange: "4h", seconds: 4 * 60 * 60 },
+        { timerange: "1D", seconds: 24 * 60 * 60 },
+    ]
+
+    for (const choice of choices) {
+        if (durationSeconds / choice.seconds <= MAX_VISIBLE_CANDLES) {
+            return choice
+        }
+    }
+
+    return choices[choices.length - 1]
+}
+
 watch(open_trade_data.data, async (newData) => {
     if (newData !== undefined && newData !== null) {
         const websocket_data = newData as any[]
@@ -200,6 +227,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
 
                                             // Create precision for candlestick prices
                                             const precision = createDecimal(rowData.precision)
+                                            const timeframe = selectTimeframe(begin_timestamp)
 
                                             chart = createChart(chartRef.value, {
                                                 autoSize: true,
@@ -235,10 +263,10 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             })
 
                                             // OHLCV data from Moonwalker
-                                            const cacheKey = `${symbol}-${currency}-15min-${begin_timestamp}-${timezoneOffset()}`
+                                            const cacheKey = `${symbol}-${currency}-${timeframe.timerange}-${begin_timestamp}-${timezoneOffset()}`
                                             let ticker_data = ohlcvStore.get(cacheKey)
                                             if (!ticker_data) {
-                                                ticker_data = await fetchJson(`/data/ohlcv/${symbol + "-" + currency.toUpperCase()}/15min/${begin_timestamp}/${timezoneOffset()}`)
+                                                ticker_data = await fetchJson(`/data/ohlcv/${symbol + "-" + currency.toUpperCase()}/${timeframe.timerange}/${begin_timestamp}/${timezoneOffset()}`)
                                                 ohlcvStore.set(cacheKey, ticker_data)
                                             }
                                             candlestickSeries.setData(ticker_data)
@@ -256,10 +284,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             })
 
                                             // Correct marker timestamp shift
-                                            let intervals = {
-                                                '15_minutes': (3600 / 2)
-                                            }
-                                            let seconds = intervals['15_minutes']
+                                            const seconds = timeframe.seconds
 
                                             let baseorder_datetime = Math.trunc(Number(begin_timestamp) / 1000) - (Math.trunc(Number(begin_timestamp) / 1000) % seconds)
                                             baseorder_datetime += 60 * timezoneOffset()
