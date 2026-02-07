@@ -5,6 +5,10 @@ FRONTEND_CONFIG=frontend/src/config.ts
 PID_FILE="moonwalker.pid"
 LOCK_FILE="moonwalker.lock"
 
+usage() {
+    echo "Usage: $0 {start|stop} [-d|--debug]"
+}
+
 # Function to stop all services
 stop_services() {
 
@@ -31,6 +35,7 @@ stop_services() {
 
 # Function to start all services
 start_services() {
+    local debug="${1:-false}"
     # Check if services are already running
     if [ -f "$LOCK_FILE" ]; then
         echo "❌ Services are already running"
@@ -41,8 +46,8 @@ start_services() {
     touch "$LOCK_FILE"
 
     echo "📂 Copying config..."
-    if [ -f "$FRONTEND_FILE" ]; then
-        rm frontend/src/config.ts
+    if [ -f "$FRONTEND_CONFIG" ]; then
+        rm "$FRONTEND_CONFIG"
     fi
     cp config.ts frontend/src/
 
@@ -69,7 +74,7 @@ start_services() {
     python3 -m venv .venv
     cd backend
     ../.venv/bin/pip install -r requirements.txt
-    if [ $# -eq 2 ]; then
+    if [ "$debug" = "true" ]; then
         MOONWALKER_DEBUG=True ../.venv/bin/python app.py > ../run.log 2>&1 &
     else
         ../.venv/bin/python app.py > ../run.log 2>&1 &
@@ -81,15 +86,45 @@ start_services() {
 }
 
 # Main script logic
-case "$1" in
+cmd=""
+debug=false
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        start|stop)
+            if [ -n "$cmd" ]; then
+                echo "❌ Multiple commands specified."
+                usage
+                exit 1
+            fi
+            cmd="$1"
+            shift
+            ;;
+        -d|--debug)
+            debug=true
+            shift
+            ;;
+        -h|--help)
+            usage
+            exit 0
+            ;;
+        *)
+            echo "❌ Unknown argument: $1"
+            usage
+            exit 1
+            ;;
+    esac
+done
+
+case "$cmd" in
     start)
-        start_services
+        start_services "$debug"
         ;;
     stop)
         stop_services
         ;;
     *)
-        echo "Usage: $0 {start|stop} (debug)"
+        usage
         exit 1
         ;;
 esac

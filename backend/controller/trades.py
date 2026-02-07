@@ -1,4 +1,7 @@
+"""Trade API endpoints."""
+
 import asyncio
+import json
 from typing import Any
 
 import helper
@@ -10,6 +13,10 @@ from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_trades")
 trades = Trades()
+
+
+def _json_dumps(payload: Any) -> str:
+    return json.dumps(payload, default=str)
 
 
 @controller.websocket("/trades/open")
@@ -24,13 +31,15 @@ async def open_trades() -> None:
     try:
         while True:
             output = await trades.get_open_trades()
-            await websocket.send(output)
+            await websocket.send(_json_dumps(output))
             await asyncio.sleep(5)
     except asyncio.CancelledError:
         # Handle disconnection gracefully
         logging.info("Client disconnected from open trades WebSocket")
         raise
-    except Exception as exc:  # noqa: BLE001 - Catch all exceptions to prevent WebSocket hang
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - Catch all exceptions to prevent WebSocket hang
         logging.error("Error in open_trades WebSocket: %s", exc, exc_info=True)
         raise
 
@@ -47,13 +56,15 @@ async def closed_trades() -> None:
     try:
         while True:
             output = await trades.get_closed_trades()
-            await websocket.send(output)
+            await websocket.send(_json_dumps(output))
             await asyncio.sleep(5)
     except asyncio.CancelledError:
         # Handle disconnection gracefully
         logging.info("Client disconnected from closed trades WebSocket")
         raise
-    except Exception as exc:  # noqa: BLE001 - Catch all exceptions to prevent WebSocket hang
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - Catch all exceptions to prevent WebSocket hang
         logging.error("Error in closed_trades WebSocket: %s", exc, exc_info=True)
         raise
 
@@ -73,10 +84,7 @@ async def closed_trades_length() -> dict[str, Any]:
         {"result": 42}
     """
     response = await trades.get_closed_trades_length()
-    if not response:
-        response = {"result": ""}
-
-    return response
+    return {"result": response}
 
 
 @controller.route("/trades/closed/<page>")
@@ -97,7 +105,4 @@ async def closed_trades_pagination(page: str) -> dict[str, Any]:
         {"result": [...]} or {"result": ""}
     """
     response = await trades.get_closed_trades(int(page))
-    if not response:
-        response = {"result": ""}
-
-    return response
+    return {"result": response}

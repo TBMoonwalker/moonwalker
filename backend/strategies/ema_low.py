@@ -1,3 +1,7 @@
+"""EMA low strategy."""
+
+from typing import Any
+
 import helper
 from service.indicators import Indicators
 
@@ -5,11 +9,14 @@ logging = helper.LoggerFactory.get_logger("logs/strategies.log", "ema_low")
 
 
 class Strategy:
-    def __init__(self, timeframe, btc_pulse=None):
+    """EMA low strategy implementation."""
+
+    def __init__(self, timeframe: str, btc_pulse: Any | None = None):
         self.timeframe = timeframe
         self.indicators = Indicators()
 
-    async def run(self, symbol, type):
+    async def run(self, symbol: str, type: str) -> bool:
+        """Evaluate EMA low conditions for a symbol."""
         result = False
 
         # EMA 20 < EMA 200
@@ -44,6 +51,8 @@ class Strategy:
             }
             logging.debug(f"{logging_json}")
         except Exception as e:
-            logging.error(f"Cannot run strategy for {symbol}, check indicators.log: {e}")
+            logging.error(
+                f"Cannot run strategy for {symbol}, check indicators.log: {e}"
+            )
             return False
         return result

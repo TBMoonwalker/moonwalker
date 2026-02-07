@@ -4,67 +4,32 @@
 </template>
 
 <script setup lang="ts">
-import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
 import { h, ref, watch } from 'vue'
-import { type DataTableColumns, NTimeline, NTimelineItem, NDivider, NSlider, NButton, NButtonGroup, useDialog, useMessage, NInput, NFlex, NCard, NIcon, NHighlight } from 'naive-ui'
+import { NButton, NButtonGroup, NCard, NDataTable, NDivider, NFlex, NHighlight, NIcon, NInput, NSlider, NTimeline, NTimelineItem, type DataTableColumns, useDialog, useMessage } from 'naive-ui'
 import { useWebSocketDataStore } from '../stores/websocket'
+import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
-import { isFloat, createDecimal } from '../helpers/validators'
+import { createDecimal } from '../helpers/validators'
 import { timezoneOffset } from '../helpers/timezone'
 import { createChart, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts'
 import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
+import { fetchJson } from '../api/client'
+import { useOhlcvStore } from '../stores/ohlcv'
 
 const open_trade_store = useWebSocketDataStore("openTrades")
 const open_trade_data = storeToRefs(open_trade_store)
+const trades_store = useTradesStore()
 const open_trades = ref()
+const ohlcvStore = useOhlcvStore()
 
 const dialog = useDialog()
 const message = useMessage()
 
-watch(open_trade_data.json, async (newData) => {
-    if (newData !== undefined) {
-        const websocket_data = JSON.parse(newData)
-        open_trades.value = websocket_data
-
-        websocket_data.forEach(function (val: any, i: any) {
-            var amount_length = 0
-            var cost_length = 0
-            var tp_length = 0
-            var avg_length = 0
-            var current_length = 0
-            if (isFloat(val.amount)) {
-                amount_length = open_trades.value[i].amount.toString().split('.')[1].length
-            }
-
-            if (isFloat(val.cost)) {
-                cost_length = open_trades.value[i].cost.toString().split('.')[1].length
-            }
-
-            if (isFloat(val.tp_price)) {
-                tp_length = open_trades.value[i].tp_price.toString().split('.')[1].length
-            }
-
-            if (isFloat(val.avg_price)) {
-                avg_length = open_trades.value[i].avg_price.toString().split('.')[1].length
-            }
-
-            if (isFloat(val.current_price)) {
-                current_length = open_trades.value[i].current_price.toString().split('.')[1].length
-            }
-
-            open_trades.value[i].cost = val.cost.toFixed(cost_length)
-            open_trades.value[i].profit = val.profit.toFixed(2)
-            open_trades.value[i].amount = val.amount.toFixed(amount_length)
-            open_trades.value[i].current_price = val.current_price.toFixed(current_length)
-            open_trades.value[i].tp_price = val.tp_price.toFixed(tp_length)
-            open_trades.value[i].avg_price = val.avg_price.toFixed(avg_length)
-            open_trades.value[i].key = val.id
-            let date = new Date(Math.trunc(parseFloat(val.open_date)));
-            open_trades.value[i].open_date = date.toLocaleString()
-            open_trades.value[i].safetyorder = val.safetyorders
-            open_trades.value[i].precision = current_length
-
-        })
+watch(open_trade_data.data, async (newData) => {
+    if (newData !== undefined && newData !== null) {
+        const websocket_data = newData as any[]
+        trades_store.setOpenTrades(websocket_data)
+        open_trades.value = trades_store.openTrades
     }
 }, { immediate: true })
 
@@ -103,9 +68,7 @@ function handle_deal_sell(data: any) {
         onPositiveClick: async () => {
             d.loading = true
             const [symbol, currency] = data["symbol"].toLowerCase().split("/")
-            const result = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/orders/sell/${symbol + "-" + currency}`).then((response) =>
-                response.json()
-            )
+            const result = await fetchJson<{ result: string }>(`/orders/sell/${symbol + "-" + currency}`)
             if (result["result"] == "sell") {
                 message.success('Sold ' + data["amount"] + ' ' + data["symbol"])
             } else {
@@ -129,9 +92,7 @@ function handle_deal_buy(data: any) {
         negativeText: 'Cancel',
         onPositiveClick: async () => {
             d.loading = true
-            const result = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/orders/buy/${symbol + "-" + currency}/${amount}`).then((response) =>
-                response.json()
-            )
+            const result = await fetchJson<{ result: string }>(`/orders/buy/${symbol + "-" + currency}/${amount}`)
             if (result["result"] == "new_so") {
                 message.success('Added ' + amount + ' ' + currency.toUpperCase() + ' for ' + symbol.toUpperCase())
             } else {
@@ -154,9 +115,7 @@ function handle_deal_stop(data: any) {
         onPositiveClick: async () => {
             d.loading = true
             const [symbol, currency] = data["symbol"].toLowerCase().split("/")
-            const result = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/orders/stop/${symbol + "-" + currency}`).then((response) =>
-                response.json()
-            )
+            const result = await fetchJson<{ result: string }>(`/orders/stop/${symbol + "-" + currency}`)
             if (result["result"] == "stop") {
                 message.success('Stopped ' + data["symbol"] + ' Please trade it manually on your exchange')
             } else {
@@ -276,9 +235,12 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             })
 
                                             // OHLCV data from Moonwalker
-                                            const ticker_data = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/data/ohlcv/${symbol + "-" + currency.toUpperCase()}/15min/${begin_timestamp}/${timezoneOffset()}`).then((response) =>
-                                                response.json()
-                                            )
+                                            const cacheKey = `${symbol}-${currency}-15min-${begin_timestamp}-${timezoneOffset()}`
+                                            let ticker_data = ohlcvStore.get(cacheKey)
+                                            if (!ticker_data) {
+                                                ticker_data = await fetchJson(`/data/ohlcv/${symbol + "-" + currency.toUpperCase()}/15min/${begin_timestamp}/${timezoneOffset()}`)
+                                                ohlcvStore.set(cacheKey, ticker_data)
+                                            }
                                             candlestickSeries.setData(ticker_data)
 
                                             let marker_data = []

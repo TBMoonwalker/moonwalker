@@ -1,19 +1,26 @@
-import model
-import json
-import helper
-from decimal import Decimal
+"""Trade persistence and retrieval helpers."""
+
+from typing import Any
+
 from asyncache import cached
 from cachetools import TTLCache
-from tortoise.models import Q
-from tortoise.functions import Sum
 from tortoise.expressions import F
+from tortoise.functions import Sum
+from tortoise.models import Q
+
+import helper
+import model
 
 logging = helper.LoggerFactory.get_logger("logs/trades.log", "trades")
 
 
 class Trades:
+    """Database access layer for trade entities."""
+
     @cached(cache=TTLCache(maxsize=1024, ttl=60))
-    async def get_trade_by_ordertype(self, symbol, baseorder=False):
+    async def get_trade_by_ordertype(
+        self, symbol: str, baseorder: bool = False
+    ) -> list[dict[str, Any]]:
         """
         Gives back the specific trade entries for an
         open order (baseorder or safetyorder)
@@ -25,6 +32,7 @@ class Trades:
                     Q(baseorder__gt=0), Q(symbol=symbol), join_type="AND"
                 ).values()
             except Exception as e:
+                # Broad catch to prevent trade queries from crashing call sites.
                 logging.error(f"Error getting baseorders from database. Cause: {e}")
         # Get safetyorders
         else:
@@ -33,55 +41,74 @@ class Trades:
                     Q(safetyorder__gt=0), Q(symbol=symbol), join_type="AND"
                 ).values()
             except Exception as e:
+                # Broad catch to prevent trade queries from crashing call sites.
                 logging.error(f"Error getting safetyorders from database. Cause: {e}")
 
         return trade
 
-    async def get_open_trades_by_symbol(self, symbol):
+    async def get_open_trades_by_symbol(
+        self, symbol: str
+    ) -> list[dict[str, Any]] | None:
+        """Return open trades for a symbol."""
         try:
             open_trades = await model.OpenTrades.filter(symbol=symbol).values()
             return open_trades
         except Exception as e:
+            # Broad catch to return partial results when database errors occur.
             logging.error(f"Error getting open trades from database. Cause: {e}")
 
-    async def get_trades_by_symbol(self, symbol):
+    async def get_trades_by_symbol(self, symbol: str) -> list[dict[str, Any]] | None:
+        """Return all trades for a symbol."""
         try:
             trades = await model.Trades.filter(symbol=symbol).values()
             return trades
         except Exception as e:
+            # Broad catch to return partial results when database errors occur.
             logging.error(f"Error getting trades from database. Cause: {e}")
 
-    async def get_open_trades(self):
+    async def get_open_trades(self) -> list[dict[str, Any]]:
         """
         Gives back the open orders including all base
         and safetyorders
         """
 
-        def decimal_serializer(obj):
-            if isinstance(obj, Decimal):
-                return str(obj)
-
         try:
             orders = await model.OpenTrades.all().values()
+            symbols = [order["symbol"] for order in orders]
+            if not symbols:
+                return []
+
+            baseorders = await model.Trades.filter(
+                Q(baseorder__gt=0), Q(symbol__in=symbols), join_type="AND"
+            ).values()
+            safetyorders = await model.Trades.filter(
+                Q(safetyorder__gt=0), Q(symbol__in=symbols), join_type="AND"
+            ).values()
+
+            base_by_symbol = {}
+            for order in baseorders:
+                base_by_symbol.setdefault(order["symbol"], order)
+
+            safety_by_symbol: dict[str, list[dict]] = {}
+            for order in safetyorders:
+                safety_by_symbol.setdefault(order["symbol"], []).append(order)
+
             for order in orders:
-
-                baseorder = await self.get_trade_by_ordertype(
-                    order["symbol"], baseorder=True
-                )
+                baseorder = base_by_symbol.get(order["symbol"])
                 if baseorder:
-                    order["baseorder"] = baseorder[0]
+                    order["baseorder"] = baseorder
 
-                safetyorders = await self.get_trade_by_ordertype(
-                    order["symbol"], baseorder=False
-                )
-                if safetyorders:
-                    order["safetyorders"] = safetyorders
-            return json.dumps(orders, default=decimal_serializer)
+                safety = safety_by_symbol.get(order["symbol"])
+                if safety:
+                    order["safetyorders"] = safety
+            return orders
         except Exception as e:
+            # Broad catch to keep open trades endpoint responsive.
             logging.error(f"Error getting open orders. Cause: {e}")
-            return json.dumps([{}])
+            return []
 
-    async def get_closed_trades(self, page=0):
+    async def get_closed_trades(self, page: int = 0) -> list[dict[str, Any]]:
+        """Return paginated closed trades."""
         try:
             # TODO: hardcoded to 10 entries per page right now
             size = 10
@@ -97,27 +124,33 @@ class Trades:
                     .limit(size)
                     .values()
                 )
-            return json.dumps(orders)
+            return orders
         except Exception as e:
+            # Broad catch to keep closed trades endpoint responsive.
             logging.error(f"Error getting closed orders. Cause: {e}")
-            return json.dumps([{}])
+            return []
 
-    async def get_closed_trades_length(self):
+    async def get_closed_trades_length(self) -> int:
+        """Return the total number of closed trades."""
         try:
             order_length = await model.ClosedTrades.all().count()
-            return json.dumps(order_length)
+            return order_length
         except Exception as e:
+            # Broad catch to keep count endpoint responsive.
             logging.error(f"Error getting closed order length. Cause: {e}")
-            return json.dumps([{}])
+            return 0
 
-    async def create_open_trades(self, payload):
+    async def create_open_trades(self, payload: dict[str, Any]) -> None:
+        """Create an open trade entry."""
         try:
             await model.OpenTrades.create(**payload)
             logging.debug(f"Added open trade for {payload['symbol']}.")
         except Exception as e:
+            # Broad catch to avoid crashing on database write errors.
             logging.error(f"Error creating open trade. Cause {e}")
 
-    async def update_open_trades(self, payload, symbol):
+    async def update_open_trades(self, payload: dict[str, Any], symbol: str) -> None:
+        """Update open trades for a symbol."""
         try:
             if await self.get_open_trades_by_symbol(symbol):
                 await model.OpenTrades.update_or_create(
@@ -125,36 +158,46 @@ class Trades:
                     symbol=symbol,
                 )
         except Exception as e:
+            # Broad catch to avoid crashing on database write errors.
             logging.error(f"Error updating SO count for {symbol}. Cause {e}")
 
-    async def create_trades(self, payload):
+    async def create_trades(self, payload: dict[str, Any]) -> None:
+        """Create a trade entry."""
         try:
             await model.Trades.create(**payload)
             logging.debug(f"Added trade for {payload['symbol']}.")
         except Exception as e:
+            # Broad catch to avoid crashing on database write errors.
             logging.error(f"Error creating trade. Cause {e}")
 
-    async def delete_open_trades(self, symbol):
+    async def delete_open_trades(self, symbol: str) -> None:
+        """Delete open trades for a symbol."""
         try:
             await model.OpenTrades.filter(symbol=symbol).delete()
             logging.debug(f"Deleted open trade for {symbol}.")
         except Exception as e:
+            # Broad catch to avoid crashing on database write errors.
             logging.error(f"Error deleting open trades for {symbol}. Cause {e}")
 
-    async def delete_trades(self, symbol):
+    async def delete_trades(self, symbol: str) -> None:
+        """Delete trades for a symbol."""
         try:
             await model.Trades.filter(symbol=symbol).delete()
             logging.debug(f"Deleted trade for {symbol}.")
         except Exception as e:
+            # Broad catch to avoid crashing on database write errors.
             logging.error(f"Error deleting trades for {symbol}. Cause {e}")
 
-    async def create_closed_trades(self, payload):
+    async def create_closed_trades(self, payload: dict[str, Any]) -> None:
+        """Create a closed trade entry."""
         try:
             await model.ClosedTrades.create(**payload)
         except Exception as e:
+            # Broad catch to avoid crashing on database write errors.
             logging.error(f"Error creating closed trade. Cause {e}")
 
-    async def get_token_amount_from_trades(self, symbol):
+    async def get_token_amount_from_trades(self, symbol: str) -> float | None:
+        """Return total token amount for a symbol."""
         try:
             result = (
                 await model.Trades.filter(symbol=symbol)
@@ -163,10 +206,12 @@ class Trades:
             )
             return result[0]
         except Exception as e:
+            # Broad catch to avoid crashing on database aggregation errors.
             logging.error(f"Error getting total amount from {symbol}. Cause {e}")
             return None
 
-    async def get_trades_for_orders(self, symbol):
+    async def get_trades_for_orders(self, symbol: str) -> dict[str, Any] | None:
+        """Return aggregated trade data for order processing."""
         trade_data = []
         total_cost = 0
         total_amount = 0
@@ -213,17 +258,20 @@ class Trades:
             }
 
             return trade_data
-        except Exception as e:
+        except Exception:
+            # Broad catch to return None when trade aggregation fails.
             # logging.debug(f"No trade for symbol {symbol} - Cause: {e}")
             return None
 
-    async def stop_trade(self, symbol):
+    async def stop_trade(self, symbol: str) -> bool:
+        """Stop a trade by removing open trade entries."""
         result = False
         try:
             # Remove open trade entry
             await self.delete_open_trades(symbol)
             result = True
         except Exception as e:
+            # Broad catch to keep stop trade operation resilient.
             logging.error(
                 f"Could not remove entries in OpenTrades for {symbol}. Cause {e}. Seems to be already removed."
             )
@@ -234,12 +282,14 @@ class Trades:
             await self.delete_trades(symbol)
             result = True
         except Exception as e:
+            # Broad catch to keep stop trade operation resilient.
             logging.error(
                 f"Could not remove entries in Trades for {symbol}. Cause {e}. Seems to be already removed."
             )
             pass
         return result
 
-    async def get_symbols(self):
+    async def get_symbols(self) -> list[str]:
+        """Return distinct trade symbols."""
         data = await model.Trades.all().distinct().values_list("symbol", flat=True)
         return data

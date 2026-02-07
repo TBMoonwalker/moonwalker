@@ -4,13 +4,13 @@ import ClosedTrades from '../components/ClosedTrades.vue'
 import Statistics from '@/components/Statistics.vue'
 import Charts from '@/components/Charts.vue'
 import { ConstructOutline } from '@vicons/ionicons5'
+import { NButton, NCard, NFlex, NIcon, NTabPane, NTabs } from 'naive-ui'
 
 import { useRouter } from 'vue-router' // Import useRouter
 
 const router = useRouter() // Initialize Vue Router
 
 function configureButtonClicked() {
-  console.log("Configure button clicked!")
   router.push('/config') // Navigate to the Configure component
   // You can add more logic here to handle what happens when the button is clicked
 }

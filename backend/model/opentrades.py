@@ -1,8 +1,12 @@
+"""Open trade model."""
+
 from tortoise import fields
 from tortoise.models import Model
 
 
 class OpenTrades(Model):
+    """Persisted open trade records."""
+
     symbol = fields.CharField(max_length=50, unique=True)
     so_count = fields.IntField(default=0)
     profit = fields.FloatField(default=0.0)

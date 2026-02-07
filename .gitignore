@@ -12,6 +12,8 @@ tests
 test*.py
 debugdb.py
 backend/strategies/btc.py
+moonwalker.lock
+moonwalker.pid
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

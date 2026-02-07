@@ -10,6 +10,18 @@ export default defineConfig({
     vue(),
     vueJsx(),
   ],
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          echarts: ['echarts', 'vue-echarts'],
+          naive: ['naive-ui'],
+          charts: ['lightweight-charts'],
+          vue: ['vue', 'vue-router', 'pinia', '@vueuse/core']
+        }
+      }
+    }
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url))

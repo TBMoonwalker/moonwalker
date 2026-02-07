@@ -1,18 +1,28 @@
-import model
-import helper
-import pandas as pd
-from service.trades import Trades
+"""Statistics aggregation for trading performance."""
+
 from datetime import datetime, timedelta
+from typing import Any
+
+import pandas as pd
 from tortoise.functions import Sum
+
+import helper
+import model
+from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/statistics.log", "statistic")
 
 
 class Statistic:
-    def __init__(self):
+    """Compute and persist trading statistics."""
+
+    def __init__(self) -> None:
         self.trades = Trades()
 
-    async def get_profits_overall(self, timestamp: None, period="daily"):
+    async def get_profits_overall(
+        self, timestamp: int | None, period: str = "daily"
+    ) -> dict[str, Any] | None:
+        """Return aggregated profits for the given time period."""
         profit_data = {}
         date = datetime.now()
         if timestamp:
@@ -57,11 +67,13 @@ class Statistic:
                     )
 
         except Exception as e:
+            # Broad catch to keep stats endpoints responsive.
             logging.error(f"Error getting profits for {period} data: {e}")
 
         return profit_data
 
-    async def get_profit(self):
+    async def get_profit(self) -> dict[str, Any]:
+        """Return profit, uPNL, and autopilot summaries."""
         profit_data = {}
 
         # uPNL
@@ -73,6 +85,7 @@ class Statistic:
             if upnl[0]:
                 profit_data["upnl"] = upnl[0]
         except Exception as e:
+            # Broad catch to keep stats endpoints responsive.
             logging.error(f"Error getting losses: {e}")
 
         # Profit overall
@@ -87,6 +100,7 @@ class Statistic:
                 profit_data["profit_overall"] = profit[0]
 
         except Exception as e:
+            # Broad catch to keep stats endpoints responsive.
             logging.error(f"Error getting profit: {e}")
 
         # Funds locked in deals
@@ -97,6 +111,7 @@ class Statistic:
             ).values_list("total", flat=True)
             profit_data["funds_locked"] = funds_locked[0]
         except Exception as e:
+            # Broad catch to keep stats endpoints responsive.
             logging.error(f"Error getting funds: {e}")
 
         # Autopilot mode
@@ -105,6 +120,7 @@ class Statistic:
             autopilot = await model.Autopilot.all().order_by("-id").first()
             profit_data["autopilot"] = autopilot.mode if autopilot else "none"
         except Exception as e:
+            # Broad catch to keep stats endpoints responsive.
             logging.error(f"Error getting autopilot mode: {e}")
 
         profit_data["profit_week"] = {}
@@ -122,11 +138,13 @@ class Statistic:
                 else:
                     profit_data["profit_week"][str(date)] += profit_day
         except Exception as e:
+            # Broad catch to keep stats endpoints responsive.
             logging.error(f"Error getting profits for the week: {e}")
 
         return profit_data
 
-    async def update_statistic_data(self, stats):
+    async def update_statistic_data(self, stats: dict[str, Any]) -> None:
+        """Update open trade statistics based on recent ticker data."""
         if stats["type"] != "dca_check":
             profit = (
                 stats["current_price"] * stats["total_amount"] - stats["total_cost"]

@@ -1,3 +1,5 @@
+"""ToTheMoon strategy."""
+
 import helper
 from service.filter import Filter
 from service.indicators import Indicators
@@ -6,12 +8,15 @@ logging = helper.LoggerFactory.get_logger("logs/strategies.log", "tothemoonv2")
 
 
 class Strategy:
-    def __init__(self, timeframe):
+    """ToTheMoon strategy implementation."""
+
+    def __init__(self, timeframe: str):
         self.timeframe = timeframe
         self.filter = Filter()
         self.indicators = Indicators()
 
-    async def run(self, symbol, type):
+    async def run(self, symbol: str, type: str) -> bool:
+        """Evaluate ToTheMoon conditions for a symbol."""
         result = False
 
         try:

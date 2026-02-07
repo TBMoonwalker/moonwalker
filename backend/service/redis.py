@@ -1,12 +1,13 @@
-import redis.asyncio as redis
-import subprocess
+"""Redis client and local subprocess lifecycle helpers."""
+
 import atexit
+import subprocess
+
+import redis.asyncio as redis
 
 
-def start_redis():
-    """
-    Start a local Redis server as a subprocess.
-    """
+def start_redis() -> subprocess.Popen:
+    """Start a local Redis server as a subprocess."""
     proc = subprocess.Popen(
         ["redis-server", "--save", "", "--appendonly", "no"],
         stdout=subprocess.DEVNULL,

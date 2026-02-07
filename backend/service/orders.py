@@ -1,7 +1,11 @@
-import helper
+"""Order orchestration for exchange buy/sell actions."""
+
 import json
 import time
 from datetime import datetime
+from typing import Any
+
+import helper
 from service.trades import Trades
 from service.exchange import Exchange
 
@@ -9,12 +13,17 @@ logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
 
 
 class Orders:
+    """Handle incoming buy/sell signals and persist trades."""
+
     def __init__(self):
         self.utils = helper.Utils()
         self.exchange = Exchange()
         self.trades = Trades()
 
-    async def receive_sell_order(self, order, config):
+    async def receive_sell_order(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> None:
+        """Create a sell order and persist closed trades."""
         logging.info(f"Incoming sell order for {order['symbol']}")
 
         order["total_amount"] = await self.trades.get_token_amount_from_trades(
@@ -34,6 +43,7 @@ class Orders:
             try:
                 open_timestamp = float(base_order[0]["timestamp"])
             except Exception as e:
+                # Broad catch: base order may be missing or malformed.
                 open_timestamp = datetime.timestamp(datetime.now())
                 logging.debug(
                     f"Did not found a timestamp - taking default value. Cause {e}"
@@ -79,7 +89,10 @@ class Orders:
         else:
             logging.error(f"Failed creating sell order for {order['symbol']}")
 
-    async def receive_buy_order(self, order, config):
+    async def receive_buy_order(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> None:
+        """Create a buy order and persist open trades."""
 
         logging.info(f"Incoming buy order for {order['symbol']}")
 
@@ -116,7 +129,8 @@ class Orders:
         else:
             logging.error(f"Failed creating buy order for {order['symbol']}")
 
-    async def receive_stop_signal(self, symbol):
+    async def receive_stop_signal(self, symbol: str) -> bool:
+        """Stop trading for a symbol."""
         logging.info("Incoming stop order")
         symbol = symbol.upper()
         token, currency = symbol.split("-")
@@ -127,7 +141,8 @@ class Orders:
             logging.error(f"Cannot stop trade for {symbol}. See trade logs for errors.")
         return False
 
-    async def receive_sell_signal(self, symbol, config):
+    async def receive_sell_signal(self, symbol: str, config: dict[str, Any]) -> bool:
+        """Handle a manual sell signal."""
         symbol = symbol.upper()
         token, currency = symbol.split("-")
         symbol = f"{token}/{currency}"
@@ -158,7 +173,10 @@ class Orders:
             await self.trades.delete_open_trades(symbol)
             return False
 
-    async def receive_buy_signal(self, symbol, ordersize, config):
+    async def receive_buy_signal(
+        self, symbol: str, ordersize: float, config: dict[str, Any]
+    ) -> bool:
+        """Handle a manual buy signal."""
         symbol = symbol.upper()
         token, currency = symbol.split("-")
         symbol = f"{token}/{currency}"
@@ -189,7 +207,8 @@ class Orders:
         else:
             return False
 
-    def __calculate_trade_duration(self, start_date, end_date):
+    def __calculate_trade_duration(self, start_date: float, end_date: float) -> str:
+        """Calculate trade duration as a JSON string."""
         # Convert Unix timestamps to datetime objects
         date1 = datetime.fromtimestamp((start_date / 1000.0))
         date2 = datetime.fromtimestamp(end_date / 1000.0)

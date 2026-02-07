@@ -9,6 +9,7 @@
 import { ref, watch } from 'vue'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
+import { NStatistic } from 'naive-ui'
 
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
@@ -21,9 +22,9 @@ const autopilot_mode = ref()
 const autopilot_class = ref()
 
 // Get new statistics data
-watch(statistics_data.json, async (newData) => {
-    if (newData !== undefined) {
-        const websocket_data = JSON.parse(newData)
+watch(statistics_data.data, async (newData) => {
+    if (newData !== undefined && newData !== null) {
+        const websocket_data = newData as any
         if (websocket_data.upnl === null) {
             upnl.value = 0.0
         } else {
@@ -57,14 +58,6 @@ watch(statistics_data.json, async (newData) => {
 }, { immediate: true })
 
 function row_classes(data: any) {
-    if (Math.sign(data) >= 0) {
-        return 'green'
-    } else {
-        return 'red'
-    }
-}
-
-function autopilot_classes(data: any) {
     if (Math.sign(data) >= 0) {
         return 'green'
     } else {

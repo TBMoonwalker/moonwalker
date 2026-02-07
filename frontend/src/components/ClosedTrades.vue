@@ -4,14 +4,15 @@
 </template>
 
 <script setup lang="ts">
-import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
-import { ref, watch, reactive } from 'vue'
-import { type DataTableColumns } from 'naive-ui'
+import { onMounted, ref, watch, reactive } from 'vue'
+import { type DataTableColumns, NDataTable } from 'naive-ui'
 import { useWebSocketDataStore } from '../stores/websocket'
+import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
-import { isFloat, isJsonString } from '../helpers/validators'
+import { fetchJson } from '../api/client'
 const closed_trade_store = useWebSocketDataStore("closedTrades")
 const closed_trade_data = storeToRefs(closed_trade_store)
+const trades_store = useTradesStore()
 // Only fetch the 10 actual closed trades with websocket - other ones get with direct api call!!!
 const closed_trades = ref()
 const closed_trades_length = ref()
@@ -38,50 +39,11 @@ const updateData = async (currentPage: number) => {
         paged_closed_trades.value = data.value
     } else {
         pagination = (currentPage - 1) * pageReactive.pageSize
-        const data = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/trades/closed/${pagination}`).then((response) =>
-            response.json()
-        )
-
-        paged_closed_trades.value = await convertData(data)
+        const data = await fetchJson(`/trades/closed/${pagination}`)
+        trades_store.setClosedTrades(data)
+        paged_closed_trades.value = trades_store.closedTrades
     }
 
-}
-
-async function convertData(data: any) {
-    const convert_data = ref(data)
-    data.forEach(function (val: any, i: any) {
-        var amount_length = 0
-        if (isFloat(val.amount)) {
-            amount_length = convert_data.value[i].amount.toString().split('.')[1].length
-        }
-
-        convert_data.value[i].cost = val.cost.toFixed(2)
-        convert_data.value[i].profit = val.profit.toFixed(2)
-        convert_data.value[i].profit_percent = val.profit_percent.toFixed(2)
-        convert_data.value[i].amount = val.amount.toFixed(amount_length)
-        convert_data.value[i].key = val.id
-        let timestamp: number = Date.parse(val.close_date)
-        let date = new Date(timestamp)
-        convert_data.value[i].close_date = date.toLocaleString()
-
-        if (isJsonString(convert_data.value[i].duration)) {
-            const duration = JSON.parse(convert_data.value[i].duration)
-            if (duration['days'] != 0) {
-                convert_data.value[i].duration = duration['days'] + " days"
-            } else if (duration['days'] == 0 && duration['hours'] != 0) {
-                convert_data.value[i].duration = duration['hours'] + " hours"
-            } else if (duration['hours'] == 0 && duration['minutes'] != 0) {
-                convert_data.value[i].duration = duration['minutes'] + " minutes"
-            } else if (duration['minutes'] == 0 && duration['seconds'] != 0) {
-                convert_data.value[i].duration = duration['seconds'] + " seconds"
-            }
-        } else {
-            convert_data.value[i].duration = "na"
-        }
-
-    })
-
-    return data
 }
 
 const handlePageChange = async (currentPage: any) => {
@@ -89,22 +51,33 @@ const handlePageChange = async (currentPage: any) => {
     updateData(currentPage)
 }
 
-// Get new order data
-watch(closed_trade_data.json, async (newData) => {
-    if (newData !== undefined) {
-        const websocket_data: RowData[] = JSON.parse(newData)
-        closed_trades.value = websocket_data
-        closed_trades.value = await convertData(websocket_data)
+const refreshLength = async () => {
+    if (closed_trades_length.value !== undefined) {
+        return
+    }
+    const response = await fetchJson<{ result: number }>('/trades/closed/length')
+    closed_trades_length.value = response.result
+    updatePageCount()
+}
 
-        // Get actual closed orders length to calculate pagination
-        closed_trades_length.value = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/trades/closed/length`).then((response) =>
-            response.json()
-        )
-        updatePageCount()
-        updateData(pageReactive.page)
+// Get new order data
+watch(closed_trade_data.data, async (newData) => {
+    if (newData !== undefined) {
+        const websocket_data: RowData[] = newData as RowData[]
+        trades_store.setClosedTrades(websocket_data)
+        closed_trades.value = trades_store.closedTrades
+
+        await refreshLength()
+        if (pageReactive.page === 1) {
+            updateData(pageReactive.page)
+        }
     }
 
 }, { immediate: true })
+
+onMounted(async () => {
+    await refreshLength()
+})
 
 type RowData = {
     id: number

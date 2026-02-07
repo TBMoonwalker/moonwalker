@@ -1,6 +1,4 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import TradesView from '../views/TradesView.vue'
-import ConfigView from '../views/ConfigView.vue'
 
 const router = createRouter({
   history: createWebHistory(import.meta.env.BASE_URL),
@@ -8,12 +6,12 @@ const router = createRouter({
     {
       path: '/',
       name: 'trades',
-      component: TradesView
+      component: () => import('../views/TradesView.vue')
     },
     {
       path: '/config',
       name: 'config',
-      component: ConfigView
+      component: () => import('../views/ConfigView.vue')
     },
   ]
 })

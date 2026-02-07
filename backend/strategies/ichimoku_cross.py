@@ -1,3 +1,7 @@
+"""Ichimoku cross strategy."""
+
+from typing import Any
+
 import helper
 from service.filter import Filter
 from service.indicators import Indicators
@@ -6,12 +10,15 @@ logging = helper.LoggerFactory.get_logger("logs/strategies.log", "ichimoku_cross
 
 
 class Strategy:
-    def __init__(self, timeframe, btc_pulse=None):
+    """Ichimoku cross strategy implementation."""
+
+    def __init__(self, timeframe: str, btc_pulse: Any | None = None):
         self.timeframe = timeframe
         self.filter = Filter()
         self.indicators = Indicators()
 
-    async def run(self, symbol, type):
+    async def run(self, symbol: str, type: str) -> bool:
+        """Evaluate Ichimoku cross conditions for a symbol."""
         result = False
 
         try:

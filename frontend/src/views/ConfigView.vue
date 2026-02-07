@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import Config from '../components/Config.vue'
+import { NFlex } from 'naive-ui'
 </script>
 
 <template>

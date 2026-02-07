@@ -1,3 +1,5 @@
+"""Statistics API endpoints."""
+
 import asyncio
 import json
 from typing import Any
@@ -34,7 +36,9 @@ async def profit() -> None:
         # Handle disconnection gracefully
         logging.info("Client disconnected from profit WebSocket")
         raise
-    except Exception as exc:  # noqa: BLE001 - Catch all exceptions to prevent WebSocket hang
+    except (
+        Exception
+    ) as exc:  # noqa: BLE001 - Catch all exceptions to prevent WebSocket hang
         logging.error("Error in profit WebSocket: %s", exc, exc_info=True)
         raise
 

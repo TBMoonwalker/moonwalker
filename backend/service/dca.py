@@ -1,16 +1,21 @@
-import helper
+"""DCA strategy handling and order logic."""
+
 import importlib
 from datetime import datetime, timedelta
+from typing import Any
+
+import helper
 from service.autopilot import Autopilot
 from service.statistic import Statistic
 from service.orders import Orders
 from service.trades import Trades
 
-
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 
 
 class Dca:
+    """DCA engine for processing ticker data and managing orders."""
+
     def __init__(self):
 
         self.autopilot = Autopilot()
@@ -19,6 +24,7 @@ class Dca:
         self.trades = Trades()
         self.utils = helper.Utils()
         self.config = None
+        self._strategy_cache: dict[tuple[str, str, str], object] = {}
 
         # Class attributes
         Dca.pnl = {}
@@ -27,15 +33,14 @@ class Dca:
         result = False
 
         if self.config.get("dca_strategy", None):
-            dca_strategy = importlib.import_module(
-                f"strategies.{self.config.get('dca_strategy')}"
-            )
-            dca_strategy_plugin = dca_strategy.Strategy(
-                timeframe=self.config.get("strategy_timeframe", "1m")
+            dca_strategy_plugin = self.__get_strategy_plugin(
+                self.config.get("dca_strategy"),
+                self.config.get("strategy_timeframe", "1m"),
+                "dca",
             )
 
-            #token, currency = symbol.split("/")
-            #symbol = f"{token}{currency}"
+            # token, currency = symbol.split("/")
+            # symbol = f"{token}{currency}"
 
             result = await dca_strategy_plugin.run(symbol, "buy")
 
@@ -45,11 +50,10 @@ class Dca:
         result = False
 
         if self.config.get("tp_strategy", None):
-            tp_strategy = importlib.import_module(
-                f"strategies.{self.config.get('tp_strategy')}"
-            )
-            tp_strategy_plugin = tp_strategy.Strategy(
-                timeframe=self.config.get("tp_strategy_timeframe", "1m")
+            tp_strategy_plugin = self.__get_strategy_plugin(
+                self.config.get("tp_strategy"),
+                self.config.get("tp_strategy_timeframe", "1m"),
+                "tp",
             )
 
             token, currency = symbol.split("/")
@@ -58,6 +62,17 @@ class Dca:
             result = tp_strategy_plugin.run(symbol, "sell")
 
         return result
+
+    def __get_strategy_plugin(self, name: str, timeframe: str, kind: str):
+        cache_key = (kind, name, timeframe)
+        cached = self._strategy_cache.get(cache_key)
+        if cached:
+            return cached
+
+        module = importlib.import_module(f"strategies.{name}")
+        plugin = module.Strategy(timeframe=timeframe)
+        self._strategy_cache[cache_key] = plugin
+        return plugin
 
     async def __calculate_tp(self, current_price, trades):
         trailing_tp = self.config.get("trailing_tp", 0)
@@ -98,7 +113,7 @@ class Dca:
         if trailing_tp > 0:
             if sell or trades["symbol"] in Dca.pnl:
                 # Initialize new symbols
-                if not trades["symbol"] in Dca.pnl:
+                if trades["symbol"] not in Dca.pnl:
                     Dca.pnl[trades["symbol"]] = 0.0
 
                 if (
@@ -206,9 +221,9 @@ class Dca:
         # Check if safety orders exist yet
         if trades["safetyorders"] and max_safety_orders:
             safety_order_size = trades["safetyorders"][-1]["ordersize"] * volume_scale
-            next_so_percentage = float(
-                trades["safetyorders"][-1]["so_percentage"]
-            ) * step_scale
+            next_so_percentage = (
+                float(trades["safetyorders"][-1]["so_percentage"]) * step_scale
+            )
             if len(trades["safetyorders"]) >= 2:
                 next_so_percentage = -abs(next_so_percentage) + -abs(
                     float(trades["safetyorders"][-2]["so_percentage"])
@@ -274,7 +289,10 @@ class Dca:
                 f"Max safety orders reached for {trades['symbol']}. Not opening more."
             )
 
-    async def process_ticker_data(self, ticker, config):
+    async def process_ticker_data(
+        self, ticker: dict[str, Any], config: dict[str, Any]
+    ) -> None:
+        """Process incoming ticker data and trigger DCA actions."""
         # Get config
         self.config = config
 

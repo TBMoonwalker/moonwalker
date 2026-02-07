@@ -1,3 +1,5 @@
+"""Order API endpoints."""
+
 from typing import Any
 
 import helper

@@ -1,16 +1,23 @@
-import ccxt.async_support as ccxt
-import decimal
-import uuid
-import time
-import helper
-from datetime import datetime
-from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
+"""Exchange service for CCXT async operations."""
+
 import asyncio
+import decimal
+import time
+import uuid
+from datetime import datetime
+from typing import Any
+
+import ccxt.async_support as ccxt
+from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
+
+import helper
 
 logging = helper.LoggerFactory.get_logger("logs/exchange.log", "exchange")
 
 
 class Exchange:
+    """Exchange wrapper for CCXT async operations."""
+
     def __init__(
         self,
     ):
@@ -19,46 +26,100 @@ class Exchange:
         self.config = None
         self.status = True
         Exchange.sell_retry_count = 0
+        self._exchange_config = None
+        self._markets_loaded = False
+        self._exchange_lock = asyncio.Lock()
 
+    async def __close_exchange(self) -> None:
+        if self.exchange is None:
+            return
+
+        try:
+            await self.exchange.close()
+        except Exception as exc:
+            logging.warning(f"Failed to close exchange client cleanly: {exc}")
+        finally:
+            self.exchange = None
+            self._markets_loaded = False
+            self._exchange_config = None
+
+    async def close(self) -> None:
+        """Close the underlying exchange client."""
+        await self.__close_exchange()
+
+    def __build_exchange_config(self, config: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "exchange": config.get("exchange"),
+            "key": config.get("key"),
+            "secret": config.get("secret"),
+            "market": config.get("market", "spot"),
+            "sandbox": config.get("sandbox", False),
+        }
+
+    async def __ensure_exchange(self, config: dict[str, Any]) -> None:
+        desired_config = self.__build_exchange_config(config)
+        async with self._exchange_lock:
+            if self.exchange is not None and self._exchange_config == desired_config:
+                return
+
+            if self.exchange is not None:
+                await self.__close_exchange()
+
+            self.exchange = await self.__init_exchange(config)
+            self._exchange_config = desired_config
+            self._markets_loaded = False
+
+    async def __ensure_markets_loaded(self) -> None:
+        if self._markets_loaded:
+            return
+        async with self._exchange_lock:
+            if not self._markets_loaded:
+                await self.exchange.load_markets()
+                self._markets_loaded = True
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
-    async def parse_iso_timestamp(self, config, date):
-        self.exchange = await self.__init_exchange(config)
+    async def parse_iso_timestamp(self, config: dict[str, Any], date: str) -> int:
+        """Parse an ISO-8601 date string using the exchange parser."""
+        await self.__ensure_exchange(config)
         timestamp = None
         try:
             timestamp = self.exchange.parse8601(date)
         except ccxt.ExchangeError as e:
-            logging.error(
-                f"Error converting timestamp due to an exchange error: {e}"
-            )
+            logging.error(f"Error converting timestamp due to an exchange error: {e}")
             raise TryAgain
         except ccxt.NetworkError as e:
-            logging.error(
-                f"Error converting timestamp due to a network error: {e}"
-            )
+            logging.error(f"Error converting timestamp due to a network error: {e}")
             raise TryAgain
         except ccxt.BaseError as e:
             logging.error(f"Converting timestamp failed due to an error: {e}")
             raise TryAgain
         except Exception as e:
+            # Broad catch to retry on unexpected exchange errors.
             logging.error(f"Converting timestamp failed with: {e}")
             raise TryAgain
-        
+
         return timestamp
 
-    async def get_history_for_symbol(self, config, symbol, timeframe, limit=1, since=0):
-        self.exchange = await self.__init_exchange(config)
-        await self.exchange.load_markets()
+    async def get_history_for_symbol(
+        self,
+        config: dict[str, Any],
+        symbol: str,
+        timeframe: str,
+        limit: int = 1,
+        since: int = 0,
+    ) -> list[list[Any]]:
+        """Fetch historical OHLCV data for a symbol."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
         ohlcv = None
         if symbol not in self.exchange.markets:
             logging.error(f"{symbol} not found")
             return ohlcv
-        
+
         timeframe_ms = self.exchange.parse_timeframe(timeframe) * 1000
         now = self.exchange.milliseconds()
 
         all_candles = []
-        retries = 0
 
         while since < now:
             try:
@@ -76,14 +137,19 @@ class Exchange:
 
                 since = candles[-1][0] + timeframe_ms
 
-            except (Exception, ccxt.NetworkError, ccxt.ExchangeError, ccxt.BaseError) as e:
+            except (
+                Exception,
+                ccxt.NetworkError,
+                ccxt.ExchangeError,
+                ccxt.BaseError,
+            ) as e:
+                # Broad catch to continue paging through historical data.
                 logging.error(f"Fetching historical data failed due to an error: {e}")
 
         return all_candles
-        
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
-    async def __get_price_for_symbol(self, pair):
+    async def __get_price_for_symbol(self, pair: str) -> str:
         """Gets the actual price for the given symbol/currency pair
 
         Parameters
@@ -120,13 +186,14 @@ class Exchange:
             logging.error(f"Fetching ticker messages failed due to an error: {e}")
             raise TryAgain
         except Exception as e:
+            # Broad catch to retry on unexpected exchange errors.
             logging.error(f"Fetching ticker messages failed with: {e}")
             raise TryAgain
 
         return result
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
-    async def __get_precision_for_symbol(self, pair):
+    async def __get_precision_for_symbol(self, pair: str) -> Any:
 
         result = None
 
@@ -143,15 +210,16 @@ class Exchange:
             logging.error(f"Fetching market data failed due to an error: {e}")
             raise TryAgain
         except Exception as e:
+            # Broad catch to retry on unexpected exchange errors.
             logging.error(f"FFetching market data failed failed with: {e}")
             raise TryAgain
 
         return result
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
-    async def __get_trades_for_symbol(self, symbol, orderid):
+    async def __get_trades_for_symbol(self, symbol: str, orderid: str) -> dict | None:
         trade = None
-        time.sleep(1)
+        await asyncio.sleep(1)
         since = self.exchange.milliseconds() - (
             self.config.get("order_check_range", 5) * 1000
         )  # X seconds from now
@@ -192,12 +260,13 @@ class Exchange:
             logging.error(f"Fetch trade order failed due to an error: {e}")
             raise TryAgain
         except Exception as e:
+            # Broad catch to retry on unexpected exchange errors.
             logging.error(f"Fetch trade order failed with: {e}")
             raise TryAgain
 
         return trade
 
-    async def __parse_order_status(self, order):
+    async def __parse_order_status(self, order: dict[str, Any]) -> dict[str, Any]:
         data = {}
 
         if self.config.get("dry_run", True):
@@ -235,7 +304,7 @@ class Exchange:
         return data
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
-    async def __get_amount_from_symbol(self, ordersize, symbol) -> float:
+    async def __get_amount_from_symbol(self, ordersize: float, symbol: str) -> str:
         price = await self.__get_price_for_symbol(symbol)
         amount = None
         try:
@@ -256,12 +325,13 @@ class Exchange:
             logging.error(f"Getting amount for {symbol} failed due to an error: {e}")
             raise TryAgain
         except Exception as e:
+            # Broad catch to retry on unexpected exchange errors.
             logging.error(f"Getting amount for {symbol} failed with: {e}")
             raise TryAgain
 
         return amount
 
-    async def __init_exchange(self, config):
+    async def __init_exchange(self, config: dict[str, Any]):
         exchange = None
 
         if config.get("exchange", None):
@@ -278,9 +348,12 @@ class Exchange:
 
         return exchange
 
-    async def create_spot_market_buy(self, order, config):
-        self.exchange = await self.__init_exchange(config)
-        await self.exchange.load_markets()
+    async def create_spot_market_buy(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Create a spot market buy order."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
         self.config = config
         order["amount"] = await self.__get_amount_from_symbol(
             order["ordersize"], order["symbol"]
@@ -290,7 +363,7 @@ class Exchange:
             order["info"] = {}
             order["info"]["orderId"] = uuid.uuid4()
             order["timestamp"] = time.mktime(datetime.now().timetuple()) * 1000
-            time.sleep(0.2)
+            await asyncio.sleep(0.2)
         else:
             try:
                 logging.info(f"Try to buy {order['amount']} {order['symbol']}")
@@ -320,6 +393,7 @@ class Exchange:
                 )
                 order = None
             except Exception as e:
+                # Broad catch to surface unexpected exchange errors.
                 logging.error(f"Buying pair {order['symbol']} failed with: {e}")
                 order = None
 
@@ -328,7 +402,9 @@ class Exchange:
 
             order_status = await self.__parse_order_status(order)
             order.update(order_status)
-            order["precision"] = await self.__get_precision_for_symbol(order_status["symbol"])
+            order["precision"] = await self.__get_precision_for_symbol(
+                order_status["symbol"]
+            )
             order["amount"] = float(order_status["amount"])
             order["amount_fee"] = 0.0
             order["fees"] = 0.0
@@ -356,13 +432,15 @@ class Exchange:
                     )
                     order = None
                 except Exception as e:
+                    # Broad catch to surface unexpected exchange errors.
                     logging.error(f"Buying pair {order['symbol']} failed with: {e}")
                     order = None
                 order["amount_fee"] = order["amount"] * float(order["fees"])
                 order["amount"] = float(order_status["amount"]) - order["amount_fee"]
 
                 logging.debug(
-                    f"Fee Deduction not active. Real amount {order_status['amount']}, deducted amount {order['amount']}"
+                    "Fee Deduction not active. Real amount "
+                    f"{order_status['amount']}, deducted amount {order['amount']}"
                 )
 
             logging.debug(order)
@@ -370,8 +448,11 @@ class Exchange:
             return order
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(200))
-    async def create_spot_market_sell(self, order, config):
-        self.exchange = await self.__init_exchange(config)
+    async def create_spot_market_sell(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Create a spot market sell order."""
+        await self.__ensure_exchange(config)
         self.config = config
         order["info"] = {}
 
@@ -381,7 +462,7 @@ class Exchange:
             order["amount"] = order["total_amount"]
             order["info"]["orderId"] = uuid.uuid4()
             order["price"] = order["current_price"]
-            time.sleep(0.2)
+            await asyncio.sleep(0.2)
         else:
             try:
                 # Implement sell safeguard, if we cannot sell full amount
@@ -432,6 +513,7 @@ class Exchange:
                 )
                 order = None
             except Exception as e:
+                # Broad catch to surface unexpected exchange errors.
                 logging.error(f"Selling pair {order['symbol']} failed with: {e}")
                 order = None
 

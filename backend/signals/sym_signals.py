@@ -1,21 +1,27 @@
-import model
-import helper
+"""SymSignals plugin implementation."""
+
 import asyncio
-import socketio
 import json
-from typing import Any, Optional, Dict, List
-from service.autopilot import Autopilot
-from service.orders import Orders
-from service.filter import Filter
-from service.data import Data
-from service.statistic import Statistic
+from typing import Any
+
+import socketio
 from socketio.exceptions import TimeoutError
+
+import helper
+import model
+from service.autopilot import Autopilot
+from service.data import Data
+from service.filter import Filter
+from service.orders import Orders
+from service.statistic import Statistic
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "sym_signals")
 
 
 class SignalPlugin:
-    def __init__(self, watcher_queue):
+    """SymSignals signal plugin for real-time signal ingestion."""
+
+    def __init__(self, watcher_queue: asyncio.Queue):
         self.utils = helper.Utils()
         self.autopilot = Autopilot()
         self.orders = Orders()
@@ -55,6 +61,7 @@ class SignalPlugin:
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True
         except Exception as e:
+            # Broad catch to avoid stopping the signal loop.
             logging.error(
                 f"Couldn't get actual list of bots - not starting new deals! Cause: {e}"
             )
@@ -62,7 +69,7 @@ class SignalPlugin:
 
         return result
 
-    def __check_entry_point(self, event: Dict[str, Any]) -> bool:
+    def __check_entry_point(self, event: dict[str, Any]) -> bool:
         """Check if a signal event meets all entry criteria for trading.
 
         Validates the signal event against various filters including allow/denylist,
@@ -75,7 +82,9 @@ class SignalPlugin:
             True if signal passes all entry checks, False otherwise
         """
         currency = self.config.get("currency").upper()
-        signal_settings = json.loads(json.dumps(eval(self.config.get("signal_settings"))))
+        signal_settings = json.loads(
+            json.dumps(eval(self.config.get("signal_settings")))
+        )
         pair_denylist = (
             self.config.get("pair_denylist", None).split(",")
             if self.config.get("pair_denylist", None)
@@ -97,15 +106,9 @@ class SignalPlugin:
             btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
 
         if btc_pulse:
-            signal_name = event["signal_name"]
             symbol = event["symbol"]
             signal = event["signal"]
             signal_id = event["signal_name_id"]
-            sym_rank = event["sym_rank"]
-            sym_score = event["sym_score"]
-            sym_sense = event["sym_sense"]
-            vol_score = event["volatility_score"]
-            price_action_score = event["price_action_score"]
             market_cap_rank = event["market_cap_rank"]
             volume_24h = event["volume_24h"]
             volume_range = None
@@ -113,16 +116,14 @@ class SignalPlugin:
 
             for exchange in volume_24h:
                 if exchange == self.config.get("exchange").upper():
-                    if volume_24h[exchange].get(currency) != None:
+                    if volume_24h[exchange].get(currency) is not None:
                         # DirtyFix: Some volume data misses "k", "M" or "B"
                         if isinstance(volume_24h[exchange].get(currency), float):
                             volume_range = "k"
                             volume_size = volume_24h[exchange][currency]
                         else:
                             volume_range = volume_24h[exchange][currency][-1]
-                            volume_size = float(
-                                volume_24h[exchange][currency][:-1]
-                            )
+                            volume_size = float(volume_24h[exchange][currency][:-1])
                     break
             if (
                 signal_id in signal_settings["allowed_signals"]
@@ -130,9 +131,7 @@ class SignalPlugin:
                 and self.filter.is_within_topcoin_limit(
                     market_cap_rank, self.config.get("topcoin_limit", None)
                 )
-                and self.filter.has_enough_volume(
-                    volume_range, volume_size, volume
-                )
+                and self.filter.has_enough_volume(volume_range, volume_size, volume)
                 and not self.filter.is_on_deny_list(symbol, pair_denylist)
                 and signal == "BOT_START"
             ):
@@ -143,7 +142,7 @@ class SignalPlugin:
             logging.info("BTC-Pulse is in downtrend - not starting new deals!")
             return False
 
-    async def run(self, config: Dict[str, Any]) -> None:
+    async def run(self, config: dict[str, Any]) -> None:
         """Main execution loop for the SymSignals plugin.
 
         Connects to the SymSignals WebSocket, receives signal events, validates them,
@@ -158,7 +157,9 @@ class SignalPlugin:
         """
         self.config = config
         currency = self.config.get("currency").upper()
-        signal_settings = json.loads(json.dumps(eval(self.config.get("signal_settings"))))
+        signal_settings = json.loads(
+            json.dumps(eval(self.config.get("signal_settings")))
+        )
         async with socketio.AsyncSimpleClient() as sio:
             while self.status:
                 if not sio.connected:
@@ -176,10 +177,11 @@ class SignalPlugin:
                         )
                         connection_success = True
                     except Exception as e:
+                        # Broad catch to keep reconnect loop alive.
                         logging.error(f"Failed to connect to sym signal websocket: {e}")
 
                     if not connection_success:
-                        logging.info(f"Reconnect attempt in 10 seconds")
+                        logging.info("Reconnect attempt in 10 seconds")
                         await asyncio.sleep(10)
                         continue
                 try:
@@ -191,8 +193,9 @@ class SignalPlugin:
                         if not max_bots:
                             if self.__check_entry_point(
                                 event[1]
-                            ) and await self.data.is_token_old_enough(self.config,
-                                self.utils.split_symbol(symbol, currency)
+                            ) and await self.data.is_token_old_enough(
+                                self.config,
+                                self.utils.split_symbol(symbol, currency),
                             ):
                                 running_trades = (
                                     await model.Trades.all()
@@ -214,8 +217,12 @@ class SignalPlugin:
 
                                     # Automatically subscribe to reduce load
                                     if self.config.get("dynamic_dca", False):
-                                        success = await Data().add_history_data_for_symbol(
-                                            symbol_full, history_data, self.config
+                                        success = (
+                                            await Data().add_history_data_for_symbol(
+                                                symbol_full,
+                                                history_data,
+                                                self.config,
+                                            )
                                         )
                                         if not success:
                                             logging.error(
@@ -237,7 +244,9 @@ class SignalPlugin:
                                         "so_percentage": None,
                                         "side": "buy",
                                     }
-                                    await self.orders.receive_buy_order(order, self.config)
+                                    await self.orders.receive_buy_order(
+                                        order, self.config
+                                    )
                         else:
                             logging.debug(
                                 f"Max Bots: {max_bots}. Max bots reached, waiting for a new slot"
@@ -246,6 +255,12 @@ class SignalPlugin:
                     logging.error(
                         "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"
                     )
+                    await sio.disconnect()
+                    continue
+                except Exception as e:
+                    # Broad catch to keep signal loop alive.
+                    logging.error(f"Error receiving signal - reconnecting. Cause: {e}")
+                    await asyncio.sleep(10)
                     await sio.disconnect()
                     continue
 

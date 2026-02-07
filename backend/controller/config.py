@@ -1,3 +1,5 @@
+"""Configuration API endpoints."""
+
 from typing import Any
 
 import helper
@@ -67,6 +69,7 @@ async def update_config_key(key: str) -> tuple[Any, int]:
     else:
         return jsonify({"error": "Update failed - check config.log"}), 400
 
+
 @controller.route("/config/multiple", methods=["POST"])
 @route_cors(allow_origin="*")
 async def update_multiple_config_keys() -> tuple[Any, int]:
@@ -83,13 +86,10 @@ async def update_multiple_config_keys() -> tuple[Any, int]:
     if not isinstance(data, dict):
         return jsonify({"error": "'data' must be a JSON object"}), 400
 
-    # Initialize the response
-    response = {"updated": []}
-
     config = await Config.instance()
     success = await config.batch_set(data)
 
     if success:
-        return jsonify({"message": f"Config updated"})
+        return jsonify({"message": "Config updated"})
     else:
         return jsonify({"error": "Update failed - check config.log"}), 400

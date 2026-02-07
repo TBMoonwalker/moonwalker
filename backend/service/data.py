@@ -1,31 +1,39 @@
+"""Data access helpers for OHLCV and listings."""
+
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
+import pandas as pd
 
 import helper
 import model
-import pandas as pd
-from datetime import datetime, timedelta, timezone
 from service.exchange import Exchange
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
 
 
 class Data:
-    def __init__(self):
+    """Data retrieval and transformation utilities."""
+
+    def __init__(self) -> None:
         utils = helper.Utils()
         self.exchange = Exchange()
         self.utils = utils
 
-    async def get_listing_date(self, config, symbol: str) -> datetime:
-        """
-        Fetch the listing date of a token, using SQLite cache with Tortoise ORM.
-        """
+    async def get_listing_date(
+        self, config: dict[str, Any], symbol: str
+    ) -> datetime | None:
+        """Fetch the listing date of a token, using SQLite cache."""
         # Check cache first
         listing = await model.Listings.get_or_none(symbol=symbol)
         if listing:
             return listing.listing_date
 
-        # If not cached → fetch from exchange        
+        # If not cached -> fetch from exchange
         try:
-            ohlcv = await self.exchange.get_history_for_symbol(config, symbol, timeframe="1d")
+            ohlcv = await self.exchange.get_history_for_symbol(
+                config, symbol, timeframe="1d"
+            )
             if not ohlcv:
                 logging.error(f"No OHLCV data available for {symbol}")
             else:
@@ -38,14 +46,13 @@ class Data:
                 await model.Listings.create(symbol=symbol, listing_date=listing_date)
                 return listing_date
         except Exception as e:
+            # Broad catch to keep listing lookups resilient.
             logging.error(f"Error fetching OHLCV for {symbol}: {e}")
 
         return None
 
-    async def is_token_old_enough(self, config, symbol: str) -> bool:
-        """
-        Return False if token is newer than threshold_days, True otherwise.
-        """
+    async def is_token_old_enough(self, config: dict[str, Any], symbol: str) -> bool:
+        """Return False if token is newer than threshold_days, True otherwise."""
         threshold_days = config.get("pair_age", 30)
         listing_date = await self.get_listing_date(config, symbol)
         if listing_date:
@@ -54,11 +61,13 @@ class Data:
         else:
             return False
 
-    async def get_ticker_symbol_list(self):
+    async def get_ticker_symbol_list(self) -> list[str]:
+        """Return distinct ticker symbols."""
         symbols = await model.Tickers.all().distinct().values_list("symbol", flat=True)
         return symbols
 
-    def __calculate_min_candle_date(self, timerange, length):
+    def __calculate_min_candle_date(self, timerange: str, length: int) -> float:
+        """Calculate the earliest timestamp for candle history."""
 
         # Convert timerange with buffer
         match timerange:
@@ -93,45 +102,64 @@ class Data:
 
         return datetime.timestamp(min_date)
 
-    async def count_history_data_for_symbol(self, symbol):
+    async def count_history_data_for_symbol(self, symbol: str) -> int | bool:
+        """Count history data rows for a symbol."""
         try:
             query = await model.Tickers.filter(symbol=f"{symbol}").count()
             logging.debug(f"Counted {query} entries for symbol {symbol}")
             return query
         except Exception as e:
+            # Broad catch to keep history endpoints responsive.
             logging.error(f"Error counting history data for symbol {symbol}: {e}")
 
         return False
 
-    async def delete_ticker_data_for_trades(self, symbol):
+    async def delete_ticker_data_for_trades(self, symbol: str) -> bool:
+        """Delete ticker data for a symbol."""
         try:
             query = await model.Tickers.filter(symbol=f"{symbol}").delete()
             logging.info(f"Delete {query} entries for symbol {symbol}")
             return True
         except Exception as e:
+            # Broad catch to keep delete endpoints responsive.
             logging.error(f"Error deleting old ticker data for symbol {symbol}: {e}")
 
         return False
 
-    async def add_history_data_for_symbol(self, symbol, history_data, config):
+    async def add_history_data_for_symbol(
+        self, symbol: str, history_data: int, config: dict[str, Any]
+    ) -> bool:
+        """Fetch and store historical data for a symbol."""
         if await self.delete_ticker_data_for_trades(symbol):
             try:
-                if await self.__fetch_history_data_for_symbol(symbol, history_data, config):
+                if await self.__fetch_history_data_for_symbol(
+                    symbol, history_data, config
+                ):
                     logging.info(f"Added history for {symbol}")
                     return True
             except Exception as e:
+                # Broad catch to keep history loads resilient.
                 logging.error(f"Error adding history for {symbol}. Cause: {e}")
 
         return False
 
-    async def __fetch_history_data_for_symbol(self, symbol, history_data, config):
+    async def __fetch_history_data_for_symbol(
+        self, symbol: str, history_data: int, config: dict[str, Any]
+    ) -> bool:
         ohlcv = []
         try:
-            since = int((datetime.now(timezone.utc) - timedelta(days=history_data)).timestamp() * 1000)
-            ohlcv_data = await self.exchange.get_history_for_symbol(
-                config, symbol, config.get("strategy_timeframe", "1m"), limit=1000, since=since
+            since = int(
+                (datetime.now(timezone.utc) - timedelta(days=history_data)).timestamp()
+                * 1000
             )
-            
+            ohlcv_data = await self.exchange.get_history_for_symbol(
+                config,
+                symbol,
+                config.get("strategy_timeframe", "1m"),
+                limit=1000,
+                since=since,
+            )
+
             symbol, market = symbol.split("/")
 
             for ticker in ohlcv_data:
@@ -151,11 +179,15 @@ class Data:
             return True
 
         except Exception as e:
+            # Broad catch to keep history loads resilient.
             logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
 
         return False
 
-    async def get_ohlcv_for_pair(self, pair, timerange, timestamp_start, offset):
+    async def get_ohlcv_for_pair(
+        self, pair: str, timerange: str, timestamp_start: float, offset: float
+    ) -> str | dict[str, Any]:
+        """Return OHLCV data for a pair and timerange."""
         # 600000 --> 60 minutes in milliseconds before
         # start_date = datetime.fromtimestamp(((float(timestamp_start) - 600000) / 1000.0),UTC,)
         symbol = self.utils.split_symbol(pair)
@@ -187,7 +219,10 @@ class Data:
 
         return ohlcv
 
-    async def get_data_for_pair(self, pair, timerange, length):
+    async def get_data_for_pair(
+        self, pair: str, timerange: str, length: int
+    ) -> pd.DataFrame | None:
+        """Return raw OHLCV rows for a pair."""
         symbol = self.utils.split_symbol(pair)
         start_date = self.__calculate_min_candle_date(timerange, length)
 
@@ -205,7 +240,8 @@ class Data:
 
         return df
 
-    def resample_data(self, ohlcv, timerange):
+    def resample_data(self, ohlcv: pd.DataFrame, timerange: str) -> pd.DataFrame | None:
+        """Resample OHLCV data to the requested timerange."""
         df = pd.DataFrame(ohlcv)
         if not df.empty:
             # Convert unix timestamp to datetime object
@@ -233,8 +269,8 @@ class Data:
             df_resample.reset_index(inplace=True)
 
             # Convert datetime object back to a unix timestamp
-            #df_resample["timestamp"] = df_resample["timestamp"].astype(int)
-            #df_resample["timestamp"] = df_resample["timestamp"].div(10**9)
+            # df_resample["timestamp"] = df_resample["timestamp"].astype(int)
+            # df_resample["timestamp"] = df_resample["timestamp"].div(10**9)
 
             # Clear empty values
             df_resample.dropna(inplace=True)

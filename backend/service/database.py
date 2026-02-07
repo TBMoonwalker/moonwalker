@@ -1,5 +1,4 @@
 import helper
-from typing import Any
 
 from tortoise import Tortoise
 
@@ -58,5 +57,7 @@ class Database:
             await Tortoise.close_connections()
             logging.info("Database connections closed successfully")
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during shutdown
-            logging.error("Failed to close database connections: %s", exc, exc_info=True)
+            logging.error(
+                "Failed to close database connections: %s", exc, exc_info=True
+            )
             raise

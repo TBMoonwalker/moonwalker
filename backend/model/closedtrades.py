@@ -1,8 +1,12 @@
+"""Closed trade model."""
+
 from tortoise import fields
 from tortoise.models import Model
 
 
 class ClosedTrades(Model):
+    """Persisted closed trade records."""
+
     symbol = fields.CharField(max_length=50)
     so_count = fields.IntField(null=True)
     profit = fields.FloatField(null=True)

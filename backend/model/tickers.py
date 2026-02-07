@@ -1,8 +1,12 @@
+"""Ticker OHLCV model."""
+
 from tortoise import fields
 from tortoise.models import Model
 
 
 class Tickers(Model):
+    """Persisted OHLCV ticker records."""
+
     timestamp = fields.TextField()
     symbol = fields.TextField()
     open = fields.FloatField()

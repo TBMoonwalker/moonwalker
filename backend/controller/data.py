@@ -1,3 +1,5 @@
+"""Data API endpoints."""
+
 from typing import Any
 
 import helper
@@ -16,7 +18,9 @@ logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_dat
     methods=["GET"],
 )
 @route_cors(allow_origin="*")
-async def get_ohlcv_data(symbol: str, timerange: str, timestamp_start: str, offset: str) -> Any:
+async def get_ohlcv_data(
+    symbol: str, timerange: str, timestamp_start: str, offset: str
+) -> Any:
     """Get OHLCV (Open, High, Low, Close, Volume) data for a trading pair.
 
     Args:

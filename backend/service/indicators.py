@@ -1,16 +1,19 @@
-import helper
+"""Indicator calculations based on OHLCV data."""
+
+from typing import Any
+
 import talib
-import pandas as pd
-import numpy as np
+
+import helper
 from service.data import Data
-from asyncache import cached
-from cachetools import TTLCache
 
 logging = helper.LoggerFactory.get_logger("logs/indicators.log", "indicators")
 
 
 class Indicators:
-    def __init__(self):
+    """Compute technical indicators used by strategies."""
+
+    def __init__(self) -> None:
         self.data = Data()
 
     # async def calculate_bbands_cross(self, symbol, timerange, length):
@@ -53,7 +56,10 @@ class Indicators:
 
     #     return result
 
-    async def calculate_ema(self, symbol, timerange, lengths):
+    async def calculate_ema(
+        self, symbol: str, timerange: str, lengths: list[int]
+    ) -> dict[str, Any]:
+        """Calculate EMA values for the given lengths."""
         ema = {}
         try:
             max_length = max(lengths)
@@ -65,15 +71,18 @@ class Indicators:
                     talib.EMA(df["close"], timeperiod=length).dropna().iloc[-1]
                 )
         except Exception as e:
+            # Broad catch to avoid breaking strategy execution.
             logging.error(f"EMA cannot be calculated for {symbol}. Cause: {e}")
         return ema
 
-    async def get_close_price(self, symbol, timerange, length):
+    async def get_close_price(self, symbol: str, timerange: str, length: int) -> Any:
+        """Return close price series for a symbol."""
         try:
             df_raw = await self.data.get_data_for_pair(symbol, timerange, length)
             df = self.data.resample_data(df_raw, timerange)
             return df["close"]
         except Exception as e:
+            # Broad catch to avoid breaking strategy execution.
             logging.error(f"Close price cannot be calculated for {symbol}. Cause: {e}")
             return None
 

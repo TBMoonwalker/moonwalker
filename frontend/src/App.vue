@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from './config'
 import { RouterView } from 'vue-router'
-import { useOsTheme, darkTheme } from 'naive-ui'
+import { darkTheme, NConfigProvider, NDialogProvider, NFlex, NGlobalStyle, NMessageProvider, NModalProvider, NNotificationProvider, useOsTheme } from 'naive-ui'
 import { computed, watch } from 'vue'
 import { useWebSocketDataStore } from './stores/websocket'
 import { useWebSocket } from '@vueuse/core'
@@ -28,15 +28,15 @@ const statistics = useWebSocket('ws://' + MOONWALKER_API_HOST + ':' + MOONWALKER
 
 // Watch Stores
 watch(open_orders.data, async (newData) => {
-  open_trade_store.json = newData
+  open_trade_store.setRaw(newData ?? null)
 })
 
 watch(closed_orders.data, async (newData) => {
-  closed_trade_store.json = newData
+  closed_trade_store.setRaw(newData ?? null)
 })
 
 watch(statistics.data, async (newData) => {
-  statistics_store.json = newData
+  statistics_store.setRaw(newData ?? null)
 })
 </script>
 

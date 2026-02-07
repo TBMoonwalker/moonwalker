@@ -1,20 +1,24 @@
-import model
-import helper
+"""ASAP signal plugin implementation."""
+
 import asyncio
-import requests
+import importlib
 import json
 import random
-import importlib
-from typing import Any, Optional, Dict, List, Tuple
+from typing import Any, Optional
+
+import requests
+from asyncache import cached
+from cachetools import TTLCache
+from tenacity import retry, wait_fixed
+
+import helper
+import model
 from service.autopilot import Autopilot
+from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
-from service.data import Data
 from service.statistic import Statistic
-from tenacity import retry, wait_fixed
-from asyncache import cached
-from cachetools import TTLCache
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "asap")
 
@@ -109,7 +113,9 @@ class SignalPlugin:
         history_data = self.config.get("history_from_data", 30)
         if symbol_list:
             if "http" in symbol_list:
-                symbol_list = requests.get(symbol_list).json()["pairs"]
+                response = requests.get(symbol_list)
+                response.raise_for_status()
+                symbol_list = response.json()["pairs"]
             else:
                 symbol_list = symbol_list.split(",")
 
@@ -131,7 +137,9 @@ class SignalPlugin:
             for symbol in symbol_list:
                 if symbol not in running_symbols:
                     if await Data().count_history_data_for_symbol(symbol) < 1:
-                        if not await Data().add_history_data_for_symbol(symbol, history_data, self.config):
+                        if not await Data().add_history_data_for_symbol(
+                            symbol, history_data, self.config
+                        ):
                             logging.error(
                                 f"Not trading {symbol} because history add failed. Please check data.log."
                             )
@@ -185,7 +193,6 @@ class SignalPlugin:
                 timeframe=self.config.get("signal_strategy_timeframe", "1min"),
             )
 
-
         # allow/denylist check
         if self.filter.is_on_allowed_list(
             symbol_only, pair_allowlist
@@ -194,7 +201,6 @@ class SignalPlugin:
                 f"Symbol {symbol} is not in your allowlist or is set in your denylist. Ignoring it."
             )
             return False
-        
 
         try:
             # btc pulse check
@@ -207,7 +213,6 @@ class SignalPlugin:
                         f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
                     )
                     return False
-                
 
             # volume check
             if volume:
@@ -220,7 +225,6 @@ class SignalPlugin:
                         f"Symbol {symbol} has a 24h volume of {volume_size}{volume_range}, which is under the configured volume of {volume['size']}{volume['range']}"
                     )
                     return False
-            
 
             # topcoin limit check
             if self.config.get("topcoin_limit", None) and self.config.get(
@@ -235,7 +239,11 @@ class SignalPlugin:
                         marketcap, self.config.get("topcoin_limit", None)
                     ):
                         logging.info(
-                            f"Symbol {symbol} has a marketcap of {marketcap} and is not within your topcoin limit of the top {self.config.get("topcoin_limit", None)}. Ignoring it."
+                            "Symbol %s has a marketcap of %s and is not within your "
+                            "topcoin limit of the top %s. Ignoring it.",
+                            symbol,
+                            marketcap,
+                            self.config.get("topcoin_limit", None),
                         )
                         return False
 
@@ -245,10 +253,13 @@ class SignalPlugin:
                     )
                     if rsi and rsi > self.config.get("rsi_max", None):
                         logging.info(
-                            f"Symbol {symbol} has a rsi of {rsi} and is not within your rsi limit of {self.config.get("rsi_max", None)}. Ignoring it."
+                            "Symbol %s has an RSI of %s and exceeds the rsi limit "
+                            "of %s. Ignoring it.",
+                            symbol,
+                            rsi,
+                            self.config.get("rsi_max", None),
                         )
                         return False
-                    
 
             # strategy entry check
             if signal_strategy_plugin:
@@ -256,9 +267,9 @@ class SignalPlugin:
                     if not await signal_strategy_plugin.run(symbol, "buy"):
                         return False
                 except Exception as e:
+                    # Broad catch to keep signal processing resilient.
                     logging.error(f"Error running buy strategy. Cause: {e}")
                     return False
-        
 
             return True
 
@@ -268,7 +279,7 @@ class SignalPlugin:
             )
             return False
 
-    async def run(self, config: Dict[str, Any]) -> None:
+    async def run(self, config: dict[str, Any]) -> None:
         """Main execution loop for the ASAP signal plugin.
 
         Continuously monitors for new trading opportunities, checks max bots limit,

@@ -1,5 +1,8 @@
-from quart import Quart
+"""Quart application entry point."""
+
 import asyncio
+
+from quart import Quart
 from controller import controller
 from service.database import Database
 from service.watcher import Watcher
@@ -14,38 +17,38 @@ app.register_blueprint(controller)
 
 
 @app.before_serving
-async def startup():
+async def startup() -> None:
     app.redis_proc = start_redis()
 
     # Initialize queues
     watcher_queue = asyncio.Queue()
 
     # Initialize database
-    database = Database()
-    await database.init()
+    app.database = Database()
+    await app.database.init()
 
     # Initialize ConfigService (starts Redis listener)
     app.conf = await Config.instance()
 
     # Initialize watcher module
-    watcher = Watcher()
-    await watcher.init()
+    app.watcher = Watcher()
+    await app.watcher.init()
 
     # Initialize housekeeper module
-    housekeeper = Housekeeper()
-    await housekeeper.init()
+    app.housekeeper = Housekeeper()
+    await app.housekeeper.init()
 
     # Initialize signal module
-    signal_plugin = Signal(watcher_queue, app)
-    await signal_plugin.init()
+    app.signal_plugin = Signal(watcher_queue, app)
+    await app.signal_plugin.init()
 
-    app.add_background_task(watcher.watch_incoming_symbols, watcher_queue)
-    app.add_background_task(housekeeper.cleanup_ticker_database)
-    app.add_background_task(watcher.watch_tickers)
+    app.add_background_task(app.watcher.watch_incoming_symbols, watcher_queue)
+    app.add_background_task(app.housekeeper.cleanup_ticker_database)
+    app.add_background_task(app.watcher.watch_tickers)
 
 
 @app.after_serving
-async def shutdown():
+async def shutdown() -> None:
     await app.signal_plugin.shutdown()
     await app.watcher.shutdown()
     await app.housekeeper.shutdown()

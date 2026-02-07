@@ -1,6 +1,9 @@
+"""Controller blueprint and dynamic module loader."""
+
 import mimetypes
 from importlib import import_module
 from pathlib import Path
+
 from quart import Blueprint
 
 controller = Blueprint(

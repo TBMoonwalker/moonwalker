@@ -1,14 +1,21 @@
+"""Market filtering helpers for signals."""
+
+from typing import Any
+
 import requests
-import helper
 from cachetools import cached, TTLCache
 from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
+
+import helper
 
 logging = helper.LoggerFactory.get_logger("logs/filter.log", "filter")
 
 
 class Filter:
+    """Filter helpers for allow/deny lists and volume checks."""
+
     @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
-    def __request_api_endpoint(self, request, headers=None):
+    def __request_api_endpoint(self, request: str, headers: dict | None = None):
         response = None
         try:
             if headers:
@@ -21,7 +28,8 @@ class Filter:
 
         return response
 
-    def is_on_allowed_list(self, symbol, allow_list):
+    def is_on_allowed_list(self, symbol: str, allow_list: list[str] | None) -> bool:
+        """Return True if symbol is in allow list or allow list is empty."""
         result = False
         if allow_list:
             if symbol in allow_list:
@@ -31,7 +39,8 @@ class Filter:
 
         return result
 
-    def is_on_deny_list(self, symbol, deny_list):
+    def is_on_deny_list(self, symbol: str, deny_list: list[str] | None) -> bool:
+        """Return True if symbol is in deny list."""
         result = False
         if deny_list:
             if symbol in deny_list:
@@ -39,7 +48,10 @@ class Filter:
 
         return result
 
-    def is_within_topcoin_limit(self, market_cap_rank, topcoin_limit):
+    def is_within_topcoin_limit(
+        self, market_cap_rank: int | None, topcoin_limit: int | None
+    ) -> bool:
+        """Return True if the rank is within the configured limit."""
         result = False
         if topcoin_limit:
             if market_cap_rank:
@@ -50,7 +62,10 @@ class Filter:
 
         return result
 
-    def has_enough_volume(self, range, size, volume):
+    def has_enough_volume(
+        self, range: str | None, size: float | None, volume: dict[str, Any] | None
+    ) -> bool:
+        """Return True if volume meets the configured threshold."""
         result = False
         volume_ranges = ["K", "M", "B", "T"]
 
@@ -69,7 +84,8 @@ class Filter:
         return result
 
     @cached(cache=TTLCache(maxsize=1024, ttl=86400))
-    def get_cmc_marketcap_rank(self, api_key, symbol):
+    def get_cmc_marketcap_rank(self, api_key: str, symbol: str) -> Any:
+        """Fetch CoinMarketCap market cap rank for the symbol."""
         marketcap = None
         headers = {"X-CMC_PRO_API_KEY": api_key}
         ws_endpoint = "pro-api.coinmarketcap.com"

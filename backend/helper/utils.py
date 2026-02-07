@@ -5,7 +5,9 @@ from typing import Any
 class Utils:
     """Utility class for common helper functions."""
 
-    def calculate_actual_pnl(self, trades: dict[str, Any], current_price: float | None = None) -> float:
+    def calculate_actual_pnl(
+        self, trades: dict[str, Any], current_price: float | None = None
+    ) -> float:
         """Calculate the actual profit and loss percentage for trades.
 
         Args:
@@ -23,7 +25,9 @@ class Utils:
 
         return actual_pnl
 
-    def convert_symbols(self, symbols: list[str], timeframe: str = "1m") -> list[list[str]]:
+    def convert_symbols(
+        self, symbols: list[str], timeframe: str = "1m"
+    ) -> list[list[str]]:
         """Convert a list of symbols to symbol-timeframe pairs.
 
         Args:
@@ -52,7 +56,7 @@ class Utils:
         if "-" in pair:
             pair, market = pair.split("-")
             symbol = f"{pair}/{market}"
-        elif not "/" in pair:
+        elif "/" not in pair:
             pair, market = pair.split(currency)
             symbol = f"{pair}/{currency}"
 

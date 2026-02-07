@@ -1,8 +1,11 @@
+"""Configuration management for runtime settings."""
+
 import asyncio
-import os
-import helper
 import json
-from typing import Any, Callable, Dict, Set, Optional
+import os
+from typing import Any, Callable
+
+import helper
 from model import AppConfig
 from service.redis import redis_client, CONFIG_CHANNEL
 
@@ -16,18 +19,19 @@ class Config:
     It supports configuration caching, change notifications, and Redis-based pub/sub for distributed
     configuration management.
     """
+
     _instance = None
     _lock = asyncio.Lock()
 
-    def __init__(self):
+    def __init__(self) -> None:
         """Initialize the Config instance.
 
         Creates empty cache and subscriber set. The listener task is created during instance
         initialization via the instance() classmethod.
         """
-        self._cache: Dict[str, Any] = {}
-        self._subscribers: Set[Callable[[Dict[str, Any]], None]] = set()
-        self._listener_task: Optional[asyncio.Task] = None
+        self._cache: dict[str, Any] = {}
+        self._subscribers: set[Callable[[dict[str, Any]], None]] = set()
+        self._listener_task: asyncio.Task | None = None
 
     @classmethod
     async def instance(cls) -> "Config":
@@ -48,7 +52,7 @@ class Config:
                 )
             return cls._instance
 
-    async def load_all(self):
+    async def load_all(self) -> None:
         """Load all configuration from the database into the cache.
 
         Retrieves all AppConfig entries and converts their values to the appropriate types
@@ -82,7 +86,6 @@ class Config:
         else:
             return value
 
-
     def __get_strategies(self) -> list[str]:
         """Get a list of available strategy filenames from the strategies directory.
 
@@ -101,8 +104,7 @@ class Config:
         signal_plugins = self.__get_filenames_in_directory("signals")
         return signal_plugins
 
-
-    def get(self, key: str, default: Optional[Any] = None) -> Optional[Any]:
+    def get(self, key: str, default: Any | None = None) -> Any | None:
         """Get a configuration value by key.
 
         Args:
@@ -114,7 +116,7 @@ class Config:
         """
         return self._cache.get(key, default)
 
-    async def set(self, key: str, value: Dict[str, Any]) -> bool:
+    async def set(self, key: str, value: dict[str, Any]) -> bool:
         """Set a configuration value in the database and notify subscribers.
 
         Args:
@@ -124,13 +126,16 @@ class Config:
         Returns:
             True if the operation succeeded
         """
-        await AppConfig.update_or_create(key=key, defaults={"value": value["value"], "value_type": value["type"]})
+        await AppConfig.update_or_create(
+            key=key,
+            defaults={"value": value["value"], "value_type": value["type"]},
+        )
         # Notify all subscribers across processes
         await redis_client.publish(CONFIG_CHANNEL, key)
 
         return True
 
-    async def batch_set(self, updates: Dict[str, Any]) -> bool:
+    async def batch_set(self, updates: dict[str, Any]) -> bool:
         """Update multiple configuration keys in the database at once.
 
         Args:
@@ -142,14 +147,17 @@ class Config:
         for key, value in updates.items():
             value = json.loads(value)
             if value["value"]:
-                await AppConfig.update_or_create(key=key, defaults={"value": value["value"], "value_type": value["type"]})
+                await AppConfig.update_or_create(
+                    key=key,
+                    defaults={"value": value["value"], "value_type": value["type"]},
+                )
         # Notify all subscribers across processes
         # ToDo - create an Array as String with changed files instead of "multiple"
         await redis_client.publish(CONFIG_CHANNEL, "multiple")
 
         return True
 
-    def subscribe(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+    def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Subscribe a callback function to configuration changes.
 
         The callback will be called with the full configuration cache whenever
@@ -182,7 +190,9 @@ class Config:
             if message["type"] == "message":
                 await self.reload()
 
-    def __get_filenames_in_directory(self, directory: str, sort: bool = True) -> list[str]:
+    def __get_filenames_in_directory(
+        self, directory: str, sort: bool = True
+    ) -> list[str]:
         """Get a list of filenames in the specified directory.
 
         Args:
@@ -198,17 +208,18 @@ class Config:
         """
         directory = os.getcwd() + "/" + directory
         if not os.path.isdir(directory):
-            raise ValueError(f"The specified path '{directory}' is not a valid directory.")
-
-        # Create the pattern based on recursive flag
-        pattern = "*"
+            raise ValueError(
+                f"The specified path '{directory}' is not a valid directory."
+            )
 
         # Get all file paths matching the pattern
         try:
             all_files = []
             for root, dirs, files in os.walk(directory):
                 # Exclude certain directories
-                dirs[:] = [d for d in dirs if not d.startswith('.') and d != '__pycache__']
+                dirs[:] = [
+                    d for d in dirs if not d.startswith(".") and d != "__pycache__"
+                ]
                 for file in files:
                     full_path = os.path.join(root, file)
                     if os.path.isfile(full_path):

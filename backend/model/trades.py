@@ -1,8 +1,12 @@
+"""Trade model."""
+
 from tortoise import fields
 from tortoise.models import Model
 
 
 class Trades(Model):
+    """Persisted trade records."""
+
     id = fields.IntField(pk=True)
     timestamp = fields.TextField()
     ordersize = fields.FloatField()

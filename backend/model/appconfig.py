@@ -1,8 +1,12 @@
+"""Configuration model."""
+
 from tortoise import fields
 from tortoise.models import Model
 
 
 class AppConfig(Model):
+    """Persisted configuration key/value pairs."""
+
     id = fields.IntField(pk=True)
     key = fields.CharField(max_length=255, unique=True)
     value = fields.CharField(max_length=1000, null=True)

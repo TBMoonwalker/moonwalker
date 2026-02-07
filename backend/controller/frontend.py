@@ -1,3 +1,5 @@
+"""Frontend routing and static asset delivery."""
+
 from pathlib import Path
 
 from quart import render_template, send_from_directory

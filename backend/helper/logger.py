@@ -1,7 +1,6 @@
 import logging
 import logging.handlers
 import os
-from typing import Any
 
 
 class LoggerFactory:

@@ -1,31 +1,40 @@
-import model
-import helper
+"""Periodic cleanup tasks for stale ticker data."""
+
 import asyncio
-from service.trades import Trades
-from service.data import Data
-from service.config import Config
 from datetime import datetime, timedelta
+from typing import Any
+
+import helper
+import model
+from service.config import Config
+from service.data import Data
+from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/housekeeper.log", "housekeeper")
 
 
 class Housekeeper:
-    def __init__(self):
+    """Cleanup service for old ticker entries."""
+
+    def __init__(self) -> None:
         self.config = None
 
         # Class variables
         Housekeeper.status = True
 
-    async def init(self):
+    async def init(self) -> None:
+        """Initialize the housekeeper with current configuration."""
         config = await Config.instance()
         config.subscribe(self.on_config_change)
         self.on_config_change(config._cache)
 
-    def on_config_change(self, config):
-        logging.info(f"Reload housekeeper")
+    def on_config_change(self, config: dict[str, Any]) -> None:
+        """Reload housekeeping configuration."""
+        logging.info("Reload housekeeper")
         self.config = config
 
-    async def cleanup_ticker_database(self):
+    async def cleanup_ticker_database(self) -> None:
+        """Remove old ticker data for inactive symbols."""
         while Housekeeper.status:
             if self.config:
                 actual_timestamp = datetime.now()
@@ -45,6 +54,7 @@ class Housekeeper:
                                 f"Start housekeeping. Delete {query} entries older then {cleanup_timestamp}"
                             )
                 except Exception as e:
+                    # Broad catch to keep the housekeeping loop running.
                     logging.error(f"Error db housekeeping: {e}")
 
                 await asyncio.sleep(
@@ -53,5 +63,6 @@ class Housekeeper:
             else:
                 await asyncio.sleep(5)
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
+        """Stop housekeeping loop."""
         Housekeeper.status = False
