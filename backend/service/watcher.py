@@ -83,7 +83,7 @@ class Watcher:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logging.error(f"Error in watch_incoming_symbols: {e}")
+                logging.error(f"Error in watch_incoming_symbols: {e}", exc_info=True)
                 await asyncio.sleep(2)
 
     # ------------------------------------------------------------------- #
@@ -108,7 +108,7 @@ class Watcher:
                     Watcher.symbol_update_event.set()
                 logging.debug(f"Added symbols. New list: {Watcher.ticker_symbols}")
             except Exception as e:
-                logging.error(f"Error adding trade symbols: {e}")
+                logging.error(f"Error adding trade symbols: {e}", exc_info=True)
 
     @post_save(model.ClosedTrades)
     async def watch_closedtrade_symbols(
@@ -128,7 +128,7 @@ class Watcher:
                     Watcher.symbol_update_event.set()
                 logging.debug(f"Removed symbols. New list: {Watcher.ticker_symbols}")
             except Exception as e:
-                logging.error(f"Error removing trade symbols: {e}")
+                logging.error(f"Error removing trade symbols: {e}", exc_info=True)
 
     # ------------------------------------------------------------------- #
     #                           Main Watch Loop                           #
@@ -167,7 +167,7 @@ class Watcher:
                 # Regular refresh to detect crashed tasks
                 await self.__sync_symbol_tasks()
             except Exception as e:
-                logging.error(f"Error in watch_tickers: {e}")
+                logging.error(f"Error in watch_tickers: {e}", exc_info=True)
                 await asyncio.sleep(5)
 
         await self.__cleanup_tasks(consumer_task)
@@ -245,12 +245,36 @@ class Watcher:
             except asyncio.CancelledError:
                 logging.info(f"Watcher cancelled for {symbol}")
                 break
-            except Exception as e:
+            except ccxtpro.NetworkError as e:
                 logging.warning(
-                    f"{symbol} watcher error: {e} — reconnecting in {self.RECONNECT_DELAY}s"
+                    f"{symbol} network error: {e} — reconnecting in {self.RECONNECT_DELAY}s"
                 )
                 await asyncio.sleep(self.RECONNECT_DELAY)
-                # Exponential backoff up to 60s
+                self.RECONNECT_DELAY = min(
+                    self.RECONNECT_DELAY * 2, self.MAX_RECONNECT_DELAY
+                )
+            except ccxtpro.ExchangeError as e:
+                logging.warning(
+                    f"{symbol} exchange error: {e} — reconnecting in {self.RECONNECT_DELAY}s"
+                )
+                await asyncio.sleep(self.RECONNECT_DELAY)
+                self.RECONNECT_DELAY = min(
+                    self.RECONNECT_DELAY * 2, self.MAX_RECONNECT_DELAY
+                )
+            except asyncio.TimeoutError as e:
+                logging.warning(
+                    f"{symbol} timeout error: {e} — reconnecting in {self.RECONNECT_DELAY}s"
+                )
+                await asyncio.sleep(self.RECONNECT_DELAY)
+                self.RECONNECT_DELAY = min(
+                    self.RECONNECT_DELAY * 2, self.MAX_RECONNECT_DELAY
+                )
+            except Exception as e:
+                logging.error(
+                    f"{symbol} unexpected error: {e} — reconnecting in {self.RECONNECT_DELAY}s",
+                    exc_info=True
+                )
+                await asyncio.sleep(self.RECONNECT_DELAY)
                 self.RECONNECT_DELAY = min(
                     self.RECONNECT_DELAY * 2, self.MAX_RECONNECT_DELAY
                 )
@@ -288,8 +312,14 @@ class Watcher:
                     await asyncio.sleep(10)
                 except asyncio.CancelledError:
                     raise
+                except asyncio.TimeoutError as e:
+                    logging.warning(f"{symbol}: timeout error {e}, reconnecting...")
+                    await asyncio.sleep(5)
+                except ValueError as e:
+                    logging.error(f"{symbol}: value error {e}")
+                    await asyncio.sleep(5)
                 except Exception as e:
-                    logging.error(f"Unexpected error for {symbol}: {e}")
+                    logging.error(f"Unexpected error for {symbol}: {e}", exc_info=True)
                     await asyncio.sleep(5)
             else:
                 logging.error(
@@ -323,8 +353,10 @@ class Watcher:
                     self.dca.process_ticker_data(ticker_price, self.config),
                     self.__write_ohlcv_data(symbol, ohlcv),
                 )
+            except asyncio.CancelledError:
+                break
             except Exception as e:
-                logging.error(f"Error processing event: {e}")
+                logging.error(f"Error processing event: {e}", exc_info=True)
 
     async def __write_ohlcv_data(self, symbol, ticker):
         current_candle = ticker[-1]

@@ -3,6 +3,7 @@ import helper
 import asyncio
 import socketio
 import json
+from typing import Any, Optional, Dict, List
 from service.autopilot import Autopilot
 from service.orders import Orders
 from service.filter import Filter
@@ -25,7 +26,19 @@ class SignalPlugin:
         self.status = True
         self.watcher_queue = watcher_queue
 
-    async def __check_max_bots(self):
+    async def __check_max_bots(self) -> bool:
+        """Check if the maximum number of bots has been reached.
+
+        Determines if new trades should be started based on the configured max_bots
+        setting and current number of active trades. Also considers autopilot settings
+        if funds are locked.
+
+        Returns:
+            True if max bots reached or error occurred, False otherwise
+
+        Raises:
+            Exception: If database operation fails
+        """
         result = False
         try:
             all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
@@ -49,7 +62,18 @@ class SignalPlugin:
 
         return result
 
-    def __check_entry_point(self, event):
+    def __check_entry_point(self, event: Dict[str, Any]) -> bool:
+        """Check if a signal event meets all entry criteria for trading.
+
+        Validates the signal event against various filters including allow/denylist,
+        volume, market cap, BTC pulse, and signal type.
+
+        Args:
+            event: Signal event dictionary containing signal data
+
+        Returns:
+            True if signal passes all entry checks, False otherwise
+        """
         currency = self.config.get("currency").upper()
         signal_settings = json.loads(json.dumps(eval(self.config.get("signal_settings"))))
         pair_denylist = (
@@ -119,13 +143,26 @@ class SignalPlugin:
             logging.info("BTC-Pulse is in downtrend - not starting new deals!")
             return False
 
-    async def run(self, config):
+    async def run(self, config: Dict[str, Any]) -> None:
+        """Main execution loop for the SymSignals plugin.
+
+        Connects to the SymSignals WebSocket, receives signal events, validates them,
+        and triggers new trades when conditions are met. Implements reconnection logic
+        with exponential backoff.
+
+        Args:
+            config: Configuration dictionary containing plugin settings
+
+        Returns:
+            None
+        """
         self.config = config
         currency = self.config.get("currency").upper()
         signal_settings = json.loads(json.dumps(eval(self.config.get("signal_settings"))))
         async with socketio.AsyncSimpleClient() as sio:
             while self.status:
                 if not sio.connected:
+                    connection_success = False
                     try:
                         logging.info("Establish connection to sym signal websocket.")
                         await sio.connect(
@@ -137,9 +174,11 @@ class SignalPlugin:
                             transports=["websocket", "polling"],
                             socketio_path="/stream/v1/signals",
                         )
+                        connection_success = True
                     except Exception as e:
                         logging.error(f"Failed to connect to sym signal websocket: {e}")
-                    finally:
+
+                    if not connection_success:
                         logging.info(f"Reconnect attempt in 10 seconds")
                         await asyncio.sleep(10)
                         continue
@@ -175,9 +214,10 @@ class SignalPlugin:
 
                                     # Automatically subscribe to reduce load
                                     if self.config.get("dynamic_dca", False):
-                                        if not await Data().add_history_data_for_symbol(
+                                        success = await Data().add_history_data_for_symbol(
                                             symbol_full, history_data, self.config
-                                        ):
+                                        )
+                                        if not success:
                                             logging.error(
                                                 f"Not trading {symbol} because history add failed. Please check data.log."
                                             )
@@ -209,5 +249,12 @@ class SignalPlugin:
                     await sio.disconnect()
                     continue
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
+        """Shutdown the signal plugin.
+
+        Stops the execution loop by setting the status flag to False.
+
+        Returns:
+            None
+        """
         self.status = False

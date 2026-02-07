@@ -1,11 +1,22 @@
-from quart import send_from_directory, render_template
-from controller import controller
 from pathlib import Path
+
+from quart import render_template, send_from_directory
+
+from controller import controller
 
 
 @controller.route("/", defaults={"path": ""})
 @controller.route("/<path:path>")
-async def serve_vue(path):
+async def serve_vue(path: str):
+    """Serve the Vue.js frontend application.
+
+    Args:
+        path: Requested path. If it exists as a static file, serve it.
+              Otherwise, serve the index.html for SPA routing.
+
+    Returns:
+        Static file if path exists, otherwise the index.html template.
+    """
     static_file = Path(controller.static_folder) / path
     if path and static_file.exists():
         return await send_from_directory(controller.static_folder, path)

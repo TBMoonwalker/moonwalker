@@ -5,6 +5,7 @@ import requests
 import json
 import random
 import importlib
+from typing import Any, Optional, Dict, List, Tuple
 from service.autopilot import Autopilot
 from service.filter import Filter
 from service.indicators import Indicators
@@ -19,7 +20,19 @@ logging = helper.LoggerFactory.get_logger("logs/signal.log", "asap")
 
 
 class SignalPlugin:
-    def __init__(self, watcher_queue):
+    """ASAP signal plugin for processing trading signals and managing bot operations.
+
+    This plugin handles signal processing, entry point validation, and trade execution
+    for the ASAP trading strategy. It integrates with various services like autopilot,
+    orders, filters, and indicators to make trading decisions.
+    """
+
+    def __init__(self, watcher_queue: asyncio.Queue):
+        """Initialize the ASAP SignalPlugin instance.
+
+        Args:
+            watcher_queue: Asyncio queue for communicating with the watcher service
+        """
         self.utils = helper.Utils()
         self.autopilot = Autopilot()
         self.orders = Orders()
@@ -30,7 +43,20 @@ class SignalPlugin:
         self.status = True
         self.watcher_queue = watcher_queue
 
-    async def __check_max_bots(self):
+    async def __check_max_bots(self) -> bool:
+        """Check if the maximum number of bots has been reached.
+
+        Determines if new trades should be started based on the configured max_bots
+        setting and current number of active trades. Also considers autopilot settings
+        if funds are locked.
+
+        Returns:
+            True if max bots reached or error occurred, False otherwise
+
+        Raises:
+            ValueError: If configuration is invalid
+            RuntimeError: If database operation fails
+        """
         result = False
         max_bots = self.config.get("max_bots", 1)
         try:
@@ -46,16 +72,38 @@ class SignalPlugin:
 
             if all_bots and (len(all_bots) >= max_bots):
                 result = True
+        except ValueError as e:
+            logging.error(
+                f"Invalid configuration for max bots check - not starting new deals! Cause: {e}"
+            )
+            result = True
+        except RuntimeError as e:
+            logging.error(
+                f"Database error while checking max bots - not starting new deals! Cause: {e}"
+            )
+            result = True
         except Exception as e:
             logging.error(
-                f"Couldn't get actual list of bots - not starting new deals! Cause: {e}"
+                f"Unexpected error checking max bots - not starting new deals! Cause: {e}"
             )
             result = True
 
         return result
 
     @cached(cache=TTLCache(maxsize=1024, ttl=900))
-    async def __get_new_symbol_list(self, running_list):
+    async def __get_new_symbol_list(self, running_list: tuple) -> Optional[list[str]]:
+        """Get the list of new symbols to trade.
+
+        Retrieves the symbol list from configuration, adds BTC if BTC-Pulse is enabled,
+        and ensures history data exists for each symbol. Puts the symbol list into the
+        watcher queue for processing.
+
+        Args:
+            running_list: Tuple of currently running trade bots
+
+        Returns:
+            List of symbols to trade, or None if no symbol list configured
+        """
         # New symbols
         symbol_list = self.config.get("symbol_list", None)
         history_data = self.config.get("history_from_data", 30)
@@ -95,7 +143,22 @@ class SignalPlugin:
         return symbol_list
 
     @retry(wait=wait_fixed(3))
-    async def __check_entry_point(self, symbol):
+    async def __check_entry_point(self, symbol: str) -> bool:
+        """Check if a symbol meets all entry criteria for trading.
+
+        Validates symbol against various filters including allow/denylist, volume,
+        market cap, RSI, BTC pulse, and strategy-specific entry conditions.
+
+        Args:
+            symbol: The trading symbol to check (e.g., "BTC/USDC")
+
+        Returns:
+            True if symbol passes all entry checks, False otherwise
+
+        Raises:
+            ValueError: If configuration is invalid
+            RuntimeError: If data retrieval fails
+        """
         # we only need the plain symbol here:
         symbol_only, currency = symbol.split("/")
         pair_denylist = (
@@ -205,7 +268,18 @@ class SignalPlugin:
             )
             return False
 
-    async def run(self, config):
+    async def run(self, config: Dict[str, Any]) -> None:
+        """Main execution loop for the ASAP signal plugin.
+
+        Continuously monitors for new trading opportunities, checks max bots limit,
+        validates entry points, and triggers new trades when conditions are met.
+
+        Args:
+            config: Configuration dictionary containing plugin settings
+
+        Returns:
+            None
+        """
         self.config = config
         while self.status:
             max_bots = await self.__check_max_bots()
@@ -253,5 +327,12 @@ class SignalPlugin:
                 )
             await asyncio.sleep(5)
 
-    def shutdown(self):
+    def shutdown(self) -> None:
+        """Shutdown the signal plugin.
+
+        Stops the execution loop by setting the status flag to False.
+
+        Returns:
+            None
+        """
         self.status = False

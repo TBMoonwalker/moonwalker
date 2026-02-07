@@ -1,7 +1,10 @@
+from typing import Any
+
 import helper
-from controller import controller
+from quart import jsonify, request
 from quart_cors import route_cors
-from quart import request, jsonify
+
+from controller import controller
 from service.config import Config
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
@@ -9,9 +12,11 @@ logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
 @controller.route("/config/all", methods=["GET"])
 @route_cors(allow_origin="*")
-async def get_config():
-    """
-    Return the current configuration as JSON
+async def get_config() -> Any:
+    """Return the current configuration as JSON.
+
+    Returns:
+        JSON response containing the full configuration cache.
     """
     config = await Config.instance()
     return jsonify(config._cache)
@@ -19,9 +24,14 @@ async def get_config():
 
 @controller.route("/config/single/<string:key>", methods=["GET"])
 @route_cors(allow_origin="*")
-async def get_config_key(key: str):
-    """
-    Get a specific config value
+async def get_config_key(key: str) -> tuple[Any, int]:
+    """Get a specific config value.
+
+    Args:
+        key: Configuration key to retrieve.
+
+    Returns:
+        JSON response with the config value, or 404 if not found.
     """
     config = await Config.instance()
     value = config.get(key)
@@ -32,9 +42,17 @@ async def get_config_key(key: str):
 
 @controller.route("/config/single/<string:key>", methods=["PUT"])
 @route_cors(allow_origin="*")
-async def update_config_key(key: str):
-    """
-    Update a specific config key via JSON body: {"value": ...}
+async def update_config_key(key: str) -> tuple[Any, int]:
+    """Update a specific config key via JSON body.
+
+    Args:
+        key: Configuration key to update.
+
+    Request body:
+        {"value": new_value}
+
+    Returns:
+        JSON response with success/error status.
     """
     data = await request.get_json()
     if "value" not in data:
@@ -51,9 +69,14 @@ async def update_config_key(key: str):
 
 @controller.route("/config/multiple", methods=["POST"])
 @route_cors(allow_origin="*")
-async def update_multiple_config_keys():
-    """
-    Update multiple config keys via JSON body: {"key1": "value1", "key2": "value2", ...}
+async def update_multiple_config_keys() -> tuple[Any, int]:
+    """Update multiple config keys via JSON body.
+
+    Request body:
+        {"key1": "value1", "key2": "value2", ...}
+
+    Returns:
+        JSON response with success/error status.
     """
     data = await request.get_json()
 
@@ -63,9 +86,9 @@ async def update_multiple_config_keys():
     # Initialize the response
     response = {"updated": []}
 
-    config = await Config.instance()        
+    config = await Config.instance()
     success = await config.batch_set(data)
-    
+
     if success:
         return jsonify({"message": f"Config updated"})
     else:

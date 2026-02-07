@@ -209,3 +209,6 @@ backend/templates/index.html
 
 # NPM
 package-lock.json
+
+# AI
+Claude.md

@@ -25,7 +25,7 @@ class Data:
 
         # If not cached → fetch from exchange        
         try:
-            ohlcv = self.exchange.get_history_for_symbol(config, symbol, timeframe="1d")
+            ohlcv = await self.exchange.get_history_for_symbol(config, symbol, timeframe="1d")
             if not ohlcv:
                 logging.error(f"No OHLCV data available for {symbol}")
             else:
@@ -128,7 +128,7 @@ class Data:
         ohlcv = []
         try:
             since = int((datetime.now(timezone.utc) - timedelta(days=history_data)).timestamp() * 1000)
-            ohlcv_data = self.exchange.get_history_for_symbol(
+            ohlcv_data = await self.exchange.get_history_for_symbol(
                 config, symbol, config.get("strategy_timeframe", "1m"), limit=1000, since=since
             )
             

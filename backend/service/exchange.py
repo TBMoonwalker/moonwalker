@@ -1,10 +1,11 @@
-import ccxt as ccxt
+import ccxt.async_support as ccxt
 import decimal
 import uuid
 import time
 import helper
 from datetime import datetime
 from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
+import asyncio
 
 logging = helper.LoggerFactory.get_logger("logs/exchange.log", "exchange")
 
@@ -21,11 +22,11 @@ class Exchange:
 
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
-    def parse_iso_timestamp(self, config, date):
-        self.exchange = self.__init_exchange(config)
+    async def parse_iso_timestamp(self, config, date):
+        self.exchange = await self.__init_exchange(config)
         timestamp = None
         try:
-            self.exchange.parse8601(date)
+            timestamp = self.exchange.parse8601(date)
         except ccxt.ExchangeError as e:
             logging.error(
                 f"Error converting timestamp due to an exchange error: {e}"
@@ -45,9 +46,9 @@ class Exchange:
         
         return timestamp
 
-    def get_history_for_symbol(self, config, symbol, timeframe, limit=1, since=0):
-        self.exchange = self.__init_exchange(config)
-        self.exchange.load_markets()
+    async def get_history_for_symbol(self, config, symbol, timeframe, limit=1, since=0):
+        self.exchange = await self.__init_exchange(config)
+        await self.exchange.load_markets()
         ohlcv = None
         if symbol not in self.exchange.markets:
             logging.error(f"{symbol} not found")
@@ -61,7 +62,7 @@ class Exchange:
 
         while since < now:
             try:
-                candles = self.exchange.fetch_ohlcv(
+                candles = await self.exchange.fetch_ohlcv(
                     symbol=symbol,
                     timeframe=timeframe,
                     since=since,
@@ -82,13 +83,13 @@ class Exchange:
         
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
-    def __get_price_for_symbol(self, pair):
+    async def __get_price_for_symbol(self, pair):
         """Gets the actual price for the given symbol/currency pair
 
         Parameters
         ----------
         pair: string
-           Pair - has to be in format "symbol"/currency" (Example: BTC/USDT)
+           Pair - has to be in format "symbol/currency" (Example: BTC/USDT)
 
         Returns
         -------
@@ -99,7 +100,7 @@ class Exchange:
 
         try:
             # Fetch the ticker data for the trading pair
-            ticker = self.exchange.fetch_ticker(pair)
+            ticker = await self.exchange.fetch_ticker(pair)
             # Extract the actual price from the ticker data
             if not ticker["last"]:
                 raise TryAgain
@@ -125,7 +126,7 @@ class Exchange:
         return result
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
-    def __get_precision_for_symbol(self, pair):
+    async def __get_precision_for_symbol(self, pair):
 
         result = None
 
@@ -148,7 +149,7 @@ class Exchange:
         return result
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
-    def __get_trades_for_symbol(self, symbol, orderid):
+    async def __get_trades_for_symbol(self, symbol, orderid):
         trade = None
         time.sleep(1)
         since = self.exchange.milliseconds() - (
@@ -159,7 +160,7 @@ class Exchange:
             amount = 0.0
             fee = 0.0
             cost = 0.0
-            orderlist = self.exchange.fetch_my_trades(symbol, since)
+            orderlist = await self.exchange.fetch_my_trades(symbol, since)
             if orderlist:
                 logging.debug(
                     f"Orderlist for {symbol} with orderid: {orderid}: {orderlist}"
@@ -196,7 +197,7 @@ class Exchange:
 
         return trade
 
-    def __parse_order_status(self, order):
+    async def __parse_order_status(self, order):
         data = {}
 
         if self.config.get("dry_run", True):
@@ -207,7 +208,7 @@ class Exchange:
             data["symbol"] = order["symbol"]
             data["total_amount"] = order["amount"]
         else:
-            trade = self.__get_trades_for_symbol(order["symbol"], order["id"])
+            trade = await self.__get_trades_for_symbol(order["symbol"], order["id"])
             if trade:
                 data["timestamp"] = trade["timestamp"]
                 data["amount"] = float(trade["amount"])
@@ -234,8 +235,8 @@ class Exchange:
         return data
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
-    def __get_amount_from_symbol(self, ordersize, symbol) -> float:
-        price = self.__get_price_for_symbol(symbol)
+    async def __get_amount_from_symbol(self, ordersize, symbol) -> float:
+        price = await self.__get_price_for_symbol(symbol)
         amount = None
         try:
             amount = self.exchange.amount_to_precision(
@@ -260,7 +261,7 @@ class Exchange:
 
         return amount
 
-    def __init_exchange(self, config):
+    async def __init_exchange(self, config):
         exchange = None
 
         if config.get("exchange", None):
@@ -278,13 +279,13 @@ class Exchange:
         return exchange
 
     async def create_spot_market_buy(self, order, config):
-        self.exchange = self.__init_exchange(config)
-        self.exchange.load_markets()
+        self.exchange = await self.__init_exchange(config)
+        await self.exchange.load_markets()
         self.config = config
-        order["amount"] = self.__get_amount_from_symbol(
+        order["amount"] = await self.__get_amount_from_symbol(
             order["ordersize"], order["symbol"]
         )
-        order["price"] = self.__get_price_for_symbol(order["symbol"])
+        order["price"] = await self.__get_price_for_symbol(order["symbol"])
         if self.config.get("dry_run", True):
             order["info"] = {}
             order["info"]["orderId"] = uuid.uuid4()
@@ -294,7 +295,7 @@ class Exchange:
             try:
                 logging.info(f"Try to buy {order['amount']} {order['symbol']}")
                 parameter = {}
-                trade = self.exchange.create_order(
+                trade = await self.exchange.create_order(
                     order["symbol"],
                     order["ordertype"],
                     order["side"],
@@ -325,9 +326,9 @@ class Exchange:
         if order:
             logging.info(f"Opened trade: {order}")
 
-            order_status = self.__parse_order_status(order)
+            order_status = await self.__parse_order_status(order)
             order.update(order_status)
-            order["precision"] = self.__get_precision_for_symbol(order_status["symbol"])
+            order["precision"] = await self.__get_precision_for_symbol(order_status["symbol"])
             order["amount"] = float(order_status["amount"])
             order["amount_fee"] = 0.0
             order["fees"] = 0.0
@@ -335,9 +336,10 @@ class Exchange:
             # Substract the order fees
             if not self.config.get("fee_deduction", False):
                 try:
-                    order["fees"] = self.exchange.fetch_trading_fee(
+                    fees = await self.exchange.fetch_trading_fee(
                         symbol=order_status["symbol"]
-                    )["taker"]
+                    )
+                    order["fees"] = fees["taker"]
                 except ccxt.ExchangeError as e:
                     logging.error(
                         f"Buying pair {order['symbol']} failed due to an exchange error: {e}"
@@ -369,7 +371,7 @@ class Exchange:
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(200))
     async def create_spot_market_sell(self, order, config):
-        self.exchange = self.__init_exchange(config)
+        self.exchange = await self.__init_exchange(config)
         self.config = config
         order["info"] = {}
 
@@ -399,7 +401,7 @@ class Exchange:
                         f"Reducing amount for sell to: {order['total_amount']}"
                     )
 
-                trade = self.exchange.create_market_sell_order(
+                trade = await self.exchange.create_market_sell_order(
                     order["symbol"], order["total_amount"]
                 )
                 # TODO: Check if there is dust left to sell
@@ -437,7 +439,7 @@ class Exchange:
             logging.info(f"Sold {order['total_amount']} {order['symbol']} on Exchange.")
             Exchange.sell_retry_count = 0
 
-            order_status = self.__parse_order_status(order)
+            order_status = await self.__parse_order_status(order)
             order_status["type"] = "sold_check"
             order_status["sell"] = True
             order_status["total_cost"] = order["total_cost"]
