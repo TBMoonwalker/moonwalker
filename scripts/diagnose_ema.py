@@ -81,9 +81,39 @@ def print_rebound_checks(close: pd.Series, ema_20: float) -> None:
         f"Rebound check: close[-2]={close_minus_2:.8f} > ema20={ema_20:.8f} and close[-3]={close_minus_3:.8f} < ema20={ema_20:.8f}"
     )
 
+def parse_datetime(value: str | None) -> pd.Timestamp | None:
+    if value is None:
+        return None
+    timestamp = pd.to_datetime(value, errors="raise")
+    if isinstance(timestamp, pd.Series):
+        raise ValueError(f"Ambiguous datetime value: {value}")
+    return pd.Timestamp(timestamp)
+
+
+def filter_by_range(
+    df: pd.DataFrame, start: pd.Timestamp | None, end: pd.Timestamp | None
+) -> pd.DataFrame:
+    if start is None and end is None:
+        return df
+    if start is not None and end is not None and start > end:
+        raise ValueError("start must be before end")
+    if not isinstance(df.index, pd.DatetimeIndex):
+        raise ValueError("Expected DatetimeIndex to filter by range")
+    mask = pd.Series(True, index=df.index)
+    if start is not None:
+        mask &= df.index >= start
+    if end is not None:
+        mask &= df.index <= end
+    return df.loc[mask]
+
 
 async def run(
-    symbol: str, timerange: str, lengths: Iterable[int], lookback: int
+    symbol: str,
+    timerange: str,
+    lengths: Iterable[int],
+    lookback: int,
+    start: pd.Timestamp | None,
+    end: pd.Timestamp | None,
 ) -> int:
     db_url = os.getenv(
         "MOONWALKER_DB_URL",
@@ -103,11 +133,27 @@ async def run(
         await Tortoise.close_connections()
         return 1
 
+    try:
+        df = filter_by_range(df, start, end)
+    except ValueError as exc:
+        print(f"Invalid time range: {exc}")
+        await Tortoise.close_connections()
+        return 1
+
+    if df.empty:
+        print("No resampled data available for the selected time range")
+        await Tortoise.close_connections()
+        return 1
+
     close = ensure_series(df, "close")
 
     print(f"Symbol: {symbol}")
     print(f"Timerange: {timerange} (resample={format_timerange(timerange)})")
     print(f"Raw rows: {len(df_raw)} Resampled rows: {len(df)}")
+    if start or end:
+        start_label = start.isoformat(sep=" ") if start else "-"
+        end_label = end.isoformat(sep=" ") if end else "-"
+        print(f"Range filter: {start_label} to {end_label}")
     describe_last(close, "Close")
 
     for length in lengths:
@@ -137,10 +183,27 @@ def main() -> int:
         default=400,
         help="Number of candles to request (default: 400)",
     )
+    parser.add_argument(
+        "--start",
+        help='Start timestamp (e.g. "2026-02-06 01:00:00")',
+    )
+    parser.add_argument(
+        "--end",
+        help='End timestamp (e.g. "2026-02-06 05:00:00")',
+    )
     args = parser.parse_args()
     lengths = parse_lengths(args.lengths)
 
-    return asyncio.run(run(args.symbol, args.timerange, lengths, args.lookback))
+    try:
+        start = parse_datetime(args.start)
+        end = parse_datetime(args.end)
+    except ValueError as exc:
+        print(f"Invalid datetime: {exc}")
+        return 1
+
+    return asyncio.run(
+        run(args.symbol, args.timerange, lengths, args.lookback, start, end)
+    )
 
 
 if __name__ == "__main__":
