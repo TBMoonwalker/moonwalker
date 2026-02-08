@@ -311,7 +311,7 @@ class SignalPlugin:
                         ):
                             logging.info(f"Triggering new trade for {symbol}")
                             order = {
-                                "ordersize": self.config.get("ordersize", 12),
+                                "ordersize": self.config.get("bo", 12),
                                 "symbol": symbol,
                                 "direction": "long",
                                 "botname": f"asap_{symbol}",
