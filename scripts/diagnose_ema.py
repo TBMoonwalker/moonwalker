@@ -102,7 +102,7 @@ def filter_by_range(
         raise ValueError("start must be before end")
     if not isinstance(df.index, pd.DatetimeIndex):
         if "timestamp" in df.columns:
-            df = df.set_index("timestamp")
+            df = df.set_index("timestamp", drop=False)
         else:
             raise ValueError("Expected DatetimeIndex or timestamp column to filter by range")
     mask = pd.Series(True, index=df.index)
@@ -112,6 +112,49 @@ def filter_by_range(
         mask &= df.index <= end
     return df.loc[mask]
 
+def add_ema_low_columns(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    close = ensure_series(df, "close")
+    df["ema_20"] = talib.EMA(close, timeperiod=20)
+    df["ema_50"] = talib.EMA(close, timeperiod=50)
+    df["ema_100"] = talib.EMA(close, timeperiod=100)
+    df["ema_200"] = talib.EMA(close, timeperiod=200)
+    df["trend_ok"] = (
+        (df["ema_20"] < df["ema_200"])
+        & (df["ema_50"] < df["ema_200"])
+        & (df["ema_100"] < df["ema_200"])
+    )
+    df["rebound_ok"] = (
+        (close.shift(1) > df["ema_20"])
+        & (close.shift(2) < df["ema_20"])
+    )
+    df["ema_low_signal"] = df["trend_ok"] & df["rebound_ok"]
+    return df
+
+
+def print_range_view(df: pd.DataFrame, max_rows: int) -> None:
+    if df.empty:
+        print("No rows available in the selected range")
+        return
+    view = df[
+        [
+            "timestamp",
+            "close",
+            "ema_20",
+            "ema_50",
+            "ema_100",
+            "ema_200",
+            "trend_ok",
+            "rebound_ok",
+            "ema_low_signal",
+        ]
+    ].copy()
+    view["timestamp"] = view["timestamp"].dt.strftime("%Y-%m-%d %H:%M:%S%z")
+    if len(view) > max_rows:
+        print(f"Showing first {max_rows} rows (total {len(view)} rows)")
+        view = view.head(max_rows)
+    print(view.to_string(index=False))
+
 
 async def run(
     symbol: str,
@@ -120,6 +163,7 @@ async def run(
     lookback: int,
     start: pd.Timestamp | None,
     end: pd.Timestamp | None,
+    max_rows: int,
 ) -> int:
     db_url = os.getenv(
         "MOONWALKER_DB_URL",
@@ -139,34 +183,37 @@ async def run(
         await Tortoise.close_connections()
         return 1
 
-    try:
-        df = filter_by_range(df, start, end)
-    except ValueError as exc:
-        print(f"Invalid time range: {exc}")
-        await Tortoise.close_connections()
-        return 1
-
-    if df.empty:
-        print("No resampled data available for the selected time range")
-        await Tortoise.close_connections()
-        return 1
-
-    close = ensure_series(df, "close")
-
     print(f"Symbol: {symbol}")
     print(f"Timerange: {timerange} (resample={format_timerange(timerange)})")
     print(f"Raw rows: {len(df_raw)} Resampled rows: {len(df)}")
+
+    df_with_ema = add_ema_low_columns(df)
+
     if start or end:
         start_label = start.isoformat(sep=" ") if start else "-"
         end_label = end.isoformat(sep=" ") if end else "-"
         print(f"Range filter: {start_label} to {end_label}")
-    describe_last(close, "Close")
+        try:
+            df_range = filter_by_range(df_with_ema, start, end)
+        except ValueError as exc:
+            print(f"Invalid time range: {exc}")
+            await Tortoise.close_connections()
+            return 1
+        if df_range.empty:
+            print("No resampled data available for the selected time range")
+            await Tortoise.close_connections()
+            return 1
+        print_range_view(df_range, max_rows)
+        await Tortoise.close_connections()
+        return 0
 
+    close = ensure_series(df_with_ema, "close")
+    describe_last(close, "Close")
     for length in lengths:
         compare_ema(close, length)
 
     # Show rebound check for ema_low (EMA20 with close[-2] / close[-3]).
-    ema20 = talib.EMA(close, timeperiod=20).dropna()
+    ema20 = df_with_ema["ema_20"].dropna()
     if not ema20.empty:
         print_rebound_checks(close, ema20.iloc[-1])
 
@@ -197,6 +244,12 @@ def main() -> int:
         "--end",
         help='End timestamp (e.g. "2026-02-06 05:00:00")',
     )
+    parser.add_argument(
+        "--max-rows",
+        type=int,
+        default=200,
+        help="Max rows to print for a range filter (default: 200)",
+    )
     args = parser.parse_args()
     lengths = parse_lengths(args.lengths)
 
@@ -208,7 +261,15 @@ def main() -> int:
         return 1
 
     return asyncio.run(
-        run(args.symbol, args.timerange, lengths, args.lookback, start, end)
+        run(
+            args.symbol,
+            args.timerange,
+            lengths,
+            args.lookback,
+            start,
+            end,
+            args.max_rows,
+        )
     )
 
 
