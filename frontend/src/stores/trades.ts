@@ -45,10 +45,18 @@ function isFloat(val: any): boolean {
   return typeof val === 'number' && Number.isFinite(val) && !Number.isInteger(val)
 }
 
-function formatDecimal(value: number, fallbackPrecision = 2): string {
-  const precision = isFloat(value)
+function formatDecimal(
+  value: number,
+  fallbackPrecision = 2,
+  maxPrecision = 6
+): string {
+  if (!Number.isFinite(value)) {
+    return String(value)
+  }
+  const actualPrecision = isFloat(value)
     ? value.toString().split('.')[1]?.length ?? fallbackPrecision
     : fallbackPrecision
+  const precision = Math.min(maxPrecision, Math.max(fallbackPrecision, actualPrecision))
   return value.toFixed(precision)
 }
 

@@ -10,6 +10,9 @@ nohup.out
 debug.py
 tests
 test*.py
+!backend/tests/
+!backend/tests/**/*
+!backend/tests/**/*.py
 debugdb.py
 backend/strategies/btc.py
 moonwalker.lock

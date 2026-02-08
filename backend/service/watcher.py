@@ -4,14 +4,13 @@ import asyncio
 from typing import Any
 
 import ccxt.pro as ccxtpro
-from tortoise import BaseDBAsyncClient
-from tortoise.signals import post_save
-
 import helper
 import model
-from service.trades import Trades
-from service.dca import Dca
 from service.config import Config
+from service.dca import Dca
+from service.trades import Trades
+from tortoise import BaseDBAsyncClient
+from tortoise.signals import post_save
 
 logging = helper.LoggerFactory.get_logger("logs/watcher.log", "watcher")
 utils = helper.Utils()

@@ -3,9 +3,8 @@
 from typing import Any
 
 import helper
-from quart_cors import route_cors
-
 from controller import controller
+from quart_cors import route_cors
 from service.data import Data
 
 data = Data()

@@ -7,7 +7,7 @@ from tortoise.models import Model
 class Autopilot(Model):
     """Persisted autopilot mode snapshots."""
 
-    id = fields.IntField(pk=True)
+    id = fields.IntField(primary_key=True)
     mode = fields.CharField(max_length=10)
 
     class Meta:

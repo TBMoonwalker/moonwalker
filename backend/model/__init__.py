@@ -1,12 +1,12 @@
 """Tortoise ORM model exports."""
 
-from .autopilot import Autopilot as Autopilot
 from .appconfig import AppConfig as AppConfig
-from .trades import Trades as Trades
-from .opentrades import OpenTrades as OpenTrades
+from .autopilot import Autopilot as Autopilot
 from .closedtrades import ClosedTrades as ClosedTrades
-from .tickers import Tickers as Tickers
 from .listings import Listings as Listings
+from .opentrades import OpenTrades as OpenTrades
+from .tickers import Tickers as Tickers
+from .trades import Trades as Trades
 
 __all__ = [
     "AppConfig",

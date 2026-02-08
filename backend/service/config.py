@@ -7,7 +7,7 @@ from typing import Any, Callable
 
 import helper
 from model import AppConfig
-from service.redis import redis_client, CONFIG_CHANNEL
+from service.redis import CONFIG_CHANNEL, redis_client
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 

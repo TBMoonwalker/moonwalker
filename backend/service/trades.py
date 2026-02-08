@@ -2,14 +2,11 @@
 
 from typing import Any
 
-from asyncache import cached
-from cachetools import TTLCache
+import helper
+import model
 from tortoise.expressions import F
 from tortoise.functions import Sum
 from tortoise.models import Q
-
-import helper
-import model
 
 logging = helper.LoggerFactory.get_logger("logs/trades.log", "trades")
 
@@ -17,7 +14,7 @@ logging = helper.LoggerFactory.get_logger("logs/trades.log", "trades")
 class Trades:
     """Database access layer for trade entities."""
 
-    @cached(cache=TTLCache(maxsize=1024, ttl=60))
+    @helper.async_ttl_cache(maxsize=1024, ttl=60)
     async def get_trade_by_ordertype(
         self, symbol: str, baseorder: bool = False
     ) -> list[dict[str, Any]]:
@@ -262,32 +259,6 @@ class Trades:
             # Broad catch to return None when trade aggregation fails.
             # logging.debug(f"No trade for symbol {symbol} - Cause: {e}")
             return None
-
-    async def stop_trade(self, symbol: str) -> bool:
-        """Stop a trade by removing open trade entries."""
-        result = False
-        try:
-            # Remove open trade entry
-            await self.delete_open_trades(symbol)
-            result = True
-        except Exception as e:
-            # Broad catch to keep stop trade operation resilient.
-            logging.error(
-                f"Could not remove entries in OpenTrades for {symbol}. Cause {e}. Seems to be already removed."
-            )
-            pass
-
-        try:
-            # Remove trades
-            await self.delete_trades(symbol)
-            result = True
-        except Exception as e:
-            # Broad catch to keep stop trade operation resilient.
-            logging.error(
-                f"Could not remove entries in Trades for {symbol}. Cause {e}. Seems to be already removed."
-            )
-            pass
-        return result
 
     async def get_symbols(self) -> list[str]:
         """Return distinct trade symbols."""

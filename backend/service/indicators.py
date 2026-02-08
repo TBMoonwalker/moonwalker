@@ -2,9 +2,8 @@
 
 from typing import Any
 
-import talib
-
 import helper
+import talib
 from service.data import Data
 
 logging = helper.LoggerFactory.get_logger("logs/indicators.log", "indicators")

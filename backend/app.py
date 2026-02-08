@@ -2,14 +2,14 @@
 
 import asyncio
 
-from quart import Quart
 from controller import controller
+from quart import Quart
+from service.config import Config
 from service.database import Database
-from service.watcher import Watcher
 from service.housekeeper import Housekeeper
 from service.redis import redis_client, start_redis
-from service.config import Config
 from service.signal import Signal
+from service.watcher import Watcher
 
 # Initialize app
 app = Quart(__name__)

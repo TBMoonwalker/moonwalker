@@ -7,7 +7,7 @@ from tortoise.models import Model
 class Trades(Model):
     """Persisted trade records."""
 
-    id = fields.IntField(pk=True)
+    id = fields.IntField(primary_key=True)
     timestamp = fields.TextField()
     ordersize = fields.FloatField()
     fee = fields.FloatField()

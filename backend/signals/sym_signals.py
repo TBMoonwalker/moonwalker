@@ -4,16 +4,15 @@ import asyncio
 import json
 from typing import Any
 
-import socketio
-from socketio.exceptions import TimeoutError
-
 import helper
 import model
+import socketio
 from service.autopilot import Autopilot
 from service.data import Data
 from service.filter import Filter
 from service.orders import Orders
 from service.statistic import Statistic
+from socketio.exceptions import TimeoutError
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "sym_signals")
 

@@ -2,11 +2,10 @@
 
 from typing import Any
 
-import requests
-from cachetools import cached, TTLCache
-from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
-
 import helper
+import requests
+from cachetools import TTLCache, cached
+from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
 
 logging = helper.LoggerFactory.get_logger("logs/filter.log", "filter")
 

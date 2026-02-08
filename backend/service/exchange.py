@@ -8,9 +8,8 @@ from datetime import datetime
 from typing import Any
 
 import ccxt.async_support as ccxt
-from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
-
 import helper
+from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
 
 logging = helper.LoggerFactory.get_logger("logs/exchange.log", "exchange")
 
@@ -359,6 +358,14 @@ class Exchange:
             order["ordersize"], order["symbol"]
         )
         order["price"] = await self.__get_price_for_symbol(order["symbol"])
+        if not order["price"] or not order["amount"] or float(order["amount"]) <= 0:
+            logging.error(
+                "Skipping buy for %s: invalid price/amount (price=%s, amount=%s).",
+                order.get("symbol"),
+                order.get("price"),
+                order.get("amount"),
+            )
+            return None
         if self.config.get("dry_run", True):
             order["info"] = {}
             order["info"]["orderId"] = uuid.uuid4()
@@ -402,6 +409,12 @@ class Exchange:
 
             order_status = await self.__parse_order_status(order)
             order.update(order_status)
+            if not order.get("amount") or float(order["amount"]) <= 0:
+                logging.error(
+                    "Buy order for %s returned zero amount. Skipping trade creation.",
+                    order.get("symbol"),
+                )
+                return None
             order["precision"] = await self.__get_precision_for_symbol(
                 order_status["symbol"]
             )
@@ -435,6 +448,8 @@ class Exchange:
                     # Broad catch to surface unexpected exchange errors.
                     logging.error(f"Buying pair {order['symbol']} failed with: {e}")
                     order = None
+                if order is None:
+                    return None
                 order["amount_fee"] = order["amount"] * float(order["fees"])
                 order["amount"] = float(order_status["amount"]) - order["amount_fee"]
 

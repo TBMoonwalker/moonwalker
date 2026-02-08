@@ -5,10 +5,9 @@ import json
 from typing import Any
 
 import helper
+from controller import controller
 from quart import websocket
 from quart_cors import route_cors
-
-from controller import controller
 from service.statistic import Statistic
 
 logging = helper.LoggerFactory.get_logger(

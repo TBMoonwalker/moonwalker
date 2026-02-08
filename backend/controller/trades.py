@@ -5,10 +5,9 @@ import json
 from typing import Any
 
 import helper
+from controller import controller
 from quart import websocket
 from quart_cors import route_cors
-
-from controller import controller
 from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_trades")

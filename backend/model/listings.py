@@ -7,7 +7,7 @@ from tortoise.models import Model
 class Listings(Model):
     """Cached listing dates for tokens."""
 
-    id = fields.IntField(pk=True)
+    id = fields.IntField(primary_key=True)
     symbol = fields.CharField(max_length=50)
     listing_date = fields.DatetimeField()
 

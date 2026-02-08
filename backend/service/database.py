@@ -1,5 +1,6 @@
-import helper
+import os
 
+import helper
 from tortoise import Tortoise
 
 logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
@@ -33,8 +34,9 @@ class Database:
             Exception: If database initialization fails.
         """
         try:
+            db_url = os.getenv("MOONWALKER_DB_URL", f"sqlite://db/{self.db_file}")
             await Tortoise.init(
-                db_url=f"sqlite://db/{self.db_file}",
+                db_url=db_url,
                 modules={"models": ["model"]},
             )
             # Generate the schema

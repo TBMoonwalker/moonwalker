@@ -6,19 +6,16 @@ import json
 import random
 from typing import Any, Optional
 
-import requests
-from asyncache import cached
-from cachetools import TTLCache
-from tenacity import retry, wait_fixed
-
 import helper
 import model
+import requests
 from service.autopilot import Autopilot
 from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
 from service.statistic import Statistic
+from tenacity import retry, wait_fixed
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "asap")
 
@@ -94,7 +91,7 @@ class SignalPlugin:
 
         return result
 
-    @cached(cache=TTLCache(maxsize=1024, ttl=900))
+    @helper.async_ttl_cache(maxsize=1024, ttl=900)
     async def __get_new_symbol_list(self, running_list: tuple) -> Optional[list[str]]:
         """Get the list of new symbols to trade.
 

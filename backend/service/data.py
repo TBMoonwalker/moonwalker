@@ -3,10 +3,9 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-import pandas as pd
-
 import helper
 import model
+import pandas as pd
 from service.exchange import Exchange
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
@@ -48,6 +47,8 @@ class Data:
         except Exception as e:
             # Broad catch to keep listing lookups resilient.
             logging.error(f"Error fetching OHLCV for {symbol}: {e}")
+        finally:
+            await self.exchange.close()
 
         return None
 
@@ -181,6 +182,8 @@ class Data:
         except Exception as e:
             # Broad catch to keep history loads resilient.
             logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
+        finally:
+            await self.exchange.close()
 
         return False
 

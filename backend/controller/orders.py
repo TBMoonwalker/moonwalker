@@ -3,9 +3,8 @@
 from typing import Any
 
 import helper
-from quart_cors import route_cors
-
 from controller import controller
+from quart_cors import route_cors
 from service.config import Config
 from service.orders import Orders
 

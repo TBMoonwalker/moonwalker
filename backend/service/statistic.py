@@ -3,12 +3,11 @@
 from datetime import datetime, timedelta
 from typing import Any
 
-import pandas as pd
-from tortoise.functions import Sum
-
 import helper
 import model
+import pandas as pd
 from service.trades import Trades
+from tortoise.functions import Sum
 
 logging = helper.LoggerFactory.get_logger("logs/statistics.log", "statistic")
 

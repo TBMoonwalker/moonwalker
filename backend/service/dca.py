@@ -6,8 +6,8 @@ from typing import Any
 
 import helper
 from service.autopilot import Autopilot
-from service.statistic import Statistic
 from service.orders import Orders
+from service.statistic import Statistic
 from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")

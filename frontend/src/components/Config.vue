@@ -266,7 +266,7 @@
 <script setup lang="ts">
 import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
 import { getAllTimeZones } from '../helpers/timezone'
-import { parseBooleanString, isJsonString } from '../helpers/validators'
+import { parseBooleanString, isJsonString, toNumberOrNull } from '../helpers/validators'
 import {
   NButton,
   NCard,
@@ -582,9 +582,8 @@ async function fetchDefaultValues() {
     try {
         const response = await axios.get(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/all`);
         if (response.status === 200) {
-            console.log(response.data)
             general.value.timezone = response.data.timezone
-            general.value.debug = parseBooleanString(response.data.debug) || false
+            general.value.debug = parseBooleanString(response.data.debug) ?? false
             signal.value.signal = response.data.signal
             signal.value.strategy = response.data.signal_strategy
             signal.value.timeframe = response.data.signal_strategy_timeframe
@@ -606,43 +605,43 @@ async function fetchDefaultValues() {
             }
             filter.value.denylist = response.data.pair_denylist
             filter.value.topcoin_limit = response.data.topcoin_limit
-            filter.value.btc_pulse = response.data.btc_pulse || false
+            filter.value.btc_pulse = parseBooleanString(response.data.btc_pulse) ?? false
             exchange.value.name = response.data.exchange
             exchange.value.timeframe = response.data.timeframe
             exchange.value.key = response.data.key
             exchange.value.secret = response.data.secret
-            exchange.value.dry_run = parseBooleanString(response.data.dry_run) || true
+            exchange.value.dry_run = parseBooleanString(response.data.dry_run) ?? true
             exchange.value.currency = response.data.currency
             exchange.value.market = response.data.market || "spot"
-            exchange.value.watcher_ohlcv = parseBooleanString(response.data.watcher_ohlcv) || false
-            dca.value.enabled = parseBooleanString(response.data.dca) || false
-            dca.value.dynamic = parseBooleanString(response.data.dynamic_dca) || false
+            exchange.value.watcher_ohlcv = parseBooleanString(response.data.watcher_ohlcv) ?? false
+            dca.value.enabled = parseBooleanString(response.data.dca) ?? false
+            dca.value.dynamic = parseBooleanString(response.data.dynamic_dca) ?? false
             dca.value.strategy = response.data.dca_strategy
             dca.value.timeframe = response.data.dca_strategy_timeframe
-            dca.value.trailing_tp = Number(response.data.trailing_tp)
-            dca.value.max_bots = Number(response.data.max_bots)
-            dca.value.bo = Number(response.data.bo)
-            dca.value.so = Number(response.data.so)
-            dca.value.mstc = Number(response.data.mstc)
-            dca.value.sos = Number(response.data.sos)
-            dca.value.ss = Number(response.data.ss)
-            dca.value.os = Number(response.data.os)
-            dca.value.tp = Number(response.data.tp)
-            dca.value.sl = Number(response.data.sl)
-            autopilot.value.enabled = parseBooleanString(response.data.autopilot) || false
-            autopilot.value.max_fund = Number(response.data.autopilot_max_fund)
-            autopilot.value.high_mad = Number(response.data.autopilot_high_mad)
-            autopilot.value.high_tp = Number(response.data.autopilot_high_tp)
-            autopilot.value.high_sl = Number(response.data.autopilot_high_sl)
-            autopilot.value.high_sl_timeout = Number(response.data.autopilot_high_sl_timeout)
-            autopilot.value.high_threshold = Number(response.data.autopilot_high_threshold)
-            autopilot.value.medium_mad = response.data.autopilot_medium_mad
-            autopilot.value.medium_tp = Number(response.data.autopilot_medium_tp)
-            autopilot.value.medium_sl = Number(response.data.autopilot_medium_sl)
-            autopilot.value.medium_sl_timeout = Number(response.data.autopilot_medium_sl_timeout)
-            autopilot.value.medium_threshold = Number(response.data.autopilot_medium_threshold)
-            indicator.value.housekeeping_interval = Number(response.data.housekeeping_interval)
-            indicator.value.history_from_data = Number(response.data.history_from_data)
+            dca.value.trailing_tp = toNumberOrNull(response.data.trailing_tp)
+            dca.value.max_bots = toNumberOrNull(response.data.max_bots)
+            dca.value.bo = toNumberOrNull(response.data.bo)
+            dca.value.so = toNumberOrNull(response.data.so)
+            dca.value.mstc = toNumberOrNull(response.data.mstc)
+            dca.value.sos = toNumberOrNull(response.data.sos)
+            dca.value.ss = toNumberOrNull(response.data.ss)
+            dca.value.os = toNumberOrNull(response.data.os)
+            dca.value.tp = toNumberOrNull(response.data.tp)
+            dca.value.sl = toNumberOrNull(response.data.sl)
+            autopilot.value.enabled = parseBooleanString(response.data.autopilot) ?? false
+            autopilot.value.max_fund = toNumberOrNull(response.data.autopilot_max_fund)
+            autopilot.value.high_mad = toNumberOrNull(response.data.autopilot_high_mad)
+            autopilot.value.high_tp = toNumberOrNull(response.data.autopilot_high_tp)
+            autopilot.value.high_sl = toNumberOrNull(response.data.autopilot_high_sl)
+            autopilot.value.high_sl_timeout = toNumberOrNull(response.data.autopilot_high_sl_timeout)
+            autopilot.value.high_threshold = toNumberOrNull(response.data.autopilot_high_threshold)
+            autopilot.value.medium_mad = toNumberOrNull(response.data.autopilot_medium_mad)
+            autopilot.value.medium_tp = toNumberOrNull(response.data.autopilot_medium_tp)
+            autopilot.value.medium_sl = toNumberOrNull(response.data.autopilot_medium_sl)
+            autopilot.value.medium_sl_timeout = toNumberOrNull(response.data.autopilot_medium_sl_timeout)
+            autopilot.value.medium_threshold = toNumberOrNull(response.data.autopilot_medium_threshold)
+            indicator.value.housekeeping_interval = toNumberOrNull(response.data.housekeeping_interval)
+            indicator.value.history_from_data = toNumberOrNull(response.data.history_from_data)
 
             signal.value.strategy_plugins = response.data.strategies.map(v => ({
                 label: v,

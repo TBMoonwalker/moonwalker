@@ -3,10 +3,9 @@
 from typing import Any
 
 import helper
+from controller import controller
 from quart import jsonify, request
 from quart_cors import route_cors
-
-from controller import controller
 from service.config import Config
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")

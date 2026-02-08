@@ -2,9 +2,8 @@
 
 from pathlib import Path
 
-from quart import render_template, send_from_directory
-
 from controller import controller
+from quart import render_template, send_from_directory
 
 
 @controller.route("/", defaults={"path": ""})

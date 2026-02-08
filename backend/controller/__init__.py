@@ -1,8 +1,7 @@
 """Controller blueprint and dynamic module loader."""
 
-import mimetypes
+import importlib.resources as resources
 from importlib import import_module
-from pathlib import Path
 
 from quart import Blueprint
 
@@ -14,12 +13,11 @@ controller = Blueprint(
 )
 
 # Load controller modules
-for mod in __loader__.get_resource_reader().contents():
-    if "python" not in str(mimetypes.guess_type(mod)[0]):
-        continue
-
-    mod = Path(mod).stem
-    if mod == "__init__":
-        continue
-
-    import_module(__package__ + "." + mod, __package__)
+package = __package__
+if package:
+    for mod in resources.files(package).iterdir():
+        if mod.suffix != ".py":
+            continue
+        if mod.stem == "__init__":
+            continue
+        import_module(f"{package}.{mod.stem}", package)
