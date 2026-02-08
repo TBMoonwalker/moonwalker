@@ -1,3 +1,4 @@
+cachetools==7.0.0
 ccxt==4.5.35
 pandas==2.3.3
 Quart==0.20.0
