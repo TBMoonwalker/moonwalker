@@ -87,7 +87,10 @@ def parse_datetime(value: str | None) -> pd.Timestamp | None:
     timestamp = pd.to_datetime(value, errors="raise")
     if isinstance(timestamp, pd.Series):
         raise ValueError(f"Ambiguous datetime value: {value}")
-    return pd.Timestamp(timestamp)
+    ts = pd.Timestamp(timestamp)
+    if ts.tzinfo is None:
+        return ts.tz_localize("UTC")
+    return ts.tz_convert("UTC")
 
 
 def filter_by_range(
