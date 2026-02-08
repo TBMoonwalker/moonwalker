@@ -39,9 +39,6 @@ class Dca:
                 "dca",
             )
 
-            # token, currency = symbol.split("/")
-            # symbol = f"{token}{currency}"
-
             result = await dca_strategy_plugin.run(symbol, "buy")
 
         return result

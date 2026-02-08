@@ -16,7 +16,15 @@ class Strategy:
         self.indicators = Indicators()
 
     async def run(self, symbol: str, type: str) -> bool:
-        """Evaluate EMA low conditions for a symbol."""
+        """Evaluate EMA low conditions for a symbol.
+
+        Strategy summary:
+        - Trend filter: EMA20, EMA50, and EMA100 must all be below EMA200
+          (downtrend / "low" regime).
+        - Entry trigger: price rebounds above EMA20 after being below it
+          (close[-2] > EMA20 and close[-3] < EMA20).
+        The method returns True when both conditions are met.
+        """
         result = False
 
         # EMA 20 < EMA 200
