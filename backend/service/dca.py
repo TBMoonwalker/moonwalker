@@ -35,7 +35,7 @@ class Dca:
         if self.config.get("dca_strategy", None):
             dca_strategy_plugin = self.__get_strategy_plugin(
                 self.config.get("dca_strategy"),
-                self.config.get("strategy_timeframe", "1m"),
+                self.config.get("dca_strategy_timeframe", "1m"),
                 "dca",
             )
 
