@@ -98,7 +98,10 @@ def filter_by_range(
     if start is not None and end is not None and start > end:
         raise ValueError("start must be before end")
     if not isinstance(df.index, pd.DatetimeIndex):
-        raise ValueError("Expected DatetimeIndex to filter by range")
+        if "timestamp" in df.columns:
+            df = df.set_index("timestamp")
+        else:
+            raise ValueError("Expected DatetimeIndex or timestamp column to filter by range")
     mask = pd.Series(True, index=df.index)
     if start is not None:
         mask &= df.index >= start
