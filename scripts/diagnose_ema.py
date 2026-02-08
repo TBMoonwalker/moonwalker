@@ -119,6 +119,14 @@ def add_ema_low_columns(df: pd.DataFrame) -> pd.DataFrame:
     df["ema_50"] = talib.EMA(close, timeperiod=50)
     df["ema_100"] = talib.EMA(close, timeperiod=100)
     df["ema_200"] = talib.EMA(close, timeperiod=200)
+    df["ema_20_pd"] = pandas_ema(close, 20)
+    df["ema_50_pd"] = pandas_ema(close, 50)
+    df["ema_100_pd"] = pandas_ema(close, 100)
+    df["ema_200_pd"] = pandas_ema(close, 200)
+    df["ema_20_diff"] = df["ema_20"] - df["ema_20_pd"]
+    df["ema_50_diff"] = df["ema_50"] - df["ema_50_pd"]
+    df["ema_100_diff"] = df["ema_100"] - df["ema_100_pd"]
+    df["ema_200_diff"] = df["ema_200"] - df["ema_200_pd"]
     df["trend_ok"] = (
         (df["ema_20"] < df["ema_200"])
         & (df["ema_50"] < df["ema_200"])
@@ -141,9 +149,17 @@ def print_range_view(df: pd.DataFrame, max_rows: int) -> None:
             "timestamp",
             "close",
             "ema_20",
+            "ema_20_pd",
+            "ema_20_diff",
             "ema_50",
+            "ema_50_pd",
+            "ema_50_diff",
             "ema_100",
+            "ema_100_pd",
+            "ema_100_diff",
             "ema_200",
+            "ema_200_pd",
+            "ema_200_diff",
             "trend_ok",
             "rebound_ok",
             "ema_low_signal",
