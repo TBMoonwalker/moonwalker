@@ -26,7 +26,7 @@ class Trades:
         if baseorder:
             try:
                 trade = await model.Trades.filter(
-                    Q(baseorder__gt=0), Q(symbol=symbol), join_type="AND"
+                    Q(baseorder=True), Q(symbol=symbol), join_type="AND"
                 ).values()
             except Exception as e:
                 # Broad catch to prevent trade queries from crashing call sites.
@@ -35,7 +35,10 @@ class Trades:
         else:
             try:
                 trade = await model.Trades.filter(
-                    Q(safetyorder__gt=0), Q(symbol=symbol), join_type="AND"
+                    Q(safetyorder=True),
+                    Q(baseorder=False),
+                    Q(symbol=symbol),
+                    join_type="AND",
                 ).values()
             except Exception as e:
                 # Broad catch to prevent trade queries from crashing call sites.
@@ -76,10 +79,13 @@ class Trades:
                 return []
 
             baseorders = await model.Trades.filter(
-                Q(baseorder__gt=0), Q(symbol__in=symbols), join_type="AND"
+                Q(baseorder=True), Q(symbol__in=symbols), join_type="AND"
             ).values()
             safetyorders = await model.Trades.filter(
-                Q(safetyorder__gt=0), Q(symbol__in=symbols), join_type="AND"
+                Q(safetyorder=True),
+                Q(baseorder=False),
+                Q(symbol__in=symbols),
+                join_type="AND",
             ).values()
 
             base_by_symbol = {}
@@ -221,14 +227,24 @@ class Trades:
             if opentrades:
                 current_price = opentrades[0]["current_price"]
 
+            baseorder = None
+            latest_order = None
             for order in trades:
                 amount = float(order["amount"])
                 amount_fee = float(order["amount_fee"])
                 total_cost += float(order["ordersize"])
                 total_amount += amount + amount_fee
+                latest_order = order
+
+                if bool(order.get("baseorder")):
+                    if (
+                        baseorder is None
+                        or float(order["timestamp"]) < float(baseorder["timestamp"])
+                    ):
+                        baseorder = order
 
                 # Safetyorder data
-                if order["safetyorder"] == 1:
+                if bool(order.get("safetyorder")) and not bool(order.get("baseorder")):
                     safetyorder = {
                         "price": order["price"],
                         "so_percentage": order["so_percentage"],
@@ -236,22 +252,27 @@ class Trades:
                     }
                     safetyorders.append(safetyorder)
 
+            if not latest_order:
+                return None
+            if not baseorder:
+                baseorder = min(trades, key=lambda trade: float(trade["timestamp"]))
+
             safetyorders_count = len(safetyorders)
 
             trade_data = {
-                "timestamp": trades[-1]["timestamp"],
-                "fee": trades[-1]["fee"],
+                "timestamp": latest_order["timestamp"],
+                "fee": latest_order["fee"],
                 "total_cost": total_cost,
                 "total_amount": total_amount,
-                "symbol": trades[-1]["symbol"],
-                "direction": trades[-1]["direction"],
-                "side": trades[-1]["side"],
-                "bot": trades[-1]["bot"],
-                "bo_price": trades[0]["price"],
+                "symbol": latest_order["symbol"],
+                "direction": latest_order["direction"],
+                "side": latest_order["side"],
+                "bot": latest_order["bot"],
+                "bo_price": baseorder["price"],
                 "current_price": current_price,
                 "safetyorders": safetyorders,
                 "safetyorders_count": safetyorders_count,
-                "ordertype": trades[0]["ordertype"],
+                "ordertype": baseorder["ordertype"],
             }
 
             return trade_data

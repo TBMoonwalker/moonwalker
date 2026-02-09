@@ -284,7 +284,11 @@ class Dca:
             await self.statistic.update_statistic_data(logging_json)
         else:
             logging.info(
-                f"Max safety orders reached for {trades['symbol']}. Not opening more."
+                "Max safety orders reached for %s (configured=%s, current=%s). "
+                "Not opening more.",
+                trades["symbol"],
+                max_safety_orders,
+                trades["safetyorders_count"],
             )
 
     async def process_ticker_data(
