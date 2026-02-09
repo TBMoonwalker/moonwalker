@@ -30,7 +30,8 @@
                         <n-input v-model:value="signal.symsignal_url" placeholder="URL" />
                     </n-form-item>
                     <n-form-item :label="'Key'" :path="'key.' + index">
-                        <n-input v-model:value="signal.symsignal_key" placeholder="Key" />
+                        <n-input v-model:value="signal.symsignal_key" type="password" show-password-on="click"
+                            placeholder="Key" />
                     </n-form-item>
                     <n-form-item :label="'Version'" :path="'version.' + index">
                         <n-input v-model:value="signal.symsignal_version" placeholder="Version" />
@@ -83,7 +84,8 @@
                         <n-input-number v-model:value="filter.rsi" placeholder="RSI Maximum" />
                     </n-form-item>
                     <n-form-item :label="'CMC API Key'" :path="'cmc_api_key.' + index">
-                        <n-input-number v-model:value="filter.cmc_api_key" placeholder="CMC API Key" />
+                        <n-input v-model:value="filter.cmc_api_key" type="password" show-password-on="click"
+                            placeholder="CMC API Key" />
                     </n-form-item>
                 </template>
 
@@ -114,10 +116,12 @@
                     <n-select v-model:value="exchange.timeframe" placeholder="Select" :options="timerange" />
                 </n-form-item>
                 <n-form-item label="Key" path="key">
-                    <n-input v-model:value="exchange.key" placeholder="Exchange Key" />
+                    <n-input v-model:value="exchange.key" type="password" show-password-on="click"
+                        placeholder="Exchange Key" />
                 </n-form-item>
                 <n-form-item label="Secret" path="secret">
-                    <n-input v-model:value="exchange.secret" placeholder="Exchange Secret" />
+                    <n-input v-model:value="exchange.secret" type="password" show-password-on="click"
+                        placeholder="Exchange Secret" />
                 </n-form-item>
                 <n-form-item label="Dry Run" path="dryrun" label-placement="left">
                     <n-checkbox v-model:checked="exchange.dry_run" />

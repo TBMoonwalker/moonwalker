@@ -221,6 +221,8 @@ class Config:
                     d for d in dirs if not d.startswith(".") and d != "__pycache__"
                 ]
                 for file in files:
+                    if not file.endswith(".py") or file == "__init__.py":
+                        continue
                     full_path = os.path.join(root, file)
                     if os.path.isfile(full_path):
                         all_files.append(full_path)

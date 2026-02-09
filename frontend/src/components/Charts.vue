@@ -1,8 +1,11 @@
 <template>
     <div class="chart-wrap" :style="{ maxWidth: chartWidth }">
         <n-spin :show="isLoading" size="small">
-            <v-chart v-if="!isLoading" class="chart" :option="option" :style="{ height: chartHeight }" autoresize />
-            <div v-else class="chart-placeholder" :style="{ height: chartHeight }" />
+            <v-chart v-if="!isLoading && !showNoProfit" class="chart" :option="option" :style="{ height: chartHeight }"
+                autoresize />
+            <div v-else class="chart-placeholder chart-empty" :style="{ height: chartHeight }">
+                {{ emptyStateText }}
+            </div>
         </n-spin>
     </div>
 </template>
@@ -30,6 +33,8 @@ const option = ref({})
 const chartHeight = ref('40vh')
 const chartWidth = ref('100%')
 const isLoading = ref(true)
+const showNoProfit = ref(false)
+const emptyStateText = ref('')
 
 let historic_data = false
 let isLoadingHistory = false
@@ -51,6 +56,8 @@ watch([statistics_data.data, profit_store.data], async ([newData]) => {
 
     if (newData !== undefined && newData !== null) {
         if (profit_store.data && Object.keys(profit_store.data).length > 0) {
+            showNoProfit.value = false
+            emptyStateText.value = ''
             let profit = profit_store.data
             for (let key in profit) {
                 let value = profit[key]
@@ -128,6 +135,12 @@ watch([statistics_data.data, profit_store.data], async ([newData]) => {
                 ]
             }
             isLoading.value = false
+        } else {
+            showNoProfit.value = true
+            emptyStateText.value = 'No profit yet'
+            chartHeight.value = '24vh'
+            chartWidth.value = '45%'
+            isLoading.value = false
         }
     }
 
@@ -165,5 +178,12 @@ function chart_classes(data: any) {
     width: 100%;
     border-radius: 8px;
     background: rgba(255, 255, 255, 0.04);
+}
+
+.chart-empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.7);
 }
 </style>

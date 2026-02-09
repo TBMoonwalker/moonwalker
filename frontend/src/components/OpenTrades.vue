@@ -271,10 +271,13 @@ const columns_trades = (): DataTableColumns<RowData> => {
 
                                             // OHLCV data from Moonwalker
                                             const cacheKey = `${symbol}-${currency}-${timeframe.timerange}-${begin_timestamp}-${timezoneOffset()}`
-                                            let ticker_data = ohlcvStore.get(cacheKey)
-                                            if (!ticker_data) {
+                                            let ticker_data = null
+                                            try {
+                                                // Always refresh chart data when opening the panel.
                                                 ticker_data = await fetchJson(`/data/ohlcv/${symbol + "-" + currency.toUpperCase()}/${timeframe.timerange}/${begin_timestamp}/${timezoneOffset()}`)
                                                 ohlcvStore.set(cacheKey, ticker_data)
+                                            } catch (_error) {
+                                                ticker_data = ohlcvStore.get(cacheKey) ?? []
                                             }
                                             candlestickSeries.setData(ticker_data)
 
