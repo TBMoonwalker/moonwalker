@@ -1,5 +1,5 @@
 <template>
-    <div class="chart-wrap" :style="{ maxWidth: chartWidth }">
+    <div class="chart-wrap">
         <n-spin :show="isLoading" size="small">
             <v-chart v-if="!isLoading && !showNoProfit" class="chart" :option="option" :style="{ height: chartHeight }"
                 autoresize />
@@ -11,7 +11,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { useProfitDatastore } from '../stores/profit'
 import { storeToRefs } from 'pinia'
@@ -31,15 +31,39 @@ const chart_data = ref({
 })
 const option = ref({})
 const chartHeight = ref('40vh')
-const chartWidth = ref('100%')
 const isLoading = ref(true)
 const showNoProfit = ref(false)
 const emptyStateText = ref('')
+const isMobile = ref(false)
 
 let historic_data = false
 let isLoadingHistory = false
 
 use([GridComponent, TooltipComponent, BarChart, CanvasRenderer])
+
+function getIsMobileViewport(): boolean {
+    if (typeof window === 'undefined') {
+        return false
+    }
+    return window.matchMedia('(max-width: 768px)').matches
+}
+
+function handleResize(): void {
+    isMobile.value = getIsMobileViewport()
+}
+
+onMounted(() => {
+    handleResize()
+    if (typeof window !== 'undefined') {
+        window.addEventListener('resize', handleResize)
+    }
+})
+
+onBeforeUnmount(() => {
+    if (typeof window !== 'undefined') {
+        window.removeEventListener('resize', handleResize)
+    }
+})
 
 // Get new statistics data
 watch([statistics_data.data, profit_store.data], async ([newData]) => {
@@ -78,28 +102,26 @@ watch([statistics_data.data, profit_store.data], async ([newData]) => {
             }
 
             const count = chart_data.value.labels.length || 1
-            const barWidth = Math.max(12, Math.min(48, Math.floor(480 / count)))
+            const maxBarWidth = isMobile.value ? 24 : 48
+            const minBarWidth = isMobile.value ? 8 : 12
+            const barWidth = Math.max(minBarWidth, Math.min(maxBarWidth, Math.floor(480 / count)))
             if (count <= 1) {
-                chartHeight.value = '24vh'
-                chartWidth.value = '45%'
+                chartHeight.value = isMobile.value ? '26vh' : '24vh'
             } else if (count <= 3) {
-                chartHeight.value = '28vh'
-                chartWidth.value = '65%'
+                chartHeight.value = isMobile.value ? '30vh' : '28vh'
             } else if (count <= 7) {
-                chartHeight.value = '32vh'
-                chartWidth.value = '85%'
+                chartHeight.value = isMobile.value ? '34vh' : '32vh'
             } else {
-                chartHeight.value = '40vh'
-                chartWidth.value = '100%'
+                chartHeight.value = isMobile.value ? '36vh' : '40vh'
             }
 
             option.value = {
                 grid: {
                     show: false,
-                    left: 12,
-                    right: 8,
+                    left: isMobile.value ? 4 : 12,
+                    right: isMobile.value ? 4 : 8,
                     top: 16,
-                    bottom: 24,
+                    bottom: isMobile.value ? 36 : 24,
                     containLabel: true
                 },
                 tooltip: {
@@ -111,7 +133,18 @@ watch([statistics_data.data, profit_store.data], async ([newData]) => {
                 xAxis: {
                     axisLine: { show: false },
                     axisTick: { show: false },
-                    axisLabel: { color: "#fff", margin: 8 },
+                    axisLabel: {
+                        color: "#fff",
+                        margin: 8,
+                        hideOverlap: true,
+                        formatter: (value: string) => {
+                            if (isMobile.value && range['period'] === 'daily' && value.includes('-')) {
+                                const parts = value.split('-')
+                                return `${parts[1]}-${parts[2]}`
+                            }
+                            return value
+                        }
+                    },
                     type: 'category',
                     data: chart_data.value.labels,
                     boundaryGap: true
@@ -138,8 +171,7 @@ watch([statistics_data.data, profit_store.data], async ([newData]) => {
         } else {
             showNoProfit.value = true
             emptyStateText.value = 'No profit yet'
-            chartHeight.value = '24vh'
-            chartWidth.value = '45%'
+            chartHeight.value = isMobile.value ? '26vh' : '24vh'
             isLoading.value = false
         }
     }
