@@ -6,7 +6,7 @@ PID_FILE="moonwalker.pid"
 LOCK_FILE="moonwalker.lock"
 
 usage() {
-    echo "Usage: $0 {start|stop} [-d|--debug]"
+    echo "Usage: $0 {start|stop} [-d|--debug] [-p|--port PORT]"
 }
 
 # Function to stop all services
@@ -36,6 +36,7 @@ stop_services() {
 # Function to start all services
 start_services() {
     local debug="${1:-false}"
+    local port="${2:-8130}"
     # Check if services are already running
     if [ -f "$LOCK_FILE" ]; then
         echo "❌ Services are already running"
@@ -75,9 +76,9 @@ start_services() {
     cd backend
     ../.venv/bin/pip install -r requirements.txt
     if [ "$debug" = "true" ]; then
-        MOONWALKER_DEBUG=True ../.venv/bin/python app.py > ../run.log 2>&1 &
+        MOONWALKER_DEBUG=True MOONWALKER_PORT="$port" ../.venv/bin/python app.py > ../run.log 2>&1 &
     else
-        ../.venv/bin/python app.py > ../run.log 2>&1 &
+        MOONWALKER_PORT="$port" ../.venv/bin/python app.py > ../run.log 2>&1 &
     fi
     echo $! > ../$PID_FILE
     cd ..
@@ -88,6 +89,7 @@ start_services() {
 # Main script logic
 cmd=""
 debug=false
+port=8130
 
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -104,6 +106,28 @@ while [ $# -gt 0 ]; do
             debug=true
             shift
             ;;
+        -p|--port)
+            if [ -z "$2" ]; then
+                echo "❌ Missing port value for $1"
+                usage
+                exit 1
+            fi
+            if ! [[ "$2" =~ ^[0-9]+$ ]] || [ "$2" -lt 1 ] || [ "$2" -gt 65535 ]; then
+                echo "❌ Invalid port: $2 (expected 1-65535)"
+                exit 1
+            fi
+            port="$2"
+            shift 2
+            ;;
+        --port=*)
+            port_value="${1#*=}"
+            if ! [[ "$port_value" =~ ^[0-9]+$ ]] || [ "$port_value" -lt 1 ] || [ "$port_value" -gt 65535 ]; then
+                echo "❌ Invalid port: $port_value (expected 1-65535)"
+                exit 1
+            fi
+            port="$port_value"
+            shift
+            ;;
         -h|--help)
             usage
             exit 0
@@ -118,7 +142,7 @@ done
 
 case "$cmd" in
     start)
-        start_services "$debug"
+        start_services "$debug" "$port"
         ;;
     stop)
         stop_services

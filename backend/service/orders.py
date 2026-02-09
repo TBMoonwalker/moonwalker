@@ -97,7 +97,7 @@ class Orders:
 
     async def receive_buy_order(
         self, order: dict[str, Any], config: dict[str, Any]
-    ) -> None:
+    ) -> bool:
         """Create a buy order and persist open trades."""
 
         logging.info(f"Incoming buy order for {order['symbol']}")
@@ -116,7 +116,7 @@ class Orders:
                         "Skipping trade creation for %s: invalid order status.",
                         order.get("symbol"),
                     )
-                    return
+                    return False
                 # 2. Create trade
                 payload = {
                     "timestamp": order_status["timestamp"],
@@ -145,8 +145,10 @@ class Orders:
                         await model.OpenTrades.create(
                             symbol=order_status["symbol"], using_db=conn
                         )
+                return True
             else:
                 logging.error(f"Failed creating buy order for {order['symbol']}")
+                return False
         finally:
             await self.exchange.close()
 

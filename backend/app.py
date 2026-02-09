@@ -1,6 +1,7 @@
 """Quart application entry point."""
 
 import asyncio
+import os
 
 from controller import controller
 from quart import Quart
@@ -64,4 +65,5 @@ async def shutdown() -> None:
 ######################################################
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port="8130")
+    port = os.getenv("MOONWALKER_PORT", "8130")
+    app.run(host="0.0.0.0", port=port)

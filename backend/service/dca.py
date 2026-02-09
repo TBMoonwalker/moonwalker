@@ -193,6 +193,7 @@ class Dca:
         next_so_percentage = price_deviation
         safety_order_size = self.config.get("so", None)
         new_so = False
+        placed_new_so = False
 
         # Actual PNL in percent
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
@@ -265,19 +266,19 @@ class Dca:
                     "so_percentage": next_so_percentage,
                     "side": "buy",
                 }
-                await self.orders.receive_buy_order(order, self.config)
+                placed_new_so = await self.orders.receive_buy_order(order, self.config)
 
             # Logging configuration
             logging_json = {
                 "type": "dca_check",
                 "symbol": trades["symbol"],
                 "botname": trades["bot"],
-                "so_orders": trades["safetyorders_count"],
+                "so_orders": trades["safetyorders_count"] + int(placed_new_so),
                 "last_so_price": last_so_price,
                 "new_so_size": safety_order_size,
                 "price_deviation": next_so_percentage,
                 "actual_pnl": actual_pnl,
-                "new_so": new_so,
+                "new_so": placed_new_so,
             }
             # Send new statistics to statistics module
             await self.statistic.update_statistic_data(logging_json)
