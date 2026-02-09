@@ -86,6 +86,13 @@ type OrderData = {
     price: number
 }
 
+function getSafetyOrderCount(rowData: RowData): number {
+    if (Array.isArray(rowData.safetyorder)) {
+        return rowData.safetyorder.length
+    }
+    return Number(rowData.so_count ?? 0)
+}
+
 function handle_deal_sell(data: any) {
     const d = dialog.warning({
         title: 'Selling deal',
@@ -412,7 +419,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
                 return [
                     h(NSlider, { value: [current_price, avg_price], range: true, min: min_price, max: max_price, disabled: true, themeOverrides: { fillColor: fillColor.value, handleSize: '8px', opacityDisabled: '1' } }),
                     h(NDivider, { dashed: true }),
-                    h('div', { innerHTML: rowData.so_count }),
+                    h('div', { innerHTML: String(getSafetyOrderCount(rowData)) }),
                 ]
             },
             align: 'center'

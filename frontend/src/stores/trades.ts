@@ -115,6 +115,7 @@ export const useTradesStore = defineStore('trades', {
           current_price: val.current_price.toFixed(currentPrecision),
           tp_price: val.tp_price.toFixed(tpPrecision),
           avg_price: val.avg_price.toFixed(avgPrecision),
+          so_count: Array.isArray(val.safetyorders) ? val.safetyorders.length : val.so_count,
           key: val.id,
           open_date: date.toLocaleString(),
           safetyorder: val.safetyorders,
