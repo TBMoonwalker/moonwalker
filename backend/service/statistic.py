@@ -18,6 +18,12 @@ class Statistic:
     def __init__(self) -> None:
         self.trades = Trades()
         self.snapshot_interval_seconds = 60
+        self.timeline_horizons = {
+            "day": timedelta(days=1),
+            "week": timedelta(days=7),
+            "month": timedelta(days=30),
+            "year": timedelta(days=365),
+        }
 
     async def get_profits_overall(
         self, timestamp: int | None, period: str = "daily"
@@ -94,10 +100,10 @@ class Statistic:
             profit = await model.ClosedTrades.annotate(total=Sum("profit")).values_list(
                 "total", flat=True
             )
-            if profit[0] and profit_data["upnl"] != 0:
-                profit_data["profit_overall"] = profit[0] + profit_data["upnl"]
-            else:
-                profit_data["profit_overall"] = profit[0]
+            closed_profit = float(profit[0] or 0.0)
+            profit_data["profit_overall"] = closed_profit + float(
+                profit_data["upnl"] or 0.0
+            )
 
         except Exception as e:
             # Broad catch to keep stats endpoints responsive.
@@ -188,6 +194,71 @@ class Statistic:
             logging.error(f"Error getting uPNL history: {e}")
 
         return upnl_data
+
+    async def get_profit_overall_timeline(self) -> list[dict[str, Any]]:
+        """Return last-12-month timeline with multi-resolution buckets.
+
+        Resolution windows:
+        - day: 15min
+        - week: 4h
+        - month: 1d
+        - year: 1w
+        """
+        now = datetime.now(timezone.utc)
+        year_start = now - self.timeline_horizons["year"]
+        try:
+            rows = await model.UpnlHistory.filter(
+                timestamp__gte=year_start
+            ).order_by("timestamp").values_list("timestamp", "profit_overall")
+            if not rows:
+                return []
+
+            df = pd.DataFrame(rows, columns=["timestamp", "profit_overall"])
+            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+            df = df.set_index("timestamp")
+            df = df[~df.index.duplicated(keep="last")]
+
+            day_start = now - self.timeline_horizons["day"]
+            week_start = now - self.timeline_horizons["week"]
+            month_start = now - self.timeline_horizons["month"]
+
+            frames: list[pd.DataFrame] = []
+
+            year_slice = df[(df.index >= year_start) & (df.index < month_start)]
+            if not year_slice.empty:
+                frames.append(year_slice["profit_overall"].resample("1W").last().dropna().to_frame())
+
+            month_slice = df[(df.index >= month_start) & (df.index < week_start)]
+            if not month_slice.empty:
+                frames.append(month_slice["profit_overall"].resample("1D").last().dropna().to_frame())
+
+            week_slice = df[(df.index >= week_start) & (df.index < day_start)]
+            if not week_slice.empty:
+                frames.append(week_slice["profit_overall"].resample("4H").last().dropna().to_frame())
+
+            day_slice = df[df.index >= day_start]
+            if not day_slice.empty:
+                frames.append(day_slice["profit_overall"].resample("15min").last().dropna().to_frame())
+
+            if not frames:
+                return []
+
+            merged = pd.concat(frames).sort_index()
+            merged = merged[~merged.index.duplicated(keep="last")]
+
+            timeline: list[dict[str, Any]] = []
+            for timestamp, row in merged.iterrows():
+                timeline.append(
+                    {
+                        "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "profit_overall": float(row["profit_overall"]),
+                    }
+                )
+            return timeline
+        except Exception as e:
+            # Broad catch to keep stats endpoints responsive.
+            logging.error(f"Error getting profit-overall timeline: {e}")
+            return []
 
     async def update_statistic_data(self, stats: dict[str, Any]) -> None:
         """Update open trade statistics based on recent ticker data."""

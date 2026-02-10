@@ -50,3 +50,43 @@ async def test_store_upnl_snapshot_applies_sampling_interval(tmp_path, monkeypat
     assert rows[0].upnl == 1.0
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_profit_overall_uses_upnl_when_no_closed_trades(tmp_path, monkeypatch):
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.OpenTrades.create(symbol="BTC/USDT", profit=12.5)
+
+    statistic = Statistic()
+    data = await statistic.get_profit()
+
+    assert data["upnl"] == 12.5
+    assert data["profit_overall"] == 12.5
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch):
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    now = datetime.utcnow()
+    await model.UpnlHistory.create(timestamp=now - timedelta(hours=2), upnl=1.0, profit_overall=10.0)
+    await model.UpnlHistory.create(timestamp=now - timedelta(hours=1), upnl=2.0, profit_overall=11.0)
+    await model.UpnlHistory.create(timestamp=now, upnl=3.0, profit_overall=12.0)
+
+    statistic = Statistic()
+    timeline = await statistic.get_profit_overall_timeline()
+
+    assert len(timeline) >= 1
+    assert "timestamp" in timeline[-1]
+    assert "profit_overall" in timeline[-1]
+
+    await Tortoise.close_connections()

@@ -40,10 +40,24 @@ const emptyStateText = ref('No profit history yet')
 const chartHeight = ref('40vh')
 
 function toMinuteBucket(timestamp: string): string {
-  if (timestamp.length >= 16) {
-    return timestamp.slice(0, 16)
+  const date = new Date(timestamp.replace(' ', 'T') + 'Z')
+  if (Number.isNaN(date.getTime())) {
+    if (timestamp.length >= 16) {
+      return timestamp.slice(0, 16)
+    }
+    return timestamp
   }
-  return timestamp
+
+  date.setUTCSeconds(0, 0)
+  const minute = date.getUTCMinutes()
+  date.setUTCMinutes(Math.floor(minute / 15) * 15)
+
+  const year = date.getUTCFullYear()
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0')
+  const day = String(date.getUTCDate()).padStart(2, '0')
+  const hour = String(date.getUTCHours()).padStart(2, '0')
+  const min = String(date.getUTCMinutes()).padStart(2, '0')
+  return `${year}-${month}-${day} ${hour}:${min}`
 }
 
 function pushRealtimePoint(profitOverall: number, timestamp: string): void {
