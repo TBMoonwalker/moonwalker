@@ -325,8 +325,9 @@ class Dca:
                     self.sl_timeout = 0
                     self.autopilot_mode = None
 
-                # Check DCA
-                await self.__calculate_dca(price, trades)
+                # Check DCA (only when DCA is enabled)
+                if self.config.get("dca", False):
+                    await self.__calculate_dca(price, trades)
 
                 # Check TP
                 await self.__calculate_tp(price, trades)

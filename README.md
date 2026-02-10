@@ -13,7 +13,7 @@ Moonwalker can be used to trade on your exchange directly using various signal p
 
 ## Installation (run script)
 1. Copy `config.ts.example` to `config.ts` and set `MOONWALKER_API_HOST` and `MOONWALKER_API_PORT`.
-2. Start everything with `./run.sh start`.
+2. Start everything with `./run.sh start -p "port"`.
 3. Stop with `./run.sh stop`.
 
 The script builds the Vue frontend, copies assets into the backend, creates a Python venv, installs backend deps, and starts the Quart app. Logs go to `run.log`.
@@ -54,7 +54,7 @@ All supported configuration keys are listed below. Keys marked "(advanced)" are 
 | `market` | `string` | Market type. | `spot` |
 | `timeframe` | `string` | Ticker timeframe for watcher. | `1m` |
 | `currency` | `string` | Quote currency for pairs. | `USDT` |
-| `dry_run` | `bool` | Simulate trades instead of placing orders. | `true` |
+| `dry_run` | `bool` | Enable CCXT demo trading mode (if supported by exchange). | `true` |
 | `watcher_ohlcv` | `bool` | Use OHLCV watcher mode. | `false` |
 | `fee_deduction` | `bool` | Use exchange fee token (e.g., BNB). | `false` |
 | `sandbox` | `bool` | Enable exchange sandbox mode (advanced). | `false` |
@@ -77,7 +77,7 @@ All supported configuration keys are listed below. Keys marked "(advanced)" are 
 | `tp` | `float` | Take profit (percent). | `1.0` |
 | `sl` | `float` | Stop loss (percent). | `2.0` |
 | `ordersize` | `float` | ASAP base order size (advanced). | `12` |
-| `housekeeping_interval` | `int` | Ticker cache cleanup interval (hours). | `48` |
+| `housekeeping_interval` | `int` | Ticker cache cleanup interval (days). | `2` |
 | `history_from_data` | `int` | History lookback for indicator seed (days). | `30` |
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |
 | `autopilot` | `bool` | Enable autopilot mode. | `false` |

@@ -33,13 +33,22 @@ class Housekeeper:
         logging.info("Reload housekeeper")
         self.config = config
 
+    def _get_housekeeping_interval_days(self) -> int:
+        """Return housekeeping interval in days with safe defaults."""
+        try:
+            interval_days = int(self.config.get("housekeeping_interval", 2))
+        except (TypeError, ValueError):
+            return 2
+        return max(1, interval_days)
+
     async def cleanup_ticker_database(self) -> None:
         """Remove old ticker data for inactive symbols."""
         while Housekeeper.status:
             if self.config:
+                interval_days = self._get_housekeeping_interval_days()
                 actual_timestamp = datetime.now()
                 cleanup_timestamp = actual_timestamp - timedelta(
-                    days=int(self.config.get("housekeeping_interval", 48))
+                    days=interval_days
                 )
                 try:
                     active_symbols = await Trades().get_symbols()
@@ -57,9 +66,7 @@ class Housekeeper:
                     # Broad catch to keep the housekeeping loop running.
                     logging.error(f"Error db housekeeping: {e}")
 
-                await asyncio.sleep(
-                    int(self.config.get("housekeeping_interval", 48) * 60)
-                )
+                await asyncio.sleep(interval_days * 24 * 60 * 60)
             else:
                 await asyncio.sleep(5)
 

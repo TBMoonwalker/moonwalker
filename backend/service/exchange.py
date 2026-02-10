@@ -2,9 +2,6 @@
 
 import asyncio
 import decimal
-import time
-import uuid
-from datetime import datetime
 from typing import Any
 
 import ccxt.async_support as ccxt
@@ -52,7 +49,7 @@ class Exchange:
             "key": config.get("key"),
             "secret": config.get("secret"),
             "market": config.get("market", "spot"),
-            "sandbox": config.get("sandbox", False),
+            "dry_run": config.get("dry_run", True)
         }
 
     async def __ensure_exchange(self, config: dict[str, Any]) -> None:
@@ -64,7 +61,7 @@ class Exchange:
             if self.exchange is not None:
                 await self.__close_exchange()
 
-            self.exchange = await self.__init_exchange(config)
+            self.exchange = await self.__init_exchange(desired_config)
             self._exchange_config = desired_config
             self._markets_loaded = False
 
@@ -215,6 +212,14 @@ class Exchange:
 
         return result
 
+    def __get_demo_taker_fee_for_symbol(self, symbol: str) -> float:
+        """Return the static market taker fee for demo trading mode."""
+        market = self.exchange.market(symbol)
+        taker_fee = market.get("taker")
+        if taker_fee is None:
+            raise ValueError(f"No market taker fee available for symbol {symbol}")
+        return float(taker_fee)
+
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     async def __get_trades_for_symbol(self, symbol: str, orderid: str) -> dict | None:
         trade = None
@@ -268,37 +273,30 @@ class Exchange:
     async def __parse_order_status(self, order: dict[str, Any]) -> dict[str, Any]:
         data = {}
 
-        if self.config.get("dry_run", True):
-            data["timestamp"] = order["timestamp"]
-            data["amount"] = order["amount"]
-            data["price"] = order["price"]
-            data["orderid"] = order["info"]["orderId"]
-            data["symbol"] = order["symbol"]
-            data["total_amount"] = order["amount"]
+        trade = await self.__get_trades_for_symbol(order["symbol"], order["id"])
+        if trade:
+            data["timestamp"] = trade["timestamp"]
+            data["amount"] = float(trade["amount"])
+            data["total_amount"] = float(trade["amount"])
+            data["price"] = trade["price"]
+            data["orderid"] = trade["order"]
+            data["symbol"] = trade["symbol"]
+            data["side"] = trade["side"]
+            data["amount_fee"] = trade["fee_cost"]
+            data["ordersize"] = order["cost"]
         else:
-            trade = await self.__get_trades_for_symbol(order["symbol"], order["id"])
-            if trade:
-                data["timestamp"] = trade["timestamp"]
-                data["amount"] = float(trade["amount"])
-                data["total_amount"] = float(trade["amount"])
-                data["price"] = trade["price"]
-                data["orderid"] = trade["order"]
-                data["symbol"] = trade["symbol"]
-                data["side"] = trade["side"]
-                data["amount_fee"] = trade["fee_cost"]
-                data["ordersize"] = order["cost"]
-            else:
-                logging.info(
-                    f"Getting trades for {order['symbol']} failed - using information of order."
-                )
-                data["timestamp"] = order["timestamp"]
-                data["amount"] = float(order["amount"])
-                data["price"] = order["price"]
-                data["orderid"] = order["id"]
-                data["symbol"] = order["symbol"]
-                data["side"] = order["side"]
-                data["amount_fee"] = order["fee"]
-                data["ordersize"] = order["cost"]
+            logging.info(
+                f"Getting trades for {order['symbol']} failed - using information of order."
+            )
+            data["timestamp"] = order["timestamp"]
+            data["amount"] = float(order["amount"])
+            data["total_amount"] = float(order["amount"])
+            data["price"] = order["price"]
+            data["orderid"] = order["id"]
+            data["symbol"] = order["symbol"]
+            data["side"] = order["side"]
+            data["amount_fee"] = order["fee"]
+            data["ordersize"] = order["cost"]
 
         return data
 
@@ -342,7 +340,19 @@ class Exchange:
                     "options": {"defaultType": config.get("market", "spot")},
                 }
             )
-            exchange.set_sandbox_mode(config.get("sandbox", False))
+            if config.get("dry_run", True):
+                try:
+                    exchange.enableDemoTrading(True)
+                    logging.info(
+                        "Enabled CCXT demo trading for exchange '%s'.",
+                        config.get("exchange"),
+                    )
+                except Exception as exc:
+                    raise ValueError(
+                        "Dry run requires CCXT enableDemoTrading support, but "
+                        f"'{config.get('exchange')}' could not enable demo trading."
+                    ) from exc
+            # exchange.set_sandbox_mode(config.get("sandbox", False))
             exchange.enableRateLimit = True
 
         return exchange
@@ -366,43 +376,35 @@ class Exchange:
                 order.get("amount"),
             )
             return None
-        if self.config.get("dry_run", True):
-            order["info"] = {}
-            order["info"]["orderId"] = uuid.uuid4()
-            order["timestamp"] = time.mktime(datetime.now().timetuple()) * 1000
-            await asyncio.sleep(0.2)
-        else:
-            try:
-                logging.info(f"Try to buy {order['amount']} {order['symbol']}")
-                parameter = {}
-                trade = await self.exchange.create_order(
-                    order["symbol"],
-                    order["ordertype"],
-                    order["side"],
-                    order["amount"],
-                    order["price"],
-                    parameter,
-                )
-                order.update(trade)
-            except ccxt.ExchangeError as e:
-                logging.error(
-                    f"Buying pair {order['symbol']} failed due to an exchange error: {e}"
-                )
-                order = None
-            except ccxt.NetworkError as e:
-                logging.error(
-                    f"Buying pair {order['symbol']} failed due to an network error: {e}"
-                )
-                order = None
-            except ccxt.BaseError as e:
-                logging.error(
-                    f"Buying pair {order['symbol']} failed due to an error: {e}"
-                )
-                order = None
-            except Exception as e:
-                # Broad catch to surface unexpected exchange errors.
-                logging.error(f"Buying pair {order['symbol']} failed with: {e}")
-                order = None
+        try:
+            logging.info(f"Try to buy {order['amount']} {order['symbol']}")
+            parameter = {}
+            trade = await self.exchange.create_order(
+                order["symbol"],
+                order["ordertype"],
+                order["side"],
+                order["amount"],
+                order["price"],
+                parameter,
+            )
+            order.update(trade)
+        except ccxt.ExchangeError as e:
+            logging.error(
+                f"Buying pair {order['symbol']} failed due to an exchange error: {e}"
+            )
+            order = None
+        except ccxt.NetworkError as e:
+            logging.error(
+                f"Buying pair {order['symbol']} failed due to an network error: {e}"
+            )
+            order = None
+        except ccxt.BaseError as e:
+            logging.error(f"Buying pair {order['symbol']} failed due to an error: {e}")
+            order = None
+        except Exception as e:
+            # Broad catch to surface unexpected exchange errors.
+            logging.error(f"Buying pair {order['symbol']} failed with: {e}")
+            order = None
 
         if order:
             logging.info(f"Opened trade: {order}")
@@ -424,32 +426,48 @@ class Exchange:
 
             # Substract the order fees
             if not self.config.get("fee_deduction", False):
-                try:
-                    fees = await self.exchange.fetch_trading_fee(
-                        symbol=order_status["symbol"]
-                    )
-                    order["fees"] = fees["taker"]
-                except ccxt.ExchangeError as e:
-                    logging.error(
-                        f"Buying pair {order['symbol']} failed due to an exchange error: {e}"
-                    )
-                    order = None
-                except ccxt.NetworkError as e:
-                    logging.error(
-                        f"Buying pair {order['symbol']} failed due to an network error: {e}"
-                    )
-                    order = None
-                except ccxt.BaseError as e:
-                    logging.error(
-                        f"Buying pair {order['symbol']} failed due to an error: {e}"
-                    )
-                    order = None
-                except Exception as e:
-                    # Broad catch to surface unexpected exchange errors.
-                    logging.error(f"Buying pair {order['symbol']} failed with: {e}")
-                    order = None
-                if order is None:
-                    return None
+                if self.config.get("dry_run", True):
+                    try:
+                        order["fees"] = self.__get_demo_taker_fee_for_symbol(
+                            order_status["symbol"]
+                        )
+                    except Exception as e:
+                        logging.warning(
+                            "Demo mode fee lookup for %s failed (%s). "
+                            "Using taker fee 0.0 as fallback.",
+                            order_status["symbol"],
+                            e,
+                        )
+                        order["fees"] = 0.0
+                else:
+                    try:
+                        fees = await self.exchange.fetch_trading_fee(
+                            symbol=order_status["symbol"]
+                        )
+                        order["fees"] = fees["taker"]
+                    except ccxt.ExchangeError as e:
+                        logging.error(
+                            f"Fetching fee for pair {order['symbol']} failed due to an exchange error: {e}"
+                        )
+                        order = None
+                    except ccxt.NetworkError as e:
+                        logging.error(
+                            f"Fetching fee for pair {order['symbol']} failed due to an network error: {e}"
+                        )
+                        order = None
+                    except ccxt.BaseError as e:
+                        logging.error(
+                            f"Fetching fee for pair {order['symbol']} failed due to an error: {e}"
+                        )
+                        order = None
+                    except Exception as e:
+                        # Broad catch to surface unexpected exchange errors.
+                        logging.error(
+                            f"Fetching fee for pair {order['symbol']} failed with: {e}"
+                        )
+                        order = None
+                    if order is None:
+                        return None
                 order["amount_fee"] = order["amount"] * float(order["fees"])
                 order["amount"] = float(order_status["amount"]) - order["amount_fee"]
 
@@ -469,68 +487,52 @@ class Exchange:
         """Create a spot market sell order."""
         await self.__ensure_exchange(config)
         self.config = config
-        order["info"] = {}
-
-        if self.config.get("dry_run", True):
-            order["side"] = order["direction"]
-            order["timestamp"] = time.mktime(datetime.now().timetuple()) * 1000
-            order["amount"] = order["total_amount"]
-            order["info"]["orderId"] = uuid.uuid4()
-            order["price"] = order["current_price"]
-            await asyncio.sleep(0.2)
-        else:
-            try:
-                # Implement sell safeguard, if we cannot sell full amount
-                if Exchange.sell_retry_count > 0:
-                    int_amount = len(str(int(order["total_amount"])))
-                    decimal_places = abs(
-                        decimal.Decimal(str(order["total_amount"])).as_tuple().exponent
-                    )
-                    if int_amount >= 3:
-                        reduce_amount = Exchange.sell_retry_count
-                    else:
-                        reduce_amount = Exchange.sell_retry_count * (
-                            10**-decimal_places
-                        )
-                    order["total_amount"] = order["total_amount"] - reduce_amount
-                    logging.info(
-                        f"Reducing amount for sell to: {order['total_amount']}"
-                    )
-
-                trade = await self.exchange.create_market_sell_order(
-                    order["symbol"], order["total_amount"]
+        try:
+            # Implement sell safeguard, if we cannot sell full amount
+            if Exchange.sell_retry_count > 0:
+                int_amount = len(str(int(order["total_amount"])))
+                decimal_places = abs(
+                    decimal.Decimal(str(order["total_amount"])).as_tuple().exponent
                 )
-                # TODO: Check if there is dust left to sell
-                # 1. fetch the amount left
-                # 2. createConvertTrade (ccxt)
-                # 3. fetchConvertTrade (ccxt)
-                order.update(trade)
-            except ccxt.ExchangeError as e:
-                if "insufficient balance" in str(e):
-                    logging.error(
-                        f"Trying to sell {order['total_amount']} of pair {order['symbol']} failed due insufficient balance."
-                    )
-                    Exchange.sell_retry_count += 1
-                    raise TryAgain
+                if int_amount >= 3:
+                    reduce_amount = Exchange.sell_retry_count
                 else:
-                    logging.error(
-                        f"Selling pair {order['symbol']} failed due to an exchange error: {e}"
-                    )
-                    order = None
-            except ccxt.NetworkError as e:
+                    reduce_amount = Exchange.sell_retry_count * (10**-decimal_places)
+                order["total_amount"] = order["total_amount"] - reduce_amount
+                logging.info(f"Reducing amount for sell to: {order['total_amount']}")
+
+            trade = await self.exchange.create_market_sell_order(
+                order["symbol"], order["total_amount"]
+            )
+            # TODO: Check if there is dust left to sell
+            # 1. fetch the amount left
+            # 2. createConvertTrade (ccxt)
+            # 3. fetchConvertTrade (ccxt)
+            order.update(trade)
+        except ccxt.ExchangeError as e:
+            if "insufficient balance" in str(e):
                 logging.error(
-                    f"Selling pair {order['symbol']} failed due to an network error: {e}"
+                    f"Trying to sell {order['total_amount']} of pair {order['symbol']} failed due insufficient balance."
+                )
+                Exchange.sell_retry_count += 1
+                raise TryAgain
+            else:
+                logging.error(
+                    f"Selling pair {order['symbol']} failed due to an exchange error: {e}"
                 )
                 order = None
-            except ccxt.BaseError as e:
-                logging.error(
-                    f"Selling pair {order['symbol']} failed due to an error: {e}"
-                )
-                order = None
-            except Exception as e:
-                # Broad catch to surface unexpected exchange errors.
-                logging.error(f"Selling pair {order['symbol']} failed with: {e}")
-                order = None
+        except ccxt.NetworkError as e:
+            logging.error(
+                f"Selling pair {order['symbol']} failed due to an network error: {e}"
+            )
+            order = None
+        except ccxt.BaseError as e:
+            logging.error(f"Selling pair {order['symbol']} failed due to an error: {e}")
+            order = None
+        except Exception as e:
+            # Broad catch to surface unexpected exchange errors.
+            logging.error(f"Selling pair {order['symbol']} failed with: {e}")
+            order = None
 
         if order:
             logging.info(f"Sold {order['total_amount']} {order['symbol']} on Exchange.")

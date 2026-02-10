@@ -67,6 +67,18 @@ class Watcher:
                     "options": {"defaultType": config.get("market", "spot")},
                 }
             )
+            if config.get("dry_run", True):
+                try:
+                    self.exchange.enableDemoTrading(True)
+                    logging.info(
+                        "Enabled CCXT Pro demo trading for exchange '%s'.",
+                        config.get("exchange"),
+                    )
+                except Exception as exc:
+                    raise ValueError(
+                        "Dry run requires CCXT Pro enableDemoTrading support, but "
+                        f"'{config.get('exchange')}' could not enable demo trading."
+                    ) from exc
             self.exchange.set_sandbox_mode(config.get("sandbox", False))
 
         Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)

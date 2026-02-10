@@ -59,7 +59,7 @@ class SignalPlugin:
             RuntimeError: If database operation fails
         """
         result = False
-        max_bots = self.config.get("max_bots", 1)
+        max_bots = self.config.get("max_bots")
         try:
             all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
 
@@ -167,7 +167,11 @@ class SignalPlugin:
         # we only need the plain symbol here:
         symbol_only, currency = symbol.split("/")
         pair_denylist = (
-            self.config.get("pair_denylist", None).split(",")
+            [
+                entry.strip().upper().split("/")[0]
+                for entry in self.config.get("pair_denylist", None).split(",")
+                if entry.strip()
+            ]
             if self.config.get("pair_denylist", None)
             else None
         )

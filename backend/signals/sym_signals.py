@@ -48,14 +48,15 @@ class SignalPlugin:
         try:
             all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
             profit = await self.statistic.get_profit()
+            self.max_bots = self.config.get("max_bots")
+
             if profit["funds_locked"] and profit["funds_locked"] > 0:
                 trading_settings = await self.autopilot.calculate_trading_settings(
                     profit["funds_locked"], self.config
                 )
                 if trading_settings:
                     self.max_bots = trading_settings["mad"]
-                else:
-                    self.max_bots = self.config.get("max_bots")
+                    
 
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True
@@ -85,7 +86,11 @@ class SignalPlugin:
             json.dumps(eval(self.config.get("signal_settings")))
         )
         pair_denylist = (
-            self.config.get("pair_denylist", None).split(",")
+            [
+                entry.strip().upper().split("/")[0]
+                for entry in self.config.get("pair_denylist", None).split(",")
+                if entry.strip()
+            ]
             if self.config.get("pair_denylist", None)
             else None
         )

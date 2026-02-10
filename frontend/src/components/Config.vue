@@ -1,12 +1,12 @@
 <template>
     <n-flex vertical :style="{ display: 'flex', flexDirection: 'column', gap: '16px', width: '98%' }">
         <n-card title="General settings">
-            <n-form ref="formRef" :model="general" :rules="rules" label-width="auto"
+            <n-form ref="generalFormRef" :model="general" :rules="rules" label-width="auto"
                 require-mark-placement="right-hanging" :style="{
                     maxWidth: '640px',
                 }">
                 <n-form-item label="Timezone" path="timezone">
-                    <n-select v-model:value="general.timezone" placeholder="Select" :options="timezone" />
+                    <n-select v-model:value="general.timezone" placeholder="Select" :options="timezone" filterable />
                 </n-form-item>
                 <n-form-item label="Debug mode" path="debug" label-placement="left">
                     <n-checkbox v-model:checked="general.debug" />
@@ -15,7 +15,7 @@
         </n-card>
 
         <n-card title=" Signal settings">
-            <n-form ref="formRef" :model="signal" :rules="rules" label-width="auto"
+            <n-form ref="signalFormRef" :model="signal" :rules="rules" label-width="auto"
                 require-mark-placement="right-hanging" :style="{
                     maxWidth: '640px',
                 }">
@@ -38,13 +38,13 @@
                     </n-form-item>
                     <n-form-item label="Allowed Signals" path="signals">
                         <n-select v-model:value="signal.symsignal_allowedsignals" placeholder="Select"
-                            :options="symsignals" multiple />
+                            :options="symsignals" multiple filterable />
                     </n-form-item>
                 </template>
 
                 <!-- Dynamic check for ASAP Signal settings -->
                 <template v-for="(index) in dynamicAsapSignalSettingsForm" :key="index">
-                    <n-form-item label="Token/Coin List or URL" :path="'symbols.' + index">
+                    <n-form-item label="Token/Coin List or URL" path="symbol_list">
                         <n-input v-model:value="signal.symbol_list" placeholder="Textarea" type="textarea" :autosize="{
                             minRows: 3,
                             maxRows: 5,
@@ -69,7 +69,7 @@
         </n-card>
 
         <n-card title="Filter settings">
-            <n-form ref="formRef" :model="filter" :rules="rules" label-width="auto"
+            <n-form ref="filterFormRef" :model="filter" :rules="rules" label-width="auto"
                 require-mark-placement="right-hanging" :style="{
                     maxWidth: '640px',
                 }">
@@ -105,14 +105,14 @@
         </n-card>
 
         <n-card title="Exchange settings">
-            <n-form ref="formRef" :model="exchange" :rules="rules" label-width="auto"
+            <n-form ref="exchangeFormRef" :model="exchange" :rules="rules" label-width="auto"
                 require-mark-placement="right-hanging" :style="{
                     maxWidth: '640px',
                 }">
-                <n-form-item label="Exchange" path="exchange">
+                <n-form-item label="Exchange" path="name">
                     <n-select v-model:value="exchange.name" placeholder="Select" :options="exchanges" />
                 </n-form-item>
-                <n-form-item label="Timerange" path="timerange">
+                <n-form-item label="Timerange" path="timeframe">
                     <n-select v-model:value="exchange.timeframe" placeholder="Select" :options="timerange" />
                 </n-form-item>
                 <n-form-item label="Key" path="key">
@@ -123,7 +123,7 @@
                     <n-input v-model:value="exchange.secret" type="password" show-password-on="click"
                         placeholder="Exchange Secret" />
                 </n-form-item>
-                <n-form-item label="Dry Run" path="dryrun" label-placement="left">
+                <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="left">
                     <n-checkbox v-model:checked="exchange.dry_run" />
                 </n-form-item>
                 <n-form-item label="Currency" path="currency">
@@ -139,7 +139,7 @@
         </n-card>
 
         <n-card title="DCA settings">
-            <n-form ref="formRef" :model="dca" :rules="rules" label-width="auto" require-mark-placement="right-hanging"
+            <n-form ref="dcaFormRef" :model="dca" :rules="rules" label-width="auto" require-mark-placement="right-hanging"
                 :style="{
                     maxWidth: '640px',
                 }">
@@ -168,25 +168,25 @@
                 <n-form-item label="Trailing Take profit percentage" path="ttp">
                     <n-input-number v-model:value="dca.trailing_tp" placeholder="TTP" />
                 </n-form-item>
-                <n-form-item label="Max bots running" path="maxbots">
+                <n-form-item label="Max bots running" path="max_bots">
                     <n-input-number v-model:value="dca.max_bots" placeholder="Bot count" />
                 </n-form-item>
                 <n-form-item label="Base order amount" path="bo">
                     <n-input-number v-model:value="dca.bo" placeholder="BO" />
                 </n-form-item>
-                <n-form-item label="Safety order amount" path="so">
+                <n-form-item v-if="dca.enabled" label="Safety order amount" path="so">
                     <n-input-number v-model:value="dca.so" placeholder="SO" />
                 </n-form-item>
-                <n-form-item label="Max safety order count" path="mstc">
+                <n-form-item v-if="dca.enabled" label="Max safety order count" path="mstc">
                     <n-input-number v-model:value="dca.mstc" placeholder="MSTC" />
                 </n-form-item>
-                <n-form-item label="Price deviation for first safety order" path="sos">
+                <n-form-item v-if="dca.enabled" label="Price deviation for first safety order" path="sos">
                     <n-input-number v-model:value="dca.sos" placeholder="SOS" />
                 </n-form-item>
-                <n-form-item label="Safety order step scale" path="ss">
+                <n-form-item v-if="dca.enabled" label="Safety order step scale" path="ss">
                     <n-input-number v-model:value="dca.ss" placeholder="SS" />
                 </n-form-item>
-                <n-form-item label="Safety order volume scale" path="os">
+                <n-form-item v-if="dca.enabled" label="Safety order volume scale" path="os">
                     <n-input-number v-model:value="dca.os" placeholder="OS" />
                 </n-form-item>
                 <n-form-item label="Stop loss percentage" path="sl">
@@ -196,7 +196,7 @@
         </n-card>
 
         <n-card title="Autopilot settings">
-            <n-form ref="formRef" :model="autopilot" :rules="rules" label-width="auto"
+            <n-form ref="autopilotFormRef" :model="autopilot" :rules="rules" label-width="auto"
                 require-mark-placement="right-hanging" :style="{
                     maxWidth: '640px',
                 }">
@@ -247,14 +247,14 @@
         </n-card>
 
         <n-card title="Indicator settings">
-            <n-form ref="formRef" :model="indicator" :rules="rules" label-width="auto"
+            <n-form ref="indicatorFormRef" :model="indicator" :rules="rules" label-width="auto"
                 require-mark-placement="right-hanging" :style="{
                     maxWidth: '640px',
                 }">
-                <n-form-item label="Housekeeping interval (in hours)" path="housekeeping_interval">
+                <n-form-item label="Housekeeping interval (in days)" path="housekeeping_interval">
                     <n-input-number v-model:value="indicator.housekeeping_interval" placeholder="Interval" />
                 </n-form-item>
-                <n-form-item label="History from data (in days)" path="history">
+                <n-form-item label="History from data (in days)" path="history_from_data">
                     <n-input-number v-model:value="indicator.history_from_data" placeholder="History" />
                 </n-form-item>
             </n-form>
@@ -287,10 +287,15 @@ import {
   useMessage
 } from 'naive-ui'
 import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import axios from 'axios'
 
 interface dynamicSelectItem {
     value: string | null;
+}
+
+function getClientTimezone(): string {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
 }
 
 // Signal strategy
@@ -300,9 +305,19 @@ const dynamicAsapSignalSettingsForm = ref<dynamicSelectItem[]>([])
 const dynamicDCAForm = ref<dynamicSelectItem[]>([])
 const DCAForm = ref<dynamicSelectItem[]>([])
 const APForm = ref<dynamicSelectItem[]>([])
-const formRef = ref<FormInst | null>(null)
+const generalFormRef = ref<FormInst | null>(null)
+const signalFormRef = ref<FormInst | null>(null)
+const filterFormRef = ref<FormInst | null>(null)
+const exchangeFormRef = ref<FormInst | null>(null)
+const dcaFormRef = ref<FormInst | null>(null)
+const autopilotFormRef = ref<FormInst | null>(null)
+const indicatorFormRef = ref<FormInst | null>(null)
 const message = useMessage()
+const router = useRouter()
 const isLoading = ref(true)
+const submitAttempted = ref(false)
+const DEFAULT_SYMSIGNAL_URL = "https://stream.3cqs.com"
+const DEFAULT_SYMSIGNAL_VERSION = "3.0.1"
 const timezone = ref([])
 const timerange = [
     {
@@ -353,30 +368,72 @@ const market = [{
 }]
 
 const symsignals = [
-    {
-        label: "SymSync50",
-        value: 66,
-    },
-    {
-        label: "SymSync60",
-        value: 65,
-    },
-    {
-        label: "SymSync70",
-        value: 64,
-    },
-    {
-        label: "SymSync80",
-        value: 63,
-    },
-    {
-        label: "SymSync90",
-        value: 62,
-    },
-    {
-        label: "SymSync100",
-        value: 61,
-    }
+    { label: "12 - SymRank Top 10", value: 12 },
+    { label: "2 - SymRank Top 30", value: 2 },
+    { label: "11 - SymRank Top 50", value: 11 },
+    { label: "1 - SymRank Top 100 Triple Tracker", value: 1 },
+    { label: "6 - SymRank Top 100 Quadruple Tracker", value: 6 },
+    { label: "7 - SymRank Top 250 Quadruple Tracker", value: 7 },
+    { label: "13 - SymScore Super Bullish", value: 13 },
+    { label: "22 - SymScore Super Bullish Range", value: 22 },
+    { label: "29 - SymScore Super-Hyper Bullish Range", value: 29 },
+    { label: "14 - SymScore Hyper Bullish", value: 14 },
+    { label: "23 - SymScore Hyper Bullish Range", value: 23 },
+    { label: "27 - SymScore Hyper-Ultra Bullish Range", value: 27 },
+    { label: "15 - SymScore Ultra Bullish", value: 15 },
+    { label: "25 - SymScore Ultra Bullish Range", value: 25 },
+    { label: "31 - SymScore Ultra-X-Treme Bullish Range", value: 31 },
+    { label: "16 - SymScore X-Treme Bullish", value: 16 },
+    { label: "54 - SymScore Neutral", value: 54 },
+    { label: "17 - SymScore Super Bearish", value: 17 },
+    { label: "21 - SymScore Super Bearish Range", value: 21 },
+    { label: "30 - SymScore Super-Hyper Bearish Range", value: 30 },
+    { label: "18 - SymScore Hyper Bearish", value: 18 },
+    { label: "24 - SymScore Hyper Bearish Range", value: 24 },
+    { label: "28 - SymScore Hyper-Ultra Bearish Range", value: 28 },
+    { label: "19 - SymScore Ultra Bearish", value: 19 },
+    { label: "26 - SymScore Ultra Bearish Range", value: 26 },
+    { label: "32 - SymScore Ultra-X-Treme Bearish Range", value: 32 },
+    { label: "20 - SymScore X-Treme Bearish", value: 20 },
+    { label: "39 - SymSense Super Greed", value: 39 },
+    { label: "48 - SymSense Super Greed Range", value: 48 },
+    { label: "55 - SymSense Super-Hyper Greed Range", value: 55 },
+    { label: "40 - SymSense Hyper Greed", value: 40 },
+    { label: "49 - SymSense Hyper Greed Range", value: 49 },
+    { label: "56 - SymSense Hyper-Ultra Greed Range", value: 56 },
+    { label: "41 - SymSense Ultra Greed", value: 41 },
+    { label: "50 - SymSense Ultra Greed Range", value: 50 },
+    { label: "57 - SymSense Ultra-X-Treme Greed Range", value: 57 },
+    { label: "42 - SymSense X-Treme Greed", value: 42 },
+    { label: "43 - SymSense Neutral", value: 43 },
+    { label: "44 - SymSense Super Fear", value: 44 },
+    { label: "51 - SymSense Super Fear Range", value: 51 },
+    { label: "58 - SymSense Super-Hyper Fear Range", value: 58 },
+    { label: "45 - SymSense Hyper Fear", value: 45 },
+    { label: "52 - SymSense Hyper Fear Range", value: 52 },
+    { label: "59 - SymSense Hyper-Ultra Fear Range", value: 59 },
+    { label: "46 - SymSense Ultra Fear", value: 46 },
+    { label: "53 - SymSense Ultra Fear Range", value: 53 },
+    { label: "60 - SymSense Ultra-X-Treme Fear Range", value: 60 },
+    { label: "47 - SymSense X-Treme Fear", value: 47 },
+    { label: "61 - SymSync 100", value: 61 },
+    { label: "62 - SymSync 90", value: 62 },
+    { label: "63 - SymSync 80", value: 63 },
+    { label: "64 - SymSync 70", value: 64 },
+    { label: "65 - SymSync 60", value: 65 },
+    { label: "66 - SymSync 50", value: 66 },
+    { label: "9 - Super Volatility", value: 9 },
+    { label: "33 - Super Volatility Range", value: 33 },
+    { label: "36 - Super-Hyper Volatility Range", value: 36 },
+    { label: "10 - Super Volatility Double Tracker", value: 10 },
+    { label: "3 - Hyper Volatility", value: 3 },
+    { label: "34 - Hyper Volatility Range", value: 34 },
+    { label: "37 - Hyper-Ultra Volatility Range", value: 37 },
+    { label: "8 - Hyper Volatility Double Tracker", value: 8 },
+    { label: "4 - Ultra Volatility", value: 4 },
+    { label: "35 - Ultra Volatility Range", value: 35 },
+    { label: "38 - Ultra-X-Treme Volatility Range", value: 38 },
+    { label: "5 - X-Treme Volatility", value: 5 },
 ]
 
 const general = ref({
@@ -455,76 +512,115 @@ const indicator = ref({
     history_from_data: null,
 })
 
+function dcaFieldValidator(fieldLabel: string) {
+    return (_rule: FormItemRule, value: unknown) => {
+        if (!dca.value.enabled) {
+            return true
+        }
+        if (value === null || value === undefined) {
+            return new Error(`Please add ${fieldLabel}`)
+        }
+        if (typeof value === 'string' && value.trim().length === 0) {
+            return new Error(`Please add ${fieldLabel}`)
+        }
+        return true
+    }
+}
+
+function requiredAfterSubmit(messageText: string) {
+    return (_rule: FormItemRule, value: unknown) => {
+        if (!submitAttempted.value) {
+            return true
+        }
+        if (value === null || value === undefined) {
+            return new Error(messageText)
+        }
+        if (typeof value === 'string' && value.trim().length === 0) {
+            return new Error(messageText)
+        }
+        if (Array.isArray(value) && value.length === 0) {
+            return new Error(messageText)
+        }
+        return true
+    }
+}
+
 const rules: FormRules = {
     timezone: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please select timezone'
+        validator: requiredAfterSubmit('Please select timezone'),
+        trigger: ['submit', 'change']
     },
     signal: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please select signal plugin'
+        validator: requiredAfterSubmit('Please select signal plugin'),
+        trigger: ['submit', 'change']
     },
     signal_settings: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please configure signal'
+        validator: requiredAfterSubmit('Please configure signal'),
+        trigger: ['submit', 'change']
     },
     symbol_list: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please add symbol list or remote list url'
+        validator: requiredAfterSubmit('Please add symbol list or remote list url'),
+        trigger: ['submit', 'change']
     },
-    exchange: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please select exchange'
+    name: {
+        validator: requiredAfterSubmit('Please select exchange'),
+        trigger: ['submit', 'change']
     },
-    timerange: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please select timeframe'
+    timeframe: {
+        validator: requiredAfterSubmit('Please select timeframe'),
+        trigger: ['submit', 'change']
     },
     key: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please add key'
+        validator: requiredAfterSubmit('Please add key'),
+        trigger: ['submit', 'change']
     },
     secret: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please add secret'
+        validator: requiredAfterSubmit('Please add secret'),
+        trigger: ['submit', 'change']
     },
     currency: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please select currency'
+        validator: requiredAfterSubmit('Please select currency'),
+        trigger: ['submit', 'change']
     },
     max_bots: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please add max bots'
+        validator: requiredAfterSubmit('Please add max bots'),
+        trigger: ['submit', 'change']
     },
     bo: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please add bo'
+        validator: requiredAfterSubmit('Please add bo'),
+        trigger: ['submit', 'change']
     },
     so: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please add so'
+        validator: dcaFieldValidator('safety order amount'),
+        trigger: ['submit'],
+    },
+    mstc: {
+        validator: dcaFieldValidator('max safety order count'),
+        trigger: ['submit'],
     },
     sos: {
-        required: true,
-        trigger: ['blur', 'input'],
-        message: 'Please input value'
+        validator: dcaFieldValidator('price deviation'),
+        trigger: ['submit'],
+    },
+    ss: {
+        validator: dcaFieldValidator('step scale'),
+        trigger: ['submit'],
+    },
+    os: {
+        validator: dcaFieldValidator('volume scale'),
+        trigger: ['submit'],
     },
     tp: {
-        required: true,
-        trigger: ['blur', 'change'],
-        message: 'Please add tp'
+        validator: requiredAfterSubmit('Please add tp'),
+        trigger: ['submit', 'change']
+    },
+    housekeeping_interval: {
+        validator: requiredAfterSubmit('Please add housekeeping interval'),
+        trigger: ['submit', 'change']
+    },
+    history_from_data: {
+        validator: requiredAfterSubmit('Please add history from data'),
+        trigger: ['submit', 'change']
     },
 }
 
@@ -542,6 +638,12 @@ function handle_signal_settings_select() {
     if (signal.value.signal == "sym_signals") {
         if (dynamicSymSignalSettingsForm.value.length === 0) {
             dynamicSymSignalSettingsForm.value.push({ value: null })
+        }
+        if (!signal.value.symsignal_url) {
+            signal.value.symsignal_url = DEFAULT_SYMSIGNAL_URL
+        }
+        if (!signal.value.symsignal_version) {
+            signal.value.symsignal_version = DEFAULT_SYMSIGNAL_VERSION
         }
         dynamicAsapSignalSettingsForm.value.pop()
     } else if (signal.value.signal == "asap") {
@@ -586,7 +688,7 @@ async function fetchDefaultValues() {
     try {
         const response = await axios.get(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/all`);
         if (response.status === 200) {
-            general.value.timezone = response.data.timezone
+            general.value.timezone = response.data.timezone || getClientTimezone()
             general.value.debug = parseBooleanString(response.data.debug) ?? false
             signal.value.signal = response.data.signal
             signal.value.strategy = response.data.signal_strategy
@@ -596,9 +698,9 @@ async function fetchDefaultValues() {
                 // ToDo - fix incorrect single quote JSON
                 signal_settings = JSON.parse(signal_settings.replace(/'/g, '"'))
                 console.log(signal_settings)
-                signal.value.symsignal_url = signal_settings["api_url"]
+                signal.value.symsignal_url = signal_settings["api_url"] || DEFAULT_SYMSIGNAL_URL
                 signal.value.symsignal_key = signal_settings["api_key"]
-                signal.value.symsignal_version = signal_settings["api_version"]
+                signal.value.symsignal_version = signal_settings["api_version"] || DEFAULT_SYMSIGNAL_VERSION
                 signal.value.symsignal_allowedsignals = signal_settings["allowed_signals"]
             }
             signal.value.symbol_list = response.data.symbol_list
@@ -607,7 +709,7 @@ async function fetchDefaultValues() {
                 filter.value.rsi = response.data.filter.rsi_max
                 filter.value.cmc_api_key = response.data.filter.marketcap_cmc_api_key
             }
-            filter.value.denylist = response.data.pair_denylist
+            filter.value.denylist = toTokenOnlyEntries(response.data.pair_denylist)
             filter.value.topcoin_limit = response.data.topcoin_limit
             filter.value.btc_pulse = parseBooleanString(response.data.btc_pulse) ?? false
             exchange.value.name = response.data.exchange
@@ -679,8 +781,81 @@ async function fetchDefaultValues() {
     }
 }
 
+function splitEntries(raw: string): string[] {
+    return raw
+        .split(/[\n,]+/)
+        .map((entry) => entry.trim().replace(/^['"]|['"]$/g, ""))
+        .filter((entry) => entry.length > 0)
+}
+
+function toTokenOnlyEntries(raw: string | null): string | null {
+    if (!raw) {
+        return raw
+    }
+
+    const normalizedRaw = raw.trim()
+    if (!normalizedRaw || /^https?:\/\//i.test(normalizedRaw)) {
+        return raw
+    }
+
+    const entries = splitEntries(normalizedRaw)
+    if (entries.length === 0) {
+        return raw
+    }
+
+    const tokens = entries.map((entry) =>
+        entry.toUpperCase().replace("-", "/").split("/")[0]
+    )
+    return tokens.join(",")
+}
+
+function normalizePairEntries(raw: string | null, quoteCurrency: string): string | false {
+    if (!raw) {
+        return false
+    }
+
+    const normalizedRaw = raw.trim()
+    if (!normalizedRaw) {
+        return false
+    }
+
+    if (/^https?:\/\//i.test(normalizedRaw)) {
+        return normalizedRaw
+    }
+
+    const entries = splitEntries(normalizedRaw)
+    if (entries.length === 0) {
+        return false
+    }
+
+    const quote = quoteCurrency.toUpperCase()
+    const pairs = entries.map((entry) => {
+        const normalizedEntry = entry.toUpperCase().replace("-", "/")
+        if (normalizedEntry.includes("/")) {
+            const [base, q] = normalizedEntry.split("/")
+            if (base && q) {
+                return `${base}/${q}`
+            }
+            return `${base}/${quote}`
+        }
+        return `${normalizedEntry}/${quote}`
+    })
+
+    return pairs.join(",")
+}
+
 async function submitForm() {
     try {
+        const quoteCurrency = String(exchange.value.currency || "USDT").toUpperCase()
+        const normalizedSymbolList = normalizePairEntries(
+            signal.value.symbol_list,
+            quoteCurrency,
+        )
+        const normalizedDenyList = normalizePairEntries(
+            filter.value.denylist,
+            quoteCurrency,
+        )
+
         const formData = {
             timezone: JSON.stringify({ 'value': general.value.timezone || false, 'type': "str" }),
             debug: JSON.stringify({ 'value': general.value.debug || false, 'type': "bool" }),
@@ -688,9 +863,9 @@ async function submitForm() {
             signal_strategy: JSON.stringify({ 'value': dynamicSignalStrategyForm.value.length > 0 ? dynamicSignalStrategyForm.value.map(item => item.value).join(', ') : false, 'type': "str" }),
             signal_strategy_timeframe: JSON.stringify({ 'value': signal.value.timeframe || false, 'type': "str" }),
             signal_settings: JSON.stringify({ 'value': { 'api_url': signal.value.symsignal_url || false, 'api_key': signal.value.symsignal_key || false, 'api_version': signal.value.symsignal_version || false, 'allowed_signals': signal.value.symsignal_allowedsignals }, 'type': "str" }),
-            symbol_list: JSON.stringify({ 'value': signal.value.symbol_list || false, 'type': "str" }),
+            symbol_list: JSON.stringify({ 'value': normalizedSymbolList, 'type': "str" }),
             filter: JSON.stringify({ 'value': { 'rsi_max': filter.value.rsi || false, 'marketcap_cmc_api_key': filter.value.cmc_api_key || false }, 'type': "str" }),
-            pair_denylist: JSON.stringify({ 'value': filter.value.denylist || false, 'type': "str" }),
+            pair_denylist: JSON.stringify({ 'value': normalizedDenyList, 'type': "str" }),
             topcoin_limit: JSON.stringify({ 'value': filter.value.topcoin_limit || false, 'type': "int" }),
             btc_pulse: JSON.stringify({ 'value': filter.value.btc_pulse || false, 'type': "bool" }),
             exchange: JSON.stringify({ 'value': exchange.value.name || false, 'type': "str" }),
@@ -737,6 +912,9 @@ async function submitForm() {
 
         if (response.status === 200) {
             message.success('Form submitted successfully')
+            setTimeout(() => {
+                router.push('/')
+            }, 250)
         } else {
             let errorMessage = 'An unexpected error occurred'
             try {
@@ -768,20 +946,40 @@ async function submitForm() {
 
 function handleValidateButtonClick(e: MouseEvent) {
     e.preventDefault()
-    formRef.value?.validate((errors) => {
-        if (!errors) {
-            submitForm();
-        }
-        else {
-            console.log(errors)
-            message.error('Invalid')
+    submitAttempted.value = true
+    const forms = [
+        generalFormRef.value,
+        signalFormRef.value,
+        filterFormRef.value,
+        exchangeFormRef.value,
+        dcaFormRef.value,
+        autopilotFormRef.value,
+        indicatorFormRef.value,
+    ].filter((form): form is FormInst => form !== null)
+
+    const validations = forms.map(
+        (form) =>
+            new Promise<boolean>((resolve) => {
+                form.validate((errors) => resolve(!errors))
+            }),
+    )
+
+    Promise.all(validations).then((results) => {
+        if (results.every(Boolean)) {
+            submitForm()
+        } else {
+            message.error('Missing/invalid configuration input')
         }
     })
 }
 
 onMounted(() => {
-    fetchDefaultValues(); // Fetch default values when component is mounted
     timezone.value = getAllTimeZones()
+    const clientTimezone = getClientTimezone()
+    if (!timezone.value.some((tz) => tz.value === clientTimezone)) {
+        timezone.value.unshift({ label: clientTimezone, value: clientTimezone })
+    }
+    fetchDefaultValues(); // Fetch default values when component is mounted
 });
 
 </script>

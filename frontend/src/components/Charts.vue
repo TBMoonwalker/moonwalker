@@ -70,7 +70,18 @@ watch([statistics_data.data, profit_store.data], async ([newData]) => {
     let labels = []
     let datasets = []
 
-    if (!historic_data && !isLoadingHistory) {
+    const hasHistoricProfitData =
+        !!profit_store.data && Object.keys(profit_store.data).length > 0
+    const websocketData = newData as any
+    const profitWeekCount =
+        websocketData && websocketData.profit_week
+            ? Object.keys(websocketData.profit_week).length
+            : 0
+    const shouldRefreshHistory =
+        !isLoadingHistory &&
+        (!historic_data || (!hasHistoricProfitData && profitWeekCount > 0))
+
+    if (shouldRefreshHistory) {
         isLoadingHistory = true
         profit_store.data = {}
         await profit_store.load_profit_history_data(range['period'])

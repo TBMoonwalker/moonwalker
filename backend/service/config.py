@@ -82,7 +82,9 @@ class Config:
         elif type == "float":
             return float(value)
         elif type == "bool":
-            return bool(value)
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in {"1", "true", "yes", "on"}
         else:
             return value
 
@@ -146,7 +148,10 @@ class Config:
         """
         for key, value in updates.items():
             value = json.loads(value)
-            if value["value"]:
+            should_persist = bool(value["value"]) or (
+                value["type"] == "bool" and value["value"] is False
+            )
+            if should_persist:
                 await AppConfig.update_or_create(
                     key=key,
                     defaults={"value": value["value"], "value_type": value["type"]},
