@@ -1,12 +1,12 @@
 cachetools==7.0.0
-ccxt==4.5.35
+ccxt==4.5.37
 pandas==2.3.3
 Quart==0.20.0
 quart-cors==0.8.0
-python-socketio==5.16.0
+python-socketio==5.16.1
 ta-lib==0.6.8
-tenacity==9.1.2
-tortoise-orm==0.25.3
+tenacity==9.1.4
+tortoise-orm==1.0.0
 anyio==4.12.1
 aiosqlite==0.22.1
-redis==7.1.0
+redis==7.1.1
