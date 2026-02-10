@@ -4,7 +4,7 @@ import asyncio
 import os
 
 from controller import controller
-from quart import Quart
+from quart import Quart, g
 from service.config import Config
 from service.database import Database
 from service.housekeeper import Housekeeper
@@ -15,6 +15,43 @@ from service.watcher import Watcher
 # Initialize app
 app = Quart(__name__)
 app.register_blueprint(controller)
+
+
+@app.before_request
+async def db_before_request() -> None:
+    """Attach a Tortoise context for request handlers."""
+    if not hasattr(app, "database"):
+        return
+    ctx = app.database.context()
+    await ctx.__aenter__()
+    g._db_ctx = ctx
+
+
+@app.after_request
+async def db_after_request(response):
+    """Release request-scoped Tortoise context."""
+    ctx = getattr(g, "_db_ctx", None)
+    if ctx:
+        await ctx.__aexit__(None, None, None)
+    return response
+
+
+@app.before_websocket
+async def db_before_websocket() -> None:
+    """Attach a Tortoise context for websocket handlers."""
+    if not hasattr(app, "database"):
+        return
+    ctx = app.database.context()
+    await ctx.__aenter__()
+    g._db_ws_ctx = ctx
+
+
+@app.after_websocket
+async def db_after_websocket() -> None:
+    """Release websocket-scoped Tortoise context."""
+    ctx = getattr(g, "_db_ws_ctx", None)
+    if ctx:
+        await ctx.__aexit__(None, None, None)
 
 
 @app.before_serving
@@ -29,7 +66,7 @@ async def startup() -> None:
     await app.database.init()
 
     # Initialize ConfigService (starts Redis listener)
-    app.conf = await Config.instance()
+    app.conf = await app.database.run_with_context(Config.instance)
 
     # Initialize watcher module
     app.watcher = Watcher()
@@ -41,11 +78,15 @@ async def startup() -> None:
 
     # Initialize signal module
     app.signal_plugin = Signal(watcher_queue, app)
-    await app.signal_plugin.init()
+    await app.database.run_with_context(app.signal_plugin.init)
 
-    app.add_background_task(app.watcher.watch_incoming_symbols, watcher_queue)
-    app.add_background_task(app.housekeeper.cleanup_ticker_database)
-    app.add_background_task(app.watcher.watch_tickers)
+    app.add_background_task(
+        app.database.run_with_context, app.watcher.watch_incoming_symbols, watcher_queue
+    )
+    app.add_background_task(
+        app.database.run_with_context, app.housekeeper.cleanup_ticker_database
+    )
+    app.add_background_task(app.database.run_with_context, app.watcher.watch_tickers)
 
 
 @app.after_serving
