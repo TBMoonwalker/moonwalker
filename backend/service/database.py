@@ -1,6 +1,5 @@
 import os
 from collections.abc import Awaitable, Callable
-from contextlib import asynccontextmanager
 from typing import Any
 
 import helper
@@ -52,23 +51,13 @@ class Database:
             logging.error("Failed to initialize database: %s", exc, exc_info=True)
             raise
 
-    @asynccontextmanager
-    async def context(self):
-        """Provide a mandatory Tortoise context."""
-        if self._ctx is None:
-            raise RuntimeError("Tortoise context is not initialized")
-        self._ctx.__enter__()
-        try:
-            yield
-        finally:
-            self._ctx.__exit__(None, None, None)
-
     async def run_with_context(
         self, func: Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any
     ) -> Any:
-        """Run an async callable inside a mandatory Tortoise context."""
-        async with self.context():
-            return await func(*args, **kwargs)
+        """Run an async callable with globally initialized Tortoise context."""
+        if self._ctx is None:
+            raise RuntimeError("Tortoise context is not initialized")
+        return await func(*args, **kwargs)
 
     async def shutdown(self) -> None:
         """Close all database connections.

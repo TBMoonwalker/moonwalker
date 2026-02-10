@@ -56,15 +56,24 @@
                     </n-form-item>
                     <n-form-item v-else label="ASAP Symbol" path="symbol_list">
                         <n-flex vertical :style="{ width: '100%' }">
-                            <n-alert v-if="!isCurrencyConfigured()" type="info">
-                                Please configure a quote currency in Exchange settings first.
+                            <n-alert v-if="!isAsapExchangeReady()" type="info">
+                                Please configure {{ getAsapMissingFieldsLabel() }} in Exchange settings first.
                             </n-alert>
                             <n-alert v-else-if="signal.asap_symbol_fetch_error" type="warning">
                                 {{ signal.asap_symbol_fetch_error }}
                             </n-alert>
+                            <n-button
+                                secondary
+                                type="primary"
+                                :loading="signal.asap_symbols_loading"
+                                :disabled="!isAsapExchangeReady()"
+                                @click="fetchAsapSymbolsForCurrency"
+                            >
+                                Load symbols from exchange
+                            </n-button>
                             <n-select v-model:value="signal.asap_symbol_select" :options="signal.asap_symbol_options"
                                 multiple
-                                :loading="signal.asap_symbols_loading" :disabled="!isCurrencyConfigured()"
+                                :loading="signal.asap_symbols_loading" :disabled="!isAsapExchangeReady() || signal.asap_symbol_options.length === 0"
                                 placeholder="Select symbol" filterable />
                         </n-flex>
                     </n-form-item>
@@ -583,6 +592,31 @@ function isCurrencyConfigured(): boolean {
     return String(configuredCurrency).trim().length > 0
 }
 
+function getAsapExchangeMissingFields(): string[] {
+    const missing: string[] = []
+    if (!exchange.value.name) {
+        missing.push('exchange')
+    }
+    if (!exchange.value.key) {
+        missing.push('key')
+    }
+    if (!exchange.value.secret) {
+        missing.push('secret')
+    }
+    if (!isCurrencyConfigured()) {
+        missing.push('currency')
+    }
+    return missing
+}
+
+function isAsapExchangeReady(): boolean {
+    return getAsapExchangeMissingFields().length === 0
+}
+
+function getAsapMissingFieldsLabel(): string {
+    return getAsapExchangeMissingFields().join(', ')
+}
+
 function isUrlInput(value: string | null): boolean {
     if (!value) {
         return false
@@ -614,17 +648,34 @@ async function fetchAsapSymbolsForCurrency(): Promise<void> {
     signal.value.asap_symbol_fetch_error = null
     signal.value.asap_symbols_loading = true
 
-    if (!isCurrencyConfigured()) {
+    if (!isAsapExchangeReady()) {
+        signal.value.asap_symbol_fetch_error = `Missing exchange configuration: ${getAsapMissingFieldsLabel()}`
         signal.value.asap_symbols_loading = false
         return
     }
 
     try {
         const quoteCurrency = String(exchange.value.currency).toUpperCase()
-        const response = await axios.get(
-            `http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/data/exchange/symbols/${quoteCurrency}`,
+        const response = await axios.post(
+            `http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/data/exchange/symbols`,
+            {
+                currency: quoteCurrency,
+                exchange_config: {
+                    exchange: exchange.value.name,
+                    key: exchange.value.key,
+                    secret: exchange.value.secret,
+                    market: exchange.value.market || "spot",
+                    dry_run: exchange.value.dry_run ?? true,
+                },
+            },
         )
         const symbols = Array.isArray(response.data?.symbols) ? response.data.symbols : []
+        const missing = Array.isArray(response.data?.missing) ? response.data.missing : []
+        if (missing.length > 0) {
+            signal.value.asap_symbol_fetch_error = `Missing exchange configuration: ${missing.join(', ')}`
+            signal.value.asap_symbol_options = []
+            return
+        }
         signal.value.asap_symbol_options = symbols.map((symbol: string) => ({
             label: symbol,
             value: symbol,
@@ -684,6 +735,10 @@ const rules: FormRules = {
 
             if (!isCurrencyConfigured()) {
                 return new Error('Please configure currency before selecting symbols')
+            }
+
+            if (!isAsapExchangeReady()) {
+                return new Error(`Please configure ${getAsapMissingFieldsLabel()} before selecting symbols`)
             }
 
             if (!signal.value.asap_symbol_select) {
@@ -1140,20 +1195,24 @@ watch(
         if (useUrl) {
             signal.value.asap_symbol_select = []
             signal.value.asap_symbol_options = []
+            signal.value.asap_symbol_fetch_error = null
             if (!isUrlInput(signal.value.symbol_list)) {
                 signal.value.symbol_list = null
             }
             return
         }
-        await fetchAsapSymbolsForCurrency()
+        signal.value.asap_symbol_options = []
+        signal.value.asap_symbol_fetch_error = null
     },
 )
 
 watch(
-    () => exchange.value.currency,
+    () => [exchange.value.currency, exchange.value.name, exchange.value.key, exchange.value.secret],
     async () => {
         if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
-            await fetchAsapSymbolsForCurrency()
+            signal.value.asap_symbol_options = []
+            signal.value.asap_symbol_select = []
+            signal.value.asap_symbol_fetch_error = null
         }
     },
 )

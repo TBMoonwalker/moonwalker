@@ -78,9 +78,31 @@ class Config:
             The converted value in the appropriate Python type
         """
         if type == "int":
-            return int(value)
+            try:
+                if isinstance(value, bool):
+                    return int(value)
+                normalized = str(value).strip().lower()
+                if normalized in {"false", "none", "null", ""}:
+                    return 0
+                return int(value)
+            except (TypeError, ValueError):
+                logging.warning(
+                    "Invalid int config value '%s'. Falling back to 0.", value
+                )
+                return 0
         elif type == "float":
-            return float(value)
+            try:
+                if isinstance(value, bool):
+                    return float(value)
+                normalized = str(value).strip().lower()
+                if normalized in {"false", "none", "null", ""}:
+                    return 0.0
+                return float(value)
+            except (TypeError, ValueError):
+                logging.warning(
+                    "Invalid float config value '%s'. Falling back to 0.0.", value
+                )
+                return 0.0
         elif type == "bool":
             if isinstance(value, bool):
                 return value
@@ -148,10 +170,15 @@ class Config:
         """
         for key, value in updates.items():
             value = json.loads(value)
+            value_type = value["type"]
+            value_data = value["value"]
+            is_numeric_value = isinstance(value_data, (int, float)) and not isinstance(
+                value_data, bool
+            )
             should_persist = bool(value["value"]) or (
-                value["type"] == "bool" and value["value"] is False
+                value_type == "bool" and value_data is False
             ) or (
-                value["type"] in {"int", "float"} and value["value"] == 0
+                value_type in {"int", "float"} and is_numeric_value and value_data == 0
             )
             if should_persist:
                 await AppConfig.update_or_create(
