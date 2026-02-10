@@ -110,6 +110,16 @@ class Config:
         else:
             return value
 
+    def __serialize_value_for_storage(self, value: Any, value_type: str) -> Any:
+        """Serialize values before storing in AppConfig.
+
+        For `str` typed config, persist dict/list as valid JSON strings so clients
+        can parse them with JSON.parse without Python-literal normalization hacks.
+        """
+        if value_type == "str" and isinstance(value, (dict, list)):
+            return json.dumps(value)
+        return value
+
     def __get_strategies(self) -> list[str]:
         """Get a list of available strategy filenames from the strategies directory.
 
@@ -150,9 +160,12 @@ class Config:
         Returns:
             True if the operation succeeded
         """
+        serialized_value = self.__serialize_value_for_storage(
+            value["value"], value["type"]
+        )
         await AppConfig.update_or_create(
             key=key,
-            defaults={"value": value["value"], "value_type": value["type"]},
+            defaults={"value": serialized_value, "value_type": value["type"]},
         )
         # Notify all subscribers across processes
         await redis_client.publish(CONFIG_CHANNEL, key)
@@ -181,9 +194,12 @@ class Config:
                 value_type in {"int", "float"} and is_numeric_value and value_data == 0
             )
             if should_persist:
+                serialized_value = self.__serialize_value_for_storage(
+                    value_data, value_type
+                )
                 await AppConfig.update_or_create(
                     key=key,
-                    defaults={"value": value["value"], "value_type": value["type"]},
+                    defaults={"value": serialized_value, "value_type": value_type},
                 )
         # Notify all subscribers across processes
         # ToDo - create an Array as String with changed files instead of "multiple"

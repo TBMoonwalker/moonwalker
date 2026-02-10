@@ -643,6 +643,33 @@ function parseSymbolListToArray(raw: string | null): string[] {
         .filter((entry) => entry.length > 0)
 }
 
+function parseStructuredConfigValue(raw: unknown): Record<string, unknown> | null {
+    if (!raw) {
+        return null
+    }
+
+    if (typeof raw === 'object') {
+        return raw as Record<string, unknown>
+    }
+
+    if (typeof raw !== 'string') {
+        return null
+    }
+
+    const normalized = raw
+        .replace(/'/g, '"')
+        .replace(/\bTrue\b/g, 'true')
+        .replace(/\bFalse\b/g, 'false')
+        .replace(/\bNone\b/g, 'null')
+
+    try {
+        return JSON.parse(normalized) as Record<string, unknown>
+    } catch (error) {
+        console.error('Failed to parse structured config value:', error, raw)
+        return null
+    }
+}
+
 async function fetchAsapSymbolsForCurrency(): Promise<void> {
     signal.value.asap_symbol_options = []
     signal.value.asap_symbol_fetch_error = null
@@ -891,23 +918,27 @@ async function fetchDefaultValues() {
             signal.value.signal = response.data.signal
             signal.value.strategy = response.data.signal_strategy
             signal.value.timeframe = response.data.signal_strategy_timeframe
-            var signal_settings = response.data.signal_settings
-            if (signal_settings) {
-                // ToDo - fix incorrect single quote JSON
-                signal_settings = JSON.parse(signal_settings.replace(/'/g, '"'))
-                console.log(signal_settings)
-                signal.value.symsignal_url = signal_settings["api_url"] || DEFAULT_SYMSIGNAL_URL
-                signal.value.symsignal_key = signal_settings["api_key"]
-                signal.value.symsignal_version = signal_settings["api_version"] || DEFAULT_SYMSIGNAL_VERSION
-                signal.value.symsignal_allowedsignals = signal_settings["allowed_signals"]
+            const signalSettings = parseStructuredConfigValue(response.data.signal_settings)
+            if (signalSettings) {
+                signal.value.symsignal_url = String(signalSettings["api_url"] || DEFAULT_SYMSIGNAL_URL)
+                signal.value.symsignal_key = String(signalSettings["api_key"] || "")
+                signal.value.symsignal_version = String(signalSettings["api_version"] || DEFAULT_SYMSIGNAL_VERSION)
+                const allowedSignals = signalSettings["allowed_signals"]
+                signal.value.symsignal_allowedsignals = Array.isArray(allowedSignals) ? allowedSignals : []
             }
             signal.value.symbol_list = response.data.symbol_list
             if (isUrlInput(response.data.symbol_list)) {
                 signal.value.asap_use_url = true
                 signal.value.asap_symbol_select = []
+                signal.value.asap_symbol_options = []
             } else {
                 signal.value.asap_use_url = false
-                signal.value.asap_symbol_select = parseSymbolListToArray(response.data.symbol_list)
+                const configuredSymbols = parseSymbolListToArray(response.data.symbol_list)
+                signal.value.asap_symbol_select = configuredSymbols
+                signal.value.asap_symbol_options = configuredSymbols.map((symbol) => ({
+                    label: symbol,
+                    value: symbol,
+                }))
             }
             var filter_indicator = response.data.filter
             if (filter_indicator) {
@@ -1189,6 +1220,9 @@ function handleValidateButtonClick(e: MouseEvent) {
 watch(
     () => signal.value.asap_use_url,
     async (useUrl) => {
+        if (isLoading.value) {
+            return
+        }
         if (signal.value.signal !== "asap") {
             return
         }
@@ -1209,6 +1243,9 @@ watch(
 watch(
     () => [exchange.value.currency, exchange.value.name, exchange.value.key, exchange.value.secret],
     async () => {
+        if (isLoading.value) {
+            return
+        }
         if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
             signal.value.asap_symbol_options = []
             signal.value.asap_symbol_select = []
