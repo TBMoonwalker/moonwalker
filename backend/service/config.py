@@ -150,6 +150,8 @@ class Config:
             value = json.loads(value)
             should_persist = bool(value["value"]) or (
                 value["type"] == "bool" and value["value"] is False
+            ) or (
+                value["type"] in {"int", "float"} and value["value"] == 0
             )
             if should_persist:
                 await AppConfig.update_or_create(

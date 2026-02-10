@@ -79,6 +79,7 @@ All supported configuration keys are listed below. Keys marked "(advanced)" are 
 | `ordersize` | `float` | ASAP base order size (advanced). | `12` |
 | `housekeeping_interval` | `int` | Ticker cache cleanup interval (days). | `2` |
 | `history_from_data` | `int` | History lookback for indicator seed (days). | `30` |
+| `upnl_housekeeping_interval` | `int` | uPNL history retention in days; `0` keeps all history forever. | `0` |
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |
 | `autopilot` | `bool` | Enable autopilot mode. | `false` |
 | `autopilot_max_fund` | `int` | Max funds for autopilot calculations. | `1000` |

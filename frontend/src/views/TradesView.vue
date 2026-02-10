@@ -3,6 +3,7 @@ import OpenTrades from '../components/OpenTrades.vue'
 import ClosedTrades from '../components/ClosedTrades.vue'
 import Statistics from '@/components/Statistics.vue'
 import Charts from '@/components/Charts.vue'
+import UpnlChart from '@/components/UpnlChart.vue'
 import { ConstructOutline } from '@vicons/ionicons5'
 import { NButton, NCard, NFlex, NIcon, NTabPane, NTabs } from 'naive-ui'
 
@@ -31,6 +32,9 @@ function configureButtonClicked() {
   <n-flex vertical :style="{ display: 'flex', flexDirection: 'column', gap: '16px', width: '98%' }">
     <n-card content-style="padding: 0;">
       <n-tabs type="line" size="large" :tabs-padding="20">
+        <n-tab-pane name="Profit overall">
+          <UpnlChart />
+        </n-tab-pane>
         <n-tab-pane name="Daily profit">
           <Charts period="daily" />
         </n-tab-pane>

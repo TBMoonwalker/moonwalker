@@ -6,6 +6,7 @@ from typing import Any
 import helper
 import model
 import pandas as pd
+from cachetools import TTLCache
 from service.exchange import Exchange
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
@@ -14,10 +15,15 @@ logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
 class Data:
     """Data retrieval and transformation utilities."""
 
+    SYMBOLS_CACHE_TTL_SECONDS = 300
+
     def __init__(self) -> None:
         utils = helper.Utils()
         self.exchange = Exchange()
         self.utils = utils
+        self._symbols_cache: TTLCache[str, list[str]] = TTLCache(
+            maxsize=64, ttl=self.SYMBOLS_CACHE_TTL_SECONDS
+        )
 
     async def get_listing_date(
         self, config: dict[str, Any], symbol: str
@@ -66,6 +72,30 @@ class Data:
         """Return distinct ticker symbols."""
         symbols = await model.Tickers.all().distinct().values_list("symbol", flat=True)
         return symbols
+
+    async def get_exchange_symbols_for_currency(
+        self, config: dict[str, Any], currency: str
+    ) -> list[str]:
+        """Return exchange symbols for the given quote currency."""
+        cache_key = (
+            f"{config.get('exchange','')}:"
+            f"{config.get('market','spot')}:"
+            f"{bool(config.get('dry_run', True))}:"
+            f"{currency.upper()}"
+        )
+        if cache_key in self._symbols_cache:
+            return self._symbols_cache[cache_key]
+
+        try:
+            symbols = await self.exchange.get_symbols_for_quote_currency(config, currency)
+            self._symbols_cache[cache_key] = symbols
+            return symbols
+        except Exception as e:
+            # Broad catch to keep symbol list retrieval resilient.
+            logging.error(f"Error fetching exchange symbols for {currency}: {e}")
+            return []
+        finally:
+            await self.exchange.close()
 
     def __calculate_min_candle_date(self, timerange: str, length: int) -> float:
         """Calculate the earliest timestamp for candle history."""

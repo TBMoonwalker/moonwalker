@@ -1,6 +1,6 @@
 """Statistics aggregation for trading performance."""
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import helper
@@ -17,6 +17,7 @@ class Statistic:
 
     def __init__(self) -> None:
         self.trades = Trades()
+        self.snapshot_interval_seconds = 60
 
     async def get_profits_overall(
         self, timestamp: int | None, period: str = "daily"
@@ -140,7 +141,53 @@ class Statistic:
             # Broad catch to keep stats endpoints responsive.
             logging.error(f"Error getting profits for the week: {e}")
 
+        profit_data["profit_overall_timestamp"] = datetime.now(timezone.utc).strftime(
+            "%Y-%m-%d %H:%M:%S"
+        )
+        await self._store_upnl_snapshot(profit_data)
         return profit_data
+
+    async def _store_upnl_snapshot(self, profit_data: dict[str, Any]) -> None:
+        """Persist a sampled uPNL snapshot for long-term charting."""
+        try:
+            latest_snapshot = await model.UpnlHistory.all().order_by("-timestamp").first()
+            now = datetime.now(timezone.utc)
+            if latest_snapshot:
+                latest_ts = latest_snapshot.timestamp
+                if latest_ts.tzinfo is None:
+                    latest_ts = latest_ts.replace(tzinfo=timezone.utc)
+                elapsed = (now - latest_ts).total_seconds()
+                if elapsed < self.snapshot_interval_seconds:
+                    return
+
+            await model.UpnlHistory.create(
+                timestamp=now,
+                upnl=float(profit_data.get("upnl") or 0.0),
+                profit_overall=float(profit_data.get("profit_overall") or 0.0),
+            )
+        except Exception as e:
+            # Broad catch to avoid stats persistence failures affecting websocket data.
+            logging.error(f"Error storing uPNL snapshot: {e}")
+
+    async def get_upnl_history_all(self) -> list[dict[str, Any]]:
+        """Return overall profit snapshots from the beginning, ordered by timestamp."""
+        upnl_data: list[dict[str, Any]] = []
+        try:
+            rows = await model.UpnlHistory.all().order_by("timestamp").values_list(
+                "timestamp", "profit_overall"
+            )
+            for timestamp, profit_overall in rows:
+                upnl_data.append(
+                    {
+                        "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                        "profit_overall": profit_overall,
+                    }
+                )
+        except Exception as e:
+            # Broad catch to keep stats endpoints responsive.
+            logging.error(f"Error getting uPNL history: {e}")
+
+        return upnl_data
 
     async def update_statistic_data(self, stats: dict[str, Any]) -> None:
         """Update open trade statistics based on recent ticker data."""

@@ -44,11 +44,29 @@
 
                 <!-- Dynamic check for ASAP Signal settings -->
                 <template v-for="(index) in dynamicAsapSignalSettingsForm" :key="index">
-                    <n-form-item label="Token/Coin List or URL" path="symbol_list">
-                        <n-input v-model:value="signal.symbol_list" placeholder="Textarea" type="textarea" :autosize="{
-                            minRows: 3,
-                            maxRows: 5,
-                        }" />
+                    <n-form-item label="Use URL input" path="asap_use_url" label-placement="left">
+                        <n-switch v-model:value="signal.asap_use_url" />
+                    </n-form-item>
+                    <n-form-item v-if="signal.asap_use_url" label="Token/Coin List or URL" path="symbol_list">
+                        <n-input
+                            :value="signal.symbol_list"
+                            placeholder="https://example.com/symbols.txt"
+                            @update:value="handleAsapUrlInput"
+                        />
+                    </n-form-item>
+                    <n-form-item v-else label="ASAP Symbol" path="symbol_list">
+                        <n-flex vertical :style="{ width: '100%' }">
+                            <n-alert v-if="!isCurrencyConfigured()" type="info">
+                                Please configure a quote currency in Exchange settings first.
+                            </n-alert>
+                            <n-alert v-else-if="signal.asap_symbol_fetch_error" type="warning">
+                                {{ signal.asap_symbol_fetch_error }}
+                            </n-alert>
+                            <n-select v-model:value="signal.asap_symbol_select" :options="signal.asap_symbol_options"
+                                multiple
+                                :loading="signal.asap_symbols_loading" :disabled="!isCurrencyConfigured()"
+                                placeholder="Select symbol" filterable />
+                        </n-flex>
                     </n-form-item>
                 </template>
 
@@ -254,6 +272,10 @@
                 <n-form-item label="Housekeeping interval (in days)" path="housekeeping_interval">
                     <n-input-number v-model:value="indicator.housekeeping_interval" placeholder="Interval" />
                 </n-form-item>
+                <n-form-item label="UPNL history retention (days, 0 = infinite)" path="upnl_housekeeping_interval">
+                    <n-input-number v-model:value="indicator.upnl_housekeeping_interval"
+                        placeholder="UPNL retention" />
+                </n-form-item>
                 <n-form-item label="History from data (in days)" path="history_from_data">
                     <n-input-number v-model:value="indicator.history_from_data" placeholder="History" />
                 </n-form-item>
@@ -272,6 +294,7 @@ import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
 import { getAllTimeZones } from '../helpers/timezone'
 import { parseBooleanString, isJsonString, toNumberOrNull } from '../helpers/validators'
 import {
+  NAlert,
   NButton,
   NCard,
   NCheckbox,
@@ -281,12 +304,13 @@ import {
   NInput,
   NInputNumber,
   NSelect,
+  NSwitch,
   type FormInst,
   type FormItemRule,
   type FormRules,
   useMessage
 } from 'naive-ui'
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import axios from 'axios'
 
@@ -443,6 +467,11 @@ const general = ref({
 
 const signal = ref({
     symbol_list: null,
+    asap_use_url: true,
+    asap_symbol_select: [] as string[],
+    asap_symbol_options: [],
+    asap_symbols_loading: false,
+    asap_symbol_fetch_error: null,
     signal: null,
     plugins: [],
     strategy: null,
@@ -509,6 +538,7 @@ const autopilot = ref({
 
 const indicator = ref({
     housekeeping_interval: null,
+    upnl_housekeeping_interval: 0,
     history_from_data: null,
 })
 
@@ -545,6 +575,81 @@ function requiredAfterSubmit(messageText: string) {
     }
 }
 
+function isCurrencyConfigured(): boolean {
+    const configuredCurrency = exchange.value.currency
+    if (!configuredCurrency) {
+        return false
+    }
+    return String(configuredCurrency).trim().length > 0
+}
+
+function isUrlInput(value: string | null): boolean {
+    if (!value) {
+        return false
+    }
+    return /^https?:\/\//i.test(value.trim())
+}
+
+const ASAP_URL_PARTIAL_PATTERN =
+    /^(?:|h|ht|htt|http|https|http:|https:|http:\/|https:\/|https?:\/\/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*)$/
+
+function handleAsapUrlInput(value: string): void {
+    if (ASAP_URL_PARTIAL_PATTERN.test(value)) {
+        signal.value.symbol_list = value
+    }
+}
+
+function parseSymbolListToArray(raw: string | null): string[] {
+    if (!raw) {
+        return []
+    }
+    return raw
+        .split(/[\n,]+/)
+        .map((entry) => entry.trim().replace(/^['"]|['"]$/g, ""))
+        .filter((entry) => entry.length > 0)
+}
+
+async function fetchAsapSymbolsForCurrency(): Promise<void> {
+    signal.value.asap_symbol_options = []
+    signal.value.asap_symbol_fetch_error = null
+    signal.value.asap_symbols_loading = true
+
+    if (!isCurrencyConfigured()) {
+        signal.value.asap_symbols_loading = false
+        return
+    }
+
+    try {
+        const quoteCurrency = String(exchange.value.currency).toUpperCase()
+        const response = await axios.get(
+            `http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/data/exchange/symbols/${quoteCurrency}`,
+        )
+        const symbols = Array.isArray(response.data?.symbols) ? response.data.symbols : []
+        signal.value.asap_symbol_options = symbols.map((symbol: string) => ({
+            label: symbol,
+            value: symbol,
+        }))
+
+        if (
+            typeof signal.value.symbol_list === 'string' &&
+            signal.value.symbol_list.length > 0
+        ) {
+            const configuredSymbols = parseSymbolListToArray(signal.value.symbol_list)
+            const optionValues = new Set(
+                signal.value.asap_symbol_options.map((option) => option.value as string)
+            )
+            signal.value.asap_symbol_select = configuredSymbols.filter((symbol) =>
+                optionValues.has(symbol)
+            )
+        }
+    } catch (error) {
+        console.error('Error fetching ASAP symbols:', error)
+        signal.value.asap_symbol_fetch_error = 'Failed to fetch symbols from exchange.'
+    } finally {
+        signal.value.asap_symbols_loading = false
+    }
+}
+
 const rules: FormRules = {
     timezone: {
         validator: requiredAfterSubmit('Please select timezone'),
@@ -559,7 +664,38 @@ const rules: FormRules = {
         trigger: ['submit', 'change']
     },
     symbol_list: {
-        validator: requiredAfterSubmit('Please add symbol list or remote list url'),
+        validator: () => {
+            if (!submitAttempted.value || signal.value.signal !== 'asap') {
+                return true
+            }
+            if (signal.value.asap_use_url) {
+                if (
+                    signal.value.symbol_list === null ||
+                    signal.value.symbol_list === undefined ||
+                    String(signal.value.symbol_list).trim().length === 0
+                ) {
+                    return new Error('Please add symbol list URL')
+                }
+                if (!isUrlInput(String(signal.value.symbol_list))) {
+                    return new Error('Please provide a valid URL (http/https)')
+                }
+                return true
+            }
+
+            if (!isCurrencyConfigured()) {
+                return new Error('Please configure currency before selecting symbols')
+            }
+
+            if (!signal.value.asap_symbol_select) {
+                return new Error('Please select at least one symbol')
+            }
+
+            if (Array.isArray(signal.value.asap_symbol_select) && signal.value.asap_symbol_select.length === 0) {
+                return new Error('Please select at least one symbol')
+            }
+
+            return true
+        },
         trigger: ['submit', 'change']
     },
     name: {
@@ -618,6 +754,10 @@ const rules: FormRules = {
         validator: requiredAfterSubmit('Please add housekeeping interval'),
         trigger: ['submit', 'change']
     },
+    upnl_housekeeping_interval: {
+        validator: requiredAfterSubmit('Please add UPNL history retention'),
+        trigger: ['submit', 'change']
+    },
     history_from_data: {
         validator: requiredAfterSubmit('Please add history from data'),
         trigger: ['submit', 'change']
@@ -651,6 +791,9 @@ function handle_signal_settings_select() {
             dynamicAsapSignalSettingsForm.value.push({ value: null })
         }
         dynamicSymSignalSettingsForm.value.pop()
+        if (!signal.value.asap_use_url) {
+            void fetchAsapSymbolsForCurrency()
+        }
     }
 }
 
@@ -704,6 +847,13 @@ async function fetchDefaultValues() {
                 signal.value.symsignal_allowedsignals = signal_settings["allowed_signals"]
             }
             signal.value.symbol_list = response.data.symbol_list
+            if (isUrlInput(response.data.symbol_list)) {
+                signal.value.asap_use_url = true
+                signal.value.asap_symbol_select = []
+            } else {
+                signal.value.asap_use_url = false
+                signal.value.asap_symbol_select = parseSymbolListToArray(response.data.symbol_list)
+            }
             var filter_indicator = response.data.filter
             if (filter_indicator) {
                 filter.value.rsi = response.data.filter.rsi_max
@@ -747,6 +897,7 @@ async function fetchDefaultValues() {
             autopilot.value.medium_sl_timeout = toNumberOrNull(response.data.autopilot_medium_sl_timeout)
             autopilot.value.medium_threshold = toNumberOrNull(response.data.autopilot_medium_threshold)
             indicator.value.housekeeping_interval = toNumberOrNull(response.data.housekeeping_interval)
+            indicator.value.upnl_housekeeping_interval = toNumberOrNull(response.data.upnl_housekeeping_interval) ?? 0
             indicator.value.history_from_data = toNumberOrNull(response.data.history_from_data)
 
             signal.value.strategy_plugins = response.data.strategies.map(v => ({
@@ -769,6 +920,9 @@ async function fetchDefaultValues() {
             handle_signal_settings_select()
             handle_dca_select()
             handle_dynamic_dca_select()
+            if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
+                await fetchAsapSymbolsForCurrency()
+            }
 
         } else {
             message.error('Failed to load default values')
@@ -847,8 +1001,11 @@ function normalizePairEntries(raw: string | null, quoteCurrency: string): string
 async function submitForm() {
     try {
         const quoteCurrency = String(exchange.value.currency || "USDT").toUpperCase()
+        const asapInputValue = signal.value.asap_use_url
+            ? signal.value.symbol_list
+            : signal.value.asap_symbol_select.join(",")
         const normalizedSymbolList = normalizePairEntries(
-            signal.value.symbol_list,
+            asapInputValue,
             quoteCurrency,
         )
         const normalizedDenyList = normalizePairEntries(
@@ -903,6 +1060,7 @@ async function submitForm() {
             autopilot_medium_sl_timeout: JSON.stringify({ 'value': autopilot.value.medium_sl_timeout || false, 'type': "int" }),
             autopilot_medium_threshold: JSON.stringify({ 'value': autopilot.value.medium_threshold || false, 'type': "int" }),
             housekeeping_interval: JSON.stringify({ 'value': indicator.value.housekeeping_interval || false, 'type': "int" }),
+            upnl_housekeeping_interval: JSON.stringify({ 'value': indicator.value.upnl_housekeeping_interval ?? false, 'type': "int" }),
             history_from_data: JSON.stringify({ 'value': indicator.value.history_from_data || false, 'type': "int" }),
         }
         console.log(formData)
@@ -972,6 +1130,46 @@ function handleValidateButtonClick(e: MouseEvent) {
         }
     })
 }
+
+watch(
+    () => signal.value.asap_use_url,
+    async (useUrl) => {
+        if (signal.value.signal !== "asap") {
+            return
+        }
+        if (useUrl) {
+            signal.value.asap_symbol_select = []
+            signal.value.asap_symbol_options = []
+            if (!isUrlInput(signal.value.symbol_list)) {
+                signal.value.symbol_list = null
+            }
+            return
+        }
+        await fetchAsapSymbolsForCurrency()
+    },
+)
+
+watch(
+    () => exchange.value.currency,
+    async () => {
+        if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
+            await fetchAsapSymbolsForCurrency()
+        }
+    },
+)
+
+watch(
+    () => signal.value.asap_symbol_select,
+    (selectedSymbol) => {
+        if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
+            if (Array.isArray(selectedSymbol)) {
+                signal.value.symbol_list = selectedSymbol.join(",")
+            } else {
+                signal.value.symbol_list = null
+            }
+        }
+    },
+)
 
 onMounted(() => {
     timezone.value = getAllTimeZones()

@@ -7,6 +7,7 @@ from .listings import Listings as Listings
 from .opentrades import OpenTrades as OpenTrades
 from .tickers import Tickers as Tickers
 from .trades import Trades as Trades
+from .upnlhistory import UpnlHistory as UpnlHistory
 
 __all__ = [
     "AppConfig",
@@ -16,6 +17,7 @@ __all__ = [
     "OpenTrades",
     "Tickers",
     "Trades",
+    "UpnlHistory",
 ]
 
 if __name__ == "__main__":
@@ -26,4 +28,5 @@ if __name__ == "__main__":
         "OpenTrades",
         "ClosedTrades",
         "Listings",
+        "UpnlHistory",
     ]

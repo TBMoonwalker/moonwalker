@@ -16,6 +16,8 @@ logging = helper.LoggerFactory.get_logger("logs/housekeeper.log", "housekeeper")
 class Housekeeper:
     """Cleanup service for old ticker entries."""
 
+    UPNL_RETENTION_DAYS_DEFAULT = 0
+
     def __init__(self) -> None:
         self.config = None
 
@@ -41,6 +43,21 @@ class Housekeeper:
             return 2
         return max(1, interval_days)
 
+    def _get_upnl_retention_days(self) -> int:
+        """Return uPNL retention in days.
+
+        A value of 0 means infinite retention (do not delete history).
+        """
+        try:
+            retention_days = int(
+                self.config.get(
+                    "upnl_housekeeping_interval", self.UPNL_RETENTION_DAYS_DEFAULT
+                )
+            )
+        except (TypeError, ValueError):
+            return self.UPNL_RETENTION_DAYS_DEFAULT
+        return max(0, retention_days)
+
     async def cleanup_ticker_database(self) -> None:
         """Remove old ticker data for inactive symbols."""
         while Housekeeper.status:
@@ -62,6 +79,7 @@ class Housekeeper:
                             logging.info(
                                 f"Start housekeeping. Delete {query} entries older then {cleanup_timestamp}"
                             )
+                    await self._cleanup_upnl_history(actual_timestamp)
                 except Exception as e:
                     # Broad catch to keep the housekeeping loop running.
                     logging.error(f"Error db housekeeping: {e}")
@@ -69,6 +87,21 @@ class Housekeeper:
                 await asyncio.sleep(interval_days * 24 * 60 * 60)
             else:
                 await asyncio.sleep(5)
+
+    async def _cleanup_upnl_history(self, actual_timestamp: datetime) -> None:
+        """Remove old uPNL snapshots based on retention policy."""
+        retention_days = self._get_upnl_retention_days()
+        if retention_days == 0:
+            return
+
+        retention_timestamp = actual_timestamp - timedelta(days=retention_days)
+        deleted = await model.UpnlHistory.filter(timestamp__lt=retention_timestamp).delete()
+        if deleted:
+            logging.info(
+                "Deleted %s uPNL history entries older than %s",
+                deleted,
+                retention_timestamp,
+            )
 
     async def shutdown(self) -> None:
         """Stop housekeeping loop."""

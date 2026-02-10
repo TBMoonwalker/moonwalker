@@ -4,7 +4,9 @@ from typing import Any
 
 import helper
 from controller import controller
+from quart import jsonify
 from quart_cors import route_cors
+from service.config import Config
 from service.data import Data
 
 data = Data()
@@ -34,3 +36,12 @@ async def get_ohlcv_data(
     response = await data.get_ohlcv_for_pair(symbol, timerange, timestamp_start, offset)
 
     return response
+
+
+@controller.route("/data/exchange/symbols/<currency>", methods=["GET"])
+@route_cors(allow_origin="*")
+async def get_exchange_symbols(currency: str) -> Any:
+    """Get exchange symbols for a configured quote currency."""
+    config = await Config.instance()
+    symbols = await data.get_exchange_symbols_for_currency(config._cache, currency)
+    return jsonify({"symbols": symbols})

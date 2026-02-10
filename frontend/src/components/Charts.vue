@@ -25,6 +25,7 @@ const range = defineProps<{ period: string }>()
 const profit_store = useProfitDatastore()
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
+const profit_store_refs = storeToRefs(profit_store)
 const chart_data = ref({
     labels: [],
     datasets: [{}]
@@ -66,12 +67,12 @@ onBeforeUnmount(() => {
 })
 
 // Get new statistics data
-watch([statistics_data.data, profit_store.data], async ([newData]) => {
+watch([statistics_data.data, profit_store_refs.data], async ([newData]) => {
     let labels = []
     let datasets = []
 
     const hasHistoricProfitData =
-        !!profit_store.data && Object.keys(profit_store.data).length > 0
+        !!profit_store_refs.data.value && Object.keys(profit_store_refs.data.value).length > 0
     const websocketData = newData as any
     const profitWeekCount =
         websocketData && websocketData.profit_week
@@ -83,17 +84,17 @@ watch([statistics_data.data, profit_store.data], async ([newData]) => {
 
     if (shouldRefreshHistory) {
         isLoadingHistory = true
-        profit_store.data = {}
+        profit_store.$patch({ data: {} })
         await profit_store.load_profit_history_data(range['period'])
         historic_data = true
         isLoadingHistory = false
     }
 
     if (newData !== undefined && newData !== null) {
-        if (profit_store.data && Object.keys(profit_store.data).length > 0) {
+        if (profit_store_refs.data.value && Object.keys(profit_store_refs.data.value).length > 0) {
             showNoProfit.value = false
             emptyStateText.value = ''
-            let profit = profit_store.data
+            const profit = profit_store_refs.data.value as Record<string, number>
             for (let key in profit) {
                 let value = profit[key]
                 labels.push(key)

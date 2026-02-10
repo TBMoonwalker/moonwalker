@@ -65,3 +65,17 @@ async def profit_statistics(timestamp: str, period: str) -> str | dict[str, Any]
         response = {"result": ""}
 
     return response
+
+
+@controller.route("/statistic/upnl/all")
+@route_cors(
+    allow_methods=["GET"],
+    allow_origin=["*"],
+)
+async def upnl_statistics_all() -> str | dict[str, Any]:
+    """Get full uPNL history from the beginning."""
+    response = json.dumps(await statistic.get_upnl_history_all())
+    if not response:
+        response = {"result": ""}
+
+    return response

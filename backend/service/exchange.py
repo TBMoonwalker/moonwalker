@@ -144,6 +144,33 @@ class Exchange:
 
         return all_candles
 
+    async def get_symbols_for_quote_currency(
+        self, config: dict[str, Any], quote_currency: str
+    ) -> list[str]:
+        """Return exchange symbols filtered by quote currency."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        if self.exchange is None:
+            return []
+
+        quote = quote_currency.upper()
+        symbols: list[str] = []
+        for market_symbol, market in self.exchange.markets.items():
+            if not isinstance(market, dict):
+                continue
+            if str(market.get("quote", "")).upper() != quote:
+                continue
+            if market.get("active") is False:
+                continue
+            if config.get("market", "spot") == "spot" and market.get("spot") is False:
+                continue
+
+            normalized_symbol = market.get("symbol", market_symbol)
+            if isinstance(normalized_symbol, str) and "/" in normalized_symbol:
+                symbols.append(normalized_symbol)
+
+        return sorted(set(symbols))
+
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     async def __get_price_for_symbol(self, pair: str) -> str:
         """Gets the actual price for the given symbol/currency pair
