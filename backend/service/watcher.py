@@ -81,12 +81,17 @@ class Watcher:
             if not config.get("exchange", None):
                 return
 
+            options: dict[str, Any] = {"defaultType": config.get("market", "spot")}
+            hostname = config.get("exchange_hostname")
+            if hostname:
+                options["hostname"] = str(hostname).strip()
+
             exchange_class = getattr(ccxtpro, config.get("exchange"))
             new_exchange = exchange_class(
                 {
                     "apiKey": config.get("key"),
                     "secret": config.get("secret"),
-                    "options": {"defaultType": config.get("market", "spot")},
+                    "options": options,
                 }
             )
             if config.get("dry_run", True):

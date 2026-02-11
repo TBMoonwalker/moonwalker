@@ -52,7 +52,8 @@ class Exchange:
             "key": config.get("key"),
             "secret": config.get("secret"),
             "market": config.get("market", "spot"),
-            "dry_run": config.get("dry_run", True)
+            "dry_run": config.get("dry_run", True),
+            "exchange_hostname": config.get("exchange_hostname"),
         }
 
     async def __ensure_exchange(self, config: dict[str, Any]) -> None:
@@ -436,12 +437,16 @@ class Exchange:
         exchange = None
 
         if config.get("exchange", None):
+            options: dict[str, Any] = {"defaultType": config.get("market", "spot")}
+            hostname = config.get("exchange_hostname")
+            if hostname:
+                options["hostname"] = str(hostname).strip()
             exchange_class = getattr(ccxt, config.get("exchange"))
             exchange = exchange_class(
                 {
                     "apiKey": config.get("key"),
                     "secret": config.get("secret"),
-                    "options": {"defaultType": config.get("market", "spot")},
+                    "options": options,
                 }
             )
             if config.get("dry_run", True):

@@ -53,6 +53,7 @@ All supported configuration keys are listed below. Keys marked "(advanced)" are 
 | `exchange` | `string` | Exchange name (ccxt id). | `binance` |
 | `key` | `string` | Exchange API key. | `your-key` |
 | `secret` | `string` | Exchange API secret. | `your-secret` |
+| `exchange_hostname` | `string` | Optional ccxt hostname override for exchange domains (advanced). | `bybit.eu` |
 | `market` | `string` | Market type. | `spot` |
 | `timeframe` | `string` | Ticker timeframe for watcher. | `1m` |
 | `currency` | `string` | Quote currency for pairs. | `USDT` |

@@ -150,6 +150,9 @@
                     <n-input v-model:value="exchange.secret" type="password" show-password-on="click"
                         placeholder="Exchange Secret" />
                 </n-form-item>
+                <n-form-item label="Exchange Hostname" path="exchange_hostname">
+                    <n-input v-model:value="exchange.exchange_hostname" placeholder="e.g. bybit.eu" />
+                </n-form-item>
                 <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="left">
                     <n-checkbox v-model:checked="exchange.dry_run" />
                 </n-form-item>
@@ -558,6 +561,7 @@ const exchange = ref({
     timeframe: null,
     key: null,
     secret: null,
+    exchange_hostname: null,
     dry_run: true,
     currency: null,
     market: "spot",
@@ -759,6 +763,7 @@ async function fetchAsapSymbolsForCurrency(): Promise<void> {
                     exchange: exchange.value.name,
                     key: exchange.value.key,
                     secret: exchange.value.secret,
+                    exchange_hostname: exchange.value.exchange_hostname || undefined,
                     market: exchange.value.market || "spot",
                     dry_run: exchange.value.dry_run ?? true,
                 },
@@ -1026,6 +1031,7 @@ async function fetchDefaultValues() {
             exchange.value.timeframe = response.data.timeframe
             exchange.value.key = response.data.key
             exchange.value.secret = response.data.secret
+            exchange.value.exchange_hostname = response.data.exchange_hostname || null
             exchange.value.dry_run = parseBooleanString(response.data.dry_run) ?? true
             exchange.value.currency = response.data.currency
             exchange.value.market = response.data.market || "spot"
@@ -1210,6 +1216,7 @@ async function submitForm() {
             timeframe: JSON.stringify({ 'value': exchange.value.timeframe || false, 'type': "str" }),
             key: JSON.stringify({ 'value': exchange.value.key || false, 'type': "str" }),
             secret: JSON.stringify({ 'value': exchange.value.secret || false, 'type': "str" }),
+            exchange_hostname: JSON.stringify({ 'value': exchange.value.exchange_hostname || false, 'type': "str" }),
             dry_run: JSON.stringify({ 'value': exchange.value.dry_run || false, 'type': "bool" }),
             currency: JSON.stringify({ 'value': exchange.value.currency || false, 'type': "str" }),
             market: JSON.stringify({ 'value': exchange.value.market || false, 'type': "str" }),
@@ -1347,7 +1354,7 @@ watch(
 )
 
 watch(
-    () => [exchange.value.currency, exchange.value.name, exchange.value.key, exchange.value.secret],
+    () => [exchange.value.currency, exchange.value.name, exchange.value.key, exchange.value.secret, exchange.value.exchange_hostname],
     async () => {
         if (isLoading.value) {
             return
