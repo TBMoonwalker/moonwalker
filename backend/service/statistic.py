@@ -1,5 +1,6 @@
 """Statistics aggregation for trading performance."""
 
+import copy
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -14,6 +15,8 @@ logging = helper.LoggerFactory.get_logger("logs/statistics.log", "statistic")
 
 class Statistic:
     """Compute and persist trading statistics."""
+
+    PROFIT_CACHE_TTL_SECONDS = 2
 
     def __init__(self) -> None:
         self.trades = Trades()
@@ -80,6 +83,11 @@ class Statistic:
 
     async def get_profit(self) -> dict[str, Any]:
         """Return profit, uPNL, and autopilot summaries."""
+        return copy.deepcopy(await self._get_profit_cached())
+
+    @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
+    async def _get_profit_cached(self) -> dict[str, Any]:
+        """Compute and cache profit, uPNL, and autopilot summaries."""
         profit_data = {}
 
         # uPNL
