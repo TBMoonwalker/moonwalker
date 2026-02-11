@@ -14,6 +14,8 @@ Moonwalker can be used to trade on your exchange directly using various signal p
 ## Installation (run script)
 1. Copy `config.ts.example` to `config.ts` and set `MOONWALKER_API_HOST` and `MOONWALKER_API_PORT`.
 2. Start everything with `./run.sh start -p "port"`.
+   - Debug logs: `./run.sh start --debug`
+   - Trace logs: `./run.sh start --trace`
 3. Stop with `./run.sh stop`.
 
 The script builds the Vue frontend, copies assets into the backend, creates a Python venv, installs backend deps, and starts the Quart app. Logs go to `run.log`.
@@ -207,3 +209,26 @@ You can see information about the DCA and the TakeProfit (TP) status in the stat
 
 ### Debug
 Start Moonwalker with ./run.sh start -d and you see the debug messages in the logs.
+
+### Trace
+Start Moonwalker with `./run.sh start -t` (or `--trace`) to enable TRACE logs.
+
+### Log Level Environment Variable
+You can override log level directly with `MOONWALKER_LOG_LEVEL`:
+- `TRACE`
+- `DEBUG`
+- `INFO`
+- `WARNING`
+- `ERROR`
+- `CRITICAL`
+
+Examples:
+```bash
+MOONWALKER_LOG_LEVEL=INFO ./run.sh start
+MOONWALKER_LOG_LEVEL=TRACE ./run.sh start
+```
+
+Priority order:
+1. `MOONWALKER_LOG_LEVEL` (if set)
+2. `MOONWALKER_DEBUG=True` (set by `./run.sh start --debug`)
+3. Default `INFO`

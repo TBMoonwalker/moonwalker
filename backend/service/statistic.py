@@ -283,21 +283,21 @@ class Statistic:
                 open_timestamp = float(base_order[0]["timestamp"])
             except Exception as e:
                 open_timestamp = datetime.timestamp(datetime.now())
-                logging.debug(
-                    f"Did not found a timestamp - taking default value. Cause {e}"
+                logging.trace(
+                    "Did not find a timestamp - taking default value. Cause %s", e
                 )
         else:
             if stats["new_so"]:
-                logging.debug(f"SO buy: {stats}")
+                logging.trace("SO buy: %s", stats)
 
             # Update SO count statistics
             payload = {"so_count": stats["so_orders"]}
             await self.trades.update_open_trades(payload, stats["symbol"])
-            logging.debug(stats)
+            logging.trace("%s", stats)
 
         # Comes from DCA module
         if stats["type"] == "tp_check":
-            logging.debug(stats)
+            logging.trace("%s", stats)
 
             # Update open trade statistics
             payload = {

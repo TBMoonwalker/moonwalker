@@ -2,6 +2,26 @@ import logging
 import logging.handlers
 import os
 
+TRACE_LEVEL_NUM = 5
+
+
+def _register_trace_level() -> None:
+    """Register TRACE logging level and logger.trace() helper."""
+    if hasattr(logging, "TRACE"):
+        return
+
+    logging.addLevelName(TRACE_LEVEL_NUM, "TRACE")
+    logging.TRACE = TRACE_LEVEL_NUM  # type: ignore[attr-defined]
+
+    def trace(self: logging.Logger, message: str, *args, **kwargs) -> None:
+        if self.isEnabledFor(TRACE_LEVEL_NUM):
+            self._log(TRACE_LEVEL_NUM, message, args, **kwargs)
+
+    logging.Logger.trace = trace  # type: ignore[attr-defined]
+
+
+_register_trace_level()
+
 
 class LoggerFactory:
     """Factory class for creating and managing logger instances.
@@ -11,6 +31,18 @@ class LoggerFactory:
     """
 
     _LOG = None
+
+    @staticmethod
+    def __resolve_loglevel() -> str:
+        """Resolve active log level from environment variables."""
+        configured = os.getenv("MOONWALKER_LOG_LEVEL", "").strip().upper()
+        if configured in {"TRACE", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+            return configured
+
+        debug = os.getenv("MOONWALKER_DEBUG")
+        if debug:
+            return "DEBUG"
+        return "INFO"
 
     @staticmethod
     def __create_logger(log_file: str, name: str) -> logging.Logger:
@@ -29,16 +61,7 @@ class LoggerFactory:
         Raises:
             Exception: If logger creation fails
         """
-        debug = None
-        try:
-            debug = os.environ["MOONWALKER_DEBUG"]
-        except KeyError:
-            pass
-
-        if debug:
-            loglevel = "DEBUG"
-        else:
-            loglevel = "INFO"
+        loglevel = LoggerFactory.__resolve_loglevel()
 
         # Set the logging format
         formatter = logging.Formatter(
@@ -61,12 +84,18 @@ class LoggerFactory:
         LoggerFactory._LOG.addHandler(file_handler)
 
         # Set the logging level based on the user selection
-        if loglevel == "INFO":
-            LoggerFactory._LOG.setLevel(logging.INFO)
-        elif loglevel == "ERROR":
-            LoggerFactory._LOG.setLevel(logging.ERROR)
+        if loglevel == "TRACE":
+            LoggerFactory._LOG.setLevel(TRACE_LEVEL_NUM)
         elif loglevel == "DEBUG":
             LoggerFactory._LOG.setLevel(logging.DEBUG)
+        elif loglevel == "INFO":
+            LoggerFactory._LOG.setLevel(logging.INFO)
+        elif loglevel == "WARNING":
+            LoggerFactory._LOG.setLevel(logging.WARNING)
+        elif loglevel == "ERROR":
+            LoggerFactory._LOG.setLevel(logging.ERROR)
+        elif loglevel == "CRITICAL":
+            LoggerFactory._LOG.setLevel(logging.CRITICAL)
         return LoggerFactory._LOG
 
     @staticmethod

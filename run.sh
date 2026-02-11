@@ -6,7 +6,7 @@ PID_FILE="moonwalker.pid"
 LOCK_FILE="moonwalker.lock"
 
 usage() {
-    echo "Usage: $0 {start|stop} [-d|--debug] [-p|--port PORT]"
+    echo "Usage: $0 {start|stop} [-d|--debug] [-t|--trace] [-p|--port PORT]"
 }
 
 build_frontend_with_fallback() {
@@ -66,7 +66,8 @@ stop_services() {
 # Function to start all services
 start_services() {
     local debug="${1:-false}"
-    local port="${2:-8130}"
+    local trace="${2:-false}"
+    local port="${3:-8130}"
     # Check if services are already running
     if [ -f "$LOCK_FILE" ]; then
         echo "❌ Services are already running"
@@ -113,7 +114,9 @@ start_services() {
     python3 -m venv .venv
     cd backend
     ../.venv/bin/pip install -r requirements.txt
-    if [ "$debug" = "true" ]; then
+    if [ "$trace" = "true" ]; then
+        MOONWALKER_LOG_LEVEL=TRACE MOONWALKER_PORT="$port" ../.venv/bin/python app.py > ../run.log 2>&1 &
+    elif [ "$debug" = "true" ]; then
         MOONWALKER_DEBUG=True MOONWALKER_PORT="$port" ../.venv/bin/python app.py > ../run.log 2>&1 &
     else
         MOONWALKER_PORT="$port" ../.venv/bin/python app.py > ../run.log 2>&1 &
@@ -127,6 +130,7 @@ start_services() {
 # Main script logic
 cmd=""
 debug=false
+trace=false
 port=8130
 
 while [ $# -gt 0 ]; do
@@ -142,6 +146,10 @@ while [ $# -gt 0 ]; do
             ;;
         -d|--debug)
             debug=true
+            shift
+            ;;
+        -t|--trace)
+            trace=true
             shift
             ;;
         -p|--port)
@@ -180,7 +188,7 @@ done
 
 case "$cmd" in
     start)
-        start_services "$debug" "$port"
+        start_services "$debug" "$trace" "$port"
         ;;
     stop)
         stop_services
