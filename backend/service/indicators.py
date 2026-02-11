@@ -14,6 +14,12 @@ class Indicators:
 
     def __init__(self) -> None:
         self.data = Data()
+        self._ema_cache: dict[
+            tuple[str, str, tuple[int, ...]], tuple[float | None, dict[str, Any]]
+        ] = {}
+        self._close_cache: dict[
+            tuple[str, str, int], tuple[float | None, Any]
+        ] = {}
 
     # async def calculate_bbands_cross(self, symbol, timerange, length):
     #     result = "none"
@@ -59,6 +65,12 @@ class Indicators:
         self, symbol: str, timerange: str, lengths: list[int]
     ) -> dict[str, Any]:
         """Calculate EMA values for the given lengths."""
+        cache_key = (symbol, timerange, tuple(lengths))
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._ema_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
+
         ema = {}
         try:
             max_length = max(lengths)
@@ -69,20 +81,33 @@ class Indicators:
                 ema[length_key] = (
                     talib.EMA(df["close"], timeperiod=length).dropna().iloc[-1]
                 )
+            self._ema_cache[cache_key] = (latest_timestamp, ema)
         except Exception as e:
             # Broad catch to avoid breaking strategy execution.
             logging.error(f"EMA cannot be calculated for {symbol}. Cause: {e}")
+            if cached:
+                return cached[1]
         return ema
 
     async def get_close_price(self, symbol: str, timerange: str, length: int) -> Any:
         """Return close price series for a symbol."""
+        cache_key = (symbol, timerange, length)
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._close_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
+
         try:
             df_raw = await self.data.get_data_for_pair(symbol, timerange, length)
             df = self.data.resample_data(df_raw, timerange)
-            return df["close"]
+            close = df["close"]
+            self._close_cache[cache_key] = (latest_timestamp, close)
+            return close
         except Exception as e:
             # Broad catch to avoid breaking strategy execution.
             logging.error(f"Close price cannot be calculated for {symbol}. Cause: {e}")
+            if cached:
+                return cached[1]
             return None
 
     # async def calculate_ema_slope(self, symbol, timerange, length):

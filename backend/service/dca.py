@@ -2,7 +2,6 @@
 
 import importlib
 from datetime import datetime, timedelta
-from time import monotonic
 from typing import Any
 
 import helper
@@ -18,10 +17,6 @@ logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 class Dca:
     """DCA engine for processing ticker data and managing orders."""
 
-    RISK_SETTINGS_CACHE_SECONDS = 2.0
-    STATS_UPDATE_INTERVAL_SECONDS = 2.0
-    STRATEGY_RESULT_CACHE_SECONDS = 2.0
-
     def __init__(self):
 
         self.autopilot = Autopilot()
@@ -32,12 +27,6 @@ class Dca:
         self.utils = helper.Utils()
         self.config = None
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
-        self._risk_settings_cache: dict[str, Any] | None = None
-        self._risk_settings_cache_at = 0.0
-        self._last_stats_update_at: dict[tuple[str, str], float] = {}
-        self._strategy_result_cache: dict[
-            tuple[str, str, str, str], tuple[float, bool]
-        ] = {}
 
         # Class attributes
         Dca.pnl = {}
@@ -46,76 +35,15 @@ class Dca:
         result = False
 
         if self.config.get("dca_strategy", None):
-            strategy_name = self.config.get("dca_strategy")
-            timeframe = self.config.get("dca_strategy_timeframe", "1m")
-            cache_key = ("dca", strategy_name, timeframe, symbol)
-            cached = self._strategy_result_cache.get(cache_key)
-            now = monotonic()
-            if cached and (now - cached[0] < self.STRATEGY_RESULT_CACHE_SECONDS):
-                return cached[1]
-
             dca_strategy_plugin = self.__get_strategy_plugin(
-                strategy_name,
-                timeframe,
+                self.config.get("dca_strategy"),
+                self.config.get("dca_strategy_timeframe", "1m"),
                 "dca",
             )
 
             result = await dca_strategy_plugin.run(symbol, "buy")
-            self._strategy_result_cache[cache_key] = (now, result)
 
         return result
-
-    async def __resolve_risk_settings(self) -> None:
-        now = monotonic()
-        if self._risk_settings_cache and (
-            now - self._risk_settings_cache_at < self.RISK_SETTINGS_CACHE_SECONDS
-        ):
-            self.tp = self._risk_settings_cache["tp"]
-            self.sl = self._risk_settings_cache["sl"]
-            self.sl_timeout = self._risk_settings_cache["sl_timeout"]
-            self.autopilot_mode = self._risk_settings_cache["mode"]
-            return
-
-        trading_settings = None
-        profit = await self.statistic.get_profit()
-        if profit["funds_locked"]:
-            trading_settings = await self.autopilot.calculate_trading_settings(
-                profit["funds_locked"], self.config
-            )
-        if trading_settings:
-            payload = {
-                "tp": trading_settings["tp"],
-                "sl": trading_settings["sl"],
-                "sl_timeout": trading_settings["sl_timeout"],
-                "mode": trading_settings["mode"],
-            }
-        else:
-            payload = {
-                "tp": self.config.get("tp", 10000),
-                "sl": self.config.get("sl", 10000),
-                "sl_timeout": 0,
-                "mode": None,
-            }
-
-        self._risk_settings_cache = payload
-        self._risk_settings_cache_at = now
-        self.tp = payload["tp"]
-        self.sl = payload["sl"]
-        self.sl_timeout = payload["sl_timeout"]
-        self.autopilot_mode = payload["mode"]
-
-    def __should_update_stats(
-        self, stat_type: str, symbol: str, force: bool = False
-    ) -> bool:
-        if force:
-            return True
-        now = monotonic()
-        key = (stat_type, symbol)
-        last_update = self._last_stats_update_at.get(key, 0.0)
-        if now - last_update < self.STATS_UPDATE_INTERVAL_SECONDS:
-            return False
-        self._last_stats_update_at[key] = now
-        return True
 
     def __tp_strategy(self, symbol):
         result = False
@@ -331,8 +259,7 @@ class Dca:
             "sell": sell,
             "direction": trades["direction"],
         }
-        if self.__should_update_stats("tp_check", trades["symbol"], force=sell):
-            await self.statistic.update_statistic_data(logging_json)
+        await self.statistic.update_statistic_data(logging_json)
 
     async def __calculate_dca(self, current_price, trades):
         dynamic_dca = self.config.get("dynamic_dca", False)
@@ -449,10 +376,7 @@ class Dca:
                 "dynamic_so_loss": dynamic_so_details.get("loss_ratio", 0.0),
             }
             # Send new statistics to statistics module
-            if self.__should_update_stats(
-                "dca_check", trades["symbol"], force=placed_new_so
-            ):
-                await self.statistic.update_statistic_data(logging_json)
+            await self.statistic.update_statistic_data(logging_json)
         else:
             logging.info(
                 "Max safety orders reached for %s (configured=%s, current=%s). "
@@ -474,7 +398,27 @@ class Dca:
             price = ticker["ticker"]["price"]
             trades = await self.trades.get_trades_for_orders(ticker["ticker"]["symbol"])
             if trades:
-                await self.__resolve_risk_settings()
+
+                # Check Autopilot
+                profit = await self.statistic.get_profit()
+                trading_settings = None
+
+                if profit["funds_locked"]:
+                    trading_settings = await self.autopilot.calculate_trading_settings(
+                        profit["funds_locked"], self.config
+                    )
+                # Use Autopilots settings
+                if trading_settings:
+                    self.tp = trading_settings["tp"]
+                    self.sl = trading_settings["sl"]
+                    self.sl_timeout = trading_settings["sl_timeout"]
+                    self.autopilot_mode = trading_settings["mode"]
+                # Use base settings
+                else:
+                    self.tp = self.config.get("tp", 10000)
+                    self.sl = self.config.get("sl", 10000)
+                    self.sl_timeout = 0
+                    self.autopilot_mode = None
 
                 # Check DCA (only when DCA is enabled)
                 if self.config.get("dca", False):
