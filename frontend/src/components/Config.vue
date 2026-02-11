@@ -424,10 +424,16 @@ const dynamicSoAthTimeframeOptions = [
     { label: '1 week (1w)', value: '1w' },
 ]
 
-const exchanges = [{
-    label: 'Binance',
-    value: 'binance'
-}]
+const exchanges = [
+    {
+        label: 'Binance',
+        value: 'binance'
+    },
+    {
+        label: 'Bybit',
+        value: 'bybit'
+    },
+]
 
 const currency = [
     {
