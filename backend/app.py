@@ -8,7 +8,7 @@ from quart import Quart
 from service.config import Config
 from service.database import Database
 from service.housekeeper import Housekeeper
-from service.redis import redis_client, start_redis
+from service.redis import redis_client, start_redis, stop_redis
 from service.signal import Signal
 from service.watcher import Watcher
 
@@ -61,7 +61,7 @@ async def shutdown() -> None:
     await redis_client.aclose()
 
     if hasattr(app, "redis_proc"):
-        app.redis_proc.terminate()
+        stop_redis(app.redis_proc)
 
 
 ######################################################
