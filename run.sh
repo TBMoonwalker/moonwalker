@@ -10,30 +10,33 @@ usage() {
 }
 
 build_frontend_with_fallback() {
-    local first_status=0
-    local second_status=0
+    local status=0
 
     echo "🏗️  Building frontend (standard)..."
     if npm run build-only; then
         return 0
+    else
+        status=$?
     fi
-    first_status=$?
-    echo "⚠️  Standard frontend build failed (exit ${first_status})."
+    echo "⚠️  Standard frontend build failed (exit ${status})."
 
-    echo "🏗️  Retrying frontend build with constrained Node heap (1536 MB)..."
-    if NODE_OPTIONS="--max-old-space-size=1536" npm run build-only; then
+    echo "🏗️  Retrying frontend build with constrained Node heap (1280 MB)..."
+    if NODE_OPTIONS="--max-old-space-size=1280" npm run build-only; then
         return 0
+    else
+        status=$?
     fi
-    second_status=$?
-    echo "⚠️  Heap-constrained build failed (exit ${second_status})."
+    echo "⚠️  Heap-constrained build failed (exit ${status})."
 
-    echo "🏗️  Retrying frontend build in low-memory mode (no minify, 1024 MB heap)..."
-    if NODE_OPTIONS="--max-old-space-size=1024" npx vite build --minify=false; then
+    echo "🏗️  Retrying frontend build in low-memory mode (no minify, no manual chunks, 1024 MB heap)..."
+    if MOONWALKER_LOW_MEMORY_BUILD=1 NODE_OPTIONS="--max-old-space-size=1024" npm run build-only; then
         return 0
+    else
+        status=$?
     fi
 
-    echo "❌ Frontend build failed after fallback attempts."
-    return ${second_status}
+    echo "❌ Frontend build failed after fallback attempts (last exit ${status})."
+    return ${status}
 }
 
 # Function to stop all services
@@ -94,6 +97,12 @@ start_services() {
     # Type checks are still available via `npm run build`/CI.
     build_frontend_with_fallback
     cd ..
+
+    if [ ! -d frontend/dist/assets ] || [ ! -f frontend/dist/index.html ]; then
+        echo "❌ Frontend build artifacts missing. Aborting startup."
+        rm -f "$LOCK_FILE"
+        exit 1
+    fi
 
     echo "📂 Copying assets into backend..."
     rm -rf backend/static/* backend/templates/*
