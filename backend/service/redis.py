@@ -1,9 +1,11 @@
 """Redis client and local subprocess lifecycle helpers."""
 
 import atexit
+import os
 import socket
 import subprocess
 import time
+import uuid
 
 import redis.asyncio as redis
 
@@ -62,4 +64,7 @@ redis_client = redis.Redis(
     decode_responses=True,
 )
 
-CONFIG_CHANNEL = "config:changed"
+_CONFIG_CHANNEL_SCOPE = os.getenv("MOONWALKER_CONFIG_CHANNEL_SCOPE") or str(
+    uuid.uuid4()
+)
+CONFIG_CHANNEL = f"config:changed:{_CONFIG_CHANNEL_SCOPE}"
