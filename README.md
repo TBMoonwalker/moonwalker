@@ -74,6 +74,17 @@ All supported configuration keys are listed below. Keys marked "(advanced)" are 
 | `ss` | `float` | Safety order step scale. | `1.05` |
 | `os` | `float` | Safety order volume scale. | `1.2` |
 | `mstc` | `int` | Max safety order count. | `5` |
+| `dynamic_so_volume_enabled` | `bool` | Enable dynamic scaling for safety order amount. Trigger logic stays unchanged; only SO size is scaled. | `false` |
+| `dynamic_so_ath_lookback_value` | `int` | ATH lookback amount used by dynamic SO scaling. | `1` |
+| `dynamic_so_ath_lookback_unit` | `string` | Lookback unit for ATH: `day`, `week`, `month`, or `year`. | `month` |
+| `dynamic_so_ath_timeframe` | `string` | Candle timeframe used for ATH fetch via ccxt: `4h`, `1d`, or `1w`. | `4h` |
+| `dynamic_so_ath_cache_ttl` | `int` | Cache TTL in seconds for ATH lookup (in-memory + DB cache freshness). | `60` |
+| `dynamic_so_loss_weight` | `float` | Weight for current trade loss contribution in dynamic scale formula. | `0.5` |
+| `dynamic_so_drawdown_weight` | `float` | Weight for ATH drawdown contribution in dynamic scale formula. | `0.8` |
+| `dynamic_so_exponent` | `float` | Curve exponent applied to drawdown term. Higher values emphasize deeper drawdowns. | `1.1` |
+| `dynamic_so_min_scale` | `float` | Lower bound for dynamic SO multiplier. | `0.5` |
+| `dynamic_so_max_scale` | `float` | Upper bound for dynamic SO multiplier. | `3.0` |
+| `dynamic_so_ath_window` | `string` | Legacy compatibility key (`1d`/`1w`/`1m`) used only when lookback value/unit are not set. | `1m` |
 | `tp` | `float` | Take profit (percent). | `1.0` |
 | `sl` | `float` | Stop loss (percent). | `2.0` |
 | `ordersize` | `float` | ASAP base order size (advanced). | `12` |
@@ -95,6 +106,86 @@ All supported configuration keys are listed below. Keys marked "(advanced)" are 
 | `autopilot_medium_threshold` | `int` | Max fund threshold percent (medium setting). | `60` |
 | `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","bbands_cross"]` |
 | `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["sym_signals","asap"]` |
+
+## Dynamic SO ATH Parameters
+Dynamic safety-order sizing uses recent ATH from exchange OHLCV data (ccxt), not local ticker history.
+
+- Formula inputs:
+  - Current loss (`actual_pnl`)
+  - Drawdown from configurable ATH window
+- Formula controls:
+  - `dynamic_so_loss_weight`
+  - `dynamic_so_drawdown_weight`
+  - `dynamic_so_exponent`
+  - `dynamic_so_min_scale` / `dynamic_so_max_scale`
+- Caching:
+  - ATH values are cached in the `ath_cache` table and in memory.
+  - Freshness is controlled by `dynamic_so_ath_cache_ttl`.
+
+### Dynamic SO Scale Controls
+- `dynamic_so_loss_weight` (Loss weight):
+  - Multiplies the current loss term (`abs(actual_pnl) / 100`) in the dynamic scale formula.
+  - Higher value increases SO size faster as deal loss grows.
+  - Typical range: `0.2` to `1.0`.
+
+- `dynamic_so_drawdown_weight` (ATH drawdown weight):
+  - Multiplies the ATH drawdown term (`(ath - price) / ath`) in the dynamic scale formula.
+  - Higher value increases SO size faster when price is further below ATH.
+  - Typical range: `0.3` to `1.5`.
+
+- `dynamic_so_exponent` (Curve exponent):
+  - Applied to drawdown term as `drawdown ** exponent`.
+  - `> 1.0`: emphasizes deeper drawdowns; `0 < x < 1.0`: reacts more to smaller drawdowns.
+  - Typical range: `1.0` to `1.5`.
+
+- `dynamic_so_min_scale` (Dynamic min scale):
+  - Lower clamp for final dynamic multiplier.
+  - Prevents SO size from being reduced below this multiplier.
+  - Example: `0.8` means SO size cannot drop below `80%` of base computed size.
+
+- `dynamic_so_max_scale` (Dynamic max scale):
+  - Upper clamp for final dynamic multiplier.
+  - Prevents overly large SO size increases in extreme conditions.
+  - Example: `1.8` means SO size cannot exceed `180%` of base computed size.
+
+- `dynamic_so_ath_cache_ttl` (ATH cache TTL (sec)):
+  - Cache freshness in seconds for ATH values (in-memory + DB cache read freshness).
+  - Lower value updates ATH more often but makes more exchange requests.
+  - Higher value reduces exchange load but uses older ATH values longer.
+  - Typical range: `30` to `300`.
+
+### Formula Summary
+Dynamic SO multiplier is computed as:
+```text
+scale = clamp(
+  1 + (loss_weight * loss_ratio) + (drawdown_weight * drawdown_ratio^exponent),
+  min_scale,
+  max_scale
+)
+```
+
+Where:
+- `loss_ratio = abs(actual_pnl) / 100`
+- `drawdown_ratio = (ath - current_price) / ath`
+
+Example: 1 year lookback using daily candles
+```json
+{
+  "dynamic_so_volume_enabled": {"value": true, "type": "bool"},
+  "dynamic_so_ath_lookback_value": {"value": 1, "type": "int"},
+  "dynamic_so_ath_lookback_unit": {"value": "year", "type": "str"},
+  "dynamic_so_ath_timeframe": {"value": "1d", "type": "str"}
+}
+```
+
+Example: 1 year lookback using 4h candles
+```json
+{
+  "dynamic_so_ath_lookback_value": {"value": 1, "type": "int"},
+  "dynamic_so_ath_lookback_unit": {"value": "year", "type": "str"},
+  "dynamic_so_ath_timeframe": {"value": "4h", "type": "str"}
+}
+```
 
 ## SymSignals signal setup
 Example value for `signal_settings`:

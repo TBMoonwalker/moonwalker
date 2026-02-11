@@ -210,15 +210,47 @@
                 <n-form-item v-if="dca.enabled" label="Price deviation for first safety order" path="sos">
                     <n-input-number v-model:value="dca.sos" placeholder="SOS" />
                 </n-form-item>
-                <n-form-item v-if="dca.enabled" label="Safety order step scale" path="ss">
+                <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order step scale" path="ss">
                     <n-input-number v-model:value="dca.ss" placeholder="SS" />
                 </n-form-item>
-                <n-form-item v-if="dca.enabled" label="Safety order volume scale" path="os">
+                <n-form-item v-if="dca.enabled && !dca.dynamic_so_volume_enabled" label="Safety order volume scale" path="os">
                     <n-input-number v-model:value="dca.os" placeholder="OS" />
                 </n-form-item>
                 <n-form-item label="Stop loss percentage" path="sl">
                     <n-input-number v-model:value="dca.sl" placeholder="SL" />
                 </n-form-item>
+                <n-form-item v-if="dca.enabled" label="Dynamic SO volume scaling" path="dynamic_so_volume_enabled" label-placement="left">
+                    <n-checkbox v-model:checked="dca.dynamic_so_volume_enabled" />
+                </n-form-item>
+                <template v-if="dca.enabled && dca.dynamic_so_volume_enabled">
+                    <n-form-item label="ATH lookback value" path="dynamic_so_ath_lookback_value">
+                        <n-input-number v-model:value="dca.dynamic_so_ath_lookback_value" placeholder="1" />
+                    </n-form-item>
+                    <n-form-item label="ATH lookback unit" path="dynamic_so_ath_lookback_unit">
+                        <n-select v-model:value="dca.dynamic_so_ath_lookback_unit" placeholder="Select" :options="dynamicSoLookbackUnitOptions" />
+                    </n-form-item>
+                    <n-form-item label="ATH candle timeframe" path="dynamic_so_ath_timeframe">
+                        <n-select v-model:value="dca.dynamic_so_ath_timeframe" placeholder="Select" :options="dynamicSoAthTimeframeOptions" />
+                    </n-form-item>
+                    <n-form-item label="ATH cache TTL (sec)" path="dynamic_so_ath_cache_ttl">
+                        <n-input-number v-model:value="dca.dynamic_so_ath_cache_ttl" placeholder="60" />
+                    </n-form-item>
+                    <n-form-item label="Loss weight" path="dynamic_so_loss_weight">
+                        <n-input-number v-model:value="dca.dynamic_so_loss_weight" placeholder="0.5" />
+                    </n-form-item>
+                    <n-form-item label="ATH drawdown weight" path="dynamic_so_drawdown_weight">
+                        <n-input-number v-model:value="dca.dynamic_so_drawdown_weight" placeholder="0.8" />
+                    </n-form-item>
+                    <n-form-item label="Curve exponent" path="dynamic_so_exponent">
+                        <n-input-number v-model:value="dca.dynamic_so_exponent" placeholder="1.1" />
+                    </n-form-item>
+                    <n-form-item label="Dynamic min scale" path="dynamic_so_min_scale">
+                        <n-input-number v-model:value="dca.dynamic_so_min_scale" placeholder="0.5" />
+                    </n-form-item>
+                    <n-form-item label="Dynamic max scale" path="dynamic_so_max_scale">
+                        <n-input-number v-model:value="dca.dynamic_so_max_scale" placeholder="3.0" />
+                    </n-form-item>
+                </template>
             </n-form>
         </n-card>
 
@@ -379,6 +411,19 @@ const timerange = [
     },
 ]
 
+const dynamicSoLookbackUnitOptions = [
+    { label: 'Day', value: 'day' },
+    { label: 'Week', value: 'week' },
+    { label: 'Month', value: 'month' },
+    { label: 'Year', value: 'year' },
+]
+
+const dynamicSoAthTimeframeOptions = [
+    { label: '4 hours (4h)', value: '4h' },
+    { label: '1 day (1d)', value: '1d' },
+    { label: '1 week (1w)', value: '1w' },
+]
+
 const exchanges = [{
     label: 'Binance',
     value: 'binance'
@@ -526,6 +571,17 @@ const dca = ref({
     sos: null,
     ss: null,
     os: null,
+    dynamic_so_volume_enabled: false,
+    dynamic_so_ath_lookback_value: 1,
+    dynamic_so_ath_lookback_unit: 'month',
+    dynamic_so_ath_timeframe: '4h',
+    dynamic_so_ath_window: '1m',
+    dynamic_so_loss_weight: 0.5,
+    dynamic_so_drawdown_weight: 0.8,
+    dynamic_so_exponent: 1.1,
+    dynamic_so_min_scale: 0.5,
+    dynamic_so_max_scale: 3.0,
+    dynamic_so_ath_cache_ttl: 60,
     tp: null,
     sl: null,
 })
@@ -551,9 +607,15 @@ const indicator = ref({
     history_from_data: null,
 })
 
-function dcaFieldValidator(fieldLabel: string) {
+function dcaFieldValidator(
+    fieldLabel: string,
+    requiredWhen: () => boolean = () => true,
+) {
     return (_rule: FormItemRule, value: unknown) => {
         if (!dca.value.enabled) {
+            return true
+        }
+        if (!requiredWhen()) {
             return true
         }
         if (value === null || value === undefined) {
@@ -821,11 +883,17 @@ const rules: FormRules = {
         trigger: ['submit'],
     },
     ss: {
-        validator: dcaFieldValidator('step scale'),
+        validator: dcaFieldValidator(
+            'step scale',
+            () => !dca.value.dynamic,
+        ),
         trigger: ['submit'],
     },
     os: {
-        validator: dcaFieldValidator('volume scale'),
+        validator: dcaFieldValidator(
+            'volume scale',
+            () => !dca.value.dynamic_so_volume_enabled,
+        ),
         trigger: ['submit'],
     },
     tp: {
@@ -968,6 +1036,27 @@ async function fetchDefaultValues() {
             dca.value.sos = toNumberOrNull(response.data.sos)
             dca.value.ss = toNumberOrNull(response.data.ss)
             dca.value.os = toNumberOrNull(response.data.os)
+            dca.value.dynamic_so_volume_enabled =
+                parseBooleanString(response.data.dynamic_so_volume_enabled) ?? false
+            dca.value.dynamic_so_ath_lookback_value =
+                toNumberOrNull(response.data.dynamic_so_ath_lookback_value) ?? 1
+            dca.value.dynamic_so_ath_lookback_unit =
+                response.data.dynamic_so_ath_lookback_unit || 'month'
+            dca.value.dynamic_so_ath_timeframe =
+                response.data.dynamic_so_ath_timeframe || '4h'
+            dca.value.dynamic_so_ath_window = response.data.dynamic_so_ath_window || '1m'
+            dca.value.dynamic_so_loss_weight =
+                toNumberOrNull(response.data.dynamic_so_loss_weight) ?? 0.5
+            dca.value.dynamic_so_drawdown_weight =
+                toNumberOrNull(response.data.dynamic_so_drawdown_weight) ?? 0.8
+            dca.value.dynamic_so_exponent =
+                toNumberOrNull(response.data.dynamic_so_exponent) ?? 1.1
+            dca.value.dynamic_so_min_scale =
+                toNumberOrNull(response.data.dynamic_so_min_scale) ?? 0.5
+            dca.value.dynamic_so_max_scale =
+                toNumberOrNull(response.data.dynamic_so_max_scale) ?? 3.0
+            dca.value.dynamic_so_ath_cache_ttl =
+                toNumberOrNull(response.data.dynamic_so_ath_cache_ttl) ?? 60
             dca.value.tp = toNumberOrNull(response.data.tp)
             dca.value.sl = toNumberOrNull(response.data.sl)
             autopilot.value.enabled = parseBooleanString(response.data.autopilot) ?? false
@@ -1131,6 +1220,17 @@ async function submitForm() {
             sos: JSON.stringify({ 'value': dca.value.sos || false, 'type': "float" }),
             ss: JSON.stringify({ 'value': dca.value.ss || false, 'type': "float" }),
             os: JSON.stringify({ 'value': dca.value.os || false, 'type': "float" }),
+            dynamic_so_volume_enabled: JSON.stringify({ 'value': dca.value.dynamic_so_volume_enabled || false, 'type': "bool" }),
+            dynamic_so_ath_lookback_value: JSON.stringify({ 'value': dca.value.dynamic_so_ath_lookback_value ?? 1, 'type': "int" }),
+            dynamic_so_ath_lookback_unit: JSON.stringify({ 'value': dca.value.dynamic_so_ath_lookback_unit || 'month', 'type': "str" }),
+            dynamic_so_ath_timeframe: JSON.stringify({ 'value': dca.value.dynamic_so_ath_timeframe || '4h', 'type': "str" }),
+            dynamic_so_ath_window: JSON.stringify({ 'value': dca.value.dynamic_so_ath_window || '1m', 'type': "str" }),
+            dynamic_so_loss_weight: JSON.stringify({ 'value': dca.value.dynamic_so_loss_weight ?? 0.5, 'type': "float" }),
+            dynamic_so_drawdown_weight: JSON.stringify({ 'value': dca.value.dynamic_so_drawdown_weight ?? 0.8, 'type': "float" }),
+            dynamic_so_exponent: JSON.stringify({ 'value': dca.value.dynamic_so_exponent ?? 1.1, 'type': "float" }),
+            dynamic_so_min_scale: JSON.stringify({ 'value': dca.value.dynamic_so_min_scale ?? 0.5, 'type': "float" }),
+            dynamic_so_max_scale: JSON.stringify({ 'value': dca.value.dynamic_so_max_scale ?? 3.0, 'type': "float" }),
+            dynamic_so_ath_cache_ttl: JSON.stringify({ 'value': dca.value.dynamic_so_ath_cache_ttl ?? 60, 'type': "int" }),
             tp: JSON.stringify({ 'value': dca.value.tp || false, 'type': "float" }),
             sl: JSON.stringify({ 'value': dca.value.sl || false, 'type': "float" }),
             autopilot: JSON.stringify({ 'value': autopilot.value.enabled || false, 'type': "bool" }),

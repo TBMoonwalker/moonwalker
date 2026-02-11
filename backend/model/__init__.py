@@ -1,6 +1,7 @@
 """Tortoise ORM model exports."""
 
 from .appconfig import AppConfig as AppConfig
+from .athcache import AthCache as AthCache
 from .autopilot import Autopilot as Autopilot
 from .closedtrades import ClosedTrades as ClosedTrades
 from .listings import Listings as Listings
@@ -11,6 +12,7 @@ from .upnlhistory import UpnlHistory as UpnlHistory
 
 __all__ = [
     "AppConfig",
+    "AthCache",
     "Autopilot",
     "ClosedTrades",
     "Listings",
@@ -24,6 +26,7 @@ if __name__ == "__main__":
     __models__ = [
         "Autopilot",
         "AppConfig",
+        "AthCache",
         "Trades",
         "OpenTrades",
         "ClosedTrades",

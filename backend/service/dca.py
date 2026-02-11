@@ -5,6 +5,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 import helper
+from service.ath import AthService
 from service.autopilot import Autopilot
 from service.orders import Orders
 from service.statistic import Statistic
@@ -19,6 +20,7 @@ class Dca:
     def __init__(self):
 
         self.autopilot = Autopilot()
+        self.ath_service = AthService()
         self.orders = Orders()
         self.statistic = Statistic()
         self.trades = Trades()
@@ -70,6 +72,82 @@ class Dca:
         plugin = module.Strategy(timeframe=timeframe)
         self._strategy_cache[cache_key] = plugin
         return plugin
+
+    async def __get_dynamic_volume_scale(
+        self,
+        symbol: str,
+        current_price: float,
+        actual_pnl: float,
+    ) -> tuple[float, dict[str, float | str]]:
+        enabled = bool(self.config.get("dynamic_so_volume_enabled", False))
+        if not enabled:
+            return 1.0, {
+                "enabled": "false",
+                "loss_ratio": 0.0,
+                "drawdown_ratio": 0.0,
+                "scale": 1.0,
+                "window": "off",
+            }
+
+        ath, window = await self.ath_service.get_recent_ath(
+            symbol=symbol,
+            config=self.config,
+            cache_ttl_seconds=int(self.config.get("dynamic_so_ath_cache_ttl", 60)),
+        )
+        if ath <= 0:
+            ath = current_price
+
+        loss_ratio = max(0.0, abs(actual_pnl) / 100)
+        drawdown_ratio = max(0.0, (ath - current_price) / ath) if ath > 0 else 0.0
+
+        loss_weight = float(self.config.get("dynamic_so_loss_weight", 0.5))
+        drawdown_weight = float(self.config.get("dynamic_so_drawdown_weight", 0.8))
+        exponent = max(float(self.config.get("dynamic_so_exponent", 1.1)), 0.1)
+        min_scale = max(float(self.config.get("dynamic_so_min_scale", 0.5)), 0.01)
+        max_scale = max(
+            float(self.config.get("dynamic_so_max_scale", 3.0)),
+            min_scale,
+        )
+
+        signal_strength = (loss_weight * loss_ratio) + (
+            drawdown_weight * (drawdown_ratio**exponent)
+        )
+        dynamic_scale = 1.0 + signal_strength
+        dynamic_scale = min(max(dynamic_scale, min_scale), max_scale)
+
+        details: dict[str, float | str] = {
+            "enabled": "true",
+            "window": window,
+            "ath": ath,
+            "loss_ratio": round(loss_ratio, 6),
+            "drawdown_ratio": round(drawdown_ratio, 6),
+            "scale": round(dynamic_scale, 6),
+            "min_scale": min_scale,
+            "max_scale": max_scale,
+        }
+        return dynamic_scale, details
+
+    async def __resolve_safety_order_size(
+        self,
+        trades: dict[str, Any],
+        current_price: float,
+        actual_pnl: float,
+        volume_scale: float,
+    ) -> tuple[float, dict[str, float | str]]:
+        base_size = float(self.config.get("so", 0) or 0)
+        if trades["safetyorders"]:
+            base_size = float(trades["safetyorders"][-1]["ordersize"]) * volume_scale
+
+        dynamic_factor, dynamic_details = await self.__get_dynamic_volume_scale(
+            trades["symbol"], current_price, actual_pnl
+        )
+        final_size = round(base_size * dynamic_factor, 8)
+
+        return final_size, {
+            "base_size": round(base_size, 8),
+            "final_size": final_size,
+            **dynamic_details,
+        }
 
     async def __calculate_tp(self, current_price, trades):
         trailing_tp = self.config.get("trailing_tp", 0)
@@ -194,6 +272,10 @@ class Dca:
         safety_order_size = self.config.get("so", None)
         new_so = False
         placed_new_so = False
+        dynamic_so_details: dict[str, float | str] = {
+            "enabled": "false",
+            "scale": 1.0,
+        }
 
         # Actual PNL in percent
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
@@ -254,6 +336,15 @@ class Dca:
                     new_so = True
 
             if new_so:
+                (
+                    safety_order_size,
+                    dynamic_so_details,
+                ) = await self.__resolve_safety_order_size(
+                    trades=trades,
+                    current_price=current_price,
+                    actual_pnl=actual_pnl,
+                    volume_scale=volume_scale,
+                )
                 order = {
                     "ordersize": safety_order_size,
                     "symbol": trades["symbol"],
@@ -279,6 +370,10 @@ class Dca:
                 "price_deviation": next_so_percentage,
                 "actual_pnl": actual_pnl,
                 "new_so": placed_new_so,
+                "dynamic_so_scale": dynamic_so_details.get("scale", 1.0),
+                "dynamic_so_window": dynamic_so_details.get("window", "off"),
+                "dynamic_so_drawdown": dynamic_so_details.get("drawdown_ratio", 0.0),
+                "dynamic_so_loss": dynamic_so_details.get("loss_ratio", 0.0),
             }
             # Send new statistics to statistics module
             await self.statistic.update_statistic_data(logging_json)

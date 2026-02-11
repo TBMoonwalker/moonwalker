@@ -62,7 +62,11 @@ function isConfigComplete(config: ConfigPayload): boolean {
 
   const dcaEnabled = Boolean(config.dca)
   if (dcaEnabled) {
-    const dcaRequiredKeys = ['so', 'mstc', 'sos', 'ss', 'os']
+    const dynamicSoEnabled = Boolean(config.dynamic_so_volume_enabled)
+    const dynamicDcaEnabled = Boolean(config.dynamic_dca)
+    const dcaRequiredKeys = dynamicSoEnabled
+      ? (dynamicDcaEnabled ? ['so', 'mstc', 'sos'] : ['so', 'mstc', 'sos', 'ss'])
+      : (dynamicDcaEnabled ? ['so', 'mstc', 'sos', 'os'] : ['so', 'mstc', 'sos', 'ss', 'os'])
     if (dcaRequiredKeys.some((key) => !hasRequiredValue(config[key]))) {
       return false
     }
