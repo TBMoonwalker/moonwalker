@@ -449,6 +449,12 @@ class Exchange:
                     "options": options,
                 }
             )
+            if hostname:
+                logging.info(
+                    "Using custom exchange hostname '%s' for exchange '%s'.",
+                    options["hostname"],
+                    config.get("exchange"),
+                )
             if config.get("dry_run", True):
                 try:
                     exchange.enableDemoTrading(True)

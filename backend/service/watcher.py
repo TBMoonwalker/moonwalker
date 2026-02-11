@@ -94,6 +94,12 @@ class Watcher:
                     "options": options,
                 }
             )
+            if hostname:
+                logging.info(
+                    "Using custom exchange hostname '%s' for watcher exchange '%s'.",
+                    options["hostname"],
+                    config.get("exchange"),
+                )
             if config.get("dry_run", True):
                 try:
                     new_exchange.enableDemoTrading(True)
