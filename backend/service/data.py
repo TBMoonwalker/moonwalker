@@ -17,13 +17,18 @@ class Data:
 
     SYMBOLS_CACHE_TTL_SECONDS = 300
 
-    def __init__(self) -> None:
+    def __init__(self, persist_exchange: bool = False) -> None:
         utils = helper.Utils()
         self.exchange = Exchange()
         self.utils = utils
+        self.persist_exchange = persist_exchange
         self._symbols_cache: TTLCache[str, list[str]] = TTLCache(
             maxsize=64, ttl=self.SYMBOLS_CACHE_TTL_SECONDS
         )
+
+    async def close(self) -> None:
+        """Close the underlying exchange client."""
+        await self.exchange.close()
 
     async def get_listing_date(
         self, config: dict[str, Any], symbol: str
@@ -54,7 +59,8 @@ class Data:
             # Broad catch to keep listing lookups resilient.
             logging.error(f"Error fetching OHLCV for {symbol}: {e}")
         finally:
-            await self.exchange.close()
+            if not self.persist_exchange:
+                await self.exchange.close()
 
         return None
 
@@ -95,7 +101,8 @@ class Data:
             logging.error(f"Error fetching exchange symbols for {currency}: {e}")
             return []
         finally:
-            await self.exchange.close()
+            if not self.persist_exchange:
+                await self.exchange.close()
 
     def __calculate_min_candle_date(self, timerange: str, length: int) -> float:
         """Calculate the earliest timestamp for candle history."""
@@ -213,7 +220,8 @@ class Data:
             # Broad catch to keep history loads resilient.
             logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
         finally:
-            await self.exchange.close()
+            if not self.persist_exchange:
+                await self.exchange.close()
 
         return False
 

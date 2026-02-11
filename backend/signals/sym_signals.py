@@ -25,7 +25,7 @@ class SignalPlugin:
         self.autopilot = Autopilot()
         self.orders = Orders()
         self.statistic = Statistic()
-        self.data = Data()
+        self.data = Data(persist_exchange=True)
         self.filter = Filter()
         self.config = None
         self.status = True
@@ -277,3 +277,4 @@ class SignalPlugin:
             None
         """
         self.status = False
+        await self.data.close()
