@@ -36,7 +36,7 @@ class SignalPlugin:
         """
         self.utils = helper.Utils()
         self.autopilot = Autopilot()
-        self.data = Data()
+        self.data = Data(persist_exchange=True)
         self.orders = Orders()
         self.filter = Filter()
         self.indicators = Indicators()
@@ -352,7 +352,7 @@ class SignalPlugin:
                 )
             await asyncio.sleep(5)
 
-    def shutdown(self) -> None:
+    async def shutdown(self) -> None:
         """Shutdown the signal plugin.
 
         Stops the execution loop by setting the status flag to False.
@@ -361,3 +361,4 @@ class SignalPlugin:
             None
         """
         self.status = False
+        await self.data.close()
