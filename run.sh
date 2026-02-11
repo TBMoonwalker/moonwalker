@@ -9,6 +9,33 @@ usage() {
     echo "Usage: $0 {start|stop} [-d|--debug] [-p|--port PORT]"
 }
 
+build_frontend_with_fallback() {
+    local first_status=0
+    local second_status=0
+
+    echo "🏗️  Building frontend (standard)..."
+    if npm run build-only; then
+        return 0
+    fi
+    first_status=$?
+    echo "⚠️  Standard frontend build failed (exit ${first_status})."
+
+    echo "🏗️  Retrying frontend build with constrained Node heap (1536 MB)..."
+    if NODE_OPTIONS="--max-old-space-size=1536" npm run build-only; then
+        return 0
+    fi
+    second_status=$?
+    echo "⚠️  Heap-constrained build failed (exit ${second_status})."
+
+    echo "🏗️  Retrying frontend build in low-memory mode (no minify, 1024 MB heap)..."
+    if NODE_OPTIONS="--max-old-space-size=1024" npx vite build --minify=false; then
+        return 0
+    fi
+
+    echo "❌ Frontend build failed after fallback attempts."
+    return ${second_status}
+}
+
 # Function to stop all services
 stop_services() {
 
@@ -65,7 +92,7 @@ start_services() {
     npm install
     # Startup path should prioritize successful asset build over type-checking.
     # Type checks are still available via `npm run build`/CI.
-    npm run build-only
+    build_frontend_with_fallback
     cd ..
 
     echo "📂 Copying assets into backend..."
