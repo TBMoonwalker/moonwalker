@@ -16,6 +16,7 @@ class Strategy:
         self.timeframe = timeframe
         self.filter = Filter()
         self.indicators = Indicators()
+        self._last_log_by_symbol: dict[str, dict[str, Any]] = {}
 
     async def run(self, symbol: str, type: str) -> bool:
         """Evaluate BBands cross conditions for a symbol."""
@@ -35,7 +36,9 @@ class Strategy:
                 "bbands": bbands,
                 "creating_order": result,
             }
-            logging.debug(f"{logging_json}")
+            if self._last_log_by_symbol.get(symbol) != logging_json:
+                logging.debug(f"{logging_json}")
+                self._last_log_by_symbol[symbol] = logging_json.copy()
 
         except ValueError as e:
             logging.error(f"JSON Message is garbage: {e}")

@@ -14,6 +14,7 @@ class Strategy:
     def __init__(self, timeframe: str, btc_pulse: Any | None = None):
         self.timeframe = timeframe
         self.indicators = Indicators()
+        self._last_log_by_symbol: dict[str, dict[str, Any]] = {}
 
     async def run(self, symbol: str, type: str) -> bool:
         """Evaluate EMA low conditions for a symbol.
@@ -46,9 +47,6 @@ class Strategy:
                     close.dropna().iloc[-2] > ema["ema_20"]
                     and close.dropna().iloc[-3] < ema["ema_20"]
                 ):
-                    logging.debug(
-                        f"Price rebound from EMA down for {symbol} Close: {close.dropna().iloc[-2]} Previous close: {close.dropna().iloc[-3]}"
-                    )
                     result = True
 
             logging_json = {
@@ -57,7 +55,9 @@ class Strategy:
                 "close price(last)": f"{close.dropna().iloc[-2]}",
                 "creating_order": result,
             }
-            logging.debug(f"{logging_json}")
+            if self._last_log_by_symbol.get(symbol) != logging_json:
+                logging.debug(f"{logging_json}")
+                self._last_log_by_symbol[symbol] = logging_json.copy()
         except Exception as e:
             logging.error(
                 f"Cannot run strategy for {symbol}, check indicators.log: {e}"

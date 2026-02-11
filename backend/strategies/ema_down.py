@@ -16,6 +16,7 @@ class Strategy:
         self.timeframe = timeframe
         self.filter = Filter()
         self.indicators = Indicators()
+        self._last_log_by_symbol: dict[str, dict[str, Any]] = {}
 
     async def run(self, symbol: str, type: str) -> bool:
         """Evaluate EMA downtrend conditions for a symbol."""
@@ -36,7 +37,9 @@ class Strategy:
                 "ema(20/50/100/200)": f"{ema['ema_20']}, {ema['ema_50']}",
                 "creating_order": result,
             }
-            logging.debug(f"{logging_json}")
+            if self._last_log_by_symbol.get(symbol) != logging_json:
+                logging.debug(f"{logging_json}")
+                self._last_log_by_symbol[symbol] = logging_json.copy()
         except Exception as exc:
             logging.error(f"Cannot run strategy for {symbol}: {exc}", exc_info=True)
             return False
