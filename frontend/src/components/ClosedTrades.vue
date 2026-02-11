@@ -39,8 +39,8 @@ const updateData = async (currentPage: number) => {
         paged_closed_trades.value = data.value
     } else {
         pagination = (currentPage - 1) * pageReactive.pageSize
-        const data = await fetchJson(`/trades/closed/${pagination}`)
-        trades_store.setClosedTrades(data)
+        const data = await fetchJson<{ result: RowData[] }>(`/trades/closed/${pagination}`)
+        trades_store.setClosedTrades(data.result ?? [])
         paged_closed_trades.value = trades_store.closedTrades
     }
 
