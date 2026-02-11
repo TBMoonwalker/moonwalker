@@ -18,6 +18,16 @@ def _json_dumps(payload: Any) -> str:
     return json.dumps(payload, default=str)
 
 
+@helper.async_ttl_cache(maxsize=1, ttl=2)
+async def _get_open_trades_cached() -> list[dict[str, Any]]:
+    return await trades.get_open_trades()
+
+
+@helper.async_ttl_cache(maxsize=1, ttl=2)
+async def _get_closed_trades_cached() -> list[dict[str, Any]]:
+    return await trades.get_closed_trades()
+
+
 @controller.websocket("/trades/open")
 async def open_trades() -> None:
     """WebSocket endpoint for streaming open trades data.
@@ -29,7 +39,7 @@ async def open_trades() -> None:
     """
     try:
         while True:
-            output = await trades.get_open_trades()
+            output = await _get_open_trades_cached()
             await websocket.send(_json_dumps(output))
             await asyncio.sleep(5)
     except asyncio.CancelledError:
@@ -54,7 +64,7 @@ async def closed_trades() -> None:
     """
     try:
         while True:
-            output = await trades.get_closed_trades()
+            output = await _get_closed_trades_cached()
             await websocket.send(_json_dumps(output))
             await asyncio.sleep(5)
     except asyncio.CancelledError:

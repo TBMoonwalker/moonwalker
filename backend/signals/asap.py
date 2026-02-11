@@ -36,6 +36,7 @@ class SignalPlugin:
         """
         self.utils = helper.Utils()
         self.autopilot = Autopilot()
+        self.data = Data()
         self.orders = Orders()
         self.filter = Filter()
         self.indicators = Indicators()
@@ -91,6 +92,20 @@ class SignalPlugin:
 
         return result
 
+    async def __fetch_symbol_list_from_url(self, url: str) -> list[str]:
+        """Fetch symbol list JSON from a remote URL without blocking the event loop."""
+
+        def _fetch() -> list[str]:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            payload = response.json()
+            pairs = payload.get("pairs", [])
+            if not isinstance(pairs, list):
+                raise ValueError("Invalid symbol list payload format: expected 'pairs' list")
+            return pairs
+
+        return await asyncio.to_thread(_fetch)
+
     @helper.async_ttl_cache(maxsize=1024, ttl=900)
     async def __get_new_symbol_list(self, running_list: tuple) -> Optional[list[str]]:
         """Get the list of new symbols to trade.
@@ -110,9 +125,7 @@ class SignalPlugin:
         history_data = self.config.get("history_from_data", 30)
         if symbol_list:
             if "http" in symbol_list:
-                response = requests.get(symbol_list)
-                response.raise_for_status()
-                symbol_list = response.json()["pairs"]
+                symbol_list = await self.__fetch_symbol_list_from_url(symbol_list)
             else:
                 symbol_list = symbol_list.split(",")
 
@@ -133,8 +146,8 @@ class SignalPlugin:
             # Add history data for indicators
             for symbol in symbol_list:
                 if symbol not in running_symbols:
-                    if await Data().count_history_data_for_symbol(symbol) < 1:
-                        if not await Data().add_history_data_for_symbol(
+                    if await self.data.count_history_data_for_symbol(symbol) < 1:
+                        if not await self.data.add_history_data_for_symbol(
                             symbol, history_data, self.config
                         ):
                             logging.error(

@@ -14,6 +14,9 @@ logging = helper.LoggerFactory.get_logger("logs/exchange.log", "exchange")
 class Exchange:
     """Exchange wrapper for CCXT async operations."""
 
+    HISTORY_RETRY_SLEEP_SECONDS = 1
+    HISTORY_MAX_CONSECUTIVE_ERRORS = 5
+
     def __init__(
         self,
     ):
@@ -116,6 +119,7 @@ class Exchange:
         now = self.exchange.milliseconds()
 
         all_candles = []
+        consecutive_errors = 0
 
         while since < now:
             try:
@@ -131,7 +135,17 @@ class Exchange:
 
                 all_candles.extend(candles)
 
-                since = candles[-1][0] + timeframe_ms
+                next_since = candles[-1][0] + timeframe_ms
+                if next_since <= since:
+                    logging.warning(
+                        "No OHLCV cursor progress for %s on timeframe %s. "
+                        "Stopping history fetch to avoid tight loop.",
+                        symbol,
+                        timeframe,
+                    )
+                    break
+                since = next_since
+                consecutive_errors = 0
 
             except (
                 Exception,
@@ -141,6 +155,15 @@ class Exchange:
             ) as e:
                 # Broad catch to continue paging through historical data.
                 logging.error(f"Fetching historical data failed due to an error: {e}")
+                consecutive_errors += 1
+                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+                    logging.error(
+                        "Stopping history fetch for %s after %s consecutive errors.",
+                        symbol,
+                        consecutive_errors,
+                    )
+                    break
+                await asyncio.sleep(self.HISTORY_RETRY_SLEEP_SECONDS)
 
         return all_candles
 

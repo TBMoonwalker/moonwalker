@@ -213,6 +213,7 @@ class Trades:
             logging.error(f"Error getting total amount from {symbol}. Cause {e}")
             return None
 
+    @helper.async_ttl_cache(maxsize=2048, ttl=2)
     async def get_trades_for_orders(self, symbol: str) -> dict[str, Any] | None:
         """Return aggregated trade data for order processing."""
         trade_data = []

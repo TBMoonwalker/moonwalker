@@ -17,6 +17,11 @@ logging = helper.LoggerFactory.get_logger(
 statistic = Statistic()
 
 
+@helper.async_ttl_cache(maxsize=1, ttl=2)
+async def _get_profit_cached() -> dict[str, Any]:
+    return await statistic.get_profit()
+
+
 @controller.websocket("/statistic/profit")
 async def profit() -> None:
     """WebSocket endpoint for streaming profit statistics.
@@ -28,7 +33,7 @@ async def profit() -> None:
     """
     try:
         while True:
-            output = json.dumps(await statistic.get_profit())
+            output = json.dumps(await _get_profit_cached())
             await websocket.send(output)
             await asyncio.sleep(5)
     except asyncio.CancelledError:

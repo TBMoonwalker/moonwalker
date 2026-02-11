@@ -222,7 +222,7 @@ class SignalPlugin:
                                     # Automatically subscribe to reduce load
                                     if self.config.get("dynamic_dca", False):
                                         success = (
-                                            await Data().add_history_data_for_symbol(
+                                            await self.data.add_history_data_for_symbol(
                                                 symbol_full,
                                                 history_data,
                                                 self.config,

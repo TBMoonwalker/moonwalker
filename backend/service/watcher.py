@@ -43,6 +43,8 @@ class Watcher:
         self.ohlcv_queue = asyncio.Queue(maxsize=self.OHLCV_QUEUE_MAXSIZE)
         self.last_price = {}
         self._worker_tasks: list[asyncio.Task] = []
+        self._reload_lock = asyncio.Lock()
+        self._reload_task: asyncio.Task | None = None
 
         # Used for cross-task signaling
         Watcher.symbol_update_event = asyncio.Event()
@@ -58,9 +60,29 @@ class Watcher:
         """Reload watcher configuration and exchange client."""
         logging.info("Reload watcher")
         self.config = config
-        if config.get("exchange", None):
-            self.exchange_class = getattr(ccxtpro, config.get("exchange"))
-            self.exchange = self.exchange_class(
+        if self._reload_task and not self._reload_task.done():
+            self._reload_task.cancel()
+        self._reload_task = asyncio.create_task(self._reload_exchange_client(config))
+
+        Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
+
+    async def _reload_exchange_client(self, config: dict[str, Any]) -> None:
+        """Close any existing client and recreate it from latest config."""
+        async with self._reload_lock:
+            old_exchange = self.exchange
+            self.exchange = None
+
+            if old_exchange:
+                try:
+                    await old_exchange.close()
+                except Exception as exc:  # noqa: BLE001
+                    logging.warning("Error closing previous CCXT Pro client: %s", exc)
+
+            if not config.get("exchange", None):
+                return
+
+            exchange_class = getattr(ccxtpro, config.get("exchange"))
+            new_exchange = exchange_class(
                 {
                     "apiKey": config.get("key"),
                     "secret": config.get("secret"),
@@ -69,7 +91,7 @@ class Watcher:
             )
             if config.get("dry_run", True):
                 try:
-                    self.exchange.enableDemoTrading(True)
+                    new_exchange.enableDemoTrading(True)
                     logging.info(
                         "Enabled CCXT Pro demo trading for exchange '%s'.",
                         config.get("exchange"),
@@ -79,9 +101,8 @@ class Watcher:
                         "Dry run requires CCXT Pro enableDemoTrading support, but "
                         f"'{config.get('exchange')}' could not enable demo trading."
                     ) from exc
-            self.exchange.set_sandbox_mode(config.get("sandbox", False))
-
-        Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
+            new_exchange.set_sandbox_mode(config.get("sandbox", False))
+            self.exchange = new_exchange
 
     # ------------------------------------------------------------------- #
     #                Queue-based symbol updates from app.py               #

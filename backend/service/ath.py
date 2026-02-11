@@ -81,8 +81,8 @@ class AthService:
             Tuple of (ath_value, normalized_cache_window_key).
         """
         (
-            lookback_value,
-            lookback_unit,
+            _lookback_value,
+            _lookback_unit,
             timeframe,
             lookback_days,
             window,
