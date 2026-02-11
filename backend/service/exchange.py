@@ -76,6 +76,47 @@ class Exchange:
                 await self.exchange.load_markets()
                 self._markets_loaded = True
 
+    def __resolve_symbol(self, symbol: str) -> str | None:
+        """Resolve a user-provided symbol to the exchange canonical symbol."""
+        if not symbol:
+            return None
+        if self.exchange is None:
+            return None
+
+        # Fast path for exact key matches.
+        if symbol in self.exchange.markets:
+            return symbol
+
+        # Prefer CCXT's own parser/normalizer.
+        try:
+            market = self.exchange.market(symbol)
+            resolved = market.get("symbol") if isinstance(market, dict) else None
+            if isinstance(resolved, str):
+                return resolved
+        except Exception:
+            pass
+
+        # Bybit and similar exchanges may require contract suffixed symbols
+        # like "BTC/USDT:USDT". Try quote-suffixed candidates.
+        if "/" in symbol and ":" not in symbol:
+            base, quote = symbol.split("/", 1)
+            candidates = (
+                f"{base}/{quote}:{quote}",
+                f"{base}/{quote}:{base}",
+            )
+            for candidate in candidates:
+                if candidate in self.exchange.markets:
+                    return candidate
+                try:
+                    market = self.exchange.market(candidate)
+                    resolved = market.get("symbol") if isinstance(market, dict) else None
+                    if isinstance(resolved, str):
+                        return resolved
+                except Exception:
+                    continue
+
+        return None
+
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
     async def parse_iso_timestamp(self, config: dict[str, Any], date: str) -> int:
         """Parse an ISO-8601 date string using the exchange parser."""
@@ -111,7 +152,8 @@ class Exchange:
         await self.__ensure_exchange(config)
         await self.__ensure_markets_loaded()
         ohlcv = None
-        if symbol not in self.exchange.markets:
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is None:
             logging.error(f"{symbol} not found")
             return ohlcv
 
@@ -124,7 +166,7 @@ class Exchange:
         while since < now:
             try:
                 candles = await self.exchange.fetch_ohlcv(
-                    symbol=symbol,
+                    symbol=resolved_symbol,
                     timeframe=timeframe,
                     since=since,
                     limit=limit,
@@ -140,7 +182,7 @@ class Exchange:
                     logging.warning(
                         "No OHLCV cursor progress for %s on timeframe %s. "
                         "Stopping history fetch to avoid tight loop.",
-                        symbol,
+                        resolved_symbol,
                         timeframe,
                     )
                     break
@@ -159,7 +201,7 @@ class Exchange:
                 if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
                     logging.error(
                         "Stopping history fetch for %s after %s consecutive errors.",
-                        symbol,
+                        resolved_symbol,
                         consecutive_errors,
                     )
                     break
@@ -211,13 +253,16 @@ class Exchange:
         result = None
 
         try:
+            resolved_pair = self.__resolve_symbol(pair)
+            if resolved_pair is None:
+                raise TryAgain
             # Fetch the ticker data for the trading pair
-            ticker = await self.exchange.fetch_ticker(pair)
+            ticker = await self.exchange.fetch_ticker(resolved_pair)
             # Extract the actual price from the ticker data
             if not ticker["last"]:
                 raise TryAgain
             actual_price = float(ticker["last"])
-            result = self.exchange.price_to_precision(pair, actual_price)
+            result = self.exchange.price_to_precision(resolved_pair, actual_price)
         except ccxt.ExchangeError as e:
             logging.error(
                 f"Fetching ticker messages failed due to an exchange error: {e}"
@@ -244,7 +289,10 @@ class Exchange:
         result = None
 
         try:
-            market = self.exchange.market(pair)
+            resolved_pair = self.__resolve_symbol(pair)
+            if resolved_pair is None:
+                raise TryAgain
+            market = self.exchange.market(resolved_pair)
             result = market["precision"]["amount"]
         except ccxt.ExchangeError as e:
             logging.error(f"Fetching market data failed due to an exchange error: {e}")
@@ -264,7 +312,10 @@ class Exchange:
 
     def __get_demo_taker_fee_for_symbol(self, symbol: str) -> float:
         """Return the static market taker fee for demo trading mode."""
-        market = self.exchange.market(symbol)
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is None:
+            raise ValueError(f"No market available for symbol {symbol}")
+        market = self.exchange.market(resolved_symbol)
         taker_fee = market.get("taker")
         if taker_fee is None:
             raise ValueError(f"No market taker fee available for symbol {symbol}")
@@ -352,11 +403,14 @@ class Exchange:
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
     async def __get_amount_from_symbol(self, ordersize: float, symbol: str) -> str:
-        price = await self.__get_price_for_symbol(symbol)
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is None:
+            raise TryAgain
+        price = await self.__get_price_for_symbol(resolved_symbol)
         amount = None
         try:
             amount = self.exchange.amount_to_precision(
-                symbol, float(ordersize) / float(price)
+                resolved_symbol, float(ordersize) / float(price)
             )
         except ccxt.NetworkError as e:
             logging.error(
