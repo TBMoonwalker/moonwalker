@@ -1,11 +1,8 @@
 """Indicator calculations based on OHLCV data."""
 
-import asyncio
-from collections import deque
 from typing import Any
 
 import helper
-import pandas as pd
 import talib
 from service.data import Data
 
@@ -15,153 +12,14 @@ logging = helper.LoggerFactory.get_logger("logs/indicators.log", "indicators")
 class Indicators:
     """Compute technical indicators used by strategies."""
 
-    EMA_SEED_BUFFER = 20
-
     def __init__(self) -> None:
         self.data = Data()
-        self._state_locks: dict[tuple[str, str], asyncio.Lock] = {}
-        self._state: dict[tuple[str, str], dict[str, Any]] = {}
-
-    def _get_lock(self, key: tuple[str, str]) -> asyncio.Lock:
-        lock = self._state_locks.get(key)
-        if lock is None:
-            lock = asyncio.Lock()
-            self._state_locks[key] = lock
-        return lock
-
-    @staticmethod
-    def _timeframe_to_seconds(timerange: str) -> int | None:
-        value = timerange.strip().lower()
-        if not value:
-            return None
-        try:
-            if value.endswith("min"):
-                return int(value[:-3]) * 60
-            if value.endswith("m"):
-                return int(value[:-1]) * 60
-            if value.endswith("h"):
-                return int(value[:-1]) * 3600
-            if value.endswith("d"):
-                return int(value[:-1]) * 86400
-            if value.endswith("w"):
-                return int(value[:-1]) * 604800
-        except ValueError:
-            return None
-        return None
-
-    async def _seed_state(
-        self,
-        symbol: str,
-        timerange: str,
-        lengths: set[int],
-        close_window: int,
-        latest_candle: tuple[float, float],
-    ) -> dict[str, Any] | None:
-        max_length = max(lengths) if lengths else 1
-        fetch_length = max(max_length + self.EMA_SEED_BUFFER, close_window + 5)
-        df_raw = await self.data.get_data_for_pair(symbol, timerange, fetch_length)
-        df = self.data.resample_data(df_raw, timerange)
-        if df is None or df.empty:
-            return None
-
-        close_series = df["close"].dropna()
-        if close_series.empty:
-            return None
-
-        closes = [float(value) for value in close_series.tolist()]
-        ema_values: dict[int, float] = {}
-        for length in lengths:
-            if len(closes) < length:
-                raise ValueError(
-                    f"Not enough candles to seed EMA{length} for {symbol}/{timerange}"
-                )
-            ema_series = talib.EMA(close_series, timeperiod=length).dropna()
-            if ema_series.empty:
-                raise ValueError(
-                    f"TA-Lib returned empty EMA{length} for {symbol}/{timerange}"
-                )
-            ema_values[length] = float(ema_series.iloc[-1])
-
-        window_size = max(close_window, 5)
-        close_values: deque[float] = deque(closes[-window_size:], maxlen=window_size)
-        return {
-            "last_timestamp": float(latest_candle[0]),
-            "last_close": float(latest_candle[1]),
-            "ema_values": ema_values,
-            "close_values": close_values,
-            "max_close_window": window_size,
-        }
-
-    async def _ensure_state(
-        self,
-        symbol: str,
-        timerange: str,
-        lengths: set[int] | None = None,
-        close_window: int = 5,
-    ) -> dict[str, Any] | None:
-        state_key = (symbol, timerange)
-        lock = self._get_lock(state_key)
-        requested_lengths = lengths or set()
-
-        async with lock:
-            latest_candle = await self.data.get_latest_candle_for_pair(symbol)
-            if latest_candle is None:
-                return None
-
-            state = self._state.get(state_key)
-            needs_reseed = state is None
-            if not needs_reseed:
-                if not requested_lengths.issubset(state["ema_values"].keys()):
-                    needs_reseed = True
-                elif close_window > state["max_close_window"]:
-                    needs_reseed = True
-
-            if needs_reseed:
-                state = await self._seed_state(
-                    symbol=symbol,
-                    timerange=timerange,
-                    lengths=requested_lengths,
-                    close_window=close_window,
-                    latest_candle=latest_candle,
-                )
-                if state is None:
-                    return None
-                self._state[state_key] = state
-                return state
-
-            latest_timestamp, latest_close = latest_candle
-            last_timestamp = float(state["last_timestamp"])
-            if latest_timestamp <= last_timestamp:
-                return state
-
-            # If data jumped more than one candle, reseed for exact indicator values.
-            timeframe_seconds = self._timeframe_to_seconds(timerange)
-            if timeframe_seconds:
-                expected_step_ms = timeframe_seconds * 1000
-                if latest_timestamp - last_timestamp > (expected_step_ms * 1.5):
-                    reseeded = await self._seed_state(
-                        symbol=symbol,
-                        timerange=timerange,
-                        lengths=set(state["ema_values"].keys()),
-                        close_window=state["max_close_window"],
-                        latest_candle=latest_candle,
-                    )
-                    if reseeded is not None:
-                        self._state[state_key] = reseeded
-                        return reseeded
-
-            # Incremental one-candle EMA update.
-            for length, prev_ema in state["ema_values"].items():
-                alpha = 2.0 / (float(length) + 1.0)
-                state["ema_values"][length] = float(
-                    prev_ema + alpha * (latest_close - prev_ema)
-                )
-
-            close_values: deque[float] = state["close_values"]
-            close_values.append(float(latest_close))
-            state["last_timestamp"] = float(latest_timestamp)
-            state["last_close"] = float(latest_close)
-            return state
+        self._ema_cache: dict[
+            tuple[str, str, tuple[int, ...]], tuple[float | None, dict[str, Any]]
+        ] = {}
+        self._close_cache: dict[
+            tuple[str, str, int], tuple[float | None, Any]
+        ] = {}
 
     # async def calculate_bbands_cross(self, symbol, timerange, length):
     #     result = "none"
@@ -207,40 +65,49 @@ class Indicators:
         self, symbol: str, timerange: str, lengths: list[int]
     ) -> dict[str, Any]:
         """Calculate EMA values for the given lengths."""
-        try:
-            state = await self._ensure_state(
-                symbol=symbol,
-                timerange=timerange,
-                lengths=set(lengths),
-                close_window=5,
-            )
-            if state is None:
-                return {}
+        cache_key = (symbol, timerange, tuple(lengths))
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._ema_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
 
-            result: dict[str, Any] = {}
+        ema = {}
+        try:
+            max_length = max(lengths)
+            df_raw = await self.data.get_data_for_pair(symbol, timerange, max_length)
+            df = self.data.resample_data(df_raw, timerange)
             for length in lengths:
-                result[f"ema_{length}"] = state["ema_values"].get(length)
-            return result
+                length_key = f"ema_{str(length)}"
+                ema[length_key] = (
+                    talib.EMA(df["close"], timeperiod=length).dropna().iloc[-1]
+                )
+            self._ema_cache[cache_key] = (latest_timestamp, ema)
         except Exception as e:
+            # Broad catch to avoid breaking strategy execution.
             logging.error(f"EMA cannot be calculated for {symbol}. Cause: {e}")
-            return {}
+            if cached:
+                return cached[1]
+        return ema
 
     async def get_close_price(self, symbol: str, timerange: str, length: int) -> Any:
         """Return close price series for a symbol."""
+        cache_key = (symbol, timerange, length)
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._close_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
+
         try:
-            state = await self._ensure_state(
-                symbol=symbol,
-                timerange=timerange,
-                lengths=set(),
-                close_window=max(length, 5),
-            )
-            if state is None:
-                return None
-            values = list(state["close_values"])[-max(length, 1) :]
-            return pd.Series(values)
+            df_raw = await self.data.get_data_for_pair(symbol, timerange, length)
+            df = self.data.resample_data(df_raw, timerange)
+            close = df["close"]
+            self._close_cache[cache_key] = (latest_timestamp, close)
+            return close
         except Exception as e:
             # Broad catch to avoid breaking strategy execution.
             logging.error(f"Close price cannot be calculated for {symbol}. Cause: {e}")
+            if cached:
+                return cached[1]
             return None
 
     # async def calculate_ema_slope(self, symbol, timerange, length):
