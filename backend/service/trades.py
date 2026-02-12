@@ -204,7 +204,7 @@ class Trades:
         try:
             result = (
                 await model.Trades.filter(symbol=symbol)
-                .annotate(total_amount=Sum(F("amount") + F("amount_fee")))
+                .annotate(total_amount=Sum(F("amount")))
                 .values_list("total_amount", flat=True)
             )
             return result[0]
@@ -232,9 +232,8 @@ class Trades:
             latest_order = None
             for order in trades:
                 amount = float(order["amount"])
-                amount_fee = float(order["amount_fee"])
                 total_cost += float(order["ordersize"])
-                total_amount += amount + amount_fee
+                total_amount += amount
                 latest_order = order
 
                 if bool(order.get("baseorder")):

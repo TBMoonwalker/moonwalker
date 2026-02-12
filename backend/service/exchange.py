@@ -1,7 +1,6 @@
 """Exchange service for CCXT async operations."""
 
 import asyncio
-import decimal
 from typing import Any
 
 import ccxt.async_support as ccxt
@@ -334,6 +333,8 @@ class Exchange:
             amount = 0.0
             fee = 0.0
             cost = 0.0
+            base_fee = 0.0
+            matched_orders: list[dict[str, Any]] = []
             orderlist = await self.exchange.fetch_my_trades(symbol, since)
             if orderlist:
                 logging.debug(
@@ -343,19 +344,32 @@ class Exchange:
                 for order in orderlist:
                     # Avoid merging different orders in high volatility scenarios
                     if order["order"] == orderid:
+                        matched_orders.append(order)
                         amount += order["amount"]
-                        fee += order["fee"]["cost"]
+                        fee_data = order.get("fee") or {}
+                        fee_cost = float(fee_data.get("cost") or 0.0)
+                        fee += fee_cost
                         cost += order["cost"]
+                        fee_currency = str(fee_data.get("currency") or "").upper()
+                        base_asset = str(order.get("symbol", symbol)).split("/")[0].upper()
+                        side = str(order.get("side") or "").lower()
+                        if side == "buy" and fee_currency == base_asset:
+                            base_fee += fee_cost
+
+                if not matched_orders:
+                    return None
+                last_order = matched_orders[-1]
 
                 trade["cost"] = cost
                 trade["fee"] = fee
+                trade["base_fee"] = base_fee
                 trade["amount"] = amount
-                trade["timestamp"] = orderlist[-1]["timestamp"]
-                trade["price"] = orderlist[-1]["price"]
-                trade["order"] = orderlist[-1]["order"]
-                trade["symbol"] = orderlist[-1]["symbol"]
-                trade["side"] = orderlist[-1]["side"]
-                trade["fee_cost"] = orderlist[-1]["fee"]
+                trade["timestamp"] = last_order["timestamp"]
+                trade["price"] = last_order["price"]
+                trade["order"] = last_order["order"]
+                trade["symbol"] = last_order["symbol"]
+                trade["side"] = last_order["side"]
+                trade["fee_cost"] = last_order.get("fee")
         except ccxt.NetworkError as e:
             logging.error(f"Fetch trade order failed due to a network error: {e}")
             raise TryAgain
@@ -385,6 +399,7 @@ class Exchange:
             data["symbol"] = trade["symbol"]
             data["side"] = trade["side"]
             data["amount_fee"] = trade["fee_cost"]
+            data["base_fee"] = float(trade.get("base_fee") or 0.0)
             data["ordersize"] = order["cost"]
         else:
             logging.info(
@@ -398,6 +413,7 @@ class Exchange:
             data["symbol"] = order["symbol"]
             data["side"] = order["side"]
             data["amount_fee"] = order["fee"]
+            data["base_fee"] = 0.0
             data["ordersize"] = order["cost"]
 
         return data
@@ -432,6 +448,26 @@ class Exchange:
             raise TryAgain
 
         return amount
+
+    def __precision_step_for_amount(self, amount_str: str) -> float:
+        """Infer amount step from a precision-formatted string."""
+        if "." not in amount_str:
+            return 1.0
+
+        decimals = amount_str.split(".", 1)[1]
+        decimals = decimals.rstrip("0")
+        if not decimals:
+            return 1.0
+        return 10 ** (-len(decimals))
+
+    def __reduce_amount_by_step(
+        self, symbol: str, current_amount: float, steps: int
+    ) -> float:
+        """Reduce amount by precision step and return exchange-formatted value."""
+        formatted = self.exchange.amount_to_precision(symbol, current_amount)
+        step = self.__precision_step_for_amount(formatted)
+        reduced = max(0.0, float(formatted) - (step * max(1, steps)))
+        return float(self.exchange.amount_to_precision(symbol, reduced))
 
     async def __init_exchange(self, config: dict[str, Any]):
         exchange = None
@@ -535,60 +571,56 @@ class Exchange:
             order["precision"] = await self.__get_precision_for_symbol(
                 order_status["symbol"]
             )
+            resolved_symbol = self.__resolve_symbol(order_status["symbol"])
+            if resolved_symbol is None:
+                logging.error(
+                    "Cannot finalize buy for %s: symbol not found.",
+                    order_status["symbol"],
+                )
+                return None
             order["amount"] = float(order_status["amount"])
             order["amount_fee"] = 0.0
             order["fees"] = 0.0
 
-            # Substract the order fees
+            # Keep fee rate for statistics/profit calculation.
+            if self.config.get("dry_run", True):
+                try:
+                    order["fees"] = self.__get_demo_taker_fee_for_symbol(
+                        order_status["symbol"]
+                    )
+                except Exception as e:
+                    logging.warning(
+                        "Demo mode fee lookup for %s failed (%s). "
+                        "Using taker fee 0.0 as fallback.",
+                        order_status["symbol"],
+                        e,
+                    )
+                    order["fees"] = 0.0
+            else:
+                try:
+                    fees = await self.exchange.fetch_trading_fee(symbol=order_status["symbol"])
+                    order["fees"] = float(fees.get("taker", 0.0))
+                except Exception as e:
+                    # Broad catch to avoid failing a filled order due fee-rate fetch only.
+                    logging.warning(
+                        "Fetching fee rate for pair %s failed (%s). Using 0.0 fallback.",
+                        order["symbol"],
+                        e,
+                    )
+                    order["fees"] = 0.0
+
+            # Subtract base-asset fee from sellable amount when fee token mode is disabled.
             if not self.config.get("fee_deduction", False):
-                if self.config.get("dry_run", True):
-                    try:
-                        order["fees"] = self.__get_demo_taker_fee_for_symbol(
-                            order_status["symbol"]
-                        )
-                    except Exception as e:
-                        logging.warning(
-                            "Demo mode fee lookup for %s failed (%s). "
-                            "Using taker fee 0.0 as fallback.",
-                            order_status["symbol"],
-                            e,
-                        )
-                        order["fees"] = 0.0
-                else:
-                    try:
-                        fees = await self.exchange.fetch_trading_fee(
-                            symbol=order_status["symbol"]
-                        )
-                        order["fees"] = fees["taker"]
-                    except ccxt.ExchangeError as e:
-                        logging.error(
-                            f"Fetching fee for pair {order['symbol']} failed due to an exchange error: {e}"
-                        )
-                        order = None
-                    except ccxt.NetworkError as e:
-                        logging.error(
-                            f"Fetching fee for pair {order['symbol']} failed due to an network error: {e}"
-                        )
-                        order = None
-                    except ccxt.BaseError as e:
-                        logging.error(
-                            f"Fetching fee for pair {order['symbol']} failed due to an error: {e}"
-                        )
-                        order = None
-                    except Exception as e:
-                        # Broad catch to surface unexpected exchange errors.
-                        logging.error(
-                            f"Fetching fee for pair {order['symbol']} failed with: {e}"
-                        )
-                        order = None
-                    if order is None:
-                        return None
-                order["amount_fee"] = order["amount"] * float(order["fees"])
-                order["amount"] = float(order_status["amount"]) - order["amount_fee"]
+                order["amount_fee"] = float(order_status.get("base_fee") or 0.0)
+                net_amount = max(0.0, float(order_status["amount"]) - order["amount_fee"])
+                order["amount"] = float(
+                    self.exchange.amount_to_precision(resolved_symbol, net_amount)
+                )
 
                 logging.debug(
                     "Fee Deduction not active. Real amount "
-                    f"{order_status['amount']}, deducted amount {order['amount']}"
+                    f"{order_status['amount']}, deducted amount {order['amount']}, "
+                    f"base fee {order['amount_fee']}"
                 )
 
             logging.debug(order)
@@ -797,23 +829,28 @@ class Exchange:
     ) -> dict[str, Any] | None:
         """Create a spot market sell order."""
         await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
         self.config = config
+        resolved_symbol = self.__resolve_symbol(order["symbol"])
+        if resolved_symbol is None:
+            logging.error("Selling pair %s failed: symbol not found.", order["symbol"])
+            return None
         try:
             # Implement sell safeguard, if we cannot sell full amount
+            current_amount = float(order["total_amount"])
             if Exchange.sell_retry_count > 0:
-                int_amount = len(str(int(order["total_amount"])))
-                decimal_places = abs(
-                    decimal.Decimal(str(order["total_amount"])).as_tuple().exponent
+                reduced_amount = self.__reduce_amount_by_step(
+                    resolved_symbol, current_amount, Exchange.sell_retry_count
                 )
-                if int_amount >= 3:
-                    reduce_amount = Exchange.sell_retry_count
-                else:
-                    reduce_amount = Exchange.sell_retry_count * (10**-decimal_places)
-                order["total_amount"] = order["total_amount"] - reduce_amount
+                order["total_amount"] = reduced_amount
                 logging.info(f"Reducing amount for sell to: {order['total_amount']}")
+            else:
+                order["total_amount"] = float(
+                    self.exchange.amount_to_precision(resolved_symbol, current_amount)
+                )
 
             trade = await self.exchange.create_market_sell_order(
-                order["symbol"], order["total_amount"]
+                resolved_symbol, order["total_amount"]
             )
             # TODO: Check if there is dust left to sell
             # 1. fetch the amount left
