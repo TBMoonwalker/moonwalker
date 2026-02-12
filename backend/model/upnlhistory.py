@@ -14,3 +14,4 @@ class UpnlHistory(Model):
 
     class Meta:
         table = "upnl_history"
+        indexes = (("timestamp",),)

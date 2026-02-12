@@ -26,5 +26,13 @@ class Trades(Model):
     direction = fields.TextField()
     side = fields.TextField()
 
+    class Meta:
+        table = "trades"
+        indexes = (
+            ("symbol",),
+            ("symbol", "baseorder"),
+            ("symbol", "safetyorder", "baseorder"),
+        )
+
     def __dict__(self):
         return f"'id': {self.id}, 'timestamp': {self.timestamp}, 'ordersize': {self.ordersize}, 'amount': {self.ordersize}, 'price': {self.price}, 'symbol': {self.symbol}, 'orderid': {self.orderid}, 'bot': {self.bot}, 'ordertype': {self.ordertype}, 'baseorder': {self.baseorder}, 'safetyorder': {self.safetyorder}, 'direction': {self.direction}, 'side': {self.side}"

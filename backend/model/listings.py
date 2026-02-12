@@ -13,3 +13,4 @@ class Listings(Model):
 
     class Meta:
         table = "token_listings"
+        indexes = (("symbol",),)

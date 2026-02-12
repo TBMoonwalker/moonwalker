@@ -15,5 +15,12 @@ class Tickers(Model):
     close = fields.FloatField()
     volume = fields.FloatField()
 
+    class Meta:
+        table = "tickers"
+        indexes = (
+            ("symbol", "timestamp"),
+            ("timestamp",),
+        )
+
     def __dict__(self):
         return f"'id': {self.id}, 'timestamp': {self.timestamp}, 'symbol': {self.symbol}, 'open': {self.open}, 'high': {self.high},  'close': {self.close},  'volume': {self.volume}"

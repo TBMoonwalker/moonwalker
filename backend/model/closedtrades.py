@@ -19,5 +19,9 @@ class ClosedTrades(Model):
     close_date = fields.TextField(null=True)
     duration = fields.TextField(null=True)
 
+    class Meta:
+        table = "closedtrades"
+        indexes = (("close_date",),)
+
     def __dict__(self):
         return f"'symbol': {self.symbol}, 'so_count': {self.so_count}, 'profit': {self.profit}, 'profit_percent': {self.profit_percent}, 'amount': {self.amount}, 'cost': {self.cost}, 'tp_price': {self.tp_price}, 'avg_price': {self.avg_price}, 'open_date': {self.open_date}, 'close_date': {self.close_date} 'close_date': {self.duration}"
