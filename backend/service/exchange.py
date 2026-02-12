@@ -595,6 +595,202 @@ class Exchange:
 
             return order
 
+    async def create_spot_sell(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Create a sell order using configured execution mode."""
+        sell_order_type = str(config.get("sell_order_type", "market")).lower()
+        if sell_order_type == "limit":
+            order_status = await self.create_spot_limit_sell(order, config)
+            if order_status:
+                return order_status
+
+            if bool(config.get("limit_sell_fallback_to_market", True)):
+                logging.info(
+                    "Limit sell for %s was not filled. Falling back to market sell.",
+                    order.get("symbol"),
+                )
+                return await self.create_spot_market_sell(order, config)
+
+            logging.info(
+                "Limit sell for %s was not filled. Market fallback is disabled.",
+                order.get("symbol"),
+            )
+            return None
+
+        return await self.create_spot_market_sell(order, config)
+
+    async def __build_sell_order_status(
+        self, order: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Build normalized sell order status for closed trade processing."""
+        order_status = await self.__parse_order_status(order)
+        if not order_status.get("total_amount"):
+            logging.error("Sell order for %s returned empty amount.", order.get("symbol"))
+            return None
+
+        order_status["type"] = "sold_check"
+        order_status["sell"] = True
+        order_status["total_cost"] = order["total_cost"]
+        order_status["actual_pnl"] = order["actual_pnl"]
+        order_status["avg_price"] = order_status["total_cost"] / order_status["total_amount"]
+        order_status["tp_price"] = order_status["price"]
+        order_status["profit"] = (
+            order_status["price"] * order_status["total_amount"] - order_status["total_cost"]
+        )
+        order_status["profit_percent"] = (
+            (order_status["price"] - order_status["avg_price"]) / order_status["avg_price"]
+        ) * 100
+        return order_status
+
+    async def __wait_for_limit_sell_fill(
+        self, symbol: str, order_id: str, timeout_seconds: int
+    ) -> dict[str, Any] | None:
+        """Poll an order until it is closed or times out."""
+        start_time = asyncio.get_running_loop().time()
+        while (asyncio.get_running_loop().time() - start_time) < timeout_seconds:
+            try:
+                status = await self.exchange.fetch_order(order_id, symbol)
+                order_status = str(status.get("status", "")).lower()
+                filled = float(status.get("filled") or 0.0)
+                amount = float(status.get("amount") or 0.0)
+
+                if order_status in {"closed", "filled"} or (
+                    amount > 0 and filled >= amount
+                ):
+                    return status
+
+                if order_status in {"canceled", "cancelled", "rejected", "expired"}:
+                    return None
+            except ccxt.NetworkError as exc:
+                logging.warning(
+                    "Polling limit sell status failed due to network error: %s", exc
+                )
+            except ccxt.ExchangeError as exc:
+                logging.warning(
+                    "Polling limit sell status failed due to exchange error: %s", exc
+                )
+            except ccxt.BaseError as exc:
+                logging.warning("Polling limit sell status failed: %s", exc)
+            except Exception as exc:
+                logging.warning("Polling limit sell status failed: %s", exc)
+
+            await asyncio.sleep(1)
+
+        return None
+
+    async def __cancel_order_safe(self, symbol: str, order_id: str) -> None:
+        """Cancel an order and only log failures."""
+        try:
+            await self.exchange.cancel_order(order_id, symbol)
+        except Exception as exc:
+            logging.warning(
+                "Cancel order %s for %s failed or order is already closed: %s",
+                order_id,
+                symbol,
+                exc,
+            )
+
+    async def create_spot_limit_sell(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Create a spot limit sell order and wait for fill."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        self.config = config
+
+        resolved_symbol = self.__resolve_symbol(order["symbol"])
+        if resolved_symbol is None:
+            logging.error("Cannot place limit sell. Symbol not found: %s", order["symbol"])
+            return None
+
+        try:
+            amount = self.exchange.amount_to_precision(
+                resolved_symbol, float(order["total_amount"])
+            )
+            if not amount or float(amount) <= 0:
+                logging.error(
+                    "Skipping limit sell for %s: invalid amount %s",
+                    resolved_symbol,
+                    amount,
+                )
+                return None
+
+            current_price = order.get("current_price")
+            if current_price and float(current_price) > 0:
+                limit_price = self.exchange.price_to_precision(
+                    resolved_symbol, float(current_price)
+                )
+            else:
+                live_price = await self.__get_price_for_symbol(resolved_symbol)
+                limit_price = self.exchange.price_to_precision(
+                    resolved_symbol, float(live_price)
+                )
+
+            logging.info(
+                "Placing limit sell for %s amount=%s price=%s",
+                resolved_symbol,
+                amount,
+                limit_price,
+            )
+            parameter = {}
+            trade = await self.exchange.create_order(
+                resolved_symbol,
+                "limit",
+                "sell",
+                amount,
+                limit_price,
+                parameter,
+            )
+        except ccxt.ExchangeError as exc:
+            logging.error(
+                "Limit sell for %s failed due to an exchange error: %s",
+                order["symbol"],
+                exc,
+            )
+            return None
+        except ccxt.NetworkError as exc:
+            logging.error(
+                "Limit sell for %s failed due to a network error: %s",
+                order["symbol"],
+                exc,
+            )
+            return None
+        except ccxt.BaseError as exc:
+            logging.error("Limit sell for %s failed due to an error: %s", order["symbol"], exc)
+            return None
+        except Exception as exc:
+            logging.error("Limit sell for %s failed with: %s", order["symbol"], exc)
+            return None
+
+        sell_order = dict(order)
+        sell_order.update(trade)
+        sell_order["symbol"] = resolved_symbol
+        sell_order["total_amount"] = float(amount)
+        if not sell_order.get("id"):
+            logging.error("Limit sell for %s returned no order id.", resolved_symbol)
+            return None
+
+        try:
+            timeout_seconds = max(1, int(config.get("limit_sell_timeout_sec", 60)))
+        except (TypeError, ValueError):
+            timeout_seconds = 60
+        filled_order = await self.__wait_for_limit_sell_fill(
+            resolved_symbol, str(sell_order["id"]), timeout_seconds
+        )
+        if not filled_order:
+            logging.info(
+                "Limit sell for %s was not filled within %s seconds.",
+                resolved_symbol,
+                timeout_seconds,
+            )
+            await self.__cancel_order_safe(resolved_symbol, str(sell_order["id"]))
+            return None
+
+        sell_order.update(filled_order)
+        logging.info("Limit sell for %s filled.", resolved_symbol)
+        return await self.__build_sell_order_status(sell_order)
+
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(200))
     async def create_spot_market_sell(
         self, order: dict[str, Any], config: dict[str, Any]
@@ -652,23 +848,4 @@ class Exchange:
         if order:
             logging.info(f"Sold {order['total_amount']} {order['symbol']} on Exchange.")
             Exchange.sell_retry_count = 0
-
-            order_status = await self.__parse_order_status(order)
-            order_status["type"] = "sold_check"
-            order_status["sell"] = True
-            order_status["total_cost"] = order["total_cost"]
-            order_status["actual_pnl"] = order["actual_pnl"]
-            order_status["avg_price"] = (
-                order_status["total_cost"] / order_status["total_amount"]
-            )
-            order_status["tp_price"] = order_status["price"]
-            order_status["profit"] = (
-                order_status["price"] * order_status["total_amount"]
-                - order_status["total_cost"]
-            )
-            order_status["profit_percent"] = (
-                (order_status["price"] - order_status["avg_price"])
-                / order_status["avg_price"]
-            ) * 100
-
-            return order_status
+            return await self.__build_sell_order_status(order)

@@ -204,6 +204,21 @@
                 <n-form-item label="Base order amount" path="bo">
                     <n-input-number v-model:value="dca.bo" placeholder="BO" />
                 </n-form-item>
+                <n-form-item label="Sell order type" path="sell_order_type">
+                    <n-select
+                        v-model:value="dca.sell_order_type"
+                        placeholder="Select"
+                        :options="sellOrderTypeOptions"
+                    />
+                </n-form-item>
+                <template v-if="dca.sell_order_type === 'limit'">
+                    <n-form-item label="Limit sell timeout (seconds)" path="limit_sell_timeout_sec">
+                        <n-input-number v-model:value="dca.limit_sell_timeout_sec" placeholder="60" />
+                    </n-form-item>
+                    <n-form-item label="Fallback to market sell on timeout" path="limit_sell_fallback_to_market" label-placement="left">
+                        <n-checkbox v-model:checked="dca.limit_sell_fallback_to_market" />
+                    </n-form-item>
+                </template>
                 <n-form-item v-if="dca.enabled" label="Safety order amount" path="so">
                     <n-input-number v-model:value="dca.so" placeholder="SO" />
                 </n-form-item>
@@ -454,6 +469,17 @@ const market = [{
     value: 'spot'
 }]
 
+const sellOrderTypeOptions = [
+    {
+        label: 'Market',
+        value: 'market',
+    },
+    {
+        label: 'Limit',
+        value: 'limit',
+    },
+]
+
 const symsignals = [
     { label: "12 - SymRank Top 10", value: 12 },
     { label: "2 - SymRank Top 30", value: 2 },
@@ -576,6 +602,9 @@ const dca = ref({
     trailing_tp: null,
     max_bots: null,
     bo: null,
+    sell_order_type: 'market',
+    limit_sell_timeout_sec: 60,
+    limit_sell_fallback_to_market: true,
     so: null,
     mstc: null,
     sos: null,
@@ -1043,6 +1072,11 @@ async function fetchDefaultValues() {
             dca.value.trailing_tp = toNumberOrNull(response.data.trailing_tp)
             dca.value.max_bots = toNumberOrNull(response.data.max_bots)
             dca.value.bo = toNumberOrNull(response.data.bo)
+            dca.value.sell_order_type = response.data.sell_order_type || 'market'
+            dca.value.limit_sell_timeout_sec =
+                toNumberOrNull(response.data.limit_sell_timeout_sec) ?? 60
+            dca.value.limit_sell_fallback_to_market =
+                parseBooleanString(response.data.limit_sell_fallback_to_market) ?? true
             dca.value.so = toNumberOrNull(response.data.so)
             dca.value.mstc = toNumberOrNull(response.data.mstc)
             dca.value.sos = toNumberOrNull(response.data.sos)
@@ -1228,6 +1262,9 @@ async function submitForm() {
             trailing_tp: JSON.stringify({ 'value': dca.value.trailing_tp || false, 'type': "float" }),
             max_bots: JSON.stringify({ 'value': dca.value.max_bots || false, 'type': "int" }),
             bo: JSON.stringify({ 'value': dca.value.bo || false, 'type': "int" }),
+            sell_order_type: JSON.stringify({ 'value': dca.value.sell_order_type || 'market', 'type': "str" }),
+            limit_sell_timeout_sec: JSON.stringify({ 'value': dca.value.limit_sell_timeout_sec ?? 60, 'type': "int" }),
+            limit_sell_fallback_to_market: JSON.stringify({ 'value': dca.value.limit_sell_fallback_to_market ?? true, 'type': "bool" }),
             so: JSON.stringify({ 'value': dca.value.so || false, 'type': "int" }),
             mstc: JSON.stringify({ 'value': dca.value.mstc || false, 'type': "int" }),
             sos: JSON.stringify({ 'value': dca.value.sos || false, 'type': "float" }),

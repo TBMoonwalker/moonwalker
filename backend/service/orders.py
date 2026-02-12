@@ -34,7 +34,7 @@ class Orders:
             )
 
             # 1. Create exchange order
-            order_status = await self.exchange.create_spot_market_sell(order, config)
+            order_status = await self.exchange.create_spot_sell(order, config)
 
             if order_status:
                 # 2. Create closed trade
