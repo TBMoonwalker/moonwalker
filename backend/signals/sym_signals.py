@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from typing import Any
 
 import helper
@@ -30,6 +31,22 @@ class SignalPlugin:
         self.config = None
         self.status = True
         self.watcher_queue = watcher_queue
+        self._max_bots_blocked = False
+        self._max_bots_last_log = 0.0
+        self._max_bots_log_interval_sec = 60.0
+
+    def __log_max_bots_waiting(self) -> None:
+        """Log max-bot saturation with state/interval throttling."""
+        now = time.monotonic()
+        should_log = (not self._max_bots_blocked) or (
+            now - self._max_bots_last_log >= self._max_bots_log_interval_sec
+        )
+        if not should_log:
+            return
+
+        logging.debug("Max bots reached, waiting for a free slot.")
+        self._max_bots_blocked = True
+        self._max_bots_last_log = now
 
     async def __check_max_bots(self) -> bool:
         """Check if the maximum number of bots has been reached.
@@ -160,6 +177,12 @@ class SignalPlugin:
             None
         """
         self.config = config
+        try:
+            self._max_bots_log_interval_sec = max(
+                1.0, float(self.config.get("max_bots_log_interval_sec", 60))
+            )
+        except (TypeError, ValueError):
+            self._max_bots_log_interval_sec = 60.0
         currency = self.config.get("currency").upper()
         signal_settings = json.loads(
             json.dumps(eval(self.config.get("signal_settings")))
@@ -195,6 +218,7 @@ class SignalPlugin:
                         history_data = self.config.get("history_from_data", 30)
                         max_bots = await self.__check_max_bots()
                         if not max_bots:
+                            self._max_bots_blocked = False
                             if self.__check_entry_point(
                                 event[1]
                             ) and await self.data.is_token_old_enough(
@@ -252,9 +276,7 @@ class SignalPlugin:
                                         order, self.config
                                     )
                         else:
-                            logging.debug(
-                                f"Max Bots: {max_bots}. Max bots reached, waiting for a new slot"
-                            )
+                            self.__log_max_bots_waiting()
                 except TimeoutError:
                     logging.error(
                         "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"

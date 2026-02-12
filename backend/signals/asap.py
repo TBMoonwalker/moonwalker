@@ -4,6 +4,7 @@ import asyncio
 import importlib
 import json
 import random
+import time
 from typing import Any, Optional
 
 import helper
@@ -44,6 +45,22 @@ class SignalPlugin:
         self.config = None
         self.status = True
         self.watcher_queue = watcher_queue
+        self._max_bots_blocked = False
+        self._max_bots_last_log = 0.0
+        self._max_bots_log_interval_sec = 60.0
+
+    def __log_max_bots_waiting(self) -> None:
+        """Log max-bot saturation with state/interval throttling."""
+        now = time.monotonic()
+        should_log = (not self._max_bots_blocked) or (
+            now - self._max_bots_last_log >= self._max_bots_log_interval_sec
+        )
+        if not should_log:
+            return
+
+        logging.debug("Max bots reached, waiting for a free slot.")
+        self._max_bots_blocked = True
+        self._max_bots_last_log = now
 
     async def __check_max_bots(self) -> bool:
         """Check if the maximum number of bots has been reached.
@@ -306,9 +323,17 @@ class SignalPlugin:
             None
         """
         self.config = config
+        try:
+            self._max_bots_log_interval_sec = max(
+                1.0, float(self.config.get("max_bots_log_interval_sec", 60))
+            )
+        except (TypeError, ValueError):
+            self._max_bots_log_interval_sec = 60.0
+
         while self.status:
             max_bots = await self.__check_max_bots()
             if not max_bots:
+                self._max_bots_blocked = False
                 running_trades = (
                     await model.Trades.all().distinct().values_list("bot", flat=True)
                 )
@@ -342,14 +367,14 @@ class SignalPlugin:
                             await self.orders.receive_buy_order(order, self.config)
                         # Slow down on many symbols at once
                         await asyncio.sleep(1)
+                        if not await self.__check_max_bots():
+                            self._max_bots_blocked = False
                 else:
                     logging.error(
                         "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
                     )
             else:
-                logging.debug(
-                    f"Max Bots: {max_bots}. Max bots reached, waiting for a new slot"
-                )
+                self.__log_max_bots_waiting()
             await asyncio.sleep(5)
 
     async def shutdown(self) -> None:
