@@ -87,6 +87,21 @@ class Data:
             return None
         return float(row.timestamp)
 
+    async def get_latest_candle_for_pair(
+        self, pair: str
+    ) -> tuple[float, float] | None:
+        """Return latest candle timestamp and close price for a pair."""
+        symbol = self.utils.split_symbol(pair)
+        row = (
+            await model.Tickers.filter(symbol=symbol)
+            .order_by("-timestamp")
+            .values("timestamp", "close")
+            .first()
+        )
+        if not row:
+            return None
+        return float(row["timestamp"]), float(row["close"])
+
     async def get_exchange_symbols_for_currency(
         self, config: dict[str, Any], currency: str
     ) -> list[str]:
