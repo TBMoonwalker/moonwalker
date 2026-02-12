@@ -288,7 +288,7 @@ class Statistic:
                 )
         else:
             if stats["new_so"]:
-                logging.trace("SO buy: %s", stats)
+                logging.info("SO buy: %s", stats)
 
             # Update SO count statistics
             payload = {"so_count": stats["so_orders"]}
@@ -297,7 +297,10 @@ class Statistic:
 
         # Comes from DCA module
         if stats["type"] == "tp_check":
-            logging.trace("%s", stats)
+            if stats.get("sell"):
+                logging.info("TP sell: %s", stats)
+            else:
+                logging.trace("%s", stats)
 
             # Update open trade statistics
             payload = {
