@@ -255,11 +255,18 @@ class Exchange:
         try:
             resolved_pair = self.__resolve_symbol(pair)
             if resolved_pair is None:
+                logging.debug(
+                    "Could not resolve symbol '%s' for ticker fetch. Will retry.",
+                    pair,
+                )
                 raise TryAgain
             # Fetch the ticker data for the trading pair
             ticker = await self.exchange.fetch_ticker(resolved_pair)
             # Extract the actual price from the ticker data
             if not ticker["last"]:
+                logging.debug(
+                    "Ticker for %s has no 'last' price yet. Will retry.", resolved_pair
+                )
                 raise TryAgain
             actual_price = float(ticker["last"])
             result = self.exchange.price_to_precision(resolved_pair, actual_price)
@@ -276,9 +283,15 @@ class Exchange:
         except ccxt.BaseError as e:
             logging.error(f"Fetching ticker messages failed due to an error: {e}")
             raise TryAgain
+        except TryAgain:
+            raise
         except Exception as e:
             # Broad catch to retry on unexpected exchange errors.
-            logging.error(f"Fetching ticker messages failed with: {e}")
+            logging.error(
+                "Fetching ticker messages failed with unexpected error type %s: %r",
+                type(e).__name__,
+                e,
+            )
             raise TryAgain
 
         return result
@@ -754,6 +767,11 @@ class Exchange:
                     resolved_symbol, float(current_price)
                 )
             else:
+                logging.debug(
+                    "Limit sell for %s has no current_price payload. "
+                    "Fetching live ticker price.",
+                    resolved_symbol,
+                )
                 live_price = await self.__get_price_for_symbol(resolved_symbol)
                 limit_price = self.exchange.price_to_precision(
                     resolved_symbol, float(live_price)
