@@ -242,6 +242,10 @@ class Dca:
                 "actual_pnl": actual_pnl,
                 "total_cost": trades["total_cost"],
                 "current_price": current_price,
+                "tp_price": take_profit_price,
+                "fallback_min_price": take_profit_price
+                if current_price >= take_profit_price
+                else None,
             }
             await self.orders.receive_sell_order(order, self.config)
 

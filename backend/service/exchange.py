@@ -651,6 +651,8 @@ class Exchange:
                 return order_status
 
             if bool(config.get("limit_sell_fallback_to_market", True)):
+                if not await self.__can_fallback_to_market_sell(order, config):
+                    return None
                 logging.info(
                     "Limit sell for %s was not filled. Falling back to market sell.",
                     order.get("symbol"),
@@ -664,6 +666,44 @@ class Exchange:
             return None
 
         return await self.create_spot_market_sell(order, config)
+
+    async def __can_fallback_to_market_sell(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> bool:
+        """Check whether market fallback is allowed after limit timeout."""
+        if not bool(config.get("limit_sell_fallback_tp_guard", True)):
+            return True
+
+        fallback_min_price = order.get("fallback_min_price")
+        if fallback_min_price in (None, False):
+            return True
+
+        try:
+            min_price = float(fallback_min_price)
+        except (TypeError, ValueError):
+            return True
+
+        try:
+            current_price = float(await self.__get_price_for_symbol(order["symbol"]))
+        except Exception as exc:
+            logging.warning(
+                "Skipping market fallback for %s: could not fetch current price (%s).",
+                order.get("symbol"),
+                exc,
+            )
+            return False
+
+        if current_price < min_price:
+            logging.info(
+                "Skipping market fallback for %s: current price %.10f is below "
+                "minimum fallback price %.10f.",
+                order.get("symbol"),
+                current_price,
+                min_price,
+            )
+            return False
+
+        return True
 
     async def __build_sell_order_status(
         self, order: dict[str, Any]
