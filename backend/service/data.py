@@ -7,6 +7,7 @@ import helper
 import model
 import pandas as pd
 from cachetools import TTLCache
+from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
@@ -53,7 +54,10 @@ class Data:
                 )
 
                 # Save to DB cache
-                await model.Listings.create(symbol=symbol, listing_date=listing_date)
+                await run_sqlite_write_with_retry(
+                    lambda: model.Listings.create(symbol=symbol, listing_date=listing_date),
+                    f"storing listing date for {symbol}",
+                )
                 return listing_date
         except Exception as e:
             # Broad catch to keep listing lookups resilient.
@@ -220,7 +224,10 @@ class Data:
                 )
                 ohlcv.append(ticker)
 
-            await model.Tickers.bulk_create(ohlcv)
+            await run_sqlite_write_with_retry(
+                lambda: model.Tickers.bulk_create(ohlcv),
+                f"bulk insert history for {symbol}/{market}",
+            )
 
             return True
 

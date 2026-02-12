@@ -1,4 +1,7 @@
 import os
+import random
+import sqlite3
+from asyncio import sleep
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -7,6 +10,56 @@ from tortoise import Tortoise
 from tortoise.context import TortoiseContext
 
 logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
+
+SQLITE_LOCK_RETRIES = 5
+SQLITE_RETRY_BASE_DELAY_SECONDS = 0.02
+SQLITE_RETRY_MAX_DELAY_SECONDS = 0.2
+
+
+def _is_sqlite_lock_error(exc: Exception) -> bool:
+    """Return True if exception indicates SQLite lock contention."""
+    if isinstance(exc, sqlite3.OperationalError):
+        return True
+    text = str(exc).lower()
+    return "database is locked" in text or "database table is locked" in text
+
+
+async def run_sqlite_write_with_retry(
+    operation: Callable[[], Awaitable[Any]],
+    operation_name: str,
+    retries: int = SQLITE_LOCK_RETRIES,
+) -> Any:
+    """Run an async write operation with lock-retry for SQLite."""
+    attempt = 0
+    while True:
+        try:
+            return await operation()
+        except Exception as exc:  # noqa: BLE001 - Retry only for lock errors.
+            if attempt >= retries or not _is_sqlite_lock_error(exc):
+                raise
+            delay = min(
+                SQLITE_RETRY_BASE_DELAY_SECONDS * (2**attempt)
+                + random.uniform(0, SQLITE_RETRY_BASE_DELAY_SECONDS),
+                SQLITE_RETRY_MAX_DELAY_SECONDS,
+            )
+            logging.warning(
+                "SQLite lock during %s (attempt %s/%s). Retrying in %.3fs",
+                operation_name,
+                attempt + 1,
+                retries,
+                delay,
+            )
+            await sleep(delay)
+            attempt += 1
+
+
+async def optimize_sqlite_connection(db_url: str | None = None) -> None:
+    """Run PRAGMA optimize when the active backend is SQLite."""
+    active_db_url = db_url or os.getenv("MOONWALKER_DB_URL", "sqlite://db/trades.sqlite")
+    if not active_db_url.startswith("sqlite://"):
+        return
+    connection = Tortoise.get_connection("default")
+    await connection.execute_query("PRAGMA optimize")
 
 
 class Database:
@@ -28,6 +81,24 @@ class Database:
         self.db_url = ""
         self._ctx: TortoiseContext | None = None
         logging.info("Database instance initialized")
+
+    async def _apply_sqlite_pragmas(self) -> None:
+        """Apply SQLite concurrency and cache tuning pragmas."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        pragma_statements = """
+        PRAGMA journal_mode=WAL;
+        PRAGMA synchronous=NORMAL;
+        PRAGMA busy_timeout=10000;
+        PRAGMA wal_autocheckpoint=2000;
+        PRAGMA temp_store=MEMORY;
+        PRAGMA mmap_size=268435456;
+        PRAGMA cache_size=-64000;
+        """
+        connection = Tortoise.get_connection("default")
+        await connection.execute_script(pragma_statements)
+        logging.info("Applied SQLite pragmas for WAL/concurrency tuning")
 
     async def _ensure_indexes(self) -> None:
         """Create performance-critical indexes for existing databases.
@@ -82,6 +153,10 @@ class Database:
         if create_statements:
             await connection.execute_script("\n".join(create_statements))
 
+    async def optimize_sqlite(self) -> None:
+        """Run SQLite planner/index maintenance."""
+        await optimize_sqlite_connection(self.db_url)
+
     async def init(self) -> None:
         """Initialize the database connection and generate schemas.
 
@@ -99,6 +174,7 @@ class Database:
                 modules={"models": ["model"]},
                 _enable_global_fallback=True,
             )
+            await self._apply_sqlite_pragmas()
             # Generate the schema
             await Tortoise.generate_schemas()
             await self._ensure_indexes()

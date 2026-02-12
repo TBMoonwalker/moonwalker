@@ -8,6 +8,7 @@ import helper
 import model
 from service.config import Config
 from service.data import Data
+from service.database import optimize_sqlite_connection, run_sqlite_write_with_retry
 from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/housekeeper.log", "housekeeper")
@@ -73,13 +74,17 @@ class Housekeeper:
                     # Do not housekeep active trades
                     for symbol in ticker_symbols:
                         if symbol not in active_symbols:
-                            query = await model.Tickers.filter(
-                                timestamp__lt=cleanup_timestamp.timestamp()
-                            ).delete()
+                            query = await run_sqlite_write_with_retry(
+                                lambda: model.Tickers.filter(
+                                    timestamp__lt=cleanup_timestamp.timestamp()
+                                ).delete(),
+                                "housekeeping ticker cleanup",
+                            )
                             logging.info(
                                 f"Start housekeeping. Delete {query} entries older then {cleanup_timestamp}"
                             )
                     await self._cleanup_upnl_history(actual_timestamp)
+                    await optimize_sqlite_connection()
                 except Exception as e:
                     # Broad catch to keep the housekeeping loop running.
                     logging.error(f"Error db housekeeping: {e}")
@@ -95,7 +100,10 @@ class Housekeeper:
             return
 
         retention_timestamp = actual_timestamp - timedelta(days=retention_days)
-        deleted = await model.UpnlHistory.filter(timestamp__lt=retention_timestamp).delete()
+        deleted = await run_sqlite_write_with_retry(
+            lambda: model.UpnlHistory.filter(timestamp__lt=retention_timestamp).delete(),
+            "cleanup upnl history",
+        )
         if deleted:
             logging.info(
                 "Deleted %s uPNL history entries older than %s",

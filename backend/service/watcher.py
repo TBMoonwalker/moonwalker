@@ -7,6 +7,7 @@ import ccxt.pro as ccxtpro
 import helper
 import model
 from service.config import Config
+from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
 from service.trades import Trades
 from tortoise import BaseDBAsyncClient
@@ -473,8 +474,10 @@ class Watcher:
         payloads = list(buffer)
         buffer.clear()
         try:
-            await model.Tickers.bulk_create(
-                [model.Tickers(**payload) for payload in payloads]
+            rows = [model.Tickers(**payload) for payload in payloads]
+            await run_sqlite_write_with_retry(
+                lambda: model.Tickers.bulk_create(rows),
+                f"bulk write OHLCV batch ({len(rows)} rows)",
             )
         except Exception as e:
             # Broad catch prevents write failures from crashing the worker.

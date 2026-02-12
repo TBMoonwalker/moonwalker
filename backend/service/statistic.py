@@ -7,6 +7,7 @@ from typing import Any
 import helper
 import model
 import pandas as pd
+from service.database import run_sqlite_write_with_retry
 from service.trades import Trades
 from tortoise.functions import Sum
 
@@ -174,10 +175,13 @@ class Statistic:
                 if elapsed < self.snapshot_interval_seconds:
                     return
 
-            await model.UpnlHistory.create(
-                timestamp=now,
-                upnl=float(profit_data.get("upnl") or 0.0),
-                profit_overall=float(profit_data.get("profit_overall") or 0.0),
+            await run_sqlite_write_with_retry(
+                lambda: model.UpnlHistory.create(
+                    timestamp=now,
+                    upnl=float(profit_data.get("upnl") or 0.0),
+                    profit_overall=float(profit_data.get("profit_overall") or 0.0),
+                ),
+                "storing upnl snapshot",
             )
         except Exception as e:
             # Broad catch to avoid stats persistence failures affecting websocket data.

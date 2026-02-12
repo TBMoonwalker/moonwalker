@@ -8,6 +8,7 @@ from typing import Any
 import helper
 import model
 from service.exchange import Exchange
+from service.database import run_sqlite_write_with_retry
 from service.trades import Trades
 from tortoise.transactions import in_transaction
 
@@ -82,14 +83,19 @@ class Orders:
                     "close_date": sell_date,
                     "duration": duration_data,
                 }
-                async with in_transaction() as conn:
-                    await model.ClosedTrades.create(**payload, using_db=conn)
-                    await model.Trades.filter(symbol=order["symbol"]).using_db(
-                        conn
-                    ).delete()
-                    await model.OpenTrades.filter(symbol=order["symbol"]).using_db(
-                        conn
-                    ).delete()
+                async def _persist_sell() -> None:
+                    async with in_transaction() as conn:
+                        await model.ClosedTrades.create(**payload, using_db=conn)
+                        await model.Trades.filter(symbol=order["symbol"]).using_db(
+                            conn
+                        ).delete()
+                        await model.OpenTrades.filter(symbol=order["symbol"]).using_db(
+                            conn
+                        ).delete()
+
+                await run_sqlite_write_with_retry(
+                    _persist_sell, f"persisting sell order for {order['symbol']}"
+                )
             else:
                 logging.error(f"Failed creating sell order for {order['symbol']}")
         finally:
@@ -137,14 +143,19 @@ class Orders:
                     "direction": order_status["direction"],
                     "side": order_status["side"],
                 }
-                async with in_transaction() as conn:
-                    await model.Trades.create(**payload, using_db=conn)
+                async def _persist_buy() -> None:
+                    async with in_transaction() as conn:
+                        await model.Trades.create(**payload, using_db=conn)
 
-                    # 3. Create open trade (only for base order)
-                    if not order["safetyorder"]:
-                        await model.OpenTrades.create(
-                            symbol=order_status["symbol"], using_db=conn
-                        )
+                        # 3. Create open trade (only for base order)
+                        if not order["safetyorder"]:
+                            await model.OpenTrades.create(
+                                symbol=order_status["symbol"], using_db=conn
+                            )
+
+                await run_sqlite_write_with_retry(
+                    _persist_buy, f"persisting buy order for {order['symbol']}"
+                )
                 return True
             else:
                 logging.error(f"Failed creating buy order for {order['symbol']}")
@@ -159,9 +170,14 @@ class Orders:
         token, currency = symbol.split("-")
         symbol = f"{token}/{currency}"
         try:
-            async with in_transaction() as conn:
-                await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
-                await model.Trades.filter(symbol=symbol).using_db(conn).delete()
+            async def _persist_stop() -> None:
+                async with in_transaction() as conn:
+                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
+                    await model.Trades.filter(symbol=symbol).using_db(conn).delete()
+
+            await run_sqlite_write_with_retry(
+                _persist_stop, f"stopping symbol {symbol}"
+            )
             return True
         except Exception as e:
             logging.error(
