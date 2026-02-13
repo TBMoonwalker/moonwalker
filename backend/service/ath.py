@@ -1,7 +1,7 @@
 """ATH retrieval and caching service."""
 
 import time
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import helper
@@ -27,6 +27,12 @@ class AthService:
         """Initialize ATH service resources."""
         self.exchange = Exchange()
         self._cache: dict[tuple[str, str], tuple[float, float]] = {}
+
+    def _to_utc_aware(self, value: datetime) -> datetime:
+        """Normalize datetime values to UTC-aware for safe comparisons."""
+        if value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value.astimezone(UTC)
 
     def normalize_lookback(
         self, config: dict[str, Any]
@@ -95,9 +101,9 @@ class AthService:
         if in_memory and in_memory[0] > now:
             return in_memory[1], window
 
-        fresh_after = datetime.now() - timedelta(seconds=ttl)
+        fresh_after = datetime.now(UTC) - timedelta(seconds=ttl)
         persisted = await model.AthCache.get_or_none(symbol=symbol, window=window)
-        if persisted and persisted.updated_at >= fresh_after:
+        if persisted and self._to_utc_aware(persisted.updated_at) >= fresh_after:
             ath = float(persisted.ath)
             self._cache[cache_key] = (now + ttl, ath)
             return ath, window
