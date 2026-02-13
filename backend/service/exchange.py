@@ -482,6 +482,64 @@ class Exchange:
         reduced = max(0.0, float(formatted) - (step * max(1, steps)))
         return float(self.exchange.amount_to_precision(symbol, reduced))
 
+    async def __get_available_base_amount(self, symbol: str) -> float | None:
+        """Return currently available base asset amount for a symbol."""
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is None:
+            return None
+
+        base_asset = resolved_symbol.split("/")[0].split(":")[0]
+        try:
+            balance = await self.exchange.fetch_balance()
+        except Exception as exc:
+            logging.warning("Fetching balance for %s failed: %s", resolved_symbol, exc)
+            return None
+
+        free_amount = None
+        asset_info = balance.get(base_asset)
+        if isinstance(asset_info, dict):
+            free_amount = asset_info.get("free")
+
+        if free_amount is None:
+            free_map = balance.get("free")
+            if isinstance(free_map, dict):
+                free_amount = free_map.get(base_asset)
+
+        if free_amount is None:
+            return None
+
+        try:
+            return float(
+                self.exchange.amount_to_precision(resolved_symbol, float(free_amount))
+            )
+        except Exception:
+            return float(free_amount)
+
+    async def __resolve_sell_amount(
+        self, symbol: str, requested_amount: float
+    ) -> tuple[str, float] | None:
+        """Resolve sell amount capped by current free balance."""
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is None:
+            return None
+
+        target_amount = max(0.0, float(requested_amount))
+        available_amount = await self.__get_available_base_amount(resolved_symbol)
+        if available_amount is not None:
+            target_amount = min(target_amount, available_amount)
+
+        try:
+            target_amount = float(
+                self.exchange.amount_to_precision(resolved_symbol, target_amount)
+            )
+        except Exception:
+            pass
+
+        if target_amount <= 0:
+            return None
+
+        return resolved_symbol, target_amount
+
     async def __init_exchange(self, config: dict[str, Any]):
         exchange = None
 
@@ -790,16 +848,17 @@ class Exchange:
             return None
 
         try:
-            amount = self.exchange.amount_to_precision(
+            sell_amount = await self.__resolve_sell_amount(
                 resolved_symbol, float(order["total_amount"])
             )
-            if not amount or float(amount) <= 0:
+            if sell_amount is None:
                 logging.error(
-                    "Skipping limit sell for %s: invalid amount %s",
+                    "Skipping limit sell for %s: no available amount to sell.",
                     resolved_symbol,
-                    amount,
                 )
                 return None
+            resolved_symbol, amount_value = sell_amount
+            amount = self.exchange.amount_to_precision(resolved_symbol, amount_value)
 
             current_price = order.get("current_price")
             if current_price and float(current_price) > 0:
@@ -856,7 +915,7 @@ class Exchange:
         sell_order = dict(order)
         sell_order.update(trade)
         sell_order["symbol"] = resolved_symbol
-        sell_order["total_amount"] = float(amount)
+        sell_order["total_amount"] = float(amount_value)
         if not sell_order.get("id"):
             logging.error("Limit sell for %s returned no order id.", resolved_symbol)
             return None
@@ -869,6 +928,31 @@ class Exchange:
             resolved_symbol, str(sell_order["id"]), timeout_seconds
         )
         if not filled_order:
+            latest_order_status = None
+            try:
+                latest_order_status = await self.exchange.fetch_order(
+                    str(sell_order["id"]), resolved_symbol
+                )
+            except Exception:
+                latest_order_status = None
+
+            if latest_order_status:
+                filled_amount = float(latest_order_status.get("filled") or 0.0)
+                remaining_amount = float(latest_order_status.get("remaining") or 0.0)
+                if filled_amount > 0:
+                    logging.info(
+                        "Limit sell for %s partially filled before timeout. "
+                        "filled=%s remaining=%s",
+                        resolved_symbol,
+                        filled_amount,
+                        remaining_amount,
+                    )
+                    if remaining_amount <= 0:
+                        sell_order.update(latest_order_status)
+                        return await self.__build_sell_order_status(sell_order)
+                    # Carry the remaining amount into optional market fallback.
+                    order["total_amount"] = remaining_amount
+
             logging.info(
                 "Limit sell for %s was not filled within %s seconds.",
                 resolved_symbol,
@@ -894,6 +978,26 @@ class Exchange:
             logging.error("Selling pair %s failed: symbol not found.", order["symbol"])
             return None
         try:
+            requested_amount = float(order["total_amount"])
+            sell_amount = await self.__resolve_sell_amount(
+                resolved_symbol, requested_amount
+            )
+            if sell_amount is None:
+                logging.error(
+                    "Skipping market sell for %s: no available amount to sell.",
+                    resolved_symbol,
+                )
+                return None
+            resolved_symbol, available_amount = sell_amount
+            order["total_amount"] = available_amount
+            if available_amount < requested_amount:
+                logging.info(
+                    "Reducing market sell for %s to available balance: requested=%s available=%s",
+                    resolved_symbol,
+                    requested_amount,
+                    available_amount,
+                )
+
             # Implement sell safeguard, if we cannot sell full amount
             current_amount = float(order["total_amount"])
             if Exchange.sell_retry_count > 0:

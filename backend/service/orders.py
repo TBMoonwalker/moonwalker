@@ -1,5 +1,6 @@
 """Order orchestration for exchange buy/sell actions."""
 
+import asyncio
 import json
 import time
 from datetime import datetime
@@ -18,88 +19,108 @@ logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
 class Orders:
     """Handle incoming buy/sell signals and persist trades."""
 
+    _sell_locks: dict[str, asyncio.Lock] = {}
+
     def __init__(self):
         self.utils = helper.Utils()
         self.exchange = Exchange()
         self.trades = Trades()
+
+    @classmethod
+    def _get_sell_lock(cls, symbol: str) -> asyncio.Lock:
+        """Return a shared per-symbol sell lock."""
+        lock = cls._sell_locks.get(symbol)
+        if lock is None:
+            lock = asyncio.Lock()
+            cls._sell_locks[symbol] = lock
+        return lock
 
     async def receive_sell_order(
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> None:
         """Create a sell order and persist closed trades."""
         logging.info(f"Incoming sell order for {order['symbol']}")
-
-        try:
-            order["total_amount"] = await self.trades.get_token_amount_from_trades(
-                order["symbol"]
+        sell_lock = self._get_sell_lock(order["symbol"])
+        if sell_lock.locked():
+            logging.debug(
+                "Skipping sell for %s because another sell is in progress.",
+                order["symbol"],
             )
+            return
 
-            # 1. Create exchange order
-            order_status = await self.exchange.create_spot_sell(order, config)
-
-            if order_status:
-                # 2. Create closed trade
-                open_timestamp = 0.0
-                base_order = await self.trades.get_trade_by_ordertype(
-                    order_status["symbol"], baseorder=True
+        async with sell_lock:
+            try:
+                order["total_amount"] = await self.trades.get_token_amount_from_trades(
+                    order["symbol"]
                 )
 
-                try:
-                    open_timestamp = float(base_order[0]["timestamp"])
-                except Exception as e:
-                    # Broad catch: base order may be missing or malformed.
-                    open_timestamp = datetime.timestamp(datetime.now())
-                    logging.debug(
-                        f"Did not found a timestamp - taking default value. Cause {e}"
+                # 1. Create exchange order
+                order_status = await self.exchange.create_spot_sell(order, config)
+
+                if order_status:
+                    # 2. Create closed trade
+                    open_timestamp = 0.0
+                    base_order = await self.trades.get_trade_by_ordertype(
+                        order_status["symbol"], baseorder=True
                     )
-                    pass
 
-                open_trade = await self.trades.get_open_trades_by_symbol(
-                    order_status["symbol"]
-                )
-                # ToDo - why is it sometimes emtpy? Race condition?
-                so_count = 0
-                if open_trade:
-                    so_count = open_trade[0]["so_count"]
+                    try:
+                        open_timestamp = float(base_order[0]["timestamp"])
+                    except Exception as e:
+                        # Broad catch: base order may be missing or malformed.
+                        open_timestamp = datetime.timestamp(datetime.now())
+                        logging.debug(
+                            f"Did not found a timestamp - taking default value. Cause {e}"
+                        )
+                        pass
 
-                sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
-                sell_date = datetime.now()
-                open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
+                    open_trade = await self.trades.get_open_trades_by_symbol(
+                        order_status["symbol"]
+                    )
+                    # ToDo - why is it sometimes emtpy? Race condition?
+                    so_count = 0
+                    if open_trade:
+                        so_count = open_trade[0]["so_count"]
 
-                # Calculate trade duration
-                duration_data = self.__calculate_trade_duration(
-                    open_timestamp, sell_timestamp
-                )
-                payload = {
-                    "symbol": order_status["symbol"],
-                    "so_count": so_count,
-                    "profit": order_status["profit"],
-                    "profit_percent": order_status["profit_percent"],
-                    "amount": order_status["total_amount"],
-                    "cost": order_status["total_cost"],
-                    "tp_price": order_status["tp_price"],
-                    "avg_price": order_status["avg_price"],
-                    "open_date": open_date,
-                    "close_date": sell_date,
-                    "duration": duration_data,
-                }
-                async def _persist_sell() -> None:
-                    async with in_transaction() as conn:
-                        await model.ClosedTrades.create(**payload, using_db=conn)
-                        await model.Trades.filter(symbol=order["symbol"]).using_db(
-                            conn
-                        ).delete()
-                        await model.OpenTrades.filter(symbol=order["symbol"]).using_db(
-                            conn
-                        ).delete()
+                    sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
+                    sell_date = datetime.now()
+                    open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
 
-                await run_sqlite_write_with_retry(
-                    _persist_sell, f"persisting sell order for {order['symbol']}"
-                )
-            else:
-                logging.error(f"Failed creating sell order for {order['symbol']}")
-        finally:
-            await self.exchange.close()
+                    # Calculate trade duration
+                    duration_data = self.__calculate_trade_duration(
+                        open_timestamp, sell_timestamp
+                    )
+                    payload = {
+                        "symbol": order_status["symbol"],
+                        "so_count": so_count,
+                        "profit": order_status["profit"],
+                        "profit_percent": order_status["profit_percent"],
+                        "amount": order_status["total_amount"],
+                        "cost": order_status["total_cost"],
+                        "tp_price": order_status["tp_price"],
+                        "avg_price": order_status["avg_price"],
+                        "open_date": open_date,
+                        "close_date": sell_date,
+                        "duration": duration_data,
+                    }
+
+                    async def _persist_sell() -> None:
+                        async with in_transaction() as conn:
+                            await model.ClosedTrades.create(**payload, using_db=conn)
+                            await model.Trades.filter(symbol=order["symbol"]).using_db(
+                                conn
+                            ).delete()
+                            await model.OpenTrades.filter(symbol=order["symbol"]).using_db(
+                                conn
+                            ).delete()
+
+                    await run_sqlite_write_with_retry(
+                        _persist_sell, f"persisting sell order for {order['symbol']}"
+                    )
+                else:
+                    logging.error(f"Failed creating sell order for {order['symbol']}")
+            finally:
+                await self.exchange.close()
 
     async def receive_buy_order(
         self, order: dict[str, Any], config: dict[str, Any]
