@@ -11,90 +11,24 @@ async def test_monitoring_service_skips_when_disabled(monkeypatch):
     service = MonitoringService()
     calls = []
 
-    def fake_post_webhook(url, message, timeout_seconds):
-        calls.append((url, message, timeout_seconds))
+    async def fake_send_telegram(api_id, api_hash, bot_token, chat_id, text):
+        calls.append((api_id, api_hash, bot_token, chat_id, text))
 
-    monkeypatch.setattr(service, "_post_webhook", fake_post_webhook)
+    monkeypatch.setattr(service, "_send_telegram", fake_send_telegram)
 
     await service.notify_trade(
         "trade.buy",
         {"symbol": "BTC/USDT"},
-        {"monitoring_enabled": False, "monitoring_webhook_url": "http://example.com"},
+        {
+            "monitoring_enabled": False,
+            "monitoring_telegram_api_id": 12345,
+            "monitoring_telegram_api_hash": "hash123",
+            "monitoring_telegram_bot_token": "token123",
+            "monitoring_telegram_chat_id": "987654321",
+        },
     )
 
     assert calls == []
-
-
-@pytest.mark.asyncio
-async def test_monitoring_service_posts_webhook_when_enabled(monkeypatch):
-    service = MonitoringService()
-    calls = []
-
-    def fake_post_webhook(url, message, timeout_seconds):
-        calls.append((url, message, timeout_seconds))
-
-    monkeypatch.setattr(service, "_post_webhook", fake_post_webhook)
-
-    await service.notify_trade(
-        "trade.sell",
-        {"symbol": "ETH/USDT", "profit": 12.5},
-        {
-            "monitoring_enabled": True,
-            "monitoring_channel": "webhook",
-            "monitoring_webhook_url": "http://example.com/webhook",
-            "monitoring_timeout_sec": 3,
-            "monitoring_retry_count": 0,
-            "exchange": "binance",
-            "dry_run": True,
-        },
-    )
-
-    assert len(calls) == 1
-    sent_url, sent_message, sent_timeout = calls[0]
-    assert sent_url == "http://example.com/webhook"
-    assert sent_timeout == 3
-    assert sent_message["event"] == "trade.sell"
-    assert sent_message["trade"]["symbol"] == "ETH/USDT"
-
-
-@pytest.mark.asyncio
-async def test_monitoring_test_notification_sends_when_disabled(monkeypatch):
-    service = MonitoringService()
-    calls = []
-
-    def fake_post_webhook(url, message, timeout_seconds):
-        calls.append((url, message, timeout_seconds))
-
-    monkeypatch.setattr(service, "_post_webhook", fake_post_webhook)
-
-    success, _ = await service.send_test_notification(
-        {
-            "monitoring_enabled": False,
-            "monitoring_channel": "webhook",
-            "monitoring_webhook_url": "http://example.com/webhook",
-            "monitoring_timeout_sec": 3,
-            "monitoring_retry_count": 0,
-        },
-    )
-
-    assert success is True
-    assert len(calls) == 1
-    assert calls[0][1]["event"] == "monitoring.test"
-
-
-@pytest.mark.asyncio
-async def test_monitoring_test_notification_requires_webhook_url():
-    service = MonitoringService()
-    success, _ = await service.send_test_notification(
-        {
-            "monitoring_channel": "webhook",
-            "monitoring_webhook_url": "",
-            "monitoring_timeout_sec": 3,
-            "monitoring_retry_count": 0,
-        },
-    )
-
-    assert success is False
 
 
 @pytest.mark.asyncio
@@ -112,7 +46,6 @@ async def test_monitoring_service_sends_telegram_when_enabled(monkeypatch):
         {"symbol": "BTC/USDT", "side": "buy"},
         {
             "monitoring_enabled": True,
-            "monitoring_channel": "telegram",
             "monitoring_telegram_api_id": 12345,
             "monitoring_telegram_api_hash": "hash123",
             "monitoring_telegram_bot_token": "token123",
@@ -131,11 +64,35 @@ async def test_monitoring_service_sends_telegram_when_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_monitoring_test_notification_sends_when_disabled(monkeypatch):
+    service = MonitoringService()
+    calls = []
+
+    async def fake_send_telegram(api_id, api_hash, bot_token, chat_id, text):
+        calls.append((api_id, api_hash, bot_token, chat_id, text))
+
+    monkeypatch.setattr(service, "_send_telegram", fake_send_telegram)
+
+    success, _ = await service.send_test_notification(
+        {
+            "monitoring_enabled": False,
+            "monitoring_telegram_api_id": 12345,
+            "monitoring_telegram_api_hash": "hash123",
+            "monitoring_telegram_bot_token": "token123",
+            "monitoring_telegram_chat_id": "987654321",
+            "monitoring_retry_count": 0,
+        },
+    )
+
+    assert success is True
+    assert len(calls) == 1
+
+
+@pytest.mark.asyncio
 async def test_monitoring_service_fails_without_telegram_credentials():
     service = MonitoringService()
     success, _ = await service.send_test_notification(
         {
-            "monitoring_channel": "telegram",
             "monitoring_telegram_api_id": 0,
             "monitoring_telegram_api_hash": "",
             "monitoring_telegram_bot_token": "",

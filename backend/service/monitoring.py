@@ -2,9 +2,7 @@
 
 import asyncio
 import json
-from datetime import datetime, timezone
 from typing import Any
-from urllib import request
 
 import helper
 from telethon import TelegramClient
@@ -14,7 +12,7 @@ logging = helper.LoggerFactory.get_logger("logs/monitoring.log", "monitoring")
 
 
 class MonitoringService:
-    """Send trade execution events to configured monitoring channels."""
+    """Send trade execution events to Telegram."""
 
     DEFAULT_TIMEOUT_SECONDS = 5
     DEFAULT_RETRY_COUNT = 1
@@ -29,22 +27,20 @@ class MonitoringService:
         await self._send_message(event_type, payload, config)
 
     async def send_test_notification(self, config: dict[str, Any]) -> tuple[bool, str]:
-        """Send a monitoring test message regardless of monitoring_enabled."""
+        """Send a Telegram test message regardless of monitoring_enabled."""
         success = await self._send_message(
             "monitoring.test",
-            {"message": "Moonwalker monitoring channel test"},
+            {"message": "Moonwalker Telegram monitoring test"},
             config,
         )
         if not success:
-            return False, "Monitoring channel test failed."
-        return True, "Monitoring channel test sent."
+            return False, "Monitoring Telegram test failed."
+        return True, "Monitoring Telegram test sent."
 
     async def _send_message(
         self, event_type: str, payload: dict[str, Any], config: dict[str, Any]
     ) -> bool:
-        """Send a monitoring message and return success state."""
-
-        channel = str(config.get("monitoring_channel", "webhook") or "webhook").lower()
+        """Send a Telegram monitoring message and return success state."""
         timeout_seconds = self._safe_int(
             config.get("monitoring_timeout_sec", self.DEFAULT_TIMEOUT_SECONDS),
             self.DEFAULT_TIMEOUT_SECONDS,
@@ -56,98 +52,49 @@ class MonitoringService:
             min_value=0,
         )
 
-        message = self._build_trade_message(event_type, payload, config)
-
-        send_operation = None
-        if channel == "webhook":
-            webhook_url = str(config.get("monitoring_webhook_url", "") or "").strip()
-            if not webhook_url:
-                logging.warning(
-                    "Monitoring is enabled but 'monitoring_webhook_url' is empty."
-                )
-                return False
-
-            async def _send() -> None:
-                await asyncio.to_thread(
-                    self._post_webhook,
-                    webhook_url,
-                    message,
-                    timeout_seconds,
-                )
-
-            send_operation = _send
-        elif channel == "telegram":
-            api_id = self._safe_int(config.get("monitoring_telegram_api_id"), 0)
-            api_hash = str(config.get("monitoring_telegram_api_hash", "") or "").strip()
-            bot_token = str(
-                config.get("monitoring_telegram_bot_token", "") or ""
-            ).strip()
-            chat_id = str(config.get("monitoring_telegram_chat_id", "") or "").strip()
-            if api_id <= 0 or not api_hash or not bot_token or not chat_id:
-                logging.warning(
-                    "Monitoring telegram channel requires api_id, api_hash, "
-                    "bot token and chat id."
-                )
-                return False
-
-            telegram_text = self._build_telegram_text(event_type, payload, config)
-
-            async def _send() -> None:
-                await self._send_telegram(
-                    api_id,
-                    api_hash,
-                    bot_token,
-                    chat_id,
-                    telegram_text,
-                )
-
-            send_operation = _send
-        else:
-            logging.warning("Unsupported monitoring channel '%s'.", channel)
+        api_id = self._safe_int(
+            config.get("api_id", config.get("monitoring_telegram_api_id")),
+            0,
+        )
+        api_hash = str(
+            config.get("api_hash", config.get("monitoring_telegram_api_hash", "")) or ""
+        ).strip()
+        bot_token = str(
+            config.get("bot_token", config.get("monitoring_telegram_bot_token", ""))
+            or ""
+        ).strip()
+        chat_id = str(
+            config.get("chat_id", config.get("monitoring_telegram_chat_id", "")) or ""
+        ).strip()
+        if api_id <= 0 or not api_hash or not bot_token or not chat_id:
+            logging.warning(
+                "Monitoring telegram requires api_id, api_hash, bot token and chat id."
+            )
             return False
+
+        telegram_text = self._build_telegram_text(event_type, payload, config)
 
         for attempt in range(retry_count + 1):
             try:
-                await asyncio.wait_for(send_operation(), timeout=timeout_seconds)
+                await asyncio.wait_for(
+                    self._send_telegram(
+                        api_id,
+                        api_hash,
+                        bot_token,
+                        chat_id,
+                        telegram_text,
+                    ),
+                    timeout=timeout_seconds,
+                )
                 return True
             except Exception as exc:  # noqa: BLE001 - Monitoring must never crash flow.
                 logging.error(
-                    "Monitoring %s failed (attempt %s/%s): %s",
-                    channel,
+                    "Monitoring telegram failed (attempt %s/%s): %s",
                     attempt + 1,
                     retry_count + 1,
                     exc,
                 )
         return False
-
-    def _build_trade_message(
-        self, event_type: str, payload: dict[str, Any], config: dict[str, Any]
-    ) -> dict[str, Any]:
-        """Build a normalized monitoring payload."""
-        now = datetime.now(tz=timezone.utc).isoformat()
-        return {
-            "event": event_type,
-            "timestamp": now,
-            "exchange": config.get("exchange"),
-            "dry_run": bool(config.get("dry_run", True)),
-            "trade": payload,
-        }
-
-    def _post_webhook(
-        self, webhook_url: str, message: dict[str, Any], timeout_seconds: int
-    ) -> None:
-        """Send a single JSON POST request to the webhook endpoint."""
-        body = json.dumps(message).encode("utf-8")
-        req = request.Request(
-            webhook_url,
-            data=body,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        with request.urlopen(req, timeout=timeout_seconds) as response:
-            status_code = int(response.getcode())
-            if status_code >= 400:
-                raise RuntimeError(f"Webhook returned status {status_code}")
 
     async def _send_telegram(
         self,
@@ -159,9 +106,12 @@ class MonitoringService:
     ) -> None:
         """Send a Telegram message with Telethon."""
         entity = self._resolve_telegram_entity(chat_id)
-        async with TelegramClient(MemorySession(), api_id, api_hash) as client:
-            await client.start(bot_token=bot_token)
-            await client.send_message(entity=entity, message=text)
+        bot = TelegramClient(MemorySession(), api_id, api_hash)
+        await bot.start(bot_token=bot_token)
+        try:
+            await bot.send_message(entity=entity, message=text)
+        finally:
+            await bot.disconnect()
 
     def _build_telegram_text(
         self, event_type: str, payload: dict[str, Any], config: dict[str, Any]

@@ -108,14 +108,12 @@ All supported configuration keys are listed below. Keys marked "(advanced)" are 
 | `autopilot_medium_sl_timeout` | `int` | SL timeout in days (medium setting). | `10` |
 | `autopilot_medium_threshold` | `int` | Max fund threshold percent (medium setting). | `60` |
 | `monitoring_enabled` | `bool` | Enable outbound monitoring notifications for executed buys/sells. | `false` |
-| `monitoring_channel` | `string` | Monitoring transport channel (`webhook` or `telegram`). | `webhook` |
-| `monitoring_webhook_url` | `string` | Webhook endpoint receiving JSON trade events. | `https://example.com/webhook` |
 | `monitoring_telegram_api_id` | `int` | Telegram API ID used by Telethon client. | `1234567` |
 | `monitoring_telegram_api_hash` | `string` | Telegram API hash used by Telethon client. | `0123456789abcdef...` |
 | `monitoring_telegram_bot_token` | `string` | Telegram bot token used by Telethon client start. | `123456:ABC-DEF...` |
 | `monitoring_telegram_chat_id` | `string` | Telegram chat ID (user/group/channel) receiving notifications. | `-1001234567890` |
-| `monitoring_timeout_sec` | `int` | Webhook HTTP timeout in seconds. | `5` |
-| `monitoring_retry_count` | `int` | Number of retries after a failed webhook request. | `1` |
+| `monitoring_timeout_sec` | `int` | Telegram send timeout in seconds. | `5` |
+| `monitoring_retry_count` | `int` | Number of retries after a failed Telegram send. | `1` |
 | `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","bbands_cross"]` |
 | `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["sym_signals","asap"]` |
 
