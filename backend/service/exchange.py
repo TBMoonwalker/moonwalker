@@ -763,6 +763,57 @@ class Exchange:
         if sell_order_type == "limit":
             order_status = await self.create_spot_limit_sell(order, config)
             if order_status:
+                if order_status.get("requires_market_fallback"):
+                    if not bool(config.get("limit_sell_fallback_to_market", True)):
+                        logging.info(
+                            "Limit sell for %s partially filled, but market fallback is disabled.",
+                            order.get("symbol"),
+                        )
+                        return None
+                    if not await self.__can_fallback_to_market_sell(order, config):
+                        return None
+                    logging.info(
+                        "Limit sell for %s was not filled. Falling back to market sell.",
+                        order.get("symbol"),
+                    )
+                    remaining_order = dict(order)
+                    remaining_order["total_amount"] = float(
+                        order_status.get("remaining_amount") or 0.0
+                    )
+                    market_status = await self.create_spot_market_sell(
+                        remaining_order, config
+                    )
+                    if not market_status:
+                        return None
+                    partial_amount = float(order_status.get("partial_filled_amount") or 0.0)
+                    partial_price = float(order_status.get("partial_avg_price") or 0.0)
+                    market_amount = float(market_status.get("total_amount") or 0.0)
+                    market_price = float(market_status.get("price") or 0.0)
+                    combined_amount = partial_amount + market_amount
+                    if combined_amount <= 0:
+                        return market_status
+
+                    total_cost = float(order.get("total_cost") or 0.0)
+                    proceeds = (partial_amount * partial_price) + (
+                        market_amount * market_price
+                    )
+                    avg_sell_price = proceeds / combined_amount
+                    avg_buy_price = (
+                        total_cost / combined_amount if combined_amount > 0 else 0.0
+                    )
+                    profit = proceeds - total_cost
+                    profit_percent = (
+                        ((avg_sell_price - avg_buy_price) / avg_buy_price) * 100
+                        if avg_buy_price > 0
+                        else 0.0
+                    )
+                    market_status["total_amount"] = combined_amount
+                    market_status["price"] = avg_sell_price
+                    market_status["tp_price"] = avg_sell_price
+                    market_status["avg_price"] = avg_buy_price
+                    market_status["profit"] = profit
+                    market_status["profit_percent"] = profit_percent
+                    return market_status
                 return order_status
 
             if bool(config.get("limit_sell_fallback_to_market", True)):
@@ -1019,6 +1070,21 @@ class Exchange:
                         return await self.__build_sell_order_status(sell_order)
                     # Carry the remaining amount into optional market fallback.
                     order["total_amount"] = remaining_amount
+                    partial_fill_status = await self.__parse_order_status(sell_order)
+                    return {
+                        "requires_market_fallback": True,
+                        "symbol": resolved_symbol,
+                        "remaining_amount": remaining_amount,
+                        "partial_filled_amount": float(
+                            partial_fill_status.get("total_amount") or filled_amount
+                        ),
+                        "partial_avg_price": float(
+                            partial_fill_status.get("price")
+                            or latest_order_status.get("average")
+                            or latest_order_status.get("price")
+                            or 0.0
+                        ),
+                    }
 
             logging.info(
                 "Limit sell for %s was not filled within %s seconds.",
