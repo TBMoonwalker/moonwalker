@@ -108,6 +108,48 @@ class Indicators:
                 return cached[1]
             return None
 
+    async def calculate_btc_pulse(self, currency: str, timerange: str) -> bool:
+        """Return BTC pulse trend state for the configured quote currency.
+
+        The signal is considered bearish when short-term momentum is strongly
+        negative or EMA50 is above EMA9.
+        """
+        result = True
+        symbol = f"BTC/{currency}"
+        try:
+            df_raw = await self.data.get_data_for_pair(symbol, timerange, 60)
+            df = self.data.resample_data(df_raw, timerange)
+            if df is None or df.empty:
+                return True
+
+            close = df["close"].dropna()
+            if close.empty:
+                return True
+
+            ema9_series = talib.EMA(close, timeperiod=9).dropna()
+            ema50_series = talib.EMA(close, timeperiod=50).dropna()
+            if ema9_series.empty or ema50_series.empty:
+                return True
+
+            ema9 = float(ema9_series.iloc[-1])
+            ema50 = float(ema50_series.iloc[-1])
+
+            momentum_3 = 0.0
+            if len(close) >= 4:
+                current_close = float(close.iloc[-1])
+                past_close = float(close.iloc[-4])
+                if past_close != 0:
+                    momentum_3 = ((current_close - past_close) / past_close) * 100
+
+            result = not (momentum_3 < -1.0 or ema50 > ema9)
+        except Exception as e:
+            logging.error(
+                "BTC Pulse cannot be calculated for %s. Cause: %s", symbol, e
+            )
+            result = True
+
+        return result
+
     # async def calculate_ema_slope(self, symbol, timerange, length):
     #     result = "none"
     #     try:

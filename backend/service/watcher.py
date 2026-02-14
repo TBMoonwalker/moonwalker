@@ -7,6 +7,7 @@ import ccxt.pro as ccxtpro
 import helper
 import model
 from service.config import Config
+from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
 from service.trades import Trades
@@ -28,8 +29,12 @@ class Watcher:
     OHLCV_BATCH_SIZE = 200
     DCA_QUEUE_MAXSIZE = 1000
     OHLCV_QUEUE_MAXSIZE = 5000
+    BTC_HISTORY_MIN_ROWS = 120
     ticker_symbols = []
     candles = {}
+    signal_symbols: set[str] = set()
+    mandatory_symbols: set[str] = set()
+    timeframe = "1m"
     symbol_update_event: asyncio.Event | None = None
 
     def __init__(self):
@@ -46,6 +51,8 @@ class Watcher:
         self._worker_tasks: list[asyncio.Task] = []
         self._reload_lock = asyncio.Lock()
         self._reload_task: asyncio.Task | None = None
+        self._btc_warmup_task: asyncio.Task | None = None
+        self._btc_warmup_key: tuple[Any, ...] | None = None
 
         # Used for cross-task signaling
         Watcher.symbol_update_event = asyncio.Event()
@@ -66,6 +73,37 @@ class Watcher:
         self._reload_task = asyncio.create_task(self._reload_exchange_client(config))
 
         Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
+        Watcher.timeframe = config.get("timeframe", "1m")
+        Watcher.mandatory_symbols = self.__get_mandatory_symbols(config)
+        current_symbols = self.__normalize_symbols(Watcher.ticker_symbols)
+        Watcher.ticker_symbols = self.__compose_ticker_symbols(current_symbols)
+        if Watcher.symbol_update_event:
+            Watcher.symbol_update_event.set()
+        self._schedule_btc_pulse_history_warmup(config)
+
+    @staticmethod
+    def __get_mandatory_symbols(config: dict[str, Any]) -> set[str]:
+        """Return symbols that must always be watched regardless of plugin queues."""
+        if not config.get("btc_pulse", False):
+            return set()
+        currency = str(config.get("currency", "USDC")).upper().strip()
+        if not currency:
+            return set()
+        return {f"BTC/{currency}"}
+
+    @staticmethod
+    def __compose_ticker_symbols(base_symbols: list[str]) -> list[Any]:
+        """Merge trades, signal symbols, and mandatory symbols into watch targets."""
+        merged_symbols = list(
+            dict.fromkeys(
+                base_symbols
+                + sorted(Watcher.signal_symbols)
+                + sorted(Watcher.mandatory_symbols)
+            )
+        )
+        if Watcher.exchange_watcher_ohlcv:
+            return utils.convert_symbols(merged_symbols, Watcher.timeframe)
+        return merged_symbols
 
     async def _reload_exchange_client(self, config: dict[str, Any]) -> None:
         """Close any existing client and recreate it from latest config."""
@@ -116,6 +154,90 @@ class Watcher:
             new_exchange.set_sandbox_mode(config.get("sandbox", False))
             self.exchange = new_exchange
 
+    def _schedule_btc_pulse_history_warmup(self, config: dict[str, Any]) -> None:
+        """Schedule BTC history prefill to stabilize BTC pulse calculations."""
+        if not config.get("btc_pulse", False):
+            return
+
+        mandatory_symbols = self.__get_mandatory_symbols(config)
+        if not mandatory_symbols:
+            return
+        btc_symbol = next(iter(mandatory_symbols))
+
+        try:
+            history_days = max(1, int(config.get("history_from_data", 30)))
+        except (TypeError, ValueError):
+            history_days = 30
+
+        warmup_key = (
+            btc_symbol,
+            history_days,
+            config.get("exchange"),
+            config.get("market"),
+            config.get("exchange_hostname"),
+            bool(config.get("dry_run", True)),
+        )
+        if warmup_key == self._btc_warmup_key and self._btc_warmup_task:
+            if not self._btc_warmup_task.done():
+                return
+
+        if self._btc_warmup_task and not self._btc_warmup_task.done():
+            self._btc_warmup_task.cancel()
+
+        self._btc_warmup_key = warmup_key
+        self._btc_warmup_task = asyncio.create_task(
+            self._warmup_btc_pulse_history(btc_symbol, history_days)
+        )
+
+    async def _warmup_btc_pulse_history(self, symbol: str, history_days: int) -> None:
+        """Backfill BTC history once when required for BTC pulse."""
+        data = Data()
+        try:
+            count = await data.count_history_data_for_symbol(symbol)
+            history_rows = 0 if count is False else int(count)
+            if history_rows >= self.BTC_HISTORY_MIN_ROWS:
+                logging.info(
+                    "BTC pulse history warmup skipped for %s, %s rows already present.",
+                    symbol,
+                    history_rows,
+                )
+                return
+
+            success = await data.add_history_data_for_symbol(
+                symbol, history_days, self.config
+            )
+            if success:
+                logging.info(
+                    "BTC pulse history warmup completed for %s (%s days).",
+                    symbol,
+                    history_days,
+                )
+            else:
+                logging.warning(
+                    "BTC pulse history warmup failed for %s.", symbol
+                )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 - Keep watcher running.
+            logging.error(
+                "BTC pulse history warmup error for %s: %s", symbol, exc, exc_info=True
+            )
+        finally:
+            await data.close()
+
+    async def _await_btc_warmup_if_needed(self) -> None:
+        """Await warmup briefly so startup has BTC history before pulse checks."""
+        if not self.config.get("btc_pulse", False):
+            return
+        if not self._btc_warmup_task:
+            return
+        try:
+            await asyncio.wait_for(self._btc_warmup_task, timeout=25)
+        except asyncio.TimeoutError:
+            logging.warning("BTC pulse warmup timed out; continuing startup.")
+        except Exception as exc:  # noqa: BLE001 - Non-fatal startup path.
+            logging.warning("BTC pulse warmup completed with warning: %s", exc)
+
     # ------------------------------------------------------------------- #
     #                Queue-based symbol updates from app.py               #
     # ------------------------------------------------------------------- #
@@ -126,15 +248,11 @@ class Watcher:
         while self.status:
             try:
                 new_symbol_list = await watcher_queue.get()
-                trades = await self.trades.get_symbols()
-                for s in new_symbol_list:
-                    if s not in trades:
-                        trades.append(s)
-                if Watcher.exchange_watcher_ohlcv:
-                    trades = utils.convert_symbols(
-                        trades, self.config.get("timeframe", "1m")
-                    )
-                Watcher.ticker_symbols = trades
+                Watcher.signal_symbols = set(
+                    self.__normalize_symbols(new_symbol_list)
+                )
+                trade_symbols = await self.trades.get_symbols()
+                Watcher.ticker_symbols = self.__compose_ticker_symbols(trade_symbols)
                 logging.info(f"Updated symbol list via queue: {Watcher.ticker_symbols}")
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
@@ -160,10 +278,10 @@ class Watcher:
     ) -> None:
         if created:
             try:
-                new_symbols = await Trades().get_symbols()
-                if Watcher.exchange_watcher_ohlcv:
-                    new_symbols = utils.convert_symbols(new_symbols)
-                Watcher.ticker_symbols = new_symbols
+                trade_symbols = await Trades().get_symbols()
+                Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(
+                    trade_symbols
+                )
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
                 logging.debug(f"Added symbols. New list: {Watcher.ticker_symbols}")
@@ -181,10 +299,10 @@ class Watcher:
     ) -> None:
         if created:
             try:
-                new_symbols = await Trades().get_symbols()
-                if Watcher.exchange_watcher_ohlcv:
-                    new_symbols = utils.convert_symbols(new_symbols)
-                Watcher.ticker_symbols = new_symbols
+                trade_symbols = await Trades().get_symbols()
+                Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(
+                    trade_symbols
+                )
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
                 logging.debug(f"Removed symbols. New list: {Watcher.ticker_symbols}")
@@ -214,12 +332,10 @@ class Watcher:
     async def watch_tickers(self) -> None:
         """Main loop that syncs symbol watchers and restarts them if needed."""
         logging.info("Starting Watcher...")
+        await self._await_btc_warmup_if_needed()
 
-        Watcher.ticker_symbols = await self.trades.get_symbols()
-        if Watcher.exchange_watcher_ohlcv:
-            Watcher.ticker_symbols = utils.convert_symbols(
-                Watcher.ticker_symbols, self.config.get("timeframe", "1m")
-            )
+        trade_symbols = await self.trades.get_symbols()
+        Watcher.ticker_symbols = self.__compose_ticker_symbols(trade_symbols)
 
         consumer_task = asyncio.create_task(self.process_events())
         self._worker_tasks = [
@@ -513,6 +629,8 @@ class Watcher:
     async def shutdown(self) -> None:
         """Stop watchers and close exchange resources."""
         self.status = False
+        if self._btc_warmup_task and not self._btc_warmup_task.done():
+            self._btc_warmup_task.cancel()
         for task in self.symbol_tasks.values():
             task.cancel()
         for task in self._worker_tasks:

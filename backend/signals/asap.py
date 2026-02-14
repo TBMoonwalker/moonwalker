@@ -129,9 +129,8 @@ class SignalPlugin:
     async def __get_new_symbol_list(self, running_list: tuple) -> Optional[list[str]]:
         """Get the list of new symbols to trade.
 
-        Retrieves the symbol list from configuration, adds BTC if BTC-Pulse is enabled,
-        and ensures history data exists for each symbol. Puts the symbol list into the
-        watcher queue for processing.
+        Retrieves the symbol list from configuration, ensures history data exists
+        for each symbol, and pushes them to watcher queue for processing.
 
         Args:
             running_list: Tuple of currently running trade bots
@@ -147,12 +146,6 @@ class SignalPlugin:
                 symbol_list = await self.__fetch_symbol_list_from_url(symbol_list)
             else:
                 symbol_list = symbol_list.split(",")
-
-            # Add BTC to list if BTC-Pulse is activated
-            if self.config.get("btc_pulse", False) and "BTC" not in symbol_list:
-                symbol_list.append(
-                    ("BTC" + "/" + self.config.get("currency", "USDC")).upper()
-                )
 
             # Running symbols
             running_symbols = [

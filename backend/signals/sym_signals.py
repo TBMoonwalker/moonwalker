@@ -11,6 +11,7 @@ import socketio
 from service.autopilot import Autopilot
 from service.data import Data
 from service.filter import Filter
+from service.indicators import Indicators
 from service.orders import Orders
 from service.statistic import Statistic
 from socketio.exceptions import TimeoutError
@@ -28,6 +29,7 @@ class SignalPlugin:
         self.statistic = Statistic()
         self.data = Data(persist_exchange=True)
         self.filter = Filter()
+        self.indicators = Indicators()
         self.config = None
         self.status = True
         self.watcher_queue = watcher_queue
@@ -85,7 +87,7 @@ class SignalPlugin:
 
         return result
 
-    def __check_entry_point(self, event: dict[str, Any]) -> bool:
+    async def __check_entry_point(self, event: dict[str, Any]) -> bool:
         """Check if a signal event meets all entry criteria for trading.
 
         Validates the signal event against various filters including allow/denylist,
@@ -123,7 +125,10 @@ class SignalPlugin:
         # btc pulse check
         btc_pulse = True
         if self.config.get("btc_pulse", False):
-            btc_pulse = self.filter.btc_pulse_status("5Min", "10Min")
+            btc_pulse = await self.indicators.calculate_btc_pulse(
+                self.config.get("currency", "USDC"),
+                self.config.get("signal_strategy_timeframe", "1min"),
+            )
 
         if btc_pulse:
             symbol = event["symbol"]
@@ -218,7 +223,7 @@ class SignalPlugin:
                         max_bots = await self.__check_max_bots()
                         if not max_bots:
                             self._max_bots_blocked = False
-                            if self.__check_entry_point(
+                            if await self.__check_entry_point(
                                 event[1]
                             ) and await self.data.is_token_old_enough(
                                 self.config,
