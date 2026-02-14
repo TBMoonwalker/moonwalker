@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import OpenTrades from '../components/OpenTrades.vue'
 import ClosedTrades from '../components/ClosedTrades.vue'
+import TradesImport from '../components/TradesImport.vue'
 import Statistics from '@/components/Statistics.vue'
 import Charts from '@/components/Charts.vue'
 import UpnlChart from '@/components/UpnlChart.vue'
@@ -57,6 +58,11 @@ function configureButtonClicked() {
           <ClosedTrades />
         </n-tab-pane>
       </n-tabs>
+    </n-card>
+  </n-flex>
+  <n-flex vertical :style="{ display: 'flex', flexDirection: 'column', gap: '16px', width: '98%' }">
+    <n-card title="Import Open Trades (CSV)">
+      <TradesImport />
     </n-card>
   </n-flex>
 </template>

@@ -4,8 +4,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { type DataTableColumns, NDataTable } from 'naive-ui'
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { NButton, type DataTableColumns, NDataTable, useDialog, useMessage } from 'naive-ui'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
@@ -29,6 +29,8 @@ const pageReactive = reactive({
 const viewportWidth = ref(window.innerWidth)
 const isMobile = computed(() => viewportWidth.value < 768)
 const isTablet = computed(() => viewportWidth.value >= 768 && viewportWidth.value < 1200)
+const dialog = useDialog()
+const message = useMessage()
 
 const handleResize = () => {
     viewportWidth.value = window.innerWidth
@@ -59,12 +61,18 @@ const handlePageChange = async (currentPage: any) => {
 }
 
 const refreshLength = async () => {
-    if (closed_trades_length.value !== undefined) {
-        return
-    }
     const response = await fetchJson<{ result: number }>('/trades/closed/length')
     closed_trades_length.value = response.result
     updatePageCount()
+}
+
+const refreshPageAfterDelete = async () => {
+    await refreshLength()
+    const maxPage = Math.max(1, pageReactive.pageCount || 1)
+    if (pageReactive.page > maxPage) {
+        pageReactive.page = maxPage
+    }
+    await updateData(pageReactive.page)
 }
 
 // Get new order data
@@ -100,6 +108,32 @@ function row_classes(row: RowData) {
     } else {
         return 'red'
     }
+}
+
+async function handleDeleteClosedTrade(rowData: RowData): Promise<void> {
+    const d = dialog.warning({
+        title: 'Delete closed trade',
+        content: `Delete ${rowData.symbol} from closed trades history? This cannot be undone.`,
+        positiveText: 'Delete',
+        negativeText: 'Cancel',
+        onPositiveClick: async () => {
+            d.loading = true
+            try {
+                const result = await fetchJson<{ result: string }>(`/trades/closed/delete/${rowData.id}`, {
+                    method: 'POST'
+                })
+                if (result.result === 'deleted') {
+                    message.success(`Deleted ${rowData.symbol}.`)
+                    await refreshPageAfterDelete()
+                    return
+                }
+                message.error(`Failed deleting ${rowData.symbol}.`)
+            } catch (error) {
+                const detail = error instanceof Error ? error.message : 'Unknown error'
+                message.error(`Failed deleting ${rowData.symbol}: ${detail}`)
+            }
+        }
+    })
 }
 
 const columns_trades = (): DataTableColumns<RowData> => {
@@ -149,6 +183,23 @@ const columns_trades = (): DataTableColumns<RowData> => {
             title: 'Closed',
             key: 'close_date'
         },
+        {
+            title: 'Action',
+            key: 'action',
+            align: 'center',
+            render: (rowData) => {
+                return h(
+                    NButton,
+                    {
+                        size: 'small',
+                        type: 'error',
+                        ghost: true,
+                        onClick: () => handleDeleteClosedTrade(rowData),
+                    },
+                    { default: () => 'Delete' }
+                )
+            },
+        },
     ]
 
     if (isMobile.value) {
@@ -156,7 +207,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
             if (!("key" in column)) {
                 return true
             }
-            return ["symbol", "profit_percent", "close_date"].includes(String(column.key))
+            return ["symbol", "profit_percent", "close_date", "action"].includes(String(column.key))
         })
     }
 
@@ -172,6 +223,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
                 "profit_percent",
                 "so_count",
                 "close_date",
+                "action",
             ].includes(String(column.key))
         })
     }

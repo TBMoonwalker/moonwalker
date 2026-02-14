@@ -267,13 +267,19 @@ class Dca:
 
     async def __calculate_dca(self, current_price, trades):
         dynamic_dca = self.config.get("dynamic_dca", False)
-        volume_scale = self.config.get("os", 0)
+        volume_scale = float(self.config.get("os", 1.0) or 1.0)
+        if volume_scale <= 0:
+            logging.warning(
+                "Invalid safety order volume scale (os=%s). Falling back to 1.0.",
+                volume_scale,
+            )
+            volume_scale = 1.0
         step_scale = self.config.get("ss", 0)
         max_safety_orders = self.config.get("mstc", 0)
         price_deviation = self.config.get("sos")
         # Apply price deviation for the first safety order
         next_so_percentage = price_deviation
-        safety_order_size = self.config.get("so", None)
+        safety_order_size = float(self.config.get("so", 0.0) or 0.0)
         new_so = False
         placed_new_so = False
         dynamic_so_details: dict[str, float | str] = {
@@ -389,6 +395,23 @@ class Dca:
                 max_safety_orders,
                 trades["safetyorders_count"],
             )
+            logging_json = {
+                "type": "dca_check",
+                "symbol": trades["symbol"],
+                "botname": trades["bot"],
+                "so_orders": trades["safetyorders_count"],
+                "last_so_price": last_so_price,
+                "new_so_size": safety_order_size,
+                "price_deviation": next_so_percentage,
+                "actual_pnl": actual_pnl,
+                "new_so": False,
+                "max_so_reached": True,
+                "dynamic_so_scale": dynamic_so_details.get("scale", 1.0),
+                "dynamic_so_window": dynamic_so_details.get("window", "off"),
+                "dynamic_so_drawdown": dynamic_so_details.get("drawdown_ratio", 0.0),
+                "dynamic_so_loss": dynamic_so_details.get("loss_ratio", 0.0),
+            }
+            await self.statistic.update_statistic_data(logging_json)
 
     async def process_ticker_data(
         self, ticker: dict[str, Any], config: dict[str, Any]

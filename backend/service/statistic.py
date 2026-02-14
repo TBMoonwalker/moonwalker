@@ -266,7 +266,7 @@ class Statistic:
             if not week_slice.empty:
                 frames.append(
                     week_slice["profit_overall"]
-                    .resample("4H")
+                    .resample("4h")
                     .last()
                     .dropna()
                     .to_frame()

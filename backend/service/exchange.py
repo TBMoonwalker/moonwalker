@@ -692,9 +692,9 @@ class Exchange:
                 net_amount = max(
                     0.0, float(order_status["amount"]) - order["amount_fee"]
                 )
-                order["amount"] = float(
-                    self.exchange.amount_to_precision(resolved_symbol, net_amount)
-                )
+                # Keep full net amount precision here to avoid large relative losses
+                # on small orders. Sell path already applies exchange precision.
+                order["amount"] = float(net_amount)
 
                 logging.debug(
                     "Fee Deduction not active. Real amount "
