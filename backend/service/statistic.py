@@ -165,7 +165,9 @@ class Statistic:
     async def _store_upnl_snapshot(self, profit_data: dict[str, Any]) -> None:
         """Persist a sampled uPNL snapshot for long-term charting."""
         try:
-            latest_snapshot = await model.UpnlHistory.all().order_by("-timestamp").first()
+            latest_snapshot = (
+                await model.UpnlHistory.all().order_by("-timestamp").first()
+            )
             now = datetime.now(timezone.utc)
             if latest_snapshot:
                 latest_ts = latest_snapshot.timestamp
@@ -191,8 +193,10 @@ class Statistic:
         """Return overall profit snapshots from the beginning, ordered by timestamp."""
         upnl_data: list[dict[str, Any]] = []
         try:
-            rows = await model.UpnlHistory.all().order_by("timestamp").values_list(
-                "timestamp", "profit_overall"
+            rows = (
+                await model.UpnlHistory.all()
+                .order_by("timestamp")
+                .values_list("timestamp", "profit_overall")
             )
             for timestamp, profit_overall in rows:
                 upnl_data.append(
@@ -219,9 +223,11 @@ class Statistic:
         now = datetime.now(timezone.utc)
         year_start = now - self.timeline_horizons["year"]
         try:
-            rows = await model.UpnlHistory.filter(
-                timestamp__gte=year_start
-            ).order_by("timestamp").values_list("timestamp", "profit_overall")
+            rows = (
+                await model.UpnlHistory.filter(timestamp__gte=year_start)
+                .order_by("timestamp")
+                .values_list("timestamp", "profit_overall")
+            )
             if not rows:
                 return []
 
@@ -238,19 +244,43 @@ class Statistic:
 
             year_slice = df[(df.index >= year_start) & (df.index < month_start)]
             if not year_slice.empty:
-                frames.append(year_slice["profit_overall"].resample("1W").last().dropna().to_frame())
+                frames.append(
+                    year_slice["profit_overall"]
+                    .resample("1W")
+                    .last()
+                    .dropna()
+                    .to_frame()
+                )
 
             month_slice = df[(df.index >= month_start) & (df.index < week_start)]
             if not month_slice.empty:
-                frames.append(month_slice["profit_overall"].resample("1D").last().dropna().to_frame())
+                frames.append(
+                    month_slice["profit_overall"]
+                    .resample("1D")
+                    .last()
+                    .dropna()
+                    .to_frame()
+                )
 
             week_slice = df[(df.index >= week_start) & (df.index < day_start)]
             if not week_slice.empty:
-                frames.append(week_slice["profit_overall"].resample("4H").last().dropna().to_frame())
+                frames.append(
+                    week_slice["profit_overall"]
+                    .resample("4H")
+                    .last()
+                    .dropna()
+                    .to_frame()
+                )
 
             day_slice = df[df.index >= day_start]
             if not day_slice.empty:
-                frames.append(day_slice["profit_overall"].resample("15min").last().dropna().to_frame())
+                frames.append(
+                    day_slice["profit_overall"]
+                    .resample("15min")
+                    .last()
+                    .dropna()
+                    .to_frame()
+                )
 
             if not frames:
                 return []

@@ -55,7 +55,9 @@ class Data:
 
                 # Save to DB cache
                 await run_sqlite_write_with_retry(
-                    lambda: model.Listings.create(symbol=symbol, listing_date=listing_date),
+                    lambda: model.Listings.create(
+                        symbol=symbol, listing_date=listing_date
+                    ),
                     f"storing listing date for {symbol}",
                 )
                 return listing_date
@@ -105,7 +107,9 @@ class Data:
             return self._symbols_cache[cache_key]
 
         try:
-            symbols = await self.exchange.get_symbols_for_quote_currency(config, currency)
+            symbols = await self.exchange.get_symbols_for_quote_currency(
+                config, currency
+            )
             self._symbols_cache[cache_key] = symbols
             return symbols
         except Exception as e:

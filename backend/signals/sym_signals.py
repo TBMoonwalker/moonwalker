@@ -73,7 +73,6 @@ class SignalPlugin:
                 )
                 if trading_settings:
                     self.max_bots = trading_settings["mad"]
-                    
 
             if all_bots and (len(all_bots) >= self.max_bots):
                 result = True

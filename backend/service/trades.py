@@ -237,9 +237,8 @@ class Trades:
                 latest_order = order
 
                 if bool(order.get("baseorder")):
-                    if (
-                        baseorder is None
-                        or float(order["timestamp"]) < float(baseorder["timestamp"])
+                    if baseorder is None or float(order["timestamp"]) < float(
+                        baseorder["timestamp"]
                     ):
                         baseorder = order
 

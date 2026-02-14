@@ -43,11 +43,19 @@ class AthService:
             (lookback_value, lookback_unit, timeframe, lookback_days, cache_window_key)
         """
         lookback_value = int(config.get("dynamic_so_ath_lookback_value", 0) or 0)
-        lookback_unit = str(config.get("dynamic_so_ath_lookback_unit", "month") or "month").strip().lower()
-        timeframe = str(config.get("dynamic_so_ath_timeframe", "4h") or "4h").strip().lower()
+        lookback_unit = (
+            str(config.get("dynamic_so_ath_lookback_unit", "month") or "month")
+            .strip()
+            .lower()
+        )
+        timeframe = (
+            str(config.get("dynamic_so_ath_timeframe", "4h") or "4h").strip().lower()
+        )
 
         if lookback_value <= 0:
-            legacy_period = str(config.get("dynamic_so_ath_window", "1m") or "1m").strip().lower()
+            legacy_period = (
+                str(config.get("dynamic_so_ath_window", "1m") or "1m").strip().lower()
+            )
             if legacy_period in {"daily", "day", "1d"}:
                 lookback_value = 1
                 lookback_unit = "day"
@@ -139,9 +147,7 @@ class AthService:
         lookback_days: int,
     ) -> float:
         """Fetch ATH from exchange OHLCV data for a configured window."""
-        since = int(
-            (datetime.now() - timedelta(days=lookback_days)).timestamp() * 1000
-        )
+        since = int((datetime.now() - timedelta(days=lookback_days)).timestamp() * 1000)
 
         try:
             candles = await self.exchange.get_history_for_symbol(

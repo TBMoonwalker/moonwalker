@@ -55,7 +55,9 @@ async def run_sqlite_write_with_retry(
 
 async def optimize_sqlite_connection(db_url: str | None = None) -> None:
     """Run PRAGMA optimize when the active backend is SQLite."""
-    active_db_url = db_url or os.getenv("MOONWALKER_DB_URL", "sqlite://db/trades.sqlite")
+    active_db_url = db_url or os.getenv(
+        "MOONWALKER_DB_URL", "sqlite://db/trades.sqlite"
+    )
     if not active_db_url.startswith("sqlite://"):
         return
     connection = Tortoise.get_connection("default")
@@ -128,16 +130,15 @@ class Database:
         tables = {table for table, _, _ in desired_indexes}
 
         for table in tables:
-            _, indexes = await connection.execute_query(
-                f"PRAGMA index_list('{table}')"
-            )
+            _, indexes = await connection.execute_query(f"PRAGMA index_list('{table}')")
             for index in indexes:
                 index_name = index["name"]
                 _, index_cols = await connection.execute_query(
                     f"PRAGMA index_info('{index_name}')"
                 )
                 columns = tuple(
-                    row["name"] for row in sorted(index_cols, key=lambda row: row["seqno"])
+                    row["name"]
+                    for row in sorted(index_cols, key=lambda row: row["seqno"])
                 )
                 if columns:
                     existing_signatures.add((table, columns))

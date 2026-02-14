@@ -188,10 +188,14 @@ class Config:
             is_numeric_value = isinstance(value_data, (int, float)) and not isinstance(
                 value_data, bool
             )
-            should_persist = bool(value["value"]) or (
-                value_type == "bool" and value_data is False
-            ) or (
-                value_type in {"int", "float"} and is_numeric_value and value_data == 0
+            should_persist = (
+                bool(value["value"])
+                or (value_type == "bool" and value_data is False)
+                or (
+                    value_type in {"int", "float"}
+                    and is_numeric_value
+                    and value_data == 0
+                )
             )
             if should_persist:
                 serialized_value = self.__serialize_value_for_storage(

@@ -78,8 +78,12 @@ async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch):
     await Tortoise.generate_schemas()
 
     now = datetime.utcnow()
-    await model.UpnlHistory.create(timestamp=now - timedelta(hours=2), upnl=1.0, profit_overall=10.0)
-    await model.UpnlHistory.create(timestamp=now - timedelta(hours=1), upnl=2.0, profit_overall=11.0)
+    await model.UpnlHistory.create(
+        timestamp=now - timedelta(hours=2), upnl=1.0, profit_overall=10.0
+    )
+    await model.UpnlHistory.create(
+        timestamp=now - timedelta(hours=1), upnl=2.0, profit_overall=11.0
+    )
     await model.UpnlHistory.create(timestamp=now, upnl=3.0, profit_overall=12.0)
 
     statistic = Statistic()

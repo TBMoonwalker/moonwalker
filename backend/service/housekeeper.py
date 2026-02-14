@@ -65,9 +65,7 @@ class Housekeeper:
             if self.config:
                 interval_days = self._get_housekeeping_interval_days()
                 actual_timestamp = datetime.now()
-                cleanup_timestamp = actual_timestamp - timedelta(
-                    days=interval_days
-                )
+                cleanup_timestamp = actual_timestamp - timedelta(days=interval_days)
                 try:
                     active_symbols = await Trades().get_symbols()
                     ticker_symbols = await Data().get_ticker_symbol_list()
@@ -101,7 +99,9 @@ class Housekeeper:
 
         retention_timestamp = actual_timestamp - timedelta(days=retention_days)
         deleted = await run_sqlite_write_with_retry(
-            lambda: model.UpnlHistory.filter(timestamp__lt=retention_timestamp).delete(),
+            lambda: model.UpnlHistory.filter(
+                timestamp__lt=retention_timestamp
+            ).delete(),
             "cleanup upnl history",
         )
         if deleted:

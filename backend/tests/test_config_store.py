@@ -39,9 +39,7 @@ async def test_config_batch_set_persists_false_bool(tmp_path, monkeypatch):
     monkeypatch.setattr(config_module, "redis_client", DummyRedis())
 
     config = Config()
-    await config.batch_set(
-        {"dry_run": '{"value": false, "type": "bool"}'}
-    )
+    await config.batch_set({"dry_run": '{"value": false, "type": "bool"}'})
     await config.load_all()
 
     assert config.get("dry_run") is False

@@ -109,7 +109,9 @@ class Exchange:
                     return candidate
                 try:
                     market = self.exchange.market(candidate)
-                    resolved = market.get("symbol") if isinstance(market, dict) else None
+                    resolved = (
+                        market.get("symbol") if isinstance(market, dict) else None
+                    )
                     if isinstance(resolved, str):
                         return resolved
                 except Exception:
@@ -364,7 +366,9 @@ class Exchange:
                         fee += fee_cost
                         cost += order["cost"]
                         fee_currency = str(fee_data.get("currency") or "").upper()
-                        base_asset = str(order.get("symbol", symbol)).split("/")[0].upper()
+                        base_asset = (
+                            str(order.get("symbol", symbol)).split("/")[0].upper()
+                        )
                         side = str(order.get("side") or "").lower()
                         if side == "buy" and fee_currency == base_asset:
                             base_fee += fee_cost
@@ -669,7 +673,9 @@ class Exchange:
                     order["fees"] = 0.0
             else:
                 try:
-                    fees = await self.exchange.fetch_trading_fee(symbol=order_status["symbol"])
+                    fees = await self.exchange.fetch_trading_fee(
+                        symbol=order_status["symbol"]
+                    )
                     order["fees"] = float(fees.get("taker", 0.0))
                 except Exception as e:
                     # Broad catch to avoid failing a filled order due fee-rate fetch only.
@@ -683,7 +689,9 @@ class Exchange:
             # Subtract base-asset fee from sellable amount when fee token mode is disabled.
             if not self.config.get("fee_deduction", False):
                 order["amount_fee"] = float(order_status.get("base_fee") or 0.0)
-                net_amount = max(0.0, float(order_status["amount"]) - order["amount_fee"])
+                net_amount = max(
+                    0.0, float(order_status["amount"]) - order["amount_fee"]
+                )
                 order["amount"] = float(
                     self.exchange.amount_to_precision(resolved_symbol, net_amount)
                 )
@@ -769,20 +777,26 @@ class Exchange:
         """Build normalized sell order status for closed trade processing."""
         order_status = await self.__parse_order_status(order)
         if not order_status.get("total_amount"):
-            logging.error("Sell order for %s returned empty amount.", order.get("symbol"))
+            logging.error(
+                "Sell order for %s returned empty amount.", order.get("symbol")
+            )
             return None
 
         order_status["type"] = "sold_check"
         order_status["sell"] = True
         order_status["total_cost"] = order["total_cost"]
         order_status["actual_pnl"] = order["actual_pnl"]
-        order_status["avg_price"] = order_status["total_cost"] / order_status["total_amount"]
+        order_status["avg_price"] = (
+            order_status["total_cost"] / order_status["total_amount"]
+        )
         order_status["tp_price"] = order_status["price"]
         order_status["profit"] = (
-            order_status["price"] * order_status["total_amount"] - order_status["total_cost"]
+            order_status["price"] * order_status["total_amount"]
+            - order_status["total_cost"]
         )
         order_status["profit_percent"] = (
-            (order_status["price"] - order_status["avg_price"]) / order_status["avg_price"]
+            (order_status["price"] - order_status["avg_price"])
+            / order_status["avg_price"]
         ) * 100
         return order_status
 
@@ -844,7 +858,9 @@ class Exchange:
 
         resolved_symbol = self.__resolve_symbol(order["symbol"])
         if resolved_symbol is None:
-            logging.error("Cannot place limit sell. Symbol not found: %s", order["symbol"])
+            logging.error(
+                "Cannot place limit sell. Symbol not found: %s", order["symbol"]
+            )
             return None
 
         try:
@@ -906,7 +922,9 @@ class Exchange:
             )
             return None
         except ccxt.BaseError as exc:
-            logging.error("Limit sell for %s failed due to an error: %s", order["symbol"], exc)
+            logging.error(
+                "Limit sell for %s failed due to an error: %s", order["symbol"], exc
+            )
             return None
         except Exception as exc:
             logging.error("Limit sell for %s failed with: %s", order["symbol"], exc)

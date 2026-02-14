@@ -8,8 +8,9 @@ from typing import Any
 
 import helper
 import model
-from service.exchange import Exchange
 from service.database import run_sqlite_write_with_retry
+from service.exchange import Exchange
+from service.monitoring import MonitoringService
 from service.trades import Trades
 from tortoise.transactions import in_transaction
 
@@ -24,6 +25,7 @@ class Orders:
     def __init__(self):
         self.utils = helper.Utils()
         self.exchange = Exchange()
+        self.monitoring = MonitoringService()
         self.trades = Trades()
 
     @classmethod
@@ -110,12 +112,30 @@ class Orders:
                             await model.Trades.filter(symbol=order["symbol"]).using_db(
                                 conn
                             ).delete()
-                            await model.OpenTrades.filter(symbol=order["symbol"]).using_db(
-                                conn
-                            ).delete()
+                            await model.OpenTrades.filter(
+                                symbol=order["symbol"]
+                            ).using_db(conn).delete()
 
                     await run_sqlite_write_with_retry(
                         _persist_sell, f"persisting sell order for {order['symbol']}"
+                    )
+                    await self.monitoring.notify_trade(
+                        "trade.sell",
+                        {
+                            "symbol": order_status["symbol"],
+                            "side": "sell",
+                            "amount": order_status["total_amount"],
+                            "cost": order_status["total_cost"],
+                            "avg_price": order_status["avg_price"],
+                            "tp_price": order_status["tp_price"],
+                            "profit": order_status["profit"],
+                            "profit_percent": order_status["profit_percent"],
+                            "so_count": so_count,
+                            "open_date": open_date.isoformat(),
+                            "close_date": sell_date.isoformat(),
+                            "duration": duration_data,
+                        },
+                        config,
                     )
                 else:
                     logging.error(f"Failed creating sell order for {order['symbol']}")
@@ -164,6 +184,7 @@ class Orders:
                     "direction": order_status["direction"],
                     "side": order_status["side"],
                 }
+
                 async def _persist_buy() -> None:
                     async with in_transaction() as conn:
                         await model.Trades.create(**payload, using_db=conn)
@@ -176,6 +197,24 @@ class Orders:
 
                 await run_sqlite_write_with_retry(
                     _persist_buy, f"persisting buy order for {order['symbol']}"
+                )
+                await self.monitoring.notify_trade(
+                    "trade.buy",
+                    {
+                        "symbol": order_status["symbol"],
+                        "side": "buy",
+                        "timestamp": order_status["timestamp"],
+                        "ordersize": order_status["ordersize"],
+                        "price": order_status["price"],
+                        "amount": order_status["amount"],
+                        "bot": order_status["botname"],
+                        "ordertype": order_status["ordertype"],
+                        "baseorder": order_status["baseorder"],
+                        "safetyorder": order_status["safetyorder"],
+                        "order_count": order_status["order_count"],
+                        "so_percentage": order_status["so_percentage"],
+                    },
+                    config,
                 )
                 return True
             else:
@@ -191,6 +230,7 @@ class Orders:
         token, currency = symbol.split("-")
         symbol = f"{token}/{currency}"
         try:
+
             async def _persist_stop() -> None:
                 async with in_transaction() as conn:
                     await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()

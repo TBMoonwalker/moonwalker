@@ -58,7 +58,7 @@ async def test_asap_run_triggers_buy_order(monkeypatch):
 
     plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
 
-    await plugin.run({"ordersize": 10})
+    await plugin.run({"bo": 10})
 
     assert len(orders) == 1
     assert orders[0]["symbol"] == "BTC/USDT"

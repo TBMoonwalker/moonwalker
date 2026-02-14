@@ -118,7 +118,9 @@ class SignalPlugin:
             payload = response.json()
             pairs = payload.get("pairs", [])
             if not isinstance(pairs, list):
-                raise ValueError("Invalid symbol list payload format: expected 'pairs' list")
+                raise ValueError(
+                    "Invalid symbol list payload format: expected 'pairs' list"
+                )
             return pairs
 
         return await asyncio.to_thread(_fetch)

@@ -107,6 +107,11 @@ All supported configuration keys are listed below. Keys marked "(advanced)" are 
 | `autopilot_medium_sl` | `float` | SL percent (medium setting). | `2.0` |
 | `autopilot_medium_sl_timeout` | `int` | SL timeout in days (medium setting). | `10` |
 | `autopilot_medium_threshold` | `int` | Max fund threshold percent (medium setting). | `60` |
+| `monitoring_enabled` | `bool` | Enable outbound monitoring notifications for executed buys/sells. | `false` |
+| `monitoring_channel` | `string` | Monitoring transport channel (currently `webhook`). | `webhook` |
+| `monitoring_webhook_url` | `string` | Webhook endpoint receiving JSON trade events. | `https://example.com/webhook` |
+| `monitoring_timeout_sec` | `int` | Webhook HTTP timeout in seconds. | `5` |
+| `monitoring_retry_count` | `int` | Number of retries after a failed webhook request. | `1` |
 | `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","bbands_cross"]` |
 | `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["sym_signals","asap"]` |
 

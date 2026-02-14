@@ -1,5 +1,4 @@
 import pytest
-
 from service.exchange import Exchange
 
 

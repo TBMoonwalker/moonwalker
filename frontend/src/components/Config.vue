@@ -323,6 +323,40 @@
             </n-form>
         </n-card>
 
+        <n-card title="Messaging / Monitoring settings">
+            <n-form ref="monitoringFormRef" :model="monitoring" :rules="rules" label-width="auto"
+                require-mark-placement="right-hanging" :style="{
+                    maxWidth: '640px',
+                }">
+                <n-form-item label="Enabled" path="monitoring_enabled" label-placement="left">
+                    <n-checkbox v-model:checked="monitoring.enabled" />
+                </n-form-item>
+                <n-form-item label="Channel" path="monitoring_channel">
+                    <n-select v-model:value="monitoring.channel" :options="monitoringChannelOptions" />
+                </n-form-item>
+                <n-form-item label="Webhook URL" path="monitoring_webhook_url">
+                    <n-input v-model:value="monitoring.webhook_url" placeholder="https://example.com/webhook" />
+                </n-form-item>
+                <n-form-item label="Timeout (seconds)" path="monitoring_timeout_sec">
+                    <n-input-number v-model:value="monitoring.timeout_sec" placeholder="5" />
+                </n-form-item>
+                <n-form-item label="Retry count" path="monitoring_retry_count">
+                    <n-input-number v-model:value="monitoring.retry_count" placeholder="1" />
+                </n-form-item>
+                <n-form-item label="Webhook connectivity">
+                    <n-button
+                        secondary
+                        type="primary"
+                        :loading="monitoring_test_loading"
+                        :disabled="!monitoring.webhook_url"
+                        @click="testMonitoringWebhook"
+                    >
+                        Test webhook
+                    </n-button>
+                </n-form-item>
+            </n-form>
+        </n-card>
+
         <n-card title="Indicator settings">
             <n-form ref="indicatorFormRef" :model="indicator" :rules="rules" label-width="auto"
                 require-mark-placement="right-hanging" :style="{
@@ -394,10 +428,12 @@ const filterFormRef = ref<FormInst | null>(null)
 const exchangeFormRef = ref<FormInst | null>(null)
 const dcaFormRef = ref<FormInst | null>(null)
 const autopilotFormRef = ref<FormInst | null>(null)
+const monitoringFormRef = ref<FormInst | null>(null)
 const indicatorFormRef = ref<FormInst | null>(null)
 const message = useMessage()
 const router = useRouter()
 const isLoading = ref(true)
+const monitoring_test_loading = ref(false)
 const submitAttempted = ref(false)
 const DEFAULT_SYMSIGNAL_URL = "https://stream.3cqs.com"
 const DEFAULT_SYMSIGNAL_VERSION = "3.0.1"
@@ -477,6 +513,13 @@ const sellOrderTypeOptions = [
     {
         label: 'Limit',
         value: 'limit',
+    },
+]
+
+const monitoringChannelOptions = [
+    {
+        label: 'Webhook',
+        value: 'webhook',
     },
 ]
 
@@ -638,6 +681,14 @@ const autopilot = ref({
     medium_sl: null,
     medium_sl_timeout: null,
     medium_threshold: null,
+})
+
+const monitoring = ref({
+    enabled: false,
+    channel: 'webhook',
+    webhook_url: null,
+    timeout_sec: 5,
+    retry_count: 1,
 })
 
 const indicator = ref({
@@ -1117,6 +1168,13 @@ async function fetchDefaultValues() {
             autopilot.value.medium_sl = toNumberOrNull(response.data.autopilot_medium_sl)
             autopilot.value.medium_sl_timeout = toNumberOrNull(response.data.autopilot_medium_sl_timeout)
             autopilot.value.medium_threshold = toNumberOrNull(response.data.autopilot_medium_threshold)
+            monitoring.value.enabled = parseBooleanString(response.data.monitoring_enabled) ?? false
+            monitoring.value.channel = response.data.monitoring_channel || 'webhook'
+            monitoring.value.webhook_url = response.data.monitoring_webhook_url || null
+            monitoring.value.timeout_sec =
+                toNumberOrNull(response.data.monitoring_timeout_sec) ?? 5
+            monitoring.value.retry_count =
+                toNumberOrNull(response.data.monitoring_retry_count) ?? 1
             indicator.value.housekeeping_interval = toNumberOrNull(response.data.housekeeping_interval)
             indicator.value.upnl_housekeeping_interval = toNumberOrNull(response.data.upnl_housekeeping_interval) ?? 0
             indicator.value.history_from_data = toNumberOrNull(response.data.history_from_data)
@@ -1295,6 +1353,11 @@ async function submitForm() {
             autopilot_medium_sl: JSON.stringify({ 'value': autopilot.value.medium_sl || false, 'type': "float" }),
             autopilot_medium_sl_timeout: JSON.stringify({ 'value': autopilot.value.medium_sl_timeout || false, 'type': "int" }),
             autopilot_medium_threshold: JSON.stringify({ 'value': autopilot.value.medium_threshold || false, 'type': "int" }),
+            monitoring_enabled: JSON.stringify({ 'value': monitoring.value.enabled || false, 'type': "bool" }),
+            monitoring_channel: JSON.stringify({ 'value': monitoring.value.channel || 'webhook', 'type': "str" }),
+            monitoring_webhook_url: JSON.stringify({ 'value': monitoring.value.webhook_url || false, 'type': "str" }),
+            monitoring_timeout_sec: JSON.stringify({ 'value': monitoring.value.timeout_sec ?? 5, 'type': "int" }),
+            monitoring_retry_count: JSON.stringify({ 'value': monitoring.value.retry_count ?? 1, 'type': "int" }),
             housekeeping_interval: JSON.stringify({ 'value': indicator.value.housekeeping_interval || false, 'type': "int" }),
             upnl_housekeeping_interval: JSON.stringify({ 'value': indicator.value.upnl_housekeeping_interval ?? false, 'type': "int" }),
             history_from_data: JSON.stringify({ 'value': indicator.value.history_from_data || false, 'type': "int" }),
@@ -1338,6 +1401,37 @@ async function submitForm() {
     }
 }
 
+async function testMonitoringWebhook() {
+    if (!monitoring.value.webhook_url) {
+        message.error('Please add a monitoring webhook URL first.')
+        return
+    }
+
+    monitoring_test_loading.value = true
+    try {
+        const response = await axios.post(
+            `http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/monitoring/test`,
+            {
+                monitoring_channel: monitoring.value.channel || 'webhook',
+                monitoring_webhook_url: monitoring.value.webhook_url,
+                monitoring_timeout_sec: monitoring.value.timeout_sec ?? 5,
+                monitoring_retry_count: monitoring.value.retry_count ?? 1,
+            },
+        )
+        message.success(response.data?.message || 'Monitoring webhook test sent.')
+    } catch (error) {
+        if (error.response) {
+            message.error(error.response.data?.error || 'Monitoring webhook test failed.')
+        } else if (error.request) {
+            message.error('No response from server. Please try again later.')
+        } else {
+            message.error(`Request failed: ${error.message}`)
+        }
+    } finally {
+        monitoring_test_loading.value = false
+    }
+}
+
 function handleValidateButtonClick(e: MouseEvent) {
     e.preventDefault()
     submitAttempted.value = true
@@ -1348,6 +1442,7 @@ function handleValidateButtonClick(e: MouseEvent) {
         exchangeFormRef.value,
         dcaFormRef.value,
         autopilotFormRef.value,
+        monitoringFormRef.value,
         indicatorFormRef.value,
     ].filter((form): form is FormInst => form !== null)
 

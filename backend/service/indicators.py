@@ -17,9 +17,7 @@ class Indicators:
         self._ema_cache: dict[
             tuple[str, str, tuple[int, ...]], tuple[float | None, dict[str, Any]]
         ] = {}
-        self._close_cache: dict[
-            tuple[str, str, int], tuple[float | None, Any]
-        ] = {}
+        self._close_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
 
     # async def calculate_bbands_cross(self, symbol, timerange, length):
     #     result = "none"

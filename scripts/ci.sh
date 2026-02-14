@@ -30,7 +30,7 @@ run_step() {
 set +e
 run_step "Backend format (black --check)" "$PYTHON_BIN" -m black --check "$ROOT_DIR/backend"
 run_step "Backend lint (ruff)" "$PYTHON_BIN" -m ruff check "$ROOT_DIR/backend"
-run_step "Backend import sort (isort --check-only)" "$PYTHON_BIN" -m isort --check-only "$ROOT_DIR/backend"
+run_step "Backend import sort (isort --check-only)" "$PYTHON_BIN" -m isort --profile black --check-only "$ROOT_DIR/backend"
 run_step "Backend type check (mypy)" env MYPYPATH="$ROOT_DIR/backend" "$PYTHON_BIN" -m mypy --config-file "$ROOT_DIR/mypy.ini" "$ROOT_DIR/backend"
 run_step "Backend tests (pytest)" env \
     MOONWALKER_DB_URL=sqlite:////tmp/moonwalker-test.sqlite \
