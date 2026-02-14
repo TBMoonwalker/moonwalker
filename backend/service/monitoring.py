@@ -1,6 +1,7 @@
 """Trade monitoring and outbound messaging helpers."""
 
 import asyncio
+import html
 import json
 from typing import Any
 
@@ -109,26 +110,29 @@ class MonitoringService:
         bot = TelegramClient(MemorySession(), api_id, api_hash)
         await bot.start(bot_token=bot_token)
         try:
-            await bot.send_message(entity=entity, message=text)
+            await bot.send_message(entity=entity, message=text, parse_mode="html")
         finally:
             await bot.disconnect()
 
     def _build_telegram_text(
         self, event_type: str, payload: dict[str, Any], config: dict[str, Any]
     ) -> str:
-        """Build a compact human-readable Telegram message."""
-        symbol = payload.get("symbol", "-")
-        side = payload.get("side", "-")
-        exchange = config.get("exchange", "-")
+        """Build an HTML-formatted Telegram message."""
+        symbol = html.escape(str(payload.get("symbol", "-")))
+        side = html.escape(str(payload.get("side", "-")))
+        exchange = html.escape(str(config.get("exchange", "-")))
         dry_run = bool(config.get("dry_run", True))
-        details = json.dumps(payload, default=str)
+        event = html.escape(str(event_type))
+        details = html.escape(json.dumps(payload, default=str, indent=2))
+        status = "yes" if dry_run else "no"
         return (
-            f"Moonwalker {event_type}\n"
-            f"Exchange: {exchange}\n"
-            f"Symbol: {symbol}\n"
-            f"Side: {side}\n"
-            f"Dry-run: {dry_run}\n"
-            f"Details: {details}"
+            f"<b>Moonwalker {event}</b>\n"
+            f"<b>Exchange:</b> {exchange}\n"
+            f"<b>Symbol:</b> {symbol}\n"
+            f"<b>Side:</b> {side}\n"
+            f"<b>Dry-run:</b> {status}\n\n"
+            f"<b>Details</b>\n"
+            f"<pre>{details}</pre>"
         )
 
     def _resolve_telegram_entity(self, chat_id: str) -> int | str:
