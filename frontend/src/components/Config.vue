@@ -11,6 +11,23 @@
                 <n-form-item label="Debug mode" path="debug" label-placement="left">
                     <n-checkbox v-model:checked="general.debug" />
                 </n-form-item>
+                <n-form-item label="Advanced configuration" label-placement="left">
+                    <n-switch v-model:value="showAdvancedGeneral" />
+                </n-form-item>
+                <template v-if="showAdvancedGeneral">
+                    <n-form-item label="WebSocket watchdog enabled" path="ws_watchdog_enabled" label-placement="left">
+                        <n-checkbox v-model:checked="general.ws_watchdog_enabled" />
+                    </n-form-item>
+                    <n-form-item label="WebSocket healthcheck interval (ms)" path="ws_healthcheck_interval_ms">
+                        <n-input-number v-model:value="general.ws_healthcheck_interval_ms" :min="1000" />
+                    </n-form-item>
+                    <n-form-item label="WebSocket stale timeout (ms)" path="ws_stale_timeout_ms">
+                        <n-input-number v-model:value="general.ws_stale_timeout_ms" :min="5000" />
+                    </n-form-item>
+                    <n-form-item label="WebSocket reconnect debounce (ms)" path="ws_reconnect_debounce_ms">
+                        <n-input-number v-model:value="general.ws_reconnect_debounce_ms" :min="500" />
+                    </n-form-item>
+                </template>
             </n-form>
         </n-card>
 
@@ -441,6 +458,7 @@ const indicatorFormRef = ref<FormInst | null>(null)
 const message = useMessage()
 const router = useRouter()
 const isLoading = ref(true)
+const showAdvancedGeneral = ref(false)
 const monitoring_test_loading = ref(false)
 const submitAttempted = ref(false)
 const DEFAULT_SYMSIGNAL_URL = "https://stream.3cqs.com"
@@ -596,6 +614,10 @@ const symsignals = [
 const general = ref({
     timezone: null,
     debug: false,
+    ws_watchdog_enabled: false,
+    ws_healthcheck_interval_ms: 5000,
+    ws_stale_timeout_ms: 20000,
+    ws_reconnect_debounce_ms: 2000,
 })
 
 const signal = ref({
@@ -1077,6 +1099,14 @@ async function fetchDefaultValues() {
         if (response.status === 200) {
             general.value.timezone = response.data.timezone || getClientTimezone()
             general.value.debug = parseBooleanString(response.data.debug) ?? false
+            general.value.ws_watchdog_enabled =
+                parseBooleanString(response.data.ws_watchdog_enabled) ?? false
+            general.value.ws_healthcheck_interval_ms =
+                toNumberOrNull(response.data.ws_healthcheck_interval_ms) ?? 5000
+            general.value.ws_stale_timeout_ms =
+                toNumberOrNull(response.data.ws_stale_timeout_ms) ?? 20000
+            general.value.ws_reconnect_debounce_ms =
+                toNumberOrNull(response.data.ws_reconnect_debounce_ms) ?? 2000
             signal.value.signal = response.data.signal
             signal.value.strategy = response.data.signal_strategy
             signal.value.timeframe = response.data.signal_strategy_timeframe
@@ -1304,6 +1334,10 @@ async function submitForm() {
         const formData = {
             timezone: JSON.stringify({ 'value': general.value.timezone || false, 'type': "str" }),
             debug: JSON.stringify({ 'value': general.value.debug || false, 'type': "bool" }),
+            ws_watchdog_enabled: JSON.stringify({ 'value': general.value.ws_watchdog_enabled ?? false, 'type': "bool" }),
+            ws_healthcheck_interval_ms: JSON.stringify({ 'value': general.value.ws_healthcheck_interval_ms ?? 5000, 'type': "int" }),
+            ws_stale_timeout_ms: JSON.stringify({ 'value': general.value.ws_stale_timeout_ms ?? 20000, 'type': "int" }),
+            ws_reconnect_debounce_ms: JSON.stringify({ 'value': general.value.ws_reconnect_debounce_ms ?? 2000, 'type': "int" }),
             signal: JSON.stringify({ 'value': signal.value.signal || false, 'type': "str" }),
             signal_strategy: JSON.stringify({ 'value': dynamicSignalStrategyForm.value.length > 0 ? dynamicSignalStrategyForm.value.map(item => item.value).join(', ') : false, 'type': "str" }),
             signal_strategy_timeframe: JSON.stringify({ 'value': signal.value.timeframe || false, 'type': "str" }),
