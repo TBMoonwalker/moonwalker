@@ -4,7 +4,7 @@
 </template>
 
 <script setup lang="ts">
-import { h, ref, watch } from 'vue'
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
 import { NButton, NButtonGroup, NCard, NDataTable, NDivider, NFlex, NHighlight, NIcon, NInput, NSlider, NTimeline, NTimelineItem, type DataTableColumns, useDialog, useMessage } from 'naive-ui'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { useTradesStore } from '../stores/trades'
@@ -26,6 +26,14 @@ const dialog = useDialog()
 const message = useMessage()
 
 const MAX_VISIBLE_CANDLES = 500
+const viewportWidth = ref(window.innerWidth)
+
+const isMobile = computed(() => viewportWidth.value < 768)
+const isTablet = computed(() => viewportWidth.value >= 768 && viewportWidth.value < 1200)
+
+const handleResize = () => {
+    viewportWidth.value = window.innerWidth
+}
 
 type TimeframeChoice = {
     timerange: string
@@ -177,7 +185,7 @@ const renderExpandIcon = () => {
 
 
 const columns_trades = (): DataTableColumns<RowData> => {
-    return [
+    const columns: DataTableColumns<RowData> = [
         {
             type: 'expand',
             expandable: (rowData) => rowData.symbol != "",
@@ -457,9 +465,39 @@ const columns_trades = (): DataTableColumns<RowData> => {
             }
         },
     ]
+
+    if (isMobile.value) {
+        return columns.filter((column) => {
+            if (!("key" in column)) {
+                return true
+            }
+            return ["symbol", "profit", "action"].includes(String(column.key))
+        })
+    }
+
+    if (isTablet.value) {
+        return columns.filter((column) => {
+            if (!("key" in column)) {
+                return true
+            }
+            return ["symbol", "amount", "profit", "action", "open_date"].includes(
+                String(column.key),
+            )
+        })
+    }
+
+    return columns
 }
 
-const columns_open_trades = columns_trades()
+const columns_open_trades = computed(() => columns_trades())
+
+onMounted(() => {
+    window.addEventListener('resize', handleResize)
+})
+
+onUnmounted(() => {
+    window.removeEventListener('resize', handleResize)
+})
 
 </script>
 

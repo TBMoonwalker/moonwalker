@@ -4,7 +4,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref, watch, reactive } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { type DataTableColumns, NDataTable } from 'naive-ui'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { useTradesStore } from '../stores/trades'
@@ -26,6 +26,13 @@ const pageReactive = reactive({
         return `Total ${itemCount} trades`
     }
 });
+const viewportWidth = ref(window.innerWidth)
+const isMobile = computed(() => viewportWidth.value < 768)
+const isTablet = computed(() => viewportWidth.value >= 768 && viewportWidth.value < 1200)
+
+const handleResize = () => {
+    viewportWidth.value = window.innerWidth
+}
 
 const updatePageCount = () => {
     pageReactive.pageCount = Math.ceil(closed_trades_length.value / pageReactive.pageSize)
@@ -75,10 +82,6 @@ watch(closed_trade_data.data, async (newData) => {
 
 }, { immediate: true })
 
-onMounted(async () => {
-    await refreshLength()
-})
-
 type RowData = {
     id: number
     symbol: string
@@ -100,7 +103,7 @@ function row_classes(row: RowData) {
 }
 
 const columns_trades = (): DataTableColumns<RowData> => {
-    return [
+    const columns: DataTableColumns<RowData> = [
         {
             title: '#',
             key: 'key',
@@ -141,9 +144,45 @@ const columns_trades = (): DataTableColumns<RowData> => {
             key: 'close_date'
         },
     ]
+
+    if (isMobile.value) {
+        return columns.filter((column) => {
+            if (!("key" in column)) {
+                return true
+            }
+            return ["symbol", "profit_percent", "close_date"].includes(String(column.key))
+        })
+    }
+
+    if (isTablet.value) {
+        return columns.filter((column) => {
+            if (!("key" in column)) {
+                return true
+            }
+            return [
+                "symbol",
+                "amount",
+                "profit",
+                "profit_percent",
+                "so_count",
+                "close_date",
+            ].includes(String(column.key))
+        })
+    }
+
+    return columns
 }
 
-const columns_closed_trades = columns_trades()
+const columns_closed_trades = computed(() => columns_trades())
+
+onMounted(async () => {
+    window.addEventListener('resize', handleResize)
+    await refreshLength()
+})
+
+onUnmounted(() => {
+    window.removeEventListener('resize', handleResize)
+})
 
 </script>
 
