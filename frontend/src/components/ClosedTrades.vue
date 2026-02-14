@@ -120,6 +120,9 @@ const columns_trades = (): DataTableColumns<RowData> => {
         {
             title: 'Profit',
             key: 'profit',
+            render: (rowData) => {
+                return Number(rowData.profit ?? 0).toFixed(2)
+            },
         },
         {
             title: 'Cost',
@@ -129,6 +132,9 @@ const columns_trades = (): DataTableColumns<RowData> => {
             title: 'PNL %',
             key: 'profit_percent',
             className: 'profit',
+            render: (rowData) => {
+                return `${Number(rowData.profit_percent ?? 0).toFixed(2)} %`
+            },
         },
         {
             title: 'SO',
