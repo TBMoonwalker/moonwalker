@@ -336,13 +336,41 @@ class Exchange:
             raise ValueError(f"No market taker fee available for symbol {symbol}")
         return float(taker_fee)
 
+    @staticmethod
+    def __is_matching_order_id(
+        candidate_order_id: Any, expected_order_id: str
+    ) -> bool:
+        """Compare order ids safely across string/int exchange payloads."""
+        if candidate_order_id is None:
+            return False
+        return str(candidate_order_id) == str(expected_order_id)
+
+    async def __fetch_my_trades_for_order(
+        self, symbol: str, orderid: str, since: int
+    ) -> list[dict[str, Any]]:
+        """Fetch account trades and filter to one order id."""
+        try:
+            orderlist = await self.exchange.fetch_my_trades(symbol, since, 1000)
+        except TypeError:
+            # Some CCXT adapters ignore limit argument.
+            orderlist = await self.exchange.fetch_my_trades(symbol, since)
+        return [
+            order
+            for order in (orderlist or [])
+            if self.__is_matching_order_id(order.get("order"), orderid)
+        ]
+
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
-    async def __get_trades_for_symbol(self, symbol: str, orderid: str) -> dict | None:
+    async def __get_trades_for_symbol(
+        self, symbol: str, orderid: str, order_timestamp: int | None = None
+    ) -> dict | None:
         trade = None
         await asyncio.sleep(1)
-        since = self.exchange.milliseconds() - (
-            self.config.get("order_check_range", 5) * 1000
-        )  # X seconds from now
+        order_check_range_seconds = int(self.config.get("order_check_range", 300))
+        since = self.exchange.milliseconds() - (order_check_range_seconds * 1000)
+        if order_timestamp:
+            # Ensure we include all partial fills from order placement onward.
+            since = min(int(order_timestamp) - 1000, since)
         try:
             trade = {}
             amount = 0.0
@@ -350,32 +378,51 @@ class Exchange:
             cost = 0.0
             base_fee = 0.0
             matched_orders: list[dict[str, Any]] = []
-            orderlist = await self.exchange.fetch_my_trades(symbol, since)
-            if orderlist:
-                logging.debug(
-                    f"Orderlist for {symbol} with orderid: {orderid}: {orderlist}"
+
+            # Prefer direct per-order trade lookup where supported by exchange.
+            try:
+                fetched = await self.exchange.fetch_order_trades(orderid, symbol)
+                matched_orders = [
+                    order
+                    for order in (fetched or [])
+                    if self.__is_matching_order_id(order.get("order"), orderid)
+                ]
+            except Exception:
+                matched_orders = []
+
+            if not matched_orders:
+                matched_orders = await self.__fetch_my_trades_for_order(
+                    symbol, orderid, since
+                )
+            if not matched_orders and order_timestamp:
+                # Fallback for delayed split fills that exceed configured range.
+                matched_orders = await self.__fetch_my_trades_for_order(
+                    symbol, orderid, int(order_timestamp) - 86_400_000
                 )
 
-                for order in orderlist:
-                    # Avoid merging different orders in high volatility scenarios
-                    if order["order"] == orderid:
-                        matched_orders.append(order)
-                        amount += order["amount"]
-                        fee_data = order.get("fee") or {}
-                        fee_cost = float(fee_data.get("cost") or 0.0)
-                        fee += fee_cost
-                        cost += order["cost"]
-                        fee_currency = str(fee_data.get("currency") or "").upper()
-                        base_asset = (
-                            str(order.get("symbol", symbol)).split("/")[0].upper()
-                        )
-                        side = str(order.get("side") or "").lower()
-                        if side == "buy" and fee_currency == base_asset:
-                            base_fee += fee_cost
+            if matched_orders:
+                logging.debug(
+                    "Orderlist for %s with orderid: %s: %s",
+                    symbol,
+                    orderid,
+                    matched_orders,
+                )
 
-                if not matched_orders:
-                    return None
-                last_order = matched_orders[-1]
+                for order in matched_orders:
+                    amount += float(order["amount"])
+                    fee_data = order.get("fee") or {}
+                    fee_cost = float(fee_data.get("cost") or 0.0)
+                    fee += fee_cost
+                    cost += float(order["cost"])
+                    fee_currency = str(fee_data.get("currency") or "").upper()
+                    base_asset = str(order.get("symbol", symbol)).split("/")[0].upper()
+                    side = str(order.get("side") or "").lower()
+                    if side == "buy" and fee_currency == base_asset:
+                        base_fee += fee_cost
+
+                last_order = max(
+                    matched_orders, key=lambda o: int(o.get("timestamp") or 0)
+                )
 
                 trade["cost"] = cost
                 trade["fee"] = fee
@@ -406,7 +453,9 @@ class Exchange:
     async def __parse_order_status(self, order: dict[str, Any]) -> dict[str, Any]:
         data = {}
 
-        trade = await self.__get_trades_for_symbol(order["symbol"], order["id"])
+        trade = await self.__get_trades_for_symbol(
+            order["symbol"], order["id"], int(order.get("timestamp") or 0)
+        )
         if trade:
             data["timestamp"] = trade["timestamp"]
             data["amount"] = float(trade["amount"])
