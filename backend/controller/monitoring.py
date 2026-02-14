@@ -16,8 +16,8 @@ logging = helper.LoggerFactory.get_logger(
 
 @controller.route("/monitoring/test", methods=["POST"])
 @route_cors(allow_origin="*")
-async def test_monitoring_webhook() -> tuple[Any, int]:
-    """Send a monitoring test message to the configured webhook."""
+async def test_monitoring_channel() -> tuple[Any, int]:
+    """Send a monitoring test message for the configured channel."""
     payload = await request.get_json(silent=True) or {}
     if not isinstance(payload, dict):
         return jsonify({"error": "Payload must be a JSON object."}), 400

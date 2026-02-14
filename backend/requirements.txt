@@ -4,6 +4,7 @@ pandas==2.3.3
 Quart==0.20.0
 quart-cors==0.8.0
 python-socketio==5.16.1
+Telethon==1.41.1
 ta-lib==0.6.8
 tenacity==9.1.4
 tortoise-orm==1.0.0

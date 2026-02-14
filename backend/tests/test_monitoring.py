@@ -98,6 +98,68 @@ async def test_monitoring_test_notification_requires_webhook_url():
 
 
 @pytest.mark.asyncio
+async def test_monitoring_service_sends_telegram_when_enabled(monkeypatch):
+    service = MonitoringService()
+    calls = []
+
+    async def fake_send_telegram(api_id, api_hash, bot_token, chat_id, text):
+        calls.append((api_id, api_hash, bot_token, chat_id, text))
+
+    monkeypatch.setattr(service, "_send_telegram", fake_send_telegram)
+
+    await service.notify_trade(
+        "trade.buy",
+        {"symbol": "BTC/USDT", "side": "buy"},
+        {
+            "monitoring_enabled": True,
+            "monitoring_channel": "telegram",
+            "monitoring_telegram_api_id": 12345,
+            "monitoring_telegram_api_hash": "hash123",
+            "monitoring_telegram_bot_token": "token123",
+            "monitoring_telegram_chat_id": "987654321",
+            "monitoring_retry_count": 0,
+        },
+    )
+
+    assert len(calls) == 1
+    sent_api_id, sent_api_hash, sent_token, sent_chat_id, sent_text = calls[0]
+    assert sent_api_id == 12345
+    assert sent_api_hash == "hash123"
+    assert sent_token == "token123"
+    assert sent_chat_id == "987654321"
+    assert "Moonwalker trade.buy" in sent_text
+
+
+@pytest.mark.asyncio
+async def test_monitoring_service_fails_without_telegram_credentials():
+    service = MonitoringService()
+    success, _ = await service.send_test_notification(
+        {
+            "monitoring_channel": "telegram",
+            "monitoring_telegram_api_id": 0,
+            "monitoring_telegram_api_hash": "",
+            "monitoring_telegram_bot_token": "",
+            "monitoring_telegram_chat_id": "",
+            "monitoring_retry_count": 0,
+        },
+    )
+
+    assert success is False
+
+
+def test_resolve_telegram_entity_numeric():
+    service = MonitoringService()
+    assert service._resolve_telegram_entity("-1001234567890") == -1001234567890
+
+
+def test_resolve_telegram_entity_username():
+    service = MonitoringService()
+    assert (
+        service._resolve_telegram_entity("@moonwalker_channel") == "@moonwalker_channel"
+    )
+
+
+@pytest.mark.asyncio
 async def test_orders_buy_triggers_monitoring_notification(tmp_path, monkeypatch):
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"

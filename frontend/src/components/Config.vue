@@ -334,8 +334,22 @@
                 <n-form-item label="Channel" path="monitoring_channel">
                     <n-select v-model:value="monitoring.channel" :options="monitoringChannelOptions" />
                 </n-form-item>
-                <n-form-item label="Webhook URL" path="monitoring_webhook_url">
+                <n-form-item v-if="monitoring.channel === 'webhook'" label="Webhook URL" path="monitoring_webhook_url">
                     <n-input v-model:value="monitoring.webhook_url" placeholder="https://example.com/webhook" />
+                </n-form-item>
+                <n-form-item v-if="monitoring.channel === 'telegram'" label="Telegram Bot Token" path="monitoring_telegram_bot_token">
+                    <n-input v-model:value="monitoring.telegram_bot_token" type="password" show-password-on="click"
+                        placeholder="123456:ABC-DEF..." />
+                </n-form-item>
+                <n-form-item v-if="monitoring.channel === 'telegram'" label="Telegram API ID" path="monitoring_telegram_api_id">
+                    <n-input-number v-model:value="monitoring.telegram_api_id" placeholder="1234567" />
+                </n-form-item>
+                <n-form-item v-if="monitoring.channel === 'telegram'" label="Telegram API Hash" path="monitoring_telegram_api_hash">
+                    <n-input v-model:value="monitoring.telegram_api_hash" type="password" show-password-on="click"
+                        placeholder="0123456789abcdef0123456789abcdef" />
+                </n-form-item>
+                <n-form-item v-if="monitoring.channel === 'telegram'" label="Telegram Chat ID" path="monitoring_telegram_chat_id">
+                    <n-input v-model:value="monitoring.telegram_chat_id" placeholder="e.g. 123456789 or -100123..." />
                 </n-form-item>
                 <n-form-item label="Timeout (seconds)" path="monitoring_timeout_sec">
                     <n-input-number v-model:value="monitoring.timeout_sec" placeholder="5" />
@@ -343,15 +357,15 @@
                 <n-form-item label="Retry count" path="monitoring_retry_count">
                     <n-input-number v-model:value="monitoring.retry_count" placeholder="1" />
                 </n-form-item>
-                <n-form-item label="Webhook connectivity">
+                <n-form-item label="Channel connectivity">
                     <n-button
                         secondary
                         type="primary"
                         :loading="monitoring_test_loading"
-                        :disabled="!monitoring.webhook_url"
-                        @click="testMonitoringWebhook"
+                        :disabled="!canTestMonitoringChannel()"
+                        @click="testMonitoringChannel"
                     >
-                        Test webhook
+                        Test channel
                     </n-button>
                 </n-form-item>
             </n-form>
@@ -521,6 +535,10 @@ const monitoringChannelOptions = [
         label: 'Webhook',
         value: 'webhook',
     },
+    {
+        label: 'Telegram',
+        value: 'telegram',
+    },
 ]
 
 const symsignals = [
@@ -687,6 +705,10 @@ const monitoring = ref({
     enabled: false,
     channel: 'webhook',
     webhook_url: null,
+    telegram_bot_token: null,
+    telegram_api_id: null,
+    telegram_api_hash: null,
+    telegram_chat_id: null,
     timeout_sec: 5,
     retry_count: 1,
 })
@@ -1171,6 +1193,14 @@ async function fetchDefaultValues() {
             monitoring.value.enabled = parseBooleanString(response.data.monitoring_enabled) ?? false
             monitoring.value.channel = response.data.monitoring_channel || 'webhook'
             monitoring.value.webhook_url = response.data.monitoring_webhook_url || null
+            monitoring.value.telegram_bot_token =
+                response.data.monitoring_telegram_bot_token || null
+            monitoring.value.telegram_api_id =
+                toNumberOrNull(response.data.monitoring_telegram_api_id)
+            monitoring.value.telegram_api_hash =
+                response.data.monitoring_telegram_api_hash || null
+            monitoring.value.telegram_chat_id =
+                response.data.monitoring_telegram_chat_id || null
             monitoring.value.timeout_sec =
                 toNumberOrNull(response.data.monitoring_timeout_sec) ?? 5
             monitoring.value.retry_count =
@@ -1356,6 +1386,10 @@ async function submitForm() {
             monitoring_enabled: JSON.stringify({ 'value': monitoring.value.enabled || false, 'type': "bool" }),
             monitoring_channel: JSON.stringify({ 'value': monitoring.value.channel || 'webhook', 'type': "str" }),
             monitoring_webhook_url: JSON.stringify({ 'value': monitoring.value.webhook_url || false, 'type': "str" }),
+            monitoring_telegram_api_id: JSON.stringify({ 'value': monitoring.value.telegram_api_id || false, 'type': "int" }),
+            monitoring_telegram_api_hash: JSON.stringify({ 'value': monitoring.value.telegram_api_hash || false, 'type': "str" }),
+            monitoring_telegram_bot_token: JSON.stringify({ 'value': monitoring.value.telegram_bot_token || false, 'type': "str" }),
+            monitoring_telegram_chat_id: JSON.stringify({ 'value': monitoring.value.telegram_chat_id || false, 'type': "str" }),
             monitoring_timeout_sec: JSON.stringify({ 'value': monitoring.value.timeout_sec ?? 5, 'type': "int" }),
             monitoring_retry_count: JSON.stringify({ 'value': monitoring.value.retry_count ?? 1, 'type': "int" }),
             housekeeping_interval: JSON.stringify({ 'value': indicator.value.housekeeping_interval || false, 'type': "int" }),
@@ -1401,9 +1435,21 @@ async function submitForm() {
     }
 }
 
-async function testMonitoringWebhook() {
-    if (!monitoring.value.webhook_url) {
-        message.error('Please add a monitoring webhook URL first.')
+function canTestMonitoringChannel(): boolean {
+    if (monitoring.value.channel === 'telegram') {
+        return Boolean(
+            monitoring.value.telegram_api_id &&
+            monitoring.value.telegram_api_hash &&
+            monitoring.value.telegram_bot_token &&
+            monitoring.value.telegram_chat_id
+        )
+    }
+    return Boolean(monitoring.value.webhook_url)
+}
+
+async function testMonitoringChannel() {
+    if (!canTestMonitoringChannel()) {
+        message.error('Please add valid monitoring channel settings first.')
         return
     }
 
@@ -1414,14 +1460,18 @@ async function testMonitoringWebhook() {
             {
                 monitoring_channel: monitoring.value.channel || 'webhook',
                 monitoring_webhook_url: monitoring.value.webhook_url,
+                monitoring_telegram_api_id: monitoring.value.telegram_api_id,
+                monitoring_telegram_api_hash: monitoring.value.telegram_api_hash,
+                monitoring_telegram_bot_token: monitoring.value.telegram_bot_token,
+                monitoring_telegram_chat_id: monitoring.value.telegram_chat_id,
                 monitoring_timeout_sec: monitoring.value.timeout_sec ?? 5,
                 monitoring_retry_count: monitoring.value.retry_count ?? 1,
             },
         )
-        message.success(response.data?.message || 'Monitoring webhook test sent.')
+        message.success(response.data?.message || 'Monitoring channel test sent.')
     } catch (error) {
         if (error.response) {
-            message.error(error.response.data?.error || 'Monitoring webhook test failed.')
+            message.error(error.response.data?.error || 'Monitoring channel test failed.')
         } else if (error.request) {
             message.error('No response from server. Please try again later.')
         } else {
