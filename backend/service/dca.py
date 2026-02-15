@@ -395,23 +395,6 @@ class Dca:
                 max_safety_orders,
                 trades["safetyorders_count"],
             )
-            logging_json = {
-                "type": "dca_check",
-                "symbol": trades["symbol"],
-                "botname": trades["bot"],
-                "so_orders": trades["safetyorders_count"],
-                "last_so_price": last_so_price,
-                "new_so_size": safety_order_size,
-                "price_deviation": next_so_percentage,
-                "actual_pnl": actual_pnl,
-                "new_so": False,
-                "max_so_reached": True,
-                "dynamic_so_scale": dynamic_so_details.get("scale", 1.0),
-                "dynamic_so_window": dynamic_so_details.get("window", "off"),
-                "dynamic_so_drawdown": dynamic_so_details.get("drawdown_ratio", 0.0),
-                "dynamic_so_loss": dynamic_so_details.get("loss_ratio", 0.0),
-            }
-            await self.statistic.update_statistic_data(logging_json)
 
     async def process_ticker_data(
         self, ticker: dict[str, Any], config: dict[str, Any]

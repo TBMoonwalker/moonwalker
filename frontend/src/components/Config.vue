@@ -31,6 +31,45 @@
             </n-form>
         </n-card>
 
+        
+
+        <n-card title="Exchange settings">
+            <n-form ref="exchangeFormRef" :model="exchange" :rules="rules" label-width="auto"
+                require-mark-placement="right-hanging" :style="{
+                    maxWidth: '640px',
+                }">
+                <n-form-item label="Exchange" path="name">
+                    <n-select v-model:value="exchange.name" placeholder="Select" :options="exchanges" />
+                </n-form-item>
+                <n-form-item label="Timerange" path="timeframe">
+                    <n-select v-model:value="exchange.timeframe" placeholder="Select" :options="timerange" />
+                </n-form-item>
+                <n-form-item label="Key" path="key">
+                    <n-input v-model:value="exchange.key" type="password" show-password-on="click"
+                        placeholder="Exchange Key" />
+                </n-form-item>
+                <n-form-item label="Secret" path="secret">
+                    <n-input v-model:value="exchange.secret" type="password" show-password-on="click"
+                        placeholder="Exchange Secret" />
+                </n-form-item>
+                <n-form-item label="Exchange Hostname" path="exchange_hostname">
+                    <n-input v-model:value="exchange.exchange_hostname" placeholder="e.g. bybit.eu" />
+                </n-form-item>
+                <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="left">
+                    <n-checkbox v-model:checked="exchange.dry_run" />
+                </n-form-item>
+                <n-form-item label="Currency" path="currency">
+                    <n-select v-model:value="exchange.currency" placeholder="Select" :options="currency" />
+                </n-form-item>
+                <n-form-item label="Market" path="market">
+                    <n-select v-model:value="exchange.market" placeholder="Select" :options="market" />
+                </n-form-item>
+                <n-form-item label="Use OHCLV" path="watcher" label-placement="left">
+                    <n-checkbox v-model:checked="exchange.watcher_ohlcv" />
+                </n-form-item>
+            </n-form>
+        </n-card>
+
         <n-card title=" Signal settings">
             <n-form ref="signalFormRef" :model="signal" :rules="rules" label-width="auto"
                 require-mark-placement="right-hanging" :style="{
@@ -98,14 +137,14 @@
 
                 <!-- Dynamic check for Strategy settings -->
                 <n-form-item label="Signal initial buy strategy" path="selectValue" label-placement="left">
-                    <n-checkbox v-model:checked="signal.strategy_enabled" @change="handle_signal_strategy_select" />
+                    <n-checkbox v-model:checked="signal.strategy_enabled" />
                 </n-form-item>
-                <template v-for="(index) in dynamicSignalStrategyForm" :key="index">
-                    <n-form-item :label="'Strategy'" :path="'strategy.' + index">
+                <template v-if="signal.strategy_enabled">
+                    <n-form-item label="Strategy" path="strategy">
                         <n-select v-model:value="signal.strategy" placeholder="Select"
                             :options="signal.strategy_plugins" />
                     </n-form-item>
-                    <n-form-item label="Timerange" :path="'timerange.' + index">
+                    <n-form-item label="Timerange" path="signal_strategy_timeframe">
                         <n-select v-model:value="signal.timeframe" placeholder="Select" :options="timerange" />
                     </n-form-item>
                 </template>
@@ -148,42 +187,7 @@
             </n-form>
         </n-card>
 
-        <n-card title="Exchange settings">
-            <n-form ref="exchangeFormRef" :model="exchange" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Exchange" path="name">
-                    <n-select v-model:value="exchange.name" placeholder="Select" :options="exchanges" />
-                </n-form-item>
-                <n-form-item label="Timerange" path="timeframe">
-                    <n-select v-model:value="exchange.timeframe" placeholder="Select" :options="timerange" />
-                </n-form-item>
-                <n-form-item label="Key" path="key">
-                    <n-input v-model:value="exchange.key" type="password" show-password-on="click"
-                        placeholder="Exchange Key" />
-                </n-form-item>
-                <n-form-item label="Secret" path="secret">
-                    <n-input v-model:value="exchange.secret" type="password" show-password-on="click"
-                        placeholder="Exchange Secret" />
-                </n-form-item>
-                <n-form-item label="Exchange Hostname" path="exchange_hostname">
-                    <n-input v-model:value="exchange.exchange_hostname" placeholder="e.g. bybit.eu" />
-                </n-form-item>
-                <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="left">
-                    <n-checkbox v-model:checked="exchange.dry_run" />
-                </n-form-item>
-                <n-form-item label="Currency" path="currency">
-                    <n-select v-model:value="exchange.currency" placeholder="Select" :options="currency" />
-                </n-form-item>
-                <n-form-item label="Market" path="market">
-                    <n-select v-model:value="exchange.market" placeholder="Select" :options="market" />
-                </n-form-item>
-                <n-form-item label="Use OHCLV" path="watcher" label-placement="left">
-                    <n-checkbox v-model:checked="exchange.watcher_ohlcv" />
-                </n-form-item>
-            </n-form>
-        </n-card>
+        
 
         <n-card title="DCA settings">
             <n-form ref="dcaFormRef" :model="dca" :rules="rules" label-width="auto" require-mark-placement="right-hanging"
@@ -441,7 +445,6 @@ function getClientTimezone(): string {
 }
 
 // Signal strategy
-const dynamicSignalStrategyForm = ref<dynamicSelectItem[]>([])
 const dynamicSymSignalSettingsForm = ref<dynamicSelectItem[]>([])
 const dynamicAsapSignalSettingsForm = ref<dynamicSelectItem[]>([])
 const dynamicDCAForm = ref<dynamicSelectItem[]>([])
@@ -847,6 +850,52 @@ function parseStructuredConfigValue(raw: unknown): Record<string, unknown> | nul
     }
 }
 
+const VOLUME_MULTIPLIERS: Record<string, number> = {
+    K: 1_000,
+    M: 1_000_000,
+    B: 1_000_000_000,
+    T: 1_000_000_000_000,
+}
+
+function parseVolumeLimitToNumber(raw: unknown): number | null {
+    const parsed = parseStructuredConfigValue(raw)
+    if (!parsed) {
+        return null
+    }
+    const range = String(parsed.range || '').toUpperCase()
+    const size = Number(parsed.size)
+    const multiplier = VOLUME_MULTIPLIERS[range]
+    if (!Number.isFinite(size) || !multiplier) {
+        return null
+    }
+    return size * multiplier
+}
+
+function buildVolumeConfig(rawVolume: number | null): Record<string, unknown> | false {
+    if (rawVolume === null || rawVolume === undefined) {
+        return false
+    }
+    const value = Number(rawVolume)
+    if (!Number.isFinite(value) || value <= 0) {
+        return false
+    }
+
+    const ranges: Array<{ range: string; multiplier: number }> = [
+        { range: 'T', multiplier: 1_000_000_000_000 },
+        { range: 'B', multiplier: 1_000_000_000 },
+        { range: 'M', multiplier: 1_000_000 },
+        { range: 'K', multiplier: 1_000 },
+    ]
+    const selected =
+        ranges.find((entry) => value >= entry.multiplier) ||
+        { range: 'K', multiplier: 1_000 }
+
+    return {
+        size: Number((value / selected.multiplier).toFixed(3)),
+        range: selected.range,
+    }
+}
+
 async function fetchAsapSymbolsForCurrency(): Promise<void> {
     signal.value.asap_symbol_options = []
     signal.value.asap_symbol_fetch_error = null
@@ -1030,16 +1079,6 @@ const rules: FormRules = {
     },
 }
 
-function handle_signal_strategy_select() {
-    if (signal.value.strategy && signal.value.strategy_enabled === true) {
-        // Add a new select item when activated
-        dynamicSignalStrategyForm.value.push({ value: null })
-    } else {
-        // Remove the last select item when deactivated
-        dynamicSignalStrategyForm.value.pop()
-    }
-}
-
 function handle_signal_settings_select() {
     if (signal.value.signal == "sym_signals") {
         if (dynamicSymSignalSettingsForm.value.length === 0) {
@@ -1132,13 +1171,20 @@ async function fetchDefaultValues() {
                     value: symbol,
                 }))
             }
-            var filter_indicator = response.data.filter
-            if (filter_indicator) {
-                filter.value.rsi = response.data.filter.rsi_max
-                filter.value.cmc_api_key = response.data.filter.marketcap_cmc_api_key
-            }
+            const filter_indicator = parseStructuredConfigValue(response.data.filter)
+            filter.value.rsi =
+                toNumberOrNull(response.data.rsi_max) ??
+                toNumberOrNull(filter_indicator?.rsi_max) ??
+                null
+            filter.value.cmc_api_key =
+                response.data.marketcap_cmc_api_key ||
+                String(filter_indicator?.marketcap_cmc_api_key || '') ||
+                null
             filter.value.denylist = toTokenOnlyEntries(response.data.pair_denylist)
             filter.value.topcoin_limit = response.data.topcoin_limit
+            filter.value.volume =
+                toNumberOrNull(response.data.volume) ??
+                parseVolumeLimitToNumber(response.data.volume)
             filter.value.btc_pulse = parseBooleanString(response.data.btc_pulse) ?? false
             exchange.value.name = response.data.exchange
             exchange.value.timeframe = response.data.timeframe
@@ -1231,7 +1277,6 @@ async function fetchDefaultValues() {
             // Show hidden strategy fields if enabled
             if (signal.value.strategy) {
                 signal.value.strategy_enabled = true
-                dynamicSignalStrategyForm.value.push({ value: signal.value.strategy })
             }
 
             // Initial call for signal settings
@@ -1339,11 +1384,14 @@ async function submitForm() {
             ws_stale_timeout_ms: JSON.stringify({ 'value': general.value.ws_stale_timeout_ms ?? 20000, 'type': "int" }),
             ws_reconnect_debounce_ms: JSON.stringify({ 'value': general.value.ws_reconnect_debounce_ms ?? 2000, 'type': "int" }),
             signal: JSON.stringify({ 'value': signal.value.signal || false, 'type': "str" }),
-            signal_strategy: JSON.stringify({ 'value': dynamicSignalStrategyForm.value.length > 0 ? dynamicSignalStrategyForm.value.map(item => item.value).join(', ') : false, 'type': "str" }),
+            signal_strategy: JSON.stringify({ 'value': signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false, 'type': "str" }),
             signal_strategy_timeframe: JSON.stringify({ 'value': signal.value.timeframe || false, 'type': "str" }),
             signal_settings: JSON.stringify({ 'value': { 'api_url': signal.value.symsignal_url || false, 'api_key': signal.value.symsignal_key || false, 'api_version': signal.value.symsignal_version || false, 'allowed_signals': signal.value.symsignal_allowedsignals }, 'type': "str" }),
             symbol_list: JSON.stringify({ 'value': normalizedSymbolList, 'type': "str" }),
             filter: JSON.stringify({ 'value': { 'rsi_max': filter.value.rsi || false, 'marketcap_cmc_api_key': filter.value.cmc_api_key || false }, 'type': "str" }),
+            rsi_max: JSON.stringify({ 'value': filter.value.rsi ?? false, 'type': "float" }),
+            marketcap_cmc_api_key: JSON.stringify({ 'value': filter.value.cmc_api_key || false, 'type': "str" }),
+            volume: JSON.stringify({ 'value': buildVolumeConfig(filter.value.volume), 'type': "str" }),
             pair_denylist: JSON.stringify({ 'value': normalizedDenyList, 'type': "str" }),
             topcoin_limit: JSON.stringify({ 'value': filter.value.topcoin_limit || false, 'type': "int" }),
             btc_pulse: JSON.stringify({ 'value': filter.value.btc_pulse || false, 'type': "bool" }),
