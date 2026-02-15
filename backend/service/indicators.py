@@ -150,6 +150,46 @@ class Indicators:
 
         return result
 
+    async def calculate_rsi(
+        self, symbol: str, timerange: str, length: int
+    ) -> float | None:
+        """Calculate RSI for the latest candle."""
+        try:
+            df_raw = await self.data.get_data_for_pair(symbol, timerange, length)
+            if df_raw is None:
+                return None
+            df = self.data.resample_data(df_raw, timerange)
+            if df is None or df.empty:
+                return None
+            rsi = talib.RSI(df["close"], timeperiod=length).dropna()
+            if rsi.empty:
+                return None
+            return float(rsi.iloc[-1])
+        except Exception as e:
+            logging.error(f"RSI cannot be calculated for {symbol}. Cause: {e}")
+            return None
+
+    async def calculate_24h_volume(self, symbol: str) -> float | None:
+        """Calculate approximate quote-volume over the latest 24 hours."""
+        try:
+            # Pull enough candles and aggregate to 1h to derive a stable 24h volume.
+            df_raw = await self.data.get_data_for_pair(symbol, "1m", 1500)
+            if df_raw is None:
+                return None
+            df = self.data.resample_data(df_raw, "1h")
+            if df is None or df.empty:
+                return None
+
+            recent = df.dropna().tail(24)
+            if recent.empty:
+                return None
+
+            quote_volume = (recent["close"] * recent["volume"]).sum()
+            return float(quote_volume)
+        except Exception as e:
+            logging.error(f"24h volume cannot be calculated for {symbol}. Cause: {e}")
+            return None
+
     # async def calculate_ema_slope(self, symbol, timerange, length):
     #     result = "none"
     #     try:
