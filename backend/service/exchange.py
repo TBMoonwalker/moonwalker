@@ -762,6 +762,13 @@ class Exchange:
             order_status = await self.create_spot_limit_sell(order, config)
             if order_status:
                 if order_status.get("requires_market_fallback"):
+                    if not bool(order_status.get("limit_cancel_confirmed", False)):
+                        logging.error(
+                            "Skipping market fallback for %s because limit cancel "
+                            "was not confirmed.",
+                            order.get("symbol"),
+                        )
+                        return None
                     if not bool(config.get("limit_sell_fallback_to_market", True)):
                         logging.info(
                             "Limit sell for %s partially filled, but market fallback is disabled.",
@@ -817,6 +824,13 @@ class Exchange:
                 return order_status
 
             if bool(config.get("limit_sell_fallback_to_market", True)):
+                if order.get("_limit_cancel_confirmed") is False:
+                    logging.error(
+                        "Skipping market fallback for %s because limit cancel "
+                        "was not confirmed.",
+                        order.get("symbol"),
+                    )
+                    return None
                 if not await self.__can_fallback_to_market_sell(order, config):
                     return None
                 logging.info(
@@ -948,6 +962,27 @@ class Exchange:
                 exc,
             )
 
+    async def __cancel_order_and_confirm(self, symbol: str, order_id: str) -> bool:
+        """Cancel an order and confirm it is no longer open."""
+        await self.__cancel_order_safe(symbol, order_id)
+
+        for _ in range(5):
+            try:
+                latest = await self.exchange.fetch_order(order_id, symbol)
+                order_status = str(latest.get("status", "")).lower()
+                if order_status in {"closed", "filled", "canceled", "cancelled"}:
+                    return True
+            except Exception as exc:
+                logging.warning(
+                    "Could not verify cancel status for order %s on %s: %s",
+                    order_id,
+                    symbol,
+                    exc,
+                )
+            await asyncio.sleep(0.5)
+
+        return False
+
     async def create_spot_limit_sell(
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any] | None:
@@ -1068,11 +1103,23 @@ class Exchange:
                     if remaining_amount <= 0:
                         sell_order.update(latest_order_status)
                         return await self.__build_sell_order_status(sell_order)
-                    # Carry the remaining amount into optional market fallback.
-                    order["total_amount"] = remaining_amount
+                    cancel_confirmed = await self.__cancel_order_and_confirm(
+                        resolved_symbol, str(sell_order["id"])
+                    )
+                    if not cancel_confirmed:
+                        logging.error(
+                            "Limit order %s for %s partially filled but could not be "
+                            "confirmed canceled. Skipping market fallback to avoid "
+                            "double-selling.",
+                            sell_order["id"],
+                            resolved_symbol,
+                        )
+                        return None
+
                     partial_fill_status = await self.__parse_order_status(sell_order)
                     return {
                         "requires_market_fallback": True,
+                        "limit_cancel_confirmed": True,
                         "symbol": resolved_symbol,
                         "remaining_amount": remaining_amount,
                         "partial_filled_amount": float(
@@ -1091,7 +1138,19 @@ class Exchange:
                 resolved_symbol,
                 timeout_seconds,
             )
-            await self.__cancel_order_safe(resolved_symbol, str(sell_order["id"]))
+            cancel_confirmed = await self.__cancel_order_and_confirm(
+                resolved_symbol, str(sell_order["id"])
+            )
+            if not cancel_confirmed:
+                logging.error(
+                    "Limit order %s for %s was not filled but could not be "
+                    "confirmed canceled. Skipping market fallback.",
+                    sell_order["id"],
+                    resolved_symbol,
+                )
+                order["_limit_cancel_confirmed"] = False
+            else:
+                order["_limit_cancel_confirmed"] = True
             return None
 
         sell_order.update(filled_order)
