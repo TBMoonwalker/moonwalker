@@ -372,20 +372,22 @@ class Dca:
                 # Trigger new safety order for dynamic dca
                 if actual_pnl <= -abs(next_so_percentage):
                     if await self.__dynamic_dca_strategy(trades["symbol"]):
+                        normalized_actual_pnl = round(actual_pnl, 1)
                         if (
                             last_so_percentage is not None
-                            and actual_pnl > last_so_percentage
+                            and normalized_actual_pnl >= last_so_percentage
                         ):
                             logging.debug(
-                                "Skip dynamic SO for %s: actual_pnl=%s is above last_so_percentage=%s",
+                                "Skip dynamic SO for %s: actual_pnl=%s (normalized=%s) is not deeper than last_so_percentage=%s",
                                 trades["symbol"],
                                 round(actual_pnl, 4),
+                                round(normalized_actual_pnl, 4),
                                 round(last_so_percentage, 4),
                             )
                             new_so = False
                         else:
                             # Set next_so_percentage to current percentage
-                            next_so_percentage = actual_pnl
+                            next_so_percentage = normalized_actual_pnl
                             new_so = True
             else:
                 # Trigger new safety order for static dca
