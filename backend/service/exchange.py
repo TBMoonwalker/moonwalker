@@ -427,11 +427,13 @@ class Exchange:
                 trade["base_fee"] = base_fee
                 trade["amount"] = amount
                 trade["timestamp"] = last_order["timestamp"]
-                trade["price"] = last_order["price"]
+                # Use weighted average execution price across all partial fills.
+                trade["price"] = (cost / amount) if amount > 0 else last_order["price"]
                 trade["order"] = last_order["order"]
                 trade["symbol"] = last_order["symbol"]
                 trade["side"] = last_order["side"]
-                trade["fee_cost"] = last_order.get("fee")
+                # Store numeric aggregated fee to avoid partial-fill truncation.
+                trade["fee_cost"] = fee
         except ccxt.NetworkError as e:
             logging.error(f"Fetch trade order failed due to a network error: {e}")
             raise TryAgain
