@@ -62,6 +62,7 @@ are not exposed in the UI and must be set via the API.
 | `dynamic_so_exponent` | `float` | Curve exponent applied to drawdown term. Higher values emphasize deeper drawdowns. | `1.1` |
 | `dynamic_so_min_scale` | `float` | Lower bound for dynamic SO multiplier. | `0.5` |
 | `dynamic_so_max_scale` | `float` | Upper bound for dynamic SO multiplier. | `3.0` |
+| `dynamic_so_loss_max_scale_threshold` | `float` | Absolute loss percentage at which dynamic SO uses `dynamic_so_max_scale` directly. | `30.0` |
 | `dynamic_so_ath_window` | `string` | Legacy compatibility key (`1d`/`1w`/`1m`) used only when lookback value/unit are not set. | `1m` |
 | `tp` | `float` | Take profit (percent). | `1.0` |
 | `sl` | `float` | Stop loss (percent). | `2.0` |

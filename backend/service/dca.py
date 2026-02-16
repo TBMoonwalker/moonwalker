@@ -108,6 +108,24 @@ class Dca:
             float(self.config.get("dynamic_so_max_scale", 3.0)),
             min_scale,
         )
+        max_scale_loss_threshold = max(
+            float(self.config.get("dynamic_so_loss_max_scale_threshold", 30.0)),
+            0.0,
+        )
+
+        if max_scale_loss_threshold > 0 and abs(actual_pnl) >= max_scale_loss_threshold:
+            threshold_details: dict[str, float | str] = {
+                "enabled": "true",
+                "window": window,
+                "ath": ath,
+                "loss_ratio": round(loss_ratio, 6),
+                "drawdown_ratio": round(drawdown_ratio, 6),
+                "scale": round(max_scale, 6),
+                "min_scale": min_scale,
+                "max_scale": max_scale,
+                "mode": "loss-threshold-max",
+            }
+            return max_scale, threshold_details
 
         signal_strength = (loss_weight * loss_ratio) + (
             drawdown_weight * (drawdown_ratio**exponent)
@@ -124,6 +142,7 @@ class Dca:
             "scale": round(dynamic_scale, 6),
             "min_scale": min_scale,
             "max_scale": max_scale,
+            "mode": "formula",
         }
         return dynamic_scale, details
 
@@ -134,9 +153,14 @@ class Dca:
         actual_pnl: float,
         volume_scale: float,
     ) -> tuple[float, dict[str, float | str]]:
-        base_size = float(self.config.get("so", 0) or 0)
+        configured_so_size = float(self.config.get("so", 0) or 0)
+        base_size = configured_so_size
         if trades["safetyorders"]:
             base_size = float(trades["safetyorders"][-1]["ordersize"]) * volume_scale
+            if self.config.get("dynamic_so_volume_enabled", False):
+                # Keep dynamic SO sizing from collapsing below the configured SO size
+                # after importing historical micro-orders.
+                base_size = max(base_size, configured_so_size)
 
         dynamic_factor, dynamic_details = await self.__get_dynamic_volume_scale(
             trades["symbol"], current_price, actual_pnl

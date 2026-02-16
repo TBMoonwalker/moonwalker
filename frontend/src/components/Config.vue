@@ -289,6 +289,12 @@
                     <n-form-item label="Dynamic max scale" path="dynamic_so_max_scale">
                         <n-input-number v-model:value="dca.dynamic_so_max_scale" placeholder="3.0" />
                     </n-form-item>
+                    <n-form-item label="Loss threshold for max scale (%)" path="dynamic_so_loss_max_scale_threshold">
+                        <n-input-number
+                            v-model:value="dca.dynamic_so_loss_max_scale_threshold"
+                            placeholder="30.0"
+                        />
+                    </n-form-item>
                 </template>
             </n-form>
         </n-card>
@@ -689,6 +695,7 @@ const dca = ref({
     dynamic_so_exponent: 1.1,
     dynamic_so_min_scale: 0.5,
     dynamic_so_max_scale: 3.0,
+    dynamic_so_loss_max_scale_threshold: 30.0,
     dynamic_so_ath_cache_ttl: 60,
     tp: null,
     sl: null,
@@ -1061,6 +1068,13 @@ const rules: FormRules = {
         ),
         trigger: ['submit'],
     },
+    dynamic_so_loss_max_scale_threshold: {
+        validator: dcaFieldValidator(
+            'loss threshold for max scale',
+            () => dca.value.dynamic_so_volume_enabled,
+        ),
+        trigger: ['submit'],
+    },
     tp: {
         validator: requiredAfterSubmit('Please add tp'),
         trigger: ['submit', 'change']
@@ -1231,6 +1245,8 @@ async function fetchDefaultValues() {
                 toNumberOrNull(response.data.dynamic_so_min_scale) ?? 0.5
             dca.value.dynamic_so_max_scale =
                 toNumberOrNull(response.data.dynamic_so_max_scale) ?? 3.0
+            dca.value.dynamic_so_loss_max_scale_threshold =
+                toNumberOrNull(response.data.dynamic_so_loss_max_scale_threshold) ?? 30.0
             dca.value.dynamic_so_ath_cache_ttl =
                 toNumberOrNull(response.data.dynamic_so_ath_cache_ttl) ?? 60
             dca.value.tp = toNumberOrNull(response.data.tp)
@@ -1429,6 +1445,7 @@ async function submitForm() {
             dynamic_so_exponent: JSON.stringify({ 'value': dca.value.dynamic_so_exponent ?? 1.1, 'type': "float" }),
             dynamic_so_min_scale: JSON.stringify({ 'value': dca.value.dynamic_so_min_scale ?? 0.5, 'type': "float" }),
             dynamic_so_max_scale: JSON.stringify({ 'value': dca.value.dynamic_so_max_scale ?? 3.0, 'type': "float" }),
+            dynamic_so_loss_max_scale_threshold: JSON.stringify({ 'value': dca.value.dynamic_so_loss_max_scale_threshold ?? 30.0, 'type': "float" }),
             dynamic_so_ath_cache_ttl: JSON.stringify({ 'value': dca.value.dynamic_so_ath_cache_ttl ?? 60, 'type': "int" }),
             tp: JSON.stringify({ 'value': dca.value.tp || false, 'type': "float" }),
             sl: JSON.stringify({ 'value': dca.value.sl || false, 'type': "float" }),
