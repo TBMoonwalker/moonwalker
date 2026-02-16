@@ -336,9 +336,9 @@ class Trades:
         symbols = sorted(rows_by_symbol.keys())
 
         if not overwrite:
-            open_symbols = await model.OpenTrades.filter(symbol__in=symbols).values_list(
-                "symbol", flat=True
-            )
+            open_symbols = await model.OpenTrades.filter(
+                symbol__in=symbols
+            ).values_list("symbol", flat=True)
             trade_symbols = await model.Trades.filter(symbol__in=symbols).values_list(
                 "symbol", flat=True
             )
@@ -430,7 +430,9 @@ class Trades:
         async def _persist_import() -> None:
             async with in_transaction() as conn:
                 if overwrite:
-                    await model.Trades.filter(symbol__in=symbols).using_db(conn).delete()
+                    await model.Trades.filter(symbol__in=symbols).using_db(
+                        conn
+                    ).delete()
                     await model.OpenTrades.filter(symbol__in=symbols).using_db(
                         conn
                     ).delete()
@@ -499,9 +501,7 @@ class Trades:
 
             timestamp_ms = self._parse_date_to_ms(date_raw)
             if timestamp_ms is None:
-                raise ValueError(
-                    f"Invalid date at line {line_number}: '{date_raw}'."
-                )
+                raise ValueError(f"Invalid date at line {line_number}: '{date_raw}'.")
 
             try:
                 price = float(price_raw)
@@ -549,7 +549,9 @@ class Trades:
         if first_so_deviation > 0 and safety_step_scale > 0:
             # DCA persists SO percentage as step increment per order.
             # so_index=1 => first safety order increment, so_index=2 => second increment...
-            incremental = abs(first_so_deviation) * (safety_step_scale ** (so_index - 1))
+            incremental = abs(first_so_deviation) * (
+                safety_step_scale ** (so_index - 1)
+            )
             return round(incremental, 2)
 
         # Fallback for incomplete DCA config.

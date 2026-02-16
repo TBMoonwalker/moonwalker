@@ -4,6 +4,9 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 
 ## Build, Lint, and Test Commands
 
+### Mandatory CI Check
+- After every code change, run CI from the scripts directory directly: `cd scripts && ./ci.sh`
+
 ### Backend (Python)
 - **Run application:** `cd backend && python app.py` or use the `./run.sh` script
 - **Install dependencies:** `cd backend && pip install -r requirements.txt`

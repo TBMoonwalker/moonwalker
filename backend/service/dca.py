@@ -325,6 +325,20 @@ class Dca:
         else:
             last_so_price = 0
 
+        # Dynamic DCA safety orders must progress deeper (more negative) than
+        # the most recently persisted SO percentage to avoid rebound buys.
+        last_so_percentage: float | None = None
+        if trades["safetyorders"]:
+            so_values = [
+                float(so["so_percentage"])
+                for so in trades["safetyorders"]
+                if so.get("so_percentage") is not None
+            ]
+            if so_values:
+                # Enforce progression against the deepest persisted SO percentage.
+                # This is robust even when DB rows are not returned in timestamp order.
+                last_so_percentage = min(so_values)
+
         # We have not reached the max safety orders
         if max_safety_orders and (trades["safetyorders_count"] < max_safety_orders):
 
@@ -334,9 +348,21 @@ class Dca:
                 # Trigger new safety order for dynamic dca
                 if actual_pnl <= -abs(next_so_percentage):
                     if await self.__dynamic_dca_strategy(trades["symbol"]):
-                        # Set next_so_percentage to current percentage
-                        next_so_percentage = actual_pnl
-                        new_so = True
+                        if (
+                            last_so_percentage is not None
+                            and actual_pnl > last_so_percentage
+                        ):
+                            logging.debug(
+                                "Skip dynamic SO for %s: actual_pnl=%s is above last_so_percentage=%s",
+                                trades["symbol"],
+                                round(actual_pnl, 4),
+                                round(last_so_percentage, 4),
+                            )
+                            new_so = False
+                        else:
+                            # Set next_so_percentage to current percentage
+                            next_so_percentage = actual_pnl
+                            new_so = True
             else:
                 # Trigger new safety order for static dca
                 if total_pnl <= -abs(max_deviation):

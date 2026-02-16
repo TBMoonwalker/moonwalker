@@ -337,9 +337,7 @@ class Exchange:
         return float(taker_fee)
 
     @staticmethod
-    def __is_matching_order_id(
-        candidate_order_id: Any, expected_order_id: str
-    ) -> bool:
+    def __is_matching_order_id(candidate_order_id: Any, expected_order_id: str) -> bool:
         """Compare order ids safely across string/int exchange payloads."""
         if candidate_order_id is None:
             return False
@@ -785,7 +783,9 @@ class Exchange:
                     )
                     if not market_status:
                         return None
-                    partial_amount = float(order_status.get("partial_filled_amount") or 0.0)
+                    partial_amount = float(
+                        order_status.get("partial_filled_amount") or 0.0
+                    )
                     partial_price = float(order_status.get("partial_avg_price") or 0.0)
                     market_amount = float(market_status.get("total_amount") or 0.0)
                     market_price = float(market_status.get("price") or 0.0)

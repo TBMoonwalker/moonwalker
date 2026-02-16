@@ -143,9 +143,7 @@ class Indicators:
 
             result = not (momentum_3 < -1.0 or ema50 > ema9)
         except Exception as e:
-            logging.error(
-                "BTC Pulse cannot be calculated for %s. Cause: %s", symbol, e
-            )
+            logging.error("BTC Pulse cannot be calculated for %s. Cause: %s", symbol, e)
             result = True
 
         return result

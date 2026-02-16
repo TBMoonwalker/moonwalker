@@ -213,9 +213,7 @@ class Watcher:
                     history_days,
                 )
             else:
-                logging.warning(
-                    "BTC pulse history warmup failed for %s.", symbol
-                )
+                logging.warning("BTC pulse history warmup failed for %s.", symbol)
         except asyncio.CancelledError:
             raise
         except Exception as exc:  # noqa: BLE001 - Keep watcher running.
@@ -248,9 +246,7 @@ class Watcher:
         while self.status:
             try:
                 new_symbol_list = await watcher_queue.get()
-                Watcher.signal_symbols = set(
-                    self.__normalize_symbols(new_symbol_list)
-                )
+                Watcher.signal_symbols = set(self.__normalize_symbols(new_symbol_list))
                 trade_symbols = await self.trades.get_symbols()
                 Watcher.ticker_symbols = self.__compose_ticker_symbols(trade_symbols)
                 logging.info(f"Updated symbol list via queue: {Watcher.ticker_symbols}")
@@ -279,9 +275,7 @@ class Watcher:
         if created:
             try:
                 trade_symbols = await Trades().get_symbols()
-                Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(
-                    trade_symbols
-                )
+                Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(trade_symbols)
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
                 logging.debug(f"Added symbols. New list: {Watcher.ticker_symbols}")
@@ -300,9 +294,7 @@ class Watcher:
         if created:
             try:
                 trade_symbols = await Trades().get_symbols()
-                Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(
-                    trade_symbols
-                )
+                Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(trade_symbols)
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
                 logging.debug(f"Removed symbols. New list: {Watcher.ticker_symbols}")
