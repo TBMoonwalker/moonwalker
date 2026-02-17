@@ -226,32 +226,32 @@ class Indicators:
     #         logging.error(f"EMA Distance cannot be calculated for {symbol}. Cause: {e}")
     #     return result
 
-    # async def calculate_ema_cross(self, symbol, timerange):
-    #     result = "none"
-    #     try:
-    #         df_raw = await self.data.get_data_for_pair(symbol, timerange, 21)
-    #         df = self.data.resample_data(df_raw, timerange)
-    #         df["ema_short"] = talib.EMA(df["close"], timeperiod=9)
-    #         df["ema_long"] = talib.EMA(df["close"], timeperiod=21)
-    #         df.dropna(subset=["ema_short", "ema_long"], inplace=True)
+    async def calculate_ema_cross(self, symbol, timerange):
+        result = "none"
+        try:
+            df_raw = await self.data.get_data_for_pair(symbol, timerange, 21)
+            df = self.data.resample_data(df_raw, timerange)
+            df["ema_short"] = talib.EMA(df["close"], timeperiod=9)
+            df["ema_long"] = talib.EMA(df["close"], timeperiod=21)
+            df.dropna(subset=["ema_short", "ema_long"], inplace=True)
 
-    #         if (
-    #             df.iloc[-2]["ema_short"] <= df.iloc[-2]["ema_long"]
-    #             and df.iloc[-1]["ema_short"] >= df.iloc[-1]["ema_long"]
-    #         ):
-    #             result = "up"
-    #         elif (
-    #             df.iloc[-2]["ema_short"] >= df.iloc[-2]["ema_long"]
-    #             and df.iloc[-1]["ema_short"] <= df.iloc[-1]["ema_long"]
-    #         ):
-    #             result = "down"
-    #         else:
-    #             result = "none"
+            if (
+                df.iloc[-2]["ema_short"] <= df.iloc[-2]["ema_long"]
+                and df.iloc[-1]["ema_short"] >= df.iloc[-1]["ema_long"]
+            ):
+                result = "up"
+            elif (
+                df.iloc[-2]["ema_short"] >= df.iloc[-2]["ema_long"]
+                and df.iloc[-1]["ema_short"] <= df.iloc[-1]["ema_long"]
+            ):
+                result = "down"
+            else:
+                result = "none"
 
-    #     except Exception as e:
-    #         logging.error(f"EMA Cross cannot be calculated for {symbol}. Cause: {e}")
+        except Exception as e:
+            logging.error(f"EMA Cross cannot be calculated for {symbol}. Cause: {e}")
 
-    #     return result
+        return result
 
     # async def calculate_rsi(self, symbol, timerange, length):
     #     try:
