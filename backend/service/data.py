@@ -1,5 +1,6 @@
 """Data access helpers for OHLCV and listings."""
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -18,6 +19,7 @@ class Data:
     """Data retrieval and transformation utilities."""
 
     SYMBOLS_CACHE_TTL_SECONDS = 300
+    LOOKBACK_BUFFER_MULTIPLIER = 2
 
     def __init__(self, persist_exchange: bool = False) -> None:
         utils = helper.Utils()
@@ -121,41 +123,39 @@ class Data:
             if not self.persist_exchange:
                 await self.exchange.close()
 
-    def __calculate_min_candle_date(self, timerange: str, length: int) -> float:
-        """Calculate the earliest timestamp for candle history."""
+    def __timeframe_to_seconds(self, timerange: str) -> int:
+        """Convert timeframe notation to seconds.
 
-        # Convert timerange with buffer
-        match timerange:
-            case "1D":
-                length_minutes = 2880
-            case "4h":
-                length_minutes = 480
-            case "60min":
-                length_minutes = 120
-            case "30min":
-                length_minutes = 90
-            case "15min":
-                length_minutes = 45
-            case "10min":
-                length_minutes = 20
-            case "5min":
-                length_minutes = 10
+        Supported examples: 1m, 5m, 15min, 1h, 4h, 1d, 1w.
+        Falls back to 60 seconds if parsing fails.
+        """
+        normalized = str(timerange or "").strip().lower()
+        if not normalized:
+            return 60
 
-            # If an exact match is not confirmed, this last case will be used if provided
-            case _:
-                length_minutes = 30
+        normalized = normalized.replace("min", "m")
+        match = re.fullmatch(r"(\d+)\s*([mhdw])", normalized)
+        if not match:
+            return 60
 
-        # Input parameters
-        num_candles = length  # Number of candles with buffer
-        end_time = datetime.now()
+        value = int(match.group(1))
+        unit = match.group(2)
+        multipliers = {
+            "m": 60,
+            "h": 60 * 60,
+            "d": 24 * 60 * 60,
+            "w": 7 * 24 * 60 * 60,
+        }
+        return max(1, value) * multipliers[unit]
 
-        # Calculate the total look-back duration
-        lookback_duration = timedelta(minutes=length_minutes * num_candles)
-
-        # Calculate the minimum date
-        min_date = end_time - lookback_duration
-
-        return datetime.timestamp(min_date)
+    def __calculate_min_candle_date(self, timerange: str, length: int) -> int:
+        """Calculate earliest timestamp in milliseconds for candle history."""
+        timeframe_seconds = self.__timeframe_to_seconds(timerange)
+        candles = max(1, int(length))
+        lookback_seconds = timeframe_seconds * candles * self.LOOKBACK_BUFFER_MULTIPLIER
+        end_time = datetime.now(timezone.utc)
+        min_date = end_time - timedelta(seconds=lookback_seconds)
+        return int(min_date.timestamp() * 1000)
 
     async def count_history_data_for_symbol(self, symbol: str) -> int | bool:
         """Count history data rows for a symbol."""
