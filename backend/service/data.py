@@ -260,8 +260,15 @@ class Data:
             .values("timestamp", "open", "high", "low", "close", "volume")
         )
 
-        if query:
-            df = self.resample_data(pd.DataFrame(query), timerange)
+        df_source = pd.DataFrame(query) if query else pd.DataFrame()
+        live_candle = self.__get_live_candle_for_symbol(symbol, start_timestamp)
+        if live_candle:
+            df_source = pd.concat(
+                [df_source, pd.DataFrame([live_candle])], ignore_index=True
+            )
+
+        if not df_source.empty:
+            df = self.resample_data(df_source, timerange)
 
             offset_minutes = int(offset)
             offset_ms = offset_minutes * 60 * 1000
@@ -281,6 +288,30 @@ class Data:
             ohlcv = df.to_json(orient="records")
 
         return ohlcv
+
+    def __get_live_candle_for_symbol(
+        self, symbol: str, start_timestamp: float
+    ) -> dict[str, float | str] | None:
+        """Return current in-memory watcher candle for symbol if it is in range."""
+        try:
+            from service.watcher import Watcher
+
+            live = Watcher.candles.get(symbol)
+            if not live or len(live) < 6:
+                return None
+            if float(live[0]) <= float(start_timestamp):
+                return None
+            return {
+                "timestamp": float(live[0]),
+                "symbol": symbol,
+                "open": float(live[1]),
+                "high": float(live[2]),
+                "low": float(live[3]),
+                "close": float(live[4]),
+                "volume": float(live[5]),
+            }
+        except Exception:
+            return None
 
     async def get_data_for_pair(
         self, pair: str, timerange: str, length: int

@@ -110,6 +110,10 @@ function selectTimeframe(
     return choices[choices.length - 1]
 }
 
+function getLocalOffsetSeconds(): number {
+    return -new Date().getTimezoneOffset() * 60
+}
+
 async function loadConfiguredMinTimeframe(): Promise<void> {
     try {
         const config = await fetchJson<ConfigResponse>('/config/all')
@@ -355,7 +359,14 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             } catch (_error) {
                                                 ticker_data = ohlcvStore.get(cacheKey) ?? []
                                             }
-                                            candlestickSeries.setData(ticker_data)
+                                            const localOffsetSeconds = getLocalOffsetSeconds()
+                                            const localTickerData = (ticker_data as Array<Record<string, number>>).map(
+                                                (entry) => ({
+                                                    ...entry,
+                                                    time: Number(entry.time) + localOffsetSeconds,
+                                                }),
+                                            )
+                                            candlestickSeries.setData(localTickerData)
 
                                             let marker_data = []
 
@@ -373,6 +384,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             const seconds = timeframe.seconds
 
                                             let baseorder_datetime = Math.trunc(Number(begin_timestamp) / 1000) - (Math.trunc(Number(begin_timestamp) / 1000) % seconds)
+                                            baseorder_datetime += localOffsetSeconds
                                             // Baseorder marker
                                             //const baseorderMarker = createSeriesMarkers(candles)
                                             marker_data.push({
@@ -396,6 +408,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             if (rowData.safetyorder) {
                                                 rowData.safetyorder.forEach(function (val: any, i: any) {
                                                     let safetyorder_datetime = Math.trunc(Number(val.timestamp) / 1000) - (Math.trunc(Number(val.timestamp) / 1000) % seconds)
+                                                    safetyorder_datetime += localOffsetSeconds
                                                     // Safetyorder marker
                                                     marker_data.push({
                                                         time: safetyorder_datetime,
