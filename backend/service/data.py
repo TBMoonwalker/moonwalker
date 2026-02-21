@@ -263,7 +263,9 @@ class Data:
         if query:
             df = self.resample_data(pd.DataFrame(query), timerange)
 
-            df["time"] = (df["timestamp"].astype(int) + 60 * int(offset)) / 1000000000
+            offset_minutes = int(offset)
+            offset_ms = offset_minutes * 60 * 1000
+            df["time"] = (df["timestamp"].astype(int) + offset_ms) / 1000000000
             df.drop_duplicates(subset=["time"], inplace=True)
             df.rename(
                 columns={

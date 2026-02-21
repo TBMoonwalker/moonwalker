@@ -10,7 +10,6 @@ import { useWebSocketDataStore } from '../stores/websocket'
 import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
 import { createDecimal } from '../helpers/validators'
-import { timezoneOffset } from '../helpers/timezone'
 import { createChart, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts'
 import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
 import { fetchJson } from '../api/client'
@@ -26,6 +25,7 @@ const dialog = useDialog()
 const message = useMessage()
 
 const MAX_VISIBLE_CANDLES = 500
+const PRE_ROLL_CANDLES = 2
 const viewportWidth = ref(window.innerWidth)
 
 const isMobile = computed(() => viewportWidth.value < 768)
@@ -306,6 +306,11 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             // Create precision for candlestick prices
                                             const precision = createDecimal(rowData.precision)
                                             const timeframe = selectTimeframe(begin_timestamp, configuredMinTimeframe.value)
+                                            const history_start = Math.max(
+                                                0,
+                                                Number(begin_timestamp) -
+                                                timeframe.seconds * PRE_ROLL_CANDLES * 1000,
+                                            )
 
                                             chart = createChart(chartRef.value, {
                                                 autoSize: true,
@@ -341,11 +346,11 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             })
 
                                             // OHLCV data from Moonwalker
-                                            const cacheKey = `${symbol}-${currency}-${timeframe.timerange}-${begin_timestamp}-${timezoneOffset()}`
+                                            const cacheKey = `${symbol}-${currency}-${timeframe.timerange}-${history_start}`
                                             let ticker_data = null
                                             try {
                                                 // Always refresh chart data when opening the panel.
-                                                ticker_data = await fetchJson(`/data/ohlcv/${symbol + "-" + currency.toUpperCase()}/${timeframe.timerange}/${begin_timestamp}/${timezoneOffset()}`)
+                                                ticker_data = await fetchJson(`/data/ohlcv/${symbol + "-" + currency.toUpperCase()}/${timeframe.timerange}/${history_start}/0`)
                                                 ohlcvStore.set(cacheKey, ticker_data)
                                             } catch (_error) {
                                                 ticker_data = ohlcvStore.get(cacheKey) ?? []
@@ -368,7 +373,6 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             const seconds = timeframe.seconds
 
                                             let baseorder_datetime = Math.trunc(Number(begin_timestamp) / 1000) - (Math.trunc(Number(begin_timestamp) / 1000) % seconds)
-                                            baseorder_datetime += 60 * timezoneOffset()
                                             // Baseorder marker
                                             //const baseorderMarker = createSeriesMarkers(candles)
                                             marker_data.push({
@@ -392,7 +396,6 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             if (rowData.safetyorder) {
                                                 rowData.safetyorder.forEach(function (val: any, i: any) {
                                                     let safetyorder_datetime = Math.trunc(Number(val.timestamp) / 1000) - (Math.trunc(Number(val.timestamp) / 1000) % seconds)
-                                                    safetyorder_datetime += 60 * timezoneOffset()
                                                     // Safetyorder marker
                                                     marker_data.push({
                                                         time: safetyorder_datetime,
