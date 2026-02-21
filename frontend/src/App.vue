@@ -92,6 +92,13 @@ const createManagedSocket = (
       retries: -1,
       delay: 1500,
     },
+    onMessage(_ws, event) {
+      lastMessageAt.value = Date.now()
+      onData((event.data as string) ?? null)
+    },
+    onConnected() {
+      lastMessageAt.value = Date.now()
+    },
   })
 
   const lastMessageAt = ref(Date.now())
@@ -110,11 +117,6 @@ const createManagedSocket = (
     setTimeout(() => socket.open(), 250)
     console.debug(`[ws] reinitialized ${name}`)
   }
-
-  watch(socket.data, (newData) => {
-    lastMessageAt.value = Date.now()
-    onData(newData ?? null)
-  })
 
   watch(socket.status, (status) => {
     if (status === 'OPEN') {
