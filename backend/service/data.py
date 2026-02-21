@@ -7,6 +7,7 @@ import helper
 import model
 import pandas as pd
 from cachetools import TTLCache
+from service.config import resolve_timeframe
 from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
 
@@ -209,7 +210,7 @@ class Data:
             ohlcv_data = await self.exchange.get_history_for_symbol(
                 config,
                 symbol,
-                config.get("strategy_timeframe", "1m"),
+                resolve_timeframe(config),
                 limit=1000,
                 since=since,
             )

@@ -9,6 +9,7 @@ import helper
 import model
 import socketio
 from service.autopilot import Autopilot
+from service.config import resolve_timeframe
 from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
@@ -122,12 +123,13 @@ class SignalPlugin:
             if self.config.get("volume", None)
             else None
         )
+        strategy_timeframe = resolve_timeframe(self.config)
         # btc pulse check
         btc_pulse = True
         if self.config.get("btc_pulse", False):
             btc_pulse = await self.indicators.calculate_btc_pulse(
                 self.config.get("currency", "USDC"),
-                self.config.get("signal_strategy_timeframe", "1min"),
+                strategy_timeframe,
             )
 
         if btc_pulse:

@@ -11,6 +11,7 @@ import helper
 import model
 import requests
 from service.autopilot import Autopilot
+from service.config import resolve_timeframe
 from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
@@ -210,13 +211,14 @@ class SignalPlugin:
             if self.config.get("volume", None)
             else None
         )
+        strategy_timeframe = resolve_timeframe(self.config)
         signal_strategy_plugin = None
         if self.config.get("signal_strategy", None):
             signal_strategy = importlib.import_module(
                 f"strategies.{self.config.get('signal_strategy')}"
             )
             signal_strategy_plugin = signal_strategy.Strategy(
-                timeframe=self.config.get("signal_strategy_timeframe", "1min"),
+                timeframe=strategy_timeframe,
             )
 
         # allow/denylist check
@@ -233,7 +235,7 @@ class SignalPlugin:
             if self.config.get("btc_pulse", False):
                 if not await self.indicators.calculate_btc_pulse(
                     self.config.get("currency", "USDC"),
-                    self.config.get("signal_strategy_timeframe", "1min"),
+                    strategy_timeframe,
                 ):
                     logging.debug(
                         f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
@@ -275,7 +277,7 @@ class SignalPlugin:
 
                 if self.config.get("rsi_max", None):
                     rsi = await self.indicators.calculate_rsi(
-                        symbol, self.config.get("signal_strategy_timeframe", "1min"), 14
+                        symbol, strategy_timeframe, 14
                     )
                     if rsi and rsi > self.config.get("rsi_max", None):
                         logging.info(

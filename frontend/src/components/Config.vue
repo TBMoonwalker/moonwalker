@@ -144,9 +144,6 @@
                         <n-select v-model:value="signal.strategy" placeholder="Select"
                             :options="signal.strategy_plugins" />
                     </n-form-item>
-                    <n-form-item label="Timerange" path="signal_strategy_timeframe">
-                        <n-select v-model:value="signal.timeframe" placeholder="Select" :options="timerange" />
-                    </n-form-item>
                 </template>
             </n-form>
         </n-card>
@@ -207,9 +204,6 @@
                         <n-form-item :label="'Dynamic DCA strategy'" :path="'strategy.' + index">
                             <n-select v-model:value="dca.strategy" placeholder="Select"
                                 :options="signal.strategy_plugins" />
-                        </n-form-item>
-                        <n-form-item label="Timerange" :path="'timerange.' + index">
-                            <n-select v-model:value="dca.timeframe" placeholder="Select" :options="timerange" />
                         </n-form-item>
                     </template>
                 </template>
@@ -1162,7 +1156,8 @@ async function fetchDefaultValues() {
                 toNumberOrNull(response.data.ws_reconnect_debounce_ms) ?? 2000
             signal.value.signal = response.data.signal
             signal.value.strategy = response.data.signal_strategy
-            signal.value.timeframe = response.data.signal_strategy_timeframe
+            signal.value.timeframe =
+                response.data.timeframe || response.data.signal_strategy_timeframe
             const signalSettings = parseStructuredConfigValue(response.data.signal_settings)
             if (signalSettings) {
                 signal.value.symsignal_url = String(signalSettings["api_url"] || DEFAULT_SYMSIGNAL_URL)
@@ -1212,7 +1207,8 @@ async function fetchDefaultValues() {
             dca.value.enabled = parseBooleanString(response.data.dca) ?? false
             dca.value.dynamic = parseBooleanString(response.data.dynamic_dca) ?? false
             dca.value.strategy = response.data.dca_strategy
-            dca.value.timeframe = response.data.dca_strategy_timeframe
+            dca.value.timeframe =
+                response.data.timeframe || response.data.dca_strategy_timeframe
             dca.value.trailing_tp = toNumberOrNull(response.data.trailing_tp)
             dca.value.max_bots = toNumberOrNull(response.data.max_bots)
             dca.value.bo = toNumberOrNull(response.data.bo)
@@ -1401,7 +1397,7 @@ async function submitForm() {
             ws_reconnect_debounce_ms: JSON.stringify({ 'value': general.value.ws_reconnect_debounce_ms ?? 2000, 'type': "int" }),
             signal: JSON.stringify({ 'value': signal.value.signal || false, 'type': "str" }),
             signal_strategy: JSON.stringify({ 'value': signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false, 'type': "str" }),
-            signal_strategy_timeframe: JSON.stringify({ 'value': signal.value.timeframe || false, 'type': "str" }),
+            signal_strategy_timeframe: JSON.stringify({ 'value': exchange.value.timeframe || false, 'type': "str" }),
             signal_settings: JSON.stringify({ 'value': { 'api_url': signal.value.symsignal_url || false, 'api_key': signal.value.symsignal_key || false, 'api_version': signal.value.symsignal_version || false, 'allowed_signals': signal.value.symsignal_allowedsignals }, 'type': "str" }),
             symbol_list: JSON.stringify({ 'value': normalizedSymbolList, 'type': "str" }),
             filter: JSON.stringify({ 'value': { 'rsi_max': filter.value.rsi || false, 'marketcap_cmc_api_key': filter.value.cmc_api_key || false }, 'type': "str" }),
@@ -1423,7 +1419,8 @@ async function submitForm() {
             dca: JSON.stringify({ 'value': dca.value.enabled || false, 'type': "bool" }),
             dynamic_dca: JSON.stringify({ 'value': dca.value.dynamic || false, 'type': "bool" }),
             dca_strategy: JSON.stringify({ 'value': dca.value.strategy || false, 'type': "str" }),
-            dca_strategy_timeframe: JSON.stringify({ 'value': dca.value.timeframe || false, 'type': "str" }),
+            dca_strategy_timeframe: JSON.stringify({ 'value': exchange.value.timeframe || false, 'type': "str" }),
+            tp_strategy_timeframe: JSON.stringify({ 'value': exchange.value.timeframe || false, 'type': "str" }),
             trailing_tp: JSON.stringify({ 'value': dca.value.trailing_tp || false, 'type': "float" }),
             max_bots: JSON.stringify({ 'value': dca.value.max_bots || false, 'type': "int" }),
             bo: JSON.stringify({ 'value': dca.value.bo || false, 'type': "int" }),

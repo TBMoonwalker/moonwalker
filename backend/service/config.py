@@ -11,6 +11,28 @@ from service.redis import CONFIG_CHANNEL, redis_client
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 
+TIMEFRAME_KEYS = (
+    "timeframe",
+    "signal_strategy_timeframe",
+    "dca_strategy_timeframe",
+    "tp_strategy_timeframe",
+)
+
+
+def resolve_timeframe(
+    config: dict[str, Any], preferred_key: str | None = None, default: str = "1m"
+) -> str:
+    """Resolve the effective bot timeframe from canonical and legacy keys."""
+    candidate_keys: list[str] = []
+    if preferred_key:
+        candidate_keys.append(preferred_key)
+    candidate_keys.extend(TIMEFRAME_KEYS)
+    for key in candidate_keys:
+        value = config.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return default
+
 
 class Config:
     """Configuration management class that handles loading, storing, and subscribing to configuration changes.

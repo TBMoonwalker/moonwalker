@@ -7,6 +7,7 @@ from typing import Any
 import helper
 from service.ath import AthService
 from service.autopilot import Autopilot
+from service.config import resolve_timeframe
 from service.orders import Orders
 from service.statistic import Statistic
 from service.trades import Trades
@@ -35,9 +36,12 @@ class Dca:
         result = False
 
         if self.config.get("dca_strategy", None):
+            strategy_timeframe = resolve_timeframe(
+                self.config, preferred_key="dca_strategy_timeframe"
+            )
             dca_strategy_plugin = self.__get_strategy_plugin(
                 self.config.get("dca_strategy"),
-                self.config.get("dca_strategy_timeframe", "1m"),
+                strategy_timeframe,
                 "dca",
             )
 
@@ -49,9 +53,12 @@ class Dca:
         result = False
 
         if self.config.get("tp_strategy", None):
+            strategy_timeframe = resolve_timeframe(
+                self.config, preferred_key="tp_strategy_timeframe"
+            )
             tp_strategy_plugin = self.__get_strategy_plugin(
                 self.config.get("tp_strategy"),
-                self.config.get("tp_strategy_timeframe", "1m"),
+                strategy_timeframe,
                 "tp",
             )
 

@@ -6,7 +6,7 @@ from typing import Any
 import ccxt.pro as ccxtpro
 import helper
 import model
-from service.config import Config
+from service.config import Config, resolve_timeframe
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
@@ -73,7 +73,7 @@ class Watcher:
         self._reload_task = asyncio.create_task(self._reload_exchange_client(config))
 
         Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
-        Watcher.timeframe = config.get("timeframe", "1m")
+        Watcher.timeframe = resolve_timeframe(config)
         Watcher.mandatory_symbols = self.__get_mandatory_symbols(config)
         current_symbols = self.__normalize_symbols(Watcher.ticker_symbols)
         Watcher.ticker_symbols = self.__compose_ticker_symbols(current_symbols)
@@ -463,7 +463,7 @@ class Watcher:
     async def __process_trade_data(self, symbol: str, trades) -> None:
         trade = trades[-1]
         price = float(trade["price"])
-        ohlcvc = self.exchange.build_ohlcvc([trade], self.config.get("timeframe", "1m"))
+        ohlcvc = self.exchange.build_ohlcvc([trade], Watcher.timeframe)
         await self.push_event(symbol, price, ohlcvc)
 
     async def watch_symbol(self, symbol: str) -> None:
@@ -474,7 +474,7 @@ class Watcher:
                 try:
                     if Watcher.exchange_watcher_ohlcv:
                         ohlcv = await self.exchange.watch_ohlcv(
-                            symbol, self.config.get("timeframe", "1m")
+                            symbol, Watcher.timeframe
                         )
                         await self.__process_ohlcv_data(symbol, ohlcv)
                     else:
