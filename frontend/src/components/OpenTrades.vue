@@ -40,16 +40,66 @@ type TimeframeChoice = {
     seconds: number
 }
 
-function selectTimeframe(beginTimestamp: string | number): TimeframeChoice {
+type ConfigResponse = {
+    timeframe?: string | null
+    signal_strategy_timeframe?: string | null
+    dca_strategy_timeframe?: string | null
+}
+
+const TIMEFRAME_CHOICES: TimeframeChoice[] = [
+    { timerange: "1m", seconds: 60 },
+    { timerange: "5min", seconds: 5 * 60 },
+    { timerange: "15min", seconds: 15 * 60 },
+    { timerange: "30min", seconds: 30 * 60 },
+    { timerange: "60min", seconds: 60 * 60 },
+    { timerange: "4h", seconds: 4 * 60 * 60 },
+    { timerange: "1D", seconds: 24 * 60 * 60 },
+]
+
+const configuredMinTimeframe = ref<TimeframeChoice>({ timerange: "15min", seconds: 15 * 60 })
+
+function parseTimeframeSeconds(rawValue: string | null | undefined): number | null {
+    const normalized = String(rawValue ?? "").trim().toLowerCase().replace("min", "m")
+    const match = normalized.match(/^(\d+)([mhd])$/)
+    if (!match) {
+        return null
+    }
+    const value = Number(match[1])
+    const unit = match[2]
+    if (!Number.isFinite(value) || value <= 0) {
+        return null
+    }
+    if (unit === "m") {
+        return value * 60
+    }
+    if (unit === "h") {
+        return value * 60 * 60
+    }
+    if (unit === "d") {
+        return value * 24 * 60 * 60
+    }
+    return null
+}
+
+function resolveMinTimeframe(configured: string | null | undefined): TimeframeChoice {
+    const configuredSeconds = parseTimeframeSeconds(configured)
+    if (!configuredSeconds) {
+        return configuredMinTimeframe.value
+    }
+    const matching = TIMEFRAME_CHOICES.find((choice) => choice.seconds >= configuredSeconds)
+    return matching ?? TIMEFRAME_CHOICES[TIMEFRAME_CHOICES.length - 1]
+}
+
+function selectTimeframe(
+    beginTimestamp: string | number,
+    minTimeframe: TimeframeChoice,
+): TimeframeChoice {
     const beginMs = Number(beginTimestamp)
     const nowMs = Date.now()
     const durationSeconds = Math.max(0, Math.floor((nowMs - beginMs) / 1000))
-
-    const choices: TimeframeChoice[] = [
-        { timerange: "15min", seconds: 15 * 60 },
-        { timerange: "4h", seconds: 4 * 60 * 60 },
-        { timerange: "1D", seconds: 24 * 60 * 60 },
-    ]
+    const choices = TIMEFRAME_CHOICES.filter(
+        (choice) => choice.seconds >= minTimeframe.seconds,
+    )
 
     for (const choice of choices) {
         if (durationSeconds / choice.seconds <= MAX_VISIBLE_CANDLES) {
@@ -58,6 +108,19 @@ function selectTimeframe(beginTimestamp: string | number): TimeframeChoice {
     }
 
     return choices[choices.length - 1]
+}
+
+async function loadConfiguredMinTimeframe(): Promise<void> {
+    try {
+        const config = await fetchJson<ConfigResponse>('/config/all')
+        const configuredTimeframe =
+            config.timeframe ||
+            config.signal_strategy_timeframe ||
+            config.dca_strategy_timeframe
+        configuredMinTimeframe.value = resolveMinTimeframe(configuredTimeframe)
+    } catch (_error) {
+        configuredMinTimeframe.value = resolveMinTimeframe(null)
+    }
 }
 
 watch(open_trade_data.data, async (newData) => {
@@ -242,7 +305,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
 
                                             // Create precision for candlestick prices
                                             const precision = createDecimal(rowData.precision)
-                                            const timeframe = selectTimeframe(begin_timestamp)
+                                            const timeframe = selectTimeframe(begin_timestamp, configuredMinTimeframe.value)
 
                                             chart = createChart(chartRef.value, {
                                                 autoSize: true,
@@ -491,8 +554,9 @@ const columns_trades = (): DataTableColumns<RowData> => {
 
 const columns_open_trades = computed(() => columns_trades())
 
-onMounted(() => {
+onMounted(async () => {
     window.addEventListener('resize', handleResize)
+    await loadConfiguredMinTimeframe()
 })
 
 onUnmounted(() => {
