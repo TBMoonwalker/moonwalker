@@ -86,7 +86,9 @@ const createManagedSocket = (
   name: string,
   url: string,
   onData: (payload: string | null) => void,
+  options?: { healthcheck?: boolean },
 ) => {
+  const healthcheckEnabled = options?.healthcheck ?? true
   const socket = useWebSocket(url, {
     autoReconnect: {
       retries: -1,
@@ -136,6 +138,7 @@ const createManagedSocket = (
   let healthcheckTimer: number | null = null
   const runHealthcheck = () => {
     if (
+      healthcheckEnabled &&
       wsWatchdogEnabled.value &&
       !document.hidden &&
       navigator.onLine &&
@@ -173,11 +176,13 @@ const disposeOpenOrders = createManagedSocket(
   'openTrades',
   buildWsUrl('/trades/open'),
   (payload) => open_trade_store.setRaw(payload),
+  { healthcheck: false },
 )
 const disposeClosedOrders = createManagedSocket(
   'closedTrades',
   buildWsUrl('/trades/closed'),
   (payload) => closed_trade_store.setRaw(payload),
+  { healthcheck: false },
 )
 const disposeStatistics = createManagedSocket(
   'statistics',
