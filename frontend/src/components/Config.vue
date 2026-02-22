@@ -52,7 +52,7 @@
                     <n-input v-model:value="exchange.secret" type="password" show-password-on="click"
                         placeholder="Exchange Secret" />
                 </n-form-item>
-                <n-form-item label="Exchange Hostname" path="exchange_hostname">
+                <n-form-item v-if="showAdvancedGeneral" label="Exchange Hostname" path="exchange_hostname">
                     <n-input v-model:value="exchange.exchange_hostname" placeholder="e.g. bybit.eu" />
                 </n-form-item>
                 <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="left">
@@ -246,7 +246,7 @@
                 <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order step scale" path="ss">
                     <n-input-number v-model:value="dca.ss" placeholder="SS" />
                 </n-form-item>
-                <n-form-item v-if="dca.enabled" label="Safety order volume scale" path="os">
+                <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order volume scale" path="os">
                     <n-input-number v-model:value="dca.os" placeholder="OS" />
                 </n-form-item>
                 <n-form-item label="Stop loss percentage" path="sl">
@@ -445,6 +445,11 @@ const isLoading = ref(true)
 const showAdvancedGeneral = ref(false)
 const monitoring_test_loading = ref(false)
 const submitAttempted = ref(false)
+const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
+const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
+const ADVANCED_WS_STALE_TIMEOUT_MS = 20000
+const ADVANCED_WS_RECONNECT_DEBOUNCE_MS = 2000
+
 const DEFAULT_SYMSIGNAL_URL = "https://stream.3cqs.com"
 const DEFAULT_SYMSIGNAL_VERSION = "3.0.1"
 const timezone = ref([])
@@ -593,10 +598,10 @@ const symsignals = [
 const general = ref({
     timezone: null,
     debug: false,
-    ws_watchdog_enabled: false,
-    ws_healthcheck_interval_ms: 5000,
-    ws_stale_timeout_ms: 20000,
-    ws_reconnect_debounce_ms: 2000,
+    ws_watchdog_enabled: true,
+    ws_healthcheck_interval_ms: ADVANCED_WS_HEALTHCHECK_INTERVAL_MS,
+    ws_stale_timeout_ms: ADVANCED_WS_STALE_TIMEOUT_MS,
+    ws_reconnect_debounce_ms: ADVANCED_WS_RECONNECT_DEBOUNCE_MS,
 })
 
 const signal = ref({
@@ -711,55 +716,17 @@ function getDefaultHistoryLookbackByTimeframe(timeframe: string | null): string 
     return '90d'
 }
 
-function convertLegacyHistoryDaysToLookback(daysValue: unknown): string | null {
-    const parsed = toNumberOrNull(daysValue)
-    if (parsed === null || parsed <= 0) {
-        return null
-    }
-    const days = Math.trunc(parsed)
-    if (days % 365 === 0) {
-        return `${days / 365}y`
-    }
-    if (days % 30 === 0) {
-        return `${days / 30}m`
-    }
-    if (days % 7 === 0) {
-        return `${days / 7}w`
-    }
-    return `${days}d`
+function getStoredAdvancedGeneralPreference(): boolean {
+    const raw = localStorage.getItem(ADVANCED_GENERAL_PREFERENCE_KEY)
+    return raw === 'true'
 }
 
-function parseHistoryLookbackToDays(value: string | null): number | null {
-    if (!value) {
-        return null
-    }
-    const normalized = String(value).trim().toLowerCase()
-    if (!normalized) {
-        return null
-    }
-    if (/^\d+$/.test(normalized)) {
-        const days = Number.parseInt(normalized, 10)
-        return Number.isFinite(days) && days > 0 ? days : null
-    }
-    const match = normalized.match(/^(\d+)\s*([dwmy])$/)
-    if (!match) {
-        return null
-    }
-    const amount = Number.parseInt(match[1], 10)
-    if (!Number.isFinite(amount) || amount <= 0) {
-        return null
-    }
-    const unit = match[2]
-    if (unit === 'd') {
-        return amount
-    }
-    if (unit === 'w') {
-        return amount * 7
-    }
-    if (unit === 'm') {
-        return amount * 30
-    }
-    return amount * 365
+function resetAdvancedGeneralSettings(): void {
+    general.value.ws_watchdog_enabled = true
+    general.value.ws_healthcheck_interval_ms = ADVANCED_WS_HEALTHCHECK_INTERVAL_MS
+    general.value.ws_stale_timeout_ms = ADVANCED_WS_STALE_TIMEOUT_MS
+    general.value.ws_reconnect_debounce_ms = ADVANCED_WS_RECONNECT_DEBOUNCE_MS
+    exchange.value.exchange_hostname = null
 }
 
 function dcaFieldValidator(
@@ -1095,7 +1062,10 @@ const rules: FormRules = {
         trigger: ['submit'],
     },
     os: {
-        validator: dcaFieldValidator('volume scale'),
+        validator: dcaFieldValidator(
+            'volume scale',
+            () => !dca.value.dynamic,
+        ),
         trigger: ['submit'],
     },
     tp: {
@@ -1176,13 +1146,13 @@ async function fetchDefaultValues() {
             general.value.timezone = response.data.timezone || getClientTimezone()
             general.value.debug = parseBooleanString(response.data.debug) ?? false
             general.value.ws_watchdog_enabled =
-                parseBooleanString(response.data.ws_watchdog_enabled) ?? false
+                parseBooleanString(response.data.ws_watchdog_enabled) ?? true
             general.value.ws_healthcheck_interval_ms =
-                toNumberOrNull(response.data.ws_healthcheck_interval_ms) ?? 5000
+                toNumberOrNull(response.data.ws_healthcheck_interval_ms) ?? ADVANCED_WS_HEALTHCHECK_INTERVAL_MS
             general.value.ws_stale_timeout_ms =
-                toNumberOrNull(response.data.ws_stale_timeout_ms) ?? 20000
+                toNumberOrNull(response.data.ws_stale_timeout_ms) ?? ADVANCED_WS_STALE_TIMEOUT_MS
             general.value.ws_reconnect_debounce_ms =
-                toNumberOrNull(response.data.ws_reconnect_debounce_ms) ?? 2000
+                toNumberOrNull(response.data.ws_reconnect_debounce_ms) ?? ADVANCED_WS_RECONNECT_DEBOUNCE_MS
             signal.value.signal = response.data.signal
             signal.value.strategy = response.data.signal_strategy
             signal.value.timeframe =
@@ -1284,8 +1254,12 @@ async function fetchDefaultValues() {
             indicator.value.upnl_housekeeping_interval = toNumberOrNull(response.data.upnl_housekeeping_interval) ?? 0
             indicator.value.history_lookback_time =
                 response.data.history_lookback_time ||
-                convertLegacyHistoryDaysToLookback(response.data.history_from_data) ||
                 getDefaultHistoryLookbackByTimeframe(exchange.value.timeframe)
+
+            showAdvancedGeneral.value = getStoredAdvancedGeneralPreference()
+            if (!showAdvancedGeneral.value) {
+                resetAdvancedGeneralSettings()
+            }
 
             signal.value.strategy_plugins = response.data.strategies.map(v => ({
                 label: v,
@@ -1402,10 +1376,10 @@ async function submitForm() {
         const formData = {
             timezone: JSON.stringify({ 'value': general.value.timezone || false, 'type': "str" }),
             debug: JSON.stringify({ 'value': general.value.debug || false, 'type': "bool" }),
-            ws_watchdog_enabled: JSON.stringify({ 'value': general.value.ws_watchdog_enabled ?? false, 'type': "bool" }),
-            ws_healthcheck_interval_ms: JSON.stringify({ 'value': general.value.ws_healthcheck_interval_ms ?? 5000, 'type': "int" }),
-            ws_stale_timeout_ms: JSON.stringify({ 'value': general.value.ws_stale_timeout_ms ?? 20000, 'type': "int" }),
-            ws_reconnect_debounce_ms: JSON.stringify({ 'value': general.value.ws_reconnect_debounce_ms ?? 2000, 'type': "int" }),
+            ws_watchdog_enabled: JSON.stringify({ 'value': general.value.ws_watchdog_enabled ?? true, 'type': "bool" }),
+            ws_healthcheck_interval_ms: JSON.stringify({ 'value': general.value.ws_healthcheck_interval_ms ?? ADVANCED_WS_HEALTHCHECK_INTERVAL_MS, 'type': "int" }),
+            ws_stale_timeout_ms: JSON.stringify({ 'value': general.value.ws_stale_timeout_ms ?? ADVANCED_WS_STALE_TIMEOUT_MS, 'type': "int" }),
+            ws_reconnect_debounce_ms: JSON.stringify({ 'value': general.value.ws_reconnect_debounce_ms ?? ADVANCED_WS_RECONNECT_DEBOUNCE_MS, 'type': "int" }),
             signal: JSON.stringify({ 'value': signal.value.signal || false, 'type': "str" }),
             signal_strategy: JSON.stringify({ 'value': signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false, 'type': "str" }),
             signal_strategy_timeframe: JSON.stringify({ 'value': exchange.value.timeframe || false, 'type': "str" }),
@@ -1422,7 +1396,7 @@ async function submitForm() {
             timeframe: JSON.stringify({ 'value': exchange.value.timeframe || false, 'type': "str" }),
             key: JSON.stringify({ 'value': exchange.value.key || false, 'type': "str" }),
             secret: JSON.stringify({ 'value': exchange.value.secret || false, 'type': "str" }),
-            exchange_hostname: JSON.stringify({ 'value': exchange.value.exchange_hostname || false, 'type': "str" }),
+            exchange_hostname: JSON.stringify({ 'value': showAdvancedGeneral.value ? (exchange.value.exchange_hostname || false) : false, 'type': "str" }),
             dry_run: JSON.stringify({ 'value': exchange.value.dry_run || false, 'type': "bool" }),
             currency: JSON.stringify({ 'value': exchange.value.currency || false, 'type': "str" }),
             market: JSON.stringify({ 'value': exchange.value.market || false, 'type': "str" }),
@@ -1442,7 +1416,7 @@ async function submitForm() {
             mstc: JSON.stringify({ 'value': dca.value.mstc || false, 'type': "int" }),
             sos: JSON.stringify({ 'value': dca.value.sos || false, 'type': "float" }),
             ss: JSON.stringify({ 'value': dca.value.ss || false, 'type': "float" }),
-            os: JSON.stringify({ 'value': dca.value.os || false, 'type': "float" }),
+            os: JSON.stringify({ 'value': dca.value.dynamic ? false : (dca.value.os || false), 'type': "float" }),
             trade_safety_order_budget_ratio: JSON.stringify({ 'value': dca.value.trade_safety_order_budget_ratio ?? 0.95, 'type': "float" }),
             tp: JSON.stringify({ 'value': dca.value.tp || false, 'type': "float" }),
             sl: JSON.stringify({ 'value': dca.value.sl || false, 'type': "float" }),
@@ -1470,10 +1444,6 @@ async function submitForm() {
             history_lookback_time: JSON.stringify({
                 'value': indicator.value.history_lookback_time || getDefaultHistoryLookbackByTimeframe(exchange.value.timeframe),
                 'type': "str"
-            }),
-            history_from_data: JSON.stringify({
-                'value': parseHistoryLookbackToDays(indicator.value.history_lookback_time) || false,
-                'type': "int"
             }),
         }
         console.log(formData)
@@ -1586,6 +1556,19 @@ function handleValidateButtonClick(e: MouseEvent) {
         }
     })
 }
+
+watch(
+    () => showAdvancedGeneral.value,
+    (enabled) => {
+        if (isLoading.value) {
+            return
+        }
+        localStorage.setItem(ADVANCED_GENERAL_PREFERENCE_KEY, enabled ? 'true' : 'false')
+        if (!enabled) {
+            resetAdvancedGeneralSettings()
+        }
+    },
+)
 
 watch(
     () => signal.value.asap_use_url,

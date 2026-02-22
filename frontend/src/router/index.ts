@@ -59,7 +59,7 @@ function isConfigComplete(config: ConfigPayload): boolean {
     return false
   }
 
-  if (!hasRequiredValue(config.history_lookback_time) && !hasRequiredValue(config.history_from_data)) {
+  if (!hasRequiredValue(config.history_lookback_time)) {
     return false
   }
 
@@ -67,7 +67,7 @@ function isConfigComplete(config: ConfigPayload): boolean {
   if (dcaEnabled) {
     const dynamicDcaEnabled = Boolean(config.dynamic_dca)
     const dcaRequiredKeys = dynamicDcaEnabled
-      ? ['mstc', 'sos', 'os']
+      ? ['mstc', 'sos']
       : ['so', 'mstc', 'sos', 'ss', 'os']
     if (dcaRequiredKeys.some((key) => !hasRequiredValue(config[key]))) {
       return false
