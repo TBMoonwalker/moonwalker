@@ -52,21 +52,23 @@ function isConfigComplete(config: ConfigPayload): boolean {
     'max_bots',
     'bo',
     'tp',
-    'housekeeping_interval',
-    'history_from_data'
+    'housekeeping_interval'
   ]
 
   if (alwaysRequiredKeys.some((key) => !hasRequiredValue(config[key]))) {
     return false
   }
 
+  if (!hasRequiredValue(config.history_lookback_time) && !hasRequiredValue(config.history_from_data)) {
+    return false
+  }
+
   const dcaEnabled = Boolean(config.dca)
   if (dcaEnabled) {
-    const dynamicSoEnabled = Boolean(config.dynamic_so_volume_enabled)
     const dynamicDcaEnabled = Boolean(config.dynamic_dca)
-    const dcaRequiredKeys = dynamicSoEnabled
-      ? (dynamicDcaEnabled ? ['mstc', 'sos'] : ['so', 'mstc', 'sos', 'ss'])
-      : (dynamicDcaEnabled ? ['mstc', 'sos', 'os'] : ['so', 'mstc', 'sos', 'ss', 'os'])
+    const dcaRequiredKeys = dynamicDcaEnabled
+      ? ['mstc', 'sos', 'os']
+      : ['so', 'mstc', 'sos', 'ss', 'os']
     if (dcaRequiredKeys.some((key) => !hasRequiredValue(config[key]))) {
       return false
     }

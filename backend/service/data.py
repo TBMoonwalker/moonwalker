@@ -334,6 +334,32 @@ class Data:
 
         return df
 
+    async def get_data_for_pair_by_days(
+        self, pair: str, lookback_days: int
+    ) -> pd.DataFrame | None:
+        """Return raw OHLCV rows for a pair using day-based lookback."""
+        symbol = self.utils.split_symbol(pair)
+        start_date = int(
+            (
+                datetime.now(timezone.utc) - timedelta(days=max(1, int(lookback_days)))
+            ).timestamp()
+            * 1000
+        )
+
+        query = (
+            await model.Tickers.filter(symbol=symbol)
+            .filter(timestamp__gt=start_date)
+            .values()
+        )
+
+        if query:
+            df = pd.DataFrame(query)
+            df.dropna(inplace=True)
+        else:
+            df = None
+
+        return df
+
     def resample_data(self, ohlcv: pd.DataFrame, timerange: str) -> pd.DataFrame | None:
         """Resample OHLCV data to the requested timerange."""
         df = pd.DataFrame(ohlcv)

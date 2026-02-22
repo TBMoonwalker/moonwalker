@@ -4,6 +4,7 @@ from typing import Any
 
 import helper
 import talib
+from service.config import resolve_history_lookback_days
 from service.data import Data
 
 logging = helper.LoggerFactory.get_logger("logs/indicators.log", "indicators")
@@ -192,6 +193,7 @@ class Indicators:
         self,
         symbol: str,
         timerange: str,
+        config: dict[str, Any] | None = None,
         length: int = 14,
         low_k: float = 2.2,
         mid_k: float = 1.8,
@@ -205,9 +207,17 @@ class Indicators:
         - HIGH -> 1.5
         """
         try:
-            df_raw = await self.data.get_data_for_pair(
-                symbol, timerange, max(length * 8, 80)
-            )
+            if config:
+                lookback_days = resolve_history_lookback_days(
+                    config, timeframe=timerange
+                )
+                df_raw = await self.data.get_data_for_pair_by_days(
+                    symbol, lookback_days
+                )
+            else:
+                df_raw = await self.data.get_data_for_pair(
+                    symbol, timerange, max(length * 8, 80)
+                )
             if df_raw is None:
                 return 1.0, {"regime": "mid", "atr_percent": 0.0}
 

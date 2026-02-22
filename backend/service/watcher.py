@@ -6,7 +6,7 @@ from typing import Any
 import ccxt.pro as ccxtpro
 import helper
 import model
-from service.config import Config, resolve_timeframe
+from service.config import Config, resolve_history_lookback_days, resolve_timeframe
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
@@ -165,9 +165,11 @@ class Watcher:
         btc_symbol = next(iter(mandatory_symbols))
 
         try:
-            history_days = max(1, int(config.get("history_from_data", 30)))
-        except (TypeError, ValueError):
-            history_days = 30
+            history_days = resolve_history_lookback_days(
+                config, timeframe=Watcher.timeframe
+            )
+        except Exception:
+            history_days = 90
 
         warmup_key = (
             btc_symbol,

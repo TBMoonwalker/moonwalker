@@ -8,7 +8,7 @@ async def test_dynamic_dca_sizing_uses_base_order_and_factors(monkeypatch):
     dca.config = {
         "bo": 100.0,
         "trade_safety_order_budget_ratio": 0.95,
-        "dynamic_so_ath_cache_ttl": 60,
+        "dynamic_dca_ath_cache_ttl": 60,
     }
 
     async def fake_ath(*_args, **_kwargs):
@@ -52,7 +52,7 @@ async def test_dynamic_dca_sizing_caps_by_budget_and_skips_below_base_order(
     dca.config = {
         "bo": 100.0,
         "trade_safety_order_budget_ratio": 0.5,
-        "dynamic_so_ath_cache_ttl": 60,
+        "dynamic_dca_ath_cache_ttl": 60,
     }
 
     async def fake_ath(*_args, **_kwargs):
@@ -92,7 +92,7 @@ async def test_dynamic_dca_sizing_uses_budget_ratio_default(monkeypatch):
     dca = Dca()
     dca.config = {
         "bo": 100.0,
-        "dynamic_so_ath_cache_ttl": 60,
+        "dynamic_dca_ath_cache_ttl": 60,
     }
 
     async def fake_ath(*_args, **_kwargs):

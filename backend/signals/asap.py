@@ -11,7 +11,7 @@ import helper
 import model
 import requests
 from service.autopilot import Autopilot
-from service.config import resolve_timeframe
+from service.config import resolve_history_lookback_days, resolve_timeframe
 from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
@@ -141,7 +141,10 @@ class SignalPlugin:
         """
         # New symbols
         symbol_list = self.config.get("symbol_list", None)
-        history_data = self.config.get("history_from_data", 30)
+        history_data = resolve_history_lookback_days(
+            self.config,
+            timeframe=resolve_timeframe(self.config),
+        )
         if symbol_list:
             if "http" in symbol_list:
                 symbol_list = await self.__fetch_symbol_list_from_url(symbol_list)

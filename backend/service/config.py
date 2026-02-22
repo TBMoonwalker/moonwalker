@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 from typing import Any, Callable
 
 import helper
@@ -18,6 +19,21 @@ TIMEFRAME_KEYS = (
     "tp_strategy_timeframe",
 )
 
+HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
+    "1m": "30d",
+    "15m": "90d",
+    "1h": "180d",
+    "4h": "1y",
+    "1d": "3y",
+}
+
+HISTORY_LOOKBACK_UNIT_TO_DAYS = {
+    "d": 1,
+    "w": 7,
+    "m": 30,
+    "y": 365,
+}
+
 
 def resolve_timeframe(
     config: dict[str, Any], preferred_key: str | None = None, default: str = "1m"
@@ -32,6 +48,73 @@ def resolve_timeframe(
         if isinstance(value, str) and value.strip():
             return value.strip()
     return default
+
+
+def parse_history_lookback_to_days(value: Any) -> int | None:
+    """Parse lookback text like 30d/12w/6m/1y into days."""
+    if value is None:
+        return None
+
+    raw = str(value).strip().lower()
+    if not raw or raw in {"false", "none", "null"}:
+        return None
+
+    if raw.isdigit():
+        days = int(raw)
+        return days if days > 0 else None
+
+    match = re.fullmatch(r"(\d+)\s*([dwmy])", raw)
+    if not match:
+        return None
+
+    amount = int(match.group(1))
+    unit = match.group(2)
+    if amount <= 0:
+        return None
+
+    return amount * HISTORY_LOOKBACK_UNIT_TO_DAYS[unit]
+
+
+def format_history_lookback_days(days: int) -> str:
+    """Format day count into canonical lookback string."""
+    normalized_days = max(1, int(days))
+    if normalized_days % 365 == 0:
+        return f"{normalized_days // 365}y"
+    if normalized_days % 30 == 0:
+        return f"{normalized_days // 30}m"
+    if normalized_days % 7 == 0:
+        return f"{normalized_days // 7}w"
+    return f"{normalized_days}d"
+
+
+def resolve_history_lookback_days(
+    config: dict[str, Any],
+    timeframe: str | None = None,
+    preferred_timeframe_key: str | None = None,
+) -> int:
+    """Resolve unified history lookback days with legacy fallback.
+
+    Precedence:
+    1) `history_lookback_time` (new canonical key)
+    2) `history_from_data` (legacy numeric days)
+    3) best-practice defaults by resolved timeframe
+    """
+    parsed = parse_history_lookback_to_days(config.get("history_lookback_time"))
+    if parsed:
+        return parsed
+
+    legacy_days = parse_history_lookback_to_days(config.get("history_from_data"))
+    if legacy_days:
+        return legacy_days
+
+    effective_timeframe = timeframe or resolve_timeframe(
+        config, preferred_key=preferred_timeframe_key
+    )
+    default_window = HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME.get(
+        str(effective_timeframe).strip().lower(), "90d"
+    )
+    default_days = parse_history_lookback_to_days(default_window)
+    return default_days or 90
 
 
 class Config:

@@ -84,79 +84,6 @@ class Dca:
         self._strategy_cache[cache_key] = plugin
         return plugin
 
-    async def __get_dynamic_volume_scale(
-        self,
-        symbol: str,
-        current_price: float,
-        actual_pnl: float,
-    ) -> tuple[float, dict[str, float | str]]:
-        enabled = bool(self.config.get("dynamic_so_volume_enabled", False))
-        if not enabled:
-            return 1.0, {
-                "enabled": "false",
-                "loss_ratio": 0.0,
-                "drawdown_ratio": 0.0,
-                "scale": 1.0,
-                "window": "off",
-            }
-
-        ath, window = await self.ath_service.get_recent_ath(
-            symbol=symbol,
-            config=self.config,
-            cache_ttl_seconds=int(self.config.get("dynamic_so_ath_cache_ttl", 60)),
-        )
-        if ath <= 0:
-            ath = current_price
-
-        loss_ratio = max(0.0, abs(actual_pnl) / 100)
-        drawdown_ratio = max(0.0, (ath - current_price) / ath) if ath > 0 else 0.0
-
-        loss_weight = float(self.config.get("dynamic_so_loss_weight", 0.5))
-        drawdown_weight = float(self.config.get("dynamic_so_drawdown_weight", 0.8))
-        exponent = max(float(self.config.get("dynamic_so_exponent", 1.1)), 0.1)
-        min_scale = max(float(self.config.get("dynamic_so_min_scale", 0.5)), 0.01)
-        max_scale = max(
-            float(self.config.get("dynamic_so_max_scale", 3.0)),
-            min_scale,
-        )
-        max_scale_loss_threshold = max(
-            float(self.config.get("dynamic_so_loss_max_scale_threshold", 30.0)),
-            0.0,
-        )
-
-        if max_scale_loss_threshold > 0 and abs(actual_pnl) >= max_scale_loss_threshold:
-            threshold_details: dict[str, float | str] = {
-                "enabled": "true",
-                "window": window,
-                "ath": ath,
-                "loss_ratio": round(loss_ratio, 6),
-                "drawdown_ratio": round(drawdown_ratio, 6),
-                "scale": round(max_scale, 6),
-                "min_scale": min_scale,
-                "max_scale": max_scale,
-                "mode": "loss-threshold-max",
-            }
-            return max_scale, threshold_details
-
-        signal_strength = (loss_weight * loss_ratio) + (
-            drawdown_weight * (drawdown_ratio**exponent)
-        )
-        dynamic_scale = 1.0 + signal_strength
-        dynamic_scale = min(max(dynamic_scale, min_scale), max_scale)
-
-        details: dict[str, float | str] = {
-            "enabled": "true",
-            "window": window,
-            "ath": ath,
-            "loss_ratio": round(loss_ratio, 6),
-            "drawdown_ratio": round(drawdown_ratio, 6),
-            "scale": round(dynamic_scale, 6),
-            "min_scale": min_scale,
-            "max_scale": max_scale,
-            "mode": "formula",
-        }
-        return dynamic_scale, details
-
     async def __resolve_safety_order_size(
         self,
         trades: dict[str, Any],
@@ -180,20 +107,12 @@ class Dca:
         base_size = configured_so_size
         if trades["safetyorders"]:
             base_size = float(trades["safetyorders"][-1]["ordersize"]) * volume_scale
-            if self.config.get("dynamic_so_volume_enabled", False):
-                # Keep dynamic SO sizing from collapsing below the configured SO size
-                # after importing historical micro-orders.
-                base_size = max(base_size, configured_so_size)
-
-        dynamic_factor, dynamic_details = await self.__get_dynamic_volume_scale(
-            trades["symbol"], current_price, actual_pnl
-        )
-        final_size = round(base_size * dynamic_factor, 8)
+        final_size = round(base_size, 8)
 
         return final_size, {
             "base_size": round(base_size, 8),
             "final_size": final_size,
-            **dynamic_details,
+            "enabled": "false",
         }
 
     async def __resolve_dynamic_dca_safety_order_size(
@@ -220,7 +139,7 @@ class Dca:
         ath, window = await self.ath_service.get_recent_ath(
             symbol=trades["symbol"],
             config=self.config,
-            cache_ttl_seconds=int(self.config.get("dynamic_so_ath_cache_ttl", 60)),
+            cache_ttl_seconds=int(self.config.get("dynamic_dca_ath_cache_ttl", 60)),
         )
         if ath <= 0:
             ath = current_price
@@ -230,7 +149,7 @@ class Dca:
         atr_timeframe = str(
             self.config.get(
                 "dynamic_so_atr_timeframe",
-                self.config.get("dynamic_so_ath_timeframe", "1h"),
+                self.config.get("dynamic_dca_ath_timeframe", "1h"),
             )
             or "1h"
         ).strip()
@@ -241,6 +160,7 @@ class Dca:
         vol_factor, atr_details = await self.indicators.calculate_atr_regime_multiplier(
             symbol=trades["symbol"],
             timerange=atr_timeframe,
+            config=self.config,
             length=atr_length,
             low_k=low_k,
             mid_k=mid_k,
@@ -443,10 +363,7 @@ class Dca:
         safety_order_size = float(self.config.get("so", 0.0) or 0.0)
         new_so = False
         placed_new_so = False
-        dynamic_so_details: dict[str, float | str] = {
-            "enabled": "false",
-            "scale": 1.0,
-        }
+        dynamic_so_details: dict[str, float | str] = {"enabled": "false"}
 
         # Actual PNL in percent
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
@@ -584,10 +501,10 @@ class Dca:
                 "price_deviation": next_so_percentage,
                 "actual_pnl": actual_pnl,
                 "new_so": placed_new_so,
-                "dynamic_so_scale": dynamic_so_details.get("scale", 1.0),
+                "dynamic_so_scale": dynamic_so_details.get("vol_factor", 1.0),
                 "dynamic_so_window": dynamic_so_details.get("window", "off"),
-                "dynamic_so_drawdown": dynamic_so_details.get("drawdown_ratio", 0.0),
-                "dynamic_so_loss": dynamic_so_details.get("loss_ratio", 0.0),
+                "dynamic_so_drawdown": dynamic_so_details.get("ath_distance", 0.0),
+                "dynamic_so_loss": dynamic_so_details.get("loss_factor", 0.0),
             }
             # Send new statistics to statistics module
             await self.statistic.update_statistic_data(logging_json)

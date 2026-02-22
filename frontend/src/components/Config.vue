@@ -246,7 +246,7 @@
                 <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order step scale" path="ss">
                     <n-input-number v-model:value="dca.ss" placeholder="SS" />
                 </n-form-item>
-                <n-form-item v-if="dca.enabled && !dca.dynamic_so_volume_enabled" label="Safety order volume scale" path="os">
+                <n-form-item v-if="dca.enabled" label="Safety order volume scale" path="os">
                     <n-input-number v-model:value="dca.os" placeholder="OS" />
                 </n-form-item>
                 <n-form-item label="Stop loss percentage" path="sl">
@@ -265,44 +265,6 @@
                         placeholder="0.95"
                     />
                 </n-form-item>
-                <n-form-item v-if="dca.enabled" label="Dynamic SO volume scaling" path="dynamic_so_volume_enabled" label-placement="left">
-                    <n-checkbox v-model:checked="dca.dynamic_so_volume_enabled" />
-                </n-form-item>
-                <template v-if="dca.enabled && dca.dynamic_so_volume_enabled">
-                    <n-form-item label="ATH lookback value" path="dynamic_so_ath_lookback_value">
-                        <n-input-number v-model:value="dca.dynamic_so_ath_lookback_value" placeholder="1" />
-                    </n-form-item>
-                    <n-form-item label="ATH lookback unit" path="dynamic_so_ath_lookback_unit">
-                        <n-select v-model:value="dca.dynamic_so_ath_lookback_unit" placeholder="Select" :options="dynamicSoLookbackUnitOptions" />
-                    </n-form-item>
-                    <n-form-item label="ATH candle timeframe" path="dynamic_so_ath_timeframe">
-                        <n-select v-model:value="dca.dynamic_so_ath_timeframe" placeholder="Select" :options="dynamicSoAthTimeframeOptions" />
-                    </n-form-item>
-                    <n-form-item label="ATH cache TTL (sec)" path="dynamic_so_ath_cache_ttl">
-                        <n-input-number v-model:value="dca.dynamic_so_ath_cache_ttl" placeholder="60" />
-                    </n-form-item>
-                    <n-form-item label="Loss weight" path="dynamic_so_loss_weight">
-                        <n-input-number v-model:value="dca.dynamic_so_loss_weight" placeholder="0.5" />
-                    </n-form-item>
-                    <n-form-item label="ATH drawdown weight" path="dynamic_so_drawdown_weight">
-                        <n-input-number v-model:value="dca.dynamic_so_drawdown_weight" placeholder="0.8" />
-                    </n-form-item>
-                    <n-form-item label="Curve exponent" path="dynamic_so_exponent">
-                        <n-input-number v-model:value="dca.dynamic_so_exponent" placeholder="1.1" />
-                    </n-form-item>
-                    <n-form-item label="Dynamic min scale" path="dynamic_so_min_scale">
-                        <n-input-number v-model:value="dca.dynamic_so_min_scale" placeholder="0.5" />
-                    </n-form-item>
-                    <n-form-item label="Dynamic max scale" path="dynamic_so_max_scale">
-                        <n-input-number v-model:value="dca.dynamic_so_max_scale" placeholder="3.0" />
-                    </n-form-item>
-                    <n-form-item label="Loss threshold for max scale (%)" path="dynamic_so_loss_max_scale_threshold">
-                        <n-input-number
-                            v-model:value="dca.dynamic_so_loss_max_scale_threshold"
-                            placeholder="30.0"
-                        />
-                    </n-form-item>
-                </template>
             </n-form>
         </n-card>
 
@@ -411,8 +373,14 @@
                     <n-input-number v-model:value="indicator.upnl_housekeeping_interval"
                         placeholder="UPNL retention" />
                 </n-form-item>
-                <n-form-item label="History from data (in days)" path="history_from_data">
-                    <n-input-number v-model:value="indicator.history_from_data" placeholder="History" />
+                <n-form-item label="History Lookback Time" path="history_lookback_time">
+                    <n-select
+                        v-model:value="indicator.history_lookback_time"
+                        :options="historyLookbackOptions"
+                        filterable
+                        tag
+                        placeholder="e.g. 90d, 1y"
+                    />
                 </n-form-item>
             </n-form>
         </n-card>
@@ -507,17 +475,12 @@ const timerange = [
     },
 ]
 
-const dynamicSoLookbackUnitOptions = [
-    { label: 'Day', value: 'day' },
-    { label: 'Week', value: 'week' },
-    { label: 'Month', value: 'month' },
-    { label: 'Year', value: 'year' },
-]
-
-const dynamicSoAthTimeframeOptions = [
-    { label: '4 hours (4h)', value: '4h' },
-    { label: '1 day (1d)', value: '1d' },
-    { label: '1 week (1w)', value: '1w' },
+const historyLookbackOptions = [
+    { label: '30 days (1m default)', value: '30d' },
+    { label: '90 days (15m default)', value: '90d' },
+    { label: '180 days (1h default)', value: '180d' },
+    { label: '1 year (4h default)', value: '1y' },
+    { label: '3 years (1d default)', value: '3y' },
 ]
 
 const exchanges = [
@@ -692,18 +655,6 @@ const dca = ref({
     sos: null,
     ss: null,
     os: null,
-    dynamic_so_volume_enabled: false,
-    dynamic_so_ath_lookback_value: 1,
-    dynamic_so_ath_lookback_unit: 'month',
-    dynamic_so_ath_timeframe: '4h',
-    dynamic_so_ath_window: '1m',
-    dynamic_so_loss_weight: 0.5,
-    dynamic_so_drawdown_weight: 0.8,
-    dynamic_so_exponent: 1.1,
-    dynamic_so_min_scale: 0.5,
-    dynamic_so_max_scale: 3.0,
-    dynamic_so_loss_max_scale_threshold: 30.0,
-    dynamic_so_ath_cache_ttl: 60,
     trade_safety_order_budget_ratio: 0.95,
     tp: null,
     sl: null,
@@ -737,8 +688,79 @@ const monitoring = ref({
 const indicator = ref({
     housekeeping_interval: null,
     upnl_housekeeping_interval: 0,
-    history_from_data: null,
+    history_lookback_time: null,
 })
+
+function getDefaultHistoryLookbackByTimeframe(timeframe: string | null): string {
+    const normalized = String(timeframe || '').trim().toLowerCase()
+    if (normalized === '1m') {
+        return '30d'
+    }
+    if (normalized === '15m') {
+        return '90d'
+    }
+    if (normalized === '1h') {
+        return '180d'
+    }
+    if (normalized === '4h') {
+        return '1y'
+    }
+    if (normalized === '1d') {
+        return '3y'
+    }
+    return '90d'
+}
+
+function convertLegacyHistoryDaysToLookback(daysValue: unknown): string | null {
+    const parsed = toNumberOrNull(daysValue)
+    if (parsed === null || parsed <= 0) {
+        return null
+    }
+    const days = Math.trunc(parsed)
+    if (days % 365 === 0) {
+        return `${days / 365}y`
+    }
+    if (days % 30 === 0) {
+        return `${days / 30}m`
+    }
+    if (days % 7 === 0) {
+        return `${days / 7}w`
+    }
+    return `${days}d`
+}
+
+function parseHistoryLookbackToDays(value: string | null): number | null {
+    if (!value) {
+        return null
+    }
+    const normalized = String(value).trim().toLowerCase()
+    if (!normalized) {
+        return null
+    }
+    if (/^\d+$/.test(normalized)) {
+        const days = Number.parseInt(normalized, 10)
+        return Number.isFinite(days) && days > 0 ? days : null
+    }
+    const match = normalized.match(/^(\d+)\s*([dwmy])$/)
+    if (!match) {
+        return null
+    }
+    const amount = Number.parseInt(match[1], 10)
+    if (!Number.isFinite(amount) || amount <= 0) {
+        return null
+    }
+    const unit = match[2]
+    if (unit === 'd') {
+        return amount
+    }
+    if (unit === 'w') {
+        return amount * 7
+    }
+    if (unit === 'm') {
+        return amount * 30
+    }
+    return amount * 365
+}
 
 function dcaFieldValidator(
     fieldLabel: string,
@@ -1073,17 +1095,7 @@ const rules: FormRules = {
         trigger: ['submit'],
     },
     os: {
-        validator: dcaFieldValidator(
-            'volume scale',
-            () => !dca.value.dynamic_so_volume_enabled,
-        ),
-        trigger: ['submit'],
-    },
-    dynamic_so_loss_max_scale_threshold: {
-        validator: dcaFieldValidator(
-            'loss threshold for max scale',
-            () => dca.value.dynamic_so_volume_enabled,
-        ),
+        validator: dcaFieldValidator('volume scale'),
         trigger: ['submit'],
     },
     tp: {
@@ -1098,8 +1110,8 @@ const rules: FormRules = {
         validator: requiredAfterSubmit('Please add UPNL history retention'),
         trigger: ['submit', 'change']
     },
-    history_from_data: {
-        validator: requiredAfterSubmit('Please add history from data'),
+    history_lookback_time: {
+        validator: requiredAfterSubmit('Please add history lookback time'),
         trigger: ['submit', 'change']
     },
 }
@@ -1239,29 +1251,6 @@ async function fetchDefaultValues() {
             dca.value.sos = toNumberOrNull(response.data.sos)
             dca.value.ss = toNumberOrNull(response.data.ss)
             dca.value.os = toNumberOrNull(response.data.os)
-            dca.value.dynamic_so_volume_enabled =
-                parseBooleanString(response.data.dynamic_so_volume_enabled) ?? false
-            dca.value.dynamic_so_ath_lookback_value =
-                toNumberOrNull(response.data.dynamic_so_ath_lookback_value) ?? 1
-            dca.value.dynamic_so_ath_lookback_unit =
-                response.data.dynamic_so_ath_lookback_unit || 'month'
-            dca.value.dynamic_so_ath_timeframe =
-                response.data.dynamic_so_ath_timeframe || '4h'
-            dca.value.dynamic_so_ath_window = response.data.dynamic_so_ath_window || '1m'
-            dca.value.dynamic_so_loss_weight =
-                toNumberOrNull(response.data.dynamic_so_loss_weight) ?? 0.5
-            dca.value.dynamic_so_drawdown_weight =
-                toNumberOrNull(response.data.dynamic_so_drawdown_weight) ?? 0.8
-            dca.value.dynamic_so_exponent =
-                toNumberOrNull(response.data.dynamic_so_exponent) ?? 1.1
-            dca.value.dynamic_so_min_scale =
-                toNumberOrNull(response.data.dynamic_so_min_scale) ?? 0.5
-            dca.value.dynamic_so_max_scale =
-                toNumberOrNull(response.data.dynamic_so_max_scale) ?? 3.0
-            dca.value.dynamic_so_loss_max_scale_threshold =
-                toNumberOrNull(response.data.dynamic_so_loss_max_scale_threshold) ?? 30.0
-            dca.value.dynamic_so_ath_cache_ttl =
-                toNumberOrNull(response.data.dynamic_so_ath_cache_ttl) ?? 60
             dca.value.trade_safety_order_budget_ratio =
                 toNumberOrNull(response.data.trade_safety_order_budget_ratio) ?? 0.95
             dca.value.tp = toNumberOrNull(response.data.tp)
@@ -1293,7 +1282,10 @@ async function fetchDefaultValues() {
                 toNumberOrNull(response.data.monitoring_retry_count) ?? 1
             indicator.value.housekeeping_interval = toNumberOrNull(response.data.housekeeping_interval)
             indicator.value.upnl_housekeeping_interval = toNumberOrNull(response.data.upnl_housekeeping_interval) ?? 0
-            indicator.value.history_from_data = toNumberOrNull(response.data.history_from_data)
+            indicator.value.history_lookback_time =
+                response.data.history_lookback_time ||
+                convertLegacyHistoryDaysToLookback(response.data.history_from_data) ||
+                getDefaultHistoryLookbackByTimeframe(exchange.value.timeframe)
 
             signal.value.strategy_plugins = response.data.strategies.map(v => ({
                 label: v,
@@ -1451,18 +1443,6 @@ async function submitForm() {
             sos: JSON.stringify({ 'value': dca.value.sos || false, 'type': "float" }),
             ss: JSON.stringify({ 'value': dca.value.ss || false, 'type': "float" }),
             os: JSON.stringify({ 'value': dca.value.os || false, 'type': "float" }),
-            dynamic_so_volume_enabled: JSON.stringify({ 'value': dca.value.dynamic_so_volume_enabled || false, 'type': "bool" }),
-            dynamic_so_ath_lookback_value: JSON.stringify({ 'value': dca.value.dynamic_so_ath_lookback_value ?? 1, 'type': "int" }),
-            dynamic_so_ath_lookback_unit: JSON.stringify({ 'value': dca.value.dynamic_so_ath_lookback_unit || 'month', 'type': "str" }),
-            dynamic_so_ath_timeframe: JSON.stringify({ 'value': dca.value.dynamic_so_ath_timeframe || '4h', 'type': "str" }),
-            dynamic_so_ath_window: JSON.stringify({ 'value': dca.value.dynamic_so_ath_window || '1m', 'type': "str" }),
-            dynamic_so_loss_weight: JSON.stringify({ 'value': dca.value.dynamic_so_loss_weight ?? 0.5, 'type': "float" }),
-            dynamic_so_drawdown_weight: JSON.stringify({ 'value': dca.value.dynamic_so_drawdown_weight ?? 0.8, 'type': "float" }),
-            dynamic_so_exponent: JSON.stringify({ 'value': dca.value.dynamic_so_exponent ?? 1.1, 'type': "float" }),
-            dynamic_so_min_scale: JSON.stringify({ 'value': dca.value.dynamic_so_min_scale ?? 0.5, 'type': "float" }),
-            dynamic_so_max_scale: JSON.stringify({ 'value': dca.value.dynamic_so_max_scale ?? 3.0, 'type': "float" }),
-            dynamic_so_loss_max_scale_threshold: JSON.stringify({ 'value': dca.value.dynamic_so_loss_max_scale_threshold ?? 30.0, 'type': "float" }),
-            dynamic_so_ath_cache_ttl: JSON.stringify({ 'value': dca.value.dynamic_so_ath_cache_ttl ?? 60, 'type': "int" }),
             trade_safety_order_budget_ratio: JSON.stringify({ 'value': dca.value.trade_safety_order_budget_ratio ?? 0.95, 'type': "float" }),
             tp: JSON.stringify({ 'value': dca.value.tp || false, 'type': "float" }),
             sl: JSON.stringify({ 'value': dca.value.sl || false, 'type': "float" }),
@@ -1487,7 +1467,14 @@ async function submitForm() {
             monitoring_retry_count: JSON.stringify({ 'value': monitoring.value.retry_count ?? 1, 'type': "int" }),
             housekeeping_interval: JSON.stringify({ 'value': indicator.value.housekeeping_interval || false, 'type': "int" }),
             upnl_housekeeping_interval: JSON.stringify({ 'value': indicator.value.upnl_housekeeping_interval ?? false, 'type': "int" }),
-            history_from_data: JSON.stringify({ 'value': indicator.value.history_from_data || false, 'type': "int" }),
+            history_lookback_time: JSON.stringify({
+                'value': indicator.value.history_lookback_time || getDefaultHistoryLookbackByTimeframe(exchange.value.timeframe),
+                'type': "str"
+            }),
+            history_from_data: JSON.stringify({
+                'value': parseHistoryLookbackToDays(indicator.value.history_lookback_time) || false,
+                'type': "int"
+            }),
         }
         console.log(formData)
 

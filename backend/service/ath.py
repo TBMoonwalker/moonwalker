@@ -6,6 +6,7 @@ from typing import Any
 
 import helper
 import model
+from service.config import resolve_history_lookback_days
 from service.exchange import Exchange
 
 logging = helper.LoggerFactory.get_logger("logs/ath.log", "ath")
@@ -15,13 +16,6 @@ class AthService:
     """Fetch and cache ATH values for configurable lookback windows."""
 
     SUPPORTED_TIMEFRAMES = {"4h", "1d", "1w"}
-    SUPPORTED_UNITS = {"day", "week", "month", "year"}
-    UNIT_TO_DAYS = {
-        "day": 1,
-        "week": 7,
-        "month": 30,
-        "year": 365,
-    }
 
     def __init__(self) -> None:
         """Initialize ATH service resources."""
@@ -34,49 +28,22 @@ class AthService:
             return value.replace(tzinfo=UTC)
         return value.astimezone(UTC)
 
-    def normalize_lookback(
-        self, config: dict[str, Any]
-    ) -> tuple[int, str, str, int, str]:
+    def normalize_lookback(self, config: dict[str, Any]) -> tuple[str, int, str]:
         """Normalize configurable lookback and timeframe settings.
 
         Returns:
-            (lookback_value, lookback_unit, timeframe, lookback_days, cache_window_key)
+            (timeframe, lookback_days, cache_window_key)
         """
-        lookback_value = int(config.get("dynamic_so_ath_lookback_value", 0) or 0)
-        lookback_unit = (
-            str(config.get("dynamic_so_ath_lookback_unit", "month") or "month")
-            .strip()
-            .lower()
-        )
         timeframe = (
-            str(config.get("dynamic_so_ath_timeframe", "4h") or "4h").strip().lower()
+            str(config.get("dynamic_dca_ath_timeframe", "4h") or "4h").strip().lower()
         )
 
-        if lookback_value <= 0:
-            legacy_period = (
-                str(config.get("dynamic_so_ath_window", "1m") or "1m").strip().lower()
-            )
-            if legacy_period in {"daily", "day", "1d"}:
-                lookback_value = 1
-                lookback_unit = "day"
-                timeframe = "4h"
-            elif legacy_period in {"weekly", "week", "1w"}:
-                lookback_value = 1
-                lookback_unit = "week"
-                timeframe = "4h"
-            else:
-                lookback_value = 1
-                lookback_unit = "month"
-                timeframe = "4h"
-
-        if lookback_unit not in self.SUPPORTED_UNITS:
-            lookback_unit = "month"
         if timeframe not in self.SUPPORTED_TIMEFRAMES:
             timeframe = "4h"
 
-        lookback_days = lookback_value * self.UNIT_TO_DAYS[lookback_unit]
-        cache_window_key = f"{lookback_value}{lookback_unit[0]}@{timeframe}"
-        return lookback_value, lookback_unit, timeframe, lookback_days, cache_window_key
+        lookback_days = resolve_history_lookback_days(config, timeframe=timeframe)
+        cache_window_key = f"{lookback_days}d@{timeframe}"
+        return timeframe, lookback_days, cache_window_key
 
     async def get_recent_ath(
         self,
@@ -94,13 +61,7 @@ class AthService:
         Returns:
             Tuple of (ath_value, normalized_cache_window_key).
         """
-        (
-            _lookback_value,
-            _lookback_unit,
-            timeframe,
-            lookback_days,
-            window,
-        ) = self.normalize_lookback(config)
+        timeframe, lookback_days, window = self.normalize_lookback(config)
         ttl = max(int(cache_ttl_seconds), 5)
         cache_key = (symbol, window)
         now = time.time()

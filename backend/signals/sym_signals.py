@@ -9,7 +9,7 @@ import helper
 import model
 import socketio
 from service.autopilot import Autopilot
-from service.config import resolve_timeframe
+from service.config import resolve_history_lookback_days, resolve_timeframe
 from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
@@ -221,7 +221,10 @@ class SignalPlugin:
                     event = await sio.receive(timeout=300)
                     if event[0] == "signal":
                         symbol = f"{event[1]['symbol'].upper()}{currency}"
-                        history_data = self.config.get("history_from_data", 30)
+                        history_data = resolve_history_lookback_days(
+                            self.config,
+                            timeframe=resolve_timeframe(self.config),
+                        )
                         max_bots = await self.__check_max_bots()
                         if not max_bots:
                             self._max_bots_blocked = False
