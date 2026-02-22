@@ -23,10 +23,21 @@ class Autopilot:
         """Return trading settings based on locked funds and thresholds."""
         trading_settings = {}
         if config.get("autopilot", False):
-            # TODO - check what's happening if funds_locked are higher then max fund
-            threshold_percent = (
-                funds_locked / int(config.get("autopilot_max_fund", 0))
-            ) * 100
+            max_fund = float(config.get("autopilot_max_fund", 0) or 0)
+            if max_fund <= 0:
+                logging.warning(
+                    "Autopilot enabled but autopilot_max_fund is missing/invalid (%s).",
+                    config.get("autopilot_max_fund"),
+                )
+                return trading_settings
+
+            threshold_percent = (funds_locked / max_fund) * 100
+            if threshold_percent > 100:
+                logging.warning(
+                    "Autopilot threshold exceeded 100%% (%.2f%%). "
+                    "Funds locked are higher than max_fund.",
+                    threshold_percent,
+                )
 
             autopilot_mode = "none"
 

@@ -114,7 +114,7 @@ class Watcher:
             if old_exchange:
                 try:
                     await old_exchange.close()
-                except Exception as exc:  # noqa: BLE001
+                except (ccxtpro.BaseError, OSError, RuntimeError) as exc:
                     logging.warning("Error closing previous CCXT Pro client: %s", exc)
 
             if not config.get("exchange", None):
@@ -146,7 +146,7 @@ class Watcher:
                         "Enabled CCXT Pro demo trading for exchange '%s'.",
                         config.get("exchange"),
                     )
-                except Exception as exc:
+                except (AttributeError, NotImplementedError, ccxtpro.BaseError) as exc:
                     raise ValueError(
                         "Dry run requires CCXT Pro enableDemoTrading support, but "
                         f"'{config.get('exchange')}' could not enable demo trading."
@@ -168,7 +168,7 @@ class Watcher:
             history_days = resolve_history_lookback_days(
                 config, timeframe=Watcher.timeframe
             )
-        except Exception:
+        except (TypeError, ValueError):
             history_days = 90
 
         warmup_key = (
@@ -218,7 +218,7 @@ class Watcher:
                 logging.warning("BTC pulse history warmup failed for %s.", symbol)
         except asyncio.CancelledError:
             raise
-        except Exception as exc:  # noqa: BLE001 - Keep watcher running.
+        except (RuntimeError, TypeError, ValueError) as exc:
             logging.error(
                 "BTC pulse history warmup error for %s: %s", symbol, exc, exc_info=True
             )
@@ -235,7 +235,7 @@ class Watcher:
             await asyncio.wait_for(self._btc_warmup_task, timeout=25)
         except asyncio.TimeoutError:
             logging.warning("BTC pulse warmup timed out; continuing startup.")
-        except Exception as exc:  # noqa: BLE001 - Non-fatal startup path.
+        except (RuntimeError, TypeError, ValueError) as exc:
             logging.warning("BTC pulse warmup completed with warning: %s", exc)
 
     # ------------------------------------------------------------------- #
@@ -257,7 +257,7 @@ class Watcher:
                 watcher_queue.task_done()
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps the watcher queue alive on unexpected errors.
                 logging.error(f"Error in watch_incoming_symbols: {e}", exc_info=True)
                 await asyncio.sleep(2)
@@ -274,6 +274,7 @@ class Watcher:
         using_db: BaseDBAsyncClient | None,
         update_fields: list[str],
     ) -> None:
+        """Refresh watched symbols when a new open trade is created."""
         if created:
             try:
                 trade_symbols = await Trades().get_symbols()
@@ -281,7 +282,7 @@ class Watcher:
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
                 logging.debug(f"Added symbols. New list: {Watcher.ticker_symbols}")
-            except Exception as e:
+            except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps post-save hooks from crashing the process.
                 logging.error(f"Error adding trade symbols: {e}", exc_info=True)
 
@@ -293,6 +294,7 @@ class Watcher:
         using_db: BaseDBAsyncClient | None,
         update_fields: list[str],
     ) -> None:
+        """Refresh watched symbols when a trade is moved to closed trades."""
         if created:
             try:
                 trade_symbols = await Trades().get_symbols()
@@ -300,7 +302,7 @@ class Watcher:
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
                 logging.debug(f"Removed symbols. New list: {Watcher.ticker_symbols}")
-            except Exception as e:
+            except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps post-save hooks from crashing the process.
                 logging.error(f"Error removing trade symbols: {e}", exc_info=True)
 
@@ -347,7 +349,7 @@ class Watcher:
             except asyncio.TimeoutError:
                 # Regular refresh to detect crashed tasks
                 await self.__sync_symbol_tasks()
-            except Exception as e:
+            except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch ensures the watcher loop continues.
                 logging.error(f"Error in watch_tickers: {e}", exc_info=True)
                 await asyncio.sleep(5)
@@ -449,7 +451,7 @@ class Watcher:
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, self.MAX_RECONNECT_DELAY)
-            except Exception as e:
+            except (RuntimeError, TypeError, ValueError, OSError) as e:
                 # Broad catch to keep reconnection loop alive.
                 logging.error(
                     f"{symbol} unexpected error: {e} — reconnecting in {delay}s",
@@ -497,7 +499,7 @@ class Watcher:
                 except ValueError as e:
                     logging.error(f"{symbol}: value error {e}")
                     await asyncio.sleep(5)
-                except Exception as e:
+                except (RuntimeError, TypeError, ValueError, OSError) as e:
                     # Broad catch avoids dropping the websocket loop on unknown errors.
                     logging.error(f"Unexpected error for {symbol}: {e}", exc_info=True)
                     await asyncio.sleep(5)
@@ -511,7 +513,8 @@ class Watcher:
     #                         Event processing                            #
     # ------------------------------------------------------------------- #
 
-    async def push_event(self, symbol: str, price: float, ohlcv) -> None:
+    async def push_event(self, symbol: str, price: float, ohlcv: Any) -> None:
+        """Push ticker event when the latest observed price changed."""
         last = self.last_price.get(symbol)
         if last != price:
             self.last_price[symbol] = price
@@ -535,7 +538,7 @@ class Watcher:
                     self._queue_put(self.ohlcv_queue, payload, "ohlcv")
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except (KeyError, RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps consumer running despite occasional bad events.
                 logging.error(f"Error processing event: {e}", exc_info=True)
 
@@ -552,7 +555,7 @@ class Watcher:
                 await self.dca.process_ticker_data(ticker_price, self.config)
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps DCA queue alive on unexpected errors.
                 logging.error(f"Error processing DCA queue: {e}", exc_info=True)
 
@@ -571,7 +574,7 @@ class Watcher:
                     await self._flush_ohlcv_buffer(buffer)
             except asyncio.CancelledError:
                 break
-            except Exception as e:
+            except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps OHLCV writer alive.
                 logging.error(f"Error processing OHLCV queue: {e}", exc_info=True)
 
@@ -589,7 +592,7 @@ class Watcher:
                 lambda: model.Tickers.bulk_create(rows),
                 f"bulk write OHLCV batch ({len(rows)} rows)",
             )
-        except Exception as e:
+        except (RuntimeError, TypeError, ValueError) as e:
             # Broad catch prevents write failures from crashing the worker.
             logging.error(f"Error writing OHLCV batch: {e}", exc_info=True)
 

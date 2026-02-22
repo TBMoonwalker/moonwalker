@@ -1,3 +1,5 @@
+"""General utility helpers used across backend services."""
+
 import math
 from typing import Any
 

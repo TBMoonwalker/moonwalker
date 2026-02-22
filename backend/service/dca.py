@@ -21,7 +21,8 @@ logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 class Dca:
     """DCA engine for processing ticker data and managing orders."""
 
-    def __init__(self):
+    def __init__(self) -> None:
+        """Initialize DCA services and runtime state."""
 
         self.autopilot = Autopilot()
         self.ath_service = AthService()
@@ -31,13 +32,13 @@ class Dca:
         self.statistic = Statistic()
         self.trades = Trades()
         self.utils = helper.Utils()
-        self.config = None
+        self.config: dict[str, Any] | None = None
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
 
         # Class attributes
         Dca.pnl = {}
 
-    async def __dynamic_dca_strategy(self, symbol):
+    async def __dynamic_dca_strategy(self, symbol: str) -> bool:
         result = False
 
         if self.config.get("dca_strategy", None):
@@ -52,7 +53,7 @@ class Dca:
 
         return result
 
-    def __tp_strategy(self, symbol):
+    def __tp_strategy(self, symbol: str) -> bool:
         result = False
 
         if self.config.get("tp_strategy", None):
@@ -70,7 +71,7 @@ class Dca:
 
         return result
 
-    def __get_strategy_plugin(self, name: str, timeframe: str, kind: str):
+    def __get_strategy_plugin(self, name: str, timeframe: str, kind: str) -> object:
         ensure_strategy_supported(name)
         cache_key = (kind, name, timeframe)
         cached = self._strategy_cache.get(cache_key)
@@ -227,7 +228,9 @@ class Dca:
 
         return final_cost, details
 
-    async def __calculate_tp(self, current_price, trades):
+    async def __calculate_tp(
+        self, current_price: float, trades: dict[str, Any]
+    ) -> None:
         trailing_tp = self.config.get("trailing_tp", 0)
         max_safety_orders = self.config.get("mstc", 0)
         sell = False
@@ -276,7 +279,11 @@ class Dca:
                     diff = actual_pnl - Dca.pnl[trades["symbol"]]
 
                     logging.debug(
-                        f"TTP Check: {trades['symbol']} - Actual PNL: {actual_pnl}, Top-PNL: {Dca.pnl[trades['symbol']]}, PNL Difference: {diff}"
+                        "TTP Check: %s - Actual PNL: %s, Top-PNL: %s, PNL Difference: %s",
+                        trades["symbol"],
+                        actual_pnl,
+                        Dca.pnl[trades["symbol"]],
+                        diff,
                     )
 
                     # Sell if trailing deviation is reached or actual PNL is under minimum TP
@@ -284,7 +291,9 @@ class Dca:
                         actual_pnl < self.tp and actual_pnl > trailing_tp
                     ):
                         logging.debug(
-                            f"TTP Sell: {trades['symbol']} - Percentage decreased - Take profit with difference: {diff}"
+                            "TTP Sell: %s - Percentage decreased - Take profit with difference: %s",
+                            trades["symbol"],
+                            diff,
                         )
                         sell = True
                         Dca.pnl.pop(trades["symbol"])
@@ -306,7 +315,8 @@ class Dca:
                 self.sl
             ):
                 logging.debug(
-                    f"Selling {trades['symbol']} because of autopilot settings. "
+                    "Selling %s because of autopilot settings.",
+                    trades["symbol"],
                 )
                 sell = True
 
@@ -343,7 +353,9 @@ class Dca:
         }
         await self.statistic.update_statistic_data(logging_json)
 
-    async def __calculate_dca(self, current_price, trades):
+    async def __calculate_dca(
+        self, current_price: float, trades: dict[str, Any]
+    ) -> None:
         dynamic_dca = self.config.get("dynamic_dca", False)
         volume_scale = float(self.config.get("os", 1.0) or 1.0)
         if volume_scale <= 0:

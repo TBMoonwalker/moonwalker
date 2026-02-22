@@ -34,7 +34,7 @@ class Exchange:
 
         try:
             await self.exchange.close()
-        except Exception as exc:
+        except (ccxt.BaseError, OSError, RuntimeError) as exc:
             logging.warning(f"Failed to close exchange client cleanly: {exc}")
         finally:
             self.exchange = None
@@ -93,7 +93,7 @@ class Exchange:
             resolved = market.get("symbol") if isinstance(market, dict) else None
             if isinstance(resolved, str):
                 return resolved
-        except Exception:
+        except (ccxt.BaseError, TypeError, ValueError):
             pass
 
         # Bybit and similar exchanges may require contract suffixed symbols
@@ -114,7 +114,7 @@ class Exchange:
                     )
                     if isinstance(resolved, str):
                         return resolved
-                except Exception:
+                except (ccxt.BaseError, TypeError, ValueError):
                     continue
 
         return None
@@ -135,7 +135,7 @@ class Exchange:
         except ccxt.BaseError as e:
             logging.error(f"Converting timestamp failed due to an error: {e}")
             raise TryAgain
-        except Exception as e:
+        except (TypeError, ValueError, RuntimeError) as e:
             # Broad catch to retry on unexpected exchange errors.
             logging.error(f"Converting timestamp failed with: {e}")
             raise TryAgain
@@ -191,13 +191,19 @@ class Exchange:
                 since = next_since
                 consecutive_errors = 0
 
-            except (
-                Exception,
-                ccxt.NetworkError,
-                ccxt.ExchangeError,
-                ccxt.BaseError,
-            ) as e:
+            except (ccxt.NetworkError, ccxt.ExchangeError, ccxt.BaseError) as e:
                 # Broad catch to continue paging through historical data.
+                logging.error(f"Fetching historical data failed due to an error: {e}")
+                consecutive_errors += 1
+                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+                    logging.error(
+                        "Stopping history fetch for %s after %s consecutive errors.",
+                        resolved_symbol,
+                        consecutive_errors,
+                    )
+                    break
+                await asyncio.sleep(self.HISTORY_RETRY_SLEEP_SECONDS)
+            except (TypeError, ValueError, RuntimeError) as e:
                 logging.error(f"Fetching historical data failed due to an error: {e}")
                 consecutive_errors += 1
                 if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
@@ -287,7 +293,7 @@ class Exchange:
             raise TryAgain
         except TryAgain:
             raise
-        except Exception as e:
+        except (TypeError, ValueError, RuntimeError) as e:
             # Broad catch to retry on unexpected exchange errors.
             logging.error(
                 "Fetching ticker messages failed with unexpected error type %s: %r",
@@ -318,7 +324,7 @@ class Exchange:
         except ccxt.BaseError as e:
             logging.error(f"Fetching market data failed due to an error: {e}")
             raise TryAgain
-        except Exception as e:
+        except (TypeError, ValueError, RuntimeError) as e:
             # Broad catch to retry on unexpected exchange errors.
             logging.error(f"FFetching market data failed failed with: {e}")
             raise TryAgain
@@ -385,7 +391,7 @@ class Exchange:
                     for order in (fetched or [])
                     if self.__is_matching_order_id(order.get("order"), orderid)
                 ]
-            except Exception:
+            except (ccxt.BaseError, TypeError, ValueError):
                 matched_orders = []
 
             if not matched_orders:
@@ -443,7 +449,7 @@ class Exchange:
         except ccxt.BaseError as e:
             logging.error(f"Fetch trade order failed due to an error: {e}")
             raise TryAgain
-        except Exception as e:
+        except (TypeError, ValueError, RuntimeError, KeyError) as e:
             # Broad catch to retry on unexpected exchange errors.
             logging.error(f"Fetch trade order failed with: {e}")
             raise TryAgain
@@ -544,7 +550,7 @@ class Exchange:
         base_asset = resolved_symbol.split("/")[0].split(":")[0]
         try:
             balance = await self.exchange.fetch_balance()
-        except Exception as exc:
+        except (ccxt.BaseError, RuntimeError, OSError) as exc:
             logging.warning("Fetching balance for %s failed: %s", resolved_symbol, exc)
             return None
 
@@ -565,8 +571,26 @@ class Exchange:
             return float(
                 self.exchange.amount_to_precision(resolved_symbol, float(free_amount))
             )
-        except Exception:
+        except (ccxt.BaseError, TypeError, ValueError):
             return float(free_amount)
+
+    async def __log_remaining_sell_dust(self, symbol: str) -> None:
+        """Log remaining base-asset balance after sell execution.
+
+        Small leftovers are common due to precision and minimum-order constraints.
+        This method keeps the behavior explicit and observable without adding
+        exchange-specific convert/dust trading logic.
+        """
+        remaining_amount = await self.__get_available_base_amount(symbol)
+        if remaining_amount is None:
+            return
+        if remaining_amount <= 0:
+            return
+        logging.info(
+            "Remaining base amount for %s after sell execution: %s",
+            symbol,
+            remaining_amount,
+        )
 
     async def get_free_quote_balance(
         self, config: dict[str, Any], symbol: str
@@ -582,7 +606,7 @@ class Exchange:
         quote_asset = resolved_symbol.split("/")[1].split(":")[0]
         try:
             balance = await self.exchange.fetch_balance()
-        except Exception as exc:
+        except (ccxt.BaseError, RuntimeError, OSError) as exc:
             logging.warning("Fetching quote balance for %s failed: %s", symbol, exc)
             return None
 
@@ -621,7 +645,7 @@ class Exchange:
             target_amount = float(
                 self.exchange.amount_to_precision(resolved_symbol, target_amount)
             )
-        except Exception:
+        except (ccxt.BaseError, TypeError, ValueError):
             pass
 
         if target_amount <= 0:
@@ -658,7 +682,7 @@ class Exchange:
                         "Enabled CCXT demo trading for exchange '%s'.",
                         config.get("exchange"),
                     )
-                except Exception as exc:
+                except (AttributeError, NotImplementedError, ccxt.BaseError) as exc:
                     raise ValueError(
                         "Dry run requires CCXT enableDemoTrading support, but "
                         f"'{config.get('exchange')}' could not enable demo trading."
@@ -712,7 +736,7 @@ class Exchange:
         except ccxt.BaseError as e:
             logging.error(f"Buying pair {order['symbol']} failed due to an error: {e}")
             order = None
-        except Exception as e:
+        except (TypeError, ValueError, RuntimeError, KeyError) as e:
             # Broad catch to surface unexpected exchange errors.
             logging.error(f"Buying pair {order['symbol']} failed with: {e}")
             order = None
@@ -748,7 +772,7 @@ class Exchange:
                     order["fees"] = self.__get_demo_taker_fee_for_symbol(
                         order_status["symbol"]
                     )
-                except Exception as e:
+                except (ValueError, TypeError, ccxt.BaseError) as e:
                     logging.warning(
                         "Demo mode fee lookup for %s failed (%s). "
                         "Using taker fee 0.0 as fallback.",
@@ -762,7 +786,7 @@ class Exchange:
                         symbol=order_status["symbol"]
                     )
                     order["fees"] = float(fees.get("taker", 0.0))
-                except Exception as e:
+                except (ccxt.BaseError, TypeError, ValueError) as e:
                     # Broad catch to avoid failing a filled order due fee-rate fetch only.
                     logging.warning(
                         "Fetching fee rate for pair %s failed (%s). Using 0.0 fallback.",
@@ -903,7 +927,7 @@ class Exchange:
 
         try:
             current_price = float(await self.__get_price_for_symbol(order["symbol"]))
-        except Exception as exc:
+        except (ccxt.BaseError, RuntimeError, TypeError, ValueError) as exc:
             logging.warning(
                 "Skipping market fallback for %s: could not fetch current price (%s).",
                 order.get("symbol"),
@@ -981,7 +1005,7 @@ class Exchange:
                 )
             except ccxt.BaseError as exc:
                 logging.warning("Polling limit sell status failed: %s", exc)
-            except Exception as exc:
+            except (TypeError, ValueError, RuntimeError, KeyError) as exc:
                 logging.warning("Polling limit sell status failed: %s", exc)
 
             await asyncio.sleep(1)
@@ -992,7 +1016,7 @@ class Exchange:
         """Cancel an order and only log failures."""
         try:
             await self.exchange.cancel_order(order_id, symbol)
-        except Exception as exc:
+        except (ccxt.BaseError, RuntimeError, TypeError, ValueError) as exc:
             logging.warning(
                 "Cancel order %s for %s failed or order is already closed: %s",
                 order_id,
@@ -1010,7 +1034,7 @@ class Exchange:
                 order_status = str(latest.get("status", "")).lower()
                 if order_status in {"closed", "filled", "canceled", "cancelled"}:
                     return True
-            except Exception as exc:
+            except (ccxt.BaseError, RuntimeError, TypeError, ValueError) as exc:
                 logging.warning(
                     "Could not verify cancel status for order %s on %s: %s",
                     order_id,
@@ -1099,7 +1123,7 @@ class Exchange:
                 "Limit sell for %s failed due to an error: %s", order["symbol"], exc
             )
             return None
-        except Exception as exc:
+        except (TypeError, ValueError, RuntimeError, KeyError) as exc:
             logging.error("Limit sell for %s failed with: %s", order["symbol"], exc)
             return None
 
@@ -1124,7 +1148,7 @@ class Exchange:
                 latest_order_status = await self.exchange.fetch_order(
                     str(sell_order["id"]), resolved_symbol
                 )
-            except Exception:
+            except (ccxt.BaseError, RuntimeError, TypeError, ValueError):
                 latest_order_status = None
 
             if latest_order_status:
@@ -1244,11 +1268,8 @@ class Exchange:
             trade = await self.exchange.create_market_sell_order(
                 resolved_symbol, order["total_amount"]
             )
-            # TODO: Check if there is dust left to sell
-            # 1. fetch the amount left
-            # 2. createConvertTrade (ccxt)
-            # 3. fetchConvertTrade (ccxt)
             order.update(trade)
+            await self.__log_remaining_sell_dust(resolved_symbol)
         except ccxt.ExchangeError as e:
             if "insufficient balance" in str(e):
                 logging.error(
@@ -1269,7 +1290,7 @@ class Exchange:
         except ccxt.BaseError as e:
             logging.error(f"Selling pair {order['symbol']} failed due to an error: {e}")
             order = None
-        except Exception as e:
+        except (TypeError, ValueError, RuntimeError, KeyError) as e:
             # Broad catch to surface unexpected exchange errors.
             logging.error(f"Selling pair {order['symbol']} failed with: {e}")
             order = None

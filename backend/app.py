@@ -19,6 +19,7 @@ app.register_blueprint(controller)
 
 @app.before_serving
 async def startup() -> None:
+    """Initialize core services and start background tasks before serving."""
     app.redis_proc = start_redis()
 
     # Initialize queues
@@ -54,6 +55,7 @@ async def startup() -> None:
 
 @app.after_serving
 async def shutdown() -> None:
+    """Gracefully stop background services and close external connections."""
     await app.signal_plugin.shutdown()
     await app.watcher.shutdown()
     await app.housekeeper.shutdown()

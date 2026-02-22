@@ -25,7 +25,7 @@ def async_ttl_cache(maxsize: int, ttl: int) -> Callable[[F], F]:
         if not inspect.iscoroutinefunction(func):
             raise TypeError("async_ttl_cache can only be used with async functions")
 
-        async def wrapper(*args: Any, **kwargs: Any):
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             key = (args, tuple(sorted(kwargs.items())))
             async with lock:
                 if key in cache:

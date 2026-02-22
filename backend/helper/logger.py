@@ -1,3 +1,5 @@
+"""Logging factory with support for TRACE level and rotating files."""
+
 import logging
 import logging.handlers
 import os

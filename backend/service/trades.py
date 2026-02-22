@@ -2,6 +2,7 @@
 
 import csv
 import io
+import os
 from collections import defaultdict
 from datetime import datetime
 from typing import Any
@@ -19,6 +20,10 @@ logging = helper.LoggerFactory.get_logger("logs/trades.log", "trades")
 
 class Trades:
     """Database access layer for trade entities."""
+
+    CLOSED_TRADES_PAGE_SIZE = max(
+        1, int(os.getenv("MOONWALKER_CLOSED_TRADES_PAGE_SIZE", "10"))
+    )
 
     _DATE_FORMATS = (
         "%Y-%m-%d %H:%M:%S",
@@ -130,8 +135,7 @@ class Trades:
     async def get_closed_trades(self, page: int = 0) -> list[dict[str, Any]]:
         """Return paginated closed trades."""
         try:
-            # TODO: hardcoded to 10 entries per page right now
-            size = 10
+            size = self.CLOSED_TRADES_PAGE_SIZE
             if page == 0:
                 orders = (
                     await model.ClosedTrades.all().order_by("-id").limit(size).values()

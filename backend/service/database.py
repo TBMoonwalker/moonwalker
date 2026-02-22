@@ -1,3 +1,5 @@
+"""Database lifecycle and SQLite resilience helpers."""
+
 import os
 import random
 import sqlite3

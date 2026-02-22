@@ -1,6 +1,7 @@
 """Frontend routing and static asset delivery."""
 
 from pathlib import Path
+from typing import Any
 
 from controller import controller
 from quart import render_template, send_from_directory
@@ -8,7 +9,7 @@ from quart import render_template, send_from_directory
 
 @controller.route("/", defaults={"path": ""})
 @controller.route("/<path:path>")
-async def serve_vue(path: str):
+async def serve_vue(path: str) -> Any:
     """Serve the Vue.js frontend application.
 
     Args:
