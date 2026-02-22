@@ -9,6 +9,7 @@ from typing import Any, Callable
 import helper
 from model import AppConfig
 from service.redis import CONFIG_CHANNEL, redis_client
+from service.strategy_capability import filter_supported_strategies
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 
@@ -232,7 +233,7 @@ class Config:
             List of strategy names (without .py extension) sorted alphabetically
         """
         strategies = self.__get_filenames_in_directory("strategies")
-        return strategies
+        return filter_supported_strategies(strategies)
 
     def __get_signal_plugins(self) -> list[str]:
         """Get a list of available signal plugin filenames from the signals directory.

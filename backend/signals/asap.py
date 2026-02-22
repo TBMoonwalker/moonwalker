@@ -17,6 +17,7 @@ from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
 from service.statistic import Statistic
+from service.strategy_capability import ensure_strategy_supported
 from tenacity import retry, wait_fixed
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "asap")
@@ -217,6 +218,7 @@ class SignalPlugin:
         strategy_timeframe = resolve_timeframe(self.config)
         signal_strategy_plugin = None
         if self.config.get("signal_strategy", None):
+            ensure_strategy_supported(self.config.get("signal_strategy"))
             signal_strategy = importlib.import_module(
                 f"strategies.{self.config.get('signal_strategy')}"
             )

@@ -12,6 +12,7 @@ from service.exchange import Exchange
 from service.indicators import Indicators
 from service.orders import Orders
 from service.statistic import Statistic
+from service.strategy_capability import ensure_strategy_supported
 from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
@@ -74,6 +75,7 @@ class Dca:
         return result
 
     def __get_strategy_plugin(self, name: str, timeframe: str, kind: str):
+        ensure_strategy_supported(name)
         cache_key = (kind, name, timeframe)
         cached = self._strategy_cache.get(cache_key)
         if cached:
