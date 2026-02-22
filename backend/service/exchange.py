@@ -568,6 +568,42 @@ class Exchange:
         except Exception:
             return float(free_amount)
 
+    async def get_free_quote_balance(
+        self, config: dict[str, Any], symbol: str
+    ) -> float | None:
+        """Return currently available quote asset balance for a symbol."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is None:
+            return None
+
+        quote_asset = resolved_symbol.split("/")[1].split(":")[0]
+        try:
+            balance = await self.exchange.fetch_balance()
+        except Exception as exc:
+            logging.warning("Fetching quote balance for %s failed: %s", symbol, exc)
+            return None
+
+        free_amount = None
+        asset_info = balance.get(quote_asset)
+        if isinstance(asset_info, dict):
+            free_amount = asset_info.get("free")
+
+        if free_amount is None:
+            free_map = balance.get("free")
+            if isinstance(free_map, dict):
+                free_amount = free_map.get(quote_asset)
+
+        if free_amount is None:
+            return None
+
+        try:
+            return float(free_amount)
+        except (TypeError, ValueError):
+            return None
+
     async def __resolve_sell_amount(
         self, symbol: str, requested_amount: float
     ) -> tuple[str, float] | None:

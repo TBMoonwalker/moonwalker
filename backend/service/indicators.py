@@ -188,6 +188,72 @@ class Indicators:
             logging.error(f"24h volume cannot be calculated for {symbol}. Cause: {e}")
             return None
 
+    async def calculate_atr_regime_multiplier(
+        self,
+        symbol: str,
+        timerange: str,
+        length: int = 14,
+        low_k: float = 2.2,
+        mid_k: float = 1.8,
+        high_k: float = 1.4,
+    ) -> tuple[float, dict[str, float | str]]:
+        """Return ATR-based volatility regime multiplier.
+
+        The regime uses ATR as percent of close price and maps to:
+        - LOW  -> 0.75
+        - MID  -> 1.0
+        - HIGH -> 1.5
+        """
+        try:
+            df_raw = await self.data.get_data_for_pair(
+                symbol, timerange, max(length * 8, 80)
+            )
+            if df_raw is None:
+                return 1.0, {"regime": "mid", "atr_percent": 0.0}
+
+            df = self.data.resample_data(df_raw, timerange)
+            if df is None or df.empty:
+                return 1.0, {"regime": "mid", "atr_percent": 0.0}
+
+            atr_series = talib.ATR(
+                df["high"], df["low"], df["close"], timeperiod=max(2, int(length))
+            ).dropna()
+            close_series = df["close"].dropna()
+            if atr_series.empty or close_series.empty:
+                return 1.0, {"regime": "mid", "atr_percent": 0.0}
+
+            atr_value = float(atr_series.iloc[-1])
+            close_value = float(close_series.iloc[-1])
+            if close_value <= 0:
+                return 1.0, {"regime": "mid", "atr_percent": 0.0}
+
+            atr_percent = (atr_value / close_value) * 100
+            if atr_percent <= float(high_k):
+                regime = "low"
+                multiplier = 0.75
+            elif atr_percent <= float(mid_k):
+                regime = "mid"
+                multiplier = 1.0
+            elif atr_percent <= float(low_k):
+                regime = "high"
+                multiplier = 1.5
+            else:
+                regime = "high"
+                multiplier = 1.5
+
+            return multiplier, {
+                "regime": regime,
+                "atr_percent": round(atr_percent, 6),
+                "low_k": float(low_k),
+                "mid_k": float(mid_k),
+                "high_k": float(high_k),
+            }
+        except Exception as e:
+            logging.error(
+                "ATR regime cannot be calculated for %s. Cause: %s", symbol, e
+            )
+            return 1.0, {"regime": "mid", "atr_percent": 0.0}
+
     # async def calculate_ema_slope(self, symbol, timerange, length):
     #     result = "none"
     #     try:

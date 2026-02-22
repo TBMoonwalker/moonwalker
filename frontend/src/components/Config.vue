@@ -234,7 +234,7 @@
                         <n-checkbox v-model:checked="dca.limit_sell_fallback_to_market" />
                     </n-form-item>
                 </template>
-                <n-form-item v-if="dca.enabled" label="Safety order amount" path="so">
+                <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order amount" path="so">
                     <n-input-number v-model:value="dca.so" placeholder="SO" />
                 </n-form-item>
                 <n-form-item v-if="dca.enabled" label="Max safety order count" path="mstc">
@@ -251,6 +251,19 @@
                 </n-form-item>
                 <n-form-item label="Stop loss percentage" path="sl">
                     <n-input-number v-model:value="dca.sl" placeholder="SL" />
+                </n-form-item>
+                <n-form-item
+                    v-if="dca.enabled && dca.dynamic"
+                    label="Safety order budget ratio"
+                    path="trade_safety_order_budget_ratio"
+                >
+                    <n-input-number
+                        v-model:value="dca.trade_safety_order_budget_ratio"
+                        :min="0.01"
+                        :max="1"
+                        :step="0.01"
+                        placeholder="0.95"
+                    />
                 </n-form-item>
                 <n-form-item v-if="dca.enabled" label="Dynamic SO volume scaling" path="dynamic_so_volume_enabled" label-placement="left">
                     <n-checkbox v-model:checked="dca.dynamic_so_volume_enabled" />
@@ -691,6 +704,7 @@ const dca = ref({
     dynamic_so_max_scale: 3.0,
     dynamic_so_loss_max_scale_threshold: 30.0,
     dynamic_so_ath_cache_ttl: 60,
+    trade_safety_order_budget_ratio: 0.95,
     tp: null,
     sl: null,
 })
@@ -1037,7 +1051,10 @@ const rules: FormRules = {
         trigger: ['submit', 'change']
     },
     so: {
-        validator: dcaFieldValidator('safety order amount'),
+        validator: dcaFieldValidator(
+            'safety order amount',
+            () => !dca.value.dynamic,
+        ),
         trigger: ['submit'],
     },
     mstc: {
@@ -1245,6 +1262,8 @@ async function fetchDefaultValues() {
                 toNumberOrNull(response.data.dynamic_so_loss_max_scale_threshold) ?? 30.0
             dca.value.dynamic_so_ath_cache_ttl =
                 toNumberOrNull(response.data.dynamic_so_ath_cache_ttl) ?? 60
+            dca.value.trade_safety_order_budget_ratio =
+                toNumberOrNull(response.data.trade_safety_order_budget_ratio) ?? 0.95
             dca.value.tp = toNumberOrNull(response.data.tp)
             dca.value.sl = toNumberOrNull(response.data.sl)
             autopilot.value.enabled = parseBooleanString(response.data.autopilot) ?? false
@@ -1444,6 +1463,7 @@ async function submitForm() {
             dynamic_so_max_scale: JSON.stringify({ 'value': dca.value.dynamic_so_max_scale ?? 3.0, 'type': "float" }),
             dynamic_so_loss_max_scale_threshold: JSON.stringify({ 'value': dca.value.dynamic_so_loss_max_scale_threshold ?? 30.0, 'type': "float" }),
             dynamic_so_ath_cache_ttl: JSON.stringify({ 'value': dca.value.dynamic_so_ath_cache_ttl ?? 60, 'type': "int" }),
+            trade_safety_order_budget_ratio: JSON.stringify({ 'value': dca.value.trade_safety_order_budget_ratio ?? 0.95, 'type': "float" }),
             tp: JSON.stringify({ 'value': dca.value.tp || false, 'type': "float" }),
             sl: JSON.stringify({ 'value': dca.value.sl || false, 'type': "float" }),
             autopilot: JSON.stringify({ 'value': autopilot.value.enabled || false, 'type': "bool" }),

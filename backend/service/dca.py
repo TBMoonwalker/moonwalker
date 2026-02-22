@@ -8,6 +8,8 @@ import helper
 from service.ath import AthService
 from service.autopilot import Autopilot
 from service.config import resolve_timeframe
+from service.exchange import Exchange
+from service.indicators import Indicators
 from service.orders import Orders
 from service.statistic import Statistic
 from service.trades import Trades
@@ -22,6 +24,8 @@ class Dca:
 
         self.autopilot = Autopilot()
         self.ath_service = AthService()
+        self.exchange = Exchange()
+        self.indicators = Indicators()
         self.orders = Orders()
         self.statistic = Statistic()
         self.trades = Trades()
@@ -159,7 +163,19 @@ class Dca:
         current_price: float,
         actual_pnl: float,
         volume_scale: float,
+        so_index: int,
+        threshold_percentage: float,
+        dynamic_dca: bool,
     ) -> tuple[float, dict[str, float | str]]:
+        if dynamic_dca:
+            return await self.__resolve_dynamic_dca_safety_order_size(
+                trades=trades,
+                current_price=current_price,
+                actual_pnl=actual_pnl,
+                so_index=so_index,
+                threshold_percentage=threshold_percentage,
+            )
+
         configured_so_size = float(self.config.get("so", 0) or 0)
         base_size = configured_so_size
         if trades["safetyorders"]:
@@ -179,6 +195,119 @@ class Dca:
             "final_size": final_size,
             **dynamic_details,
         }
+
+    async def __resolve_dynamic_dca_safety_order_size(
+        self,
+        trades: dict[str, Any],
+        current_price: float,
+        actual_pnl: float,
+        so_index: int,
+        threshold_percentage: float,
+    ) -> tuple[float, dict[str, float | str]]:
+        base_cost = float(self.config.get("bo", 0.0) or 0.0)
+        if base_cost <= 0:
+            return 0.0, {
+                "error": "Dynamic DCA requires a positive base order amount (bo).",
+                "skip": "true",
+            }
+
+        loss_factor = 1 + min(abs(actual_pnl) / 20.0, 2.0)
+        threshold_delta = threshold_percentage - actual_pnl
+        threshold_factor = 1.0
+        if threshold_delta > 0:
+            threshold_factor += min(threshold_delta / 10.0, 1.0)
+
+        ath, window = await self.ath_service.get_recent_ath(
+            symbol=trades["symbol"],
+            config=self.config,
+            cache_ttl_seconds=int(self.config.get("dynamic_so_ath_cache_ttl", 60)),
+        )
+        if ath <= 0:
+            ath = current_price
+        ath_distance = max(0.0, (ath - current_price) / ath) if ath > 0 else 0.0
+        ath_factor = 1 + ath_distance
+
+        atr_timeframe = str(
+            self.config.get(
+                "dynamic_so_atr_timeframe",
+                self.config.get("dynamic_so_ath_timeframe", "1h"),
+            )
+            or "1h"
+        ).strip()
+        atr_length = int(self.config.get("dynamic_so_atr_length", 14) or 14)
+        low_k = float(self.config.get("dynamic_so_atr_regime_low_k", 2.2) or 2.2)
+        mid_k = float(self.config.get("dynamic_so_atr_regime_mid_k", 1.8) or 1.8)
+        high_k = float(self.config.get("dynamic_so_atr_regime_high_k", 1.4) or 1.4)
+        vol_factor, atr_details = await self.indicators.calculate_atr_regime_multiplier(
+            symbol=trades["symbol"],
+            timerange=atr_timeframe,
+            length=atr_length,
+            low_k=low_k,
+            mid_k=mid_k,
+            high_k=high_k,
+        )
+
+        progression_factor = 1 + min(max(so_index, 1) * 0.15, 0.75)
+
+        raw_cost = (
+            base_cost
+            * loss_factor
+            * threshold_factor
+            * ath_factor
+            * vol_factor
+            * progression_factor
+        )
+
+        budget_ratio = float(
+            self.config.get("trade_safety_order_budget_ratio", 0.95) or 0.95
+        )
+        if budget_ratio <= 0:
+            budget_ratio = 0.95
+        budget_ratio = min(budget_ratio, 1.0)
+
+        free_quote_balance = await self.exchange.get_free_quote_balance(
+            self.config,
+            trades["symbol"],
+        )
+        if free_quote_balance is None:
+            available_budget = raw_cost
+        else:
+            available_budget = free_quote_balance * budget_ratio
+
+        final_cost = min(raw_cost, available_budget)
+        final_cost = round(final_cost, 8)
+
+        details: dict[str, float | str] = {
+            "base_cost": round(base_cost, 8),
+            "raw_cost": round(raw_cost, 8),
+            "final_size": final_cost,
+            "loss_factor": round(loss_factor, 6),
+            "threshold_factor": round(threshold_factor, 6),
+            "ath_factor": round(ath_factor, 6),
+            "ath_distance": round(ath_distance, 6),
+            "vol_factor": round(vol_factor, 6),
+            "progression_factor": round(progression_factor, 6),
+            "budget_ratio": round(budget_ratio, 6),
+            "free_quote_balance": (
+                round(float(free_quote_balance), 8)
+                if free_quote_balance is not None
+                else -1.0
+            ),
+            "available_budget": round(float(available_budget), 8),
+            "threshold": round(float(threshold_percentage), 6),
+            "window": window,
+            "atr_regime": str(atr_details.get("regime", "mid")),
+            "atr_percent": float(atr_details.get("atr_percent", 0.0)),
+            "enabled": "true",
+        }
+
+        if final_cost < base_cost:
+            details["skip"] = "true"
+            details["error"] = (
+                "Dynamic DCA SO skipped: final cost below base order amount."
+            )
+
+        return final_cost, details
 
     async def __calculate_tp(self, current_price, trades):
         trailing_tp = self.config.get("trailing_tp", 0)
@@ -310,6 +439,7 @@ class Dca:
         price_deviation = self.config.get("sos")
         # Apply price deviation for the first safety order
         next_so_percentage = price_deviation
+        trigger_threshold = -abs(next_so_percentage)
         safety_order_size = float(self.config.get("so", 0.0) or 0.0)
         new_so = False
         placed_new_so = False
@@ -351,6 +481,7 @@ class Dca:
                 )
             else:
                 next_so_percentage = -abs(next_so_percentage) + -abs(price_deviation)
+            trigger_threshold = -abs(next_so_percentage)
 
             last_so_price = float(trades["safetyorders"][-1]["price"])
         else:
@@ -377,7 +508,7 @@ class Dca:
 
             if dynamic_dca:
                 # Trigger new safety order for dynamic dca
-                if actual_pnl <= -abs(next_so_percentage):
+                if actual_pnl <= trigger_threshold:
                     if await self.__dynamic_dca_strategy(trades["symbol"]):
                         normalized_actual_pnl = round(actual_pnl, 1)
                         if (
@@ -402,6 +533,7 @@ class Dca:
                     # Set next_so_percentage to diffence between max deviation and actual deviation
                     next_so_percentage = max_deviation - actual_deviation
                     next_so_percentage = round(next_so_percentage, 2)
+                    trigger_threshold = -abs(next_so_percentage)
                     new_so = True
 
             if new_so:
@@ -413,20 +545,33 @@ class Dca:
                     current_price=current_price,
                     actual_pnl=actual_pnl,
                     volume_scale=volume_scale,
+                    so_index=trades["safetyorders_count"] + 1,
+                    threshold_percentage=trigger_threshold,
+                    dynamic_dca=bool(dynamic_dca),
                 )
-                order = {
-                    "ordersize": safety_order_size,
-                    "symbol": trades["symbol"],
-                    "direction": trades["direction"],
-                    "botname": trades["bot"],
-                    "baseorder": False,
-                    "safetyorder": True,
-                    "order_count": trades["safetyorders_count"] + 1,
-                    "ordertype": trades["ordertype"],
-                    "so_percentage": next_so_percentage,
-                    "side": "buy",
-                }
-                placed_new_so = await self.orders.receive_buy_order(order, self.config)
+                if dynamic_so_details.get("skip") == "true":
+                    logging.error(
+                        "Skipping safety order for %s: %s",
+                        trades["symbol"],
+                        dynamic_so_details.get("error", "size resolution skipped"),
+                    )
+                    placed_new_so = False
+                else:
+                    order = {
+                        "ordersize": safety_order_size,
+                        "symbol": trades["symbol"],
+                        "direction": trades["direction"],
+                        "botname": trades["bot"],
+                        "baseorder": False,
+                        "safetyorder": True,
+                        "order_count": trades["safetyorders_count"] + 1,
+                        "ordertype": trades["ordertype"],
+                        "so_percentage": next_so_percentage,
+                        "side": "buy",
+                    }
+                    placed_new_so = await self.orders.receive_buy_order(
+                        order, self.config
+                    )
 
             # Logging configuration
             logging_json = {
