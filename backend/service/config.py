@@ -168,10 +168,41 @@ class Config:
         for row in rows:
             value = self.__set_type(row.value, row.value_type)
             self._cache[row.key] = value
+        await self.__migrate_legacy_timeframe_if_needed()
         # get strategies
         self._cache["strategies"] = self.__get_strategies()
         # get signal plugins
         self._cache["signal_plugins"] = self.__get_signal_plugins()
+
+    async def __migrate_legacy_timeframe_if_needed(self) -> None:
+        """Backfill canonical timeframe from legacy keys when missing.
+
+        This keeps old installations working after moving to the unified `timeframe`
+        key while allowing new clients to stop writing legacy timeframe keys.
+        """
+        canonical = self._cache.get("timeframe")
+        if isinstance(canonical, str) and canonical.strip():
+            return
+
+        legacy_timeframe = None
+        for key in TIMEFRAME_KEYS[1:]:
+            value = self._cache.get(key)
+            if isinstance(value, str) and value.strip():
+                legacy_timeframe = value.strip()
+                break
+
+        if not legacy_timeframe:
+            return
+
+        self._cache["timeframe"] = legacy_timeframe
+        await AppConfig.update_or_create(
+            key="timeframe",
+            defaults={"value": legacy_timeframe, "value_type": "str"},
+        )
+        logging.info(
+            "Migrated legacy timeframe configuration to canonical key 'timeframe': %s",
+            legacy_timeframe,
+        )
 
     def __set_type(self, value: str, type: str) -> Any:
         """Convert a string value to its appropriate Python type based on the type specification.
