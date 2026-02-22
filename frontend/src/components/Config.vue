@@ -1147,8 +1147,7 @@ async function fetchDefaultValues() {
                 toNumberOrNull(response.data.ws_reconnect_debounce_ms) ?? ADVANCED_WS_RECONNECT_DEBOUNCE_MS
             signal.value.signal = response.data.signal
             signal.value.strategy = response.data.signal_strategy
-            signal.value.timeframe =
-                response.data.timeframe || response.data.signal_strategy_timeframe
+            signal.value.timeframe = response.data.timeframe
             const signalSettings = parseStructuredConfigValue(response.data.signal_settings)
             if (signalSettings) {
                 signal.value.symsignal_url = String(signalSettings["api_url"] || DEFAULT_SYMSIGNAL_URL)
@@ -1198,8 +1197,7 @@ async function fetchDefaultValues() {
             dca.value.enabled = parseBooleanString(response.data.dca) ?? false
             dca.value.dynamic = parseBooleanString(response.data.dynamic_dca) ?? false
             dca.value.strategy = response.data.dca_strategy
-            dca.value.timeframe =
-                response.data.timeframe || response.data.dca_strategy_timeframe
+            dca.value.timeframe = response.data.timeframe
             dca.value.trailing_tp = toNumberOrNull(response.data.trailing_tp)
             dca.value.max_bots = toNumberOrNull(response.data.max_bots)
             dca.value.bo = toNumberOrNull(response.data.bo)

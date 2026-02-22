@@ -41,9 +41,7 @@ class Dca:
         result = False
 
         if self.config.get("dca_strategy", None):
-            strategy_timeframe = resolve_timeframe(
-                self.config, preferred_key="dca_strategy_timeframe"
-            )
+            strategy_timeframe = resolve_timeframe(self.config)
             dca_strategy_plugin = self.__get_strategy_plugin(
                 self.config.get("dca_strategy"),
                 strategy_timeframe,
@@ -58,9 +56,7 @@ class Dca:
         result = False
 
         if self.config.get("tp_strategy", None):
-            strategy_timeframe = resolve_timeframe(
-                self.config, preferred_key="tp_strategy_timeframe"
-            )
+            strategy_timeframe = resolve_timeframe(self.config)
             tp_strategy_plugin = self.__get_strategy_plugin(
                 self.config.get("tp_strategy"),
                 strategy_timeframe,

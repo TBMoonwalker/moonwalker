@@ -16,7 +16,6 @@ are not exposed in the UI and must be set via the API.
 | `signal_settings` | `string (json)` | Plugin settings for SymSignals. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |
 | `symbol_list` | `string` | CSV list or URL for ASAP symbol list. | `BTC/USDT,ETH/USDT` |
 | `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema_cross` |
-| `signal_strategy_timeframe` | `string` | Timeframe for `signal_strategy`. | `1m` |
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
 | `pair_denylist` | `string` | Comma-separated denied symbols. | `SCAM,XYZ` |
 | `filter` | `string (json)` | UI filter payload (compat). | `{"rsi_max":70,"marketcap_cmc_api_key":"cmc_..."}` |
@@ -31,6 +30,9 @@ are not exposed in the UI and must be set via the API.
 | `exchange_hostname` | `string` | Optional ccxt hostname override for exchange domains (advanced). | `bybit.eu` |
 | `market` | `string` | Market type. | `spot` |
 | `timeframe` | `string` | Ticker timeframe for watcher. | `1m` |
+| `signal_strategy_timeframe` | `string` | Deprecated compatibility key. Migrated to `timeframe` at startup if `timeframe` is missing. | `1m` |
+| `dca_strategy_timeframe` | `string` | Deprecated compatibility key. Migrated to `timeframe` at startup if `timeframe` is missing. | `1m` |
+| `tp_strategy_timeframe` | `string` | Deprecated compatibility key. Migrated to `timeframe` at startup if `timeframe` is missing. | `1m` |
 | `currency` | `string` | Quote currency for pairs. | `USDT` |
 | `dry_run` | `bool` | Enable CCXT demo trading mode (if supported by exchange). | `true` |
 | `watcher_ohlcv` | `bool` | Use OHLCV watcher mode. | `false` |
@@ -40,10 +42,7 @@ are not exposed in the UI and must be set via the API.
 | `dca` | `bool` | Enable DCA. | `true` |
 | `dynamic_dca` | `bool` | Enable dynamic DCA. | `false` |
 | `dca_strategy` | `string` | Strategy for dynamic DCA. | `bbands_cross` |
-| `dca_strategy_timeframe` | `string` | UI timeframe for dynamic DCA (compat). | `1m` |
-| `strategy_timeframe` | `string` | Timeframe for `dca_strategy` (advanced). | `1m` |
 | `tp_strategy` | `string` | Strategy for take-profit checks (advanced). | `ema_cross` |
-| `tp_strategy_timeframe` | `string` | Timeframe for `tp_strategy` (advanced). | `1m` |
 | `trailing_tp` | `float` | Trailing TP deviation (percent). | `0.5` |
 | `max_bots` | `int` | Max concurrent bots. | `3` |
 | `bo` | `float` | Base order size. | `10` |

@@ -42,8 +42,6 @@ type TimeframeChoice = {
 
 type ConfigResponse = {
     timeframe?: string | null
-    signal_strategy_timeframe?: string | null
-    dca_strategy_timeframe?: string | null
 }
 
 const TIMEFRAME_CHOICES: TimeframeChoice[] = [
@@ -117,11 +115,7 @@ function getLocalOffsetSeconds(): number {
 async function loadConfiguredMinTimeframe(): Promise<void> {
     try {
         const config = await fetchJson<ConfigResponse>('/config/all')
-        const configuredTimeframe =
-            config.timeframe ||
-            config.signal_strategy_timeframe ||
-            config.dca_strategy_timeframe
-        configuredMinTimeframe.value = resolveMinTimeframe(configuredTimeframe)
+        configuredMinTimeframe.value = resolveMinTimeframe(config.timeframe)
     } catch (_error) {
         configuredMinTimeframe.value = resolveMinTimeframe(null)
     }
