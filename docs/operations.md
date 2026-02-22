@@ -45,3 +45,6 @@ Priority order:
 1. `MOONWALKER_LOG_LEVEL` (if set)
 2. `MOONWALKER_DEBUG=True` (set by `./run.sh start --debug`)
 3. Default `INFO`
+
+## Statistics API
+- Canonical endpoint: `/statistic/profit-overall/timeline`

@@ -13,13 +13,6 @@ from service.strategy_capability import filter_supported_strategies
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 
-TIMEFRAME_KEYS = (
-    "timeframe",
-    "signal_strategy_timeframe",
-    "dca_strategy_timeframe",
-    "tp_strategy_timeframe",
-)
-
 HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
     "1m": "30d",
     "15m": "90d",
@@ -36,18 +29,11 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 }
 
 
-def resolve_timeframe(
-    config: dict[str, Any], preferred_key: str | None = None, default: str = "1m"
-) -> str:
-    """Resolve the effective bot timeframe from canonical and legacy keys."""
-    candidate_keys: list[str] = []
-    if preferred_key:
-        candidate_keys.append(preferred_key)
-    candidate_keys.extend(TIMEFRAME_KEYS)
-    for key in candidate_keys:
-        value = config.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
+def resolve_timeframe(config: dict[str, Any], default: str = "1m") -> str:
+    """Resolve the effective bot timeframe from the canonical key."""
+    value = config.get("timeframe")
+    if isinstance(value, str) and value.strip():
+        return value.strip()
     return default
 
 
@@ -91,7 +77,6 @@ def format_history_lookback_days(days: int) -> str:
 def resolve_history_lookback_days(
     config: dict[str, Any],
     timeframe: str | None = None,
-    preferred_timeframe_key: str | None = None,
 ) -> int:
     """Resolve unified history lookback days with legacy fallback.
 
@@ -108,9 +93,7 @@ def resolve_history_lookback_days(
     if legacy_days:
         return legacy_days
 
-    effective_timeframe = timeframe or resolve_timeframe(
-        config, preferred_key=preferred_timeframe_key
-    )
+    effective_timeframe = timeframe or resolve_timeframe(config)
     default_window = HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME.get(
         str(effective_timeframe).strip().lower(), "90d"
     )
@@ -168,41 +151,10 @@ class Config:
         for row in rows:
             value = self.__set_type(row.value, row.value_type)
             self._cache[row.key] = value
-        await self.__migrate_legacy_timeframe_if_needed()
         # get strategies
         self._cache["strategies"] = self.__get_strategies()
         # get signal plugins
         self._cache["signal_plugins"] = self.__get_signal_plugins()
-
-    async def __migrate_legacy_timeframe_if_needed(self) -> None:
-        """Backfill canonical timeframe from legacy keys when missing.
-
-        This keeps old installations working after moving to the unified `timeframe`
-        key while allowing new clients to stop writing legacy timeframe keys.
-        """
-        canonical = self._cache.get("timeframe")
-        if isinstance(canonical, str) and canonical.strip():
-            return
-
-        legacy_timeframe = None
-        for key in TIMEFRAME_KEYS[1:]:
-            value = self._cache.get(key)
-            if isinstance(value, str) and value.strip():
-                legacy_timeframe = value.strip()
-                break
-
-        if not legacy_timeframe:
-            return
-
-        self._cache["timeframe"] = legacy_timeframe
-        await AppConfig.update_or_create(
-            key="timeframe",
-            defaults={"value": legacy_timeframe, "value_type": "str"},
-        )
-        logging.info(
-            "Migrated legacy timeframe configuration to canonical key 'timeframe': %s",
-            legacy_timeframe,
-        )
 
     def __set_type(self, value: str, type: str) -> Any:
         """Convert a string value to its appropriate Python type based on the type specification.

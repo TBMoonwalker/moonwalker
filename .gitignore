@@ -1,5 +1,6 @@
 # Moonwalker specific
 *.log*
+*.db
 *.sqlite
 *.sqlite-wal
 *.sqlite-shm
@@ -17,6 +18,8 @@ debugdb.py
 backend/strategies/btc.py
 moonwalker.lock
 moonwalker.pid
+logs/
+backend/logs/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -209,7 +212,8 @@ playwright-report/
 config.ts
 
 # Static filess
-backend/static/assets
+frontend/dist/
+backend/static/assets/
 backend/templates/index.html
 
 # NPM

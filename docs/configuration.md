@@ -30,9 +30,6 @@ are not exposed in the UI and must be set via the API.
 | `exchange_hostname` | `string` | Optional ccxt hostname override for exchange domains (advanced). | `bybit.eu` |
 | `market` | `string` | Market type. | `spot` |
 | `timeframe` | `string` | Ticker timeframe for watcher. | `1m` |
-| `signal_strategy_timeframe` | `string` | Deprecated compatibility key. Migrated to `timeframe` at startup if `timeframe` is missing. | `1m` |
-| `dca_strategy_timeframe` | `string` | Deprecated compatibility key. Migrated to `timeframe` at startup if `timeframe` is missing. | `1m` |
-| `tp_strategy_timeframe` | `string` | Deprecated compatibility key. Migrated to `timeframe` at startup if `timeframe` is missing. | `1m` |
 | `currency` | `string` | Quote currency for pairs. | `USDT` |
 | `dry_run` | `bool` | Enable CCXT demo trading mode (if supported by exchange). | `true` |
 | `watcher_ohlcv` | `bool` | Use OHLCV watcher mode. | `false` |

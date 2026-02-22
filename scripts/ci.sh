@@ -32,11 +32,13 @@ run_step "Backend format (black --check)" "$PYTHON_BIN" -m black --check "$ROOT_
 run_step "Backend lint (ruff)" "$PYTHON_BIN" -m ruff check "$ROOT_DIR/backend"
 run_step "Backend import sort (isort --check-only)" "$PYTHON_BIN" -m isort --profile black --check-only "$ROOT_DIR/backend"
 run_step "Backend type check (mypy)" env MYPYPATH="$ROOT_DIR/backend" "$PYTHON_BIN" -m mypy --config-file "$ROOT_DIR/mypy.ini" "$ROOT_DIR/backend"
+run_step "Guardrail: strategy/indicator + commented blocks" "$PYTHON_BIN" "$ROOT_DIR/scripts/check_backend_guardrails.py"
 run_step "Backend tests (pytest)" env \
     MOONWALKER_DB_URL=sqlite:////tmp/moonwalker-test.sqlite \
     PYTEST_ASYNCIO_MODE=auto \
     PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
     "$PYTHON_BIN" "$ROOT_DIR/scripts/run_pytest.py" -p pytest_asyncio.plugin "$ROOT_DIR/backend/tests"
+run_step "Frontend unused export check (optional)" bash "$ROOT_DIR/scripts/check_frontend_unused_exports.sh"
 set -e
 
 echo "-----"
