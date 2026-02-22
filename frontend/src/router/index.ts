@@ -51,8 +51,7 @@ function isConfigComplete(config: ConfigPayload): boolean {
     'currency',
     'max_bots',
     'bo',
-    'tp',
-    'housekeeping_interval'
+    'tp'
   ]
 
   if (alwaysRequiredKeys.some((key) => !hasRequiredValue(config[key]))) {

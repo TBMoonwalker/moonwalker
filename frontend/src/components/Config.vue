@@ -366,9 +366,6 @@
                 require-mark-placement="right-hanging" :style="{
                     maxWidth: '640px',
                 }">
-                <n-form-item label="Housekeeping interval (in days)" path="housekeeping_interval">
-                    <n-input-number v-model:value="indicator.housekeeping_interval" placeholder="Interval" />
-                </n-form-item>
                 <n-form-item label="UPNL history retention (days, 0 = infinite)" path="upnl_housekeeping_interval">
                     <n-input-number v-model:value="indicator.upnl_housekeeping_interval"
                         placeholder="UPNL retention" />
@@ -691,7 +688,6 @@ const monitoring = ref({
 })
 
 const indicator = ref({
-    housekeeping_interval: null,
     upnl_housekeeping_interval: 0,
     history_lookback_time: null,
 })
@@ -1072,10 +1068,6 @@ const rules: FormRules = {
         validator: requiredAfterSubmit('Please add tp'),
         trigger: ['submit', 'change']
     },
-    housekeeping_interval: {
-        validator: requiredAfterSubmit('Please add housekeeping interval'),
-        trigger: ['submit', 'change']
-    },
     upnl_housekeeping_interval: {
         validator: requiredAfterSubmit('Please add UPNL history retention'),
         trigger: ['submit', 'change']
@@ -1250,7 +1242,6 @@ async function fetchDefaultValues() {
                 toNumberOrNull(response.data.monitoring_timeout_sec) ?? 5
             monitoring.value.retry_count =
                 toNumberOrNull(response.data.monitoring_retry_count) ?? 1
-            indicator.value.housekeeping_interval = toNumberOrNull(response.data.housekeeping_interval)
             indicator.value.upnl_housekeeping_interval = toNumberOrNull(response.data.upnl_housekeeping_interval) ?? 0
             indicator.value.history_lookback_time =
                 response.data.history_lookback_time ||
@@ -1439,7 +1430,6 @@ async function submitForm() {
             monitoring_telegram_chat_id: JSON.stringify({ 'value': monitoring.value.telegram_chat_id || false, 'type': "str" }),
             monitoring_timeout_sec: JSON.stringify({ 'value': monitoring.value.timeout_sec ?? 5, 'type': "int" }),
             monitoring_retry_count: JSON.stringify({ 'value': monitoring.value.retry_count ?? 1, 'type': "int" }),
-            housekeeping_interval: JSON.stringify({ 'value': indicator.value.housekeeping_interval || false, 'type': "int" }),
             upnl_housekeeping_interval: JSON.stringify({ 'value': indicator.value.upnl_housekeeping_interval ?? false, 'type': "int" }),
             history_lookback_time: JSON.stringify({
                 'value': indicator.value.history_lookback_time || getDefaultHistoryLookbackByTimeframe(exchange.value.timeframe),

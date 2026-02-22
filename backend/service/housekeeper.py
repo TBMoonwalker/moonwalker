@@ -6,7 +6,7 @@ from typing import Any
 
 import helper
 import model
-from service.config import Config
+from service.config import Config, resolve_history_lookback_days, resolve_timeframe
 from service.data import Data
 from service.database import optimize_sqlite_connection, run_sqlite_write_with_retry
 from service.trades import Trades
@@ -17,6 +17,7 @@ logging = helper.LoggerFactory.get_logger("logs/housekeeper.log", "housekeeper")
 class Housekeeper:
     """Cleanup service for old ticker entries."""
 
+    CLEANUP_LOOP_INTERVAL_SECONDS = 24 * 60 * 60
     UPNL_RETENTION_DAYS_DEFAULT = 0
 
     def __init__(self) -> None:
@@ -36,13 +37,10 @@ class Housekeeper:
         logging.info("Reload housekeeper")
         self.config = config
 
-    def _get_housekeeping_interval_days(self) -> int:
-        """Return housekeeping interval in days with safe defaults."""
-        try:
-            interval_days = int(self.config.get("housekeeping_interval", 2))
-        except (TypeError, ValueError):
-            return 2
-        return max(1, interval_days)
+    def _get_ticker_retention_days(self) -> int:
+        """Return ticker retention window in days based on history lookback."""
+        timeframe = resolve_timeframe(self.config)
+        return max(1, resolve_history_lookback_days(self.config, timeframe=timeframe))
 
     def _get_upnl_retention_days(self) -> int:
         """Return uPNL retention in days.
@@ -63,9 +61,9 @@ class Housekeeper:
         """Remove old ticker data for inactive symbols."""
         while Housekeeper.status:
             if self.config:
-                interval_days = self._get_housekeeping_interval_days()
+                retention_days = self._get_ticker_retention_days()
                 actual_timestamp = datetime.now()
-                cleanup_timestamp = actual_timestamp - timedelta(days=interval_days)
+                cleanup_timestamp = actual_timestamp - timedelta(days=retention_days)
                 try:
                     active_symbols = await Trades().get_symbols()
                     ticker_symbols = await Data().get_ticker_symbol_list()
@@ -79,7 +77,11 @@ class Housekeeper:
                                 "housekeeping ticker cleanup",
                             )
                             logging.info(
-                                f"Start housekeeping. Delete {query} entries older then {cleanup_timestamp}"
+                                "Start housekeeping. Delete %s entries older than %s "
+                                "(retention_days=%s)",
+                                query,
+                                cleanup_timestamp,
+                                retention_days,
                             )
                     await self._cleanup_upnl_history(actual_timestamp)
                     await optimize_sqlite_connection()
@@ -87,7 +89,7 @@ class Housekeeper:
                     # Broad catch to keep the housekeeping loop running.
                     logging.error(f"Error db housekeeping: {e}")
 
-                await asyncio.sleep(interval_days * 24 * 60 * 60)
+                await asyncio.sleep(self.CLEANUP_LOOP_INTERVAL_SECONDS)
             else:
                 await asyncio.sleep(5)
 
