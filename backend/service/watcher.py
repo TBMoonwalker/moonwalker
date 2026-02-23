@@ -617,7 +617,32 @@ class Watcher:
                 payload = None
             Watcher.candles[symbol] = current_candle
             return payload
+        if last[0] == timestamp:
+            # Keep the in-progress candle fresh between rollovers so the closed row
+            # reflects full OHLCV, not only the first tick in the interval.
+            Watcher.candles[symbol] = self._merge_candle(last, current_candle)
         return None
+
+    @staticmethod
+    def _merge_candle(last: list[Any], current: list[Any]) -> list[float]:
+        """Merge two candles for the same timestamp into one OHLCV candle."""
+        t = float(last[0])
+        open_price = float(last[1])
+        high_price = max(float(last[2]), float(current[2]))
+        low_price = min(float(last[3]), float(current[3]))
+        close_price = float(current[4])
+
+        # `watchOHLCV` streams cumulative candle volume while trade-derived candles
+        # are incremental; handle both without double counting.
+        last_volume = float(last[5])
+        current_volume = float(current[5])
+        volume = (
+            current_volume
+            if current_volume >= last_volume
+            else last_volume + current_volume
+        )
+
+        return [t, open_price, high_price, low_price, close_price, volume]
 
     # ------------------------------------------------------------------- #
     #                              Shutdown                               #
