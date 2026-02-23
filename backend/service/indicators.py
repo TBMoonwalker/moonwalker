@@ -20,6 +20,20 @@ class Indicators:
         ] = {}
         self._close_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
 
+    async def _get_indicator_source_data(
+        self, symbol: str, timerange: str, minimum_length: int
+    ) -> Any:
+        """Load stable source candles for indicator calculations.
+
+        Prefer timeframe-based lookback windows to keep long EMAs stable (e.g. EMA200 on 4h),
+        then fall back to length-based retrieval if needed.
+        """
+        lookback_days = resolve_history_lookback_days({"timeframe": timerange})
+        df_raw = await self.data.get_data_for_pair_by_days(symbol, lookback_days)
+        if df_raw is None or df_raw.empty:
+            return await self.data.get_data_for_pair(symbol, timerange, minimum_length)
+        return df_raw
+
     async def calculate_ema(
         self, symbol: str, timerange: str, lengths: list[int]
     ) -> dict[str, Any]:
@@ -33,7 +47,9 @@ class Indicators:
         ema = {}
         try:
             max_length = max(lengths)
-            df_raw = await self.data.get_data_for_pair(symbol, timerange, max_length)
+            df_raw = await self._get_indicator_source_data(
+                symbol, timerange, max(max_length * 2, 200)
+            )
             df = self.data.resample_data(df_raw, timerange)
             for length in lengths:
                 length_key = f"ema_{str(length)}"
@@ -57,7 +73,9 @@ class Indicators:
             return cached[1]
 
         try:
-            df_raw = await self.data.get_data_for_pair(symbol, timerange, length)
+            df_raw = await self._get_indicator_source_data(
+                symbol, timerange, max(length * 2, 50)
+            )
             df = self.data.resample_data(df_raw, timerange)
             close = df["close"]
             self._close_cache[cache_key] = (latest_timestamp, close)

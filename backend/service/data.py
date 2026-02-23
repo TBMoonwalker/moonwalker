@@ -323,6 +323,7 @@ class Data:
         query = (
             await model.Tickers.filter(symbol=symbol)
             .filter(timestamp__gt=start_date)
+            .order_by("timestamp")
             .values()
         )
 
@@ -349,6 +350,7 @@ class Data:
         query = (
             await model.Tickers.filter(symbol=symbol)
             .filter(timestamp__gt=start_date)
+            .order_by("timestamp")
             .values()
         )
 
