@@ -54,7 +54,7 @@ class Indicators:
             for length in lengths:
                 length_key = f"ema_{str(length)}"
                 ema[length_key] = (
-                    talib.EMA(df["close"], timeperiod=length).dropna().iloc[-2]
+                    talib.EMA(df["close"], timeperiod=length).dropna().iloc[-1]
                 )
             self._ema_cache[cache_key] = (latest_timestamp, ema)
         except Exception as e:

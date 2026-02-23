@@ -23,7 +23,7 @@ class Strategy:
         - Trend filter: EMA20, EMA50, and EMA100 must all be below EMA200
           (downtrend / "low" regime).
         - Entry trigger: price rebounds above EMA20 after being below it
-          (close[-2] > EMA20 and close[-3] < EMA20).
+          (close[-1] > EMA20 and close[-2] < EMA20).
         The method returns True when both conditions are met.
         """
         result = False
@@ -44,15 +44,15 @@ class Strategy:
             ):
                 # Check if rebound happened
                 if (
-                    close.dropna().iloc[-2] > ema["ema_20"]
-                    and close.dropna().iloc[-3] < ema["ema_20"]
+                    close.dropna().iloc[-1] > ema["ema_20"]
+                    and close.dropna().iloc[-2] < ema["ema_20"]
                 ):
                     result = True
 
             logging_json = {
                 "symbol": symbol,
                 "ema(20/50/100/200)": f"{ema['ema_20']}, {ema['ema_50']}, {ema['ema_100']}, {ema['ema_200']}",
-                "close price(last)": f"{close.dropna().iloc[-2]}",
+                "close price(last)": f"{close.dropna().iloc[-1]}",
                 "creating_order": result,
             }
             if self._last_log_by_symbol.get(symbol) != logging_json:
