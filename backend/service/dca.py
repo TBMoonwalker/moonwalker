@@ -38,8 +38,9 @@ class Dca:
         # Class attributes
         Dca.pnl = {}
 
-    async def __dynamic_dca_strategy(self, symbol: str) -> bool:
+    async def __dynamic_dca_strategy(self, symbol: str) -> tuple[bool, bool]:
         result = False
+        payload_changed = True
 
         if self.config.get("dca_strategy", None):
             strategy_timeframe = resolve_timeframe(self.config)
@@ -49,9 +50,20 @@ class Dca:
                 "dca",
             )
 
-            result = await dca_strategy_plugin.run(symbol, "buy")
+            previous_payload = None
+            if hasattr(dca_strategy_plugin, "_last_log_by_symbol"):
+                state_map = getattr(dca_strategy_plugin, "_last_log_by_symbol")
+                if isinstance(state_map, dict):
+                    previous_payload = state_map.get(symbol)
 
-        return result
+            result = await dca_strategy_plugin.run(symbol, "buy")
+            if hasattr(dca_strategy_plugin, "_last_log_by_symbol"):
+                state_map = getattr(dca_strategy_plugin, "_last_log_by_symbol")
+                if isinstance(state_map, dict):
+                    current_payload = state_map.get(symbol)
+                    payload_changed = current_payload != previous_payload
+
+        return result, payload_changed
 
     def __tp_strategy(self, symbol: str) -> bool:
         result = False
@@ -436,24 +448,40 @@ class Dca:
             if dynamic_dca:
                 # Trigger new safety order for dynamic dca
                 if actual_pnl <= trigger_threshold:
-                    if await self.__dynamic_dca_strategy(trades["symbol"]):
-                        normalized_actual_pnl = round(actual_pnl, 1)
-                        if (
-                            last_so_percentage is not None
-                            and normalized_actual_pnl >= last_so_percentage
-                        ):
+                    strategy_result = await self.__dynamic_dca_strategy(
+                        trades["symbol"]
+                    )
+                    payload_changed = True
+                    if isinstance(strategy_result, tuple):
+                        strategy_buy_signal, payload_changed = strategy_result
+                    else:
+                        strategy_buy_signal = bool(strategy_result)
+
+                    if strategy_buy_signal:
+                        if not payload_changed:
                             logging.debug(
-                                "Skip dynamic SO for %s: actual_pnl=%s (normalized=%s) is not deeper than last_so_percentage=%s",
+                                "Skip dynamic SO for %s: strategy payload unchanged from previous evaluation.",
                                 trades["symbol"],
-                                round(actual_pnl, 4),
-                                round(normalized_actual_pnl, 4),
-                                round(last_so_percentage, 4),
                             )
                             new_so = False
                         else:
-                            # Set next_so_percentage to current percentage
-                            next_so_percentage = normalized_actual_pnl
-                            new_so = True
+                            normalized_actual_pnl = round(actual_pnl, 1)
+                            if (
+                                last_so_percentage is not None
+                                and normalized_actual_pnl >= last_so_percentage
+                            ):
+                                logging.debug(
+                                    "Skip dynamic SO for %s: actual_pnl=%s (normalized=%s) is not deeper than last_so_percentage=%s",
+                                    trades["symbol"],
+                                    round(actual_pnl, 4),
+                                    round(normalized_actual_pnl, 4),
+                                    round(last_so_percentage, 4),
+                                )
+                                new_so = False
+                            else:
+                                # Set next_so_percentage to current percentage
+                                next_so_percentage = normalized_actual_pnl
+                                new_so = True
             else:
                 # Trigger new safety order for static dca
                 if total_pnl <= -abs(max_deviation):

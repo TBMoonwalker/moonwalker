@@ -44,8 +44,8 @@ class Strategy:
             ):
                 # Check if rebound happened
                 if (
-                    close.dropna().iloc[-1] > ema["ema_20"]
-                    and close.dropna().iloc[-2] < ema["ema_20"]
+                    close.dropna().iloc[-2] > ema["ema_20"]
+                    and close.dropna().iloc[-3] < ema["ema_20"]
                 ):
                     result = True
 
