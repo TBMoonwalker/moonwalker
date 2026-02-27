@@ -156,6 +156,33 @@ class Database:
         if create_statements:
             await connection.execute_script("\n".join(create_statements))
 
+    async def _ensure_open_trades_columns(self) -> None:
+        """Ensure additive OpenTrades columns exist on existing SQLite databases."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query("PRAGMA table_info('opentrades')")
+        existing = {row["name"] for row in columns}
+        alter_statements = []
+        if "sold_amount" not in existing:
+            alter_statements.append(
+                "ALTER TABLE opentrades ADD COLUMN sold_amount REAL NOT NULL DEFAULT 0.0;"
+            )
+        if "sold_proceeds" not in existing:
+            alter_statements.append(
+                "ALTER TABLE opentrades ADD COLUMN sold_proceeds REAL NOT NULL DEFAULT 0.0;"
+            )
+        if alter_statements:
+            await connection.execute_script("\n".join(alter_statements))
+            logging.info(
+                "Added missing OpenTrades columns: %s",
+                ", ".join(
+                    statement.split("ADD COLUMN", 1)[1].split()[0].strip()
+                    for statement in alter_statements
+                ),
+            )
+
     async def optimize_sqlite(self) -> None:
         """Run SQLite planner/index maintenance."""
         await optimize_sqlite_connection(self.db_url)
@@ -180,6 +207,7 @@ class Database:
             await self._apply_sqlite_pragmas()
             # Generate the schema
             await Tortoise.generate_schemas()
+            await self._ensure_open_trades_columns()
             await self._ensure_indexes()
             logging.info("Database initialized successfully")
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during init

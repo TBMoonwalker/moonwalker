@@ -17,6 +17,14 @@ class OpenTrades(Model):
     tp_price = fields.FloatField(default=0.0)
     avg_price = fields.FloatField(default=0.0)
     open_date = fields.TextField(null=True)
+    sold_amount = fields.FloatField(default=0.0)
+    sold_proceeds = fields.FloatField(default=0.0)
 
     def __dict__(self):
-        return f"'symbol': {self.symbol}, 'so_count': {self.so_count}, 'profit': {self.profit}, 'profit_percent': {self.profit_percent}, 'amount': {self.amount}, 'cost': {self.cost}, 'tp_price': {self.tp_price}, 'avg_price': {self.avg_price}, 'open_date': {self.open_date}"
+        return (
+            f"'symbol': {self.symbol}, 'so_count': {self.so_count}, "
+            f"'profit': {self.profit}, 'profit_percent': {self.profit_percent}, "
+            f"'amount': {self.amount}, 'cost': {self.cost}, 'tp_price': {self.tp_price}, "
+            f"'avg_price': {self.avg_price}, 'open_date': {self.open_date}, "
+            f"'sold_amount': {self.sold_amount}, 'sold_proceeds': {self.sold_proceeds}"
+        )

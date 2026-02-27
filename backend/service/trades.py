@@ -185,6 +185,40 @@ class Trades:
             # Broad catch to avoid crashing on database write errors.
             logging.error(f"Error updating SO count for {symbol}. Cause {e}")
 
+    async def add_partial_sell_execution(
+        self, symbol: str, sold_amount: float, sold_proceeds: float
+    ) -> None:
+        """Accumulate partial sell execution totals on the open trade row."""
+        try:
+            await model.OpenTrades.filter(symbol=symbol).update(
+                sold_amount=F("sold_amount") + float(sold_amount),
+                sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
+            )
+        except Exception as e:
+            logging.error(
+                "Error updating partial sell execution for %s. Cause %s",
+                symbol,
+                e,
+            )
+
+    async def get_partial_sell_execution(self, symbol: str) -> tuple[float, float]:
+        """Return accumulated partial sell totals (amount, proceeds)."""
+        try:
+            open_trade = await model.OpenTrades.filter(symbol=symbol).first()
+            if not open_trade:
+                return 0.0, 0.0
+            return (
+                float(getattr(open_trade, "sold_amount", 0.0) or 0.0),
+                float(getattr(open_trade, "sold_proceeds", 0.0) or 0.0),
+            )
+        except Exception as e:
+            logging.error(
+                "Error reading partial sell execution for %s. Cause %s",
+                symbol,
+                e,
+            )
+            return 0.0, 0.0
+
     async def create_trades(self, payload: dict[str, Any]) -> None:
         """Create a trade entry."""
         try:

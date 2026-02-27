@@ -836,9 +836,31 @@ class Exchange:
                             "Limit sell for %s partially filled, but market fallback is disabled.",
                             order.get("symbol"),
                         )
-                        return None
+                        return self.__build_partial_sell_status(
+                            symbol=str(order_status.get("symbol", order.get("symbol"))),
+                            partial_amount=float(
+                                order_status.get("partial_filled_amount") or 0.0
+                            ),
+                            partial_avg_price=float(
+                                order_status.get("partial_avg_price") or 0.0
+                            ),
+                            remaining_amount=float(
+                                order_status.get("remaining_amount") or 0.0
+                            ),
+                        )
                     if not await self.__can_fallback_to_market_sell(order, config):
-                        return None
+                        return self.__build_partial_sell_status(
+                            symbol=str(order_status.get("symbol", order.get("symbol"))),
+                            partial_amount=float(
+                                order_status.get("partial_filled_amount") or 0.0
+                            ),
+                            partial_avg_price=float(
+                                order_status.get("partial_avg_price") or 0.0
+                            ),
+                            remaining_amount=float(
+                                order_status.get("remaining_amount") or 0.0
+                            ),
+                        )
                     logging.info(
                         "Limit sell for %s was not filled. Falling back to market sell.",
                         order.get("symbol"),
@@ -975,6 +997,23 @@ class Exchange:
             / order_status["avg_price"]
         ) * 100
         return order_status
+
+    def __build_partial_sell_status(
+        self,
+        symbol: str,
+        partial_amount: float,
+        partial_avg_price: float,
+        remaining_amount: float,
+    ) -> dict[str, Any]:
+        """Build a partial execution status for deferred close accounting."""
+        return {
+            "type": "partial_sell",
+            "symbol": symbol,
+            "partial_filled_amount": float(partial_amount),
+            "partial_avg_price": float(partial_avg_price),
+            "partial_proceeds": float(partial_amount * partial_avg_price),
+            "remaining_amount": float(remaining_amount),
+        }
 
     async def __wait_for_limit_sell_fill(
         self, symbol: str, order_id: str, timeout_seconds: int

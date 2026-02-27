@@ -60,6 +60,28 @@ class Orders:
                 order_status = await self.exchange.create_spot_sell(order, config)
 
                 if order_status:
+                    if order_status.get("type") == "partial_sell":
+                        partial_amount = float(
+                            order_status.get("partial_filled_amount") or 0.0
+                        )
+                        partial_proceeds = float(
+                            order_status.get("partial_proceeds") or 0.0
+                        )
+                        if partial_amount > 0:
+                            await self.trades.add_partial_sell_execution(
+                                order_status["symbol"],
+                                partial_amount,
+                                partial_proceeds,
+                            )
+                            logging.info(
+                                "Persisted partial sell execution for %s: amount=%s proceeds=%s remaining=%s",
+                                order_status["symbol"],
+                                partial_amount,
+                                partial_proceeds,
+                                float(order_status.get("remaining_amount") or 0.0),
+                            )
+                        return
+
                     # 2. Create closed trade
                     open_timestamp = 0.0
                     base_order = await self.trades.get_trade_by_ordertype(
@@ -83,6 +105,33 @@ class Orders:
                     so_count = 0
                     if open_trade:
                         so_count = open_trade[0]["so_count"]
+
+                    partial_amount, partial_proceeds = (
+                        await self.trades.get_partial_sell_execution(
+                            order_status["symbol"]
+                        )
+                    )
+                    final_amount = float(order_status.get("total_amount") or 0.0)
+                    final_price = float(order_status.get("price") or 0.0)
+                    total_amount = partial_amount + final_amount
+                    total_proceeds = partial_proceeds + (final_amount * final_price)
+                    total_cost = float(order_status.get("total_cost") or 0.0)
+
+                    if total_amount > 0:
+                        avg_sell_price = total_proceeds / total_amount
+                        avg_buy_price = total_cost / total_amount if total_cost else 0.0
+                        profit = total_proceeds - total_cost
+                        profit_percent = (
+                            ((avg_sell_price - avg_buy_price) / avg_buy_price) * 100
+                            if avg_buy_price > 0
+                            else 0.0
+                        )
+                        order_status["total_amount"] = total_amount
+                        order_status["price"] = avg_sell_price
+                        order_status["tp_price"] = avg_sell_price
+                        order_status["avg_price"] = avg_buy_price
+                        order_status["profit"] = profit
+                        order_status["profit_percent"] = profit_percent
 
                     sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
                     sell_date = datetime.now()
