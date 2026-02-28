@@ -15,6 +15,7 @@ REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {
     "ema_cross": ("calculate_ema_cross",),
     "ema_down": ("calculate_ema",),
     "ema_low": ("calculate_ema", "get_close_price"),
+    "ema_swing": ("calculate_ema", "get_close_price"),
     "ichimoku_cross": ("calculate_ichimoku_cross",),
     "tothemoonv2": (
         "calculate_ema_slope",
