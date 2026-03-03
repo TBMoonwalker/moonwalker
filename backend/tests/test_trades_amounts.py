@@ -6,7 +6,9 @@ from tortoise import Tortoise
 
 
 @pytest.mark.asyncio
-async def test_get_token_amount_from_trades_uses_net_amount(tmp_path, monkeypatch):
+async def test_get_token_amount_from_trades_uses_net_amount(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -42,7 +44,7 @@ async def test_get_token_amount_from_trades_uses_net_amount(tmp_path, monkeypatc
 
 
 @pytest.mark.asyncio
-async def test_get_trades_for_orders_uses_net_amount(tmp_path, monkeypatch):
+async def test_get_trades_for_orders_uses_net_amount(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})

@@ -209,6 +209,33 @@ class Config:
             return json.dumps(value)
         return value
 
+    def __notify_subscribers(self) -> None:
+        """Notify local subscribers that cache values changed."""
+        for subscriber in self._subscribers:
+            subscriber(self._cache)
+
+    async def __publish_change(self, key: str) -> None:
+        """Publish config changes to Redis if available.
+
+        Redis publish failures should not roll back DB writes.
+        """
+        try:
+            await redis_client.publish(CONFIG_CHANNEL, key)
+        except Exception as exc:  # noqa: BLE001 - Keep local updates working.
+            logging.warning("Failed to publish config change for '%s': %s", key, exc)
+
+    def __parse_update_payload(self, payload: Any) -> dict[str, Any]:
+        """Normalize update payloads from API clients.
+
+        Supports both legacy stringified JSON values and direct dict payloads.
+        """
+        parsed = json.loads(payload) if isinstance(payload, str) else payload
+        if not isinstance(parsed, dict):
+            raise TypeError("Config payload must be a JSON object")
+        if "type" not in parsed or "value" not in parsed:
+            raise KeyError("Config payload must include 'type' and 'value'")
+        return parsed
+
     def __get_strategies(self) -> list[str]:
         """Get a list of available strategy filenames from the strategies directory.
 
@@ -249,15 +276,18 @@ class Config:
         Returns:
             True if the operation succeeded
         """
+        update = self.__parse_update_payload(value)
         serialized_value = self.__serialize_value_for_storage(
-            value["value"], value["type"]
+            update["value"], update["type"]
         )
         await AppConfig.update_or_create(
             key=key,
-            defaults={"value": serialized_value, "value_type": value["type"]},
+            defaults={"value": serialized_value, "value_type": update["type"]},
         )
-        # Notify all subscribers across processes
-        await redis_client.publish(CONFIG_CHANNEL, key)
+        self._cache[key] = self.__set_type(serialized_value, update["type"])
+        self.__notify_subscribers()
+        # Notify all subscribers across processes (best effort)
+        await self.__publish_change(key)
 
         return True
 
@@ -270,8 +300,16 @@ class Config:
         Returns:
             True if the operation succeeded
         """
-        for key, value in updates.items():
-            value = json.loads(value)
+        changed = False
+        for key, raw_value in updates.items():
+            try:
+                value = self.__parse_update_payload(raw_value)
+            except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+                logging.warning(
+                    "Skipping invalid config payload for '%s': %s", key, exc
+                )
+                continue
+
             value_type = value["type"]
             value_data = value["value"]
             is_numeric_value = isinstance(value_data, (int, float)) and not isinstance(
@@ -294,9 +332,15 @@ class Config:
                     key=key,
                     defaults={"value": serialized_value, "value_type": value_type},
                 )
+                self._cache[key] = self.__set_type(serialized_value, value_type)
+                changed = True
+
+        if changed:
+            self.__notify_subscribers()
+
         # Notify all subscribers across processes
         # ToDo - create an Array as String with changed files instead of "multiple"
-        await redis_client.publish(CONFIG_CHANNEL, "multiple")
+        await self.__publish_change("multiple")
 
         return True
 

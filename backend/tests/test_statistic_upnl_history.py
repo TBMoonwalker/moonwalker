@@ -8,7 +8,7 @@ from tortoise import Tortoise
 
 
 @pytest.mark.asyncio
-async def test_get_upnl_history_all_returns_ordered_rows(tmp_path, monkeypatch):
+async def test_get_upnl_history_all_returns_ordered_rows(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -33,7 +33,9 @@ async def test_get_upnl_history_all_returns_ordered_rows(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_store_upnl_snapshot_applies_sampling_interval(tmp_path, monkeypatch):
+async def test_store_upnl_snapshot_applies_sampling_interval(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -53,7 +55,9 @@ async def test_store_upnl_snapshot_applies_sampling_interval(tmp_path, monkeypat
 
 
 @pytest.mark.asyncio
-async def test_profit_overall_uses_upnl_when_no_closed_trades(tmp_path, monkeypatch):
+async def test_profit_overall_uses_upnl_when_no_closed_trades(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -71,7 +75,7 @@ async def test_profit_overall_uses_upnl_when_no_closed_trades(tmp_path, monkeypa
 
 
 @pytest.mark.asyncio
-async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch):
+async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
@@ -94,3 +98,39 @@ async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch):
     assert "profit_overall" in timeline[-1]
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_update_statistic_data_uses_fallback_when_base_order_missing() -> None:
+    statistic = Statistic()
+    captured: dict[str, object] = {}
+
+    async def fake_get_trade_by_ordertype(
+        symbol: str, baseorder: bool = False
+    ) -> list[dict[str, object]]:
+        return []
+
+    async def fake_update_open_trades(payload: dict[str, object], symbol: str) -> None:
+        captured["payload"] = payload
+        captured["symbol"] = symbol
+
+    statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.update_open_trades = fake_update_open_trades
+
+    stats = {
+        "type": "tp_check",
+        "symbol": "BTC/USDC",
+        "total_amount": 2.0,
+        "total_cost": 20.0,
+        "current_price": 12.0,
+        "tp_price": 11.0,
+        "avg_price": 10.0,
+        "actual_pnl": 20.0,
+        "sell": False,
+    }
+    await statistic.update_statistic_data(stats)
+
+    assert captured["symbol"] == "BTC/USDC"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert float(payload["open_date"]) > 1_000_000_000_000

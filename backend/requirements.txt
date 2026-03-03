@@ -11,3 +11,4 @@ tortoise-orm==1.0.0
 anyio==4.12.1
 aiosqlite==0.22.1
 redis==7.1.1
+httpx==0.28.1

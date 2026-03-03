@@ -1,17 +1,14 @@
-import os
-
 import pytest
 from service.monitoring import MonitoringService
 from service.orders import Orders
-from tortoise import Tortoise
 
 
 @pytest.mark.asyncio
-async def test_monitoring_service_skips_when_disabled(monkeypatch):
+async def test_monitoring_service_skips_when_disabled(monkeypatch) -> None:
     service = MonitoringService()
     calls = []
 
-    async def fake_send_telegram(api_id, api_hash, bot_token, chat_id, text):
+    async def fake_send_telegram(api_id, api_hash, bot_token, chat_id, text) -> None:
         calls.append((api_id, api_hash, bot_token, chat_id, text))
 
     monkeypatch.setattr(service, "_send_telegram", fake_send_telegram)
@@ -32,11 +29,11 @@ async def test_monitoring_service_skips_when_disabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_service_sends_telegram_when_enabled(monkeypatch):
+async def test_monitoring_service_sends_telegram_when_enabled(monkeypatch) -> None:
     service = MonitoringService()
     calls = []
 
-    async def fake_send_telegram(api_id, api_hash, bot_token, chat_id, text):
+    async def fake_send_telegram(api_id, api_hash, bot_token, chat_id, text) -> None:
         calls.append((api_id, api_hash, bot_token, chat_id, text))
 
     monkeypatch.setattr(service, "_send_telegram", fake_send_telegram)
@@ -64,11 +61,11 @@ async def test_monitoring_service_sends_telegram_when_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_test_notification_sends_when_disabled(monkeypatch):
+async def test_monitoring_test_notification_sends_when_disabled(monkeypatch) -> None:
     service = MonitoringService()
     calls = []
 
-    async def fake_send_telegram(api_id, api_hash, bot_token, chat_id, text):
+    async def fake_send_telegram(api_id, api_hash, bot_token, chat_id, text) -> None:
         calls.append((api_id, api_hash, bot_token, chat_id, text))
 
     monkeypatch.setattr(service, "_send_telegram", fake_send_telegram)
@@ -89,7 +86,7 @@ async def test_monitoring_test_notification_sends_when_disabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_monitoring_service_fails_without_telegram_credentials():
+async def test_monitoring_service_fails_without_telegram_credentials() -> None:
     service = MonitoringService()
     success, _ = await service.send_test_notification(
         {
@@ -104,12 +101,12 @@ async def test_monitoring_service_fails_without_telegram_credentials():
     assert success is False
 
 
-def test_resolve_telegram_entity_numeric():
+def test_resolve_telegram_entity_numeric() -> None:
     service = MonitoringService()
     assert service._resolve_telegram_entity("-1001234567890") == -1001234567890
 
 
-def test_resolve_telegram_entity_username():
+def test_resolve_telegram_entity_username() -> None:
     service = MonitoringService()
     assert (
         service._resolve_telegram_entity("@moonwalker_channel") == "@moonwalker_channel"
@@ -117,17 +114,19 @@ def test_resolve_telegram_entity_username():
 
 
 @pytest.mark.asyncio
-async def test_orders_buy_triggers_monitoring_notification(tmp_path, monkeypatch):
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
+async def test_orders_buy_triggers_monitoring_notification(monkeypatch) -> None:
     try:
         orders = Orders()
         notify_calls = []
 
-        async def fake_create_spot_market_buy(_order, _config):
+        async def fake_run_sqlite(func, *args, **kwargs) -> None:
+            return None
+
+        monkeypatch.setattr(
+            "service.orders.run_sqlite_write_with_retry", fake_run_sqlite
+        )
+
+        async def fake_create_spot_market_buy(_order, _config) -> None:
             return {
                 "timestamp": "1739400000000",
                 "ordersize": 25.0,
@@ -148,16 +147,22 @@ async def test_orders_buy_triggers_monitoring_notification(tmp_path, monkeypatch
                 "side": "buy",
             }
 
-        async def fake_close():
+        async def fake_close() -> None:
             return None
 
-        async def fake_notify(event_type, payload, _config):
+        async def fake_notify(event_type, payload, _config) -> None:
             notify_calls.append((event_type, payload))
+
+        async def fake_get_partial_sell_execution(_symbol) -> None:
+            return 0.0, 0.0
 
         monkeypatch.setattr(
             orders.exchange, "create_spot_market_buy", fake_create_spot_market_buy
         )
         monkeypatch.setattr(orders.exchange, "close", fake_close)
+        monkeypatch.setattr(
+            orders.trades, "get_partial_sell_execution", fake_get_partial_sell_execution
+        )
         monkeypatch.setattr(orders.monitoring, "notify_trade", fake_notify)
 
         result = await orders.receive_buy_order(
@@ -181,21 +186,23 @@ async def test_orders_buy_triggers_monitoring_notification(tmp_path, monkeypatch
         assert notify_calls[0][0] == "trade.buy"
         assert notify_calls[0][1]["symbol"] == "BTC/USDT"
     finally:
-        await Tortoise.close_connections()
+        pass
 
 
 @pytest.mark.asyncio
-async def test_orders_sell_triggers_monitoring_notification(tmp_path, monkeypatch):
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
+async def test_orders_sell_triggers_monitoring_notification(monkeypatch) -> None:
     try:
         orders = Orders()
         notify_calls = []
 
-        async def fake_create_spot_sell(_order, _config):
+        async def fake_run_sqlite(func, *args, **kwargs) -> None:
+            return None
+
+        monkeypatch.setattr(
+            "service.orders.run_sqlite_write_with_retry", fake_run_sqlite
+        )
+
+        async def fake_create_spot_sell(_order, _config) -> None:
             return {
                 "symbol": "BTC/USDT",
                 "profit": 5.0,
@@ -206,22 +213,25 @@ async def test_orders_sell_triggers_monitoring_notification(tmp_path, monkeypatc
                 "avg_price": 24000.0,
             }
 
-        async def fake_get_token_amount_from_trades(_symbol):
+        async def fake_get_token_amount_from_trades(_symbol) -> None:
             return 0.001
 
-        async def fake_get_trade_by_ordertype(_symbol, baseorder=False):
+        async def fake_get_trade_by_ordertype(_symbol, baseorder=False) -> None:
             if baseorder:
                 return [{"timestamp": "1739400000000"}]
             return []
 
-        async def fake_get_open_trades_by_symbol(_symbol):
+        async def fake_get_open_trades_by_symbol(_symbol) -> None:
             return [{"so_count": 1}]
 
-        async def fake_close():
+        async def fake_close() -> None:
             return None
 
-        async def fake_notify(event_type, payload, _config):
+        async def fake_notify(event_type, payload, _config) -> None:
             notify_calls.append((event_type, payload))
+
+        async def fake_get_partial_sell_execution(_symbol) -> None:
+            return 0.0, 0.0
 
         monkeypatch.setattr(orders.exchange, "create_spot_sell", fake_create_spot_sell)
         monkeypatch.setattr(orders.exchange, "close", fake_close)
@@ -235,6 +245,9 @@ async def test_orders_sell_triggers_monitoring_notification(tmp_path, monkeypatc
         )
         monkeypatch.setattr(
             orders.trades, "get_open_trades_by_symbol", fake_get_open_trades_by_symbol
+        )
+        monkeypatch.setattr(
+            orders.trades, "get_partial_sell_execution", fake_get_partial_sell_execution
         )
         monkeypatch.setattr(orders.monitoring, "notify_trade", fake_notify)
 
@@ -256,4 +269,4 @@ async def test_orders_sell_triggers_monitoring_notification(tmp_path, monkeypatc
         assert notify_calls[0][1]["symbol"] == "BTC/USDT"
         assert notify_calls[0][1]["so_count"] == 1
     finally:
-        await Tortoise.close_connections()
+        pass

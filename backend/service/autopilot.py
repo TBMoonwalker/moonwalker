@@ -67,7 +67,9 @@ class Autopilot:
             if threshold_percent != Autopilot.threshold_percent:
                 Autopilot.threshold_percent = threshold_percent
                 logging.debug(
-                    f"we reached autopilot {autopilot_mode} values - threshold: {threshold_percent}%"
+                    "we reached autopilot %s values - threshold: %s%%",
+                    autopilot_mode,
+                    threshold_percent,
                 )
                 # Write to DB
                 if autopilot_mode != Autopilot.mode:

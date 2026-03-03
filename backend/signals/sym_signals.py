@@ -15,13 +15,18 @@ from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
 from service.statistic import Statistic
-from socketio.exceptions import TimeoutError
+from socketio.exceptions import DisconnectedError, TimeoutError
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "sym_signals")
 
 
 class SignalPlugin:
     """SymSignals signal plugin for real-time signal ingestion."""
+
+    SOCKET_IDLE_TIMEOUT_SECONDS = 300
+    MAX_IDLE_TIMEOUTS_BEFORE_RECONNECT = 6
+    RECONNECT_DELAY_SECONDS = 10
+    MAX_ERROR_RECONNECT_DELAY_SECONDS = 300
 
     def __init__(self, watcher_queue: asyncio.Queue):
         self.utils = helper.Utils()
@@ -193,6 +198,9 @@ class SignalPlugin:
         signal_settings = json.loads(
             json.dumps(eval(self.config.get("signal_settings")))
         )
+        idle_timeout_count = 0
+        received_events_since_connect = 0
+        consecutive_error_events = 0
         async with socketio.AsyncSimpleClient() as sio:
             while self.status:
                 if not sio.connected:
@@ -209,95 +217,166 @@ class SignalPlugin:
                             socketio_path="/stream/v1/signals",
                         )
                         connection_success = True
+                        idle_timeout_count = 0
+                        received_events_since_connect = 0
                     except Exception as e:
                         # Broad catch to keep reconnect loop alive.
                         logging.error(f"Failed to connect to sym signal websocket: {e}")
 
                     if not connection_success:
-                        logging.info("Reconnect attempt in 10 seconds")
-                        await asyncio.sleep(10)
+                        logging.info(
+                            "Reconnect attempt in %s seconds",
+                            self.RECONNECT_DELAY_SECONDS,
+                        )
+                        await asyncio.sleep(self.RECONNECT_DELAY_SECONDS)
                         continue
                 try:
-                    event = await sio.receive(timeout=300)
+                    event = await sio.receive(timeout=self.SOCKET_IDLE_TIMEOUT_SECONDS)
+                    idle_timeout_count = 0
+                    if not event:
+                        continue
+                    received_events_since_connect += 1
+
                     if event[0] == "signal":
-                        symbol = f"{event[1]['symbol'].upper()}{currency}"
+                        consecutive_error_events = 0
+                        max_bots = await self.__check_max_bots()
+                        if max_bots:
+                            self.__log_max_bots_waiting()
+                            continue
+
+                        self._max_bots_blocked = False
                         history_data = resolve_history_lookback_days(
                             self.config,
                             timeframe=resolve_timeframe(self.config),
                         )
-                        max_bots = await self.__check_max_bots()
-                        if not max_bots:
-                            self._max_bots_blocked = False
-                            if await self.__check_entry_point(
-                                event[1]
-                            ) and await self.data.is_token_old_enough(
-                                self.config,
-                                self.utils.split_symbol(symbol, currency),
-                            ):
-                                running_trades = (
-                                    await model.Trades.all()
-                                    .distinct()
-                                    .values_list("bot", flat=True)
-                                )
-
-                                current_symbol = f"symsignal_{symbol}"
-
-                                if current_symbol not in running_trades:
-                                    logging.debug(f"Running trades: {running_trades}")
-
-                                    logging.info(f"Triggering new trade for {symbol}")
-
-                                    # Backend needs symbol with /
-                                    symbol_full = self.utils.split_symbol(
-                                        symbol, currency
-                                    )
-
-                                    # Automatically subscribe to reduce load
-                                    if self.config.get("dynamic_dca", False):
-                                        success = (
-                                            await self.data.add_history_data_for_symbol(
-                                                symbol_full,
-                                                history_data,
-                                                self.config,
-                                            )
-                                        )
-                                        if not success:
-                                            logging.error(
-                                                f"Not trading {symbol} because history add failed. Please check data.log."
-                                            )
-                                            continue
-
-                                    await self.watcher_queue.put([symbol_full])
-
-                                    order = {
-                                        "ordersize": self.config.get("bo"),
-                                        "symbol": symbol_full,
-                                        "direction": "long",
-                                        "botname": f"symsignal_{symbol}",
-                                        "baseorder": True,
-                                        "safetyorder": False,
-                                        "order_count": 0,
-                                        "ordertype": "market",
-                                        "so_percentage": None,
-                                        "side": "buy",
-                                    }
-                                    await self.orders.receive_buy_order(
-                                        order, self.config
-                                    )
-                        else:
-                            self.__log_max_bots_waiting()
+                        await self.__process_valid_signal(
+                            event[1],
+                            currency,
+                            history_data,
+                        )
+                    elif event[0] == "error":
+                        error_payload = event[1] if len(event) == 2 else event[1:]
+                        consecutive_error_events += 1
+                        reconnect_delay = min(
+                            self.RECONNECT_DELAY_SECONDS
+                            * (2 ** (consecutive_error_events - 1)),
+                            self.MAX_ERROR_RECONNECT_DELAY_SECONDS,
+                        )
+                        logging.warning(
+                            "Received websocket event 'error': %s. Reconnecting in "
+                            "%s seconds (consecutive_error_events=%s).",
+                            error_payload,
+                            reconnect_delay,
+                            consecutive_error_events,
+                        )
+                        await sio.disconnect()
+                        await asyncio.sleep(reconnect_delay)
+                        continue
+                    else:
+                        consecutive_error_events = 0
+                        logging.debug(
+                            "Ignoring non-signal websocket event '%s'.",
+                            event[0],
+                        )
                 except TimeoutError:
-                    logging.error(
-                        "Didn't get any event after 5 minutes - SocketIO connection seems to hang. Try to reconnect"
+                    idle_timeout_count += 1
+                    if idle_timeout_count >= self.MAX_IDLE_TIMEOUTS_BEFORE_RECONNECT:
+                        no_events_notice = (
+                            " No websocket events were received since this connection "
+                            "was established."
+                            if received_events_since_connect == 0
+                            else ""
+                        )
+                        logging.warning(
+                            "No websocket events for %s minutes (%s consecutive "
+                            "timeouts). Reconnecting to recover from a possible "
+                            "stale connection.%s",
+                            int(
+                                (self.SOCKET_IDLE_TIMEOUT_SECONDS * idle_timeout_count)
+                                / 60
+                            ),
+                            idle_timeout_count,
+                            no_events_notice,
+                        )
+                        await sio.disconnect()
+                        idle_timeout_count = 0
+                        received_events_since_connect = 0
+                    else:
+                        logging.debug(
+                            "No websocket events for %s seconds (%s/%s idle "
+                            "timeouts). Keeping connection open.",
+                            self.SOCKET_IDLE_TIMEOUT_SECONDS * idle_timeout_count,
+                            idle_timeout_count,
+                            self.MAX_IDLE_TIMEOUTS_BEFORE_RECONNECT,
+                        )
+                    continue
+                except DisconnectedError:
+                    logging.warning(
+                        "Sym signal websocket disconnected. Reconnecting in %s "
+                        "seconds.",
+                        self.RECONNECT_DELAY_SECONDS,
                     )
-                    await sio.disconnect()
+                    await asyncio.sleep(self.RECONNECT_DELAY_SECONDS)
                     continue
                 except Exception as e:
                     # Broad catch to keep signal loop alive.
                     logging.error(f"Error receiving signal - reconnecting. Cause: {e}")
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(self.RECONNECT_DELAY_SECONDS)
                     await sio.disconnect()
                     continue
+
+    async def __process_valid_signal(
+        self,
+        event: dict[str, Any],
+        currency: str,
+        history_data: int,
+    ) -> None:
+        """Process a valid websocket signal and trigger trade creation."""
+        symbol = f"{event['symbol'].upper()}{currency}"
+        symbol_full = self.utils.split_symbol(symbol, currency)
+
+        is_entry_signal = await self.__check_entry_point(event)
+        token_old_enough = await self.data.is_token_old_enough(self.config, symbol_full)
+        if not (is_entry_signal and token_old_enough):
+            return
+
+        running_trades = (
+            await model.Trades.all().distinct().values_list("bot", flat=True)
+        )
+        current_symbol = f"symsignal_{symbol}"
+        if current_symbol in running_trades:
+            return
+
+        logging.debug("Running trades: %s", running_trades)
+        logging.info("Triggering new trade for %s", symbol)
+
+        if self.config.get("dynamic_dca", False):
+            success = await self.data.add_history_data_for_symbol(
+                symbol_full,
+                history_data,
+                self.config,
+            )
+            if not success:
+                logging.error(
+                    "Not trading %s because history add failed. Please check data.log.",
+                    symbol,
+                )
+                return
+
+        await self.watcher_queue.put([symbol_full])
+        order = {
+            "ordersize": self.config.get("bo"),
+            "symbol": symbol_full,
+            "direction": "long",
+            "botname": f"symsignal_{symbol}",
+            "baseorder": True,
+            "safetyorder": False,
+            "order_count": 0,
+            "ordertype": "market",
+            "so_percentage": None,
+            "side": "buy",
+        }
+        await self.orders.receive_buy_order(order, self.config)
 
     async def shutdown(self) -> None:
         """Shutdown the signal plugin.

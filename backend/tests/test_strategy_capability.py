@@ -4,17 +4,17 @@ from service.strategy_capability import (
 )
 
 
-def test_supported_strategy_has_no_support_error():
+def test_supported_strategy_has_no_support_error() -> None:
     assert get_strategy_support_error("ema_cross") is None
 
 
-def test_unsupported_strategy_reports_missing_indicator_methods():
+def test_unsupported_strategy_reports_missing_indicator_methods() -> None:
     error = get_strategy_support_error("bbands_cross")
     assert error is not None
     assert "calculate_bbands_cross" in error
 
 
-def test_filter_supported_strategies_removes_unsupported_entries():
+def test_filter_supported_strategies_removes_unsupported_entries() -> None:
     supported = filter_supported_strategies(
         ["ema_cross", "bbands_cross", "ichimoku_cross"]
     )

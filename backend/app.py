@@ -20,7 +20,7 @@ app.register_blueprint(controller)
 @app.before_serving
 async def startup() -> None:
     """Initialize core services and start background tasks before serving."""
-    app.redis_proc = start_redis()
+    app.redis_proc = await asyncio.to_thread(start_redis)
 
     # Initialize queues
     watcher_queue = asyncio.Queue()
@@ -63,7 +63,7 @@ async def shutdown() -> None:
     await redis_client.aclose()
 
     if hasattr(app, "redis_proc"):
-        stop_redis(app.redis_proc)
+        await asyncio.to_thread(stop_redis, app.redis_proc)
 
 
 ######################################################

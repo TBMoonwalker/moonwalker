@@ -3,15 +3,15 @@ from service.exchange import Exchange
 
 
 @pytest.mark.asyncio
-async def test_create_spot_sell_uses_limit_when_enabled(monkeypatch):
+async def test_create_spot_sell_uses_limit_when_enabled(monkeypatch) -> None:
     exchange = Exchange()
     calls = {"limit": 0, "market": 0}
 
-    async def fake_limit_sell(_order, _config):
+    async def fake_limit_sell(_order, _config) -> None:
         calls["limit"] += 1
         return {"path": "limit"}
 
-    async def fake_market_sell(_order, _config):
+    async def fake_market_sell(_order, _config) -> None:
         calls["market"] += 1
         return {"path": "market"}
 
@@ -29,15 +29,15 @@ async def test_create_spot_sell_uses_limit_when_enabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_spot_sell_falls_back_to_market(monkeypatch):
+async def test_create_spot_sell_falls_back_to_market(monkeypatch) -> None:
     exchange = Exchange()
     calls = {"limit": 0, "market": 0}
 
-    async def fake_limit_sell(_order, _config):
+    async def fake_limit_sell(_order, _config) -> None:
         calls["limit"] += 1
         return None
 
-    async def fake_market_sell(_order, _config):
+    async def fake_market_sell(_order, _config) -> None:
         calls["market"] += 1
         return {"path": "market"}
 
@@ -55,15 +55,15 @@ async def test_create_spot_sell_falls_back_to_market(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_spot_sell_skips_fallback_when_disabled(monkeypatch):
+async def test_create_spot_sell_skips_fallback_when_disabled(monkeypatch) -> None:
     exchange = Exchange()
     calls = {"limit": 0, "market": 0}
 
-    async def fake_limit_sell(_order, _config):
+    async def fake_limit_sell(_order, _config) -> None:
         calls["limit"] += 1
         return None
 
-    async def fake_market_sell(_order, _config):
+    async def fake_market_sell(_order, _config) -> None:
         calls["market"] += 1
         return {"path": "market"}
 
@@ -81,11 +81,11 @@ async def test_create_spot_sell_skips_fallback_when_disabled(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_spot_sell_defaults_to_market(monkeypatch):
+async def test_create_spot_sell_defaults_to_market(monkeypatch) -> None:
     exchange = Exchange()
     calls = {"market": 0}
 
-    async def fake_market_sell(_order, _config):
+    async def fake_market_sell(_order, _config) -> None:
         calls["market"] += 1
         return {"path": "market"}
 
@@ -98,11 +98,13 @@ async def test_create_spot_sell_defaults_to_market(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_create_spot_sell_returns_partial_when_fallback_disabled(monkeypatch):
+async def test_create_spot_sell_returns_partial_when_fallback_disabled(
+    monkeypatch,
+) -> None:
     exchange = Exchange()
     calls = {"limit": 0, "market": 0}
 
-    async def fake_limit_sell(_order, _config):
+    async def fake_limit_sell(_order, _config) -> None:
         calls["limit"] += 1
         return {
             "requires_market_fallback": True,
@@ -113,7 +115,7 @@ async def test_create_spot_sell_returns_partial_when_fallback_disabled(monkeypat
             "partial_avg_price": 0.1515,
         }
 
-    async def fake_market_sell(_order, _config):
+    async def fake_market_sell(_order, _config) -> None:
         calls["market"] += 1
         return {"path": "market"}
 
@@ -136,11 +138,11 @@ async def test_create_spot_sell_returns_partial_when_fallback_disabled(monkeypat
 @pytest.mark.asyncio
 async def test_create_spot_sell_returns_partial_when_tp_guard_blocks_fallback(
     monkeypatch,
-):
+) -> None:
     exchange = Exchange()
     calls = {"limit": 0, "market": 0, "guard": 0}
 
-    async def fake_limit_sell(_order, _config):
+    async def fake_limit_sell(_order, _config) -> None:
         calls["limit"] += 1
         return {
             "requires_market_fallback": True,
@@ -151,11 +153,11 @@ async def test_create_spot_sell_returns_partial_when_tp_guard_blocks_fallback(
             "partial_avg_price": 0.1515,
         }
 
-    async def fake_market_sell(_order, _config):
+    async def fake_market_sell(_order, _config) -> None:
         calls["market"] += 1
         return {"path": "market"}
 
-    async def fake_guard(_order, _config):
+    async def fake_guard(_order, _config) -> None:
         calls["guard"] += 1
         return False
 

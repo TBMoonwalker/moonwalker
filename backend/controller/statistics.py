@@ -8,6 +8,8 @@ import helper
 from controller import controller
 from quart import websocket
 from quart_cors import route_cors
+from service.config import Config
+from service.exchange import Exchange
 from service.statistic import Statistic
 
 logging = helper.LoggerFactory.get_logger(
@@ -15,11 +17,27 @@ logging = helper.LoggerFactory.get_logger(
 )
 
 statistic = Statistic()
+exchange = Exchange()
+
+
+async def _get_available_funds() -> float | None:
+    """Resolve available quote funds from the configured exchange account."""
+    try:
+        config = await Config.instance()
+        currency = str(config.get("currency", "USDC")).strip().upper()
+        if not currency:
+            return None
+        return await exchange.get_free_balance_for_asset(config._cache, currency)
+    except Exception as exc:  # noqa: BLE001 - Avoid breaking stats websocket updates.
+        logging.warning("Failed to fetch available exchange funds: %s", exc)
+        return None
 
 
 @helper.async_ttl_cache(maxsize=1, ttl=2)
 async def _get_profit_cached() -> dict[str, Any]:
-    return await statistic.get_profit()
+    profit = await statistic.get_profit()
+    profit["funds_available"] = await _get_available_funds()
+    return profit
 
 
 @controller.websocket("/statistic/profit")

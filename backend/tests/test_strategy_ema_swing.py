@@ -7,7 +7,9 @@ class _StubIndicators:
     def __init__(self):
         self.close_calls = 0
 
-    async def calculate_ema(self, _symbol: str, _timeframe: str, _lengths: list[int]):
+    async def calculate_ema(
+        self, _symbol: str, _timeframe: str, _lengths: list[int]
+    ) -> dict:
         return {
             "ema_20": 10.0,
             "ema_50": 11.0,
@@ -15,7 +17,9 @@ class _StubIndicators:
             "ema_200": 20.0,
         }
 
-    async def get_close_price(self, _symbol: str, _timeframe: str, _length: int):
+    async def get_close_price(
+        self, _symbol: str, _timeframe: str, _length: int
+    ) -> float:
         self.close_calls += 1
         if self.close_calls == 1:
             # First swing-up with swing low = min(9.5, 9.0) = 9.0.
@@ -25,7 +29,7 @@ class _StubIndicators:
 
 
 @pytest.mark.asyncio
-async def test_ema_swing_first_swing_only_primes_state():
+async def test_ema_swing_first_swing_only_primes_state() -> None:
     strategy = Strategy("4h")
     strategy.indicators = _StubIndicators()
 
@@ -35,7 +39,7 @@ async def test_ema_swing_first_swing_only_primes_state():
 
 
 @pytest.mark.asyncio
-async def test_ema_swing_returns_true_when_new_swing_low_is_higher():
+async def test_ema_swing_returns_true_when_new_swing_low_is_higher() -> None:
     strategy = Strategy("4h")
     strategy.indicators = _StubIndicators()
 

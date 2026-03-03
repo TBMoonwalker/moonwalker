@@ -3,8 +3,7 @@
 from typing import Any
 
 import helper
-import requests
-from cachetools import TTLCache, cached
+import httpx
 from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
 
 logging = helper.LoggerFactory.get_logger("logs/filter.log", "filter")
@@ -14,15 +13,19 @@ class Filter:
     """Filter helpers for allow/deny lists and volume checks."""
 
     @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
-    def __request_api_endpoint(self, request: str, headers: dict | None = None):
+    async def __request_api_endpoint(
+        self, request: str, headers: dict | None = None
+    ) -> Any:
         response = None
         try:
-            if headers:
-                response = requests.get(url=request, headers=headers)
-            else:
-                response = requests.get(url=request)
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error getting response for {request}. Cause: {e}")
+            async with httpx.AsyncClient() as client:
+                if headers:
+                    response = await client.get(url=request, headers=headers)
+                else:
+                    response = await client.get(url=request)
+                response.raise_for_status()
+        except httpx.HTTPError as e:
+            logging.error("Error getting response for %s. Cause: %s", request, e)
             raise TryAgain
 
         return response
@@ -82,8 +85,8 @@ class Filter:
 
         return result
 
-    @cached(cache=TTLCache(maxsize=1024, ttl=86400))
-    def get_cmc_marketcap_rank(self, api_key: str, symbol: str) -> Any:
+    @helper.async_ttl_cache(maxsize=1024, ttl=86400)
+    async def get_cmc_marketcap_rank(self, api_key: str, symbol: str) -> Any:
         """Fetch CoinMarketCap market cap rank for the symbol."""
         marketcap = None
         headers = {"X-CMC_PRO_API_KEY": api_key}
@@ -93,7 +96,7 @@ class Filter:
         limit = 5000
         sort = "cmc_rank"
         url = f"https://{ws_endpoint}/{ws_context}?start={start}&limit={limit}&sort={sort}"
-        response = self.__request_api_endpoint(
+        response = await self.__request_api_endpoint(
             url,
             headers,
         )
@@ -106,6 +109,6 @@ class Filter:
                         marketcap = entry["rank"]
                         break
         except Exception as e:
-            logging.error(f"Error getting CMC data. Cause: {e}")
+            logging.error("Error getting CMC data. Cause: %s", e)
 
         return marketcap

@@ -393,38 +393,22 @@ class Dca:
         # Total PNL from base order
         total_pnl = ((current_price - trades["bo_price"]) / trades["bo_price"]) * 100
 
-        # Evaluate max deviation and actual deviation from base order
-        if step_scale == 1:
-            # If step scale equals 1
-            max_deviation = price_deviation * (trades["safetyorders_count"] + 1)
-            actual_deviation = price_deviation * trades["safetyorders_count"]
-        else:
-            # If step scale is other than 1
-            max_deviation = (
-                price_deviation * (1 - step_scale ** (trades["safetyorders_count"] + 1))
-            ) / (1 - step_scale)
-            max_deviation = round(max_deviation, 2)
-            actual_deviation = (
-                price_deviation * (1 - step_scale ** trades["safetyorders_count"])
-            ) / (1 - step_scale)
+        max_deviation, actual_deviation = self.__calculate_deviations(
+            step_scale, price_deviation, trades["safetyorders_count"]
+        )
 
-        # Check if safety orders exist yet
-        if trades["safetyorders"] and max_safety_orders:
-            safety_order_size = trades["safetyorders"][-1]["ordersize"] * volume_scale
-            next_so_percentage = (
-                float(trades["safetyorders"][-1]["so_percentage"]) * step_scale
+        last_so_price, safety_order_size, next_so_percentage, trigger_threshold = (
+            self.__evaluate_existing_safety_orders(
+                trades["safetyorders"],
+                max_safety_orders,
+                volume_scale,
+                step_scale,
+                price_deviation,
+                safety_order_size,
+                next_so_percentage,
+                trigger_threshold,
             )
-            if len(trades["safetyorders"]) >= 2:
-                next_so_percentage = -abs(next_so_percentage) + -abs(
-                    float(trades["safetyorders"][-2]["so_percentage"])
-                )
-            else:
-                next_so_percentage = -abs(next_so_percentage) + -abs(price_deviation)
-            trigger_threshold = -abs(next_so_percentage)
-
-            last_so_price = float(trades["safetyorders"][-1]["price"])
-        else:
-            last_so_price = 0
+        )
 
         # Dynamic DCA safety orders must progress deeper (more negative) than
         # the most recently persisted SO percentage to avoid rebound buys.
@@ -440,56 +424,19 @@ class Dca:
                 # This is robust even when DB rows are not returned in timestamp order.
                 last_so_percentage = min(so_values)
 
-        # We have not reached the max safety orders
         if max_safety_orders and (trades["safetyorders_count"] < max_safety_orders):
-
             new_so = False
 
             if dynamic_dca:
-                # Trigger new safety order for dynamic dca
-                if actual_pnl <= trigger_threshold:
-                    strategy_result = await self.__dynamic_dca_strategy(
-                        trades["symbol"]
-                    )
-                    payload_changed = True
-                    if isinstance(strategy_result, tuple):
-                        strategy_buy_signal, payload_changed = strategy_result
-                    else:
-                        strategy_buy_signal = bool(strategy_result)
-
-                    if strategy_buy_signal:
-                        if not payload_changed:
-                            logging.debug(
-                                "Skip dynamic SO for %s: strategy payload unchanged from previous evaluation.",
-                                trades["symbol"],
-                            )
-                            new_so = False
-                        else:
-                            normalized_actual_pnl = round(actual_pnl, 1)
-                            if (
-                                last_so_percentage is not None
-                                and normalized_actual_pnl >= last_so_percentage
-                            ):
-                                logging.debug(
-                                    "Skip dynamic SO for %s: actual_pnl=%s (normalized=%s) is not deeper than last_so_percentage=%s",
-                                    trades["symbol"],
-                                    round(actual_pnl, 4),
-                                    round(normalized_actual_pnl, 4),
-                                    round(last_so_percentage, 4),
-                                )
-                                new_so = False
-                            else:
-                                # Set next_so_percentage to current percentage
-                                next_so_percentage = normalized_actual_pnl
-                                new_so = True
+                new_so, next_so_percentage = await self.__evaluate_dynamic_dca_trigger(
+                    trades, actual_pnl, trigger_threshold, last_so_percentage
+                )
             else:
-                # Trigger new safety order for static dca
-                if total_pnl <= -abs(max_deviation):
-                    # Set next_so_percentage to diffence between max deviation and actual deviation
-                    next_so_percentage = max_deviation - actual_deviation
-                    next_so_percentage = round(next_so_percentage, 2)
-                    trigger_threshold = -abs(next_so_percentage)
-                    new_so = True
+                new_so, trigger_threshold, next_so_percentage = (
+                    self.__evaluate_static_dca_trigger(
+                        total_pnl, max_deviation, actual_deviation
+                    )
+                )
 
             if new_so:
                 (
@@ -529,23 +476,15 @@ class Dca:
                     )
 
             # Logging configuration
-            logging_json = {
-                "type": "dca_check",
-                "symbol": trades["symbol"],
-                "botname": trades["bot"],
-                "so_orders": trades["safetyorders_count"] + int(placed_new_so),
-                "last_so_price": last_so_price,
-                "new_so_size": safety_order_size,
-                "price_deviation": next_so_percentage,
-                "actual_pnl": actual_pnl,
-                "new_so": placed_new_so,
-                "dynamic_so_scale": dynamic_so_details.get("vol_factor", 1.0),
-                "dynamic_so_window": dynamic_so_details.get("window", "off"),
-                "dynamic_so_drawdown": dynamic_so_details.get("ath_distance", 0.0),
-                "dynamic_so_loss": dynamic_so_details.get("loss_factor", 0.0),
-            }
-            # Send new statistics to statistics module
-            await self.statistic.update_statistic_data(logging_json)
+            await self.__log_dca_check(
+                trades=trades,
+                placed_new_so=placed_new_so,
+                last_so_price=last_so_price,
+                safety_order_size=safety_order_size,
+                next_so_percentage=next_so_percentage,
+                actual_pnl=actual_pnl,
+                dynamic_so_details=dynamic_so_details,
+            )
         else:
             logging.info(
                 "Max safety orders reached for %s (configured=%s, current=%s). "
@@ -554,6 +493,61 @@ class Dca:
                 max_safety_orders,
                 trades["safetyorders_count"],
             )
+
+    def __calculate_deviations(
+        self, step_scale: float, price_deviation: float, safetyorders_count: int
+    ) -> tuple[float, float]:
+        """Calculate max/actual deviation for static DCA progression."""
+        if step_scale == 1:
+            max_deviation = price_deviation * (safetyorders_count + 1)
+            actual_deviation = price_deviation * safetyorders_count
+            return max_deviation, actual_deviation
+
+        max_deviation = (
+            price_deviation * (1 - step_scale ** (safetyorders_count + 1))
+        ) / (1 - step_scale)
+        max_deviation = round(max_deviation, 2)
+        actual_deviation = (
+            price_deviation * (1 - step_scale**safetyorders_count)
+        ) / (1 - step_scale)
+        return max_deviation, actual_deviation
+
+    def __evaluate_existing_safety_orders(
+        self,
+        safetyorders: list[dict[str, Any]],
+        max_safety_orders: int,
+        volume_scale: float,
+        step_scale: float,
+        price_deviation: float,
+        safety_order_size: float,
+        next_so_percentage: float,
+        trigger_threshold: float,
+    ) -> tuple[float, float, float, float]:
+        """Derive SO context from already placed safety orders."""
+        if safetyorders and max_safety_orders:
+            safety_order_size = safetyorders[-1]["ordersize"] * volume_scale
+            next_so_percentage = float(safetyorders[-1]["so_percentage"]) * step_scale
+            if len(safetyorders) >= 2:
+                next_so_percentage = -abs(next_so_percentage) + -abs(
+                    float(safetyorders[-2]["so_percentage"])
+                )
+            else:
+                next_so_percentage = -abs(next_so_percentage) + -abs(price_deviation)
+            trigger_threshold = -abs(next_so_percentage)
+            last_so_price = float(safetyorders[-1]["price"])
+            return (
+                last_so_price,
+                safety_order_size,
+                next_so_percentage,
+                trigger_threshold,
+            )
+
+        return (
+            0.0,
+            safety_order_size,
+            next_so_percentage,
+            trigger_threshold,
+        )
 
     async def process_ticker_data(
         self, ticker: dict[str, Any], config: dict[str, Any]
@@ -595,3 +589,84 @@ class Dca:
 
                 # Check TP
                 await self.__calculate_tp(price, trades)
+
+    async def __evaluate_dynamic_dca_trigger(
+        self,
+        trades: dict[str, Any],
+        actual_pnl: float,
+        trigger_threshold: float,
+        last_so_percentage: float | None,
+    ) -> tuple[bool, float]:
+        new_so = False
+        next_so_percentage = last_so_percentage or trigger_threshold
+        if actual_pnl <= trigger_threshold:
+            strategy_result = await self.__dynamic_dca_strategy(trades["symbol"])
+            payload_changed = True
+            if isinstance(strategy_result, tuple):
+                strategy_buy_signal, payload_changed = strategy_result
+            else:
+                strategy_buy_signal = bool(strategy_result)
+
+            if strategy_buy_signal:
+                if not payload_changed:
+                    logging.debug(
+                        "Skip dynamic SO for %s: strategy payload unchanged from previous evaluation.",
+                        trades["symbol"],
+                    )
+                else:
+                    normalized_actual_pnl = round(actual_pnl, 1)
+                    if (
+                        last_so_percentage is not None
+                        and normalized_actual_pnl >= last_so_percentage
+                    ):
+                        logging.debug(
+                            "Skip dynamic SO for %s: actual_pnl=%s (normalized=%s) is not deeper than last_so_percentage=%s",
+                            trades["symbol"],
+                            round(actual_pnl, 4),
+                            round(normalized_actual_pnl, 4),
+                            round(last_so_percentage, 4),
+                        )
+                    else:
+                        next_so_percentage = normalized_actual_pnl
+                        new_so = True
+        return new_so, next_so_percentage
+
+    def __evaluate_static_dca_trigger(
+        self, total_pnl: float, max_deviation: float, actual_deviation: float
+    ) -> tuple[bool, float, float]:
+        new_so = False
+        trigger_threshold = -abs(max_deviation - actual_deviation)
+        next_so_percentage = 0.0
+        if total_pnl <= -abs(max_deviation):
+            next_so_percentage = max_deviation - actual_deviation
+            next_so_percentage = round(next_so_percentage, 2)
+            trigger_threshold = -abs(next_so_percentage)
+            new_so = True
+        return new_so, trigger_threshold, next_so_percentage
+
+    async def __log_dca_check(
+        self,
+        trades: dict[str, Any],
+        placed_new_so: bool,
+        last_so_price: float,
+        safety_order_size: float,
+        next_so_percentage: float,
+        actual_pnl: float,
+        dynamic_so_details: dict[str, Any],
+    ) -> None:
+        logging_json = {
+            "type": "dca_check",
+            "symbol": trades["symbol"],
+            "botname": trades["bot"],
+            "so_orders": trades["safetyorders_count"] + int(placed_new_so),
+            "last_so_price": last_so_price,
+            "new_so_size": safety_order_size,
+            "price_deviation": next_so_percentage,
+            "actual_pnl": actual_pnl,
+            "new_so": placed_new_so,
+            "dynamic_so_scale": dynamic_so_details.get("vol_factor", 1.0),
+            "dynamic_so_window": dynamic_so_details.get("window", "off"),
+            "dynamic_so_drawdown": dynamic_so_details.get("ath_distance", 0.0),
+            "dynamic_so_loss": dynamic_so_details.get("loss_factor", 0.0),
+        }
+        await self.statistic.update_statistic_data(logging_json)

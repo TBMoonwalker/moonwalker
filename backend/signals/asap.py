@@ -263,7 +263,7 @@ class SignalPlugin:
             if self.config.get("topcoin_limit", None) and self.config.get(
                 "marketcap_cmc_api_key", None
             ):
-                marketcap = self.filter.get_cmc_marketcap_rank(
+                marketcap = await self.filter.get_cmc_marketcap_rank(
                     self.config.get("marketcap_cmc_api_key", None),
                     symbol_only,
                 )

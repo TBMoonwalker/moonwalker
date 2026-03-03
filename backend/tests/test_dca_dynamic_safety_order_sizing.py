@@ -3,7 +3,7 @@ from service.dca import Dca
 
 
 @pytest.mark.asyncio
-async def test_dynamic_dca_sizing_uses_base_order_and_factors(monkeypatch):
+async def test_dynamic_dca_sizing_uses_base_order_and_factors(monkeypatch) -> None:
     dca = Dca()
     dca.config = {
         "bo": 100.0,
@@ -11,13 +11,13 @@ async def test_dynamic_dca_sizing_uses_base_order_and_factors(monkeypatch):
         "dynamic_dca_ath_cache_ttl": 60,
     }
 
-    async def fake_ath(*_args, **_kwargs):
+    async def fake_ath(*_args, **_kwargs) -> None:
         return 110.0, "1m"
 
-    async def fake_atr(*_args, **_kwargs):
+    async def fake_atr(*_args, **_kwargs) -> None:
         return 1.5, {"regime": "high", "atr_percent": 2.1}
 
-    async def fake_quote_balance(*_args, **_kwargs):
+    async def fake_quote_balance(*_args, **_kwargs) -> None:
         return 1000.0
 
     monkeypatch.setattr(dca.ath_service, "get_recent_ath", fake_ath)
@@ -47,7 +47,7 @@ async def test_dynamic_dca_sizing_uses_base_order_and_factors(monkeypatch):
 @pytest.mark.asyncio
 async def test_dynamic_dca_sizing_caps_by_budget_and_skips_below_base_order(
     monkeypatch,
-):
+) -> None:
     dca = Dca()
     dca.config = {
         "bo": 100.0,
@@ -55,13 +55,13 @@ async def test_dynamic_dca_sizing_caps_by_budget_and_skips_below_base_order(
         "dynamic_dca_ath_cache_ttl": 60,
     }
 
-    async def fake_ath(*_args, **_kwargs):
+    async def fake_ath(*_args, **_kwargs) -> None:
         return 120.0, "1m"
 
-    async def fake_atr(*_args, **_kwargs):
+    async def fake_atr(*_args, **_kwargs) -> None:
         return 1.5, {"regime": "high", "atr_percent": 2.5}
 
-    async def fake_quote_balance(*_args, **_kwargs):
+    async def fake_quote_balance(*_args, **_kwargs) -> None:
         return 100.0
 
     monkeypatch.setattr(dca.ath_service, "get_recent_ath", fake_ath)
@@ -88,20 +88,20 @@ async def test_dynamic_dca_sizing_caps_by_budget_and_skips_below_base_order(
 
 
 @pytest.mark.asyncio
-async def test_dynamic_dca_sizing_uses_budget_ratio_default(monkeypatch):
+async def test_dynamic_dca_sizing_uses_budget_ratio_default(monkeypatch) -> None:
     dca = Dca()
     dca.config = {
         "bo": 100.0,
         "dynamic_dca_ath_cache_ttl": 60,
     }
 
-    async def fake_ath(*_args, **_kwargs):
+    async def fake_ath(*_args, **_kwargs) -> None:
         return 100.0, "1m"
 
-    async def fake_atr(*_args, **_kwargs):
+    async def fake_atr(*_args, **_kwargs) -> None:
         return 1.0, {"regime": "mid", "atr_percent": 1.0}
 
-    async def fake_quote_balance(*_args, **_kwargs):
+    async def fake_quote_balance(*_args, **_kwargs) -> None:
         return 1000.0
 
     monkeypatch.setattr(dca.ath_service, "get_recent_ath", fake_ath)

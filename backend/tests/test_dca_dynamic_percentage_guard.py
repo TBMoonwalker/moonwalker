@@ -3,21 +3,23 @@ from service.dca import Dca
 
 
 @pytest.mark.asyncio
-async def test_dynamic_dca_skips_so_when_pnl_is_above_last_so_percentage(monkeypatch):
+async def test_dynamic_dca_skips_so_when_pnl_is_above_last_so_percentage(
+    monkeypatch,
+) -> None:
     dca = Dca()
     buy_calls = []
 
-    async def fake_dynamic_strategy(_symbol):
+    async def fake_dynamic_strategy(_symbol) -> None:
         return True
 
-    async def fake_resolve_size(**_kwargs):
+    async def fake_resolve_size(**_kwargs) -> None:
         return 100.0, {"scale": 1.0, "window": "off"}
 
-    async def fake_receive_buy_order(order, _config):
+    async def fake_receive_buy_order(order, _config) -> None:
         buy_calls.append(order)
         return True
 
-    async def fake_update_statistic_data(_payload):
+    async def fake_update_statistic_data(_payload) -> None:
         return None
 
     monkeypatch.setattr(
@@ -69,21 +71,21 @@ async def test_dynamic_dca_skips_so_when_pnl_is_above_last_so_percentage(monkeyp
 @pytest.mark.asyncio
 async def test_dynamic_dca_allows_so_when_pnl_is_deeper_than_last_so_percentage(
     monkeypatch,
-):
+) -> None:
     dca = Dca()
     buy_calls = []
 
-    async def fake_dynamic_strategy(_symbol):
+    async def fake_dynamic_strategy(_symbol) -> None:
         return True
 
-    async def fake_resolve_size(**_kwargs):
+    async def fake_resolve_size(**_kwargs) -> None:
         return 100.0, {"scale": 1.0, "window": "off"}
 
-    async def fake_receive_buy_order(order, _config):
+    async def fake_receive_buy_order(order, _config) -> None:
         buy_calls.append(order)
         return True
 
-    async def fake_update_statistic_data(_payload):
+    async def fake_update_statistic_data(_payload) -> None:
         return None
 
     monkeypatch.setattr(
@@ -136,21 +138,21 @@ async def test_dynamic_dca_allows_so_when_pnl_is_deeper_than_last_so_percentage(
 @pytest.mark.asyncio
 async def test_dynamic_dca_skips_so_when_normalized_pnl_matches_last_so_percentage(
     monkeypatch,
-):
+) -> None:
     dca = Dca()
     buy_calls = []
 
-    async def fake_dynamic_strategy(_symbol):
+    async def fake_dynamic_strategy(_symbol) -> None:
         return True
 
-    async def fake_resolve_size(**_kwargs):
+    async def fake_resolve_size(**_kwargs) -> None:
         return 100.0, {"scale": 1.0, "window": "off"}
 
-    async def fake_receive_buy_order(order, _config):
+    async def fake_receive_buy_order(order, _config) -> None:
         buy_calls.append(order)
         return True
 
-    async def fake_update_statistic_data(_payload):
+    async def fake_update_statistic_data(_payload) -> None:
         return None
 
     monkeypatch.setattr(
@@ -200,21 +202,23 @@ async def test_dynamic_dca_skips_so_when_normalized_pnl_matches_last_so_percenta
 
 
 @pytest.mark.asyncio
-async def test_dynamic_dca_skips_so_when_strategy_payload_unchanged(monkeypatch):
+async def test_dynamic_dca_skips_so_when_strategy_payload_unchanged(
+    monkeypatch,
+) -> None:
     dca = Dca()
     buy_calls = []
 
-    async def fake_dynamic_strategy(_symbol):
+    async def fake_dynamic_strategy(_symbol) -> None:
         return True, False
 
-    async def fake_resolve_size(**_kwargs):
+    async def fake_resolve_size(**_kwargs) -> None:
         return 100.0, {"scale": 1.0, "window": "off"}
 
-    async def fake_receive_buy_order(order, _config):
+    async def fake_receive_buy_order(order, _config) -> None:
         buy_calls.append(order)
         return True
 
-    async def fake_update_statistic_data(_payload):
+    async def fake_update_statistic_data(_payload) -> None:
         return None
 
     monkeypatch.setattr(

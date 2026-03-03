@@ -3,6 +3,7 @@
     <n-statistic :class="upnl_class" label="UPNL" :value="upnl" />
     <n-statistic :class="autopilot_class" label="Autopilot mode" :value="autopilot_mode" />
     <n-statistic label="Funds locked" :value="funds_locked" />
+    <n-statistic label="Funds available" :value="funds_available" />
 </template>
 
 <script setup lang="ts">
@@ -18,6 +19,7 @@ const profit_class = ref()
 const upnl = ref()
 const upnl_class = ref()
 const funds_locked = ref()
+const funds_available = ref()
 const autopilot_mode = ref()
 const autopilot_class = ref()
 
@@ -41,6 +43,11 @@ watch(statistics_data.data, async (newData) => {
             funds_locked.value = 0.0
         } else {
             funds_locked.value = websocket_data.funds_locked.toFixed(2)
+        }
+        if (websocket_data.funds_available === null || websocket_data.funds_available === undefined) {
+            funds_available.value = 0.0
+        } else {
+            funds_available.value = websocket_data.funds_available.toFixed(2)
         }
         if (websocket_data.autopilot == "high") {
             autopilot_mode.value = "High"

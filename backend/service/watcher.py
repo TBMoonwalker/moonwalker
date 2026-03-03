@@ -30,14 +30,17 @@ class Watcher:
     DCA_QUEUE_MAXSIZE = 1000
     OHLCV_QUEUE_MAXSIZE = 5000
     BTC_HISTORY_MIN_ROWS = 120
+    DCA_WORKER_TASK_NAME = "watcher:dca_worker"
+    OHLCV_WORKER_TASK_NAME = "watcher:ohlcv_worker"
     ticker_symbols = []
     candles = {}
     signal_symbols: set[str] = set()
     mandatory_symbols: set[str] = set()
     timeframe = "1m"
     symbol_update_event: asyncio.Event | None = None
+    exchange_watcher_ohlcv: bool = True
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.trades = Trades()
         self.dca = Dca()
         self.config = None
@@ -251,7 +254,9 @@ class Watcher:
                 Watcher.signal_symbols = set(self.__normalize_symbols(new_symbol_list))
                 trade_symbols = await self.trades.get_symbols()
                 Watcher.ticker_symbols = self.__compose_ticker_symbols(trade_symbols)
-                logging.info(f"Updated symbol list via queue: {Watcher.ticker_symbols}")
+                logging.info(
+                    "Updated symbol list via queue: %s", Watcher.ticker_symbols
+                )
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
                 watcher_queue.task_done()
@@ -259,7 +264,7 @@ class Watcher:
                 break
             except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps the watcher queue alive on unexpected errors.
-                logging.error(f"Error in watch_incoming_symbols: {e}", exc_info=True)
+                logging.error("Error in watch_incoming_symbols: %s", e, exc_info=True)
                 await asyncio.sleep(2)
 
     # ------------------------------------------------------------------- #
@@ -281,10 +286,10 @@ class Watcher:
                 Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(trade_symbols)
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
-                logging.debug(f"Added symbols. New list: {Watcher.ticker_symbols}")
+                logging.debug("Added symbols. New list: %s", Watcher.ticker_symbols)
             except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps post-save hooks from crashing the process.
-                logging.error(f"Error adding trade symbols: {e}", exc_info=True)
+                logging.error("Error adding trade symbols: %s", e, exc_info=True)
 
     @post_save(model.ClosedTrades)
     async def watch_closedtrade_symbols(
@@ -301,10 +306,10 @@ class Watcher:
                 Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(trade_symbols)
                 if Watcher.symbol_update_event:
                     Watcher.symbol_update_event.set()
-                logging.debug(f"Removed symbols. New list: {Watcher.ticker_symbols}")
+                logging.debug("Removed symbols. New list: %s", Watcher.ticker_symbols)
             except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps post-save hooks from crashing the process.
-                logging.error(f"Error removing trade symbols: {e}", exc_info=True)
+                logging.error("Error removing trade symbols: %s", e, exc_info=True)
 
     # ------------------------------------------------------------------- #
     #                           Main Watch Loop                           #
@@ -325,6 +330,58 @@ class Watcher:
         await consumer_task
         await asyncio.gather(*self._worker_tasks, return_exceptions=True)
 
+    def _create_worker_task(self, task_name: str) -> asyncio.Task | None:
+        if task_name == self.DCA_WORKER_TASK_NAME:
+            return asyncio.create_task(
+                self._process_dca_queue(), name=self.DCA_WORKER_TASK_NAME
+            )
+        if task_name == self.OHLCV_WORKER_TASK_NAME:
+            return asyncio.create_task(
+                self._process_ohlcv_queue(), name=self.OHLCV_WORKER_TASK_NAME
+            )
+        return None
+
+    def _start_worker_tasks(self) -> None:
+        self._worker_tasks = [
+            asyncio.create_task(
+                self._process_dca_queue(),
+                name=self.DCA_WORKER_TASK_NAME,
+            ),
+            asyncio.create_task(
+                self._process_ohlcv_queue(),
+                name=self.OHLCV_WORKER_TASK_NAME,
+            ),
+        ]
+
+    def _ensure_worker_tasks(self) -> None:
+        for idx, task in enumerate(list(self._worker_tasks)):
+            if not task.done():
+                continue
+
+            task_name = task.get_name()
+            if task.cancelled():
+                logging.warning(
+                    "Worker task '%s' was cancelled; restarting.", task_name
+                )
+            else:
+                exc = task.exception()
+                if exc:
+                    logging.error(
+                        "Worker task '%s' crashed; restarting. Cause: %s",
+                        task_name,
+                        exc,
+                        exc_info=True,
+                    )
+                else:
+                    logging.warning(
+                        "Worker task '%s' stopped unexpectedly; restarting.",
+                        task_name,
+                    )
+
+            replacement = self._create_worker_task(task_name)
+            if replacement:
+                self._worker_tasks[idx] = replacement
+
     async def watch_tickers(self) -> None:
         """Main loop that syncs symbol watchers and restarts them if needed."""
         logging.info("Starting Watcher...")
@@ -334,14 +391,12 @@ class Watcher:
         Watcher.ticker_symbols = self.__compose_ticker_symbols(trade_symbols)
 
         consumer_task = asyncio.create_task(self.process_events())
-        self._worker_tasks = [
-            asyncio.create_task(self._process_dca_queue()),
-            asyncio.create_task(self._process_ohlcv_queue()),
-        ]
+        self._start_worker_tasks()
 
         while self.status:
             try:
                 await self.__sync_symbol_tasks()
+                self._ensure_worker_tasks()
 
                 # Wait for event or periodically refresh
                 await self.__wait_for_updates()
@@ -349,9 +404,10 @@ class Watcher:
             except asyncio.TimeoutError:
                 # Regular refresh to detect crashed tasks
                 await self.__sync_symbol_tasks()
+                self._ensure_worker_tasks()
             except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch ensures the watcher loop continues.
-                logging.error(f"Error in watch_tickers: {e}", exc_info=True)
+                logging.error("Error in watch_tickers: %s", e, exc_info=True)
                 await asyncio.sleep(5)
 
         await self.__cleanup_tasks(consumer_task)
@@ -399,20 +455,20 @@ class Watcher:
 
         # Add new watcher tasks
         for sym in desired_symbols - current_symbols:
-            logging.info(f"Starting new watcher for {sym}")
+            logging.info("Starting new watcher for %s", sym)
             task = asyncio.create_task(self.watch_symbol_with_reconnect(sym))
             self.symbol_tasks[sym] = task
 
         # Remove watchers for symbols that are no longer active
         for sym in current_symbols - desired_symbols:
-            logging.info(f"Stopping watcher for {sym}")
+            logging.info("Stopping watcher for %s", sym)
             task = self.symbol_tasks.pop(sym)
             task.cancel()
 
         # Restart crashed tasks
         for sym, task in list(self.symbol_tasks.items()):
             if task.done() and not task.cancelled():
-                logging.warning(f"Watcher for {sym} crashed — restarting...")
+                logging.warning("Watcher for %s crashed — restarting...", sym)
                 self.symbol_tasks[sym] = asyncio.create_task(
                     self.watch_symbol_with_reconnect(sym)
                 )
@@ -431,30 +487,33 @@ class Watcher:
                     break
                 delay = self.RECONNECT_DELAY
             except asyncio.CancelledError:
-                logging.info(f"Watcher cancelled for {symbol}")
+                logging.info("Watcher cancelled for %s", symbol)
                 break
             except ccxtpro.NetworkError as e:
                 logging.warning(
-                    f"{symbol} network error: {e} — reconnecting in {delay}s"
+                    "%s network error: %s — reconnecting in %ss", symbol, e, delay
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, self.MAX_RECONNECT_DELAY)
             except ccxtpro.ExchangeError as e:
                 logging.warning(
-                    f"{symbol} exchange error: {e} — reconnecting in {delay}s"
+                    "%s exchange error: %s — reconnecting in %ss", symbol, e, delay
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, self.MAX_RECONNECT_DELAY)
             except asyncio.TimeoutError as e:
                 logging.warning(
-                    f"{symbol} timeout error: {e} — reconnecting in {delay}s"
+                    "%s timeout error: %s — reconnecting in %ss", symbol, e, delay
                 )
                 await asyncio.sleep(delay)
                 delay = min(delay * 2, self.MAX_RECONNECT_DELAY)
             except (RuntimeError, TypeError, ValueError, OSError) as e:
                 # Broad catch to keep reconnection loop alive.
                 logging.error(
-                    f"{symbol} unexpected error: {e} — reconnecting in {delay}s",
+                    "%s unexpected error: %s — reconnecting in %ss",
+                    symbol,
+                    e,
+                    delay,
                     exc_info=True,
                 )
                 await asyncio.sleep(delay)
@@ -472,7 +531,7 @@ class Watcher:
 
     async def watch_symbol(self, symbol: str) -> None:
         """Actual exchange streaming for one symbol."""
-        logging.info(f"Started websocket stream for {symbol}")
+        logging.info("Started websocket stream for %s", symbol)
         while self.status:
             if self.exchange:
                 try:
@@ -486,22 +545,24 @@ class Watcher:
                         if trades:
                             await self.__process_trade_data(symbol, trades)
                 except ccxtpro.NetworkError as e:
-                    logging.warning(f"{symbol}: network error {e}, reconnecting...")
+                    logging.warning("%s: network error %s, reconnecting...", symbol, e)
                     await asyncio.sleep(5)
                 except ccxtpro.ExchangeError as e:
-                    logging.warning(f"{symbol}: exchange error {e}, reconnecting...")
+                    logging.warning("%s: exchange error %s, reconnecting...", symbol, e)
                     await asyncio.sleep(10)
                 except asyncio.CancelledError:
                     raise
                 except asyncio.TimeoutError as e:
-                    logging.warning(f"{symbol}: timeout error {e}, reconnecting...")
+                    logging.warning("%s: timeout error %s, reconnecting...", symbol, e)
                     await asyncio.sleep(5)
                 except ValueError as e:
-                    logging.error(f"{symbol}: value error {e}")
+                    logging.error("%s: value error %s", symbol, e)
                     await asyncio.sleep(5)
                 except (RuntimeError, TypeError, ValueError, OSError) as e:
                     # Broad catch avoids dropping the websocket loop on unknown errors.
-                    logging.error(f"Unexpected error for {symbol}: {e}", exc_info=True)
+                    logging.error(
+                        "Unexpected error for %s: %s", symbol, e, exc_info=True
+                    )
                     await asyncio.sleep(5)
             else:
                 logging.error(
@@ -540,24 +601,36 @@ class Watcher:
                 break
             except (KeyError, RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps consumer running despite occasional bad events.
-                logging.error(f"Error processing event: {e}", exc_info=True)
+                logging.error("Error processing event: %s", e, exc_info=True)
 
     def _queue_put(self, queue: asyncio.Queue, payload: Any, name: str) -> None:
         try:
             queue.put_nowait(payload)
         except asyncio.QueueFull:
-            logging.warning(f"{name} queue full; dropping event.")
+            worker_summary = ", ".join(
+                f"{task.get_name()}={'done' if task.done() else 'alive'}"
+                for task in self._worker_tasks
+            )
+            logging.warning(
+                "%s queue full; dropping event. qsize=%s workers=[%s]",
+                name,
+                queue.qsize(),
+                worker_summary or "none",
+            )
 
     async def _process_dca_queue(self) -> None:
         while self.status:
+            ticker_price = None
             try:
                 ticker_price = await self.dca_queue.get()
                 await self.dca.process_ticker_data(ticker_price, self.config)
             except asyncio.CancelledError:
                 break
-            except (RuntimeError, TypeError, ValueError) as e:
-                # Broad catch keeps DCA queue alive on unexpected errors.
-                logging.error(f"Error processing DCA queue: {e}", exc_info=True)
+            except Exception as e:  # noqa: BLE001 - Keep worker alive on any failure.
+                logging.error("Error processing DCA queue: %s", e, exc_info=True)
+            finally:
+                if ticker_price is not None:
+                    self.dca_queue.task_done()
 
     async def _process_ohlcv_queue(self) -> None:
         buffer = []
@@ -576,7 +649,7 @@ class Watcher:
                 break
             except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps OHLCV writer alive.
-                logging.error(f"Error processing OHLCV queue: {e}", exc_info=True)
+                logging.error("Error processing OHLCV queue: %s", e, exc_info=True)
 
         if buffer:
             await self._flush_ohlcv_buffer(buffer)
@@ -594,7 +667,7 @@ class Watcher:
             )
         except (RuntimeError, TypeError, ValueError) as e:
             # Broad catch prevents write failures from crashing the worker.
-            logging.error(f"Error writing OHLCV batch: {e}", exc_info=True)
+            logging.error("Error writing OHLCV batch: %s", e, exc_info=True)
 
     def __prepare_ohlcv_write(self, symbol: str, ticker) -> dict | None:
         current_candle = ticker[-1]

@@ -66,9 +66,24 @@ The backend is a Python application using Quart (async Flask) framework with the
    - Handles orders, trades, statistics, and data endpoints
 
 2. **Services** (`backend/service/`)
+   - `config.py` - Singleton configuration manager backed by DB (`AppConfig`), hot-reload via Redis pub/sub
+   - `exchange.py` - Async CCXT wrapper: buy/sell lifecycle, precision, balance, retry logic
+   - `dca.py` - Core DCA engine: processes tickers, evaluates TP/SO triggers, places orders
+   - `watcher.py` - Real-time OHLCV/trade streaming via CCXT Pro WebSockets with auto-reconnect
+   - `trades.py` - Trade persistence layer: CRUD for open/closed trades, CSV import, aggregation
+   - `orders.py` - Order execution and management
    - `database.py` - Tortoise ORM database connection and management
-   - `watcher.py` - Monitors exchange tickers and symbol signals via WebSocket
-   - `housekeeper.py` - Cleans up old ticker data and manages database maintenance
+   - `housekeeper.py` - Periodic cleanup of old ticker data and uPNL history
+   - `statistic.py` - Portfolio stats, uPNL tracking, profit calculations
+   - `autopilot.py` - Dynamic trading parameter adjustment based on locked-fund thresholds
+   - `monitoring.py` - Telegram notifications via Telethon for buy/sell events
+   - `indicators.py` - TA-Lib wrappers for EMA, RSI, Bollinger Bands, Ichimoku, etc.
+   - `signal.py` - Signal plugin loader and lifecycle management
+   - `data.py` - Data endpoints and helpers for the controller layer
+   - `filter.py` - Symbol filtering (volume, market cap, pair age)
+   - `ath.py` - All-Time-High lookups with caching for dynamic SO scaling
+   - `redis.py` - Redis client setup and pub/sub helpers
+   - `strategy_capability.py` - Strategy availability validation
 
 3. **Signal Plugins** (`backend/signals/`)
    - `asap.py` - Signal plugin for ASAP signals
@@ -80,13 +95,13 @@ The backend is a Python application using Quart (async Flask) framework with the
    - Each strategy is a module with indicator calculation logic
 
 5. **Models** (`backend/model/`)
-   - Tortoise ORM data models for trades, tickers, open trades, listings
-   - Database schema definitions
+   - 9 Tortoise ORM models: `AppConfig`, `AthCache`, `Autopilot`, `Trades`, `OpenTrades`, `ClosedTrades`, `Tickers`, `Listings`, `UpnlHistory`
+   - Database: SQLite (configurable via `MOONWALKER_DB_URL`)
 
 6. **Helper** (`backend/helper/`)
-   - `config.py` - Configuration loading from config.ini
    - `logger.py` - Logging factory with different log levels
    - `utils.py` - Utility functions
+   - `async_cache.py` - Async-compatible caching decorator
 
 ### Frontend (Vue.js)
 The frontend is a Vue.js application built with Vite:
@@ -154,11 +169,11 @@ cd backend
 python app.py
 ```
 
-The app runs on port 8120 (configurable in config.ini) by default.
+The app runs on port 8130 (configurable via `MOONWALKER_PORT` env var or `./run.sh start -p <port>`) by default.
 
 ### Configuration
 
-Main configuration file: `config.ini` (based on `config.ini.example`)
+Runtime configuration is **DB-persisted** (`AppConfig` table) and managed via the `Config` singleton in `backend/service/config.py`. Changes propagate across processes via **Redis pub/sub**. The web UI provides a visual config editor; all ~60 keys are documented in `docs/configuration.md`.
 
 Key configuration sections:
 - **general**: Timezone, debug mode, port
@@ -174,8 +189,8 @@ Key configuration sections:
 The project uses standard Python and JavaScript testing approaches:
 
 **Python testing:**
-- No explicit test files in repository (test*.py files are gitignored)
-- Use pytest for testing: `pip install pytest`
+- 16 test files in `backend/tests/` covering: autopilot, config store, DCA (dynamic percentage guard, dynamic SO sizing), exchange sell execution, filter, history lookback, monitoring, signal plugins (ASAP, SymSignals), statistic uPNL history, strategy capability, strategy EMA swing, trades amounts, watcher OHLCV merge
+- Run tests: `cd scripts && ./ci.sh` (runs pytest with all checks) or `pytest backend/tests/` directly
 
 **Frontend testing:**
 - Vue Test Utils for component testing

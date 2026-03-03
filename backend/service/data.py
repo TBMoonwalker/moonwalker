@@ -1,5 +1,6 @@
 """Data access helpers for OHLCV and listings."""
 
+import asyncio
 import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -49,7 +50,7 @@ class Data:
                 config, symbol, timeframe="1d"
             )
             if not ohlcv:
-                logging.error(f"No OHLCV data available for {symbol}")
+                logging.error("No OHLCV data available for %s", symbol)
             else:
                 first_timestamp = ohlcv[0][0]
                 listing_date = datetime.fromtimestamp(
@@ -66,7 +67,7 @@ class Data:
                 return listing_date
         except Exception as e:
             # Broad catch to keep listing lookups resilient.
-            logging.error(f"Error fetching OHLCV for {symbol}: {e}")
+            logging.error("Error fetching OHLCV for %s: %s", symbol, e)
         finally:
             if not self.persist_exchange:
                 await self.exchange.close()
@@ -117,7 +118,7 @@ class Data:
             return symbols
         except Exception as e:
             # Broad catch to keep symbol list retrieval resilient.
-            logging.error(f"Error fetching exchange symbols for {currency}: {e}")
+            logging.error("Error fetching exchange symbols for %s: %s", currency, e)
             return []
         finally:
             if not self.persist_exchange:
@@ -157,15 +158,50 @@ class Data:
         min_date = end_time - timedelta(seconds=lookback_seconds)
         return int(min_date.timestamp() * 1000)
 
+    @staticmethod
+    def _rows_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
+        """Create and sanitize a DataFrame from DB rows."""
+        df = pd.DataFrame(rows)
+        df.dropna(inplace=True)
+        return df
+
+    @staticmethod
+    def _append_live_candle(
+        df_source: pd.DataFrame, live_candle: dict[str, float | str]
+    ) -> pd.DataFrame:
+        """Append in-memory live candle data to DB candles."""
+        return pd.concat([df_source, pd.DataFrame([live_candle])], ignore_index=True)
+
+    @staticmethod
+    def _serialize_ohlcv_dataframe(df_source: pd.DataFrame, offset: float) -> str:
+        """Convert OHLCV DataFrame into frontend payload JSON."""
+        df = df_source.copy()
+        offset_minutes = int(offset)
+        offset_ms = offset_minutes * 60 * 1000
+        df["time"] = (df["timestamp"].astype(int) + offset_ms) / 1000000000
+        df.drop_duplicates(subset=["time"], inplace=True)
+        df.rename(
+            columns={
+                "open": "open",
+                "high": "high",
+                "low": "low",
+                "close": "close",
+            },
+            inplace=True,
+        )
+        df.drop("volume", axis=1, inplace=True)
+        df.drop("timestamp", axis=1, inplace=True)
+        return df.to_json(orient="records")
+
     async def count_history_data_for_symbol(self, symbol: str) -> int | bool:
         """Count history data rows for a symbol."""
         try:
             query = await model.Tickers.filter(symbol=f"{symbol}").count()
-            logging.debug(f"Counted {query} entries for symbol {symbol}")
+            logging.debug("Counted %s entries for symbol %s", query, symbol)
             return query
         except Exception as e:
             # Broad catch to keep history endpoints responsive.
-            logging.error(f"Error counting history data for symbol {symbol}: {e}")
+            logging.error("Error counting history data for symbol %s: %s", symbol, e)
 
         return False
 
@@ -173,11 +209,11 @@ class Data:
         """Delete ticker data for a symbol."""
         try:
             query = await model.Tickers.filter(symbol=f"{symbol}").delete()
-            logging.info(f"Delete {query} entries for symbol {symbol}")
+            logging.info("Delete %s entries for symbol %s", query, symbol)
             return True
         except Exception as e:
             # Broad catch to keep delete endpoints responsive.
-            logging.error(f"Error deleting old ticker data for symbol {symbol}: {e}")
+            logging.error("Error deleting old ticker data for symbol %s: %s", symbol, e)
 
         return False
 
@@ -190,11 +226,11 @@ class Data:
                 if await self.__fetch_history_data_for_symbol(
                     symbol, history_data, config
                 ):
-                    logging.info(f"Added history for {symbol}")
+                    logging.info("Added history for %s", symbol)
                     return True
             except Exception as e:
                 # Broad catch to keep history loads resilient.
-                logging.error(f"Error adding history for {symbol}. Cause: {e}")
+                logging.error("Error adding history for %s. Cause: %s", symbol, e)
 
         return False
 
@@ -238,7 +274,7 @@ class Data:
 
         except Exception as e:
             # Broad catch to keep history loads resilient.
-            logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
+            logging.error("Error fetching historical data from Exchange. Cause: %s", e)
         finally:
             if not self.persist_exchange:
                 await self.exchange.close()
@@ -260,32 +296,21 @@ class Data:
             .values("timestamp", "open", "high", "low", "close", "volume")
         )
 
-        df_source = pd.DataFrame(query) if query else pd.DataFrame()
+        df_source = (
+            await asyncio.to_thread(pd.DataFrame, query) if query else pd.DataFrame()
+        )
         live_candle = self.__get_live_candle_for_symbol(symbol, start_timestamp)
         if live_candle:
-            df_source = pd.concat(
-                [df_source, pd.DataFrame([live_candle])], ignore_index=True
+            df_source = await asyncio.to_thread(
+                self._append_live_candle, df_source, live_candle
             )
 
         if not df_source.empty:
-            df = self.resample_data(df_source, timerange)
-
-            offset_minutes = int(offset)
-            offset_ms = offset_minutes * 60 * 1000
-            df["time"] = (df["timestamp"].astype(int) + offset_ms) / 1000000000
-            df.drop_duplicates(subset=["time"], inplace=True)
-            df.rename(
-                columns={
-                    "open": "open",
-                    "high": "high",
-                    "low": "low",
-                    "close": "close",
-                },
-                inplace=True,
-            )
-            df.drop("volume", axis=1, inplace=True)
-            df.drop("timestamp", axis=1, inplace=True)
-            ohlcv = df.to_json(orient="records")
+            df = await asyncio.to_thread(self.resample_data, df_source, timerange)
+            if df is not None and not df.empty:
+                ohlcv = await asyncio.to_thread(
+                    self._serialize_ohlcv_dataframe, df, offset
+                )
 
         return ohlcv
 
@@ -328,8 +353,7 @@ class Data:
         )
 
         if query:
-            df = pd.DataFrame(query)
-            df.dropna(inplace=True)
+            df = await asyncio.to_thread(self._rows_to_dataframe, query)
         else:
             df = None
 
@@ -355,8 +379,7 @@ class Data:
         )
 
         if query:
-            df = pd.DataFrame(query)
-            df.dropna(inplace=True)
+            df = await asyncio.to_thread(self._rows_to_dataframe, query)
         else:
             df = None
 

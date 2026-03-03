@@ -1,5 +1,6 @@
 """Statistics aggregation for trading performance."""
 
+import asyncio
 import copy
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -9,6 +10,7 @@ import model
 import pandas as pd
 from service.database import run_sqlite_write_with_retry
 from service.trades import Trades
+from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
 
 logging = helper.LoggerFactory.get_logger("logs/statistics.log", "statistic")
@@ -28,6 +30,84 @@ class Statistic:
             "month": timedelta(days=30),
             "year": timedelta(days=365),
         }
+
+    @staticmethod
+    def _resample_profit_data_sync(
+        profit_data: dict[str, Any], period: str
+    ) -> dict[str, Any]:
+        """Resample aggregated profit data synchronously."""
+        if not profit_data:
+            return profit_data
+        s = pd.Series(profit_data)
+        s.index = pd.to_datetime(s.index)
+        if period == "monthly":
+            result = s.resample("ME").sum().reset_index()
+            result.columns = ["Month", "Sum"]
+            return dict(zip(result["Month"].dt.strftime("%Y-%m"), result["Sum"]))
+        if period == "yearly":
+            result = s.resample("YE").sum().reset_index()
+            result.columns = ["Year", "Sum"]
+            return dict(zip(result["Year"].dt.strftime("%Y"), result["Sum"]))
+        return profit_data
+
+    @staticmethod
+    def _build_profit_overall_timeline_sync(
+        rows: list[tuple[Any, Any]],
+        now: datetime,
+        timeline_horizons: dict[str, timedelta],
+    ) -> list[dict[str, Any]]:
+        """Build resampled profit timeline synchronously from raw rows."""
+        df = pd.DataFrame(rows, columns=["timestamp", "profit_overall"])
+        df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
+        df = df.set_index("timestamp")
+        df = df[~df.index.duplicated(keep="last")]
+
+        year_start = now - timeline_horizons["year"]
+        day_start = now - timeline_horizons["day"]
+        week_start = now - timeline_horizons["week"]
+        month_start = now - timeline_horizons["month"]
+
+        frames: list[pd.DataFrame] = []
+
+        year_slice = df[(df.index >= year_start) & (df.index < month_start)]
+        if not year_slice.empty:
+            frames.append(
+                year_slice["profit_overall"].resample("1W").last().dropna().to_frame()
+            )
+
+        month_slice = df[(df.index >= month_start) & (df.index < week_start)]
+        if not month_slice.empty:
+            frames.append(
+                month_slice["profit_overall"].resample("1D").last().dropna().to_frame()
+            )
+
+        week_slice = df[(df.index >= week_start) & (df.index < day_start)]
+        if not week_slice.empty:
+            frames.append(
+                week_slice["profit_overall"].resample("4h").last().dropna().to_frame()
+            )
+
+        day_slice = df[df.index >= day_start]
+        if not day_slice.empty:
+            frames.append(
+                day_slice["profit_overall"].resample("15min").last().dropna().to_frame()
+            )
+
+        if not frames:
+            return []
+
+        merged = pd.concat(frames).sort_index()
+        merged = merged[~merged.index.duplicated(keep="last")]
+
+        timeline: list[dict[str, Any]] = []
+        for timestamp, row in merged.iterrows():
+            timeline.append(
+                {
+                    "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
+                    "profit_overall": float(row["profit_overall"]),
+                }
+            )
+        return timeline
 
     async def get_profits_overall(
         self, timestamp: int | None, period: str = "daily"
@@ -58,27 +138,13 @@ class Statistic:
                 else:
                     profit_data[str(date)] += profit_unit
 
-            # Resample data
-            s = pd.Series(profit_data)
-            s.index = pd.to_datetime(s.index)
+            profit_data = await asyncio.to_thread(
+                self._resample_profit_data_sync, profit_data, period
+            )
 
-            match period:
-                case "monthly":
-                    result = s.resample("ME").sum().reset_index()
-                    result.columns = ["Month", "Sum"]
-                    profit_data = dict(
-                        zip(result["Month"].dt.strftime("%Y-%m"), result["Sum"])
-                    )
-                case "yearly":
-                    result = s.resample("YE").sum().reset_index()
-                    result.columns = ["Year", "Sum"]
-                    profit_data = dict(
-                        zip(result["Year"].dt.strftime("%Y"), result["Sum"])
-                    )
-
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep stats endpoints responsive.
-            logging.error(f"Error getting profits for {period} data: {e}")
+            logging.error("Error getting profits for %s data: %s", period, e)
 
         return profit_data
 
@@ -99,9 +165,9 @@ class Statistic:
             )
             if upnl[0]:
                 profit_data["upnl"] = upnl[0]
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep stats endpoints responsive.
-            logging.error(f"Error getting losses: {e}")
+            logging.error("Error getting losses: %s", e)
 
         # Profit overall
         profit_data["profit_overall"] = 0
@@ -114,9 +180,9 @@ class Statistic:
                 profit_data["upnl"] or 0.0
             )
 
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep stats endpoints responsive.
-            logging.error(f"Error getting profit: {e}")
+            logging.error("Error getting profit: %s", e)
 
         # Funds locked in deals
         profit_data["funds_locked"] = 0
@@ -125,18 +191,18 @@ class Statistic:
                 total=Sum("cost")
             ).values_list("total", flat=True)
             profit_data["funds_locked"] = funds_locked[0]
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep stats endpoints responsive.
-            logging.error(f"Error getting funds: {e}")
+            logging.error("Error getting funds: %s", e)
 
         # Autopilot mode
         profit_data["autopilot"] = "none"
         try:
             autopilot = await model.Autopilot.all().order_by("-id").first()
             profit_data["autopilot"] = autopilot.mode if autopilot else "none"
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep stats endpoints responsive.
-            logging.error(f"Error getting autopilot mode: {e}")
+            logging.error("Error getting autopilot mode: %s", e)
 
         profit_data["profit_week"] = {}
         begin_week = (
@@ -152,9 +218,9 @@ class Statistic:
                     profit_data["profit_week"][str(date)] = profit_day
                 else:
                     profit_data["profit_week"][str(date)] += profit_day
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep stats endpoints responsive.
-            logging.error(f"Error getting profits for the week: {e}")
+            logging.error("Error getting profits for the week: %s", e)
 
         profit_data["profit_overall_timestamp"] = datetime.now(timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S"
@@ -185,9 +251,9 @@ class Statistic:
                 ),
                 "storing upnl snapshot",
             )
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to avoid stats persistence failures affecting websocket data.
-            logging.error(f"Error storing uPNL snapshot: {e}")
+            logging.error("Error storing uPNL snapshot: %s", e)
 
     async def get_upnl_history_all(self) -> list[dict[str, Any]]:
         """Return overall profit snapshots from the beginning, ordered by timestamp."""
@@ -205,9 +271,9 @@ class Statistic:
                         "profit_overall": profit_overall,
                     }
                 )
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep stats endpoints responsive.
-            logging.error(f"Error getting uPNL history: {e}")
+            logging.error("Error getting uPNL history: %s", e)
 
         return upnl_data
 
@@ -230,76 +296,15 @@ class Statistic:
             )
             if not rows:
                 return []
-
-            df = pd.DataFrame(rows, columns=["timestamp", "profit_overall"])
-            df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
-            df = df.set_index("timestamp")
-            df = df[~df.index.duplicated(keep="last")]
-
-            day_start = now - self.timeline_horizons["day"]
-            week_start = now - self.timeline_horizons["week"]
-            month_start = now - self.timeline_horizons["month"]
-
-            frames: list[pd.DataFrame] = []
-
-            year_slice = df[(df.index >= year_start) & (df.index < month_start)]
-            if not year_slice.empty:
-                frames.append(
-                    year_slice["profit_overall"]
-                    .resample("1W")
-                    .last()
-                    .dropna()
-                    .to_frame()
-                )
-
-            month_slice = df[(df.index >= month_start) & (df.index < week_start)]
-            if not month_slice.empty:
-                frames.append(
-                    month_slice["profit_overall"]
-                    .resample("1D")
-                    .last()
-                    .dropna()
-                    .to_frame()
-                )
-
-            week_slice = df[(df.index >= week_start) & (df.index < day_start)]
-            if not week_slice.empty:
-                frames.append(
-                    week_slice["profit_overall"]
-                    .resample("4h")
-                    .last()
-                    .dropna()
-                    .to_frame()
-                )
-
-            day_slice = df[df.index >= day_start]
-            if not day_slice.empty:
-                frames.append(
-                    day_slice["profit_overall"]
-                    .resample("15min")
-                    .last()
-                    .dropna()
-                    .to_frame()
-                )
-
-            if not frames:
-                return []
-
-            merged = pd.concat(frames).sort_index()
-            merged = merged[~merged.index.duplicated(keep="last")]
-
-            timeline: list[dict[str, Any]] = []
-            for timestamp, row in merged.iterrows():
-                timeline.append(
-                    {
-                        "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
-                        "profit_overall": float(row["profit_overall"]),
-                    }
-                )
-            return timeline
-        except Exception as e:
+            return await asyncio.to_thread(
+                self._build_profit_overall_timeline_sync,
+                rows,
+                now,
+                self.timeline_horizons,
+            )
+        except BaseORMException as e:
             # Broad catch to keep stats endpoints responsive.
-            logging.error(f"Error getting profit-overall timeline: {e}")
+            logging.error("Error getting profit-overall timeline: %s", e)
             return []
 
     async def update_statistic_data(self, stats: dict[str, Any]) -> None:
@@ -308,17 +313,24 @@ class Statistic:
             profit = (
                 stats["current_price"] * stats["total_amount"] - stats["total_cost"]
             )
-            open_timestamp = 0.0
+            open_timestamp = datetime.timestamp(datetime.now()) * 1000
             base_order = await self.trades.get_trade_by_ordertype(
                 stats["symbol"], baseorder=True
             )
 
             try:
-                open_timestamp = float(base_order[0]["timestamp"])
-            except Exception as e:
-                open_timestamp = datetime.timestamp(datetime.now())
-                logging.trace(
-                    "Did not find a timestamp - taking default value. Cause %s", e
+                if base_order and base_order[0].get("timestamp") is not None:
+                    open_timestamp = float(base_order[0]["timestamp"])
+                else:
+                    logging.debug(
+                        "Did not find base-order timestamp for %s; using current time.",
+                        stats["symbol"],
+                    )
+            except (KeyError, IndexError, TypeError, ValueError) as e:
+                logging.debug(
+                    "Invalid base-order timestamp for %s; using current time. Cause %s",
+                    stats["symbol"],
+                    e,
                 )
         else:
             if stats["new_so"]:

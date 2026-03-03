@@ -10,6 +10,7 @@ from typing import Any
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
+from tortoise.exceptions import BaseORMException
 from tortoise.expressions import F
 from tortoise.functions import Sum
 from tortoise.models import Q
@@ -50,9 +51,9 @@ class Trades:
                 trade = await model.Trades.filter(
                     Q(baseorder=True), Q(symbol=symbol), join_type="AND"
                 ).values()
-            except Exception as e:
+            except BaseORMException as e:
                 # Broad catch to prevent trade queries from crashing call sites.
-                logging.error(f"Error getting baseorders from database. Cause: {e}")
+                logging.error("Error getting baseorders from database. Cause: %s", e)
         # Get safetyorders
         else:
             try:
@@ -62,9 +63,9 @@ class Trades:
                     Q(symbol=symbol),
                     join_type="AND",
                 ).values()
-            except Exception as e:
+            except BaseORMException as e:
                 # Broad catch to prevent trade queries from crashing call sites.
-                logging.error(f"Error getting safetyorders from database. Cause: {e}")
+                logging.error("Error getting safetyorders from database. Cause: %s", e)
 
         return trade
 
@@ -75,18 +76,18 @@ class Trades:
         try:
             open_trades = await model.OpenTrades.filter(symbol=symbol).values()
             return open_trades
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to return partial results when database errors occur.
-            logging.error(f"Error getting open trades from database. Cause: {e}")
+            logging.error("Error getting open trades from database. Cause: %s", e)
 
     async def get_trades_by_symbol(self, symbol: str) -> list[dict[str, Any]] | None:
         """Return all trades for a symbol."""
         try:
             trades = await model.Trades.filter(symbol=symbol).values()
             return trades
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to return partial results when database errors occur.
-            logging.error(f"Error getting trades from database. Cause: {e}")
+            logging.error("Error getting trades from database. Cause: %s", e)
 
     async def get_open_trades(self) -> list[dict[str, Any]]:
         """
@@ -127,9 +128,9 @@ class Trades:
                 if safety:
                     order["safetyorders"] = safety
             return orders
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep open trades endpoint responsive.
-            logging.error(f"Error getting open orders. Cause: {e}")
+            logging.error("Error getting open orders. Cause: %s", e)
             return []
 
     async def get_closed_trades(self, page: int = 0) -> list[dict[str, Any]]:
@@ -149,9 +150,9 @@ class Trades:
                     .values()
                 )
             return orders
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep closed trades endpoint responsive.
-            logging.error(f"Error getting closed orders. Cause: {e}")
+            logging.error("Error getting closed orders. Cause: %s", e)
             return []
 
     async def get_closed_trades_length(self) -> int:
@@ -159,19 +160,19 @@ class Trades:
         try:
             order_length = await model.ClosedTrades.all().count()
             return order_length
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to keep count endpoint responsive.
-            logging.error(f"Error getting closed order length. Cause: {e}")
+            logging.error("Error getting closed order length. Cause: %s", e)
             return 0
 
     async def create_open_trades(self, payload: dict[str, Any]) -> None:
         """Create an open trade entry."""
         try:
             await model.OpenTrades.create(**payload)
-            logging.debug(f"Added open trade for {payload['symbol']}.")
-        except Exception as e:
+            logging.debug("Added open trade for %s.", payload["symbol"])
+        except BaseORMException as e:
             # Broad catch to avoid crashing on database write errors.
-            logging.error(f"Error creating open trade. Cause {e}")
+            logging.error("Error creating open trade. Cause %s", e)
 
     async def update_open_trades(self, payload: dict[str, Any], symbol: str) -> None:
         """Update open trades for a symbol."""
@@ -181,9 +182,9 @@ class Trades:
                     defaults=payload,
                     symbol=symbol,
                 )
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to avoid crashing on database write errors.
-            logging.error(f"Error updating SO count for {symbol}. Cause {e}")
+            logging.error("Error updating SO count for %s. Cause %s", symbol, e)
 
     async def add_partial_sell_execution(
         self, symbol: str, sold_amount: float, sold_proceeds: float
@@ -194,7 +195,7 @@ class Trades:
                 sold_amount=F("sold_amount") + float(sold_amount),
                 sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
             )
-        except Exception as e:
+        except BaseORMException as e:
             logging.error(
                 "Error updating partial sell execution for %s. Cause %s",
                 symbol,
@@ -211,7 +212,7 @@ class Trades:
                 float(getattr(open_trade, "sold_amount", 0.0) or 0.0),
                 float(getattr(open_trade, "sold_proceeds", 0.0) or 0.0),
             )
-        except Exception as e:
+        except BaseORMException as e:
             logging.error(
                 "Error reading partial sell execution for %s. Cause %s",
                 symbol,
@@ -223,45 +224,45 @@ class Trades:
         """Create a trade entry."""
         try:
             await model.Trades.create(**payload)
-            logging.debug(f"Added trade for {payload['symbol']}.")
-        except Exception as e:
+            logging.debug("Added trade for %s.", payload["symbol"])
+        except BaseORMException as e:
             # Broad catch to avoid crashing on database write errors.
-            logging.error(f"Error creating trade. Cause {e}")
+            logging.error("Error creating trade. Cause %s", e)
 
     async def delete_open_trades(self, symbol: str) -> None:
         """Delete open trades for a symbol."""
         try:
             await model.OpenTrades.filter(symbol=symbol).delete()
-            logging.debug(f"Deleted open trade for {symbol}.")
-        except Exception as e:
+            logging.debug("Deleted open trade for %s.", symbol)
+        except BaseORMException as e:
             # Broad catch to avoid crashing on database write errors.
-            logging.error(f"Error deleting open trades for {symbol}. Cause {e}")
+            logging.error("Error deleting open trades for %s. Cause %s", symbol, e)
 
     async def delete_trades(self, symbol: str) -> None:
         """Delete trades for a symbol."""
         try:
             await model.Trades.filter(symbol=symbol).delete()
-            logging.debug(f"Deleted trade for {symbol}.")
-        except Exception as e:
+            logging.debug("Deleted trade for %s.", symbol)
+        except BaseORMException as e:
             # Broad catch to avoid crashing on database write errors.
-            logging.error(f"Error deleting trades for {symbol}. Cause {e}")
+            logging.error("Error deleting trades for %s. Cause %s", symbol, e)
 
     async def create_closed_trades(self, payload: dict[str, Any]) -> None:
         """Create a closed trade entry."""
         try:
             await model.ClosedTrades.create(**payload)
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to avoid crashing on database write errors.
-            logging.error(f"Error creating closed trade. Cause {e}")
+            logging.error("Error creating closed trade. Cause %s", e)
 
     async def delete_closed_trade(self, trade_id: int) -> bool:
         """Delete a closed trade by its identifier."""
         try:
             deleted_count = await model.ClosedTrades.filter(id=trade_id).delete()
             return deleted_count > 0
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to avoid crashing on database write errors.
-            logging.error(f"Error deleting closed trade {trade_id}. Cause {e}")
+            logging.error("Error deleting closed trade %s. Cause %s", trade_id, e)
             return False
 
     async def get_token_amount_from_trades(self, symbol: str) -> float | None:
@@ -273,9 +274,9 @@ class Trades:
                 .values_list("total_amount", flat=True)
             )
             return result[0]
-        except Exception as e:
+        except BaseORMException as e:
             # Broad catch to avoid crashing on database aggregation errors.
-            logging.error(f"Error getting total amount from {symbol}. Cause {e}")
+            logging.error("Error getting total amount from %s. Cause %s", symbol, e)
             return None
 
     @helper.async_ttl_cache(maxsize=2048, ttl=2)
@@ -340,7 +341,7 @@ class Trades:
             }
 
             return trade_data
-        except Exception:
+        except BaseORMException:
             # Broad catch to return None when trade aggregation fails.
             # logging.debug(f"No trade for symbol {symbol} - Cause: {e}")
             return None

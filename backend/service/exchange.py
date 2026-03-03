@@ -15,6 +15,7 @@ class Exchange:
 
     HISTORY_RETRY_SLEEP_SECONDS = 1
     HISTORY_MAX_CONSECUTIVE_ERRORS = 5
+    BALANCE_CACHE_TTL_SECONDS = 2.0
 
     def __init__(
         self,
@@ -27,6 +28,9 @@ class Exchange:
         self._exchange_config = None
         self._markets_loaded = False
         self._exchange_lock = asyncio.Lock()
+        self._balance_lock = asyncio.Lock()
+        self._balance_cache: dict[str, Any] | None = None
+        self._balance_cache_ts = 0.0
 
     async def __close_exchange(self) -> None:
         if self.exchange is None:
@@ -35,11 +39,13 @@ class Exchange:
         try:
             await self.exchange.close()
         except (ccxt.BaseError, OSError, RuntimeError) as exc:
-            logging.warning(f"Failed to close exchange client cleanly: {exc}")
+            logging.warning("Failed to close exchange client cleanly: %s", exc)
         finally:
             self.exchange = None
             self._markets_loaded = False
             self._exchange_config = None
+            self._balance_cache = None
+            self._balance_cache_ts = 0.0
 
     async def close(self) -> None:
         """Close the underlying exchange client."""
@@ -127,17 +133,17 @@ class Exchange:
         try:
             timestamp = self.exchange.parse8601(date)
         except ccxt.ExchangeError as e:
-            logging.error(f"Error converting timestamp due to an exchange error: {e}")
+            logging.error("Error converting timestamp due to an exchange error: %s", e)
             raise TryAgain
         except ccxt.NetworkError as e:
-            logging.error(f"Error converting timestamp due to a network error: {e}")
+            logging.error("Error converting timestamp due to a network error: %s", e)
             raise TryAgain
         except ccxt.BaseError as e:
-            logging.error(f"Converting timestamp failed due to an error: {e}")
+            logging.error("Converting timestamp failed due to an error: %s", e)
             raise TryAgain
         except (TypeError, ValueError, RuntimeError) as e:
             # Broad catch to retry on unexpected exchange errors.
-            logging.error(f"Converting timestamp failed with: {e}")
+            logging.error("Converting timestamp failed with: %s", e)
             raise TryAgain
 
         return timestamp
@@ -156,7 +162,7 @@ class Exchange:
         ohlcv = None
         resolved_symbol = self.__resolve_symbol(symbol)
         if resolved_symbol is None:
-            logging.error(f"{symbol} not found")
+            logging.error("%s not found", symbol)
             return ohlcv
 
         timeframe_ms = self.exchange.parse_timeframe(timeframe) * 1000
@@ -193,7 +199,7 @@ class Exchange:
 
             except (ccxt.NetworkError, ccxt.ExchangeError, ccxt.BaseError) as e:
                 # Broad catch to continue paging through historical data.
-                logging.error(f"Fetching historical data failed due to an error: {e}")
+                logging.error("Fetching historical data failed due to an error: %s", e)
                 consecutive_errors += 1
                 if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
                     logging.error(
@@ -204,7 +210,7 @@ class Exchange:
                     break
                 await asyncio.sleep(self.HISTORY_RETRY_SLEEP_SECONDS)
             except (TypeError, ValueError, RuntimeError) as e:
-                logging.error(f"Fetching historical data failed due to an error: {e}")
+                logging.error("Fetching historical data failed due to an error: %s", e)
                 consecutive_errors += 1
                 if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
                     logging.error(
@@ -280,16 +286,16 @@ class Exchange:
             result = self.exchange.price_to_precision(resolved_pair, actual_price)
         except ccxt.ExchangeError as e:
             logging.error(
-                f"Fetching ticker messages failed due to an exchange error: {e}"
+                "Fetching ticker messages failed due to an exchange error: %s", e
             )
             raise TryAgain
         except ccxt.NetworkError as e:
             logging.error(
-                f"Fetching ticker messages failed due to a network error: {e}"
+                "Fetching ticker messages failed due to a network error: %s", e
             )
             raise TryAgain
         except ccxt.BaseError as e:
-            logging.error(f"Fetching ticker messages failed due to an error: {e}")
+            logging.error("Fetching ticker messages failed due to an error: %s", e)
             raise TryAgain
         except TryAgain:
             raise
@@ -316,17 +322,17 @@ class Exchange:
             market = self.exchange.market(resolved_pair)
             result = market["precision"]["amount"]
         except ccxt.ExchangeError as e:
-            logging.error(f"Fetching market data failed due to an exchange error: {e}")
+            logging.error("Fetching market data failed due to an exchange error: %s", e)
             raise TryAgain
         except ccxt.NetworkError as e:
-            logging.error(f"Fetching market data failed due to a network error: {e}")
+            logging.error("Fetching market data failed due to a network error: %s", e)
             raise TryAgain
         except ccxt.BaseError as e:
-            logging.error(f"Fetching market data failed due to an error: {e}")
+            logging.error("Fetching market data failed due to an error: %s", e)
             raise TryAgain
         except (TypeError, ValueError, RuntimeError) as e:
             # Broad catch to retry on unexpected exchange errors.
-            logging.error(f"FFetching market data failed failed with: {e}")
+            logging.error("FFetching market data failed failed with: %s", e)
             raise TryAgain
 
         return result
@@ -377,10 +383,6 @@ class Exchange:
             since = min(int(order_timestamp) - 1000, since)
         try:
             trade = {}
-            amount = 0.0
-            fee = 0.0
-            cost = 0.0
-            base_fee = 0.0
             matched_orders: list[dict[str, Any]] = []
 
             # Prefer direct per-order trade lookup where supported by exchange.
@@ -405,54 +407,65 @@ class Exchange:
                 )
 
             if matched_orders:
-                logging.debug(
-                    "Orderlist for %s with orderid: %s: %s",
-                    symbol,
-                    orderid,
-                    matched_orders,
-                )
-
-                for order in matched_orders:
-                    amount += float(order["amount"])
-                    fee_data = order.get("fee") or {}
-                    fee_cost = float(fee_data.get("cost") or 0.0)
-                    fee += fee_cost
-                    cost += float(order["cost"])
-                    fee_currency = str(fee_data.get("currency") or "").upper()
-                    base_asset = str(order.get("symbol", symbol)).split("/")[0].upper()
-                    side = str(order.get("side") or "").lower()
-                    if side == "buy" and fee_currency == base_asset:
-                        base_fee += fee_cost
-
-                last_order = max(
-                    matched_orders, key=lambda o: int(o.get("timestamp") or 0)
-                )
-
-                trade["cost"] = cost
-                trade["fee"] = fee
-                trade["base_fee"] = base_fee
-                trade["amount"] = amount
-                trade["timestamp"] = last_order["timestamp"]
-                # Use weighted average execution price across all partial fills.
-                trade["price"] = (cost / amount) if amount > 0 else last_order["price"]
-                trade["order"] = last_order["order"]
-                trade["symbol"] = last_order["symbol"]
-                trade["side"] = last_order["side"]
-                # Store numeric aggregated fee to avoid partial-fill truncation.
-                trade["fee_cost"] = fee
+                trade = self.__aggregate_matched_trades(matched_orders, symbol, orderid)
         except ccxt.NetworkError as e:
-            logging.error(f"Fetch trade order failed due to a network error: {e}")
+            logging.error("Fetch trade order failed due to a network error: %s", e)
             raise TryAgain
         except ccxt.ExchangeError as e:
-            logging.error(f"Fetch trade order failed due to an exchange error: {e}")
+            logging.error("Fetch trade order failed due to an exchange error: %s", e)
             raise TryAgain
         except ccxt.BaseError as e:
-            logging.error(f"Fetch trade order failed due to an error: {e}")
+            logging.error("Fetch trade order failed due to an error: %s", e)
             raise TryAgain
         except (TypeError, ValueError, RuntimeError, KeyError) as e:
             # Broad catch to retry on unexpected exchange errors.
-            logging.error(f"Fetch trade order failed with: {e}")
+            logging.error("Fetch trade order failed with: %s", e)
             raise TryAgain
+
+        return trade
+
+    def __aggregate_matched_trades(
+        self, matched_orders: list[dict[str, Any]], symbol: str, orderid: str
+    ) -> dict[str, Any]:
+        logging.debug(
+            "Orderlist for %s with orderid: %s: %s",
+            symbol,
+            orderid,
+            matched_orders,
+        )
+
+        amount = 0.0
+        fee = 0.0
+        cost = 0.0
+        base_fee = 0.0
+
+        for order in matched_orders:
+            amount += float(order["amount"])
+            fee_data = order.get("fee") or {}
+            fee_cost = float(fee_data.get("cost") or 0.0)
+            fee += fee_cost
+            cost += float(order["cost"])
+            fee_currency = str(fee_data.get("currency") or "").upper()
+            base_asset = str(order.get("symbol", symbol)).split("/")[0].upper()
+            side = str(order.get("side") or "").lower()
+            if side == "buy" and fee_currency == base_asset:
+                base_fee += fee_cost
+
+        last_order = max(matched_orders, key=lambda o: int(o.get("timestamp") or 0))
+
+        trade = {}
+        trade["cost"] = cost
+        trade["fee"] = fee
+        trade["base_fee"] = base_fee
+        trade["amount"] = amount
+        trade["timestamp"] = last_order["timestamp"]
+        # Use weighted average execution price across all partial fills.
+        trade["price"] = (cost / amount) if amount > 0 else last_order["price"]
+        trade["order"] = last_order["order"]
+        trade["symbol"] = last_order["symbol"]
+        trade["side"] = last_order["side"]
+        # Store numeric aggregated fee to avoid partial-fill truncation.
+        trade["fee_cost"] = fee
 
         return trade
 
@@ -475,7 +488,8 @@ class Exchange:
             data["ordersize"] = order["cost"]
         else:
             logging.info(
-                f"Getting trades for {order['symbol']} failed - using information of order."
+                "Getting trades for %s failed - using information of order.",
+                order["symbol"],
             )
             data["timestamp"] = order["timestamp"]
             data["amount"] = float(order["amount"])
@@ -503,20 +517,20 @@ class Exchange:
             )
         except ccxt.NetworkError as e:
             logging.error(
-                f"Getting amount for {symbol} failed due to a network error: {e}"
+                "Getting amount for %s failed due to a network error: %s", symbol, e
             )
             raise TryAgain
         except ccxt.ExchangeError as e:
             logging.error(
-                f"Getting amount for {symbol} failed due to an exchange error: {e}"
+                "Getting amount for %s failed due to an exchange error: %s", symbol, e
             )
             raise TryAgain
         except ccxt.BaseError as e:
-            logging.error(f"Getting amount for {symbol} failed due to an error: {e}")
+            logging.error("Getting amount for %s failed due to an error: %s", symbol, e)
             raise TryAgain
         except Exception as e:
             # Broad catch to retry on unexpected exchange errors.
-            logging.error(f"Getting amount for {symbol} failed with: {e}")
+            logging.error("Getting amount for %s failed with: %s", symbol, e)
             raise TryAgain
 
         return amount
@@ -541,7 +555,59 @@ class Exchange:
         reduced = max(0.0, float(formatted) - (step * max(1, steps)))
         return float(self.exchange.amount_to_precision(symbol, reduced))
 
-    async def __get_available_base_amount(self, symbol: str) -> float | None:
+    @staticmethod
+    def __extract_free_amount(balance: dict[str, Any], asset: str) -> float | None:
+        """Extract free amount for an asset from CCXT balance payload."""
+        free_amount = None
+        asset_info = balance.get(asset)
+        if isinstance(asset_info, dict):
+            free_amount = asset_info.get("free")
+
+        if free_amount is None:
+            free_map = balance.get("free")
+            if isinstance(free_map, dict):
+                free_amount = free_map.get(asset)
+
+        if free_amount is None:
+            return None
+
+        try:
+            return float(free_amount)
+        except (TypeError, ValueError):
+            return None
+
+    async def __get_balance_snapshot(
+        self, force_refresh: bool = False
+    ) -> dict[str, Any] | None:
+        """Return cached exchange balance snapshot with short TTL."""
+        if self.exchange is None:
+            return None
+
+        now = asyncio.get_running_loop().time()
+        if (
+            not force_refresh
+            and self._balance_cache is not None
+            and now - self._balance_cache_ts < self.BALANCE_CACHE_TTL_SECONDS
+        ):
+            return self._balance_cache
+
+        async with self._balance_lock:
+            now = asyncio.get_running_loop().time()
+            if (
+                not force_refresh
+                and self._balance_cache is not None
+                and now - self._balance_cache_ts < self.BALANCE_CACHE_TTL_SECONDS
+            ):
+                return self._balance_cache
+
+            balance = await self.exchange.fetch_balance()
+            self._balance_cache = balance
+            self._balance_cache_ts = now
+            return balance
+
+    async def __get_available_base_amount(
+        self, symbol: str, force_refresh: bool = False
+    ) -> float | None:
         """Return currently available base asset amount for a symbol."""
         resolved_symbol = self.__resolve_symbol(symbol)
         if resolved_symbol is None:
@@ -549,30 +615,23 @@ class Exchange:
 
         base_asset = resolved_symbol.split("/")[0].split(":")[0]
         try:
-            balance = await self.exchange.fetch_balance()
+            balance = await self.__get_balance_snapshot(force_refresh=force_refresh)
         except (ccxt.BaseError, RuntimeError, OSError) as exc:
             logging.warning("Fetching balance for %s failed: %s", resolved_symbol, exc)
             return None
 
-        free_amount = None
-        asset_info = balance.get(base_asset)
-        if isinstance(asset_info, dict):
-            free_amount = asset_info.get("free")
-
-        if free_amount is None:
-            free_map = balance.get("free")
-            if isinstance(free_map, dict):
-                free_amount = free_map.get(base_asset)
-
+        if balance is None:
+            return None
+        free_amount = self.__extract_free_amount(balance, base_asset)
         if free_amount is None:
             return None
 
         try:
             return float(
-                self.exchange.amount_to_precision(resolved_symbol, float(free_amount))
+                self.exchange.amount_to_precision(resolved_symbol, free_amount)
             )
         except (ccxt.BaseError, TypeError, ValueError):
-            return float(free_amount)
+            return free_amount
 
     async def __log_remaining_sell_dust(self, symbol: str) -> None:
         """Log remaining base-asset balance after sell execution.
@@ -605,28 +664,38 @@ class Exchange:
 
         quote_asset = resolved_symbol.split("/")[1].split(":")[0]
         try:
-            balance = await self.exchange.fetch_balance()
+            balance = await self.__get_balance_snapshot()
         except (ccxt.BaseError, RuntimeError, OSError) as exc:
             logging.warning("Fetching quote balance for %s failed: %s", symbol, exc)
             return None
 
-        free_amount = None
-        asset_info = balance.get(quote_asset)
-        if isinstance(asset_info, dict):
-            free_amount = asset_info.get("free")
+        if balance is None:
+            return None
+        return self.__extract_free_amount(balance, quote_asset)
 
-        if free_amount is None:
-            free_map = balance.get("free")
-            if isinstance(free_map, dict):
-                free_amount = free_map.get(quote_asset)
+    async def get_free_balance_for_asset(
+        self, config: dict[str, Any], asset: str
+    ) -> float | None:
+        """Return currently available balance for an asset symbol (e.g. USDC)."""
+        await self.__ensure_exchange(config)
+        if self.exchange is None:
+            return None
 
-        if free_amount is None:
+        asset_symbol = str(asset or "").strip().upper()
+        if not asset_symbol:
             return None
 
         try:
-            return float(free_amount)
-        except (TypeError, ValueError):
+            balance = await self.__get_balance_snapshot()
+        except (ccxt.BaseError, RuntimeError, OSError) as exc:
+            logging.warning(
+                "Fetching free balance for %s failed: %s", asset_symbol, exc
+            )
             return None
+
+        if balance is None:
+            return None
+        return self.__extract_free_amount(balance, asset_symbol)
 
     async def __resolve_sell_amount(
         self, symbol: str, requested_amount: float
@@ -637,7 +706,9 @@ class Exchange:
             return None
 
         target_amount = max(0.0, float(requested_amount))
-        available_amount = await self.__get_available_base_amount(resolved_symbol)
+        available_amount = await self.__get_available_base_amount(
+            resolved_symbol, force_refresh=True
+        )
         if available_amount is not None:
             target_amount = min(target_amount, available_amount)
 
@@ -653,7 +724,7 @@ class Exchange:
 
         return resolved_symbol, target_amount
 
-    async def __init_exchange(self, config: dict[str, Any]):
+    async def __init_exchange(self, config: dict[str, Any]) -> Any:
         exchange = None
 
         if config.get("exchange", None):
@@ -711,38 +782,10 @@ class Exchange:
                 order.get("amount"),
             )
             return None
-        try:
-            logging.info(f"Try to buy {order['amount']} {order['symbol']}")
-            parameter = {}
-            trade = await self.exchange.create_order(
-                order["symbol"],
-                order["ordertype"],
-                order["side"],
-                order["amount"],
-                order["price"],
-                parameter,
-            )
-            order.update(trade)
-        except ccxt.ExchangeError as e:
-            logging.error(
-                f"Buying pair {order['symbol']} failed due to an exchange error: {e}"
-            )
-            order = None
-        except ccxt.NetworkError as e:
-            logging.error(
-                f"Buying pair {order['symbol']} failed due to an network error: {e}"
-            )
-            order = None
-        except ccxt.BaseError as e:
-            logging.error(f"Buying pair {order['symbol']} failed due to an error: {e}")
-            order = None
-        except (TypeError, ValueError, RuntimeError, KeyError) as e:
-            # Broad catch to surface unexpected exchange errors.
-            logging.error(f"Buying pair {order['symbol']} failed with: {e}")
-            order = None
+        order = await self.__execute_market_buy(order)
 
         if order:
-            logging.info(f"Opened trade: {order}")
+            logging.info("Opened trade: %s", order)
 
             order_status = await self.__parse_order_status(order)
             order.update(order_status)
@@ -806,14 +849,51 @@ class Exchange:
                 order["amount"] = float(net_amount)
 
                 logging.debug(
-                    "Fee Deduction not active. Real amount "
-                    f"{order_status['amount']}, deducted amount {order['amount']}, "
-                    f"base fee {order['amount_fee']}"
+                    "Fee Deduction not active. Real amount %s, deducted amount %s, base fee %s",
+                    order_status["amount"],
+                    order["amount"],
+                    order["amount_fee"],
                 )
 
             logging.debug(order)
 
             return order
+
+    async def __execute_market_buy(
+        self, order: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        try:
+            logging.info("Try to buy %s %s", order["amount"], order["symbol"])
+            parameter = {}
+            trade = await self.exchange.create_order(
+                order["symbol"],
+                order["ordertype"],
+                order["side"],
+                order["amount"],
+                order["price"],
+                parameter,
+            )
+            order.update(trade)
+            return order
+        except ccxt.ExchangeError as e:
+            logging.error(
+                "Buying pair %s failed due to an exchange error: %s", order["symbol"], e
+            )
+            return None
+        except ccxt.NetworkError as e:
+            logging.error(
+                "Buying pair %s failed due to an network error: %s", order["symbol"], e
+            )
+            return None
+        except ccxt.BaseError as e:
+            logging.error(
+                "Buying pair %s failed due to an error: %s", order["symbol"], e
+            )
+            return None
+        except (TypeError, ValueError, RuntimeError, KeyError) as e:
+            # Broad catch to surface unexpected exchange errors.
+            logging.error("Buying pair %s failed with: %s", order["symbol"], e)
+            return None
 
     async def create_spot_sell(
         self, order: dict[str, Any], config: dict[str, Any]
@@ -1099,43 +1179,67 @@ class Exchange:
             )
             return None
 
-        try:
-            sell_amount = await self.__resolve_sell_amount(
-                resolved_symbol, float(order["total_amount"])
-            )
-            if sell_amount is None:
-                logging.error(
-                    "Skipping limit sell for %s: no available amount to sell.",
-                    resolved_symbol,
-                )
-                return None
-            resolved_symbol, amount_value = sell_amount
-            amount = self.exchange.amount_to_precision(resolved_symbol, amount_value)
-
-            current_price = order.get("current_price")
-            if current_price and float(current_price) > 0:
-                limit_price = self.exchange.price_to_precision(
-                    resolved_symbol, float(current_price)
-                )
-            else:
-                logging.debug(
-                    "Limit sell for %s has no current_price payload. "
-                    "Fetching live ticker price.",
-                    resolved_symbol,
-                )
-                live_price = await self.__get_price_for_symbol(resolved_symbol)
-                limit_price = self.exchange.price_to_precision(
-                    resolved_symbol, float(live_price)
-                )
-
-            logging.info(
-                "Placing limit sell for %s amount=%s price=%s",
+        sell_amount = await self.__resolve_sell_amount(
+            resolved_symbol, float(order["total_amount"])
+        )
+        if sell_amount is None:
+            logging.error(
+                "Skipping limit sell for %s: no available amount to sell.",
                 resolved_symbol,
-                amount,
-                limit_price,
             )
+            return None
+        resolved_symbol, amount_value = sell_amount
+        amount = self.exchange.amount_to_precision(resolved_symbol, amount_value)
+
+        limit_price = await self.__resolve_limit_sell_price(order, resolved_symbol)
+
+        logging.info(
+            "Placing limit sell for %s amount=%s price=%s",
+            resolved_symbol,
+            amount,
+            limit_price,
+        )
+        trade = await self.__execute_limit_sell(
+            resolved_symbol, amount, limit_price, order
+        )
+        if not trade:
+            return None
+
+        sell_order = dict(order)
+        sell_order.update(trade)
+        sell_order["symbol"] = resolved_symbol
+        sell_order["total_amount"] = float(amount_value)
+        if not sell_order.get("id"):
+            logging.error("Limit sell for %s returned no order id.", resolved_symbol)
+            return None
+
+        return await self.__handle_limit_sell_fill(
+            sell_order, resolved_symbol, config, order
+        )
+
+    async def __resolve_limit_sell_price(
+        self, order: dict[str, Any], resolved_symbol: str
+    ) -> str:
+        current_price = order.get("current_price")
+        if current_price and float(current_price) > 0:
+            return self.exchange.price_to_precision(
+                resolved_symbol, float(current_price)
+            )
+        else:
+            logging.debug(
+                "Limit sell for %s has no current_price payload. "
+                "Fetching live ticker price.",
+                resolved_symbol,
+            )
+            live_price = await self.__get_price_for_symbol(resolved_symbol)
+            return self.exchange.price_to_precision(resolved_symbol, float(live_price))
+
+    async def __execute_limit_sell(
+        self, resolved_symbol: str, amount: str, limit_price: str, order: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        try:
             parameter = {}
-            trade = await self.exchange.create_order(
+            return await self.exchange.create_order(
                 resolved_symbol,
                 "limit",
                 "sell",
@@ -1166,14 +1270,13 @@ class Exchange:
             logging.error("Limit sell for %s failed with: %s", order["symbol"], exc)
             return None
 
-        sell_order = dict(order)
-        sell_order.update(trade)
-        sell_order["symbol"] = resolved_symbol
-        sell_order["total_amount"] = float(amount_value)
-        if not sell_order.get("id"):
-            logging.error("Limit sell for %s returned no order id.", resolved_symbol)
-            return None
-
+    async def __handle_limit_sell_fill(
+        self,
+        sell_order: dict[str, Any],
+        resolved_symbol: str,
+        config: dict[str, Any],
+        original_order: dict[str, Any],
+    ) -> dict[str, Any] | None:
         try:
             timeout_seconds = max(1, int(config.get("limit_sell_timeout_sec", 60)))
         except (TypeError, ValueError):
@@ -1249,9 +1352,9 @@ class Exchange:
                     sell_order["id"],
                     resolved_symbol,
                 )
-                order["_limit_cancel_confirmed"] = False
+                original_order["_limit_cancel_confirmed"] = False
             else:
-                order["_limit_cancel_confirmed"] = True
+                original_order["_limit_cancel_confirmed"] = True
             return None
 
         sell_order.update(filled_order)
@@ -1298,7 +1401,7 @@ class Exchange:
                     resolved_symbol, current_amount, Exchange.sell_retry_count
                 )
                 order["total_amount"] = reduced_amount
-                logging.info(f"Reducing amount for sell to: {order['total_amount']}")
+                logging.info("Reducing amount for sell to: %s", order["total_amount"])
             else:
                 order["total_amount"] = float(
                     self.exchange.amount_to_precision(resolved_symbol, current_amount)
@@ -1312,29 +1415,37 @@ class Exchange:
         except ccxt.ExchangeError as e:
             if "insufficient balance" in str(e):
                 logging.error(
-                    f"Trying to sell {order['total_amount']} of pair {order['symbol']} failed due insufficient balance."
+                    "Trying to sell %s of pair %s failed due insufficient balance.",
+                    order["total_amount"],
+                    order["symbol"],
                 )
                 Exchange.sell_retry_count += 1
                 raise TryAgain
             else:
                 logging.error(
-                    f"Selling pair {order['symbol']} failed due to an exchange error: {e}"
+                    "Selling pair %s failed due to an exchange error: %s",
+                    order["symbol"],
+                    e,
                 )
                 order = None
         except ccxt.NetworkError as e:
             logging.error(
-                f"Selling pair {order['symbol']} failed due to an network error: {e}"
+                "Selling pair %s failed due to an network error: %s", order["symbol"], e
             )
             order = None
         except ccxt.BaseError as e:
-            logging.error(f"Selling pair {order['symbol']} failed due to an error: {e}")
+            logging.error(
+                "Selling pair %s failed due to an error: %s", order["symbol"], e
+            )
             order = None
         except (TypeError, ValueError, RuntimeError, KeyError) as e:
             # Broad catch to surface unexpected exchange errors.
-            logging.error(f"Selling pair {order['symbol']} failed with: {e}")
+            logging.error("Selling pair %s failed with: %s", order["symbol"], e)
             order = None
 
         if order:
-            logging.info(f"Sold {order['total_amount']} {order['symbol']} on Exchange.")
+            logging.info(
+                "Sold %s %s on Exchange.", order["total_amount"], order["symbol"]
+            )
             Exchange.sell_retry_count = 0
             return await self.__build_sell_order_status(order)

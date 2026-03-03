@@ -87,7 +87,7 @@ class Housekeeper:
                     await optimize_sqlite_connection()
                 except Exception as e:
                     # Broad catch to keep the housekeeping loop running.
-                    logging.error(f"Error db housekeeping: {e}")
+                    logging.error("Error db housekeeping: %s", e)
 
                 await asyncio.sleep(self.CLEANUP_LOOP_INTERVAL_SECONDS)
             else:

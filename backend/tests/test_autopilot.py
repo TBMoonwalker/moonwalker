@@ -6,10 +6,10 @@ from service.autopilot import Autopilot
 
 
 @pytest.mark.asyncio
-async def test_autopilot_high_threshold_triggers_db_write(monkeypatch):
+async def test_autopilot_high_threshold_triggers_db_write(monkeypatch) -> None:
     created_modes = []
 
-    async def fake_create(**kwargs):
+    async def fake_create(**kwargs) -> None:
         created_modes.append(kwargs.get("mode"))
 
     monkeypatch.setattr(model, "Autopilot", types.SimpleNamespace(create=fake_create))
