@@ -173,6 +173,30 @@ class Database:
             alter_statements.append(
                 "ALTER TABLE opentrades ADD COLUMN sold_proceeds REAL NOT NULL DEFAULT 0.0;"
             )
+        if "unsellable_amount" not in existing:
+            alter_statements.append(
+                "ALTER TABLE opentrades ADD COLUMN unsellable_amount REAL NOT NULL DEFAULT 0.0;"
+            )
+        if "unsellable_reason" not in existing:
+            alter_statements.append(
+                "ALTER TABLE opentrades ADD COLUMN unsellable_reason TEXT NULL;"
+            )
+        if "unsellable_min_notional" not in existing:
+            alter_statements.append(
+                "ALTER TABLE opentrades ADD COLUMN unsellable_min_notional REAL NULL;"
+            )
+        if "unsellable_estimated_notional" not in existing:
+            alter_statements.append(
+                "ALTER TABLE opentrades ADD COLUMN unsellable_estimated_notional REAL NULL;"
+            )
+        if "unsellable_since" not in existing:
+            alter_statements.append(
+                "ALTER TABLE opentrades ADD COLUMN unsellable_since TEXT NULL;"
+            )
+        if "unsellable_notice_sent" not in existing:
+            alter_statements.append(
+                "ALTER TABLE opentrades ADD COLUMN unsellable_notice_sent INTEGER NOT NULL DEFAULT 0;"
+            )
         if alter_statements:
             await connection.execute_script("\n".join(alter_statements))
             logging.info(

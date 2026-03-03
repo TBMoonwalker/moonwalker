@@ -1,5 +1,6 @@
 """SymSignals plugin implementation."""
 
+import ast
 import asyncio
 import json
 import time
@@ -42,6 +43,63 @@ class SignalPlugin:
         self._max_bots_blocked = False
         self._max_bots_last_log = 0.0
         self._max_bots_log_interval_sec = 60.0
+        self._currency = "USDC"
+        self._signal_settings: dict[str, Any] = {}
+        self._pair_denylist: list[str] | None = None
+        self._pair_allowlist: list[str] | None = None
+        self._volume: dict[str, Any] | None = None
+        self._strategy_timeframe = "1m"
+        self._exchange_name = ""
+
+    @staticmethod
+    def _parse_signal_settings(raw_value: Any) -> dict[str, Any]:
+        """Parse signal settings from config string/dict once per run."""
+        if isinstance(raw_value, dict):
+            return raw_value
+        if raw_value is None:
+            return {}
+
+        raw_text = str(raw_value).strip()
+        if not raw_text:
+            return {}
+
+        try:
+            parsed = json.loads(raw_text)
+        except json.JSONDecodeError:
+            parsed = ast.literal_eval(raw_text)
+
+        if not isinstance(parsed, dict):
+            raise TypeError("signal_settings must be a dictionary payload")
+
+        return parsed
+
+    def _prepare_runtime_settings(self) -> None:
+        """Cache parsed runtime settings to avoid per-event parsing overhead."""
+        self._currency = str(self.config.get("currency", "USDC")).upper()
+        self._signal_settings = self._parse_signal_settings(
+            self.config.get("signal_settings")
+        )
+        self._pair_denylist = (
+            [
+                entry.strip().upper().split("/")[0]
+                for entry in self.config.get("pair_denylist", None).split(",")
+                if entry.strip()
+            ]
+            if self.config.get("pair_denylist", None)
+            else None
+        )
+        self._pair_allowlist = (
+            self.config.get("pair_allowlist", None).split(",")
+            if self.config.get("pair_allowlist", None)
+            else None
+        )
+        self._volume = (
+            json.loads(self.config.get("volume", None))
+            if self.config.get("volume", None)
+            else None
+        )
+        self._strategy_timeframe = resolve_timeframe(self.config)
+        self._exchange_name = str(self.config.get("exchange", "")).upper()
 
     def __log_max_bots_waiting(self) -> None:
         """Log max-bot saturation with state/interval throttling."""
@@ -105,36 +163,12 @@ class SignalPlugin:
         Returns:
             True if signal passes all entry checks, False otherwise
         """
-        currency = self.config.get("currency").upper()
-        signal_settings = json.loads(
-            json.dumps(eval(self.config.get("signal_settings")))
-        )
-        pair_denylist = (
-            [
-                entry.strip().upper().split("/")[0]
-                for entry in self.config.get("pair_denylist", None).split(",")
-                if entry.strip()
-            ]
-            if self.config.get("pair_denylist", None)
-            else None
-        )
-        pair_allowlist = (
-            self.config.get("pair_allowlist", None).split(",")
-            if self.config.get("pair_allowlist", None)
-            else None
-        )
-        volume = (
-            json.loads(self.config.get("volume", None))
-            if self.config.get("volume", None)
-            else None
-        )
-        strategy_timeframe = resolve_timeframe(self.config)
         # btc pulse check
         btc_pulse = True
         if self.config.get("btc_pulse", False):
             btc_pulse = await self.indicators.calculate_btc_pulse(
                 self.config.get("currency", "USDC"),
-                strategy_timeframe,
+                self._strategy_timeframe,
             )
 
         if btc_pulse:
@@ -147,24 +181,28 @@ class SignalPlugin:
             volume_size = None
 
             for exchange in volume_24h:
-                if exchange == self.config.get("exchange").upper():
-                    if volume_24h[exchange].get(currency) is not None:
+                if exchange == self._exchange_name:
+                    if volume_24h[exchange].get(self._currency) is not None:
                         # DirtyFix: Some volume data misses "k", "M" or "B"
-                        if isinstance(volume_24h[exchange].get(currency), float):
+                        if isinstance(volume_24h[exchange].get(self._currency), float):
                             volume_range = "k"
-                            volume_size = volume_24h[exchange][currency]
+                            volume_size = volume_24h[exchange][self._currency]
                         else:
-                            volume_range = volume_24h[exchange][currency][-1]
-                            volume_size = float(volume_24h[exchange][currency][:-1])
+                            volume_range = volume_24h[exchange][self._currency][-1]
+                            volume_size = float(
+                                volume_24h[exchange][self._currency][:-1]
+                            )
                     break
             if (
-                signal_id in signal_settings["allowed_signals"]
-                and self.filter.is_on_allowed_list(symbol, pair_allowlist)
+                signal_id in self._signal_settings["allowed_signals"]
+                and self.filter.is_on_allowed_list(symbol, self._pair_allowlist)
                 and self.filter.is_within_topcoin_limit(
                     market_cap_rank, self.config.get("topcoin_limit", None)
                 )
-                and self.filter.has_enough_volume(volume_range, volume_size, volume)
-                and not self.filter.is_on_deny_list(symbol, pair_denylist)
+                and self.filter.has_enough_volume(
+                    volume_range, volume_size, self._volume
+                )
+                and not self.filter.is_on_deny_list(symbol, self._pair_denylist)
                 and signal == "BOT_START"
             ):
                 return True
@@ -194,9 +232,10 @@ class SignalPlugin:
             )
         except (TypeError, ValueError):
             self._max_bots_log_interval_sec = 60.0
-        currency = self.config.get("currency").upper()
-        signal_settings = json.loads(
-            json.dumps(eval(self.config.get("signal_settings")))
+        self._prepare_runtime_settings()
+        history_data = resolve_history_lookback_days(
+            self.config,
+            timeframe=self._strategy_timeframe,
         )
         idle_timeout_count = 0
         received_events_since_connect = 0
@@ -208,10 +247,13 @@ class SignalPlugin:
                     try:
                         logging.info("Establish connection to sym signal websocket.")
                         await sio.connect(
-                            signal_settings["api_url"],
+                            self._signal_settings["api_url"],
                             headers={
-                                "api-key": signal_settings["api_key"],
-                                "user-agent": f"3CQS Signal Client/{signal_settings['api_version']}",
+                                "api-key": self._signal_settings["api_key"],
+                                "user-agent": (
+                                    "3CQS Signal Client/"
+                                    f"{self._signal_settings['api_version']}"
+                                ),
                             },
                             transports=["websocket", "polling"],
                             socketio_path="/stream/v1/signals",
@@ -245,13 +287,9 @@ class SignalPlugin:
                             continue
 
                         self._max_bots_blocked = False
-                        history_data = resolve_history_lookback_days(
-                            self.config,
-                            timeframe=resolve_timeframe(self.config),
-                        )
                         await self.__process_valid_signal(
                             event[1],
-                            currency,
+                            self._currency,
                             history_data,
                         )
                     elif event[0] == "error":

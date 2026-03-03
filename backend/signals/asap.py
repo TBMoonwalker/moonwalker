@@ -50,6 +50,45 @@ class SignalPlugin:
         self._max_bots_blocked = False
         self._max_bots_last_log = 0.0
         self._max_bots_log_interval_sec = 60.0
+        self._pair_denylist: list[str] | None = None
+        self._pair_allowlist: list[str] | None = None
+        self._volume: dict[str, Any] | None = None
+        self._strategy_timeframe = "1m"
+        self._signal_strategy_plugin: Any | None = None
+
+    def __prepare_runtime_settings(self) -> None:
+        """Cache parsed runtime settings and strategy instance for hot loops."""
+        self._pair_denylist = (
+            [
+                entry.strip().upper().split("/")[0]
+                for entry in self.config.get("pair_denylist", None).split(",")
+                if entry.strip()
+            ]
+            if self.config.get("pair_denylist", None)
+            else None
+        )
+        self._pair_allowlist = (
+            self.config.get("pair_allowlist", None).split(",")
+            if self.config.get("pair_allowlist", None)
+            else None
+        )
+        self._volume = (
+            json.loads(self.config.get("volume", None))
+            if self.config.get("volume", None)
+            else None
+        )
+        self._strategy_timeframe = resolve_timeframe(self.config)
+        self._signal_strategy_plugin = None
+
+        signal_strategy_name = self.config.get("signal_strategy", None)
+        if signal_strategy_name:
+            ensure_strategy_supported(signal_strategy_name)
+            signal_strategy = importlib.import_module(
+                f"strategies.{signal_strategy_name}"
+            )
+            self._signal_strategy_plugin = signal_strategy.Strategy(
+                timeframe=self._strategy_timeframe,
+            )
 
     def __log_max_bots_waiting(self) -> None:
         """Log max-bot saturation with state/interval throttling."""
@@ -195,41 +234,12 @@ class SignalPlugin:
             RuntimeError: If data retrieval fails
         """
         # we only need the plain symbol here:
-        symbol_only, currency = symbol.split("/")
-        pair_denylist = (
-            [
-                entry.strip().upper().split("/")[0]
-                for entry in self.config.get("pair_denylist", None).split(",")
-                if entry.strip()
-            ]
-            if self.config.get("pair_denylist", None)
-            else None
-        )
-        pair_allowlist = (
-            self.config.get("pair_allowlist", None).split(",")
-            if self.config.get("pair_allowlist", None)
-            else None
-        )
-        volume = (
-            json.loads(self.config.get("volume", None))
-            if self.config.get("volume", None)
-            else None
-        )
-        strategy_timeframe = resolve_timeframe(self.config)
-        signal_strategy_plugin = None
-        if self.config.get("signal_strategy", None):
-            ensure_strategy_supported(self.config.get("signal_strategy"))
-            signal_strategy = importlib.import_module(
-                f"strategies.{self.config.get('signal_strategy')}"
-            )
-            signal_strategy_plugin = signal_strategy.Strategy(
-                timeframe=strategy_timeframe,
-            )
+        symbol_only, _currency = symbol.split("/")
 
         # allow/denylist check
         if self.filter.is_on_allowed_list(
-            symbol_only, pair_allowlist
-        ) and self.filter.is_on_deny_list(symbol_only, pair_denylist):
+            symbol_only, self._pair_allowlist
+        ) and self.filter.is_on_deny_list(symbol_only, self._pair_denylist):
             logging.info(
                 f"Symbol {symbol} is not in your allowlist or is set in your denylist. Ignoring it."
             )
@@ -240,7 +250,7 @@ class SignalPlugin:
             if self.config.get("btc_pulse", False):
                 if not await self.indicators.calculate_btc_pulse(
                     self.config.get("currency", "USDC"),
-                    strategy_timeframe,
+                    self._strategy_timeframe,
                 ):
                     logging.debug(
                         f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
@@ -248,14 +258,22 @@ class SignalPlugin:
                     return False
 
             # volume check
-            if volume:
+            if self._volume:
                 volume_size, volume_range = self.utils.convert_numbers(
                     await self.indicators.calculate_24h_volume(symbol)
                 ).split(" ")
 
-                if not self.filter.has_enough_volume(volume_range, volume_size, volume):
+                if not self.filter.has_enough_volume(
+                    volume_range, volume_size, self._volume
+                ):
                     logging.info(
-                        f"Symbol {symbol} has a 24h volume of {volume_size}{volume_range}, which is under the configured volume of {volume['size']}{volume['range']}"
+                        "Symbol %s has a 24h volume of %s%s, which is under the "
+                        "configured volume of %s%s",
+                        symbol,
+                        volume_size,
+                        volume_range,
+                        self._volume["size"],
+                        self._volume["range"],
                     )
                     return False
 
@@ -282,7 +300,7 @@ class SignalPlugin:
 
                 if self.config.get("rsi_max", None):
                     rsi = await self.indicators.calculate_rsi(
-                        symbol, strategy_timeframe, 14
+                        symbol, self._strategy_timeframe, 14
                     )
                     if rsi and rsi > self.config.get("rsi_max", None):
                         logging.info(
@@ -295,9 +313,9 @@ class SignalPlugin:
                         return False
 
             # strategy entry check
-            if signal_strategy_plugin:
+            if self._signal_strategy_plugin:
                 try:
-                    if not await signal_strategy_plugin.run(symbol, "buy"):
+                    if not await self._signal_strategy_plugin.run(symbol, "buy"):
                         return False
                 except Exception as e:
                     # Broad catch to keep signal processing resilient.
@@ -331,6 +349,7 @@ class SignalPlugin:
             )
         except (TypeError, ValueError):
             self._max_bots_log_interval_sec = 60.0
+        self.__prepare_runtime_settings()
 
         while self.status:
             max_bots = await self.__check_max_bots()

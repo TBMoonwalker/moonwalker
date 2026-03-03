@@ -5,7 +5,7 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
-import { NButton, NButtonGroup, NCard, NDataTable, NDivider, NFlex, NHighlight, NIcon, NInput, NSlider, NTimeline, NTimelineItem, type DataTableColumns, useDialog, useMessage } from 'naive-ui'
+import { NButton, NButtonGroup, NCard, NDataTable, NDivider, NFlex, NHighlight, NIcon, NInput, NSlider, NTimeline, NTimelineItem, NTooltip, type DataTableColumns, useDialog, useMessage } from 'naive-ui'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
@@ -144,6 +144,10 @@ type RowData = {
     baseorder: OrderData
     safetyorder: Array<OrderData>
     precision: number
+    unsellable_amount?: number
+    unsellable_reason?: string | null
+    unsellable_min_notional?: number | null
+    unsellable_estimated_notional?: number | null
 }
 
 type OrderData = {
@@ -160,6 +164,29 @@ function getSafetyOrderCount(rowData: RowData): number {
         return rowData.safetyorder.length
     }
     return Number(rowData.so_count ?? 0)
+}
+
+function isUnsellableRemainder(rowData: RowData): boolean {
+    return Number(rowData.unsellable_amount ?? 0) > 0 && Boolean(rowData.unsellable_reason)
+}
+
+function getUnsellableMessage(rowData: RowData): string {
+    const remainingAmount = Number(rowData.unsellable_amount ?? 0)
+    const [symbol] = rowData.symbol.split("/")
+    const estimatedNotional = rowData.unsellable_estimated_notional
+    const minNotional = rowData.unsellable_min_notional
+
+    const parts: string[] = [
+        `Unsellable remainder for ${rowData.symbol}: ${remainingAmount.toFixed(8)} ${symbol}.`,
+    ]
+    if (estimatedNotional !== null && estimatedNotional !== undefined) {
+        parts.push(`Estimated notional: ${Number(estimatedNotional).toFixed(8)}.`)
+    }
+    if (minNotional !== null && minNotional !== undefined) {
+        parts.push(`Minimum notional required: ${Number(minNotional).toFixed(8)}.`)
+    }
+    parts.push("Use Stop and close the remainder manually on the exchange.")
+    return parts.join(" ")
 }
 
 function handle_deal_sell(data: any) {
@@ -512,6 +539,20 @@ const columns_trades = (): DataTableColumns<RowData> => {
             title: 'Action',
             key: 'action',
             render: (rowData) => {
+                if (isUnsellableRemainder(rowData)) {
+                    return [
+                        h(NTooltip, {}, {
+                            trigger: () =>
+                                h(NButton, {
+                                    type: 'error',
+                                    size: 'small',
+                                    ghost: true,
+                                    onClick: () => handle_deal_stop(rowData),
+                                }, { default: () => 'Stop (Unsellable)' }),
+                            default: () => getUnsellableMessage(rowData),
+                        })
+                    ]
+                }
                 return [
                     h(NButtonGroup, { size: 'small', vertical: true }, {
                         default: () => [

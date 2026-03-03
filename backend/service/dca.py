@@ -246,6 +246,7 @@ class Dca:
         trailing_tp = self.config.get("trailing_tp", 0)
         max_safety_orders = self.config.get("mstc", 0)
         sell = False
+        is_unsellable = bool(trades.get("is_unsellable", False))
 
         # Last sell fee has to be considered
         total_cost = trades["total_cost"] + (trades["total_cost"] * trades["fee"])
@@ -256,12 +257,13 @@ class Dca:
         stop_loss_price = average_buy_price * (1 - (self.sl / 100))
 
         # Check if TP is reached
-        if current_price >= take_profit_price:
+        if not is_unsellable and current_price >= take_profit_price:
             sell = True
 
         # Check if SL is reached
         if (
-            current_price <= stop_loss_price
+            not is_unsellable
+            and current_price <= stop_loss_price
             and max_safety_orders == trades["safetyorders_count"]
         ):
             sell = True
@@ -270,7 +272,7 @@ class Dca:
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
 
         # TP strategy
-        if self.config.get("tp_strategy", None) and sell:
+        if not is_unsellable and self.config.get("tp_strategy", None) and sell:
             logging.debug("Check if we should sell ...")
             if self.__tp_strategy(trades["symbol"]):
                 sell = True
@@ -278,7 +280,7 @@ class Dca:
                 sell = False
 
         # Trailing TP
-        if trailing_tp > 0:
+        if not is_unsellable and trailing_tp > 0:
             if sell or trades["symbol"] in Dca.pnl:
                 # Initialize new symbols
                 if trades["symbol"] not in Dca.pnl:
@@ -318,7 +320,7 @@ class Dca:
                     sell = False
 
         # Sell if Autopilot is enabled and SL is set
-        if self.sl_timeout > 0:
+        if not is_unsellable and self.sl_timeout > 0:
             last_trade_date = datetime.fromtimestamp(
                 int(float(trades["timestamp"]) / 1000)
             )
@@ -349,6 +351,13 @@ class Dca:
             }
             await self.orders.receive_sell_order(order, self.config)
 
+        if is_unsellable:
+            logging.debug(
+                "Skipping automated sell for %s due unsellable remainder (%s).",
+                trades["symbol"],
+                trades.get("unsellable_reason"),
+            )
+
         # Logging configuration
         logging_json = {
             "type": "tp_check",
@@ -362,6 +371,8 @@ class Dca:
             "actual_pnl": actual_pnl,
             "sell": sell,
             "direction": trades["direction"],
+            "unsellable": is_unsellable,
+            "unsellable_reason": trades.get("unsellable_reason"),
         }
         await self.statistic.update_statistic_data(logging_json)
 
@@ -584,7 +595,9 @@ class Dca:
                     self.autopilot_mode = None
 
                 # Check DCA (only when DCA is enabled)
-                if self.config.get("dca", False):
+                if self.config.get("dca", False) and not trades.get(
+                    "is_unsellable", False
+                ):
                     await self.__calculate_dca(price, trades)
 
                 # Check TP

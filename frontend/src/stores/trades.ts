@@ -15,6 +15,11 @@ export type OpenTradeRow = {
   baseorder: OrderData
   safetyorder: Array<OrderData>
   precision: number
+  unsellable_amount?: number
+  unsellable_reason?: string | null
+  unsellable_min_notional?: number | null
+  unsellable_estimated_notional?: number | null
+  unsellable_since?: string | null
   key: number
 }
 
@@ -119,7 +124,18 @@ export const useTradesStore = defineStore('trades', {
           key: val.id,
           open_date: date.toLocaleString(),
           safetyorder: val.safetyorders,
-          precision: currentPrecision
+          precision: currentPrecision,
+          unsellable_amount: Number(val.unsellable_amount ?? 0),
+          unsellable_reason: val.unsellable_reason ?? null,
+          unsellable_min_notional:
+            val.unsellable_min_notional === null || val.unsellable_min_notional === undefined
+              ? null
+              : Number(val.unsellable_min_notional),
+          unsellable_estimated_notional:
+            val.unsellable_estimated_notional === null || val.unsellable_estimated_notional === undefined
+              ? null
+              : Number(val.unsellable_estimated_notional),
+          unsellable_since: val.unsellable_since ?? null
         }
       })
     },

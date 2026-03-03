@@ -63,7 +63,7 @@ class Orders:
                     logging.error("Failed creating sell order for %s", order["symbol"])
                     return
 
-                if await self.__handle_partial_sell_status(order_status):
+                if await self.__handle_partial_sell_status(order_status, config):
                     return
 
                 close_context = await self.__calculate_closed_trade_stats(order_status)
@@ -78,10 +78,16 @@ class Orders:
             finally:
                 await self.exchange.close()
 
-    async def __handle_partial_sell_status(self, order_status: dict[str, Any]) -> bool:
+    async def __handle_partial_sell_status(
+        self, order_status: dict[str, Any], config: dict[str, Any]
+    ) -> bool:
         """Persist partial sell execution and return True when trade remains open."""
         if order_status.get("type") != "partial_sell":
             return False
+
+        if bool(order_status.get("unsellable", False)):
+            await self.__handle_unsellable_remainder(order_status, config)
+            return True
 
         partial_amount = float(order_status.get("partial_filled_amount") or 0.0)
         partial_proceeds = float(order_status.get("partial_proceeds") or 0.0)
@@ -99,6 +105,134 @@ class Orders:
                 float(order_status.get("remaining_amount") or 0.0),
             )
         return True
+
+    async def __handle_unsellable_remainder(
+        self, order_status: dict[str, Any], config: dict[str, Any]
+    ) -> None:
+        """Persist partial close and mark remaining amount as unsellable."""
+        symbol = str(order_status.get("symbol", ""))
+        if not symbol:
+            return
+
+        partial_amount = max(
+            0.0, float(order_status.get("partial_filled_amount") or 0.0)
+        )
+        partial_proceeds = max(0.0, float(order_status.get("partial_proceeds") or 0.0))
+        remaining_amount = max(0.0, float(order_status.get("remaining_amount") or 0.0))
+        reason = str(order_status.get("unsellable_reason") or "minimum_notional")
+        min_notional_raw = order_status.get("unsellable_min_notional")
+        estimated_notional_raw = order_status.get("unsellable_estimated_notional")
+        min_notional = float(min_notional_raw) if min_notional_raw is not None else None
+        estimated_notional = (
+            float(estimated_notional_raw)
+            if estimated_notional_raw is not None
+            else None
+        )
+
+        trade_snapshot = await self.trades.get_trades_for_orders(symbol)
+        open_trade_rows = await self.trades.get_open_trades_by_symbol(symbol)
+        open_trade = open_trade_rows[0] if open_trade_rows else None
+        already_notified = bool(open_trade and open_trade.get("unsellable_notice_sent"))
+
+        total_amount = (
+            float(trade_snapshot.get("total_amount") or 0.0) if trade_snapshot else 0.0
+        )
+        total_cost = (
+            float(trade_snapshot.get("total_cost") or 0.0) if trade_snapshot else 0.0
+        )
+        if total_amount <= 0 and open_trade:
+            total_amount = float(open_trade.get("amount") or 0.0)
+        if total_cost <= 0 and open_trade:
+            total_cost = float(open_trade.get("cost") or 0.0)
+
+        avg_buy_price = (total_cost / total_amount) if total_amount > 0 else 0.0
+        sold_cost = avg_buy_price * partial_amount
+        remaining_cost = max(0.0, total_cost - sold_cost)
+
+        if partial_amount > 0:
+            open_timestamp = await self.__resolve_open_timestamp(symbol)
+            so_count = await self.__resolve_so_count(symbol)
+            close_timestamp = time.mktime(datetime.now().timetuple()) * 1000
+            close_date = datetime.now()
+            open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
+            duration_data = self.__calculate_trade_duration(
+                open_timestamp, close_timestamp
+            )
+            partial_avg_sell_price = (
+                partial_proceeds / partial_amount if partial_amount > 0 else 0.0
+            )
+            partial_profit = partial_proceeds - sold_cost
+            partial_profit_percent = (
+                ((partial_avg_sell_price - avg_buy_price) / avg_buy_price) * 100
+                if avg_buy_price > 0
+                else 0.0
+            )
+
+            await self.trades.create_closed_trades(
+                {
+                    "symbol": symbol,
+                    "so_count": so_count,
+                    "profit": partial_profit,
+                    "profit_percent": partial_profit_percent,
+                    "amount": partial_amount,
+                    "cost": sold_cost,
+                    "tp_price": partial_avg_sell_price,
+                    "avg_price": avg_buy_price,
+                    "open_date": open_date,
+                    "close_date": close_date,
+                    "duration": duration_data,
+                }
+            )
+
+        tp_percent = float(config.get("tp", 0.0) or 0.0)
+        next_tp_price = (
+            (remaining_cost / remaining_amount) * (1 + tp_percent / 100.0)
+            if remaining_amount > 0
+            else 0.0
+        )
+        await self.trades.update_open_trades(
+            {
+                "amount": remaining_amount,
+                "cost": remaining_cost,
+                "avg_price": (
+                    (remaining_cost / remaining_amount) if remaining_amount > 0 else 0.0
+                ),
+                "tp_price": next_tp_price,
+                "sold_amount": 0.0,
+                "sold_proceeds": 0.0,
+                "unsellable_amount": remaining_amount,
+                "unsellable_reason": reason,
+                "unsellable_min_notional": min_notional,
+                "unsellable_estimated_notional": estimated_notional,
+                "unsellable_since": datetime.now().isoformat(),
+                "unsellable_notice_sent": True,
+            },
+            symbol,
+        )
+
+        if not already_notified:
+            await self.monitoring.notify_trade(
+                "trade.unsellable_notional",
+                {
+                    "symbol": symbol,
+                    "side": "sell",
+                    "reason": reason,
+                    "partial_filled_amount": partial_amount,
+                    "partial_proceeds": partial_proceeds,
+                    "remaining_amount": remaining_amount,
+                    "unsellable_min_notional": min_notional,
+                    "unsellable_estimated_notional": estimated_notional,
+                },
+                config,
+            )
+        logging.warning(
+            "Marked %s remainder as unsellable (reason=%s, remaining=%s, min_notional=%s, estimated_notional=%s).",
+            symbol,
+            reason,
+            remaining_amount,
+            min_notional,
+            estimated_notional,
+        )
 
     async def __calculate_closed_trade_stats(
         self, order_status: dict[str, Any]
@@ -256,6 +390,21 @@ class Orders:
                 await run_sqlite_write_with_retry(
                     _persist_buy, f"persisting buy order for {order['symbol']}"
                 )
+                try:
+                    await self.trades.update_open_trades(
+                        {
+                            "unsellable_amount": 0.0,
+                            "unsellable_reason": None,
+                            "unsellable_min_notional": None,
+                            "unsellable_estimated_notional": None,
+                            "unsellable_since": None,
+                            "unsellable_notice_sent": False,
+                        },
+                        order_status["symbol"],
+                    )
+                except RuntimeError:
+                    # Tests may stub persistence without initializing DB context.
+                    pass
                 await self.monitoring.notify_trade(
                     "trade.buy",
                     {

@@ -18,16 +18,27 @@ logging = helper.LoggerFactory.get_logger(
 
 statistic = Statistic()
 exchange = Exchange()
+_config_service: Config | None = None
+
+
+async def _get_config_service() -> Config:
+    """Return cached Config singleton reference."""
+    global _config_service
+    if _config_service is None:
+        _config_service = await Config.instance()
+    return _config_service
 
 
 async def _get_available_funds() -> float | None:
     """Resolve available quote funds from the configured exchange account."""
     try:
-        config = await Config.instance()
-        currency = str(config.get("currency", "USDC")).strip().upper()
+        config_service = await _get_config_service()
+        currency = str(config_service.get("currency", "USDC")).strip().upper()
         if not currency:
             return None
-        return await exchange.get_free_balance_for_asset(config._cache, currency)
+        return await exchange.get_free_balance_for_asset(
+            config_service._cache, currency
+        )
     except Exception as exc:  # noqa: BLE001 - Avoid breaking stats websocket updates.
         logging.warning("Failed to fetch available exchange funds: %s", exc)
         return None

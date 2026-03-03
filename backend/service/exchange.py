@@ -556,6 +556,84 @@ class Exchange:
         return float(self.exchange.amount_to_precision(symbol, reduced))
 
     @staticmethod
+    def __safe_float(value: Any) -> float | None:
+        """Convert a value to float when possible."""
+        try:
+            if value is None:
+                return None
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def __get_min_notional_for_symbol(
+        self, symbol: str, *, is_market_order: bool
+    ) -> float | None:
+        """Resolve minimum notional for a symbol from CCXT market metadata."""
+        if self.exchange is None:
+            return None
+
+        min_values: list[float] = []
+        try:
+            market = self.exchange.market(symbol)
+        except (ccxt.BaseError, TypeError, ValueError):
+            return None
+        if not isinstance(market, dict):
+            return None
+
+        limits = market.get("limits")
+        if isinstance(limits, dict):
+            cost_limits = limits.get("cost")
+            if isinstance(cost_limits, dict):
+                min_cost = self.__safe_float(cost_limits.get("min"))
+                if min_cost and min_cost > 0:
+                    min_values.append(min_cost)
+
+        info = market.get("info")
+        if isinstance(info, dict):
+            filters = info.get("filters")
+            if isinstance(filters, list):
+                for filter_data in filters:
+                    if not isinstance(filter_data, dict):
+                        continue
+                    filter_type = str(filter_data.get("filterType", "")).upper()
+                    min_notional = self.__safe_float(filter_data.get("minNotional"))
+                    if not min_notional or min_notional <= 0:
+                        continue
+
+                    if filter_type == "MIN_NOTIONAL":
+                        if (
+                            is_market_order
+                            and str(filter_data.get("applyToMarket", "true")).lower()
+                            == "false"
+                        ):
+                            continue
+                        min_values.append(min_notional)
+                    elif filter_type == "NOTIONAL":
+                        if (
+                            is_market_order
+                            and str(filter_data.get("applyMinToMarket", "true")).lower()
+                            == "false"
+                        ):
+                            continue
+                        min_values.append(min_notional)
+
+        if not min_values:
+            return None
+        return max(min_values)
+
+    def __is_notional_below_minimum(
+        self, symbol: str, amount: float, price: float, *, is_market_order: bool
+    ) -> tuple[bool, float | None, float]:
+        """Check whether an order notional is below exchange minimum."""
+        estimated_notional = max(0.0, float(amount)) * max(0.0, float(price))
+        min_notional = self.__get_min_notional_for_symbol(
+            symbol, is_market_order=is_market_order
+        )
+        if min_notional is None:
+            return False, None, estimated_notional
+        return estimated_notional < min_notional, min_notional, estimated_notional
+
+    @staticmethod
     def __extract_free_amount(balance: dict[str, Any], asset: str) -> float | None:
         """Extract free amount for an asset from CCXT balance payload."""
         free_amount = None
@@ -958,6 +1036,51 @@ class Exchange:
                         order_status.get("partial_filled_amount") or 0.0
                     )
                     partial_price = float(order_status.get("partial_avg_price") or 0.0)
+                    if market_status.get("type") == "partial_sell":
+                        market_partial_amount = float(
+                            market_status.get("partial_filled_amount") or 0.0
+                        )
+                        market_partial_price = float(
+                            market_status.get("partial_avg_price") or 0.0
+                        )
+                        combined_partial_amount = partial_amount + market_partial_amount
+                        combined_proceeds = (
+                            partial_amount * partial_price
+                            + market_partial_amount * market_partial_price
+                        )
+                        combined_partial_price = (
+                            combined_proceeds / combined_partial_amount
+                            if combined_partial_amount > 0
+                            else 0.0
+                        )
+                        return self.__build_partial_sell_status(
+                            symbol=str(order_status.get("symbol", order.get("symbol"))),
+                            partial_amount=combined_partial_amount,
+                            partial_avg_price=combined_partial_price,
+                            remaining_amount=float(
+                                market_status.get("remaining_amount") or 0.0
+                            ),
+                            unsellable=bool(market_status.get("unsellable", False)),
+                            unsellable_reason=(
+                                str(market_status.get("unsellable_reason"))
+                                if market_status.get("unsellable_reason")
+                                else None
+                            ),
+                            unsellable_min_notional=(
+                                float(market_status.get("unsellable_min_notional"))
+                                if market_status.get("unsellable_min_notional")
+                                is not None
+                                else None
+                            ),
+                            unsellable_estimated_notional=(
+                                float(
+                                    market_status.get("unsellable_estimated_notional")
+                                )
+                                if market_status.get("unsellable_estimated_notional")
+                                is not None
+                                else None
+                            ),
+                        )
                     market_amount = float(market_status.get("total_amount") or 0.0)
                     market_price = float(market_status.get("price") or 0.0)
                     combined_amount = partial_amount + market_amount
@@ -1084,6 +1207,10 @@ class Exchange:
         partial_amount: float,
         partial_avg_price: float,
         remaining_amount: float,
+        unsellable: bool = False,
+        unsellable_reason: str | None = None,
+        unsellable_min_notional: float | None = None,
+        unsellable_estimated_notional: float | None = None,
     ) -> dict[str, Any]:
         """Build a partial execution status for deferred close accounting."""
         return {
@@ -1093,6 +1220,18 @@ class Exchange:
             "partial_avg_price": float(partial_avg_price),
             "partial_proceeds": float(partial_amount * partial_avg_price),
             "remaining_amount": float(remaining_amount),
+            "unsellable": bool(unsellable),
+            "unsellable_reason": unsellable_reason,
+            "unsellable_min_notional": (
+                float(unsellable_min_notional)
+                if unsellable_min_notional is not None
+                else None
+            ),
+            "unsellable_estimated_notional": (
+                float(unsellable_estimated_notional)
+                if unsellable_estimated_notional is not None
+                else None
+            ),
         }
 
     async def __wait_for_limit_sell_fill(
@@ -1192,6 +1331,31 @@ class Exchange:
         amount = self.exchange.amount_to_precision(resolved_symbol, amount_value)
 
         limit_price = await self.__resolve_limit_sell_price(order, resolved_symbol)
+        limit_price_value = float(limit_price)
+        below_min_notional, min_notional, estimated_notional = (
+            self.__is_notional_below_minimum(
+                resolved_symbol,
+                amount_value,
+                limit_price_value,
+                is_market_order=False,
+            )
+        )
+        if below_min_notional:
+            logging.info(
+                "Skipping limit sell for %s: estimated notional %.8f is below "
+                "minimum %.8f. Trying market fallback if enabled.",
+                resolved_symbol,
+                estimated_notional,
+                float(min_notional or 0.0),
+            )
+            return {
+                "requires_market_fallback": True,
+                "limit_cancel_confirmed": True,
+                "symbol": resolved_symbol,
+                "remaining_amount": float(amount_value),
+                "partial_filled_amount": 0.0,
+                "partial_avg_price": 0.0,
+            }
 
         logging.info(
             "Placing limit sell for %s amount=%s price=%s",
@@ -1407,6 +1571,45 @@ class Exchange:
                     self.exchange.amount_to_precision(resolved_symbol, current_amount)
                 )
 
+            notional_price_value = self.__safe_float(order.get("current_price"))
+            if notional_price_value is None or notional_price_value <= 0:
+                try:
+                    notional_price_value = float(
+                        await self.__get_price_for_symbol(resolved_symbol)
+                    )
+                except (ccxt.BaseError, RuntimeError, TypeError, ValueError):
+                    notional_price_value = None
+
+            if notional_price_value and notional_price_value > 0:
+                below_min_notional, min_notional, estimated_notional = (
+                    self.__is_notional_below_minimum(
+                        resolved_symbol,
+                        float(order["total_amount"]),
+                        notional_price_value,
+                        is_market_order=True,
+                    )
+                )
+                if below_min_notional:
+                    logging.info(
+                        "Skipping market sell for %s: estimated notional %.8f is "
+                        "below minimum %.8f (amount=%s, price=%s).",
+                        resolved_symbol,
+                        estimated_notional,
+                        float(min_notional or 0.0),
+                        order["total_amount"],
+                        notional_price_value,
+                    )
+                    return self.__build_partial_sell_status(
+                        symbol=resolved_symbol,
+                        partial_amount=0.0,
+                        partial_avg_price=0.0,
+                        remaining_amount=float(order["total_amount"]),
+                        unsellable=True,
+                        unsellable_reason="minimum_notional",
+                        unsellable_min_notional=float(min_notional or 0.0),
+                        unsellable_estimated_notional=float(estimated_notional),
+                    )
+
             trade = await self.exchange.create_market_sell_order(
                 resolved_symbol, order["total_amount"]
             )
@@ -1421,6 +1624,20 @@ class Exchange:
                 )
                 Exchange.sell_retry_count += 1
                 raise TryAgain
+            if "filter failure: notional" in str(e).lower():
+                logging.info(
+                    "Skipping market sell for %s due NOTIONAL filter failure. "
+                    "Keeping position open for a later retry.",
+                    resolved_symbol,
+                )
+                return self.__build_partial_sell_status(
+                    symbol=resolved_symbol,
+                    partial_amount=0.0,
+                    partial_avg_price=0.0,
+                    remaining_amount=float(order.get("total_amount") or 0.0),
+                    unsellable=True,
+                    unsellable_reason="minimum_notional",
+                )
             else:
                 logging.error(
                     "Selling pair %s failed due to an exchange error: %s",
@@ -1444,6 +1661,8 @@ class Exchange:
             order = None
 
         if order:
+            if order.get("type") == "partial_sell":
+                return order
             logging.info(
                 "Sold %s %s on Exchange.", order["total_amount"], order["symbol"]
             )

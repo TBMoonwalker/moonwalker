@@ -291,6 +291,7 @@ class Trades:
         try:
             trades = await self.get_trades_by_symbol(symbol)
             opentrades = await self.get_open_trades_by_symbol(symbol)
+            open_trade = opentrades[0] if opentrades else None
             if opentrades:
                 current_price = opentrades[0]["current_price"]
 
@@ -323,6 +324,26 @@ class Trades:
                 baseorder = min(trades, key=lambda trade: float(trade["timestamp"]))
 
             safetyorders_count = len(safetyorders)
+            is_unsellable = False
+            unsellable_reason = None
+            unsellable_amount = 0.0
+            unsellable_min_notional = None
+            unsellable_estimated_notional = None
+
+            if open_trade:
+                unsellable_amount = float(open_trade.get("unsellable_amount") or 0.0)
+                unsellable_reason = open_trade.get("unsellable_reason")
+                unsellable_min_notional = open_trade.get("unsellable_min_notional")
+                unsellable_estimated_notional = open_trade.get(
+                    "unsellable_estimated_notional"
+                )
+                is_unsellable = unsellable_amount > 0 and bool(unsellable_reason)
+
+                # For unsellable remnants, OpenTrades carries the authoritative
+                # remaining amount/cost after partial close bookkeeping.
+                if is_unsellable:
+                    total_amount = float(open_trade.get("amount") or total_amount)
+                    total_cost = float(open_trade.get("cost") or total_cost)
 
             trade_data = {
                 "timestamp": latest_order["timestamp"],
@@ -338,6 +359,11 @@ class Trades:
                 "safetyorders": safetyorders,
                 "safetyorders_count": safetyorders_count,
                 "ordertype": baseorder["ordertype"],
+                "is_unsellable": is_unsellable,
+                "unsellable_reason": unsellable_reason,
+                "unsellable_amount": unsellable_amount,
+                "unsellable_min_notional": unsellable_min_notional,
+                "unsellable_estimated_notional": unsellable_estimated_notional,
             }
 
             return trade_data
