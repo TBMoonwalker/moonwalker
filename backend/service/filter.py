@@ -1,33 +1,37 @@
-import requests
+"""Market filtering helpers for signals."""
+
+from typing import Any
+
 import helper
-from cachetools import cached, TTLCache
-from tenacity import retry, TryAgain, stop_after_attempt, wait_fixed
+import httpx
+from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
 
 logging = helper.LoggerFactory.get_logger("logs/filter.log", "filter")
 
 
 class Filter:
-    def __init__(self):
-        config = helper.Config()
-        self.ws_url = config.get("ws_url", None)
-        self.btc_pulse = config.get("btc_pulse", False)
-        self.currency = config.get("currency").upper()
+    """Filter helpers for allow/deny lists and volume checks."""
 
     @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
-    def __request_api_endpoint(self, request, headers=None):
+    async def __request_api_endpoint(
+        self, request: str, headers: dict | None = None
+    ) -> Any:
         response = None
         try:
-            if headers:
-                response = requests.get(url=request, headers=headers)
-            else:
-                response = requests.get(url=request)
-        except requests.exceptions.RequestException as e:
-            logging.error(f"Error getting response for {request}. Cause: {e}")
+            async with httpx.AsyncClient() as client:
+                if headers:
+                    response = await client.get(url=request, headers=headers)
+                else:
+                    response = await client.get(url=request)
+                response.raise_for_status()
+        except httpx.HTTPError as e:
+            logging.error("Error getting response for %s. Cause: %s", request, e)
             raise TryAgain
 
         return response
 
-    def is_on_allowed_list(self, symbol, allow_list):
+    def is_on_allowed_list(self, symbol: str, allow_list: list[str] | None) -> bool:
+        """Return True if symbol is in allow list or allow list is empty."""
         result = False
         if allow_list:
             if symbol in allow_list:
@@ -37,7 +41,8 @@ class Filter:
 
         return result
 
-    def is_on_deny_list(self, symbol, deny_list):
+    def is_on_deny_list(self, symbol: str, deny_list: list[str] | None) -> bool:
+        """Return True if symbol is in deny list."""
         result = False
         if deny_list:
             if symbol in deny_list:
@@ -45,7 +50,10 @@ class Filter:
 
         return result
 
-    def is_within_topcoin_limit(self, market_cap_rank, topcoin_limit):
+    def is_within_topcoin_limit(
+        self, market_cap_rank: int | None, topcoin_limit: int | None
+    ) -> bool:
+        """Return True if the rank is within the configured limit."""
         result = False
         if topcoin_limit:
             if market_cap_rank:
@@ -56,7 +64,10 @@ class Filter:
 
         return result
 
-    def has_enough_volume(self, range, size, volume):
+    def has_enough_volume(
+        self, range: str | None, size: float | None, volume: dict[str, Any] | None
+    ) -> bool:
+        """Return True if volume meets the configured threshold."""
         result = False
         volume_ranges = ["K", "M", "B", "T"]
 
@@ -74,8 +85,9 @@ class Filter:
 
         return result
 
-    @cached(cache=TTLCache(maxsize=1024, ttl=86400))
-    def get_cmc_marketcap_rank(self, api_key, symbol):
+    @helper.async_ttl_cache(maxsize=1024, ttl=86400)
+    async def get_cmc_marketcap_rank(self, api_key: str, symbol: str) -> Any:
+        """Fetch CoinMarketCap market cap rank for the symbol."""
         marketcap = None
         headers = {"X-CMC_PRO_API_KEY": api_key}
         ws_endpoint = "pro-api.coinmarketcap.com"
@@ -84,7 +96,7 @@ class Filter:
         limit = 5000
         sort = "cmc_rank"
         url = f"https://{ws_endpoint}/{ws_context}?start={start}&limit={limit}&sort={sort}"
-        response = self.__request_api_endpoint(
+        response = await self.__request_api_endpoint(
             url,
             headers,
         )
@@ -97,6 +109,6 @@ class Filter:
                         marketcap = entry["rank"]
                         break
         except Exception as e:
-            logging.error(f"Error getting CMC data. Cause: {e}")
+            logging.error("Error getting CMC data. Cause: %s", e)
 
         return marketcap

@@ -1,9 +1,13 @@
+"""Autopilot mode history model."""
+
 from tortoise import fields
 from tortoise.models import Model
 
 
 class Autopilot(Model):
-    id = fields.IntField(pk=True)
+    """Persisted autopilot mode snapshots."""
+
+    id = fields.IntField(primary_key=True)
     mode = fields.CharField(max_length=10)
 
     class Meta:

@@ -1,142 +1,245 @@
-import model
-import helper
+"""ASAP signal plugin implementation."""
+
 import asyncio
-import requests
+import importlib
 import json
 import random
-import importlib
+import time
+from typing import Any, Optional
+
+import helper
+import model
+import requests
 from service.autopilot import Autopilot
+from service.config import resolve_history_lookback_days, resolve_timeframe
+from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
-from service.data import Data
 from service.statistic import Statistic
+from service.strategy_capability import ensure_strategy_supported
 from tenacity import retry, wait_fixed
-from asyncache import cached
-from cachetools import TTLCache
 
-logging = helper.LoggerFactory.get_logger("logs/signals.log", "asap")
+logging = helper.LoggerFactory.get_logger("logs/signal.log", "asap")
 
 
 class SignalPlugin:
-    def __init__(self, watcher_queue):
-        config = helper.Config()
+    """ASAP signal plugin for processing trading signals and managing bot operations.
+
+    This plugin handles signal processing, entry point validation, and trade execution
+    for the ASAP trading strategy. It integrates with various services like autopilot,
+    orders, filters, and indicators to make trading decisions.
+    """
+
+    def __init__(self, watcher_queue: asyncio.Queue):
+        """Initialize the ASAP SignalPlugin instance.
+
+        Args:
+            watcher_queue: Asyncio queue for communicating with the watcher service
+        """
         self.utils = helper.Utils()
         self.autopilot = Autopilot()
+        self.data = Data(persist_exchange=True)
         self.orders = Orders()
         self.filter = Filter()
         self.indicators = Indicators()
         self.statistic = Statistic()
-        self.config = config
-        self.max_bots = self.config.get("max_bots")
-        self.ordersize = config.get("bo")
-        self.signal_settings = json.loads(config.get("signal_settings"))
-        self.filter_values = (
-            json.loads(config.get("filter", None))
-            if config.get("filter", None)
-            else None
-        )
-        self.currency = config.get("currency")
-        self.pair_denylist = (
-            config.get("pair_denylist", None).split(",")
-            if config.get("pair_denylist", None)
-            else None
-        )
-        self.pair_allowlist = (
-            config.get("pair_allowlist", None).split(",")
-            if config.get("pair_allowlist", None)
-            else None
-        )
-        self.volume = (
-            json.loads(config.get("volume", None))
-            if config.get("volume", None)
-            else None
-        )
-        # Import configured strategies
-        signal_strategy_plugin = None
-        if config.get("signal_strategy", None):
-            signal_strategy = importlib.import_module(
-                f"strategies.{config.get('signal_strategy')}"
-            )
-            signal_strategy_plugin = signal_strategy.Strategy(
-                timeframe=config.get("signal_strategy_timeframe", "1min"),
-            )
-        self.strategy = signal_strategy_plugin
-        self.strategy_timeframe = config.get("signal_strategy_timeframe", "1min")
-        self.dynamic_dca = config.get("dynamic_dca", False)
-        self.btc_pulse = config.get("btc_pulse", False)
-        self.topcoin_limit = config.get("topcoin_limit", None)
+        self.config = None
         self.status = True
         self.watcher_queue = watcher_queue
+        self._max_bots_blocked = False
+        self._max_bots_last_log = 0.0
+        self._max_bots_log_interval_sec = 60.0
+        self._pair_denylist: list[str] | None = None
+        self._pair_allowlist: list[str] | None = None
+        self._volume: dict[str, Any] | None = None
+        self._strategy_timeframe = "1m"
+        self._signal_strategy_plugin: Any | None = None
 
-    async def __check_max_bots(self):
+    def __prepare_runtime_settings(self) -> None:
+        """Cache parsed runtime settings and strategy instance for hot loops."""
+        self._pair_denylist = (
+            [
+                entry.strip().upper().split("/")[0]
+                for entry in self.config.get("pair_denylist", None).split(",")
+                if entry.strip()
+            ]
+            if self.config.get("pair_denylist", None)
+            else None
+        )
+        self._pair_allowlist = (
+            self.config.get("pair_allowlist", None).split(",")
+            if self.config.get("pair_allowlist", None)
+            else None
+        )
+        self._volume = (
+            json.loads(self.config.get("volume", None))
+            if self.config.get("volume", None)
+            else None
+        )
+        self._strategy_timeframe = resolve_timeframe(self.config)
+        self._signal_strategy_plugin = None
+
+        signal_strategy_name = self.config.get("signal_strategy", None)
+        if signal_strategy_name:
+            ensure_strategy_supported(signal_strategy_name)
+            signal_strategy = importlib.import_module(
+                f"strategies.{signal_strategy_name}"
+            )
+            self._signal_strategy_plugin = signal_strategy.Strategy(
+                timeframe=self._strategy_timeframe,
+            )
+
+    def __log_max_bots_waiting(self) -> None:
+        """Log max-bot saturation with state/interval throttling."""
+        now = time.monotonic()
+        should_log = (not self._max_bots_blocked) or (
+            now - self._max_bots_last_log >= self._max_bots_log_interval_sec
+        )
+        if not should_log:
+            return
+
+        logging.debug("Max bots reached, waiting for a free slot.")
+        self._max_bots_blocked = True
+        self._max_bots_last_log = now
+
+    async def __check_max_bots(self) -> bool:
+        """Check if the maximum number of bots has been reached.
+
+        Determines if new trades should be started based on the configured max_bots
+        setting and current number of active trades. Also considers autopilot settings
+        if funds are locked.
+
+        Returns:
+            True if max bots reached or error occurred, False otherwise
+
+        Raises:
+            ValueError: If configuration is invalid
+            RuntimeError: If database operation fails
+        """
         result = False
+        max_bots = self.config.get("max_bots")
         try:
             all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
 
             profit = await self.statistic.get_profit()
             if profit["funds_locked"] and profit["funds_locked"] > 0:
                 trading_settings = await self.autopilot.calculate_trading_settings(
-                    profit["funds_locked"]
+                    profit["funds_locked"], self.config
                 )
                 if trading_settings:
-                    self.max_bots = trading_settings["mad"]
-                else:
-                    self.max_bots = self.config.get("max_bots")
+                    max_bots = trading_settings["mad"]
 
-            if all_bots and (len(all_bots) >= self.max_bots):
+            if all_bots and (len(all_bots) >= max_bots):
                 result = True
+        except ValueError as e:
+            logging.error(
+                f"Invalid configuration for max bots check - not starting new deals! Cause: {e}"
+            )
+            result = True
+        except RuntimeError as e:
+            logging.error(
+                f"Database error while checking max bots - not starting new deals! Cause: {e}"
+            )
+            result = True
         except Exception as e:
             logging.error(
-                f"Couldn't get actual list of bots - not starting new deals! Cause: {e}"
+                f"Unexpected error checking max bots - not starting new deals! Cause: {e}"
             )
             result = True
 
         return result
 
-    @cached(cache=TTLCache(maxsize=1024, ttl=900))
-    async def __get_new_symbol_list(self, running_list):
+    async def __fetch_symbol_list_from_url(self, url: str) -> list[str]:
+        """Fetch symbol list JSON from a remote URL without blocking the event loop."""
+
+        def _fetch() -> list[str]:
+            response = requests.get(url, timeout=10)
+            response.raise_for_status()
+            payload = response.json()
+            pairs = payload.get("pairs", [])
+            if not isinstance(pairs, list):
+                raise ValueError(
+                    "Invalid symbol list payload format: expected 'pairs' list"
+                )
+            return pairs
+
+        return await asyncio.to_thread(_fetch)
+
+    @helper.async_ttl_cache(maxsize=1024, ttl=900)
+    async def __get_new_symbol_list(self, running_list: tuple) -> Optional[list[str]]:
+        """Get the list of new symbols to trade.
+
+        Retrieves the symbol list from configuration, ensures history data exists
+        for each symbol, and pushes them to watcher queue for processing.
+
+        Args:
+            running_list: Tuple of currently running trade bots
+
+        Returns:
+            List of symbols to trade, or None if no symbol list configured
+        """
         # New symbols
-        symbol_list = self.signal_settings["symbol_list"]
-        if "http" in symbol_list:
-            symbol_list = requests.get(symbol_list).json()["pairs"]
-        else:
-            symbol_list = self.signal_settings["symbol_list"].split(",")
+        symbol_list = self.config.get("symbol_list", None)
+        history_data = resolve_history_lookback_days(
+            self.config,
+            timeframe=resolve_timeframe(self.config),
+        )
+        if symbol_list:
+            if "http" in symbol_list:
+                symbol_list = await self.__fetch_symbol_list_from_url(symbol_list)
+            else:
+                symbol_list = symbol_list.split(",")
 
-        # Add BTC to list if BTC-Pulse is activated
-        if self.btc_pulse and "BTC" not in symbol_list:
-            symbol_list.append(("BTC" + "/" + self.currency).upper())
+            # Running symbols
+            running_symbols = [
+                f"{symbol.upper()}"
+                for botsuffix, symbol in [item.split("_") for item in running_list]
+            ]
 
-        # Running symbols
-        running_symbols = [
-            f"{symbol.upper()}"
-            for botsuffix, symbol in [item.split("_") for item in running_list]
-        ]
+            logging.debug(symbol_list)
 
-        # Add history data for indicators
-        for symbol in symbol_list:
-            if symbol not in running_symbols:
-                if await Data().count_history_data_for_symbol(symbol) < 1:
-                    if not await Data().add_history_data_for_symbol(symbol):
-                        logging.error(
-                            f"Not trading {symbol} because history add failed. Please check data.log."
-                        )
-                        symbol_list.remove(symbol)
-        await self.watcher_queue.put(symbol_list)
+            # Add history data for indicators
+            for symbol in symbol_list:
+                if symbol not in running_symbols:
+                    if await self.data.count_history_data_for_symbol(symbol) < 1:
+                        if not await self.data.add_history_data_for_symbol(
+                            symbol, history_data, self.config
+                        ):
+                            logging.error(
+                                f"Not trading {symbol} because history add failed. Please check data.log."
+                            )
+                            symbol_list.remove(symbol)
+            await self.watcher_queue.put(symbol_list)
 
-        logging.debug(f"Running symbols: {running_symbols}")
-        logging.debug(f"New symbols: {symbol_list}")
+            logging.debug(f"Running symbols: {running_symbols}")
+            logging.debug(f"New symbols: {symbol_list}")
         return symbol_list
 
     @retry(wait=wait_fixed(3))
-    async def __check_entry_point(self, symbol):
-        # allow/denylist check
-        # we only need the plain symbol here:
-        symbol_only, currency = symbol.split("/")
+    async def __check_entry_point(self, symbol: str) -> bool:
+        """Check if a symbol meets all entry criteria for trading.
 
+        Validates symbol against various filters including allow/denylist, volume,
+        market cap, RSI, BTC pulse, and strategy-specific entry conditions.
+
+        Args:
+            symbol: The trading symbol to check (e.g., "BTC/USDC")
+
+        Returns:
+            True if symbol passes all entry checks, False otherwise
+
+        Raises:
+            ValueError: If configuration is invalid
+            RuntimeError: If data retrieval fails
+        """
+        # we only need the plain symbol here:
+        symbol_only, _currency = symbol.split("/")
+
+        # allow/denylist check
         if self.filter.is_on_allowed_list(
-            symbol_only, self.pair_allowlist
-        ) and self.filter.is_on_deny_list(symbol_only, self.pair_denylist):
+            symbol_only, self._pair_allowlist
+        ) and self.filter.is_on_deny_list(symbol_only, self._pair_denylist):
             logging.info(
                 f"Symbol {symbol} is not in your allowlist or is set in your denylist. Ignoring it."
             )
@@ -144,9 +247,10 @@ class SignalPlugin:
 
         try:
             # btc pulse check
-            if self.btc_pulse:
+            if self.config.get("btc_pulse", False):
                 if not await self.indicators.calculate_btc_pulse(
-                    self.currency, self.strategy_timeframe
+                    self.config.get("currency", "USDC"),
+                    self._strategy_timeframe,
                 ):
                     logging.debug(
                         f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
@@ -154,51 +258,67 @@ class SignalPlugin:
                     return False
 
             # volume check
-            if self.volume:
+            if self._volume:
                 volume_size, volume_range = self.utils.convert_numbers(
                     await self.indicators.calculate_24h_volume(symbol)
                 ).split(" ")
 
                 if not self.filter.has_enough_volume(
-                    volume_range, volume_size, self.volume
+                    volume_range, volume_size, self._volume
                 ):
                     logging.info(
-                        f"Symbol {symbol} has a 24h volume of {volume_size}{volume_range}, which is under the configured volume of {self.volume['size']}{self.volume['range']}"
+                        "Symbol %s has a 24h volume of %s%s, which is under the "
+                        "configured volume of %s%s",
+                        symbol,
+                        volume_size,
+                        volume_range,
+                        self._volume["size"],
+                        self._volume["range"],
                     )
                     return False
 
             # topcoin limit check
-            if self.topcoin_limit and self.filter_values:
-                if self.filter_values["marketcap_cmc_api_key"]:
-                    marketcap = self.filter.get_cmc_marketcap_rank(
-                        self.filter_values["marketcap_cmc_api_key"],
-                        symbol_only,
-                    )
-                    if marketcap:
-                        if not self.filter.is_within_topcoin_limit(
-                            marketcap, self.topcoin_limit
-                        ):
-                            logging.info(
-                                f"Symbol {symbol} has a marketcap of {marketcap} and is not within your topcoin limit of the top {self.topcoin_limit}. Ignoring it."
-                            )
-                            return False
-
-                if self.filter_values["rsi_max"]:
-                    rsi = await self.indicators.calculate_rsi(
-                        symbol, self.strategy_timeframe, 14
-                    )
-                    if rsi and rsi > self.filter_values["rsi_max"]:
+            if self.config.get("topcoin_limit", None) and self.config.get(
+                "marketcap_cmc_api_key", None
+            ):
+                marketcap = await self.filter.get_cmc_marketcap_rank(
+                    self.config.get("marketcap_cmc_api_key", None),
+                    symbol_only,
+                )
+                if marketcap:
+                    if not self.filter.is_within_topcoin_limit(
+                        marketcap, self.config.get("topcoin_limit", None)
+                    ):
                         logging.info(
-                            f"Symbol {symbol} has a rsi of {rsi} and is not within your rsi limit of {self.filter_values["rsi_max"]}. Ignoring it."
+                            "Symbol %s has a marketcap of %s and is not within your "
+                            "topcoin limit of the top %s. Ignoring it.",
+                            symbol,
+                            marketcap,
+                            self.config.get("topcoin_limit", None),
+                        )
+                        return False
+
+                if self.config.get("rsi_max", None):
+                    rsi = await self.indicators.calculate_rsi(
+                        symbol, self._strategy_timeframe, 14
+                    )
+                    if rsi and rsi > self.config.get("rsi_max", None):
+                        logging.info(
+                            "Symbol %s has an RSI of %s and exceeds the rsi limit "
+                            "of %s. Ignoring it.",
+                            symbol,
+                            rsi,
+                            self.config.get("rsi_max", None),
                         )
                         return False
 
             # strategy entry check
-            if self.strategy:
+            if self._signal_strategy_plugin:
                 try:
-                    if not await self.strategy.run(symbol, "buy"):
+                    if not await self._signal_strategy_plugin.run(symbol, "buy"):
                         return False
                 except Exception as e:
+                    # Broad catch to keep signal processing resilient.
                     logging.error(f"Error running buy strategy. Cause: {e}")
                     return False
 
@@ -210,10 +330,31 @@ class SignalPlugin:
             )
             return False
 
-    async def run(self):
+    async def run(self, config: dict[str, Any]) -> None:
+        """Main execution loop for the ASAP signal plugin.
+
+        Continuously monitors for new trading opportunities, checks max bots limit,
+        validates entry points, and triggers new trades when conditions are met.
+
+        Args:
+            config: Configuration dictionary containing plugin settings
+
+        Returns:
+            None
+        """
+        self.config = config
+        try:
+            self._max_bots_log_interval_sec = max(
+                1.0, float(self.config.get("max_bots_log_interval_sec", 60))
+            )
+        except (TypeError, ValueError):
+            self._max_bots_log_interval_sec = 60.0
+        self.__prepare_runtime_settings()
+
         while self.status:
             max_bots = await self.__check_max_bots()
             if not max_bots:
+                self._max_bots_blocked = False
                 running_trades = (
                     await model.Trades.all().distinct().values_list("bot", flat=True)
                 )
@@ -222,7 +363,6 @@ class SignalPlugin:
                     # Randomize symbols for new deals
                     random.shuffle(symbol_list)
                     for symbol in symbol_list:
-
                         current_symbol = f"asap_{symbol}"
                         signal = await self.__check_entry_point(symbol)
                         # Check max bots again
@@ -234,7 +374,7 @@ class SignalPlugin:
                         ):
                             logging.info(f"Triggering new trade for {symbol}")
                             order = {
-                                "ordersize": self.ordersize,
+                                "ordersize": self.config.get("bo", 12),
                                 "symbol": symbol,
                                 "direction": "long",
                                 "botname": f"asap_{symbol}",
@@ -245,19 +385,26 @@ class SignalPlugin:
                                 "so_percentage": None,
                                 "side": "buy",
                             }
-                            await self.orders.receive_buy_order(order)
+                            await self.orders.receive_buy_order(order, self.config)
                         # Slow down on many symbols at once
                         await asyncio.sleep(1)
+                        if not await self.__check_max_bots():
+                            self._max_bots_blocked = False
                 else:
                     logging.error(
                         "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
                     )
-                    break
             else:
-                logging.debug(
-                    f"Max Bots: {max_bots}. Max bots reached, waiting for a new slot"
-                )
+                self.__log_max_bots_waiting()
             await asyncio.sleep(5)
 
-    async def shutdown(self):
+    async def shutdown(self) -> None:
+        """Shutdown the signal plugin.
+
+        Stops the execution loop by setting the status flag to False.
+
+        Returns:
+            None
+        """
         self.status = False
+        await self.data.close()

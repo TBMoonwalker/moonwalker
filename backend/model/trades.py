@@ -1,9 +1,13 @@
+"""Trade model."""
+
 from tortoise import fields
 from tortoise.models import Model
 
 
 class Trades(Model):
-    id = fields.IntField(pk=True)
+    """Persisted trade records."""
+
+    id = fields.IntField(primary_key=True)
     timestamp = fields.TextField()
     ordersize = fields.FloatField()
     fee = fields.FloatField()
@@ -21,6 +25,14 @@ class Trades(Model):
     so_percentage = fields.DecimalField(max_digits=2, decimal_places=1, null=True)
     direction = fields.TextField()
     side = fields.TextField()
+
+    class Meta:
+        table = "trades"
+        indexes = (
+            ("symbol",),
+            ("symbol", "baseorder"),
+            ("symbol", "safetyorder", "baseorder"),
+        )
 
     def __dict__(self):
         return f"'id': {self.id}, 'timestamp': {self.timestamp}, 'ordersize': {self.ordersize}, 'amount': {self.ordersize}, 'price': {self.price}, 'symbol': {self.symbol}, 'orderid': {self.orderid}, 'bot': {self.bot}, 'ordertype': {self.ordertype}, 'baseorder': {self.baseorder}, 'safetyorder': {self.safetyorder}, 'direction': {self.direction}, 'side': {self.side}"

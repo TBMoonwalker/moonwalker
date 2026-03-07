@@ -1,11 +1,16 @@
+"""Token listing date cache model."""
+
 from tortoise import fields
 from tortoise.models import Model
 
 
 class Listings(Model):
-    id = fields.IntField(pk=True)
+    """Cached listing dates for tokens."""
+
+    id = fields.IntField(primary_key=True)
     symbol = fields.CharField(max_length=50)
     listing_date = fields.DatetimeField()
 
     class Meta:
         table = "token_listings"
+        indexes = (("symbol",),)

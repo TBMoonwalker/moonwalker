@@ -1,3 +1,7 @@
+"""EMA cross strategy."""
+
+from typing import Any
+
 import helper
 from service.filter import Filter
 from service.indicators import Indicators
@@ -6,12 +10,16 @@ logging = helper.LoggerFactory.get_logger("logs/strategies.log", "ema_cross")
 
 
 class Strategy:
-    def __init__(self, timeframe, btc_pulse=None):
+    """EMA cross strategy implementation."""
+
+    def __init__(self, timeframe: str, btc_pulse: Any | None = None):
         self.timeframe = timeframe
         self.filter = Filter()
         self.indicators = Indicators()
+        self._last_log_by_symbol: dict[str, dict[str, Any]] = {}
 
-    async def run(self, symbol, type):
+    async def run(self, symbol: str, type: str) -> bool:
+        """Evaluate EMA cross conditions for a symbol."""
         result = False
 
         try:
@@ -28,7 +36,9 @@ class Strategy:
                 "ema_cross": ema_cross,
                 "creating_order": result,
             }
-            logging.debug(f"{logging_json}")
+            if self._last_log_by_symbol.get(symbol) != logging_json:
+                logging.debug(f"{logging_json}")
+                self._last_log_by_symbol[symbol] = logging_json.copy()
 
         except ValueError as e:
             logging.error(f"JSON Message is garbage: {e}")

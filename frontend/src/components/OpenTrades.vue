@@ -4,67 +4,128 @@
 </template>
 
 <script setup lang="ts">
-import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
-import { h, ref, watch } from 'vue'
-import { type DataTableColumns, NTimeline, NTimelineItem, NDivider, NSlider, NButton, NButtonGroup, useDialog, useMessage, NInput, NFlex, NCard, NIcon, NHighlight } from 'naive-ui'
+import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
+import { NButton, NButtonGroup, NCard, NDataTable, NDivider, NFlex, NHighlight, NIcon, NInput, NSlider, NTimeline, NTimelineItem, NTooltip, type DataTableColumns, useDialog, useMessage } from 'naive-ui'
 import { useWebSocketDataStore } from '../stores/websocket'
+import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
-import { isFloat, createDecimal } from '../helpers/validators'
-import { timezoneOffset } from '../helpers/timezone'
+import { createDecimal } from '../helpers/validators'
 import { createChart, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts'
 import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
+import { fetchJson } from '../api/client'
+import { useOhlcvStore } from '../stores/ohlcv'
 
 const open_trade_store = useWebSocketDataStore("openTrades")
 const open_trade_data = storeToRefs(open_trade_store)
+const trades_store = useTradesStore()
 const open_trades = ref()
+const ohlcvStore = useOhlcvStore()
 
 const dialog = useDialog()
 const message = useMessage()
 
-watch(open_trade_data.json, async (newData) => {
-    if (newData !== undefined) {
-        const websocket_data = JSON.parse(newData)
-        open_trades.value = websocket_data
+const MAX_VISIBLE_CANDLES = 500
+const PRE_ROLL_CANDLES = 2
+const viewportWidth = ref(window.innerWidth)
 
-        websocket_data.forEach(function (val: any, i: any) {
-            var amount_length = 0
-            var cost_length = 0
-            var tp_length = 0
-            var avg_length = 0
-            var current_length = 0
-            if (isFloat(val.amount)) {
-                amount_length = open_trades.value[i].amount.toString().split('.')[1].length
-            }
+const isMobile = computed(() => viewportWidth.value < 768)
+const isTablet = computed(() => viewportWidth.value >= 768 && viewportWidth.value < 1200)
 
-            if (isFloat(val.cost)) {
-                cost_length = open_trades.value[i].cost.toString().split('.')[1].length
-            }
+const handleResize = () => {
+    viewportWidth.value = window.innerWidth
+}
 
-            if (isFloat(val.tp_price)) {
-                tp_length = open_trades.value[i].tp_price.toString().split('.')[1].length
-            }
+type TimeframeChoice = {
+    timerange: string
+    seconds: number
+}
 
-            if (isFloat(val.avg_price)) {
-                avg_length = open_trades.value[i].avg_price.toString().split('.')[1].length
-            }
+type ConfigResponse = {
+    timeframe?: string | null
+}
 
-            if (isFloat(val.current_price)) {
-                current_length = open_trades.value[i].current_price.toString().split('.')[1].length
-            }
+const TIMEFRAME_CHOICES: TimeframeChoice[] = [
+    { timerange: "1m", seconds: 60 },
+    { timerange: "5min", seconds: 5 * 60 },
+    { timerange: "15min", seconds: 15 * 60 },
+    { timerange: "30min", seconds: 30 * 60 },
+    { timerange: "60min", seconds: 60 * 60 },
+    { timerange: "4h", seconds: 4 * 60 * 60 },
+    { timerange: "1D", seconds: 24 * 60 * 60 },
+]
 
-            open_trades.value[i].cost = val.cost.toFixed(cost_length)
-            open_trades.value[i].profit = val.profit.toFixed(2)
-            open_trades.value[i].amount = val.amount.toFixed(amount_length)
-            open_trades.value[i].current_price = val.current_price.toFixed(current_length)
-            open_trades.value[i].tp_price = val.tp_price.toFixed(tp_length)
-            open_trades.value[i].avg_price = val.avg_price.toFixed(avg_length)
-            open_trades.value[i].key = val.id
-            let date = new Date(Math.trunc(parseFloat(val.open_date)));
-            open_trades.value[i].open_date = date.toLocaleString()
-            open_trades.value[i].safetyorder = val.safetyorders
-            open_trades.value[i].precision = current_length
+const configuredMinTimeframe = ref<TimeframeChoice>({ timerange: "15min", seconds: 15 * 60 })
 
-        })
+function parseTimeframeSeconds(rawValue: string | null | undefined): number | null {
+    const normalized = String(rawValue ?? "").trim().toLowerCase().replace("min", "m")
+    const match = normalized.match(/^(\d+)([mhd])$/)
+    if (!match) {
+        return null
+    }
+    const value = Number(match[1])
+    const unit = match[2]
+    if (!Number.isFinite(value) || value <= 0) {
+        return null
+    }
+    if (unit === "m") {
+        return value * 60
+    }
+    if (unit === "h") {
+        return value * 60 * 60
+    }
+    if (unit === "d") {
+        return value * 24 * 60 * 60
+    }
+    return null
+}
+
+function resolveMinTimeframe(configured: string | null | undefined): TimeframeChoice {
+    const configuredSeconds = parseTimeframeSeconds(configured)
+    if (!configuredSeconds) {
+        return configuredMinTimeframe.value
+    }
+    const matching = TIMEFRAME_CHOICES.find((choice) => choice.seconds >= configuredSeconds)
+    return matching ?? TIMEFRAME_CHOICES[TIMEFRAME_CHOICES.length - 1]
+}
+
+function selectTimeframe(
+    beginTimestamp: string | number,
+    minTimeframe: TimeframeChoice,
+): TimeframeChoice {
+    const beginMs = Number(beginTimestamp)
+    const nowMs = Date.now()
+    const durationSeconds = Math.max(0, Math.floor((nowMs - beginMs) / 1000))
+    const choices = TIMEFRAME_CHOICES.filter(
+        (choice) => choice.seconds >= minTimeframe.seconds,
+    )
+
+    for (const choice of choices) {
+        if (durationSeconds / choice.seconds <= MAX_VISIBLE_CANDLES) {
+            return choice
+        }
+    }
+
+    return choices[choices.length - 1]
+}
+
+function getLocalOffsetSeconds(): number {
+    return -new Date().getTimezoneOffset() * 60
+}
+
+async function loadConfiguredMinTimeframe(): Promise<void> {
+    try {
+        const config = await fetchJson<ConfigResponse>('/config/all')
+        configuredMinTimeframe.value = resolveMinTimeframe(config.timeframe)
+    } catch (_error) {
+        configuredMinTimeframe.value = resolveMinTimeframe(null)
+    }
+}
+
+watch(open_trade_data.data, async (newData) => {
+    if (newData !== undefined && newData !== null) {
+        const websocket_data = newData as any[]
+        trades_store.setOpenTrades(websocket_data)
+        open_trades.value = trades_store.openTrades
     }
 }, { immediate: true })
 
@@ -83,6 +144,10 @@ type RowData = {
     baseorder: OrderData
     safetyorder: Array<OrderData>
     precision: number
+    unsellable_amount?: number
+    unsellable_reason?: string | null
+    unsellable_min_notional?: number | null
+    unsellable_estimated_notional?: number | null
 }
 
 type OrderData = {
@@ -94,6 +159,36 @@ type OrderData = {
     price: number
 }
 
+function getSafetyOrderCount(rowData: RowData): number {
+    if (Array.isArray(rowData.safetyorder)) {
+        return rowData.safetyorder.length
+    }
+    return Number(rowData.so_count ?? 0)
+}
+
+function isUnsellableRemainder(rowData: RowData): boolean {
+    return Number(rowData.unsellable_amount ?? 0) > 0 && Boolean(rowData.unsellable_reason)
+}
+
+function getUnsellableMessage(rowData: RowData): string {
+    const remainingAmount = Number(rowData.unsellable_amount ?? 0)
+    const [symbol] = rowData.symbol.split("/")
+    const estimatedNotional = rowData.unsellable_estimated_notional
+    const minNotional = rowData.unsellable_min_notional
+
+    const parts: string[] = [
+        `Unsellable remainder for ${rowData.symbol}: ${remainingAmount.toFixed(8)} ${symbol}.`,
+    ]
+    if (estimatedNotional !== null && estimatedNotional !== undefined) {
+        parts.push(`Estimated notional: ${Number(estimatedNotional).toFixed(8)}.`)
+    }
+    if (minNotional !== null && minNotional !== undefined) {
+        parts.push(`Minimum notional required: ${Number(minNotional).toFixed(8)}.`)
+    }
+    parts.push("Use Stop and close the remainder manually on the exchange.")
+    return parts.join(" ")
+}
+
 function handle_deal_sell(data: any) {
     const d = dialog.warning({
         title: 'Selling deal',
@@ -103,9 +198,7 @@ function handle_deal_sell(data: any) {
         onPositiveClick: async () => {
             d.loading = true
             const [symbol, currency] = data["symbol"].toLowerCase().split("/")
-            const result = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/orders/sell/${symbol + "-" + currency}`).then((response) =>
-                response.json()
-            )
+            const result = await fetchJson<{ result: string }>(`/orders/sell/${symbol + "-" + currency}`)
             if (result["result"] == "sell") {
                 message.success('Sold ' + data["amount"] + ' ' + data["symbol"])
             } else {
@@ -129,9 +222,7 @@ function handle_deal_buy(data: any) {
         negativeText: 'Cancel',
         onPositiveClick: async () => {
             d.loading = true
-            const result = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/orders/buy/${symbol + "-" + currency}/${amount}`).then((response) =>
-                response.json()
-            )
+            const result = await fetchJson<{ result: string }>(`/orders/buy/${symbol + "-" + currency}/${amount}`)
             if (result["result"] == "new_so") {
                 message.success('Added ' + amount + ' ' + currency.toUpperCase() + ' for ' + symbol.toUpperCase())
             } else {
@@ -154,9 +245,7 @@ function handle_deal_stop(data: any) {
         onPositiveClick: async () => {
             d.loading = true
             const [symbol, currency] = data["symbol"].toLowerCase().split("/")
-            const result = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/orders/stop/${symbol + "-" + currency}`).then((response) =>
-                response.json()
-            )
+            const result = await fetchJson<{ result: string }>(`/orders/stop/${symbol + "-" + currency}`)
             if (result["result"] == "stop") {
                 message.success('Stopped ' + data["symbol"] + ' Please trade it manually on your exchange')
             } else {
@@ -184,7 +273,7 @@ const renderExpandIcon = () => {
 
 
 const columns_trades = (): DataTableColumns<RowData> => {
-    return [
+    const columns: DataTableColumns<RowData> = [
         {
             type: 'expand',
             expandable: (rowData) => rowData.symbol != "",
@@ -203,7 +292,6 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                         let timeline_items: Array<any> = []
                                         // Baseorder
                                         let timestamp = new Date(Math.trunc(parseFloat(rowData.baseorder.timestamp)))
-                                        //console.log(timestamp)
                                         let date = timestamp.toLocaleString()
                                         timeline_items[0] = h(NTimelineItem, {
                                             title: "Baseorder",
@@ -242,6 +330,12 @@ const columns_trades = (): DataTableColumns<RowData> => {
 
                                             // Create precision for candlestick prices
                                             const precision = createDecimal(rowData.precision)
+                                            const timeframe = selectTimeframe(begin_timestamp, configuredMinTimeframe.value)
+                                            const history_start = Math.max(
+                                                0,
+                                                Number(begin_timestamp) -
+                                                timeframe.seconds * PRE_ROLL_CANDLES * 1000,
+                                            )
 
                                             chart = createChart(chartRef.value, {
                                                 autoSize: true,
@@ -277,10 +371,23 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             })
 
                                             // OHLCV data from Moonwalker
-                                            const ticker_data = await fetch(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/data/ohlcv/${symbol + currency.toUpperCase()}/15min/${begin_timestamp}/${timezoneOffset()}`).then((response) =>
-                                                response.json()
+                                            const cacheKey = `${symbol}-${currency}-${timeframe.timerange}-${history_start}`
+                                            let ticker_data = null
+                                            try {
+                                                // Always refresh chart data when opening the panel.
+                                                ticker_data = await fetchJson(`/data/ohlcv/${symbol + "-" + currency.toUpperCase()}/${timeframe.timerange}/${history_start}/0`)
+                                                ohlcvStore.set(cacheKey, ticker_data)
+                                            } catch (_error) {
+                                                ticker_data = ohlcvStore.get(cacheKey) ?? []
+                                            }
+                                            const localOffsetSeconds = getLocalOffsetSeconds()
+                                            const localTickerData = (ticker_data as Array<Record<string, number>>).map(
+                                                (entry) => ({
+                                                    ...entry,
+                                                    time: Number(entry.time) + localOffsetSeconds,
+                                                }),
                                             )
-                                            candlestickSeries.setData(ticker_data)
+                                            candlestickSeries.setData(localTickerData)
 
                                             let marker_data = []
 
@@ -295,13 +402,10 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             })
 
                                             // Correct marker timestamp shift
-                                            let intervals = {
-                                                '15_minutes': (3600 / 2)
-                                            }
-                                            let seconds = intervals['15_minutes']
+                                            const seconds = timeframe.seconds
 
                                             let baseorder_datetime = Math.trunc(Number(begin_timestamp) / 1000) - (Math.trunc(Number(begin_timestamp) / 1000) % seconds)
-                                            baseorder_datetime += 60 * timezoneOffset()
+                                            baseorder_datetime += localOffsetSeconds
                                             // Baseorder marker
                                             //const baseorderMarker = createSeriesMarkers(candles)
                                             marker_data.push({
@@ -325,7 +429,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
                                             if (rowData.safetyorder) {
                                                 rowData.safetyorder.forEach(function (val: any, i: any) {
                                                     let safetyorder_datetime = Math.trunc(Number(val.timestamp) / 1000) - (Math.trunc(Number(val.timestamp) / 1000) % seconds)
-                                                    safetyorder_datetime += 60 * timezoneOffset()
+                                                    safetyorder_datetime += localOffsetSeconds
                                                     // Safetyorder marker
                                                     marker_data.push({
                                                         time: safetyorder_datetime,
@@ -426,7 +530,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
                 return [
                     h(NSlider, { value: [current_price, avg_price], range: true, min: min_price, max: max_price, disabled: true, themeOverrides: { fillColor: fillColor.value, handleSize: '8px', opacityDisabled: '1' } }),
                     h(NDivider, { dashed: true }),
-                    h('div', { innerHTML: rowData.so_count }),
+                    h('div', { innerHTML: String(getSafetyOrderCount(rowData)) }),
                 ]
             },
             align: 'center'
@@ -435,6 +539,20 @@ const columns_trades = (): DataTableColumns<RowData> => {
             title: 'Action',
             key: 'action',
             render: (rowData) => {
+                if (isUnsellableRemainder(rowData)) {
+                    return [
+                        h(NTooltip, {}, {
+                            trigger: () =>
+                                h(NButton, {
+                                    type: 'error',
+                                    size: 'small',
+                                    ghost: true,
+                                    onClick: () => handle_deal_stop(rowData),
+                                }, { default: () => 'Stop (Unsellable)' }),
+                            default: () => getUnsellableMessage(rowData),
+                        })
+                    ]
+                }
                 return [
                     h(NButtonGroup, { size: 'small', vertical: true }, {
                         default: () => [
@@ -461,9 +579,40 @@ const columns_trades = (): DataTableColumns<RowData> => {
             }
         },
     ]
+
+    if (isMobile.value) {
+        return columns.filter((column) => {
+            if (!("key" in column)) {
+                return true
+            }
+            return ["symbol", "profit", "action"].includes(String(column.key))
+        })
+    }
+
+    if (isTablet.value) {
+        return columns.filter((column) => {
+            if (!("key" in column)) {
+                return true
+            }
+            return ["symbol", "amount", "profit", "action", "open_date"].includes(
+                String(column.key),
+            )
+        })
+    }
+
+    return columns
 }
 
-const columns_open_trades = columns_trades()
+const columns_open_trades = computed(() => columns_trades())
+
+onMounted(async () => {
+    window.addEventListener('resize', handleResize)
+    await loadConfiguredMinTimeframe()
+})
+
+onUnmounted(() => {
+    window.removeEventListener('resize', handleResize)
+})
 
 </script>
 

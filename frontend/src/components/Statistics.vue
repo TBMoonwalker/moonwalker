@@ -3,12 +3,14 @@
     <n-statistic :class="upnl_class" label="UPNL" :value="upnl" />
     <n-statistic :class="autopilot_class" label="Autopilot mode" :value="autopilot_mode" />
     <n-statistic label="Funds locked" :value="funds_locked" />
+    <n-statistic label="Funds available" :value="funds_available" />
 </template>
 
 <script setup lang="ts">
 import { ref, watch } from 'vue'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
+import { NStatistic } from 'naive-ui'
 
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
@@ -17,13 +19,14 @@ const profit_class = ref()
 const upnl = ref()
 const upnl_class = ref()
 const funds_locked = ref()
+const funds_available = ref()
 const autopilot_mode = ref()
 const autopilot_class = ref()
 
 // Get new statistics data
-watch(statistics_data.json, async (newData) => {
-    if (newData !== undefined) {
-        const websocket_data = JSON.parse(newData)
+watch(statistics_data.data, async (newData) => {
+    if (newData !== undefined && newData !== null) {
+        const websocket_data = newData as any
         if (websocket_data.upnl === null) {
             upnl.value = 0.0
         } else {
@@ -41,6 +44,11 @@ watch(statistics_data.json, async (newData) => {
         } else {
             funds_locked.value = websocket_data.funds_locked.toFixed(2)
         }
+        if (websocket_data.funds_available === null || websocket_data.funds_available === undefined) {
+            funds_available.value = 0.0
+        } else {
+            funds_available.value = websocket_data.funds_available.toFixed(2)
+        }
         if (websocket_data.autopilot == "high") {
             autopilot_mode.value = "High"
             autopilot_class.value = "red"
@@ -57,14 +65,6 @@ watch(statistics_data.json, async (newData) => {
 }, { immediate: true })
 
 function row_classes(data: any) {
-    if (Math.sign(data) >= 0) {
-        return 'green'
-    } else {
-        return 'red'
-    }
-}
-
-function autopilot_classes(data: any) {
     if (Math.sign(data) >= 0) {
         return 'green'
     } else {

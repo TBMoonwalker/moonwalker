@@ -1,7 +1,12 @@
+"""Order API endpoints."""
+
+from typing import Any
+
 import helper
-from service.orders import Orders
 from controller import controller
 from quart_cors import route_cors
+from service.config import Config
+from service.orders import Orders
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_orders")
 orders = Orders()
@@ -12,8 +17,20 @@ orders = Orders()
     allow_methods=["GET"],
     allow_origin=["*"],
 )
-async def sell_order(symbol):
-    if await orders.receive_sell_signal(symbol):
+async def sell_order(symbol: str) -> dict[str, Any]:
+    """Create a sell order for the specified symbol.
+
+    Args:
+        symbol: Trading pair symbol (e.g., "BTCUSDT").
+
+    Returns:
+        Dictionary with result status.
+
+    Example:
+        {"result": "sell"} or {"result": ""}
+    """
+    config = await Config.instance()
+    if await orders.receive_sell_signal(symbol, config):
         return {"result": "sell"}
     else:
         return {"result": ""}
@@ -24,8 +41,21 @@ async def sell_order(symbol):
     allow_methods=["GET"],
     allow_origin=["*"],
 )
-async def buy_order(symbol, ordersize):
-    if await orders.receive_buy_signal(symbol, ordersize):
+async def buy_order(symbol: str, ordersize: str) -> dict[str, Any]:
+    """Create a buy order for the specified symbol and size.
+
+    Args:
+        symbol: Trading pair symbol (e.g., "BTCUSDT").
+        ordersize: Order size in quote currency.
+
+    Returns:
+        Dictionary with result status.
+
+    Example:
+        {"result": "new_so"} or {"result": ""}
+    """
+    config = await Config.instance()
+    if await orders.receive_buy_signal(symbol, ordersize, config):
         return {"result": "new_so"}
     else:
         return {"result": ""}
@@ -36,7 +66,18 @@ async def buy_order(symbol, ordersize):
     allow_methods=["GET"],
     allow_origin=["*"],
 )
-async def stop_order(symbol):
+async def stop_order(symbol: str) -> dict[str, Any]:
+    """Stop an active order for the specified symbol.
+
+    Args:
+        symbol: Trading pair symbol (e.g., "BTCUSDT").
+
+    Returns:
+        Dictionary with result status.
+
+    Example:
+        {"result": "stop"} or {"result": ""}
+    """
     if await orders.receive_stop_signal(symbol):
         return {"result": "stop"}
     else:

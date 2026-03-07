@@ -1,17 +1,31 @@
+"""EMA low strategy."""
+
+from typing import Any
+
 import helper
-from service.filter import Filter
 from service.indicators import Indicators
 
 logging = helper.LoggerFactory.get_logger("logs/strategies.log", "ema_low")
 
 
 class Strategy:
-    def __init__(self, timeframe, btc_pulse=None):
-        self.timeframe = timeframe
-        self.filter = Filter()
-        self.indicators = Indicators()
+    """EMA low strategy implementation."""
 
-    async def run(self, symbol, type):
+    def __init__(self, timeframe: str, btc_pulse: Any | None = None):
+        self.timeframe = timeframe
+        self.indicators = Indicators()
+        self._last_log_by_symbol: dict[str, dict[str, Any]] = {}
+
+    async def run(self, symbol: str, type: str) -> bool:
+        """Evaluate EMA low conditions for a symbol.
+
+        Strategy summary:
+        - Trend filter: EMA20, EMA50, and EMA100 must all be below EMA200
+          (downtrend / "low" regime).
+        - Entry trigger: price rebounds above EMA20 after being below it
+          (close[-1] > EMA20 and close[-2] < EMA20).
+        The method returns True when both conditions are met.
+        """
         result = False
 
         # EMA 20 < EMA 200
@@ -33,19 +47,20 @@ class Strategy:
                     close.dropna().iloc[-2] > ema["ema_20"]
                     and close.dropna().iloc[-3] < ema["ema_20"]
                 ):
-                    logging.debug(
-                        f"Price rebound from EMA down for {symbol} Close: {close.dropna().iloc[-2]} Previous close: {close.dropna().iloc[-3]}"
-                    )
                     result = True
 
             logging_json = {
                 "symbol": symbol,
                 "ema(20/50/100/200)": f"{ema['ema_20']}, {ema['ema_50']}, {ema['ema_100']}, {ema['ema_200']}",
-                "close price(last)": f"{close.dropna().iloc[-2]}",
+                "close price(last)": f"{close.dropna().iloc[-1]}",
                 "creating_order": result,
             }
-            logging.debug(f"{logging_json}")
-        except:
-            logging.error(f"Cannot run strategy for {symbol}, check indicators.log")
+            if self._last_log_by_symbol.get(symbol) != logging_json:
+                logging.debug(f"{logging_json}")
+                self._last_log_by_symbol[symbol] = logging_json.copy()
+        except Exception as e:
+            logging.error(
+                f"Cannot run strategy for {symbol}, check indicators.log: {e}"
+            )
             return False
         return result

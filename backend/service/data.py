@@ -1,54 +1,56 @@
-import ccxt.pro as ccxtpro
-import ccxt as ccxt
+"""Data access helpers for OHLCV and listings."""
+
+import asyncio
+import re
+from datetime import datetime, timedelta, timezone
+from typing import Any
+
 import helper
 import model
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from cachetools import TTLCache
+from service.config import resolve_timeframe
+from service.database import run_sqlite_write_with_retry
+from service.exchange import Exchange
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
 
 
 class Data:
-    def __init__(self):
-        config = helper.Config()
-        utils = helper.Utils()
-        self.utils = utils
-        self.history_data = config.get("history_from_data", 30)
-        self.exchange_id = config.get("exchange")
-        self.exchange_class = getattr(ccxtpro, self.exchange_id)
-        self.exchange = self.exchange_class(
-            {
-                "apiKey": config.get("key"),
-                "secret": config.get("secret"),
-                "options": {
-                    "defaultType": config.get("market", "spot"),
-                },
-            },
-        )
-        self.exchange.set_sandbox_mode(config.get("sandbox", False))
-        self.market = config.get("market", "spot")
-        self.timeframe = config.get("timeframe", "1m")
-        self.currency = config.get("currency").upper()
+    """Data retrieval and transformation utilities."""
 
-    async def get_listing_date(self, symbol: str) -> datetime:
-        """
-        Fetch the listing date of a token, using SQLite cache with Tortoise ORM.
-        """
+    SYMBOLS_CACHE_TTL_SECONDS = 300
+    LOOKBACK_BUFFER_MULTIPLIER = 2
+
+    def __init__(self, persist_exchange: bool = False) -> None:
+        utils = helper.Utils()
+        self.exchange = Exchange()
+        self.utils = utils
+        self.persist_exchange = persist_exchange
+        self._symbols_cache: TTLCache[str, list[str]] = TTLCache(
+            maxsize=64, ttl=self.SYMBOLS_CACHE_TTL_SECONDS
+        )
+
+    async def close(self) -> None:
+        """Close the underlying exchange client."""
+        await self.exchange.close()
+
+    async def get_listing_date(
+        self, config: dict[str, Any], symbol: str
+    ) -> datetime | None:
+        """Fetch the listing date of a token, using SQLite cache."""
         # Check cache first
         listing = await model.Listings.get_or_none(symbol=symbol)
         if listing:
             return listing.listing_date
 
-        # If not cached → fetch from exchange
-        await self.exchange.load_markets()
-        if symbol not in self.exchange.markets:
-            logging.error(f"{symbol} not found")
+        # If not cached -> fetch from exchange
         try:
-            ohlcv = await self.exchange.fetch_ohlcv(
-                symbol, timeframe="1d", limit=1, since=0
+            ohlcv = await self.exchange.get_history_for_symbol(
+                config, symbol, timeframe="1d"
             )
             if not ohlcv:
-                logging.error(f"No OHLCV data available for {symbol}")
+                logging.error("No OHLCV data available for %s", symbol)
             else:
                 first_timestamp = ohlcv[0][0]
                 listing_date = datetime.fromtimestamp(
@@ -56,115 +58,199 @@ class Data:
                 )
 
                 # Save to DB cache
-                await model.Listings.create(symbol=symbol, listing_date=listing_date)
-                await self.exchange.close()
+                await run_sqlite_write_with_retry(
+                    lambda: model.Listings.create(
+                        symbol=symbol, listing_date=listing_date
+                    ),
+                    f"storing listing date for {symbol}",
+                )
                 return listing_date
         except Exception as e:
-            logging.error(f"Error fetching OHLCV for {symbol}: {e}")
+            # Broad catch to keep listing lookups resilient.
+            logging.error("Error fetching OHLCV for %s: %s", symbol, e)
         finally:
-            await self.exchange.close()
+            if not self.persist_exchange:
+                await self.exchange.close()
 
         return None
 
-    async def is_token_old_enough(self, symbol: str, threshold_days: int) -> bool:
-        """
-        Return False if token is newer than threshold_days, True otherwise.
-        """
-        listing_date = await self.get_listing_date(symbol)
+    async def is_token_old_enough(self, config: dict[str, Any], symbol: str) -> bool:
+        """Return False if token is newer than threshold_days, True otherwise."""
+        threshold_days = config.get("pair_age", 30)
+        listing_date = await self.get_listing_date(config, symbol)
         if listing_date:
             threshold_date = datetime.now(timezone.utc) - timedelta(days=threshold_days)
             return listing_date <= threshold_date
         else:
             return False
 
-    async def get_ticker_symbol_list(self):
+    async def get_ticker_symbol_list(self) -> list[str]:
+        """Return distinct ticker symbols."""
         symbols = await model.Tickers.all().distinct().values_list("symbol", flat=True)
         return symbols
 
-    def __calculate_min_candle_date(self, timerange, length):
-        # Convert timerange with buffer
-        match timerange:
-            case "1D":
-                length_minutes = 2880
-            case "4h":
-                length_minutes = 480
-            case "60min":
-                length_minutes = 120
-            case "30min":
-                length_minutes = 90
-            case "15min":
-                length_minutes = 45
-            case "10min":
-                length_minutes = 20
-            case "5min":
-                length_minutes = 10
+    async def get_latest_timestamp_for_pair(self, pair: str) -> float | None:
+        """Return the latest stored ticker timestamp for a pair."""
+        symbol = self.utils.split_symbol(pair)
+        row = await model.Tickers.filter(symbol=symbol).order_by("-timestamp").first()
+        if row is None:
+            return None
+        return float(row.timestamp)
 
-            # If an exact match is not confirmed, this last case will be used if provided
-            case _:
-                length_minutes = 30
+    async def get_exchange_symbols_for_currency(
+        self, config: dict[str, Any], currency: str
+    ) -> list[str]:
+        """Return exchange symbols for the given quote currency."""
+        cache_key = (
+            f"{config.get('exchange','')}:"
+            f"{config.get('market','spot')}:"
+            f"{bool(config.get('dry_run', True))}:"
+            f"{currency.upper()}"
+        )
+        if cache_key in self._symbols_cache:
+            return self._symbols_cache[cache_key]
 
-        # Input parameters
-        num_candles = length  # Number of candles with buffer
-        end_time = datetime.now()
+        try:
+            symbols = await self.exchange.get_symbols_for_quote_currency(
+                config, currency
+            )
+            self._symbols_cache[cache_key] = symbols
+            return symbols
+        except Exception as e:
+            # Broad catch to keep symbol list retrieval resilient.
+            logging.error("Error fetching exchange symbols for %s: %s", currency, e)
+            return []
+        finally:
+            if not self.persist_exchange:
+                await self.exchange.close()
 
-        # Calculate the total look-back duration
-        lookback_duration = timedelta(minutes=length_minutes * num_candles)
+    def __timeframe_to_seconds(self, timerange: str) -> int:
+        """Convert timeframe notation to seconds.
 
-        # Calculate the minimum date
-        min_date = end_time - lookback_duration
+        Supported examples: 1m, 5m, 15min, 1h, 4h, 1d, 1w.
+        Falls back to 60 seconds if parsing fails.
+        """
+        normalized = str(timerange or "").strip().lower()
+        if not normalized:
+            return 60
 
-        return datetime.timestamp(min_date)
+        normalized = normalized.replace("min", "m")
+        match = re.fullmatch(r"(\d+)\s*([mhdw])", normalized)
+        if not match:
+            return 60
 
-    async def count_history_data_for_symbol(self, symbol):
+        value = int(match.group(1))
+        unit = match.group(2)
+        multipliers = {
+            "m": 60,
+            "h": 60 * 60,
+            "d": 24 * 60 * 60,
+            "w": 7 * 24 * 60 * 60,
+        }
+        return max(1, value) * multipliers[unit]
+
+    def __calculate_min_candle_date(self, timerange: str, length: int) -> int:
+        """Calculate earliest timestamp in milliseconds for candle history."""
+        timeframe_seconds = self.__timeframe_to_seconds(timerange)
+        candles = max(1, int(length))
+        lookback_seconds = timeframe_seconds * candles * self.LOOKBACK_BUFFER_MULTIPLIER
+        end_time = datetime.now(timezone.utc)
+        min_date = end_time - timedelta(seconds=lookback_seconds)
+        return int(min_date.timestamp() * 1000)
+
+    @staticmethod
+    def _rows_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
+        """Create and sanitize a DataFrame from DB rows."""
+        df = pd.DataFrame(rows)
+        df.dropna(inplace=True)
+        return df
+
+    @staticmethod
+    def _append_live_candle(
+        df_source: pd.DataFrame, live_candle: dict[str, float | str]
+    ) -> pd.DataFrame:
+        """Append in-memory live candle data to DB candles."""
+        return pd.concat([df_source, pd.DataFrame([live_candle])], ignore_index=True)
+
+    @staticmethod
+    def _serialize_ohlcv_dataframe(df_source: pd.DataFrame, offset: float) -> str:
+        """Convert OHLCV DataFrame into frontend payload JSON."""
+        df = df_source.copy()
+        offset_minutes = int(offset)
+        offset_ms = offset_minutes * 60 * 1000
+        df["time"] = (df["timestamp"].astype(int) + offset_ms) / 1000000000
+        df.drop_duplicates(subset=["time"], inplace=True)
+        df.rename(
+            columns={
+                "open": "open",
+                "high": "high",
+                "low": "low",
+                "close": "close",
+            },
+            inplace=True,
+        )
+        df.drop("volume", axis=1, inplace=True)
+        df.drop("timestamp", axis=1, inplace=True)
+        return df.to_json(orient="records")
+
+    async def count_history_data_for_symbol(self, symbol: str) -> int | bool:
+        """Count history data rows for a symbol."""
         try:
             query = await model.Tickers.filter(symbol=f"{symbol}").count()
-            logging.debug(f"Counted {query} entries for symbol {symbol}")
+            logging.debug("Counted %s entries for symbol %s", query, symbol)
             return query
         except Exception as e:
-            logging.error(f"Error counting history data for symbol {symbol}: {e}")
+            # Broad catch to keep history endpoints responsive.
+            logging.error("Error counting history data for symbol %s: %s", symbol, e)
 
         return False
 
-    async def delete_ticker_data_for_trades(self, symbol):
+    async def delete_ticker_data_for_trades(self, symbol: str) -> bool:
+        """Delete ticker data for a symbol."""
         try:
             query = await model.Tickers.filter(symbol=f"{symbol}").delete()
-            logging.info(f"Delete {query} entries for symbol {symbol}")
+            logging.info("Delete %s entries for symbol %s", query, symbol)
             return True
         except Exception as e:
-            logging.error(f"Error deleting old ticker data for symbol {symbol}: {e}")
+            # Broad catch to keep delete endpoints responsive.
+            logging.error("Error deleting old ticker data for symbol %s: %s", symbol, e)
 
         return False
 
-    async def add_history_data_for_symbol(self, symbol):
+    async def add_history_data_for_symbol(
+        self, symbol: str, history_data: int, config: dict[str, Any]
+    ) -> bool:
+        """Fetch and store historical data for a symbol."""
         if await self.delete_ticker_data_for_trades(symbol):
             try:
-                if await self.fetch_history_data_for_symbol(symbol):
-                    logging.info(f"Added history for {symbol}")
+                if await self.__fetch_history_data_for_symbol(
+                    symbol, history_data, config
+                ):
+                    logging.info("Added history for %s", symbol)
                     return True
             except Exception as e:
-                logging.error(f"Error adding history for {symbol}. Cause: {e}")
+                # Broad catch to keep history loads resilient.
+                logging.error("Error adding history for %s. Cause: %s", symbol, e)
 
         return False
 
-    async def fetch_history_data_for_symbol(self, symbol):
+    async def __fetch_history_data_for_symbol(
+        self, symbol: str, history_data: int, config: dict[str, Any]
+    ) -> bool:
         ohlcv = []
-        from_date = "{:%Y-%m-%d %H:%M:%S}".format(
-            datetime.now() - timedelta(days=self.history_data)
-        )
         try:
-            from_ts = self.exchange.parse8601(from_date)
-            ohlcv_data = await self.exchange.fetch_ohlcv(
-                symbol, self.timeframe, since=from_ts, limit=1000
+            since = int(
+                (datetime.now(timezone.utc) - timedelta(days=history_data)).timestamp()
+                * 1000
             )
-            await self.exchange.close()
-            while True:
-                from_ts = ohlcv_data[-1][0]
-                new_ohlcv = await self.exchange.fetch_ohlcv(
-                    symbol, self.timeframe, since=from_ts, limit=1000
-                )
-                ohlcv_data.extend(new_ohlcv)
-                if len(new_ohlcv) != 1000:
-                    break
+            ohlcv_data = await self.exchange.get_history_for_symbol(
+                config,
+                symbol,
+                resolve_timeframe(config),
+                limit=1000,
+                since=since,
+            )
+
             symbol, market = symbol.split("/")
 
             for ticker in ohlcv_data:
@@ -179,33 +265,29 @@ class Data:
                 )
                 ohlcv.append(ticker)
 
-            await model.Tickers.bulk_create(ohlcv)
+            await run_sqlite_write_with_retry(
+                lambda: model.Tickers.bulk_create(ohlcv),
+                f"bulk insert history for {symbol}/{market}",
+            )
 
             return True
 
-        except ccxt.NetworkError as e:
-            logging.error(
-                f"Error fetching historical data from Exchange due to a network error: {e}"
-            )
-        except ccxt.ExchangeError as e:
-            logging.error(
-                f"Error fetching historical data from Exchange due to an exchange error: {e}"
-            )
-        except ccxt.BaseError as e:
-            logging.error(
-                f"Error fetching historical data from Exchange due to an error: {e}"
-            )
         except Exception as e:
-            logging.error(f"Error fetching historical data from Exchange. Cause: {e}")
+            # Broad catch to keep history loads resilient.
+            logging.error("Error fetching historical data from Exchange. Cause: %s", e)
         finally:
-            await self.exchange.close()
+            if not self.persist_exchange:
+                await self.exchange.close()
 
         return False
 
-    async def get_ohlcv_for_pair(self, pair, timerange, timestamp_start, offset):
+    async def get_ohlcv_for_pair(
+        self, pair: str, timerange: str, timestamp_start: float, offset: float
+    ) -> str | dict[str, Any]:
+        """Return OHLCV data for a pair and timerange."""
         # 600000 --> 60 minutes in milliseconds before
         # start_date = datetime.fromtimestamp(((float(timestamp_start) - 600000) / 1000.0),UTC,)
-        symbol = self.utils.split_symbol(pair, self.currency)
+        symbol = self.utils.split_symbol(pair)
         start_timestamp = float(timestamp_start) - 60000
         ohlcv = {}
         query = (
@@ -214,55 +296,105 @@ class Data:
             .values("timestamp", "open", "high", "low", "close", "volume")
         )
 
-        if query:
-            df = self.resample_data(pd.DataFrame(query), timerange)
-
-            df["time"] = df["timestamp"].astype(int) + 60 * int(offset)
-            df.drop_duplicates(subset=["time"], inplace=True)
-            df.rename(
-                columns={
-                    "open": "open",
-                    "high": "high",
-                    "low": "low",
-                    "close": "close",
-                },
-                inplace=True,
+        df_source = (
+            await asyncio.to_thread(pd.DataFrame, query) if query else pd.DataFrame()
+        )
+        live_candle = self.__get_live_candle_for_symbol(symbol, start_timestamp)
+        if live_candle:
+            df_source = await asyncio.to_thread(
+                self._append_live_candle, df_source, live_candle
             )
-            df.drop("volume", axis=1, inplace=True)
-            df.drop("timestamp", axis=1, inplace=True)
-            ohlcv = df.to_json(orient="records")
+
+        if not df_source.empty:
+            df = await asyncio.to_thread(self.resample_data, df_source, timerange)
+            if df is not None and not df.empty:
+                ohlcv = await asyncio.to_thread(
+                    self._serialize_ohlcv_dataframe, df, offset
+                )
 
         return ohlcv
 
-    async def get_data_for_pair(self, pair, timerange, length):
-        symbol = self.utils.split_symbol(pair, self.currency)
+    def __get_live_candle_for_symbol(
+        self, symbol: str, start_timestamp: float
+    ) -> dict[str, float | str] | None:
+        """Return current in-memory watcher candle for symbol if it is in range."""
+        try:
+            from service.watcher import Watcher
+
+            live = Watcher.candles.get(symbol)
+            if not live or len(live) < 6:
+                return None
+            if float(live[0]) <= float(start_timestamp):
+                return None
+            return {
+                "timestamp": float(live[0]),
+                "symbol": symbol,
+                "open": float(live[1]),
+                "high": float(live[2]),
+                "low": float(live[3]),
+                "close": float(live[4]),
+                "volume": float(live[5]),
+            }
+        except Exception:
+            return None
+
+    async def get_data_for_pair(
+        self, pair: str, timerange: str, length: int
+    ) -> pd.DataFrame | None:
+        """Return raw OHLCV rows for a pair."""
+        symbol = self.utils.split_symbol(pair)
         start_date = self.__calculate_min_candle_date(timerange, length)
+
         query = (
             await model.Tickers.filter(symbol=symbol)
             .filter(timestamp__gt=start_date)
+            .order_by("timestamp")
             .values()
         )
 
         if query:
-            df = pd.DataFrame(query)
-
-            df.dropna(inplace=True)
+            df = await asyncio.to_thread(self._rows_to_dataframe, query)
         else:
             df = None
 
         return df
 
-    def resample_data(self, ohlcv, timerange):
+    async def get_data_for_pair_by_days(
+        self, pair: str, lookback_days: int
+    ) -> pd.DataFrame | None:
+        """Return raw OHLCV rows for a pair using day-based lookback."""
+        symbol = self.utils.split_symbol(pair)
+        start_date = int(
+            (
+                datetime.now(timezone.utc) - timedelta(days=max(1, int(lookback_days)))
+            ).timestamp()
+            * 1000
+        )
+
+        query = (
+            await model.Tickers.filter(symbol=symbol)
+            .filter(timestamp__gt=start_date)
+            .order_by("timestamp")
+            .values()
+        )
+
+        if query:
+            df = await asyncio.to_thread(self._rows_to_dataframe, query)
+        else:
+            df = None
+
+        return df
+
+    def resample_data(self, ohlcv: pd.DataFrame, timerange: str) -> pd.DataFrame | None:
+        """Resample OHLCV data to the requested timerange."""
         df = pd.DataFrame(ohlcv)
         if not df.empty:
-
             # Convert unix timestamp to datetime object
             df["timestamp"] = pd.to_datetime(
                 df["timestamp"].astype(float), utc=True, origin="unix", unit="ms"
             )
             # Set datetime index
             df = df.set_index("timestamp")
-
             # Resample to the configured timerange
             if "m" in timerange:
                 interval, range = timerange.split("m")
@@ -282,12 +414,11 @@ class Data:
             df_resample.reset_index(inplace=True)
 
             # Convert datetime object back to a unix timestamp
-            df_resample["timestamp"] = df_resample["timestamp"].astype(int)
-            df_resample["timestamp"] = df_resample["timestamp"].div(10**9)
+            # df_resample["timestamp"] = df_resample["timestamp"].astype(int)
+            # df_resample["timestamp"] = df_resample["timestamp"].div(10**9)
 
             # Clear empty values
             df_resample.dropna(inplace=True)
-
             return df_resample
         else:
             logging.error("No historic data available yet for symbol")

@@ -1,0 +1,357 @@
+import asyncio
+import types
+from typing import Any
+
+import model
+import pytest
+import signals.sym_signals as sym_module
+from signals.sym_signals import SignalPlugin
+
+
+class DummyTrades:
+    @classmethod
+    def all(cls):
+        return cls()
+
+    async def values_list(self, *args, **kwargs) -> list:
+        return []
+
+    def distinct(self) -> Any:
+        return self
+
+
+@pytest.mark.asyncio
+async def test_sym_signals_run_triggers_buy_order(monkeypatch) -> None:
+    watcher_queue = asyncio.Queue()
+    plugin = SignalPlugin(watcher_queue)
+
+    monkeypatch.setattr(model, "Trades", DummyTrades)
+
+    class DummyAsyncClient:
+        def __init__(self):
+            self.connected = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def connect(self, *_args, **_kwargs) -> None:
+            self.connected = True
+
+        async def disconnect(self) -> None:
+            self.connected = False
+
+        async def receive(self, *_, **__) -> list:
+            plugin.status = False
+            return [
+                "signal",
+                {
+                    "symbol": "BTC",
+                    "signal": "BOT_START",
+                    "signal_name_id": 1,
+                    "market_cap_rank": 1,
+                    "volume_24h": {"BINANCE": {"USDT": "10M"}},
+                },
+            ]
+
+    monkeypatch.setattr(sym_module.socketio, "AsyncSimpleClient", DummyAsyncClient)
+
+    # Minimal valid config for the plugin.
+    config = {
+        "currency": "USDT",
+        "bo": 10,
+        "signal_settings": (
+            '{"api_url":"https://example.com","api_key":"x",'
+            '"api_version":"v1","allowed_signals":[1]}'
+        ),
+    }
+
+    async def fake_check_entry_point(*_args, **_kwargs) -> None:
+        return True
+
+    async def fake_is_token_old_enough(*_args, **_kwargs) -> None:
+        return True
+
+    monkeypatch.setattr(
+        plugin, "_SignalPlugin__check_entry_point", fake_check_entry_point
+    )
+    monkeypatch.setattr(plugin.data, "is_token_old_enough", fake_is_token_old_enough)
+
+    async def fake_get_profit() -> None:
+        return {
+            "upnl": 0,
+            "profit_overall": 0,
+            "funds_locked": 0,
+            "autopilot": "none",
+            "profit_week": {},
+        }
+
+    monkeypatch.setattr(plugin.statistic, "get_profit", fake_get_profit)
+
+    orders = []
+
+    async def fake_receive_buy_order(order, _config) -> None:
+        orders.append(order)
+
+    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+
+    await plugin.run(config)
+
+    assert len(orders) == 1
+    assert orders[0]["symbol"] == "BTC/USDT"
+
+
+@pytest.mark.asyncio
+async def test_sym_signals_idle_timeout_does_not_force_immediate_reconnect(
+    monkeypatch,
+) -> None:
+    watcher_queue = asyncio.Queue()
+    plugin = SignalPlugin(watcher_queue)
+
+    monkeypatch.setattr(model, "Trades", DummyTrades)
+
+    class DummyAsyncClient:
+        connect_calls = 0
+        disconnect_calls = 0
+
+        def __init__(self):
+            self.connected = False
+            self.receive_calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def connect(self, *_args, **_kwargs) -> None:
+            self.connected = True
+            DummyAsyncClient.connect_calls += 1
+
+        async def disconnect(self) -> None:
+            self.connected = False
+            DummyAsyncClient.disconnect_calls += 1
+
+        async def receive(self, *_, **__) -> list:
+            self.receive_calls += 1
+            if self.receive_calls == 1:
+                raise sym_module.TimeoutError()
+
+            plugin.status = False
+            return [
+                "signal",
+                {
+                    "symbol": "BTC",
+                    "signal": "BOT_START",
+                    "signal_name_id": 1,
+                    "market_cap_rank": 1,
+                    "volume_24h": {"BINANCE": {"USDT": "10M"}},
+                },
+            ]
+
+    monkeypatch.setattr(sym_module.socketio, "AsyncSimpleClient", DummyAsyncClient)
+
+    config = {
+        "currency": "USDT",
+        "bo": 10,
+        "signal_settings": (
+            '{"api_url":"https://example.com","api_key":"x",'
+            '"api_version":"v1","allowed_signals":[1]}'
+        ),
+    }
+
+    async def fake_check_entry_point(*_args, **_kwargs) -> None:
+        return True
+
+    async def fake_is_token_old_enough(*_args, **_kwargs) -> None:
+        return True
+
+    monkeypatch.setattr(
+        plugin, "_SignalPlugin__check_entry_point", fake_check_entry_point
+    )
+    monkeypatch.setattr(plugin.data, "is_token_old_enough", fake_is_token_old_enough)
+
+    async def fake_get_profit() -> None:
+        return {
+            "upnl": 0,
+            "profit_overall": 0,
+            "funds_locked": 0,
+            "autopilot": "none",
+            "profit_week": {},
+        }
+
+    monkeypatch.setattr(plugin.statistic, "get_profit", fake_get_profit)
+
+    orders = []
+
+    async def fake_receive_buy_order(order, _config) -> None:
+        orders.append(order)
+
+    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+
+    await plugin.run(config)
+
+    assert len(orders) == 1
+    assert DummyAsyncClient.connect_calls == 1
+    assert DummyAsyncClient.disconnect_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_sym_signals_idle_warning_mentions_no_events(monkeypatch) -> None:
+    watcher_queue = asyncio.Queue()
+    plugin = SignalPlugin(watcher_queue)
+    plugin.SOCKET_IDLE_TIMEOUT_SECONDS = 1
+    plugin.MAX_IDLE_TIMEOUTS_BEFORE_RECONNECT = 2
+
+    monkeypatch.setattr(model, "Trades", DummyTrades)
+
+    class DummyAsyncClient:
+        def __init__(self):
+            self.connected = False
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def connect(self, *_args, **_kwargs) -> None:
+            self.connected = True
+
+        async def disconnect(self) -> None:
+            self.connected = False
+            plugin.status = False
+
+        async def receive(self, *_, **__) -> list:
+            raise sym_module.TimeoutError()
+
+    warnings = []
+
+    def capture_warning(message, *args) -> None:
+        warnings.append(message % args if args else message)
+
+    monkeypatch.setattr(sym_module.socketio, "AsyncSimpleClient", DummyAsyncClient)
+    monkeypatch.setattr(sym_module.logging, "warning", capture_warning)
+
+    config = {
+        "currency": "USDT",
+        "bo": 10,
+        "signal_settings": (
+            '{"api_url":"https://example.com","api_key":"x",'
+            '"api_version":"v1","allowed_signals":[1]}'
+        ),
+    }
+
+    await plugin.run(config)
+
+    assert any(
+        "No websocket events were received since this connection was established."
+        in entry
+        for entry in warnings
+    )
+
+
+@pytest.mark.asyncio
+async def test_sym_signals_error_event_logs_payload_and_uses_backoff(
+    monkeypatch,
+) -> None:
+    watcher_queue = asyncio.Queue()
+    plugin = SignalPlugin(watcher_queue)
+    plugin.RECONNECT_DELAY_SECONDS = 3
+    plugin.MAX_ERROR_RECONNECT_DELAY_SECONDS = 30
+
+    monkeypatch.setattr(model, "Trades", DummyTrades)
+
+    class DummyAsyncClient:
+        def __init__(self):
+            self.connected = False
+            self.receive_calls = 0
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def connect(self, *_args, **_kwargs) -> None:
+            self.connected = True
+
+        async def disconnect(self) -> None:
+            self.connected = False
+
+        async def receive(self, *_, **__) -> list:
+            self.receive_calls += 1
+            if self.receive_calls == 1:
+                return ["error", {"message": "unauthorized", "code": "AUTH_401"}]
+
+            plugin.status = False
+            return [
+                "signal",
+                {
+                    "symbol": "BTC",
+                    "signal": "BOT_START",
+                    "signal_name_id": 1,
+                    "market_cap_rank": 1,
+                    "volume_24h": {"BINANCE": {"USDT": "10M"}},
+                },
+            ]
+
+    warning_logs = []
+    sleep_calls = []
+
+    def capture_warning(message, *args) -> None:
+        warning_logs.append(message % args if args else message)
+
+    async def fake_sleep(seconds) -> None:
+        sleep_calls.append(seconds)
+        return None
+
+    monkeypatch.setattr(sym_module.socketio, "AsyncSimpleClient", DummyAsyncClient)
+    monkeypatch.setattr(sym_module.logging, "warning", capture_warning)
+    monkeypatch.setattr(sym_module.asyncio, "sleep", fake_sleep)
+
+    config = {
+        "currency": "USDT",
+        "bo": 10,
+        "signal_settings": (
+            '{"api_url":"https://example.com","api_key":"x",'
+            '"api_version":"v1","allowed_signals":[1]}'
+        ),
+    }
+
+    async def fake_check_entry_point(*_args, **_kwargs) -> None:
+        return True
+
+    async def fake_is_token_old_enough(*_args, **_kwargs) -> None:
+        return True
+
+    monkeypatch.setattr(
+        plugin, "_SignalPlugin__check_entry_point", fake_check_entry_point
+    )
+    monkeypatch.setattr(plugin.data, "is_token_old_enough", fake_is_token_old_enough)
+
+    async def fake_get_profit() -> None:
+        return {
+            "upnl": 0,
+            "profit_overall": 0,
+            "funds_locked": 0,
+            "autopilot": "none",
+            "profit_week": {},
+        }
+
+    monkeypatch.setattr(plugin.statistic, "get_profit", fake_get_profit)
+
+    orders = []
+
+    async def fake_receive_buy_order(order, _config) -> None:
+        orders.append(order)
+
+    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+
+    await plugin.run(config)
+
+    assert len(orders) == 1
+    assert sleep_calls == [3]
+    assert any("AUTH_401" in entry for entry in warning_logs)
