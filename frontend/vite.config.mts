@@ -23,16 +23,6 @@ export default defineConfig({
     cssCodeSplit: !lowMemoryBuild,
     chunkSizeWarningLimit: 600,
     rollupOptions: {
-      onwarn(warning, warn) {
-        if (
-          warning.code === 'CIRCULAR_DEPENDENCY' &&
-          typeof warning.message === 'string' &&
-          warning.message.includes('Circular chunk: vendor-naive')
-        ) {
-          return
-        }
-        warn(warning)
-      },
       output: {
         manualChunks: lowMemoryBuild
           ? undefined
@@ -61,20 +51,6 @@ export default defineConfig({
                 return 'vendor-echarts-core'
               }
 
-              if (
-                id.includes('/node_modules/naive-ui/es/_internal/') ||
-                id.includes('/node_modules/naive-ui/es/_mixins/') ||
-                id.includes('/node_modules/naive-ui/es/_utils/')
-              ) {
-                return 'vendor-naive-common'
-              }
-              if (
-                id.includes('/node_modules/naive-ui/es/data-table/') ||
-                id.includes('/node_modules/naive-ui/es/pagination/') ||
-                id.includes('/node_modules/naive-ui/es/table/')
-              ) {
-                return 'vendor-naive-table'
-              }
               if (id.includes('/node_modules/naive-ui/')) {
                 return 'vendor-naive'
               }
