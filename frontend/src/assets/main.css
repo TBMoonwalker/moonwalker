@@ -1,35 +1,46 @@
 @import './base.css';
 
 #app {
-  max-width: 1280px;
+  width: 100%;
+  min-height: 100vh;
   margin: 0 auto;
-  padding: 2rem;
-
+  padding: clamp(12px, 2vw, 24px);
   font-weight: normal;
 }
 
-a,
-.green {
-  text-decoration: none;
-  color: hsla(160, 100%, 37%, 1);
-  transition: 0.4s;
+body {
+  margin: 0;
+  min-height: 100vh;
 }
 
-@media (hover: hover) {
-  a:hover {
-    background-color: hsla(160, 100%, 37%, 0.2);
+.page-shell {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.page-header,
+.page-section {
+  width: 100%;
+}
+
+@media (min-width: 1280px) {
+  .page-shell {
+    gap: 20px;
   }
 }
 
-@media (min-width: 1024px) {
-  body {
-    display: flex;
-    place-items: center;
-  }
+:focus-visible {
+  outline: 2px solid rgba(99, 226, 183, 0.95);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
 
+@media (max-width: 768px) {
   #app {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    padding: 0 2rem;
+    padding: 12px;
   }
 }

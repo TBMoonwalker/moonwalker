@@ -1,5 +1,5 @@
 <template>
-    <n-flex vertical :style="{ display: 'flex', flexDirection: 'column', gap: '16px', width: '98%' }">
+    <n-flex vertical class="config-form-shell">
         <n-card title="General settings">
             <n-form ref="generalFormRef" :model="general" :rules="rules" label-width="auto"
                 require-mark-placement="right-hanging" :style="{
@@ -382,8 +382,26 @@
             </n-form>
         </n-card>
 
-        <n-button round type="primary" @click="handleValidateButtonClick">
-            Submit
+        <n-alert
+            :type="saveBannerType"
+            :title="saveBannerTitle"
+            role="status"
+            aria-live="polite"
+        >
+            {{ saveBannerMessage }}
+        </n-alert>
+
+        <n-button
+            class="submit-button"
+            round
+            type="primary"
+            :loading="saveState === 'saving'"
+            :disabled="isSubmitDisabled"
+            aria-label="Submit configuration changes"
+            aria-keyshortcuts="Control+S Meta+S"
+            @click="handleValidateButtonClick"
+        >
+            {{ submitButtonLabel }}
         </n-button>
     </n-flex>
 
@@ -410,13 +428,17 @@ import {
   type FormRules,
   useMessage
 } from 'naive-ui'
-import { ref, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import axios from 'axios'
+import { trackUiEvent } from '../utils/uiTelemetry'
 
 interface dynamicSelectItem {
     value: string | null;
 }
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+type PersistableState = Record<string, Record<string, unknown>>
 
 function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
@@ -442,6 +464,10 @@ const isLoading = ref(true)
 const showAdvancedGeneral = ref(false)
 const monitoring_test_loading = ref(false)
 const submitAttempted = ref(false)
+const saveState = ref<SaveState>('idle')
+const saveErrorMessage = ref<string | null>(null)
+const lastSavedAt = ref<Date | null>(null)
+const baselineState = ref<PersistableState | null>(null)
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
 const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
 const ADVANCED_WS_STALE_TIMEOUT_MS = 20000
@@ -691,6 +717,158 @@ const indicator = ref({
     upnl_housekeeping_interval: 0,
     history_lookback_time: null,
 })
+
+const SECTION_LABELS: Record<string, string> = {
+    general: 'General',
+    signal: 'Signal',
+    filter: 'Filter',
+    exchange: 'Exchange',
+    dca: 'DCA',
+    autopilot: 'Autopilot',
+    monitoring: 'Monitoring',
+    indicator: 'Indicator',
+}
+
+function buildPersistableState(): PersistableState {
+    return {
+        general: {
+            ...general.value,
+            show_advanced_general: showAdvancedGeneral.value,
+        },
+        signal: {
+            symbol_list: signal.value.symbol_list,
+            asap_use_url: signal.value.asap_use_url,
+            asap_symbol_select: signal.value.asap_symbol_select,
+            signal: signal.value.signal,
+            strategy: signal.value.strategy,
+            strategy_enabled: signal.value.strategy_enabled,
+            timeframe: signal.value.timeframe,
+            symsignal_url: signal.value.symsignal_url,
+            symsignal_key: signal.value.symsignal_key,
+            symsignal_version: signal.value.symsignal_version,
+            symsignal_allowedsignals: signal.value.symsignal_allowedsignals,
+        },
+        filter: { ...filter.value },
+        exchange: { ...exchange.value },
+        dca: { ...dca.value },
+        autopilot: { ...autopilot.value },
+        monitoring: { ...monitoring.value },
+        indicator: { ...indicator.value },
+    }
+}
+
+function clonePersistableState(state: PersistableState): PersistableState {
+    return JSON.parse(JSON.stringify(state)) as PersistableState
+}
+
+function syncBaselineState(): void {
+    baselineState.value = clonePersistableState(buildPersistableState())
+}
+
+const changedSections = computed(() => {
+    if (!baselineState.value) {
+        return [] as string[]
+    }
+
+    const currentState = buildPersistableState()
+    return Object.keys(currentState).filter(
+        (section) =>
+            JSON.stringify(currentState[section]) !==
+            JSON.stringify(baselineState.value?.[section]),
+    )
+})
+
+const changedSectionLabels = computed(() =>
+    changedSections.value.map((section) => SECTION_LABELS[section] || section),
+)
+
+const isDirty = computed(() => changedSections.value.length > 0)
+const submitButtonLabel = computed(() => {
+    if (saveState.value === 'saving') {
+        return 'Saving...'
+    }
+    if (isDirty.value) {
+        return 'Submit changes'
+    }
+    return 'No changes'
+})
+const saveBannerType = computed(() => {
+    if (saveState.value === 'error') {
+        return 'error'
+    }
+    if (saveState.value === 'saved') {
+        return 'success'
+    }
+    if (isDirty.value) {
+        return 'warning'
+    }
+    return 'info'
+})
+const saveBannerTitle = computed(() => {
+    if (saveState.value === 'error') {
+        return 'Save failed'
+    }
+    if (saveState.value === 'saved') {
+        return 'Saved'
+    }
+    if (isDirty.value) {
+        return 'Unsaved changes'
+    }
+    return 'No pending changes'
+})
+const saveBannerMessage = computed(() => {
+    if (saveState.value === 'error' && saveErrorMessage.value) {
+        return saveErrorMessage.value
+    }
+    if (saveState.value === 'saved' && lastSavedAt.value) {
+        return `Configuration saved at ${lastSavedAt.value.toLocaleTimeString()}`
+    }
+    if (isDirty.value) {
+        const changed = changedSectionLabels.value.join(', ')
+        return changed.length > 0
+            ? `Changed sections: ${changed}`
+            : 'You have unsaved changes.'
+    }
+    return 'Edit any field and submit to persist updates.'
+})
+const isSubmitDisabled = computed(
+    () => isLoading.value || saveState.value === 'saving' || !isDirty.value,
+)
+
+function hasUnsavedChanges(): boolean {
+    return !isLoading.value && isDirty.value
+}
+
+function setSaveError(messageText: string): void {
+    saveState.value = 'error'
+    saveErrorMessage.value = messageText
+}
+
+function confirmDiscardUnsavedChanges(source: 'route_leave' | 'page_unload'): boolean {
+    if (!hasUnsavedChanges()) {
+        return true
+    }
+    if (source === 'page_unload') {
+        return false
+    }
+    const confirmLeave = window.confirm(
+        'You have unsaved changes. Leave this page and discard them?',
+    )
+    trackUiEvent('config_unsaved_prompt', {
+        source,
+        confirmed: confirmLeave,
+        dirty_sections: changedSections.value.length,
+    })
+    return confirmLeave
+}
+
+const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (confirmDiscardUnsavedChanges('page_unload')) {
+        return
+    }
+    event.preventDefault()
+    event.returnValue = ''
+}
 
 function getDefaultHistoryLookbackByTimeframe(timeframe: string | null): string {
     const normalized = String(timeframe || '').trim().toLowerCase()
@@ -1273,12 +1451,20 @@ async function fetchDefaultValues() {
                 await fetchAsapSymbolsForCurrency()
             }
 
+            syncBaselineState()
+            saveState.value = 'idle'
+            saveErrorMessage.value = null
+            lastSavedAt.value = null
+            trackUiEvent('config_baseline_loaded')
+
         } else {
             message.error('Failed to load default values')
+            setSaveError('Failed to load configuration.')
         }
     } catch (error) {
         console.error('Error fetching default values:', error);
         message.error('An unexpected error occurred while loading default values.')
+        setSaveError('An unexpected error occurred while loading default values.')
     } finally {
         isLoading.value = false; // Set loading state to false after fetch
     }
@@ -1348,6 +1534,21 @@ function normalizePairEntries(raw: string | null, quoteCurrency: string): string
 }
 
 async function submitForm() {
+    if (!isDirty.value) {
+        message.info('No unsaved changes to submit.')
+        trackUiEvent('config_submit_skipped_no_changes')
+        return
+    }
+    if (saveState.value === 'saving') {
+        return
+    }
+
+    const submitStartedAt = performance.now()
+    const dirtySectionsBeforeSubmit = changedSections.value.length
+    trackUiEvent('config_submit_requested')
+    saveState.value = 'saving'
+    saveErrorMessage.value = null
+
     try {
         const quoteCurrency = String(exchange.value.currency || "USDT").toUpperCase()
         const asapInputValue = signal.value.asap_use_url
@@ -1431,27 +1632,47 @@ async function submitForm() {
                 'type': "str"
             }),
         }
-        console.log(formData)
 
         // Assuming you have an API endpoint
         const response = await axios.post(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/multiple`, formData);
 
         if (response.status >= 200 && response.status < 300) {
+            syncBaselineState()
+            saveState.value = 'saved'
+            saveErrorMessage.value = null
+            lastSavedAt.value = new Date()
+            trackUiEvent('config_submit_success', {
+                status_code: response.status,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                dirty_sections: dirtySectionsBeforeSubmit,
+            })
             message.success('Form submitted successfully')
             setTimeout(() => {
                 router.push('/')
             }, 250)
         } else {
+            setSaveError('An unexpected error occurred while submitting the configuration.')
+            trackUiEvent('config_submit_error', {
+                status_code: response.status,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                category: 'non_2xx_response',
+            })
             let errorMessage = 'An unexpected error occurred'
             try {
                 errorMessage = response.data.message || JSON.stringify(response.data);
             } catch (e) {
                 console.error('Error parsing error message:', e)
             }
+            setSaveError(errorMessage)
             message.error(errorMessage)
         }
     } catch (error) {
         if (error.response) {
+            trackUiEvent('config_submit_error', {
+                status_code: error.response.status || null,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                category: 'exception_response',
+            })
             // Server responded with a status other than 2xx
             let errorMessage = 'An unexpected error occurred'
             try {
@@ -1459,12 +1680,25 @@ async function submitForm() {
             } catch (e) {
                 console.error('Error parsing error message:', e)
             }
+            setSaveError(errorMessage)
             message.error(errorMessage)
         } else if (error.request) {
+            trackUiEvent('config_submit_error', {
+                status_code: null,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                category: 'no_response',
+            })
             // No response was received
+            setSaveError('No response from server. Please try again later.')
             message.error('No response from server. Please try again later.')
         } else {
+            trackUiEvent('config_submit_error', {
+                status_code: null,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                category: 'request_setup',
+            })
             // Something happened while setting up the request
+            setSaveError(`Request failed: ${error.message}`)
             message.error(`Request failed: ${error.message}`)
         }
     }
@@ -1512,8 +1746,7 @@ async function testMonitoringTelegram() {
     }
 }
 
-function handleValidateButtonClick(e: MouseEvent) {
-    e.preventDefault()
+function validateAndSubmit(): void {
     submitAttempted.value = true
     const forms = [
         generalFormRef.value,
@@ -1535,11 +1768,28 @@ function handleValidateButtonClick(e: MouseEvent) {
 
     Promise.all(validations).then((results) => {
         if (results.every(Boolean)) {
+            trackUiEvent('config_validation_success')
             submitForm()
         } else {
+            setSaveError('Missing/invalid configuration input')
+            trackUiEvent('config_validation_failed')
             message.error('Missing/invalid configuration input')
         }
     })
+}
+
+function handleValidateButtonClick(e: MouseEvent) {
+    e.preventDefault()
+    validateAndSubmit()
+}
+
+function handleGlobalKeydown(event: KeyboardEvent): void {
+    const key = event.key.toLowerCase()
+    if ((event.ctrlKey || event.metaKey) && key === 's') {
+        event.preventDefault()
+        trackUiEvent('config_submit_shortcut_used')
+        validateAndSubmit()
+    }
 }
 
 watch(
@@ -1605,13 +1855,37 @@ watch(
     },
 )
 
+onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
+
 onMounted(() => {
     timezone.value = getAllTimeZones()
     const clientTimezone = getClientTimezone()
     if (!timezone.value.some((tz) => tz.value === clientTimezone)) {
         timezone.value.unshift({ label: clientTimezone, value: clientTimezone })
     }
-    fetchDefaultValues(); // Fetch default values when component is mounted
-});
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener('keydown', handleGlobalKeydown)
+    void fetchDefaultValues()
+})
+
+onUnmounted(() => {
+    window.removeEventListener('beforeunload', handleBeforeUnload)
+    window.removeEventListener('keydown', handleGlobalKeydown)
+})
 
 </script>
+
+<style scoped>
+.config-form-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+}
+
+@media (max-width: 768px) {
+    .submit-button {
+        width: 100%;
+    }
+}
+</style>

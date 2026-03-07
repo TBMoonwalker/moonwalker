@@ -26,6 +26,7 @@ import VChart from 'vue-echarts'
 import { NSpin } from 'naive-ui'
 import { useUpnlDatastore } from '../stores/upnl'
 import { useWebSocketDataStore } from '../stores/websocket'
+import { formatTradingViewDate } from '../helpers/date'
 
 use([GridComponent, TooltipComponent, LineChart, CanvasRenderer])
 
@@ -115,6 +116,7 @@ const option = computed(() => {
       axisLabel: {
         color: '#fff',
         hideOverlap: true,
+        formatter: (value: string) => formatTradingViewDate(value),
       },
       boundaryGap: false,
     },

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from './config'
 import { RouterView } from 'vue-router'
-import { darkTheme, NConfigProvider, NDialogProvider, NFlex, NGlobalStyle, NMessageProvider, NModalProvider, NNotificationProvider, useOsTheme } from 'naive-ui'
+import { darkTheme, NConfigProvider, NDialogProvider, NGlobalStyle, NMessageProvider, NModalProvider, NNotificationProvider, useOsTheme } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWebSocketDataStore } from './stores/websocket'
 import { useWebSocket } from '@vueuse/core'
 import axios from 'axios'
+import { trackUiEvent } from './utils/uiTelemetry'
+import type { WebSocketStatus } from './stores/websocket'
 
 const DEFAULT_WS_WATCHDOG_ENABLED = false
 const DEFAULT_WS_HEALTHCHECK_INTERVAL_MS = 5000
@@ -27,6 +29,8 @@ const wsReconnectDebounceMs = ref(DEFAULT_WS_RECONNECT_DEBOUNCE_MS)
 const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
 const buildWsUrl = (path: string): string =>
   `${wsProtocol}://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}${path}`
+const buildHttpUrl = (path: string): string =>
+  `${window.location.protocol}//${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}${path}`
 
 const toNumberOrDefault = (value: unknown, fallback: number): number => {
   const parsed = Number(value)
@@ -51,7 +55,7 @@ const toBooleanOrDefault = (value: unknown, fallback: boolean): boolean => {
 
 const loadWsWatchdogConfig = async () => {
   try {
-    const response = await axios.get(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/all`)
+    const response = await axios.get(buildHttpUrl('/config/all'))
     wsWatchdogEnabled.value = toBooleanOrDefault(
       response.data?.ws_watchdog_enabled,
       DEFAULT_WS_WATCHDOG_ENABLED,
@@ -85,7 +89,7 @@ const loadWsWatchdogConfig = async () => {
 const createManagedSocket = (
   name: string,
   url: string,
-  onData: (payload: string | null) => void,
+  store: ReturnType<typeof useWebSocketDataStore>,
   options?: { healthcheck?: boolean },
 ) => {
   const healthcheckEnabled = options?.healthcheck ?? true
@@ -96,108 +100,128 @@ const createManagedSocket = (
     },
     onMessage(_ws, event) {
       lastMessageAt.value = Date.now()
-      onData((event.data as string) ?? null)
-    },
-    onConnected() {
-      lastMessageAt.value = Date.now()
+      store.setRaw((event.data as string) ?? null)
     },
   })
 
   const lastMessageAt = ref(Date.now())
   let lastReconnectAt = 0
 
-  const reconnect = () => {
+  const reconnect = (reason: string) => {
     if (!wsWatchdogEnabled.value) {
       return
     }
     const now = Date.now()
     if (now - lastReconnectAt < wsReconnectDebounceMs.value) {
+      trackUiEvent('ws_reconnect_debounced', { socket: name, reason })
       return
     }
     lastReconnectAt = now
+    store.markReconnect()
+    trackUiEvent('ws_reconnect', { socket: name, reason })
     socket.close()
     setTimeout(() => socket.open(), 250)
     console.debug(`[ws] reinitialized ${name}`)
   }
 
-  watch(socket.status, (status) => {
+  const stopStatusWatch = watch(socket.status, (status) => {
+    store.setStatus(status as WebSocketStatus)
     if (status === 'OPEN') {
       lastMessageAt.value = Date.now()
     }
-  })
+  }, { immediate: true })
 
-  const onActiveAgain = () => {
-    if (!wsWatchdogEnabled.value) {
-      return
-    }
-    if (!document.hidden && navigator.onLine) {
-      reconnect()
-    }
-  }
-
-  let healthcheckTimer: number | null = null
-  const runHealthcheck = () => {
-    if (
-      healthcheckEnabled &&
-      wsWatchdogEnabled.value &&
-      !document.hidden &&
-      navigator.onLine &&
-      socket.status.value === 'OPEN' &&
-      Date.now() - lastMessageAt.value > wsStaleTimeoutMs.value
-    ) {
-      reconnect()
-    }
-    healthcheckTimer = window.setTimeout(runHealthcheck, wsHealthcheckIntervalMs.value)
-  }
-  runHealthcheck()
-
-  const visibilityHandler = () => {
-    if (!document.hidden) {
-      onActiveAgain()
-    }
-  }
-
-  window.addEventListener('focus', onActiveAgain)
-  window.addEventListener('online', onActiveAgain)
-  document.addEventListener('visibilitychange', visibilityHandler)
-
-  return () => {
-    if (healthcheckTimer !== null) {
-      window.clearTimeout(healthcheckTimer)
-    }
-    window.removeEventListener('focus', onActiveAgain)
-    window.removeEventListener('online', onActiveAgain)
-    document.removeEventListener('visibilitychange', visibilityHandler)
+  const dispose = () => {
+    stopStatusWatch()
+    store.setStatus('CLOSED')
     socket.close()
+  }
+
+  return {
+    name,
+    socket,
+    healthcheckEnabled,
+    lastMessageAt,
+    reconnect,
+    dispose,
   }
 }
 
-const disposeOpenOrders = createManagedSocket(
+const managedSockets = [
+  createManagedSocket(
   'openTrades',
   buildWsUrl('/trades/open'),
-  (payload) => open_trade_store.setRaw(payload),
+  open_trade_store,
   { healthcheck: false },
-)
-const disposeClosedOrders = createManagedSocket(
+  ),
+  createManagedSocket(
   'closedTrades',
   buildWsUrl('/trades/closed'),
-  (payload) => closed_trade_store.setRaw(payload),
+  closed_trade_store,
   { healthcheck: false },
-)
-const disposeStatistics = createManagedSocket(
+  ),
+  createManagedSocket(
   'statistics',
   buildWsUrl('/statistic/profit'),
-  (payload) => statistics_store.setRaw(payload),
-)
+  statistics_store,
+  ),
+]
+
+const onActiveAgain = () => {
+  if (!wsWatchdogEnabled.value) {
+    return
+  }
+  if (document.hidden || !navigator.onLine) {
+    return
+  }
+  for (const managedSocket of managedSockets) {
+    if (managedSocket.socket.status.value !== 'OPEN') {
+      managedSocket.reconnect('app_active')
+    }
+  }
+}
+
+const visibilityHandler = () => {
+  if (!document.hidden) {
+    onActiveAgain()
+  }
+}
+
+let healthcheckTimer: number | null = null
+const runHealthcheck = () => {
+  if (wsWatchdogEnabled.value && !document.hidden && navigator.onLine) {
+    const now = Date.now()
+    for (const managedSocket of managedSockets) {
+      if (
+        managedSocket.healthcheckEnabled &&
+        managedSocket.socket.status.value === 'OPEN' &&
+        now - managedSocket.lastMessageAt.value > wsStaleTimeoutMs.value
+      ) {
+        managedSocket.reconnect('stale_timeout')
+      }
+    }
+  }
+  healthcheckTimer = window.setTimeout(runHealthcheck, wsHealthcheckIntervalMs.value)
+}
 
 onUnmounted(() => {
-  disposeOpenOrders()
-  disposeClosedOrders()
-  disposeStatistics()
+  if (healthcheckTimer !== null) {
+    window.clearTimeout(healthcheckTimer)
+  }
+  window.removeEventListener('focus', onActiveAgain)
+  window.removeEventListener('online', onActiveAgain)
+  document.removeEventListener('visibilitychange', visibilityHandler)
+  for (const managedSocket of managedSockets) {
+    managedSocket.dispose()
+  }
 })
 
 onMounted(() => {
   loadWsWatchdogConfig()
+  runHealthcheck()
+  window.addEventListener('focus', onActiveAgain)
+  window.addEventListener('online', onActiveAgain)
+  document.addEventListener('visibilitychange', visibilityHandler)
 })
 </script>
 
@@ -208,12 +232,18 @@ onMounted(() => {
       <n-notification-provider>
         <n-modal-provider>
           <n-dialog-provider>
-            <n-flex justify="center">
+            <div class="app-layout">
               <RouterView />
-            </n-flex>
+            </div>
           </n-dialog-provider>
         </n-modal-provider>
       </n-notification-provider>
     </n-message-provider>
   </n-config-provider>
 </template>
+
+<style scoped>
+.app-layout {
+  width: 100%;
+}
+</style>

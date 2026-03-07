@@ -110,8 +110,6 @@ export const useTradesStore = defineStore('trades', {
           ? val.current_price.toString().split('.')[1].length
           : 0
 
-        const date = new Date(Math.trunc(parseFloat(val.open_date)))
-
         return {
           ...val,
           cost: val.cost.toFixed(costPrecision),
@@ -122,7 +120,7 @@ export const useTradesStore = defineStore('trades', {
           avg_price: val.avg_price.toFixed(avgPrecision),
           so_count: Array.isArray(val.safetyorders) ? val.safetyorders.length : val.so_count,
           key: val.id,
-          open_date: date.toLocaleString(),
+          open_date: String(val.open_date ?? ''),
           safetyorder: val.safetyorders,
           precision: currentPrecision,
           unsellable_amount: Number(val.unsellable_amount ?? 0),
@@ -144,9 +142,6 @@ export const useTradesStore = defineStore('trades', {
         const amountPrecision = isFloat(val.amount)
           ? val.amount.toString().split('.')[1].length
           : 0
-        const timestamp: number = Date.parse(val.close_date)
-        const date = new Date(timestamp)
-
         return {
           ...val,
           cost: formatDecimal(val.cost, 2),
@@ -154,7 +149,7 @@ export const useTradesStore = defineStore('trades', {
           profit_percent: formatDecimal(val.profit_percent, 2),
           amount: val.amount.toFixed(amountPrecision),
           key: val.id,
-          close_date: date.toLocaleString(),
+          close_date: String(val.close_date ?? ''),
           duration: formatDuration(val.duration)
         }
       })
