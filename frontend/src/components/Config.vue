@@ -135,6 +135,58 @@
                     </n-form-item>
                 </template>
 
+                <!-- Dynamic check for CSV Signal settings -->
+                <template v-for="(index) in dynamicCsvSignalSettingsForm" :key="index">
+                    <n-form-item label="CSV input mode" path="csv_signal_mode">
+                        <n-radio-group v-model:value="signal.csvsignal_mode">
+                            <n-space>
+                                <n-radio value="source">Path / URL</n-radio>
+                                <n-radio value="inline">Paste text / Upload file</n-radio>
+                            </n-space>
+                        </n-radio-group>
+                    </n-form-item>
+                    <n-form-item
+                        v-if="signal.csvsignal_mode === 'source'"
+                        label="CSV source (path or URL)"
+                        path="csv_signal_source"
+                    >
+                        <n-input
+                            v-model:value="signal.csvsignal_source"
+                            placeholder="/path/to/trades.csv or https://example.com/trades.csv"
+                        />
+                    </n-form-item>
+                    <template v-else>
+                        <n-form-item label="Paste CSV text" path="csv_signal_inline">
+                            <n-input
+                                v-model:value="signal.csvsignal_inline"
+                                type="textarea"
+                                :autosize="{
+                                    minRows: 6,
+                                    maxRows: 16,
+                                }"
+                                placeholder="date;symbol;price;amount&#10;18/08/2025 19:32:00;BTC/USDC;117644.41;0.00099153"
+                            />
+                        </n-form-item>
+                        <n-form-item label="CSV file upload">
+                            <n-flex align="center" :size="10">
+                                <input
+                                    ref="csvSignalFileInput"
+                                    type="file"
+                                    accept=".csv,text/csv"
+                                    style="display: none;"
+                                    @change="handleCsvSignalFileSelected"
+                                />
+                                <n-button secondary type="primary" @click="openCsvSignalFilePicker">
+                                    Upload CSV file
+                                </n-button>
+                                <n-text v-if="signal.csvsignal_file_name" depth="3">
+                                    Loaded: {{ signal.csvsignal_file_name }}
+                                </n-text>
+                            </n-flex>
+                        </n-form-item>
+                    </template>
+                </template>
+
                 <!-- Dynamic check for Strategy settings -->
                 <n-form-item label="Signal initial buy strategy" path="selectValue" label-placement="left">
                     <n-checkbox v-model:checked="signal.strategy_enabled" />
@@ -432,6 +484,7 @@ function getClientTimezone(): string {
 // Signal strategy
 const dynamicSymSignalSettingsForm = ref<dynamicSelectItem[]>([])
 const dynamicAsapSignalSettingsForm = ref<dynamicSelectItem[]>([])
+const dynamicCsvSignalSettingsForm = ref<dynamicSelectItem[]>([])
 const dynamicDCAForm = ref<dynamicSelectItem[]>([])
 const DCAForm = ref<dynamicSelectItem[]>([])
 const APForm = ref<dynamicSelectItem[]>([])
@@ -443,6 +496,7 @@ const dcaFormRef = ref<FormInst | null>(null)
 const autopilotFormRef = ref<FormInst | null>(null)
 const monitoringFormRef = ref<FormInst | null>(null)
 const indicatorFormRef = ref<FormInst | null>(null)
+const csvSignalFileInput = ref<HTMLInputElement | null>(null)
 const message = useMessage()
 const router = useRouter()
 const isLoading = ref(true)
@@ -629,6 +683,10 @@ const signal = ref({
     symsignal_key: null,
     symsignal_version: null,
     symsignal_allowedsignals: [],
+    csvsignal_mode: "source",
+    csvsignal_source: null,
+    csvsignal_inline: null,
+    csvsignal_file_name: null,
 })
 
 const filter = ref({
@@ -732,6 +790,10 @@ function buildPersistableState(): PersistableState {
             symsignal_key: signal.value.symsignal_key,
             symsignal_version: signal.value.symsignal_version,
             symsignal_allowedsignals: signal.value.symsignal_allowedsignals,
+            csvsignal_mode: signal.value.csvsignal_mode,
+            csvsignal_source: signal.value.csvsignal_source,
+            csvsignal_inline: signal.value.csvsignal_inline,
+            csvsignal_file_name: signal.value.csvsignal_file_name,
         },
         filter: { ...filter.value },
         exchange: { ...exchange.value },
@@ -1170,6 +1232,46 @@ const rules: FormRules = {
         },
         trigger: ['submit', 'change']
     },
+    csv_signal_source: {
+        validator: () => {
+            if (
+                !submitAttempted.value ||
+                signal.value.signal !== 'csv_signal' ||
+                signal.value.csvsignal_mode !== 'source'
+            ) {
+                return true
+            }
+            if (
+                signal.value.csvsignal_source === null ||
+                signal.value.csvsignal_source === undefined ||
+                String(signal.value.csvsignal_source).trim().length === 0
+            ) {
+                return new Error('Please add CSV source path or URL')
+            }
+            return true
+        },
+        trigger: ['submit', 'change']
+    },
+    csv_signal_inline: {
+        validator: () => {
+            if (
+                !submitAttempted.value ||
+                signal.value.signal !== 'csv_signal' ||
+                signal.value.csvsignal_mode !== 'inline'
+            ) {
+                return true
+            }
+            if (
+                signal.value.csvsignal_inline === null ||
+                signal.value.csvsignal_inline === undefined ||
+                String(signal.value.csvsignal_inline).trim().length === 0
+            ) {
+                return new Error('Please paste CSV text or upload a CSV file')
+            }
+            return true
+        },
+        trigger: ['submit', 'change']
+    },
     name: {
         validator: requiredAfterSubmit('Please select exchange'),
         trigger: ['submit', 'change']
@@ -1252,15 +1354,30 @@ function handle_signal_settings_select() {
         if (!signal.value.symsignal_version) {
             signal.value.symsignal_version = DEFAULT_SYMSIGNAL_VERSION
         }
-        dynamicAsapSignalSettingsForm.value.pop()
+        dynamicAsapSignalSettingsForm.value = []
+        dynamicCsvSignalSettingsForm.value = []
     } else if (signal.value.signal == "asap") {
         if (dynamicAsapSignalSettingsForm.value.length === 0) {
             dynamicAsapSignalSettingsForm.value.push({ value: null })
         }
-        dynamicSymSignalSettingsForm.value.pop()
+        dynamicSymSignalSettingsForm.value = []
+        dynamicCsvSignalSettingsForm.value = []
         if (!signal.value.asap_use_url) {
             void fetchAsapSymbolsForCurrency()
         }
+    } else if (signal.value.signal == "csv_signal") {
+        if (dynamicCsvSignalSettingsForm.value.length === 0) {
+            dynamicCsvSignalSettingsForm.value.push({ value: null })
+        }
+        if (!signal.value.csvsignal_mode) {
+            signal.value.csvsignal_mode = 'source'
+        }
+        dynamicSymSignalSettingsForm.value = []
+        dynamicAsapSignalSettingsForm.value = []
+    } else {
+        dynamicSymSignalSettingsForm.value = []
+        dynamicAsapSignalSettingsForm.value = []
+        dynamicCsvSignalSettingsForm.value = []
     }
 }
 
@@ -1294,6 +1411,31 @@ function handle_ap_select() {
     }
 }
 
+function openCsvSignalFilePicker(): void {
+    csvSignalFileInput.value?.click()
+}
+
+async function handleCsvSignalFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement
+    const selectedFile = input.files?.[0]
+    if (!selectedFile) {
+        return
+    }
+
+    try {
+        const csvText = await selectedFile.text()
+        signal.value.csvsignal_mode = 'inline'
+        signal.value.csvsignal_inline = csvText
+        signal.value.csvsignal_file_name = selectedFile.name
+        message.success(`Loaded ${selectedFile.name}`)
+    } catch (error) {
+        console.error('Error loading CSV file:', error)
+        message.error('Failed to read CSV file.')
+    } finally {
+        input.value = ''
+    }
+}
+
 async function fetchDefaultValues() {
     try {
         const response = await axios.get(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/all`);
@@ -1318,6 +1460,30 @@ async function fetchDefaultValues() {
                 signal.value.symsignal_version = String(signalSettings["api_version"] || DEFAULT_SYMSIGNAL_VERSION)
                 const allowedSignals = signalSettings["allowed_signals"]
                 signal.value.symsignal_allowedsignals = Array.isArray(allowedSignals) ? allowedSignals : []
+                const csvSourceRaw = signalSettings["csv_source"]
+                if (csvSourceRaw) {
+                    const csvSource = String(csvSourceRaw)
+                    const isInlineCsv = csvSource.includes('\n') && csvSource.includes(';')
+                    if (isInlineCsv) {
+                        signal.value.csvsignal_mode = 'inline'
+                        signal.value.csvsignal_inline = csvSource
+                        signal.value.csvsignal_source = null
+                    } else {
+                        signal.value.csvsignal_mode = 'source'
+                        signal.value.csvsignal_source = csvSource
+                        signal.value.csvsignal_inline = null
+                    }
+                } else {
+                    signal.value.csvsignal_mode = 'source'
+                    signal.value.csvsignal_source = null
+                    signal.value.csvsignal_inline = null
+                }
+                signal.value.csvsignal_file_name = null
+            } else {
+                signal.value.csvsignal_mode = 'source'
+                signal.value.csvsignal_source = null
+                signal.value.csvsignal_inline = null
+                signal.value.csvsignal_file_name = null
             }
             signal.value.symbol_list = response.data.symbol_list
             if (isUrlInput(response.data.symbol_list)) {
@@ -1518,6 +1684,26 @@ function normalizePairEntries(raw: string | null, quoteCurrency: string): string
     return pairs.join(",")
 }
 
+function buildSignalSettingsValue(): Record<string, unknown> | false {
+    if (signal.value.signal === "sym_signals") {
+        return {
+            api_url: signal.value.symsignal_url || false,
+            api_key: signal.value.symsignal_key || false,
+            api_version: signal.value.symsignal_version || false,
+            allowed_signals: signal.value.symsignal_allowedsignals,
+        }
+    }
+    if (signal.value.signal === "csv_signal") {
+        const csvSourceValue = signal.value.csvsignal_mode === 'inline'
+            ? signal.value.csvsignal_inline
+            : signal.value.csvsignal_source
+        return {
+            csv_source: csvSourceValue || false,
+        }
+    }
+    return false
+}
+
 async function submitForm() {
     if (!isDirty.value) {
         message.info('No unsaved changes to submit.')
@@ -1536,13 +1722,14 @@ async function submitForm() {
 
     try {
         const quoteCurrency = String(exchange.value.currency || "USDT").toUpperCase()
-        const asapInputValue = signal.value.asap_use_url
-            ? signal.value.symbol_list
-            : signal.value.asap_symbol_select.join(",")
-        const normalizedSymbolList = normalizePairEntries(
-            asapInputValue,
-            quoteCurrency,
-        )
+        const normalizedSymbolList = signal.value.signal === "asap"
+            ? normalizePairEntries(
+                signal.value.asap_use_url
+                    ? signal.value.symbol_list
+                    : signal.value.asap_symbol_select.join(","),
+                quoteCurrency,
+            )
+            : false
         const normalizedDenyList = normalizePairEntries(
             filter.value.denylist,
             quoteCurrency,
@@ -1557,7 +1744,7 @@ async function submitForm() {
             ws_reconnect_debounce_ms: JSON.stringify({ 'value': general.value.ws_reconnect_debounce_ms ?? ADVANCED_WS_RECONNECT_DEBOUNCE_MS, 'type': "int" }),
             signal: JSON.stringify({ 'value': signal.value.signal || false, 'type': "str" }),
             signal_strategy: JSON.stringify({ 'value': signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false, 'type': "str" }),
-            signal_settings: JSON.stringify({ 'value': { 'api_url': signal.value.symsignal_url || false, 'api_key': signal.value.symsignal_key || false, 'api_version': signal.value.symsignal_version || false, 'allowed_signals': signal.value.symsignal_allowedsignals }, 'type': "str" }),
+            signal_settings: JSON.stringify({ 'value': buildSignalSettingsValue(), 'type': "str" }),
             symbol_list: JSON.stringify({ 'value': normalizedSymbolList, 'type': "str" }),
             filter: JSON.stringify({ 'value': { 'rsi_max': filter.value.rsi || false, 'marketcap_cmc_api_key': filter.value.cmc_api_key || false }, 'type': "str" }),
             rsi_max: JSON.stringify({ 'value': filter.value.rsi ?? false, 'type': "float" }),

@@ -1,16 +1,13 @@
 """Trade API endpoints."""
 
 import asyncio
-import inspect
 import json
 from collections.abc import AsyncGenerator
 from typing import Any
 
 import helper
 from controller.responses import json_response
-from litestar.connection import Request
 from litestar.handlers import get, post, websocket_stream
-from service.config import Config
 from service.trades import Trades
 from service.websocket_fanout import WebSocketFanout
 
@@ -126,61 +123,10 @@ async def closed_trade_delete(trade_id: str) -> Any:
     return json_response({"result": "", "error": "Trade not found."}, 404)
 
 
-async def _read_upload_as_text(upload: Any) -> str:
-    """Read an uploaded file object and return UTF-8 text."""
-    raw_content = upload.read()
-    if inspect.isawaitable(raw_content):
-        raw_content = await raw_content
-
-    if isinstance(raw_content, bytes):
-        return raw_content.decode("utf-8-sig")
-    if isinstance(raw_content, str):
-        return raw_content
-    return ""
-
-
-@post(path="/trades/import/csv")
-async def import_open_trades_csv(request: Request[Any, Any, Any]) -> Any:
-    """Import open trades from CSV content."""
-    try:
-        form = await request.form()
-        csv_file = form.get("file")
-        if csv_file is None:
-            return json_response(
-                {"result": "", "error": "Missing file field 'file'."}, 400
-            )
-
-        overwrite_raw = str(form.get("overwrite", "false")).strip().lower()
-        overwrite = overwrite_raw in {"1", "true", "yes", "on"}
-
-        csv_content = await _read_upload_as_text(csv_file)
-        config = await Config.instance()
-        quote_currency = str(config.get("currency", "USDT")).upper().strip()
-        take_profit = float(config.get("take_profit", 0.0) or 0.0)
-        first_so_deviation = float(config.get("sos", 0.0) or 0.0)
-        safety_step_scale = float(config.get("ss", 1.0) or 1.0)
-
-        result = await trades.import_open_trades_from_csv(
-            csv_content=csv_content,
-            quote_currency=quote_currency,
-            take_profit=take_profit,
-            first_so_deviation=first_so_deviation,
-            safety_step_scale=safety_step_scale,
-            overwrite=overwrite,
-        )
-        return {"result": "ok", **result}
-    except ValueError as exc:
-        return json_response({"result": "", "error": str(exc)}, 400)
-    except Exception as exc:  # noqa: BLE001 - Keep API resilient on import errors.
-        logging.error("Failed importing trades from CSV: %s", exc, exc_info=True)
-        return json_response({"result": "", "error": "Failed importing CSV."}, 500)
-
-
 route_handlers = [
     open_trades,
     closed_trades,
     closed_trades_length,
     closed_trades_pagination,
     closed_trade_delete,
-    import_open_trades_csv,
 ]

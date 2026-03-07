@@ -231,13 +231,17 @@ class Data:
         return False
 
     async def add_history_data_for_symbol(
-        self, symbol: str, history_data: int, config: dict[str, Any]
+        self,
+        symbol: str,
+        history_data: int,
+        config: dict[str, Any],
+        since_ms: int | None = None,
     ) -> bool:
         """Fetch and store historical data for a symbol."""
         if await self.delete_ticker_data_for_trades(symbol):
             try:
                 if await self.__fetch_history_data_for_symbol(
-                    symbol, history_data, config
+                    symbol, history_data, config, since_ms
                 ):
                     logging.info("Added history for %s", symbol)
                     return True
@@ -248,13 +252,23 @@ class Data:
         return False
 
     async def __fetch_history_data_for_symbol(
-        self, symbol: str, history_data: int, config: dict[str, Any]
+        self,
+        symbol: str,
+        history_data: int,
+        config: dict[str, Any],
+        since_ms: int | None = None,
     ) -> bool:
         ohlcv = []
         try:
-            since = int(
-                (datetime.now(timezone.utc) - timedelta(days=history_data)).timestamp()
-                * 1000
+            since = (
+                int(since_ms)
+                if since_ms is not None
+                else int(
+                    (
+                        datetime.now(timezone.utc) - timedelta(days=history_data)
+                    ).timestamp()
+                    * 1000
+                )
             )
             ohlcv_data = await self.exchange.get_history_for_symbol(
                 config,
@@ -263,6 +277,13 @@ class Data:
                 limit=1000,
                 since=since,
             )
+            if not ohlcv_data:
+                logging.error(
+                    "No historical OHLCV candles returned for %s (since=%s).",
+                    symbol,
+                    since,
+                )
+                return False
 
             symbol, market = symbol.split("/")
 

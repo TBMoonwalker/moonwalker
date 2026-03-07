@@ -12,8 +12,8 @@ are not exposed in the UI and must be set via the API.
 | --- | --- | --- | --- |
 | `timezone` | `string` | Timezone used for logging. | `Europe/London` |
 | `debug` | `bool` | Enable debug logging. | `true` |
-| `signal` | `string` | Signal plugin to use (e.g. `sym_signals`, `asap`). | `sym_signals` |
-| `signal_settings` | `string (json)` | Plugin settings for SymSignals. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |
+| `signal` | `string` | Signal plugin to use (e.g. `sym_signals`, `asap`, `csv_signal`). | `sym_signals` |
+| `signal_settings` | `string (json)` | Plugin settings per selected signal plugin. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |
 | `symbol_list` | `string` | CSV list or URL for ASAP symbol list. | `BTC/USDT,ETH/USDT` |
 | `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema_cross` |
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
@@ -87,4 +87,4 @@ are not exposed in the UI and must be set via the API.
 | `monitoring_timeout_sec` | `int` | Telegram send timeout in seconds. | `5` |
 | `monitoring_retry_count` | `int` | Number of retries after a failed Telegram send. | `1` |
 | `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","bbands_cross"]` |
-| `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["sym_signals","asap"]` |
+| `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals"]` |

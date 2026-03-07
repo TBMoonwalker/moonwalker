@@ -7,7 +7,6 @@ import { useRouter } from 'vue-router'
 
 const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
 const ClosedTrades = defineAsyncComponent(() => import('../components/ClosedTrades.vue'))
-const TradesImport = defineAsyncComponent(() => import('../components/TradesImport.vue'))
 const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
 const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'))
 
@@ -124,12 +123,6 @@ onUnmounted(() => {
             <ClosedTrades v-if="activeTradesTab === 'closed-trades'" />
           </n-tab-pane>
         </n-tabs>
-      </n-card>
-    </n-flex>
-
-    <n-flex class="page-section" vertical>
-      <n-card title="Import Open Trades (CSV)">
-        <TradesImport />
       </n-card>
     </n-flex>
   </div>

@@ -1,14 +1,56 @@
 """Configuration API endpoints."""
 
+import json
 from typing import Any
 
 import helper
 from controller.responses import json_response
 from litestar.connection import Request
 from litestar.handlers import get, post, put
+from model import OpenTrades
 from service.config import Config
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
+
+CSV_SIGNAL_NAME = "csv_signal"
+
+
+def _extract_config_update_value(raw_value: Any) -> Any:
+    """Extract normalized `value` from config update payloads."""
+    parsed = raw_value
+    if isinstance(parsed, str):
+        try:
+            parsed = json.loads(parsed)
+        except json.JSONDecodeError:
+            return parsed
+    if isinstance(parsed, dict) and "value" in parsed:
+        return parsed["value"]
+    return parsed
+
+
+async def _validate_csv_signal_switch(
+    config: Config, raw_signal_update: Any
+) -> str | None:
+    """Return error message if switching to csv_signal while open trades exist."""
+    new_signal_raw = _extract_config_update_value(raw_signal_update)
+    if not isinstance(new_signal_raw, str):
+        return None
+
+    new_signal = new_signal_raw.strip()
+    if not new_signal or new_signal.lower() != CSV_SIGNAL_NAME:
+        return None
+
+    current_signal = str(config.get("signal", "") or "").strip().lower()
+    if current_signal == CSV_SIGNAL_NAME:
+        return None
+
+    open_trade_count = await OpenTrades.all().count()
+    if open_trade_count > 0:
+        return (
+            "Cannot switch signal plugin to 'csv_signal' while open trades exist. "
+            "Close all open trades first."
+        )
+    return None
 
 
 @get(path="/config/all")
@@ -61,9 +103,17 @@ async def update_config_key(key: str, request: Request[Any, Any, Any]) -> Any:
     if "value" not in data:
         return json_response({"error": "Missing 'value' in request"}, 400)
 
-    value = data["value"]
-    # Save to DB and trigger Pub/Sub
     config = await Config.instance()
+    value = data["value"]
+
+    if key == "signal":
+        error_message = await _validate_csv_signal_switch(config, value)
+        if error_message:
+            return json_response(
+                {"error": error_message, "message": error_message}, 409
+            )
+
+    # Save to DB and trigger Pub/Sub
     success = await config.set(key, value)
     if success:
         return {"message": f"Config '{key}' updated", "value": value}
@@ -90,6 +140,13 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
         return json_response({"error": "'data' must be a JSON object"}, 400)
 
     config = await Config.instance()
+    if "signal" in data:
+        error_message = await _validate_csv_signal_switch(config, data["signal"])
+        if error_message:
+            return json_response(
+                {"error": error_message, "message": error_message}, 409
+            )
+
     success = await config.batch_set(data)
 
     if success:

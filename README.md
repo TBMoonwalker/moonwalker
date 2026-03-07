@@ -25,7 +25,6 @@ You also need to install the ta-lib library for your OS. Please see: https://ta-
 
 ## Documentation
 - Configuration and full key reference: `docs/configuration.md`
-- Trade import (CSV): `docs/trade-import.md`
 - Monitoring (Telegram): `docs/monitoring.md`
 - Dynamic SO details and formulas: `docs/dynamic-so.md`
 - Signal plugin setup (SymSignals, ASAP): `docs/signals.md`

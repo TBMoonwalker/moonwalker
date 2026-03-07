@@ -18,10 +18,31 @@ class _DummyConfigService:
 
     def __init__(self) -> None:
         self.last_batch: dict[str, Any] | None = None
+        self._cache: dict[str, Any] = {"signal": "asap"}
 
     async def batch_set(self, payload: dict[str, Any]) -> bool:
         self.last_batch = payload
         return True
+
+    async def set(self, key: str, value: Any) -> bool:
+        self._cache[key] = value
+        return True
+
+    def get(self, key: str, default: Any | None = None) -> Any | None:
+        return self._cache.get(key, default)
+
+
+class _DummyOpenTradesCount:
+    """OpenTrades stub exposing count() through all()."""
+
+    count_value = 0
+
+    @classmethod
+    def all(cls) -> "_DummyOpenTradesCount":
+        return cls()
+
+    async def count(self) -> int:
+        return self.count_value
 
 
 def test_frontend_routes_serve_index_and_assets(tmp_path: Path, monkeypatch) -> None:
@@ -126,6 +147,56 @@ def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
     assert response.status_code == 201
     assert response.json() == {"message": "Config updated"}
     assert service.last_batch == payload
+
+
+def test_config_multiple_blocks_switch_to_csv_signal_when_open_trades_exist(
+    monkeypatch,
+) -> None:
+    """Switching to csv_signal must be blocked while open trades exist."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+    _DummyOpenTradesCount.count_value = 2
+    monkeypatch.setattr(config_controller, "OpenTrades", _DummyOpenTradesCount)
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {"signal": '{"value":"csv_signal","type":"str"}'}
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 409
+    assert "csv_signal" in response.json().get("error", "")
+    assert service.last_batch is None
+
+
+def test_config_single_blocks_switch_to_csv_signal_when_open_trades_exist(
+    monkeypatch,
+) -> None:
+    """Single-key signal update must also block csv_signal switch."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+    _DummyOpenTradesCount.count_value = 1
+    monkeypatch.setattr(config_controller, "OpenTrades", _DummyOpenTradesCount)
+
+    app = Litestar(route_handlers=[config_controller.update_config_key])
+    payload = {"value": '{"value":"csv_signal","type":"str"}'}
+    with TestClient(app=app) as client:
+        response = client.put("/config/single/signal", json=payload)
+
+    assert response.status_code == 409
+    assert "open trades" in response.json().get("error", "").lower()
+    assert service.last_batch is None
 
 
 def test_trades_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> None:

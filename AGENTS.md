@@ -52,7 +52,7 @@ This script:
 
 Moonwalker is a cryptocurrency trading bot that connects to exchanges (like Binance) and executes trades based on signals from various plugins. It supports:
 - Dynamic DCA (Dollar Cost Averaging) deals
-- Multiple signal plugins (ASAP, SymSignals)
+- Multiple signal plugins (ASAP, SymSignals, CSV Signal)
 - Various trading strategies (EMA cross, Bbands cross, Ichimoku, etc.)
 - Autopilot mode for automatic portfolio management
 - REST API and WebSocket interface
@@ -79,7 +79,7 @@ The backend is a Python application using Quart (async Flask) framework with the
    - `exchange.py` - Async CCXT wrapper: buy/sell lifecycle, precision, balance, retry logic
    - `dca.py` - Core DCA engine: processes tickers, evaluates TP/SO triggers, places orders
    - `watcher.py` - Real-time OHLCV/trade streaming via CCXT Pro WebSockets with auto-reconnect
-   - `trades.py` - Trade persistence layer: CRUD for open/closed trades, CSV import, aggregation
+   - `trades.py` - Trade persistence layer: CRUD for open/closed trades, aggregation
    - `orders.py` - Order execution and management
    - `database.py` - Tortoise ORM database connection and management
    - `housekeeper.py` - Periodic cleanup of old ticker data and uPNL history
@@ -96,6 +96,7 @@ The backend is a Python application using Quart (async Flask) framework with the
 
 3. **Signal Plugins** (`backend/signals/`)
    - `asap.py` - Signal plugin for ASAP signals
+   - `csv_signal.py` - Signal plugin for importing open trades from CSV source
    - `sym_signals.py` - Signal plugin for 3CQS SymSignals
    - Each plugin implements `SignalPlugin` class with `run()` and `shutdown()` methods
 

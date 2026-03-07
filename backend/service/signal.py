@@ -18,6 +18,8 @@ class Signal:
         self.signal_name: str | None = None
         self.signal_plugin: Any = None
         self._task: asyncio.Task[Any] | None = None
+        self._reload_lock = asyncio.Lock()
+        self._reload_task: asyncio.Task[Any] | None = None
 
     async def init(self) -> None:
         """Initialize signal plugin based on current configuration."""
@@ -27,38 +29,69 @@ class Signal:
 
     async def shutdown(self) -> None:
         """Cancel active plugin run task and call plugin shutdown hook."""
-        if self._task is not None:
-            self._task.cancel()
-            await asyncio.gather(self._task, return_exceptions=True)
-            self._task = None
+        if self._reload_task is not None and not self._reload_task.done():
+            self._reload_task.cancel()
+            await asyncio.gather(self._reload_task, return_exceptions=True)
+            self._reload_task = None
 
-        if self.signal_plugin is not None:
-            shutdown = getattr(self.signal_plugin, "shutdown", None)
+        await self._stop_current_plugin()
+
+    async def _stop_current_plugin(self) -> None:
+        """Shutdown and cancel the active signal plugin safely."""
+        plugin = self.signal_plugin
+        task = self._task
+
+        self.signal_plugin = None
+        self._task = None
+        self.signal_name = None
+
+        if plugin is not None:
+            shutdown = getattr(plugin, "shutdown", None)
             if callable(shutdown):
-                result = shutdown()
-                if asyncio.iscoroutine(result):
-                    await result
+                try:
+                    result = shutdown()
+                    if asyncio.iscoroutine(result):
+                        await result
+                except Exception as exc:  # noqa: BLE001 - Continue cleanup on failure.
+                    logging.warning("Signal plugin shutdown failed: %s", exc)
 
-    def _reload_plugin(self, config: dict[str, Any]) -> None:
-        if self._task is not None:
-            self._task.cancel()
+        if task is not None:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
 
-        self.signal_name = str(config.get("signal", "")).strip()
-        if not self.signal_name:
-            logging.error(
-                "No plugin configured. Please configure the plugin in the GUI"
-            )
-            return
+    async def _reload_plugin(self, config: dict[str, Any]) -> None:
+        """Reload signal plugin in a serialized critical section."""
+        async with self._reload_lock:
+            await self._stop_current_plugin()
 
-        signal_plugin = importlib.import_module(f"signals.{self.signal_name}")
-        self.signal_plugin = signal_plugin.SignalPlugin(self.watcher_queue)
-        self._task = asyncio.create_task(self.signal_plugin.run(config))
+            self.signal_name = str(config.get("signal", "")).strip()
+            if not self.signal_name:
+                logging.error(
+                    "No plugin configured. Please configure the plugin in the GUI"
+                )
+                return
+
+            try:
+                signal_plugin = importlib.import_module(f"signals.{self.signal_name}")
+                self.signal_plugin = signal_plugin.SignalPlugin(self.watcher_queue)
+                self._task = asyncio.create_task(self.signal_plugin.run(config))
+            except Exception as exc:  # noqa: BLE001 - Keep config loop alive.
+                logging.error(
+                    "Failed to load signal plugin '%s': %s",
+                    self.signal_name,
+                    exc,
+                    exc_info=True,
+                )
+                self.signal_plugin = None
+                self._task = None
 
     def on_config_change(self, config: dict[str, Any]) -> None:
         """Reload the signal plugin if configuration changes."""
         logging.info("Reload signal plugin system")
         if config.get("signal") is not None:
-            self._reload_plugin(config)
+            if self._reload_task and not self._reload_task.done():
+                self._reload_task.cancel()
+            self._reload_task = asyncio.create_task(self._reload_plugin(config))
         else:
             logging.error(
                 "No plugin configured. Please configure the plugin in the GUI"
