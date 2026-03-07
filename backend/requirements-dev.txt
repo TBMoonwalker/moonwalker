@@ -1,5 +1,5 @@
 black
-isort
+isort==8.0.1
 mypy
 pytest
 pytest-asyncio
