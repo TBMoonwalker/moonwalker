@@ -110,7 +110,7 @@ start_services() {
     cp -r frontend/dist/assets backend/static/
     cp frontend/dist/index.html backend/templates/
 
-    echo "🐍 Installing Python venv and deps & starting Quart..."
+    echo "🐍 Installing Python venv and deps & starting Litestar..."
     python3 -m venv .venv
     cd backend
     ../.venv/bin/pip install -r requirements.txt

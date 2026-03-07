@@ -1436,7 +1436,7 @@ async function submitForm() {
         // Assuming you have an API endpoint
         const response = await axios.post(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/multiple`, formData);
 
-        if (response.status === 200) {
+        if (response.status >= 200 && response.status < 300) {
             message.success('Form submitted successfully')
             setTimeout(() => {
                 router.push('/')

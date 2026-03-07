@@ -3,16 +3,15 @@
 from typing import Any
 
 import helper
-from controller import controller
-from quart import jsonify, request
-from quart_cors import route_cors
+from controller.responses import json_response
+from litestar.connection import Request
+from litestar.handlers import get, post, put
 from service.config import Config
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
 
-@controller.route("/config/all", methods=["GET"])
-@route_cors(allow_origin="*")
+@get(path="/config/all")
 async def get_config() -> Any:
     """Return the current configuration as JSON.
 
@@ -20,12 +19,11 @@ async def get_config() -> Any:
         JSON response containing the full configuration cache.
     """
     config = await Config.instance()
-    return jsonify(config._cache)
+    return config._cache
 
 
-@controller.route("/config/single/<string:key>", methods=["GET"])
-@route_cors(allow_origin="*")
-async def get_config_key(key: str) -> tuple[Any, int]:
+@get(path="/config/single/{key:str}")
+async def get_config_key(key: str) -> Any:
     """Get a specific config value.
 
     Args:
@@ -37,13 +35,12 @@ async def get_config_key(key: str) -> tuple[Any, int]:
     config = await Config.instance()
     value = config.get(key)
     if value is None:
-        return jsonify({"error": "Key not found"}), 404
-    return jsonify({key: value})
+        return json_response({"error": "Key not found"}, 404)
+    return {key: value}
 
 
-@controller.route("/config/single/<string:key>", methods=["PUT"])
-@route_cors(allow_origin="*")
-async def update_config_key(key: str) -> tuple[Any, int]:
+@put(path="/config/single/{key:str}")
+async def update_config_key(key: str, request: Request[Any, Any, Any]) -> Any:
     """Update a specific config key via JSON body.
 
     Args:
@@ -55,23 +52,27 @@ async def update_config_key(key: str) -> tuple[Any, int]:
     Returns:
         JSON response with success/error status.
     """
-    data = await request.get_json()
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001 - Return explicit validation error payload.
+        return json_response({"error": "Payload must be a JSON object"}, 400)
+    if not isinstance(data, dict):
+        return json_response({"error": "Payload must be a JSON object"}, 400)
     if "value" not in data:
-        return jsonify({"error": "Missing 'value' in request"}), 400
+        return json_response({"error": "Missing 'value' in request"}, 400)
 
     value = data["value"]
     # Save to DB and trigger Pub/Sub
     config = await Config.instance()
     success = await config.set(key, value)
     if success:
-        return jsonify({"message": f"Config '{key}' updated", "value": value})
+        return {"message": f"Config '{key}' updated", "value": value}
     else:
-        return jsonify({"error": "Update failed - check config.log"}), 400
+        return json_response({"error": "Update failed - check config.log"}, 400)
 
 
-@controller.route("/config/multiple", methods=["POST"])
-@route_cors(allow_origin="*")
-async def update_multiple_config_keys() -> tuple[Any, int]:
+@post(path="/config/multiple")
+async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
     """Update multiple config keys via JSON body.
 
     Request body:
@@ -80,15 +81,26 @@ async def update_multiple_config_keys() -> tuple[Any, int]:
     Returns:
         JSON response with success/error status.
     """
-    data = await request.get_json()
+    try:
+        data = await request.json()
+    except Exception:  # noqa: BLE001 - Return explicit validation error payload.
+        return json_response({"error": "'data' must be a JSON object"}, 400)
 
     if not isinstance(data, dict):
-        return jsonify({"error": "'data' must be a JSON object"}), 400
+        return json_response({"error": "'data' must be a JSON object"}, 400)
 
     config = await Config.instance()
     success = await config.batch_set(data)
 
     if success:
-        return jsonify({"message": "Config updated"})
+        return {"message": "Config updated"}
     else:
-        return jsonify({"error": "Update failed - check config.log"}), 400
+        return json_response({"error": "Update failed - check config.log"}, 400)
+
+
+route_handlers = [
+    get_config,
+    get_config_key,
+    update_config_key,
+    update_multiple_config_keys,
+]
