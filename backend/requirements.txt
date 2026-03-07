@@ -1,6 +1,6 @@
 cachetools==7.0.3
 ccxt==4.5.42
-pandas==2.3.3
+pandas==3.0.1
 litestar==2.21.0
 python-socketio==5.16.1
 Telethon==1.42.0

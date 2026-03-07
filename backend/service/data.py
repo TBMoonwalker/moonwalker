@@ -173,12 +173,25 @@ class Data:
         return pd.concat([df_source, pd.DataFrame([live_candle])], ignore_index=True)
 
     @staticmethod
+    def _timestamp_to_unix_seconds(timestamp: Any) -> float | None:
+        """Convert arbitrary timestamp-like values to UTC unix seconds."""
+        if pd.isna(timestamp):
+            return None
+        try:
+            return pd.Timestamp(timestamp).timestamp()
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _serialize_ohlcv_dataframe(df_source: pd.DataFrame, offset: float) -> str:
         """Convert OHLCV DataFrame into frontend payload JSON."""
         df = df_source.copy()
         offset_minutes = int(offset)
-        offset_ms = offset_minutes * 60 * 1000
-        df["time"] = (df["timestamp"].astype(int) + offset_ms) / 1000000000
+        offset_seconds = offset_minutes * 60
+        timestamp_series = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
+        df["time"] = timestamp_series.map(Data._timestamp_to_unix_seconds)
+        df.dropna(subset=["time"], inplace=True)
+        df["time"] = df["time"].astype(float) + float(offset_seconds)
         df.drop_duplicates(subset=["time"], inplace=True)
         df.rename(
             columns={
