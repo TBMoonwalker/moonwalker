@@ -7,6 +7,15 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 ### Mandatory CI Check
 - After every code change, run CI from the scripts directory directly: `cd scripts && ./ci.sh`
 
+### Dependency Hygiene (Mandatory)
+- Run dependency outdated checks at least weekly and before each release candidate.
+- Backend outdated check: `./.venv/bin/python -m pip list --outdated --format=json`
+- Frontend outdated check: `cd frontend && npm outdated --json`
+- If updates are found, record them in the task summary and explicitly classify each as:
+  - patch/minor (safe candidate)
+  - major (needs compatibility review)
+- Apply dependency updates only in dedicated dependency PRs/changesets unless the task explicitly asks for version upgrades.
+
 ### Backend (Python)
 - **Run application:** `cd backend && python app.py` or use the `./run.sh` script
 - **Install dependencies:** `cd backend && pip install -r requirements.txt`
