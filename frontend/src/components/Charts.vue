@@ -20,7 +20,6 @@ import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
-import { NSpin } from 'naive-ui'
 import { formatTradingViewDate } from '../helpers/date'
 const range = defineProps<{ period: string }>()
 const profit_store = useProfitDatastore()

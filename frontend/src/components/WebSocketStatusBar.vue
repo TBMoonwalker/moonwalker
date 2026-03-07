@@ -45,7 +45,6 @@
 
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
-import { NCard, NSpace, NTag, NText } from 'naive-ui'
 import { useWebSocketDataStore, type WebSocketStatus } from '../stores/websocket'
 
 withDefaults(defineProps<{ compact?: boolean }>(), {

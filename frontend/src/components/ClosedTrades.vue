@@ -15,7 +15,10 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { NButton, type DataTableColumns, NDataTable, useDialog, useMessage } from 'naive-ui'
+import { NButton } from 'naive-ui/es/button'
+import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
+import { useDialog } from 'naive-ui/es/dialog'
+import { useMessage } from 'naive-ui/es/message'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'

@@ -26,7 +26,6 @@
 
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { NCard, NFlex, NTimeline, NTimelineItem } from 'naive-ui'
 import { createChart, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts'
 
 import { fetchJson } from '../api/client'

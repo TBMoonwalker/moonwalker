@@ -52,7 +52,6 @@ import { computed, ref, watch } from 'vue'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
 import { FlashOutline, PauseCircleOutline, SpeedometerOutline } from '@vicons/ionicons5'
-import { NAlert, NFlex, NIcon, NStatistic } from 'naive-ui'
 
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)

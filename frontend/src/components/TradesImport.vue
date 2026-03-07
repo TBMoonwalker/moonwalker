@@ -27,8 +27,8 @@
 
 <script setup lang="ts">
 import { ref } from 'vue'
-import { NButton, NCheckbox, NFlex, NIcon, NText, useMessage } from 'naive-ui'
 import { WarningOutline } from '@vicons/ionicons5'
+import { useMessage } from 'naive-ui/es/message'
 import { fetchJson } from '../api/client'
 
 const message = useMessage()

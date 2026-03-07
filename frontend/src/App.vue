@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from './config'
 import { RouterView } from 'vue-router'
-import { darkTheme, NConfigProvider, NDialogProvider, NGlobalStyle, NMessageProvider, NModalProvider, NNotificationProvider, useOsTheme } from 'naive-ui'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWebSocketDataStore } from './stores/websocket'
 import { useWebSocket } from '@vueuse/core'
+import { useOsTheme } from 'vooks'
+import { darkTheme } from 'naive-ui/es/themes'
 import axios from 'axios'
 import { trackUiEvent } from './utils/uiTelemetry'
 import type { WebSocketStatus } from './stores/websocket'

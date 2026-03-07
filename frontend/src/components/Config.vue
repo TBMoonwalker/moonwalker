@@ -411,23 +411,8 @@
 import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
 import { getAllTimeZones } from '../helpers/timezone'
 import { parseBooleanString, isJsonString, toNumberOrNull } from '../helpers/validators'
-import {
-  NAlert,
-  NButton,
-  NCard,
-  NCheckbox,
-  NFlex,
-  NForm,
-  NFormItem,
-  NInput,
-  NInputNumber,
-  NSelect,
-  NSwitch,
-  type FormInst,
-  type FormItemRule,
-  type FormRules,
-  useMessage
-} from 'naive-ui'
+import type { FormInst, FormItemRule, FormRules } from 'naive-ui/es/form'
+import { useMessage } from 'naive-ui/es/message'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import axios from 'axios'

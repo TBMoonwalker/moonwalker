@@ -1,20 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from 'vue'
-import OpenTrades from '../components/OpenTrades.vue'
-import ClosedTrades from '../components/ClosedTrades.vue'
-import TradesImport from '../components/TradesImport.vue'
+import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import Statistics from '@/components/Statistics.vue'
-import Charts from '@/components/Charts.vue'
-import UpnlChart from '@/components/UpnlChart.vue'
 import WebSocketStatusBar from '@/components/WebSocketStatusBar.vue'
 import { ConstructOutline } from '@vicons/ionicons5'
-import { NButton, NCard, NFlex, NIcon, NTabPane, NTabs } from 'naive-ui'
 import { useRouter } from 'vue-router'
+
+const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
+const ClosedTrades = defineAsyncComponent(() => import('../components/ClosedTrades.vue'))
+const TradesImport = defineAsyncComponent(() => import('../components/TradesImport.vue'))
+const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
+const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'))
 
 const router = useRouter()
 const viewportWidth = ref(window.innerWidth)
 const isMobile = computed(() => viewportWidth.value < 768)
 const tabPadding = computed(() => (isMobile.value ? 12 : 20))
+const activeProfitTab = ref('profit-overall')
+const activeTradesTab = ref('open-trades')
 
 function handleResize() {
   viewportWidth.value = window.innerWidth
@@ -86,18 +88,23 @@ onUnmounted(() => {
 
     <n-flex class="page-section" vertical>
       <n-card content-style="padding: 0;">
-        <n-tabs type="line" size="large" :tabs-padding="tabPadding">
-          <n-tab-pane name="Profit overall">
-            <UpnlChart />
+        <n-tabs
+          v-model:value="activeProfitTab"
+          type="line"
+          size="large"
+          :tabs-padding="tabPadding"
+        >
+          <n-tab-pane name="profit-overall" tab="Profit overall">
+            <UpnlChart v-if="activeProfitTab === 'profit-overall'" />
           </n-tab-pane>
-          <n-tab-pane name="Daily profit">
-            <Charts period="daily" />
+          <n-tab-pane name="daily-profit" tab="Daily profit">
+            <Charts v-if="activeProfitTab === 'daily-profit'" period="daily" />
           </n-tab-pane>
-          <n-tab-pane name="Monthly profit">
-            <Charts period="monthly" />
+          <n-tab-pane name="monthly-profit" tab="Monthly profit">
+            <Charts v-if="activeProfitTab === 'monthly-profit'" period="monthly" />
           </n-tab-pane>
-          <n-tab-pane name="Yearly profit">
-            <Charts period="yearly" />
+          <n-tab-pane name="yearly-profit" tab="Yearly profit">
+            <Charts v-if="activeProfitTab === 'yearly-profit'" period="yearly" />
           </n-tab-pane>
         </n-tabs>
       </n-card>
@@ -105,12 +112,16 @@ onUnmounted(() => {
 
     <n-flex class="page-section" vertical>
       <n-card content-style="padding: 0;">
-        <n-tabs size="large" :tabs-padding="tabPadding">
-          <n-tab-pane name=" Open Trades">
-            <OpenTrades />
+        <n-tabs
+          v-model:value="activeTradesTab"
+          size="large"
+          :tabs-padding="tabPadding"
+        >
+          <n-tab-pane name="open-trades" tab="Open Trades">
+            <OpenTrades v-if="activeTradesTab === 'open-trades'" />
           </n-tab-pane>
-          <n-tab-pane name="Closed Trades">
-            <ClosedTrades />
+          <n-tab-pane name="closed-trades" tab="Closed Trades">
+            <ClosedTrades v-if="activeTradesTab === 'closed-trades'" />
           </n-tab-pane>
         </n-tabs>
       </n-card>
