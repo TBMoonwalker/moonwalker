@@ -21,7 +21,7 @@ import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
 import { NDivider } from 'naive-ui/es/divider'
 import { useDialog } from 'naive-ui/es/dialog'
 import { NIcon } from 'naive-ui/es/icon'
-import { NInput } from 'naive-ui/es/input'
+import { NInputNumber } from 'naive-ui/es/input-number'
 import { useMessage } from 'naive-ui/es/message'
 import { NSlider } from 'naive-ui/es/slider'
 import { NTooltip } from 'naive-ui/es/tooltip'
@@ -35,6 +35,8 @@ import OpenTradeExpandedRow from './OpenTradeExpandedRow.vue'
 
 const open_trade_store = useWebSocketDataStore("openTrades")
 const open_trade_data = storeToRefs(open_trade_store)
+const statistics_store = useWebSocketDataStore("statistics")
+const statistics_data = storeToRefs(statistics_store)
 const trades_store = useTradesStore()
 const open_trades = ref()
 
@@ -207,6 +209,54 @@ function formatAssetAmount(value: unknown, maxDecimals = 8): string {
     return parsed.toFixed(maxDecimals).replace(/\.?0+$/, "")
 }
 
+function toFiniteNonNegative(value: unknown): number {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed) || parsed < 0) {
+        return 0
+    }
+    return parsed
+}
+
+function formatOrderAmount(value: number): string {
+    const normalized = toFiniteNonNegative(value)
+    return normalized.toFixed(2)
+}
+
+const availableFunds = computed(() => {
+    const payload = statistics_data.data.value as Record<string, unknown> | null
+    return toFiniteNonNegative(payload?.funds_available)
+})
+
+function clampToRange(value: number, min: number, max: number): number {
+    if (!Number.isFinite(value)) {
+        return min
+    }
+    return Math.max(min, Math.min(max, value))
+}
+
+function floorToDecimals(value: number, decimals: number): number {
+    const factor = 10 ** decimals
+    return Math.floor(value * factor) / factor
+}
+
+function roundToDecimals(value: number, decimals: number): number {
+    const factor = 10 ** decimals
+    return Math.round(value * factor) / factor
+}
+
+function snapToMarkers(
+    value: number,
+    markers: number[],
+    tolerance: number,
+): number {
+    for (const marker of markers) {
+        if (Math.abs(value - marker) <= tolerance) {
+            return marker
+        }
+    }
+    return value
+}
+
 function resolveDateTime(value: string): { date: string; time: string } {
     const parts = formatTradingViewDateParts(value)
     if (parts.time) {
@@ -244,20 +294,74 @@ function handle_deal_sell(data: any) {
 }
 
 function handle_deal_buy(data: any) {
-    var amount = ""
     const [symbol, currency] = data["symbol"].toLowerCase().split("/")
+    const maxAmount = floorToDecimals(toFiniteNonNegative(availableFunds.value), 2)
+    if (maxAmount <= 0) {
+        message.error(`No available ${currency.toUpperCase()} funds`)
+        return
+    }
+    const amount = ref(maxAmount)
+    const marks = {
+        0: '0%',
+        [roundToDecimals(maxAmount * 0.25, 2)]: '25%',
+        [roundToDecimals(maxAmount * 0.5, 2)]: '50%',
+        [roundToDecimals(maxAmount * 0.75, 2)]: '75%',
+        [maxAmount]: '100%',
+    }
+    const markerValues = Object.keys(marks)
+        .map((key) => Number(key))
+        .filter((value) => Number.isFinite(value))
+    const snapTolerance = Math.max(0.02, roundToDecimals(maxAmount * 0.015, 2))
     const d = dialog.info({
         title: 'Adding funds',
-        content: () => h(NInput, { onUpdateValue: (value) => { amount = value }, allowInput: (value: string) => !value || /^\d+$/.test(value), placeholder: "Add amount in " + currency.toUpperCase() }),
+        content: () => h('div', { style: 'display:flex; flex-direction:column; gap:10px; min-width:260px;' }, [
+            h('div', { style: 'font-size:12px; opacity:0.75;' }, `Available ${currency.toUpperCase()}: ${formatOrderAmount(maxAmount)}`),
+            h(NSlider, {
+                min: 0,
+                max: maxAmount,
+                step: 0.01,
+                marks,
+                value: amount.value,
+                'onUpdate:value': (value: number | [number, number]) => {
+                    const resolved = Array.isArray(value) ? Number(value[0]) : Number(value)
+                    const clamped = roundToDecimals(clampToRange(resolved, 0, maxAmount), 2)
+                    amount.value = snapToMarkers(clamped, markerValues, snapTolerance)
+                },
+            }),
+            h(NInputNumber, {
+                min: 0,
+                max: maxAmount,
+                step: 0.01,
+                precision: 2,
+                value: amount.value,
+                placeholder: `Add amount in ${currency.toUpperCase()}`,
+                'onUpdate:value': (value: number | null) => {
+                    amount.value = roundToDecimals(
+                        clampToRange(Number(value ?? 0), 0, maxAmount),
+                        2,
+                    )
+                },
+            }),
+        ]),
         positiveText: 'Add funds',
         negativeText: 'Cancel',
         onPositiveClick: async () => {
             d.loading = true
-            const result = await fetchJson<{ result: string }>(`/orders/buy/${symbol + "-" + currency}/${amount}`)
+            const finalAmount = roundToDecimals(
+                clampToRange(amount.value, 0, maxAmount),
+                2,
+            )
+            if (finalAmount <= 0) {
+                d.loading = false
+                message.error(`Amount must be greater than 0 ${currency.toUpperCase()}`)
+                return false
+            }
+            const orderAmount = formatOrderAmount(finalAmount)
+            const result = await fetchJson<{ result: string }>(`/orders/buy/${symbol + "-" + currency}/${orderAmount}`)
             if (result["result"] == "new_so") {
-                message.success('Added ' + amount + ' ' + currency.toUpperCase() + ' for ' + symbol.toUpperCase())
+                message.success('Added ' + orderAmount + ' ' + currency.toUpperCase() + ' for ' + symbol.toUpperCase())
             } else {
-                message.error('Failed to add ' + amount + ' ' + currency.toUpperCase() + ' for ' + symbol.toUpperCase())
+                message.error('Failed to add ' + orderAmount + ' ' + currency.toUpperCase() + ' for ' + symbol.toUpperCase())
             }
 
         },

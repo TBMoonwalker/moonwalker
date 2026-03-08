@@ -161,13 +161,11 @@ const managedSockets = [
   'openTrades',
   buildWsUrl('/trades/open'),
   open_trade_store,
-  { healthcheck: false },
   ),
   createManagedSocket(
   'closedTrades',
   buildWsUrl('/trades/closed'),
   closed_trade_store,
-  { healthcheck: false },
   ),
   createManagedSocket(
   'statistics',
