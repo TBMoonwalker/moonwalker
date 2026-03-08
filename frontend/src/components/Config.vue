@@ -188,14 +188,16 @@
                 </template>
 
                 <!-- Dynamic check for Strategy settings -->
-                <n-form-item label="Signal initial buy strategy" path="selectValue" label-placement="left">
-                    <n-checkbox v-model:checked="signal.strategy_enabled" />
-                </n-form-item>
-                <template v-if="signal.strategy_enabled">
-                    <n-form-item label="Strategy" path="strategy">
-                        <n-select v-model:value="signal.strategy" placeholder="Select"
-                            :options="signal.strategy_plugins" />
+                <template v-if="!isCsvSignalSelected">
+                    <n-form-item label="Signal initial buy strategy" path="selectValue" label-placement="left">
+                        <n-checkbox v-model:checked="signal.strategy_enabled" />
                     </n-form-item>
+                    <template v-if="signal.strategy_enabled">
+                        <n-form-item label="Strategy" path="strategy">
+                            <n-select v-model:value="signal.strategy" placeholder="Select"
+                                :options="signal.strategy_plugins" />
+                        </n-form-item>
+                    </template>
                 </template>
             </n-form>
         </n-card>
@@ -760,6 +762,12 @@ const indicator = ref({
     upnl_housekeeping_interval: 0,
     history_lookback_time: null,
 })
+const isCsvSignalSelected = computed(() => signal.value.signal === 'csv_signal')
+
+function resetSignalStrategySelection(): void {
+    signal.value.strategy_enabled = false
+    signal.value.strategy = null
+}
 
 const SECTION_LABELS: Record<string, string> = {
     general: 'General',
@@ -1369,6 +1377,7 @@ function handle_signal_settings_select() {
         if (dynamicCsvSignalSettingsForm.value.length === 0) {
             dynamicCsvSignalSettingsForm.value.push({ value: null })
         }
+        resetSignalStrategySelection()
         if (!signal.value.csvsignal_mode) {
             signal.value.csvsignal_mode = 'source'
         }
@@ -1743,7 +1752,12 @@ async function submitForm() {
             ws_stale_timeout_ms: JSON.stringify({ 'value': general.value.ws_stale_timeout_ms ?? ADVANCED_WS_STALE_TIMEOUT_MS, 'type': "int" }),
             ws_reconnect_debounce_ms: JSON.stringify({ 'value': general.value.ws_reconnect_debounce_ms ?? ADVANCED_WS_RECONNECT_DEBOUNCE_MS, 'type': "int" }),
             signal: JSON.stringify({ 'value': signal.value.signal || false, 'type': "str" }),
-            signal_strategy: JSON.stringify({ 'value': signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false, 'type': "str" }),
+            signal_strategy: JSON.stringify({
+                'value': signal.value.signal === 'csv_signal'
+                    ? false
+                    : (signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false),
+                'type': "str"
+            }),
             signal_settings: JSON.stringify({ 'value': buildSignalSettingsValue(), 'type': "str" }),
             symbol_list: JSON.stringify({ 'value': normalizedSymbolList, 'type': "str" }),
             filter: JSON.stringify({ 'value': { 'rsi_max': filter.value.rsi || false, 'marketcap_cmc_api_key': filter.value.cmc_api_key || false }, 'type': "str" }),

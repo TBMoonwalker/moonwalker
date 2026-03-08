@@ -425,7 +425,17 @@ class Orders:
                 )
                 return True
             else:
-                logging.error("Failed creating buy order for %s", order["symbol"])
+                precheck = self.exchange.get_last_buy_precheck_result()
+                if precheck and not bool(precheck.get("ok", False)):
+                    logging.warning(
+                        "Skipping buy order for %s: funds pre-check failed (%s). required=%s available=%s",
+                        order["symbol"],
+                        precheck.get("reason", "unknown"),
+                        precheck.get("required_quote"),
+                        precheck.get("available_quote"),
+                    )
+                else:
+                    logging.error("Failed creating buy order for %s", order["symbol"])
                 return False
         finally:
             await self.exchange.close()

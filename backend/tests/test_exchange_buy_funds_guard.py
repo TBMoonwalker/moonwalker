@@ -1,0 +1,163 @@
+import pytest
+from service.exchange import Exchange
+
+
+@pytest.mark.asyncio
+async def test_create_spot_market_buy_skips_when_quote_balance_is_zero(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    execute_calls = {"count": 0}
+
+    async def fake_ensure_exchange(_config) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_get_amount(_ordersize, _symbol) -> str:
+        return "0.001"
+
+    async def fake_get_price(_symbol) -> str:
+        return "100000.0"
+
+    async def fake_get_free_quote_balance(
+        config=None, symbol=None, force_refresh=False
+    ) -> float:
+        assert config is not None
+        assert symbol == "BTC/USDT"
+        assert force_refresh is True
+        return 0.0
+
+    async def fake_execute(_order) -> None:
+        execute_calls["count"] += 1
+        return None
+
+    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(
+        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
+    )
+    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "get_free_quote_balance", fake_get_free_quote_balance)
+    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+
+    result = await exchange.create_spot_market_buy(
+        {"ordersize": 100.0, "symbol": "BTC/USDT"},
+        {},
+    )
+
+    assert result is None
+    assert execute_calls["count"] == 0
+    precheck = exchange.get_last_buy_precheck_result()
+    assert precheck is not None
+    assert precheck["ok"] is False
+    assert precheck["reason"] == "insufficient_quote_balance"
+
+
+@pytest.mark.asyncio
+async def test_create_spot_market_buy_skips_when_balance_check_unavailable(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    execute_calls = {"count": 0}
+
+    async def fake_ensure_exchange(_config) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_get_amount(_ordersize, _symbol) -> str:
+        return "0.001"
+
+    async def fake_get_price(_symbol) -> str:
+        return "100000.0"
+
+    async def fake_get_free_quote_balance(
+        config=None, symbol=None, force_refresh=False
+    ) -> None:
+        assert config is not None
+        assert symbol == "BTC/USDT"
+        assert force_refresh is True
+        return None
+
+    async def fake_execute(_order) -> None:
+        execute_calls["count"] += 1
+        return None
+
+    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(
+        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
+    )
+    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "get_free_quote_balance", fake_get_free_quote_balance)
+    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+
+    result = await exchange.create_spot_market_buy(
+        {"ordersize": 100.0, "symbol": "BTC/USDT"},
+        {},
+    )
+
+    assert result is None
+    assert execute_calls["count"] == 0
+    precheck = exchange.get_last_buy_precheck_result()
+    assert precheck is not None
+    assert precheck["ok"] is False
+    assert precheck["reason"] == "balance_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_create_spot_market_buy_runs_when_quote_balance_is_sufficient(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    execute_calls = {"count": 0}
+
+    async def fake_ensure_exchange(_config) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_get_amount(_ordersize, _symbol) -> str:
+        return "0.001"
+
+    async def fake_get_price(_symbol) -> str:
+        return "100000.0"
+
+    async def fake_get_free_quote_balance(
+        config=None, symbol=None, force_refresh=False
+    ) -> float:
+        assert config is not None
+        assert symbol == "BTC/USDT"
+        assert force_refresh is True
+        return 100.0
+
+    async def fake_execute(_order) -> None:
+        execute_calls["count"] += 1
+        return None
+
+    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(
+        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
+    )
+    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "get_free_quote_balance", fake_get_free_quote_balance)
+    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+
+    result = await exchange.create_spot_market_buy(
+        {"ordersize": 100.0, "symbol": "BTC/USDT"},
+        {},
+    )
+
+    assert result is None
+    assert execute_calls["count"] == 1
+    precheck = exchange.get_last_buy_precheck_result()
+    assert precheck is not None
+    assert precheck["ok"] is True

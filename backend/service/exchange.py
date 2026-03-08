@@ -31,6 +31,7 @@ class Exchange:
         self._balance_lock = asyncio.Lock()
         self._balance_cache: dict[str, Any] | None = None
         self._balance_cache_ts = 0.0
+        self._last_buy_precheck_result: dict[str, Any] | None = None
 
     async def __close_exchange(self) -> None:
         if self.exchange is None:
@@ -633,6 +634,26 @@ class Exchange:
             return False, None, estimated_notional
         return estimated_notional < min_notional, min_notional, estimated_notional
 
+    def __resolve_required_buy_quote(self, order: dict[str, Any]) -> float | None:
+        """Return required quote amount for a buy order."""
+        requested_quote = self.__safe_float(order.get("ordersize"))
+        required_quote = (
+            requested_quote if requested_quote and requested_quote > 0 else None
+        )
+
+        amount = self.__safe_float(order.get("amount"))
+        price = self.__safe_float(order.get("price"))
+        if amount is not None and amount > 0 and price is not None and price > 0:
+            estimated_quote = amount * price
+            if required_quote is None:
+                required_quote = estimated_quote
+            else:
+                required_quote = max(required_quote, estimated_quote)
+
+        if required_quote is None or required_quote <= 0:
+            return None
+        return float(required_quote)
+
     @staticmethod
     def __extract_free_amount(balance: dict[str, Any], asset: str) -> float | None:
         """Extract free amount for an asset from CCXT balance payload."""
@@ -730,7 +751,7 @@ class Exchange:
         )
 
     async def get_free_quote_balance(
-        self, config: dict[str, Any], symbol: str
+        self, config: dict[str, Any], symbol: str, force_refresh: bool = False
     ) -> float | None:
         """Return currently available quote asset balance for a symbol."""
         await self.__ensure_exchange(config)
@@ -742,7 +763,7 @@ class Exchange:
 
         quote_asset = resolved_symbol.split("/")[1].split(":")[0]
         try:
-            balance = await self.__get_balance_snapshot()
+            balance = await self.__get_balance_snapshot(force_refresh=force_refresh)
         except (ccxt.BaseError, RuntimeError, OSError) as exc:
             logging.warning("Fetching quote balance for %s failed: %s", symbol, exc)
             return None
@@ -750,6 +771,77 @@ class Exchange:
         if balance is None:
             return None
         return self.__extract_free_amount(balance, quote_asset)
+
+    async def __preflight_buy_funds(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> bool:
+        """Check quote balance before placing a buy order."""
+        self._last_buy_precheck_result = None
+
+        symbol = str(order.get("symbol") or "")
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is None:
+            self._last_buy_precheck_result = {
+                "ok": False,
+                "reason": "symbol_not_found",
+                "symbol": symbol,
+            }
+            return False
+
+        required_quote = self.__resolve_required_buy_quote(order)
+        if required_quote is None:
+            self._last_buy_precheck_result = {
+                "ok": False,
+                "reason": "invalid_required_quote",
+                "symbol": resolved_symbol,
+            }
+            return False
+
+        buffer_pct = self.__safe_float(config.get("buy_fund_buffer_pct"))
+        if buffer_pct is None or buffer_pct < 0:
+            buffer_pct = 0.0
+        required_with_buffer = required_quote * (1 + buffer_pct)
+
+        available_quote = await self.get_free_quote_balance(
+            config=config,
+            symbol=resolved_symbol,
+            force_refresh=True,
+        )
+        if available_quote is None:
+            self._last_buy_precheck_result = {
+                "ok": False,
+                "reason": "balance_unavailable",
+                "symbol": resolved_symbol,
+                "required_quote": round(required_with_buffer, 8),
+                "available_quote": None,
+                "buffer_pct": round(buffer_pct, 6),
+            }
+            return False
+
+        if available_quote + 1e-12 < required_with_buffer:
+            self._last_buy_precheck_result = {
+                "ok": False,
+                "reason": "insufficient_quote_balance",
+                "symbol": resolved_symbol,
+                "required_quote": round(required_with_buffer, 8),
+                "available_quote": round(float(available_quote), 8),
+                "buffer_pct": round(buffer_pct, 6),
+            }
+            return False
+
+        self._last_buy_precheck_result = {
+            "ok": True,
+            "reason": "ok",
+            "symbol": resolved_symbol,
+            "required_quote": round(required_with_buffer, 8),
+            "available_quote": round(float(available_quote), 8),
+            "buffer_pct": round(buffer_pct, 6),
+        }
+        return True
+
+    def get_last_buy_precheck_result(self) -> dict[str, Any] | None:
+        """Return metadata from the most recent buy funds pre-check."""
+        return self._last_buy_precheck_result
 
     async def get_free_balance_for_asset(
         self, config: dict[str, Any], asset: str
@@ -848,6 +940,7 @@ class Exchange:
         await self.__ensure_exchange(config)
         await self.__ensure_markets_loaded()
         self.config = config
+        self._last_buy_precheck_result = None
         order["amount"] = await self.__get_amount_from_symbol(
             order["ordersize"], order["symbol"]
         )
@@ -858,6 +951,16 @@ class Exchange:
                 order.get("symbol"),
                 order.get("price"),
                 order.get("amount"),
+            )
+            return None
+        if not await self.__preflight_buy_funds(order, config):
+            precheck = self._last_buy_precheck_result or {}
+            logging.warning(
+                "Skipping buy for %s: funds check failed (%s). required=%s available=%s",
+                order.get("symbol"),
+                precheck.get("reason", "unknown"),
+                precheck.get("required_quote"),
+                precheck.get("available_quote"),
             )
             return None
         order = await self.__execute_market_buy(order)
