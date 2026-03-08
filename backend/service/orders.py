@@ -11,6 +11,12 @@ import model
 from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
 from service.monitoring import MonitoringService
+from service.trade_math import (
+    calculate_order_size,
+    calculate_so_percentage,
+    count_decimal_places,
+    parse_date_to_ms,
+)
 from service.trades import Trades
 from tortoise.transactions import in_transaction
 
@@ -334,6 +340,30 @@ class Orders:
             return int(open_trade[0]["so_count"])
         return 0
 
+    @staticmethod
+    def _normalize_symbol(symbol: str) -> str:
+        """Normalize symbol into BASE/QUOTE format."""
+        normalized = str(symbol or "").strip().upper().replace(" ", "")
+        normalized = normalized.replace("_", "/")
+        if "-" in normalized and "/" not in normalized:
+            normalized = normalized.replace("-", "/")
+
+        parts = normalized.split("/")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError("Invalid symbol. Use BASE/QUOTE format.")
+        return f"{parts[0]}/{parts[1]}"
+
+    @staticmethod
+    def _parse_positive_float(value: Any, field_name: str) -> float:
+        """Parse and validate positive numeric payload fields."""
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid {field_name}.") from exc
+        if parsed <= 0:
+            raise ValueError(f"{field_name} must be greater than 0.")
+        return parsed
+
     async def receive_buy_order(
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> bool:
@@ -439,6 +469,122 @@ class Orders:
                 return False
         finally:
             await self.exchange.close()
+
+    async def receive_manual_buy_add(
+        self,
+        symbol: str,
+        date_input: Any,
+        price_raw: Any,
+        amount_raw: Any,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append a manual buy as a safety-order row without exchange execution."""
+        normalized_symbol = self._normalize_symbol(symbol)
+        price = self._parse_positive_float(price_raw, "price")
+        amount = self._parse_positive_float(amount_raw, "amount")
+        timestamp_ms = parse_date_to_ms(str(date_input or "").strip())
+        if timestamp_ms is None:
+            raise ValueError("Invalid date.")
+
+        open_trade_rows = await self.trades.get_open_trades_by_symbol(normalized_symbol)
+        if not open_trade_rows:
+            raise ValueError(f"No open trade found for {normalized_symbol}.")
+        open_trade = open_trade_rows[0]
+
+        existing_trades = await self.trades.get_trades_by_symbol(normalized_symbol)
+        if not existing_trades:
+            raise ValueError(f"No existing trade rows found for {normalized_symbol}.")
+
+        last_trade = max(
+            existing_trades,
+            key=lambda trade: float(trade.get("timestamp") or 0.0),
+        )
+        last_timestamp = int(float(last_trade.get("timestamp") or 0.0))
+        if int(timestamp_ms) < last_timestamp:
+            raise ValueError(
+                "Date must be greater than or equal to the latest existing buy date."
+            )
+
+        trade_data = await self.trades.get_trades_for_orders(normalized_symbol)
+        if not trade_data:
+            raise ValueError(f"Cannot resolve trade context for {normalized_symbol}.")
+
+        previous_price = float(last_trade.get("price") or 0.0)
+        ordersize = calculate_order_size(price=price, amount=amount)
+        so_percentage = calculate_so_percentage(
+            price=price,
+            previous_price=previous_price,
+            is_base=False,
+        )
+        safetyorders_count = int(trade_data.get("safetyorders_count") or 0)
+        order_count = safetyorders_count + 1
+        amount_precision = count_decimal_places(str(amount_raw))
+
+        total_amount = float(open_trade.get("amount") or 0.0) + amount
+        total_cost = float(open_trade.get("cost") or 0.0) + ordersize
+        avg_price = total_cost / total_amount if total_amount > 0 else 0.0
+        tp = float(config.get("tp", 0.0) or 0.0)
+        tp_price = avg_price * (1 + (tp / 100.0)) if tp else 0.0
+
+        trade_payload = {
+            "timestamp": str(int(timestamp_ms)),
+            "ordersize": float(ordersize),
+            "fee": 0.0,
+            "precision": amount_precision,
+            "amount_fee": 0.0,
+            "amount": float(amount),
+            "price": float(price),
+            "symbol": normalized_symbol,
+            "orderid": (
+                f"manual-add-{normalized_symbol.replace('/', '')}-"
+                f"{int(timestamp_ms)}-{order_count}"
+            ),
+            "bot": str(trade_data.get("bot") or "manual_add"),
+            "ordertype": str(trade_data.get("ordertype") or "market"),
+            "baseorder": False,
+            "safetyorder": True,
+            "order_count": order_count,
+            "so_percentage": so_percentage,
+            "direction": str(trade_data.get("direction") or "long"),
+            "side": "buy",
+        }
+        open_trade_payload = {
+            "so_count": max(int(open_trade.get("so_count") or 0), order_count),
+            "amount": total_amount,
+            "cost": total_cost,
+            "avg_price": avg_price,
+            "tp_price": tp_price,
+            "unsellable_amount": 0.0,
+            "unsellable_reason": None,
+            "unsellable_min_notional": None,
+            "unsellable_estimated_notional": None,
+            "unsellable_since": None,
+            "unsellable_notice_sent": False,
+        }
+
+        async def _persist_manual_buy() -> None:
+            async with in_transaction() as conn:
+                await model.Trades.create(**trade_payload, using_db=conn)
+                updated = (
+                    await model.OpenTrades.filter(symbol=normalized_symbol)
+                    .using_db(conn)
+                    .update(**open_trade_payload)
+                )
+                if updated == 0:
+                    raise ValueError(f"No open trade found for {normalized_symbol}.")
+
+        await run_sqlite_write_with_retry(
+            _persist_manual_buy, f"persisting manual buy add for {normalized_symbol}"
+        )
+        return {
+            "symbol": normalized_symbol,
+            "timestamp": int(timestamp_ms),
+            "price": float(price),
+            "amount": float(amount),
+            "ordersize": float(ordersize),
+            "so_percentage": float(so_percentage),
+            "order_count": order_count,
+        }
 
     async def receive_stop_signal(self, symbol: str) -> bool:
         """Stop trading for a symbol."""

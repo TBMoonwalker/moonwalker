@@ -17,6 +17,16 @@
                     :time="formatTimestamp(order.timestamp)"
                 />
             </n-timeline>
+            <div class="manual-order-actions">
+                <n-button
+                    tertiary
+                    size="small"
+                    type="primary"
+                    @click="emitAddOrderManually"
+                >
+                    Add order manually
+                </n-button>
+            </div>
         </n-card>
         <n-card>
             <div ref="chartRef" class="expand-chart" />
@@ -27,6 +37,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { createChart, CandlestickSeries, createSeriesMarkers } from 'lightweight-charts'
+import { NButton } from 'naive-ui/es/button'
 
 import { fetchJson } from '../api/client'
 import { formatTradingViewDate } from '../helpers/date'
@@ -52,6 +63,7 @@ type RowData = {
     symbol: string
     tp_price: number
     precision: number
+    current_price?: number
     baseorder: OrderData
     safetyorder?: OrderData[]
 }
@@ -59,6 +71,7 @@ type RowData = {
 const props = defineProps<{
     rowData: RowData
     minTimeframe: TimeframeChoice
+    onAddOrderManually?: (rowData: RowData) => void
 }>()
 
 const MAX_VISIBLE_CANDLES = 500
@@ -119,6 +132,12 @@ function formatPrice(value: unknown): string {
 
 function formatPercent(value: unknown): string {
     return `${toNumberOrZero(value).toFixed(2)} %`
+}
+
+function emitAddOrderManually(): void {
+    if (typeof props.onAddOrderManually === 'function') {
+        props.onAddOrderManually(props.rowData)
+    }
 }
 
 function selectTimeframe(
@@ -287,5 +306,11 @@ onUnmounted(() => {
 <style scoped>
 .expand-chart {
     height: 400px;
+}
+
+.manual-order-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 10px;
 }
 </style>

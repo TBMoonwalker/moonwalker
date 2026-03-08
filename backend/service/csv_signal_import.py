@@ -3,12 +3,17 @@
 import csv
 import io
 from collections import defaultdict
-from datetime import datetime
 from typing import Any
 
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
+from service.trade_math import (
+    calculate_order_size,
+    calculate_so_percentage,
+    count_decimal_places,
+    parse_date_to_ms,
+)
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "csv_signal_import")
@@ -16,17 +21,6 @@ logging = helper.LoggerFactory.get_logger("logs/signal.log", "csv_signal_import"
 
 class CSVSignalImportService:
     """Parse CSV rows and persist imported open trades atomically."""
-
-    _DATE_FORMATS = (
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d",
-        "%d.%m.%Y %H:%M:%S",
-        "%d.%m.%Y",
-        "%d/%m/%Y %H:%M:%S",
-        "%d/%m/%Y",
-        "%m/%d/%Y %H:%M:%S",
-        "%m/%d/%Y",
-    )
 
     async def import_from_csv(
         self,
@@ -87,17 +81,16 @@ class CSVSignalImportService:
             for index, entry in enumerate(entries):
                 amount = float(entry["amount"])
                 price = float(entry["price"])
-                ordersize = amount * price
+                ordersize = calculate_order_size(price=price, amount=amount)
                 total_amount += amount
                 total_cost += ordersize
 
                 is_base = index == 0
-                so_percentage = 0.0
-                if not is_base and previous_price and previous_price > 0:
-                    # Signed percentage change from previous order price.
-                    so_percentage = round(
-                        ((price - previous_price) / previous_price) * 100, 2
-                    )
+                so_percentage = calculate_so_percentage(
+                    price=price,
+                    previous_price=previous_price,
+                    is_base=is_base,
+                )
 
                 previous_price = price
                 trade_rows.append(
@@ -212,7 +205,7 @@ class CSVSignalImportService:
                     f"Invalid CSV at line {line_number}. Empty value detected."
                 )
 
-            timestamp_ms = self._parse_date_to_ms(date_raw)
+            timestamp_ms = parse_date_to_ms(date_raw)
             if timestamp_ms is None:
                 raise ValueError(f"Invalid date at line {line_number}: '{date_raw}'.")
 
@@ -235,7 +228,7 @@ class CSVSignalImportService:
                     "timestamp": timestamp_ms,
                     "price": price,
                     "amount": amount,
-                    "precision": self._count_decimal_places(amount_raw),
+                    "precision": count_decimal_places(amount_raw),
                 }
             )
 
@@ -270,36 +263,9 @@ class CSVSignalImportService:
             f"Invalid symbol '{symbol_raw}'. Use BASE/QUOTE or BASE-{quote_currency}."
         )
 
+    # Compatibility aliases for existing call sites/tests.
     def _parse_date_to_ms(self, value: str) -> int | None:
-        """Parse date-like values to Unix milliseconds."""
-        normalized_value = value.strip()
-        if not normalized_value:
-            return None
-
-        if normalized_value.isdigit():
-            numeric = int(normalized_value)
-            if numeric > 10_000_000_000:
-                return numeric
-            return numeric * 1000
-
-        iso_value = normalized_value.replace("Z", "+00:00")
-        try:
-            iso_dt = datetime.fromisoformat(iso_value)
-            return int(iso_dt.timestamp() * 1000)
-        except ValueError:
-            pass
-
-        for date_format in self._DATE_FORMATS:
-            try:
-                parsed = datetime.strptime(normalized_value, date_format)
-                return int(parsed.timestamp() * 1000)
-            except ValueError:
-                continue
-
-        return None
+        return parse_date_to_ms(value)
 
     def _count_decimal_places(self, value: str) -> int:
-        """Count decimal places for a numeric string."""
-        if "." not in value:
-            return 0
-        return len(value.split(".", maxsplit=1)[1].rstrip("0"))
+        return count_decimal_places(value)
