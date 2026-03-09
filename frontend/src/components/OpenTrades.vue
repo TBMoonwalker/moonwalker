@@ -396,30 +396,18 @@ function handle_deal_buy(data: any) {
 
 function handle_add_manual_buy(data: RowData) {
     const symbol = String(data.symbol || '').toUpperCase()
-    const [, quoteCurrency] = symbol.split("/")
     const previousPrice = getPreviousBuyPrice(data)
     const price = ref(previousPrice > 0 ? previousPrice : Number(data.current_price) || 0)
-    const quoteAmount = ref<number | null>(null)
+    const amount = ref<number | null>(null)
     const timestampMs = ref<number | null>(Date.now())
 
     const orderSize = computed(() => {
-        const localQuoteAmount = Number(quoteAmount.value ?? 0)
-        if (!Number.isFinite(localQuoteAmount)) {
-            return 0
-        }
-        return localQuoteAmount
-    })
-    const baseAmount = computed(() => {
         const localPrice = Number(price.value ?? 0)
-        const localQuoteAmount = Number(quoteAmount.value ?? 0)
-        if (
-            !Number.isFinite(localPrice) ||
-            localPrice <= 0 ||
-            !Number.isFinite(localQuoteAmount)
-        ) {
+        const localAmount = Number(amount.value ?? 0)
+        if (!Number.isFinite(localPrice) || !Number.isFinite(localAmount)) {
             return 0
         }
-        return localQuoteAmount / localPrice
+        return localPrice * localAmount
     })
     const soPercentage = computed(() =>
         calculateSoPercentage(Number(price.value ?? 0), previousPrice),
@@ -447,16 +435,15 @@ function handle_add_manual_buy(data: RowData) {
                 },
             }),
             h(NInputNumber, {
-                value: quoteAmount.value,
+                value: amount.value,
                 min: 0.00000001,
                 precision: 8,
-                placeholder: `Amount (${quoteCurrency})`,
+                placeholder: 'Amount',
                 'onUpdate:value': (value: number | null) => {
-                    quoteAmount.value = value
+                    amount.value = value
                 },
             }),
-            h('div', { style: 'font-size:12px; opacity:0.85;' }, `Order size: ${formatPrice(orderSize.value)} ${quoteCurrency}`),
-            h('div', { style: 'font-size:12px; opacity:0.85;' }, `Asset amount (derived): ${formatPrice(baseAmount.value)}`),
+            h('div', { style: 'font-size:12px; opacity:0.85;' }, `Order size: ${formatPrice(orderSize.value)}`),
             h('div', { style: 'font-size:12px; opacity:0.85;' }, `SO %: ${soPercentage.value.toFixed(2)}%`),
         ]),
         positiveText: 'Add order manually',
@@ -465,7 +452,7 @@ function handle_add_manual_buy(data: RowData) {
             d.loading = true
             const finalTimestamp = Number(timestampMs.value ?? 0)
             const finalPrice = Number(price.value ?? 0)
-            const finalQuoteAmount = Number(quoteAmount.value ?? 0)
+            const finalAmount = Number(amount.value ?? 0)
             if (!Number.isFinite(finalTimestamp) || finalTimestamp <= 0) {
                 d.loading = false
                 message.error('Please enter a valid date')
@@ -476,12 +463,11 @@ function handle_add_manual_buy(data: RowData) {
                 message.error('Please enter a valid price')
                 return false
             }
-            if (!Number.isFinite(finalQuoteAmount) || finalQuoteAmount <= 0) {
+            if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
                 d.loading = false
                 message.error('Please enter a valid amount')
                 return false
             }
-            const finalBaseAmount = finalQuoteAmount / finalPrice
             try {
                 const result = await fetchJson<{ result: string; data?: { so_percentage?: number } }>('/orders/buy/manual', {
                     method: 'POST',
@@ -490,13 +476,13 @@ function handle_add_manual_buy(data: RowData) {
                         symbol,
                         date: finalTimestamp,
                         price: finalPrice,
-                        amount: finalBaseAmount,
+                        amount: finalAmount,
                     }),
                 })
                 if (result.result === 'manual_so') {
                     const effectiveSo = Number(result.data?.so_percentage ?? soPercentage.value)
                     message.success(
-                        `Added manual order for ${symbol} (${formatPrice(finalQuoteAmount)} ${quoteCurrency} at ${formatPrice(finalPrice)}, SO ${effectiveSo.toFixed(2)}%)`,
+                        `Added manual order for ${symbol} (${formatPrice(finalAmount)} at ${formatPrice(finalPrice)}, SO ${effectiveSo.toFixed(2)}%)`,
                     )
                 } else {
                     message.error(`Failed to add manual order for ${symbol}`)
