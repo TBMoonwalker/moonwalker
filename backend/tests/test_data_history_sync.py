@@ -1,0 +1,225 @@
+import os
+import types
+
+import pytest
+from service.data import Data
+from tortoise import Tortoise
+
+
+def _make_candle(timestamp: int, close: float) -> list[float]:
+    return [
+        float(timestamp),
+        close - 1.0,
+        close + 1.0,
+        close - 2.0,
+        close,
+        10.0,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_history_sync_backfills_only_missing_newer_boundary(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    import model
+
+    await model.Tickers.create(
+        timestamp=1000,
+        symbol="BTC/USDC",
+        open=1.0,
+        high=2.0,
+        low=0.5,
+        close=1.5,
+        volume=10.0,
+    )
+    await model.Tickers.create(
+        timestamp=2000,
+        symbol="BTC/USDC",
+        open=2.0,
+        high=3.0,
+        low=1.5,
+        close=2.5,
+        volume=10.0,
+    )
+
+    data = Data()
+    fetch_calls: list[int] = []
+
+    async def fake_get_history_for_symbol(
+        config: dict, symbol: str, timeframe: str, limit: int = 1, since: int = 0
+    ):
+        fetch_calls.append(int(since))
+        return [_make_candle(3000, 3.5)]
+
+    async def fake_close() -> None:
+        return None
+
+    monkeypatch.setattr(
+        data,
+        "_Data__resolve_required_history_window",
+        lambda history_data, config, since_ms=None: (1000, 3000, 1000),
+    )
+    data.exchange = types.SimpleNamespace(
+        get_history_for_symbol=fake_get_history_for_symbol,
+        close=fake_close,
+    )
+
+    success = await data.add_history_data_for_symbol(
+        symbol="BTC/USDC",
+        history_data=1,
+        config={"timeframe": "1s"},
+    )
+
+    rows = (
+        await model.Tickers.filter(symbol="BTC/USDC")
+        .order_by("timestamp")
+        .values_list("timestamp", flat=True)
+    )
+
+    assert success is True
+    assert fetch_calls == [3000]
+    assert [int(float(row)) for row in rows] == [1000, 2000, 3000]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_history_sync_falls_back_to_full_refill_for_internal_gap(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    import model
+
+    await model.Tickers.create(
+        timestamp=1000,
+        symbol="BTC/USDC",
+        open=1.0,
+        high=2.0,
+        low=0.5,
+        close=1.5,
+        volume=10.0,
+    )
+    await model.Tickers.create(
+        timestamp=3000,
+        symbol="BTC/USDC",
+        open=3.0,
+        high=4.0,
+        low=2.5,
+        close=3.5,
+        volume=10.0,
+    )
+
+    data = Data()
+    fetch_calls: list[int] = []
+
+    async def fake_get_history_for_symbol(
+        config: dict, symbol: str, timeframe: str, limit: int = 1, since: int = 0
+    ):
+        fetch_calls.append(int(since))
+        return [
+            _make_candle(1000, 1.5),
+            _make_candle(2000, 2.5),
+            _make_candle(3000, 3.5),
+        ]
+
+    async def fake_close() -> None:
+        return None
+
+    monkeypatch.setattr(
+        data,
+        "_Data__resolve_required_history_window",
+        lambda history_data, config, since_ms=None: (1000, 3000, 1000),
+    )
+    data.exchange = types.SimpleNamespace(
+        get_history_for_symbol=fake_get_history_for_symbol,
+        close=fake_close,
+    )
+
+    success = await data.add_history_data_for_symbol(
+        symbol="BTC/USDC",
+        history_data=1,
+        config={"timeframe": "1s"},
+    )
+
+    rows = (
+        await model.Tickers.filter(symbol="BTC/USDC")
+        .order_by("timestamp")
+        .values_list("timestamp", flat=True)
+    )
+
+    assert success is True
+    assert fetch_calls == [1000]
+    assert [int(float(row)) for row in rows] == [1000, 2000, 3000]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_history_sync_preserves_existing_rows_when_exchange_fetch_fails(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    import model
+
+    await model.Tickers.create(
+        timestamp=1000,
+        symbol="BTC/USDC",
+        open=1.0,
+        high=2.0,
+        low=0.5,
+        close=1.5,
+        volume=10.0,
+    )
+
+    data = Data()
+    fetch_calls: list[int] = []
+
+    async def fake_get_history_for_symbol(
+        config: dict, symbol: str, timeframe: str, limit: int = 1, since: int = 0
+    ):
+        fetch_calls.append(int(since))
+        return []
+
+    async def fake_close() -> None:
+        return None
+
+    monkeypatch.setattr(
+        data,
+        "_Data__resolve_required_history_window",
+        lambda history_data, config, since_ms=None: (1000, 3000, 1000),
+    )
+    data.exchange = types.SimpleNamespace(
+        get_history_for_symbol=fake_get_history_for_symbol,
+        close=fake_close,
+    )
+
+    success = await data.add_history_data_for_symbol(
+        symbol="BTC/USDC",
+        history_data=1,
+        config={"timeframe": "1s"},
+    )
+
+    rows = (
+        await model.Tickers.filter(symbol="BTC/USDC")
+        .order_by("timestamp")
+        .values_list("timestamp", flat=True)
+    )
+
+    assert success is False
+    assert fetch_calls == [2000, 1000]
+    assert [int(float(row)) for row in rows] == [1000]
+
+    await Tortoise.close_connections()

@@ -158,6 +158,124 @@ class Data:
         min_date = end_time - timedelta(seconds=lookback_seconds)
         return int(min_date.timestamp() * 1000)
 
+    def __timeframe_to_milliseconds(self, timerange: str) -> int:
+        """Convert timeframe notation to milliseconds."""
+        return self.__timeframe_to_seconds(timerange) * 1000
+
+    def __resolve_required_history_window(
+        self,
+        history_data: int,
+        config: dict[str, Any],
+        since_ms: int | None = None,
+    ) -> tuple[int, int, int]:
+        """Return normalized required history window and timeframe size."""
+        timeframe = resolve_timeframe(config)
+        timeframe_ms = max(1, self.__timeframe_to_milliseconds(timeframe))
+        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
+        current_candle_start = now_ms - (now_ms % timeframe_ms)
+        required_until = max(0, current_candle_start - timeframe_ms)
+        requested_since = (
+            int(since_ms)
+            if since_ms is not None
+            else int(
+                (datetime.now(timezone.utc) - timedelta(days=history_data)).timestamp()
+                * 1000
+            )
+        )
+        required_since = max(
+            0,
+            ((requested_since + timeframe_ms - 1) // timeframe_ms) * timeframe_ms,
+        )
+        if required_since > required_until:
+            required_since = required_until
+        return required_since, required_until, timeframe_ms
+
+    @staticmethod
+    def _build_required_timestamps(
+        required_since: int, required_until: int, timeframe_ms: int
+    ) -> set[int]:
+        """Build the exact timestamp set required for a history window."""
+        if timeframe_ms <= 0 or required_until < required_since:
+            return set()
+        return set(range(required_since, required_until + 1, timeframe_ms))
+
+    async def __get_stored_timestamps(
+        self, symbol: str, since_ms: int, until_ms: int
+    ) -> set[int]:
+        """Return stored timestamps for a symbol within the required window."""
+        rows = (
+            await model.Tickers.filter(symbol=symbol)
+            .filter(timestamp__gte=since_ms, timestamp__lte=until_ms)
+            .values_list("timestamp", flat=True)
+        )
+        timestamps: set[int] = set()
+        for row in rows:
+            try:
+                timestamps.add(int(float(row)))
+            except (TypeError, ValueError):
+                continue
+        return timestamps
+
+    async def __fetch_and_store_history_range(
+        self,
+        symbol: str,
+        config: dict[str, Any],
+        fetch_since_ms: int,
+        required_since: int,
+        required_until: int,
+        required_timestamps: set[int],
+        existing_timestamps: set[int],
+    ) -> set[int]:
+        """Fetch OHLCV from exchange and insert only missing required candles."""
+        ohlcv_data = await self.exchange.get_history_for_symbol(
+            config,
+            symbol,
+            resolve_timeframe(config),
+            limit=1000,
+            since=fetch_since_ms,
+        )
+        if not ohlcv_data:
+            logging.warning(
+                "No historical OHLCV candles returned for %s (since=%s).",
+                symbol,
+                fetch_since_ms,
+            )
+            return set()
+
+        normalized_symbol = self.utils.split_symbol(symbol)
+        rows_to_insert: list[model.Tickers] = []
+        inserted_timestamps: set[int] = set()
+
+        for candle in ohlcv_data:
+            timestamp = int(candle[0])
+            if timestamp < required_since or timestamp > required_until:
+                continue
+            if timestamp not in required_timestamps:
+                continue
+            if timestamp in existing_timestamps or timestamp in inserted_timestamps:
+                continue
+
+            rows_to_insert.append(
+                model.Tickers(
+                    timestamp=timestamp,
+                    symbol=normalized_symbol,
+                    open=candle[1],
+                    high=candle[2],
+                    low=candle[3],
+                    close=candle[4],
+                    volume=candle[5],
+                )
+            )
+            inserted_timestamps.add(timestamp)
+
+        if rows_to_insert:
+            await run_sqlite_write_with_retry(
+                lambda: model.Tickers.bulk_create(rows_to_insert),
+                f"bulk insert history for {normalized_symbol}",
+            )
+
+        return inserted_timestamps
+
     @staticmethod
     def _rows_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
         """Create and sanitize a DataFrame from DB rows."""
@@ -237,82 +355,89 @@ class Data:
         config: dict[str, Any],
         since_ms: int | None = None,
     ) -> bool:
-        """Fetch and store historical data for a symbol."""
-        if await self.delete_ticker_data_for_trades(symbol):
-            try:
-                if await self.__fetch_history_data_for_symbol(
-                    symbol, history_data, config, since_ms
-                ):
-                    logging.info("Added history for %s", symbol)
-                    return True
-            except Exception as e:
-                # Broad catch to keep history loads resilient.
-                logging.error("Error adding history for %s. Cause: %s", symbol, e)
-
-        return False
-
-    async def __fetch_history_data_for_symbol(
-        self,
-        symbol: str,
-        history_data: int,
-        config: dict[str, Any],
-        since_ms: int | None = None,
-    ) -> bool:
-        ohlcv = []
+        """Ensure required history exists for a symbol without deleting stored data."""
         try:
-            since = (
-                int(since_ms)
-                if since_ms is not None
-                else int(
-                    (
-                        datetime.now(timezone.utc) - timedelta(days=history_data)
-                    ).timestamp()
-                    * 1000
-                )
+            (
+                required_since,
+                required_until,
+                timeframe_ms,
+            ) = self.__resolve_required_history_window(history_data, config, since_ms)
+            required_timestamps = self._build_required_timestamps(
+                required_since, required_until, timeframe_ms
             )
-            ohlcv_data = await self.exchange.get_history_for_symbol(
-                config,
-                symbol,
-                resolve_timeframe(config),
-                limit=1000,
-                since=since,
-            )
-            if not ohlcv_data:
-                logging.error(
-                    "No historical OHLCV candles returned for %s (since=%s).",
-                    symbol,
-                    since,
-                )
+            if not required_timestamps:
+                logging.warning("No closed candle window available yet for %s.", symbol)
                 return False
 
-            symbol, market = symbol.split("/")
-
-            for ticker in ohlcv_data:
-                ticker = model.Tickers(
-                    timestamp=ticker[0],
-                    symbol=symbol + "/" + market,
-                    open=ticker[1],
-                    high=ticker[2],
-                    low=ticker[3],
-                    close=ticker[4],
-                    volume=ticker[5],
-                )
-                ohlcv.append(ticker)
-
-            await run_sqlite_write_with_retry(
-                lambda: model.Tickers.bulk_create(ohlcv),
-                f"bulk insert history for {symbol}/{market}",
+            stored_timestamps = await self.__get_stored_timestamps(
+                symbol, required_since, required_until
             )
+            if required_timestamps.issubset(stored_timestamps):
+                logging.info("History already complete for %s", symbol)
+                return True
 
-            return True
+            fetch_starts: list[int] = []
+            if not stored_timestamps:
+                fetch_starts.append(required_since)
+            else:
+                earliest_stored = min(stored_timestamps)
+                latest_stored = max(stored_timestamps)
+                if earliest_stored > required_since:
+                    fetch_starts.append(required_since)
+                if latest_stored < required_until:
+                    fetch_starts.append(latest_stored + timeframe_ms)
 
+            if not fetch_starts:
+                fetch_starts.append(required_since)
+
+            for fetch_since in dict.fromkeys(fetch_starts):
+                inserted_timestamps = await self.__fetch_and_store_history_range(
+                    symbol=symbol,
+                    config=config,
+                    fetch_since_ms=fetch_since,
+                    required_since=required_since,
+                    required_until=required_until,
+                    required_timestamps=required_timestamps,
+                    existing_timestamps=stored_timestamps,
+                )
+                stored_timestamps.update(inserted_timestamps)
+
+            if required_timestamps.issubset(stored_timestamps):
+                logging.info("Added missing history boundaries for %s", symbol)
+                return True
+
+            logging.info(
+                "History for %s is still incomplete after boundary sync. "
+                "Retrying full-window refill without deleting local candles.",
+                symbol,
+            )
+            inserted_timestamps = await self.__fetch_and_store_history_range(
+                symbol=symbol,
+                config=config,
+                fetch_since_ms=required_since,
+                required_since=required_since,
+                required_until=required_until,
+                required_timestamps=required_timestamps,
+                existing_timestamps=stored_timestamps,
+            )
+            stored_timestamps.update(inserted_timestamps)
+
+            if required_timestamps.issubset(stored_timestamps):
+                logging.info("Added history for %s", symbol)
+                return True
+
+            missing_count = len(required_timestamps - stored_timestamps)
+            logging.error(
+                "History for %s remains incomplete after refill attempt. "
+                "missing_candles=%s",
+                symbol,
+                missing_count,
+            )
         except Exception as e:
-            # Broad catch to keep history loads resilient.
-            logging.error("Error fetching historical data from Exchange. Cause: %s", e)
+            logging.error("Error adding history for %s. Cause: %s", symbol, e)
         finally:
             if not self.persist_exchange:
                 await self.exchange.close()
-
         return False
 
     async def get_ohlcv_for_pair(

@@ -54,6 +54,7 @@ class Watcher:
         self._worker_tasks: list[asyncio.Task] = []
         self._reload_lock = asyncio.Lock()
         self._reload_task: asyncio.Task | None = None
+        self._pending_reload_config: dict[str, Any] | None = None
         self._btc_warmup_task: asyncio.Task | None = None
         self._btc_warmup_key: tuple[Any, ...] | None = None
 
@@ -71,9 +72,9 @@ class Watcher:
         """Reload watcher configuration and exchange client."""
         logging.info("Reload watcher")
         self.config = config
-        if self._reload_task and not self._reload_task.done():
-            self._reload_task.cancel()
-        self._reload_task = asyncio.create_task(self._reload_exchange_client(config))
+        self._pending_reload_config = dict(config)
+        if self._reload_task is None or self._reload_task.done():
+            self._reload_task = asyncio.create_task(self._drain_exchange_reloads())
 
         Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
         Watcher.timeframe = resolve_timeframe(config)
@@ -83,6 +84,30 @@ class Watcher:
         if Watcher.symbol_update_event:
             Watcher.symbol_update_event.set()
         self._schedule_btc_pulse_history_warmup(config)
+
+    async def _drain_exchange_reloads(self) -> None:
+        """Serialize watcher exchange reloads and coalesce rapid config bursts."""
+        while self._pending_reload_config is not None:
+            config = self._pending_reload_config
+            self._pending_reload_config = None
+
+            try:
+                await self._reload_exchange_client(config)
+            except asyncio.CancelledError:
+                raise
+            except (
+                AttributeError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                ccxtpro.BaseError,
+                OSError,
+            ) as exc:
+                logging.error(
+                    "Failed to reload watcher exchange client: %s",
+                    exc,
+                    exc_info=True,
+                )
 
     @staticmethod
     def __get_mandatory_symbols(config: dict[str, Any]) -> set[str]:
@@ -558,7 +583,7 @@ class Watcher:
                 except ValueError as e:
                     logging.error("%s: value error %s", symbol, e)
                     await asyncio.sleep(5)
-                except (RuntimeError, TypeError, ValueError, OSError) as e:
+                except (IndexError, KeyError, RuntimeError, TypeError, OSError) as e:
                     # Broad catch avoids dropping the websocket loop on unknown errors.
                     logging.error(
                         "Unexpected error for %s: %s", symbol, e, exc_info=True
@@ -724,6 +749,10 @@ class Watcher:
     async def shutdown(self) -> None:
         """Stop watchers and close exchange resources."""
         self.status = False
+        self._pending_reload_config = None
+        if self._reload_task is not None and not self._reload_task.done():
+            await asyncio.gather(self._reload_task, return_exceptions=True)
+            self._reload_task = None
         if self._btc_warmup_task and not self._btc_warmup_task.done():
             self._btc_warmup_task.cancel()
         for task in self.symbol_tasks.values():

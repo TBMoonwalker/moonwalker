@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, h, onMounted, reactive, ref, watch } from 'vue'
 import { NButton } from 'naive-ui/es/button'
 import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
 import { useDialog } from 'naive-ui/es/dialog'
@@ -23,7 +23,12 @@ import { useWebSocketDataStore } from '../stores/websocket'
 import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
 import { fetchJson } from '../api/client'
-import { formatTradingViewDateParts } from '../helpers/date'
+import { useViewport } from '../composables/useViewport'
+import {
+    formatAssetAmount,
+    formatFixed,
+    resolveTradeDateTime,
+} from '../helpers/tradeTable'
 const closed_trade_store = useWebSocketDataStore("closedTrades")
 const closed_trade_data = storeToRefs(closed_trade_store)
 const trades_store = useTradesStore()
@@ -43,9 +48,7 @@ const pageReactive = reactive({
         return `Total ${itemCount} trades`
     }
 });
-const viewportWidth = ref(window.innerWidth)
-const isMobile = computed(() => viewportWidth.value < 768)
-const isTablet = computed(() => viewportWidth.value >= 768 && viewportWidth.value < 1200)
+const { isMobile, isTablet } = useViewport()
 const isTableLoading = computed(
     () => !closed_trade_data.hasReceivedData.value && closed_trade_data.status.value !== 'CLOSED',
 )
@@ -57,10 +60,6 @@ const tableEmptyText = computed(() => {
 })
 const dialog = useDialog()
 const message = useMessage()
-
-const handleResize = () => {
-    viewportWidth.value = window.innerWidth
-}
 
 const updatePageCount = () => {
     pageReactive.pageCount = Math.ceil(closed_trades_length.value / pageReactive.pageSize)
@@ -154,35 +153,6 @@ type RowData = {
     close_date: string
 }
 
-function formatFixed(value: unknown, decimals = 2): string {
-    const parsed = Number(value)
-    if (!Number.isFinite(parsed)) {
-        return (0).toFixed(decimals)
-    }
-    return parsed.toFixed(decimals)
-}
-
-function formatAssetAmount(value: unknown, maxDecimals = 8): string {
-    const parsed = Number(value)
-    if (!Number.isFinite(parsed)) {
-        return "0"
-    }
-    return parsed.toFixed(maxDecimals).replace(/\.?0+$/, "")
-}
-
-function resolveDateTime(value: string): { date: string; time: string } {
-    const parts = formatTradingViewDateParts(value)
-    if (parts.time) {
-        return parts
-    }
-    const raw = String(value).trim()
-    const match = raw.match(/^(.*)\s(\d{2}:\d{2}(?::\d{2})?)$/)
-    if (!match) {
-        return parts
-    }
-    return { date: match[1], time: match[2] }
-}
-
 function row_classes(row: RowData) {
     if (Math.sign(row.profit_percent) >= 0) {
         return 'green'
@@ -270,7 +240,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
             title: 'Closed',
             key: 'close_date',
             render: (rowData) => {
-                const { date, time } = resolveDateTime(rowData.close_date)
+                const { date, time } = resolveTradeDateTime(rowData.close_date)
                 return [
                     h('div', date),
                     h('div', time),
@@ -328,12 +298,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
 const columns_closed_trades = computed(() => columns_trades())
 
 onMounted(async () => {
-    window.addEventListener('resize', handleResize)
     await refreshLength(true)
-})
-
-onUnmounted(() => {
-    window.removeEventListener('resize', handleResize)
 })
 
 </script>

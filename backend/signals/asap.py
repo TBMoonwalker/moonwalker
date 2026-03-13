@@ -2,9 +2,7 @@
 
 import asyncio
 import importlib
-import json
 import random
-import time
 from typing import Any, Optional
 
 import helper
@@ -16,9 +14,16 @@ from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
+from service.signal_runtime import (
+    build_common_runtime_settings,
+    is_max_bots_reached,
+    resolve_max_bots_log_interval,
+    update_waiting_log_state,
+)
 from service.statistic import Statistic
 from service.strategy_capability import ensure_strategy_supported
 from tenacity import retry, wait_fixed
+from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "asap")
 
@@ -58,26 +63,11 @@ class SignalPlugin:
 
     def __prepare_runtime_settings(self) -> None:
         """Cache parsed runtime settings and strategy instance for hot loops."""
-        self._pair_denylist = (
-            [
-                entry.strip().upper().split("/")[0]
-                for entry in self.config.get("pair_denylist", None).split(",")
-                if entry.strip()
-            ]
-            if self.config.get("pair_denylist", None)
-            else None
-        )
-        self._pair_allowlist = (
-            self.config.get("pair_allowlist", None).split(",")
-            if self.config.get("pair_allowlist", None)
-            else None
-        )
-        self._volume = (
-            json.loads(self.config.get("volume", None))
-            if self.config.get("volume", None)
-            else None
-        )
-        self._strategy_timeframe = resolve_timeframe(self.config)
+        runtime = build_common_runtime_settings(self.config)
+        self._pair_denylist = runtime.pair_denylist
+        self._pair_allowlist = runtime.pair_allowlist
+        self._volume = runtime.volume
+        self._strategy_timeframe = runtime.strategy_timeframe
         self._signal_strategy_plugin = None
 
         signal_strategy_name = self.config.get("signal_strategy", None)
@@ -92,16 +82,19 @@ class SignalPlugin:
 
     def __log_max_bots_waiting(self) -> None:
         """Log max-bot saturation with state/interval throttling."""
-        now = time.monotonic()
-        should_log = (not self._max_bots_blocked) or (
-            now - self._max_bots_last_log >= self._max_bots_log_interval_sec
+        (
+            self._max_bots_blocked,
+            self._max_bots_last_log,
+            should_log,
+        ) = update_waiting_log_state(
+            self._max_bots_blocked,
+            self._max_bots_last_log,
+            self._max_bots_log_interval_sec,
         )
         if not should_log:
             return
 
         logging.debug("Max bots reached, waiting for a free slot.")
-        self._max_bots_blocked = True
-        self._max_bots_last_log = now
 
     async def __check_max_bots(self) -> bool:
         """Check if the maximum number of bots has been reached.
@@ -117,38 +110,25 @@ class SignalPlugin:
             ValueError: If configuration is invalid
             RuntimeError: If database operation fails
         """
-        result = False
-        max_bots = self.config.get("max_bots")
         try:
-            all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
-
-            profit = await self.statistic.get_profit()
-            if profit["funds_locked"] and profit["funds_locked"] > 0:
-                trading_settings = await self.autopilot.calculate_trading_settings(
-                    profit["funds_locked"], self.config
-                )
-                if trading_settings:
-                    max_bots = trading_settings["mad"]
-
-            if all_bots and (len(all_bots) >= max_bots):
-                result = True
+            return await is_max_bots_reached(
+                self.config, self.statistic, self.autopilot
+            )
         except ValueError as e:
             logging.error(
                 f"Invalid configuration for max bots check - not starting new deals! Cause: {e}"
             )
-            result = True
+            return True
         except RuntimeError as e:
             logging.error(
                 f"Database error while checking max bots - not starting new deals! Cause: {e}"
             )
-            result = True
-        except Exception as e:
+            return True
+        except (BaseORMException, TypeError) as e:
             logging.error(
                 f"Unexpected error checking max bots - not starting new deals! Cause: {e}"
             )
-            result = True
-
-        return result
+            return True
 
     async def __fetch_symbol_list_from_url(self, url: str) -> list[str]:
         """Fetch symbol list JSON from a remote URL without blocking the event loop."""
@@ -199,6 +179,7 @@ class SignalPlugin:
 
             logging.debug(symbol_list)
 
+            eligible_symbols: list[str] = []
             # Add history data for indicators
             for symbol in symbol_list:
                 if symbol not in running_symbols:
@@ -209,11 +190,13 @@ class SignalPlugin:
                             logging.error(
                                 f"Not trading {symbol} because history add failed. Please check data.log."
                             )
-                            symbol_list.remove(symbol)
-            await self.watcher_queue.put(symbol_list)
+                            continue
+                eligible_symbols.append(symbol)
+            await self.watcher_queue.put(eligible_symbols)
 
             logging.debug(f"Running symbols: {running_symbols}")
-            logging.debug(f"New symbols: {symbol_list}")
+            logging.debug(f"New symbols: {eligible_symbols}")
+            return eligible_symbols
         return symbol_list
 
     @retry(wait=wait_fixed(3))
@@ -317,14 +300,14 @@ class SignalPlugin:
                 try:
                     if not await self._signal_strategy_plugin.run(symbol, "buy"):
                         return False
-                except Exception as e:
+                except (AttributeError, RuntimeError, TypeError, ValueError) as e:
                     # Broad catch to keep signal processing resilient.
                     logging.error(f"Error running buy strategy. Cause: {e}")
                     return False
 
             return True
 
-        except Exception as e:
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as e:
             logging.debug(
                 f"No data yet for {symbol} - you need to enable dynamic dca - error: {e}"
             )
@@ -343,12 +326,7 @@ class SignalPlugin:
             None
         """
         self.config = config
-        try:
-            self._max_bots_log_interval_sec = max(
-                1.0, float(self.config.get("max_bots_log_interval_sec", 60))
-            )
-        except (TypeError, ValueError):
-            self._max_bots_log_interval_sec = 60.0
+        self._max_bots_log_interval_sec = resolve_max_bots_log_interval(self.config)
         self.__prepare_runtime_settings()
 
         while self.status:

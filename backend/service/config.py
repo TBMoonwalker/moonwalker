@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import uuid
 from typing import Any, Callable
 
 import helper
@@ -121,6 +122,7 @@ class Config:
         self._cache: dict[str, Any] = {}
         self._subscribers: set[Callable[[dict[str, Any]], None]] = set()
         self._listener_task: asyncio.Task | None = None
+        self._instance_id = uuid.uuid4().hex
 
     @classmethod
     async def instance(cls) -> "Config":
@@ -151,9 +153,27 @@ class Config:
         for row in rows:
             value = self.__set_type(row.value, row.value_type)
             self._cache[row.key] = value
-        # get strategies
+        self.__refresh_runtime_metadata()
+
+    async def __load_keys(self, keys: list[str]) -> None:
+        """Refresh only the specified config keys from the database cache source."""
+        normalized_keys = [str(key).strip() for key in keys if str(key).strip()]
+        if not normalized_keys:
+            return
+
+        rows = await AppConfig.filter(key__in=normalized_keys)
+        loaded_keys = set()
+        for row in rows:
+            self._cache[row.key] = self.__set_type(row.value, row.value_type)
+            loaded_keys.add(row.key)
+
+        for key in normalized_keys:
+            if key not in loaded_keys:
+                self._cache.pop(key, None)
+
+    def __refresh_runtime_metadata(self) -> None:
+        """Refresh derived config metadata that is not stored in AppConfig."""
         self._cache["strategies"] = self.__get_strategies()
-        # get signal plugins
         self._cache["signal_plugins"] = self.__get_signal_plugins()
 
     def __set_type(self, value: str, type: str) -> Any:
@@ -214,15 +234,24 @@ class Config:
         for subscriber in self._subscribers:
             subscriber(self._cache)
 
-    async def __publish_change(self, key: str) -> None:
+    async def __publish_change(self, keys: list[str]) -> None:
         """Publish config changes to Redis if available.
 
         Redis publish failures should not roll back DB writes.
         """
+        if not keys:
+            return
+
+        message = json.dumps(
+            {
+                "source": self._instance_id,
+                "keys": [str(key).strip() for key in keys if str(key).strip()],
+            }
+        )
         try:
-            await redis_client.publish(CONFIG_CHANNEL, key)
+            await redis_client.publish(CONFIG_CHANNEL, message)
         except Exception as exc:  # noqa: BLE001 - Keep local updates working.
-            logging.warning("Failed to publish config change for '%s': %s", key, exc)
+            logging.warning("Failed to publish config change for '%s': %s", keys, exc)
 
     def __parse_update_payload(self, payload: Any) -> dict[str, Any]:
         """Normalize update payloads from API clients.
@@ -287,7 +316,7 @@ class Config:
         self._cache[key] = self.__set_type(serialized_value, update["type"])
         self.__notify_subscribers()
         # Notify all subscribers across processes (best effort)
-        await self.__publish_change(key)
+        await self.__publish_change([key])
 
         return True
 
@@ -300,7 +329,7 @@ class Config:
         Returns:
             True if the operation succeeded
         """
-        changed = False
+        changed_keys: list[str] = []
         for key, raw_value in updates.items():
             try:
                 value = self.__parse_update_payload(raw_value)
@@ -333,14 +362,11 @@ class Config:
                     defaults={"value": serialized_value, "value_type": value_type},
                 )
                 self._cache[key] = self.__set_type(serialized_value, value_type)
-                changed = True
+                changed_keys.append(key)
 
-        if changed:
+        if changed_keys:
             self.__notify_subscribers()
-
-        # Notify all subscribers across processes
-        # ToDo - create an Array as String with changed files instead of "multiple"
-        await self.__publish_change("multiple")
+            await self.__publish_change(changed_keys)
 
         return True
 
@@ -355,15 +381,50 @@ class Config:
         """
         self._subscribers.add(callback)
 
-    async def reload(self) -> None:
+    async def reload(self, keys: list[str] | None = None) -> None:
         """Reload all configuration from the database and notify subscribers.
 
         This method is called automatically when a configuration change is detected
         via the Redis pub/sub channel, or can be called manually to force a reload.
         """
-        await self.load_all()
+        if keys:
+            await self.__load_keys(keys)
+        else:
+            await self.load_all()
         for subscriber in self._subscribers:
             subscriber(self._cache)
+
+    async def _handle_change_message(self, payload: Any) -> None:
+        """Apply a Redis change payload, skipping self-originated updates."""
+        keys: list[str] | None = None
+        source = None
+
+        if isinstance(payload, str):
+            stripped = payload.strip()
+            if stripped:
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    keys = [stripped]
+                else:
+                    if isinstance(parsed, dict):
+                        source = parsed.get("source")
+                        raw_keys = parsed.get("keys")
+                        if isinstance(raw_keys, list):
+                            keys = [
+                                str(key).strip() for key in raw_keys if str(key).strip()
+                            ]
+                    elif isinstance(parsed, list):
+                        keys = [str(key).strip() for key in parsed if str(key).strip()]
+
+        if source == self._instance_id:
+            return
+
+        if keys:
+            await self.reload(keys)
+            return
+
+        await self.reload()
 
     async def _listen(self) -> None:
         """Listen for configuration change notifications via Redis pub/sub.
@@ -375,7 +436,7 @@ class Config:
         await pubsub.subscribe(CONFIG_CHANNEL)
         async for message in pubsub.listen():
             if message["type"] == "message":
-                await self.reload()
+                await self._handle_change_message(message.get("data"))
 
     def __get_filenames_in_directory(
         self, directory: str, sort: bool = True

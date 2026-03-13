@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import service.watcher as watcher_module
 from service.watcher import Watcher
 
 
@@ -96,3 +97,66 @@ async def test_ensure_worker_tasks_restarts_crashed_dca_worker() -> None:
     watcher.status = False
     replacement.cancel()
     await asyncio.gather(replacement, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_watcher_reload_coalesces_rapid_config_changes(monkeypatch) -> None:
+    watcher = Watcher()
+    events: list[str] = []
+    old_close_started = asyncio.Event()
+    old_close_release = asyncio.Event()
+    created_exchanges: list[object] = []
+
+    class ExistingExchange:
+        async def close(self) -> None:
+            events.append("old_close_start")
+            old_close_started.set()
+            await old_close_release.wait()
+            events.append("old_close_end")
+
+    class FakeExchange:
+        def __init__(self, params: dict) -> None:
+            self.params = params
+            self.closed = False
+            created_exchanges.append(self)
+
+        def set_sandbox_mode(self, _enabled: bool) -> None:
+            return None
+
+        async def close(self) -> None:
+            self.closed = True
+            events.append(self.params["options"]["defaultType"])
+
+    monkeypatch.setattr(watcher_module.ccxtpro, "binance", FakeExchange)
+
+    watcher.exchange = ExistingExchange()
+
+    watcher.on_config_change(
+        {
+            "exchange": "binance",
+            "market": "spot",
+            "dry_run": False,
+            "sandbox": False,
+        }
+    )
+    await asyncio.wait_for(old_close_started.wait(), timeout=1)
+
+    first_reload_task = watcher._reload_task
+    watcher.on_config_change(
+        {
+            "exchange": "binance",
+            "market": "future",
+            "dry_run": False,
+            "sandbox": False,
+        }
+    )
+
+    assert watcher._reload_task is first_reload_task
+
+    old_close_release.set()
+    await asyncio.wait_for(watcher._reload_task, timeout=1)
+
+    assert len(created_exchanges) == 2
+    assert created_exchanges[0].closed is True
+    assert created_exchanges[1].closed is False
+    assert created_exchanges[1].params["options"]["defaultType"] == "future"

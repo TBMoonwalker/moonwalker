@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, h, onMounted, ref, watch } from 'vue'
 import { NButton } from 'naive-ui/es/button'
 import { NButtonGroup } from 'naive-ui/es/button-group'
 import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
@@ -31,7 +31,12 @@ import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
 import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
 import { fetchJson } from '../api/client'
-import { formatTradingViewDateParts } from '../helpers/date'
+import { useViewport } from '../composables/useViewport'
+import {
+    formatAssetAmount,
+    formatFixed,
+    resolveTradeDateTime,
+} from '../helpers/tradeTable'
 import OpenTradeExpandedRow from './OpenTradeExpandedRow.vue'
 
 const open_trade_store = useWebSocketDataStore("openTrades")
@@ -44,10 +49,7 @@ const open_trades = ref()
 const dialog = useDialog()
 const message = useMessage()
 
-const viewportWidth = ref(window.innerWidth)
-
-const isMobile = computed(() => viewportWidth.value < 768)
-const isTablet = computed(() => viewportWidth.value >= 768 && viewportWidth.value < 1200)
+const { isMobile, isTablet } = useViewport()
 const isTableLoading = computed(
     () => !open_trade_data.hasReceivedData.value && open_trade_data.status.value !== 'CLOSED',
 )
@@ -57,10 +59,6 @@ const tableEmptyText = computed(() => {
     }
     return 'No open trades'
 })
-
-const handleResize = () => {
-    viewportWidth.value = window.innerWidth
-}
 
 type TimeframeChoice = {
     timerange: string
@@ -194,22 +192,6 @@ function getUnsellableMessage(rowData: RowData): string {
     return parts.join(" ")
 }
 
-function formatFixed(value: unknown, decimals = 2): string {
-    const parsed = Number(value)
-    if (!Number.isFinite(parsed)) {
-        return (0).toFixed(decimals)
-    }
-    return parsed.toFixed(decimals)
-}
-
-function formatAssetAmount(value: unknown, maxDecimals = 8): string {
-    const parsed = Number(value)
-    if (!Number.isFinite(parsed)) {
-        return "0"
-    }
-    return parsed.toFixed(maxDecimals).replace(/\.?0+$/, "")
-}
-
 function toFiniteNonNegative(value: unknown): number {
     const parsed = Number(value)
     if (!Number.isFinite(parsed) || parsed < 0) {
@@ -260,19 +242,6 @@ function snapToMarkers(
         }
     }
     return value
-}
-
-function resolveDateTime(value: string): { date: string; time: string } {
-    const parts = formatTradingViewDateParts(value)
-    if (parts.time) {
-        return parts
-    }
-    const raw = String(value).trim()
-    const match = raw.match(/^(.*)\s(\d{2}:\d{2}(?::\d{2})?)$/)
-    if (!match) {
-        return parts
-    }
-    return { date: match[1], time: match[2] }
 }
 
 function getPreviousBuyPrice(rowData: RowData): number {
@@ -646,7 +615,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
             key: 'open_date',
             align: 'center',
             render: (rowData) => {
-                const { date, time } = resolveDateTime(rowData.open_date)
+                const { date, time } = resolveTradeDateTime(rowData.open_date)
                 return [
                     h('div', date),
                     h(NDivider, { dashed: true }),
@@ -682,12 +651,7 @@ const columns_trades = (): DataTableColumns<RowData> => {
 const columns_open_trades = computed(() => columns_trades())
 
 onMounted(async () => {
-    window.addEventListener('resize', handleResize)
     await loadConfiguredMinTimeframe()
-})
-
-onUnmounted(() => {
-    window.removeEventListener('resize', handleResize)
 })
 
 </script>

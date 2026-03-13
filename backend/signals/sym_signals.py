@@ -1,22 +1,28 @@
 """SymSignals plugin implementation."""
 
-import ast
 import asyncio
-import json
-import time
 from typing import Any
 
 import helper
 import model
 import socketio
 from service.autopilot import Autopilot
-from service.config import resolve_history_lookback_days, resolve_timeframe
+from service.config import resolve_history_lookback_days
 from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
+from service.signal_runtime import (
+    build_common_runtime_settings,
+    is_max_bots_reached,
+    parse_signal_settings,
+    resolve_max_bots_log_interval,
+    update_waiting_log_state,
+)
 from service.statistic import Statistic
+from socketio.exceptions import ConnectionError as SocketConnectionError
 from socketio.exceptions import DisconnectedError, TimeoutError
+from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "sym_signals")
 
@@ -54,65 +60,36 @@ class SignalPlugin:
     @staticmethod
     def _parse_signal_settings(raw_value: Any) -> dict[str, Any]:
         """Parse signal settings from config string/dict once per run."""
-        if isinstance(raw_value, dict):
-            return raw_value
-        if raw_value is None:
-            return {}
-
-        raw_text = str(raw_value).strip()
-        if not raw_text:
-            return {}
-
-        try:
-            parsed = json.loads(raw_text)
-        except json.JSONDecodeError:
-            parsed = ast.literal_eval(raw_text)
-
-        if not isinstance(parsed, dict):
-            raise TypeError("signal_settings must be a dictionary payload")
-
-        return parsed
+        return parse_signal_settings(raw_value)
 
     def _prepare_runtime_settings(self) -> None:
         """Cache parsed runtime settings to avoid per-event parsing overhead."""
+        runtime = build_common_runtime_settings(self.config)
         self._currency = str(self.config.get("currency", "USDC")).upper()
         self._signal_settings = self._parse_signal_settings(
             self.config.get("signal_settings")
         )
-        self._pair_denylist = (
-            [
-                entry.strip().upper().split("/")[0]
-                for entry in self.config.get("pair_denylist", None).split(",")
-                if entry.strip()
-            ]
-            if self.config.get("pair_denylist", None)
-            else None
-        )
-        self._pair_allowlist = (
-            self.config.get("pair_allowlist", None).split(",")
-            if self.config.get("pair_allowlist", None)
-            else None
-        )
-        self._volume = (
-            json.loads(self.config.get("volume", None))
-            if self.config.get("volume", None)
-            else None
-        )
-        self._strategy_timeframe = resolve_timeframe(self.config)
+        self._pair_denylist = runtime.pair_denylist
+        self._pair_allowlist = runtime.pair_allowlist
+        self._volume = runtime.volume
+        self._strategy_timeframe = runtime.strategy_timeframe
         self._exchange_name = str(self.config.get("exchange", "")).upper()
 
     def __log_max_bots_waiting(self) -> None:
         """Log max-bot saturation with state/interval throttling."""
-        now = time.monotonic()
-        should_log = (not self._max_bots_blocked) or (
-            now - self._max_bots_last_log >= self._max_bots_log_interval_sec
+        (
+            self._max_bots_blocked,
+            self._max_bots_last_log,
+            should_log,
+        ) = update_waiting_log_state(
+            self._max_bots_blocked,
+            self._max_bots_last_log,
+            self._max_bots_log_interval_sec,
         )
         if not should_log:
             return
 
         logging.debug("Max bots reached, waiting for a free slot.")
-        self._max_bots_blocked = True
-        self._max_bots_last_log = now
 
     async def __check_max_bots(self) -> bool:
         """Check if the maximum number of bots has been reached.
@@ -127,29 +104,16 @@ class SignalPlugin:
         Raises:
             Exception: If database operation fails
         """
-        result = False
         try:
-            all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
-            profit = await self.statistic.get_profit()
-            self.max_bots = self.config.get("max_bots")
-
-            if profit["funds_locked"] and profit["funds_locked"] > 0:
-                trading_settings = await self.autopilot.calculate_trading_settings(
-                    profit["funds_locked"], self.config
-                )
-                if trading_settings:
-                    self.max_bots = trading_settings["mad"]
-
-            if all_bots and (len(all_bots) >= self.max_bots):
-                result = True
-        except Exception as e:
+            return await is_max_bots_reached(
+                self.config, self.statistic, self.autopilot
+            )
+        except (BaseORMException, RuntimeError, TypeError, ValueError) as e:
             # Broad catch to avoid stopping the signal loop.
             logging.error(
                 f"Couldn't get actual list of bots - not starting new deals! Cause: {e}"
             )
-            result = True
-
-        return result
+            return True
 
     async def __check_entry_point(self, event: dict[str, Any]) -> bool:
         """Check if a signal event meets all entry criteria for trading.
@@ -226,12 +190,7 @@ class SignalPlugin:
             None
         """
         self.config = config
-        try:
-            self._max_bots_log_interval_sec = max(
-                1.0, float(self.config.get("max_bots_log_interval_sec", 60))
-            )
-        except (TypeError, ValueError):
-            self._max_bots_log_interval_sec = 60.0
+        self._max_bots_log_interval_sec = resolve_max_bots_log_interval(self.config)
         self._prepare_runtime_settings()
         history_data = resolve_history_lookback_days(
             self.config,
@@ -261,7 +220,13 @@ class SignalPlugin:
                         connection_success = True
                         idle_timeout_count = 0
                         received_events_since_connect = 0
-                    except Exception as e:
+                    except (
+                        OSError,
+                        RuntimeError,
+                        TypeError,
+                        ValueError,
+                        SocketConnectionError,
+                    ) as e:
                         # Broad catch to keep reconnect loop alive.
                         logging.error(f"Failed to connect to sym signal websocket: {e}")
 
@@ -356,7 +321,14 @@ class SignalPlugin:
                     )
                     await asyncio.sleep(self.RECONNECT_DELAY_SECONDS)
                     continue
-                except Exception as e:
+                except (
+                    KeyError,
+                    OSError,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                    SocketConnectionError,
+                ) as e:
                     # Broad catch to keep signal loop alive.
                     logging.error(f"Error receiving signal - reconnecting. Cause: {e}")
                     await asyncio.sleep(self.RECONNECT_DELAY_SECONDS)

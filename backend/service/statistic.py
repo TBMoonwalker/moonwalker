@@ -32,6 +32,68 @@ class Statistic:
         }
 
     @staticmethod
+    def _extract_date_key(timestamp: Any) -> str | None:
+        """Normalize timestamp-like values into a YYYY-MM-DD grouping key."""
+        if isinstance(timestamp, datetime):
+            return timestamp.date().isoformat()
+        if isinstance(timestamp, str):
+            date_part = timestamp.strip().split(" ", maxsplit=1)[0]
+            return date_part or None
+        return None
+
+    @classmethod
+    def _group_profit_rows_by_date(
+        cls, rows: list[tuple[Any, Any]]
+    ) -> dict[str, float]:
+        """Aggregate profit rows by date without reparsing full timestamps repeatedly."""
+        grouped: dict[str, float] = {}
+        for timestamp, profit_value in rows:
+            date_key = cls._extract_date_key(timestamp)
+            if not date_key:
+                continue
+            grouped[date_key] = grouped.get(date_key, 0.0) + float(profit_value or 0.0)
+        return grouped
+
+    async def _get_sum_value(
+        self,
+        queryset,
+        field_name: str,
+        error_message: str,
+    ) -> float:
+        """Return a scalar SUM aggregate with a stable 0.0 fallback."""
+        try:
+            result = await queryset.annotate(total=Sum(field_name)).values_list(
+                "total", flat=True
+            )
+            return float(result[0] or 0.0)
+        except BaseORMException as exc:
+            logging.error(error_message, exc)
+            return 0.0
+
+    async def _get_profit_rows_since(
+        self,
+        begin_datetime: datetime | Any,
+        error_message: str,
+    ) -> list[tuple[Any, Any]]:
+        """Return closed-trade profit rows since the given date boundary."""
+        try:
+            return await model.ClosedTrades.filter(
+                close_date__gt=begin_datetime
+            ).values_list("close_date", "profit")
+        except BaseORMException as exc:
+            logging.error(error_message, exc)
+            return []
+
+    async def _get_autopilot_mode(self) -> str:
+        """Return the latest autopilot mode with a stable fallback."""
+        try:
+            autopilot = await model.Autopilot.all().order_by("-id").first()
+            return autopilot.mode if autopilot else "none"
+        except BaseORMException as exc:
+            logging.error("Error getting autopilot mode: %s", exc)
+            return "none"
+
+    @staticmethod
     def _resample_profit_data_sync(
         profit_data: dict[str, Any], period: str
     ) -> dict[str, Any]:
@@ -127,23 +189,16 @@ class Statistic:
             case _:
                 return None
         try:
-            data = await model.ClosedTrades.filter(
-                close_date__gt=begin_datetime
-            ).values_list("close_date", "profit")
-
-            for timestamp, profit_unit in data:
-                date = (datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")).date()
-                if str(date) not in profit_data:
-                    profit_data[str(date)] = profit_unit
-                else:
-                    profit_data[str(date)] += profit_unit
-
+            data = await self._get_profit_rows_since(
+                begin_datetime,
+                f"Error getting profits for {period} data: %s",
+            )
+            profit_data = self._group_profit_rows_by_date(data)
             profit_data = await asyncio.to_thread(
                 self._resample_profit_data_sync, profit_data, period
             )
 
         except BaseORMException as e:
-            # Broad catch to keep stats endpoints responsive.
             logging.error("Error getting profits for %s data: %s", period, e)
 
         return profit_data
@@ -156,71 +211,60 @@ class Statistic:
     async def _get_profit_cached(self) -> dict[str, Any]:
         """Compute and cache profit, uPNL, and autopilot summaries."""
         profit_data = {}
-
-        # uPNL
-        profit_data["upnl"] = 0
-        try:
-            upnl = await model.OpenTrades.annotate(total=Sum("profit")).values_list(
-                "total", flat=True
-            )
-            if upnl[0]:
-                profit_data["upnl"] = upnl[0]
-        except BaseORMException as e:
-            # Broad catch to keep stats endpoints responsive.
-            logging.error("Error getting losses: %s", e)
-
-        # Profit overall
-        profit_data["profit_overall"] = 0
-        try:
-            profit = await model.ClosedTrades.annotate(total=Sum("profit")).values_list(
-                "total", flat=True
-            )
-            closed_profit = float(profit[0] or 0.0)
-            profit_data["profit_overall"] = closed_profit + float(
-                profit_data["upnl"] or 0.0
-            )
-
-        except BaseORMException as e:
-            # Broad catch to keep stats endpoints responsive.
-            logging.error("Error getting profit: %s", e)
-
-        # Funds locked in deals
-        profit_data["funds_locked"] = 0
-        try:
-            funds_locked = await model.OpenTrades.annotate(
-                total=Sum("cost")
-            ).values_list("total", flat=True)
-            profit_data["funds_locked"] = funds_locked[0]
-        except BaseORMException as e:
-            # Broad catch to keep stats endpoints responsive.
-            logging.error("Error getting funds: %s", e)
-
-        # Autopilot mode
-        profit_data["autopilot"] = "none"
-        try:
-            autopilot = await model.Autopilot.all().order_by("-id").first()
-            profit_data["autopilot"] = autopilot.mode if autopilot else "none"
-        except BaseORMException as e:
-            # Broad catch to keep stats endpoints responsive.
-            logging.error("Error getting autopilot mode: %s", e)
-
-        profit_data["profit_week"] = {}
         begin_week = (
             datetime.now() + timedelta(days=(0 - datetime.now().weekday()))
         ).date()
-        try:
-            profit_week = await model.ClosedTrades.filter(
-                close_date__gt=begin_week
-            ).values_list("close_date", "profit")
-            for timestamp, profit_day in profit_week:
-                date = (datetime.strptime(timestamp, "%Y-%m-%d %H:%M:%S.%f")).date()
-                if str(date) not in profit_data["profit_week"]:
-                    profit_data["profit_week"][str(date)] = profit_day
-                else:
-                    profit_data["profit_week"][str(date)] += profit_day
-        except BaseORMException as e:
-            # Broad catch to keep stats endpoints responsive.
-            logging.error("Error getting profits for the week: %s", e)
+
+        upnl_task = self._get_sum_value(
+            model.OpenTrades,
+            "profit",
+            "Error getting losses: %s",
+        )
+        closed_profit_task = self._get_sum_value(
+            model.ClosedTrades,
+            "profit",
+            "Error getting profit: %s",
+        )
+        funds_locked_task = self._get_sum_value(
+            model.OpenTrades,
+            "cost",
+            "Error getting funds: %s",
+        )
+        autopilot_task = self._get_autopilot_mode()
+        profit_week_task = self._get_profit_rows_since(
+            begin_week,
+            "Error getting profits for the week: %s",
+        )
+
+        (
+            upnl_value,
+            closed_profit,
+            funds_locked,
+            autopilot_mode,
+            profit_week_rows,
+        ) = await asyncio.gather(
+            upnl_task,
+            closed_profit_task,
+            funds_locked_task,
+            autopilot_task,
+            profit_week_task,
+        )
+
+        # uPNL
+        profit_data["upnl"] = upnl_value
+
+        # Profit overall
+        profit_data["profit_overall"] = closed_profit + float(
+            profit_data["upnl"] or 0.0
+        )
+
+        # Funds locked in deals
+        profit_data["funds_locked"] = funds_locked
+
+        # Autopilot mode
+        profit_data["autopilot"] = autopilot_mode
+
+        profit_data["profit_week"] = self._group_profit_rows_by_date(profit_week_rows)
 
         profit_data["profit_overall_timestamp"] = datetime.now(timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S"
