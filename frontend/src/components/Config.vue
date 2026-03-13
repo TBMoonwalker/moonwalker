@@ -463,6 +463,20 @@
 
 <script setup lang="ts">
 import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
+import {
+    usePersistableStateTracking,
+    type PersistableState,
+} from '../composables/usePersistableStateTracking'
+import {
+    buildSignalSettingsValue,
+    buildVolumeConfig,
+    getDefaultHistoryLookbackByTimeframe,
+    normalizePairEntries,
+    parseStructuredConfigValue,
+    parseSymbolListToArray,
+    parseVolumeLimitToNumber,
+    toTokenOnlyEntries,
+} from '../helpers/configForm'
 import { getAllTimeZones } from '../helpers/timezone'
 import { parseBooleanString, isJsonString, toNumberOrNull } from '../helpers/validators'
 import type { FormInst, FormItemRule, FormRules } from 'naive-ui/es/form'
@@ -477,7 +491,6 @@ interface dynamicSelectItem {
 }
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
-type PersistableState = Record<string, Record<string, unknown>>
 
 function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
@@ -508,7 +521,6 @@ const submitAttempted = ref(false)
 const saveState = ref<SaveState>('idle')
 const saveErrorMessage = ref<string | null>(null)
 const lastSavedAt = ref<Date | null>(null)
-const baselineState = ref<PersistableState | null>(null)
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
 const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
 const ADVANCED_WS_STALE_TIMEOUT_MS = 20000
@@ -811,33 +823,11 @@ function buildPersistableState(): PersistableState {
         indicator: { ...indicator.value },
     }
 }
-
-function clonePersistableState(state: PersistableState): PersistableState {
-    return JSON.parse(JSON.stringify(state)) as PersistableState
-}
-
-function syncBaselineState(): void {
-    baselineState.value = clonePersistableState(buildPersistableState())
-}
-
-const changedSections = computed(() => {
-    if (!baselineState.value) {
-        return [] as string[]
-    }
-
-    const currentState = buildPersistableState()
-    return Object.keys(currentState).filter(
-        (section) =>
-            JSON.stringify(currentState[section]) !==
-            JSON.stringify(baselineState.value?.[section]),
-    )
-})
-
-const changedSectionLabels = computed(() =>
-    changedSections.value.map((section) => SECTION_LABELS[section] || section),
-)
-
-const isDirty = computed(() => changedSections.value.length > 0)
+const { changedSectionLabels, changedSections, isDirty, syncBaselineState } =
+    usePersistableStateTracking({
+        buildState: buildPersistableState,
+        sectionLabels: SECTION_LABELS,
+    })
 const submitButtonLabel = computed(() => {
     if (saveState.value === 'saving') {
         return 'Saving...'
@@ -923,26 +913,6 @@ const handleBeforeUnload = (event: BeforeUnloadEvent) => {
     }
     event.preventDefault()
     event.returnValue = ''
-}
-
-function getDefaultHistoryLookbackByTimeframe(timeframe: string | null): string {
-    const normalized = String(timeframe || '').trim().toLowerCase()
-    if (normalized === '1m') {
-        return '30d'
-    }
-    if (normalized === '15m') {
-        return '90d'
-    }
-    if (normalized === '1h') {
-        return '180d'
-    }
-    if (normalized === '4h') {
-        return '1y'
-    }
-    if (normalized === '1d') {
-        return '3y'
-    }
-    return '90d'
 }
 
 function getStoredAdvancedGeneralPreference(): boolean {
@@ -1043,89 +1013,6 @@ const ASAP_URL_PARTIAL_PATTERN =
 function handleAsapUrlInput(value: string): void {
     if (ASAP_URL_PARTIAL_PATTERN.test(value)) {
         signal.value.symbol_list = value
-    }
-}
-
-function parseSymbolListToArray(raw: string | null): string[] {
-    if (!raw) {
-        return []
-    }
-    return raw
-        .split(/[\n,]+/)
-        .map((entry) => entry.trim().replace(/^['"]|['"]$/g, ""))
-        .filter((entry) => entry.length > 0)
-}
-
-function parseStructuredConfigValue(raw: unknown): Record<string, unknown> | null {
-    if (!raw) {
-        return null
-    }
-
-    if (typeof raw === 'object') {
-        return raw as Record<string, unknown>
-    }
-
-    if (typeof raw !== 'string') {
-        return null
-    }
-
-    const normalized = raw
-        .replace(/'/g, '"')
-        .replace(/\bTrue\b/g, 'true')
-        .replace(/\bFalse\b/g, 'false')
-        .replace(/\bNone\b/g, 'null')
-
-    try {
-        return JSON.parse(normalized) as Record<string, unknown>
-    } catch (error) {
-        console.error('Failed to parse structured config value:', error, raw)
-        return null
-    }
-}
-
-const VOLUME_MULTIPLIERS: Record<string, number> = {
-    K: 1_000,
-    M: 1_000_000,
-    B: 1_000_000_000,
-    T: 1_000_000_000_000,
-}
-
-function parseVolumeLimitToNumber(raw: unknown): number | null {
-    const parsed = parseStructuredConfigValue(raw)
-    if (!parsed) {
-        return null
-    }
-    const range = String(parsed.range || '').toUpperCase()
-    const size = Number(parsed.size)
-    const multiplier = VOLUME_MULTIPLIERS[range]
-    if (!Number.isFinite(size) || !multiplier) {
-        return null
-    }
-    return size * multiplier
-}
-
-function buildVolumeConfig(rawVolume: number | null): Record<string, unknown> | false {
-    if (rawVolume === null || rawVolume === undefined) {
-        return false
-    }
-    const value = Number(rawVolume)
-    if (!Number.isFinite(value) || value <= 0) {
-        return false
-    }
-
-    const ranges: Array<{ range: string; multiplier: number }> = [
-        { range: 'T', multiplier: 1_000_000_000_000 },
-        { range: 'B', multiplier: 1_000_000_000 },
-        { range: 'M', multiplier: 1_000_000 },
-        { range: 'K', multiplier: 1_000 },
-    ]
-    const selected =
-        ranges.find((entry) => value >= entry.multiplier) ||
-        { range: 'K', multiplier: 1_000 }
-
-    return {
-        size: Number((value / selected.multiplier).toFixed(3)),
-        range: selected.range,
     }
 }
 
@@ -1630,89 +1517,6 @@ async function fetchDefaultValues() {
     }
 }
 
-function splitEntries(raw: string): string[] {
-    return raw
-        .split(/[\n,]+/)
-        .map((entry) => entry.trim().replace(/^['"]|['"]$/g, ""))
-        .filter((entry) => entry.length > 0)
-}
-
-function toTokenOnlyEntries(raw: string | null): string | null {
-    if (!raw) {
-        return raw
-    }
-
-    const normalizedRaw = raw.trim()
-    if (!normalizedRaw || /^https?:\/\//i.test(normalizedRaw)) {
-        return raw
-    }
-
-    const entries = splitEntries(normalizedRaw)
-    if (entries.length === 0) {
-        return raw
-    }
-
-    const tokens = entries.map((entry) =>
-        entry.toUpperCase().replace("-", "/").split("/")[0]
-    )
-    return tokens.join(",")
-}
-
-function normalizePairEntries(raw: string | null, quoteCurrency: string): string | false {
-    if (!raw) {
-        return false
-    }
-
-    const normalizedRaw = raw.trim()
-    if (!normalizedRaw) {
-        return false
-    }
-
-    if (/^https?:\/\//i.test(normalizedRaw)) {
-        return normalizedRaw
-    }
-
-    const entries = splitEntries(normalizedRaw)
-    if (entries.length === 0) {
-        return false
-    }
-
-    const quote = quoteCurrency.toUpperCase()
-    const pairs = entries.map((entry) => {
-        const normalizedEntry = entry.toUpperCase().replace("-", "/")
-        if (normalizedEntry.includes("/")) {
-            const [base, q] = normalizedEntry.split("/")
-            if (base && q) {
-                return `${base}/${q}`
-            }
-            return `${base}/${quote}`
-        }
-        return `${normalizedEntry}/${quote}`
-    })
-
-    return pairs.join(",")
-}
-
-function buildSignalSettingsValue(): Record<string, unknown> | false {
-    if (signal.value.signal === "sym_signals") {
-        return {
-            api_url: signal.value.symsignal_url || false,
-            api_key: signal.value.symsignal_key || false,
-            api_version: signal.value.symsignal_version || false,
-            allowed_signals: signal.value.symsignal_allowedsignals,
-        }
-    }
-    if (signal.value.signal === "csv_signal") {
-        const csvSourceValue = signal.value.csvsignal_mode === 'inline'
-            ? signal.value.csvsignal_inline
-            : signal.value.csvsignal_source
-        return {
-            csv_source: csvSourceValue || false,
-        }
-    }
-    return false
-}
-
 async function submitForm() {
     if (!isDirty.value) {
         message.info('No unsaved changes to submit.')
@@ -1758,7 +1562,19 @@ async function submitForm() {
                     : (signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false),
                 'type': "str"
             }),
-            signal_settings: JSON.stringify({ 'value': buildSignalSettingsValue(), 'type': "str" }),
+            signal_settings: JSON.stringify({
+                'value': buildSignalSettingsValue({
+                    signal: signal.value.signal,
+                    symsignal_url: signal.value.symsignal_url,
+                    symsignal_key: signal.value.symsignal_key,
+                    symsignal_version: signal.value.symsignal_version,
+                    symsignal_allowedsignals: signal.value.symsignal_allowedsignals,
+                    csvsignal_mode: signal.value.csvsignal_mode,
+                    csvsignal_source: signal.value.csvsignal_source,
+                    csvsignal_inline: signal.value.csvsignal_inline,
+                }),
+                'type': "str",
+            }),
             symbol_list: JSON.stringify({ 'value': normalizedSymbolList, 'type': "str" }),
             filter: JSON.stringify({ 'value': { 'rsi_max': filter.value.rsi || false, 'marketcap_cmc_api_key': filter.value.cmc_api_key || false }, 'type': "str" }),
             rsi_max: JSON.stringify({ 'value': filter.value.rsi ?? false, 'type': "float" }),

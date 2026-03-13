@@ -1,8 +1,6 @@
 """Order orchestration for exchange buy/sell actions."""
 
 import asyncio
-import json
-import time
 from datetime import datetime
 from typing import Any
 
@@ -11,6 +9,12 @@ import model
 from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
 from service.monitoring import MonitoringService
+from service.order_payloads import (
+    build_closed_trade_payloads,
+    build_manual_buy_open_trade_payload,
+    build_manual_buy_trade_payload,
+    calculate_trade_duration,
+)
 from service.trade_math import (
     calculate_order_size,
     calculate_so_percentage,
@@ -158,12 +162,10 @@ class Orders:
         if partial_amount > 0:
             open_timestamp = await self.__resolve_open_timestamp(symbol)
             so_count = await self.__resolve_so_count(symbol)
-            close_timestamp = time.mktime(datetime.now().timetuple()) * 1000
             close_date = datetime.now()
+            close_timestamp = close_date.timestamp() * 1000
             open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
-            duration_data = self.__calculate_trade_duration(
-                open_timestamp, close_timestamp
-            )
+            duration_data = calculate_trade_duration(open_timestamp, close_timestamp)
             partial_avg_sell_price = (
                 partial_proceeds / partial_amount if partial_amount > 0 else 0.0
             )
@@ -251,61 +253,13 @@ class Orders:
             symbol
         )
 
-        final_amount = float(order_status.get("total_amount") or 0.0)
-        final_price = float(order_status.get("price") or 0.0)
-        total_amount = partial_amount + final_amount
-        total_proceeds = partial_proceeds + (final_amount * final_price)
-        total_cost = float(order_status.get("total_cost") or 0.0)
-
-        if total_amount > 0:
-            avg_sell_price = total_proceeds / total_amount
-            avg_buy_price = total_cost / total_amount if total_cost else 0.0
-            profit = total_proceeds - total_cost
-            profit_percent = (
-                ((avg_sell_price - avg_buy_price) / avg_buy_price) * 100
-                if avg_buy_price > 0
-                else 0.0
-            )
-            order_status["total_amount"] = total_amount
-            order_status["price"] = avg_sell_price
-            order_status["tp_price"] = avg_sell_price
-            order_status["avg_price"] = avg_buy_price
-            order_status["profit"] = profit
-            order_status["profit_percent"] = profit_percent
-
-        sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
-        sell_date = datetime.now()
-        open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
-        duration_data = self.__calculate_trade_duration(open_timestamp, sell_timestamp)
-
-        payload = {
-            "symbol": symbol,
-            "so_count": so_count,
-            "profit": order_status["profit"],
-            "profit_percent": order_status["profit_percent"],
-            "amount": order_status["total_amount"],
-            "cost": order_status["total_cost"],
-            "tp_price": order_status["tp_price"],
-            "avg_price": order_status["avg_price"],
-            "open_date": open_date,
-            "close_date": sell_date,
-            "duration": duration_data,
-        }
-        monitor_payload = {
-            "symbol": symbol,
-            "side": "sell",
-            "amount": order_status["total_amount"],
-            "cost": order_status["total_cost"],
-            "avg_price": order_status["avg_price"],
-            "tp_price": order_status["tp_price"],
-            "profit": order_status["profit"],
-            "profit_percent": order_status["profit_percent"],
-            "so_count": so_count,
-            "open_date": open_date.isoformat(),
-            "close_date": sell_date.isoformat(),
-            "duration": duration_data,
-        }
-        return {"payload": payload, "monitor_payload": monitor_payload}
+        return build_closed_trade_payloads(
+            order_status,
+            so_count=so_count,
+            open_timestamp_ms=open_timestamp,
+            partial_amount=partial_amount,
+            partial_proceeds=partial_proceeds,
+        )
 
     async def __persist_closed_trade(
         self, symbol: str, payload: dict[str, Any]
@@ -520,47 +474,24 @@ class Orders:
         order_count = safetyorders_count + 1
         amount_precision = count_decimal_places(str(amount_raw))
 
-        total_amount = float(open_trade.get("amount") or 0.0) + amount
-        total_cost = float(open_trade.get("cost") or 0.0) + ordersize
-        avg_price = total_cost / total_amount if total_amount > 0 else 0.0
-        tp = float(config.get("tp", 0.0) or 0.0)
-        tp_price = avg_price * (1 + (tp / 100.0)) if tp else 0.0
-
-        trade_payload = {
-            "timestamp": str(int(timestamp_ms)),
-            "ordersize": float(ordersize),
-            "fee": 0.0,
-            "precision": amount_precision,
-            "amount_fee": 0.0,
-            "amount": float(amount),
-            "price": float(price),
-            "symbol": normalized_symbol,
-            "orderid": (
-                f"manual-add-{normalized_symbol.replace('/', '')}-"
-                f"{int(timestamp_ms)}-{order_count}"
-            ),
-            "bot": str(trade_data.get("bot") or "manual_add"),
-            "ordertype": str(trade_data.get("ordertype") or "market"),
-            "baseorder": False,
-            "safetyorder": True,
-            "order_count": order_count,
-            "so_percentage": so_percentage,
-            "direction": str(trade_data.get("direction") or "long"),
-            "side": "buy",
-        }
-        open_trade_payload = {
-            "so_count": max(int(open_trade.get("so_count") or 0), order_count),
-            "amount": total_amount,
-            "cost": total_cost,
-            "avg_price": avg_price,
-            "tp_price": tp_price,
-            "unsellable_amount": 0.0,
-            "unsellable_reason": None,
-            "unsellable_min_notional": None,
-            "unsellable_estimated_notional": None,
-            "unsellable_since": None,
-            "unsellable_notice_sent": False,
-        }
+        trade_payload = build_manual_buy_trade_payload(
+            normalized_symbol=normalized_symbol,
+            timestamp_ms=int(timestamp_ms),
+            price=float(price),
+            amount=float(amount),
+            ordersize=float(ordersize),
+            amount_precision=amount_precision,
+            order_count=order_count,
+            so_percentage=so_percentage,
+            trade_data=trade_data,
+        )
+        open_trade_payload = build_manual_buy_open_trade_payload(
+            open_trade=open_trade,
+            amount=float(amount),
+            ordersize=float(ordersize),
+            order_count=order_count,
+            tp_percent=float(config.get("tp", 0.0) or 0.0),
+        )
 
         async def _persist_manual_buy() -> None:
             async with in_transaction() as conn:
@@ -677,29 +608,3 @@ class Orders:
             return True
         else:
             return False
-
-    def __calculate_trade_duration(self, start_date: float, end_date: float) -> str:
-        """Calculate trade duration as a JSON string."""
-        # Convert Unix timestamps to datetime objects
-        date1 = datetime.fromtimestamp((start_date / 1000.0))
-        date2 = datetime.fromtimestamp(end_date / 1000.0)
-
-        # Calculate the time difference
-        time_difference = date2 - date1
-
-        # Extract days, seconds, and microseconds
-        days = time_difference.days
-        seconds = time_difference.seconds
-
-        # Calculate hours, minutes, and seconds
-        hours, reminder = divmod(seconds, 3600)
-        minutes, seconds = divmod(reminder, 60)
-
-        return json.dumps(
-            {
-                "days": days,
-                "hours": hours,
-                "minutes": minutes,
-                "seconds": seconds,
-            }
-        )
