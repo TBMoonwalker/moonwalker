@@ -4,19 +4,17 @@ import { RouterView } from 'vue-router'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWebSocketDataStore } from './stores/websocket'
 import { useWebSocket } from '@vueuse/core'
-import {
-  darkTheme,
-  NConfigProvider,
-  NDialogProvider,
-  NGlobalStyle,
-  NMessageProvider,
-  NModalProvider,
-  NNotificationProvider,
-  useOsTheme
-} from 'naive-ui'
 import axios from 'axios'
 import { trackUiEvent } from './utils/uiTelemetry'
 import type { WebSocketStatus } from './stores/websocket'
+import { NConfigProvider } from 'naive-ui/es/config-provider'
+import { NDialogProvider } from 'naive-ui/es/dialog'
+import { NGlobalStyle } from 'naive-ui/es/global-style'
+import { NMessageProvider } from 'naive-ui/es/message'
+import { NModalProvider } from 'naive-ui/es/modal'
+import { NNotificationProvider } from 'naive-ui/es/notification'
+import { darkTheme } from 'naive-ui/es/themes'
+import { useOsTheme } from 'vooks'
 
 const DEFAULT_WS_WATCHDOG_ENABLED = false
 const DEFAULT_WS_HEALTHCHECK_INTERVAL_MS = 5000
