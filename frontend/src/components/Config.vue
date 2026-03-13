@@ -1,440 +1,79 @@
 <template>
     <n-flex vertical class="config-form-shell">
-        <n-card title="General settings">
-            <n-form ref="generalFormRef" :model="general" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Timezone" path="timezone">
-                    <n-select v-model:value="general.timezone" placeholder="Select" :options="timezone" filterable />
-                </n-form-item>
-                <n-form-item label="Debug mode" path="debug" label-placement="left">
-                    <n-checkbox v-model:checked="general.debug" />
-                </n-form-item>
-                <n-form-item label="Advanced configuration" label-placement="left">
-                    <n-switch v-model:value="showAdvancedGeneral" />
-                </n-form-item>
-                <template v-if="showAdvancedGeneral">
-                    <n-form-item label="WebSocket watchdog enabled" path="ws_watchdog_enabled" label-placement="left">
-                        <n-checkbox v-model:checked="general.ws_watchdog_enabled" />
-                    </n-form-item>
-                    <n-form-item label="WebSocket healthcheck interval (ms)" path="ws_healthcheck_interval_ms">
-                        <n-input-number v-model:value="general.ws_healthcheck_interval_ms" :min="1000" />
-                    </n-form-item>
-                    <n-form-item label="WebSocket stale timeout (ms)" path="ws_stale_timeout_ms">
-                        <n-input-number v-model:value="general.ws_stale_timeout_ms" :min="5000" />
-                    </n-form-item>
-                    <n-form-item label="WebSocket reconnect debounce (ms)" path="ws_reconnect_debounce_ms">
-                        <n-input-number v-model:value="general.ws_reconnect_debounce_ms" :min="500" />
-                    </n-form-item>
-                </template>
-            </n-form>
-        </n-card>
+        <ConfigGeneralSection
+            ref="generalFormRef"
+            :general="general"
+            :rules="rules"
+            :show-advanced-general="showAdvancedGeneral"
+            :timezone="timezone"
+            @update:show-advanced-general="showAdvancedGeneral = $event"
+        />
 
         
 
-        <n-card title="Exchange settings">
-            <n-form ref="exchangeFormRef" :model="exchange" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Exchange" path="name">
-                    <n-select v-model:value="exchange.name" placeholder="Select" :options="exchanges" />
-                </n-form-item>
-                <n-form-item label="Timerange" path="timeframe">
-                    <n-select v-model:value="exchange.timeframe" placeholder="Select" :options="timerange" />
-                </n-form-item>
-                <n-form-item label="Key" path="key">
-                    <n-input v-model:value="exchange.key" type="password" show-password-on="click"
-                        placeholder="Exchange Key" />
-                </n-form-item>
-                <n-form-item label="Secret" path="secret">
-                    <n-input v-model:value="exchange.secret" type="password" show-password-on="click"
-                        placeholder="Exchange Secret" />
-                </n-form-item>
-                <n-form-item v-if="showAdvancedGeneral" label="Exchange Hostname" path="exchange_hostname">
-                    <n-input v-model:value="exchange.exchange_hostname" placeholder="e.g. bybit.eu" />
-                </n-form-item>
-                <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="left">
-                    <n-checkbox v-model:checked="exchange.dry_run" />
-                </n-form-item>
-                <n-form-item label="Currency" path="currency">
-                    <n-select v-model:value="exchange.currency" placeholder="Select" :options="currency" />
-                </n-form-item>
-                <n-form-item label="Market" path="market">
-                    <n-select v-model:value="exchange.market" placeholder="Select" :options="market" />
-                </n-form-item>
-                <n-form-item label="Use OHCLV" path="watcher" label-placement="left">
-                    <n-checkbox v-model:checked="exchange.watcher_ohlcv" />
-                </n-form-item>
-            </n-form>
-        </n-card>
+        <ConfigExchangeSection
+            ref="exchangeFormRef"
+            :currency="currency"
+            :exchange="exchange"
+            :exchanges="exchanges"
+            :market="market"
+            :rules="rules"
+            :show-advanced-general="showAdvancedGeneral"
+            :timerange="timerange"
+        />
 
-        <n-card title=" Signal settings">
-            <n-form ref="signalFormRef" :model="signal" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Signal Plugin" path="signal">
-                    <n-select v-model:value="signal.signal" placeholder="Select" :options="signal.plugins"
-                        @update:value="handle_signal_settings_select" @blur="handle_signal_settings_select" />
-                </n-form-item>
+        <ConfigSignalSection
+            ref="signalFormRef"
+            :asap-missing-fields-label="getAsapMissingFieldsLabel()"
+            :is-asap-exchange-ready="isAsapExchangeReady()"
+            :on-asap-url-input="handleAsapUrlInput"
+            :on-csv-file-selected="handleCsvSignalFileSelected"
+            :on-fetch-asap-symbols="fetchAsapSymbolsForCurrency"
+            :on-signal-settings-select="handle_signal_settings_select"
+            :rules="rules"
+            :signal="signal"
+            :symsignals="symsignals"
+        />
 
-                <!-- Dynamic check for Sym Signal settings -->
-                <template v-for="(index) in dynamicSymSignalSettingsForm" :key="index">
-                    <n-form-item :label="'URL'" :path="'url.' + index">
-                        <n-input v-model:value="signal.symsignal_url" placeholder="URL" />
-                    </n-form-item>
-                    <n-form-item :label="'Key'" :path="'key.' + index">
-                        <n-input v-model:value="signal.symsignal_key" type="password" show-password-on="click"
-                            placeholder="Key" />
-                    </n-form-item>
-                    <n-form-item :label="'Version'" :path="'version.' + index">
-                        <n-input v-model:value="signal.symsignal_version" placeholder="Version" />
-                    </n-form-item>
-                    <n-form-item label="Allowed Signals" path="signals">
-                        <n-select v-model:value="signal.symsignal_allowedsignals" placeholder="Select"
-                            :options="symsignals" multiple filterable />
-                    </n-form-item>
-                </template>
-
-                <!-- Dynamic check for ASAP Signal settings -->
-                <template v-for="(index) in dynamicAsapSignalSettingsForm" :key="index">
-                    <n-form-item label="Use URL input" path="asap_use_url" label-placement="left">
-                        <n-switch v-model:value="signal.asap_use_url" />
-                    </n-form-item>
-                    <n-form-item v-if="signal.asap_use_url" label="Token/Coin List or URL" path="symbol_list">
-                        <n-input
-                            :value="signal.symbol_list"
-                            placeholder="https://example.com/symbols.txt"
-                            @update:value="handleAsapUrlInput"
-                        />
-                    </n-form-item>
-                    <n-form-item v-else label="ASAP Symbol" path="symbol_list">
-                        <n-flex vertical :style="{ width: '100%' }">
-                            <n-alert v-if="!isAsapExchangeReady()" type="info">
-                                Please configure {{ getAsapMissingFieldsLabel() }} in Exchange settings first.
-                            </n-alert>
-                            <n-alert v-else-if="signal.asap_symbol_fetch_error" type="warning">
-                                {{ signal.asap_symbol_fetch_error }}
-                            </n-alert>
-                            <n-button
-                                secondary
-                                type="primary"
-                                :loading="signal.asap_symbols_loading"
-                                :disabled="!isAsapExchangeReady()"
-                                @click="fetchAsapSymbolsForCurrency"
-                            >
-                                Load symbols from exchange
-                            </n-button>
-                            <n-select v-model:value="signal.asap_symbol_select" :options="signal.asap_symbol_options"
-                                multiple
-                                :loading="signal.asap_symbols_loading" :disabled="!isAsapExchangeReady() || signal.asap_symbol_options.length === 0"
-                                placeholder="Select symbol" filterable />
-                        </n-flex>
-                    </n-form-item>
-                </template>
-
-                <!-- Dynamic check for CSV Signal settings -->
-                <template v-for="(index) in dynamicCsvSignalSettingsForm" :key="index">
-                    <n-form-item label="CSV input mode" path="csv_signal_mode">
-                        <n-radio-group v-model:value="signal.csvsignal_mode">
-                            <n-space>
-                                <n-radio value="source">Path / URL</n-radio>
-                                <n-radio value="inline">Paste text / Upload file</n-radio>
-                            </n-space>
-                        </n-radio-group>
-                    </n-form-item>
-                    <n-form-item
-                        v-if="signal.csvsignal_mode === 'source'"
-                        label="CSV source (path or URL)"
-                        path="csv_signal_source"
-                    >
-                        <n-input
-                            v-model:value="signal.csvsignal_source"
-                            placeholder="/path/to/trades.csv or https://example.com/trades.csv"
-                        />
-                    </n-form-item>
-                    <template v-else>
-                        <n-form-item label="Paste CSV text" path="csv_signal_inline">
-                            <n-input
-                                v-model:value="signal.csvsignal_inline"
-                                type="textarea"
-                                :autosize="{
-                                    minRows: 6,
-                                    maxRows: 16,
-                                }"
-                                placeholder="date;symbol;price;amount&#10;18/08/2025 19:32:00;BTC/USDC;117644.41;0.00099153"
-                            />
-                        </n-form-item>
-                        <n-form-item label="CSV file upload">
-                            <n-flex align="center" :size="10">
-                                <input
-                                    ref="csvSignalFileInput"
-                                    type="file"
-                                    accept=".csv,text/csv"
-                                    style="display: none;"
-                                    @change="handleCsvSignalFileSelected"
-                                />
-                                <n-button secondary type="primary" @click="openCsvSignalFilePicker">
-                                    Upload CSV file
-                                </n-button>
-                                <n-text v-if="signal.csvsignal_file_name" depth="3">
-                                    Loaded: {{ signal.csvsignal_file_name }}
-                                </n-text>
-                            </n-flex>
-                        </n-form-item>
-                    </template>
-                </template>
-
-                <!-- Dynamic check for Strategy settings -->
-                <template v-if="!isCsvSignalSelected">
-                    <n-form-item label="Signal initial buy strategy" path="selectValue" label-placement="left">
-                        <n-checkbox v-model:checked="signal.strategy_enabled" />
-                    </n-form-item>
-                    <template v-if="signal.strategy_enabled">
-                        <n-form-item label="Strategy" path="strategy">
-                            <n-select v-model:value="signal.strategy" placeholder="Select"
-                                :options="signal.strategy_plugins" />
-                        </n-form-item>
-                    </template>
-                </template>
-            </n-form>
-        </n-card>
-
-        <n-card title="Filter settings">
-            <n-form ref="filterFormRef" :model="filter" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Denylist" path="denylist">
-                    <n-input v-model:value="filter.denylist" placeholder="Textarea" type="textarea" :autosize="{
-                        minRows: 3,
-                        maxRows: 5,
-                    }" />
-                </n-form-item>
-                <template v-for="(index) in dynamicAsapSignalSettingsForm" :key="index">
-                    <n-form-item :label="'RSI Maximum'" :path="'rsi.' + index">
-                        <n-input-number v-model:value="filter.rsi" placeholder="RSI Maximum" />
-                    </n-form-item>
-                    <n-form-item :label="'CMC API Key'" :path="'cmc_api_key.' + index">
-                        <n-input v-model:value="filter.cmc_api_key" type="password" show-password-on="click"
-                            placeholder="CMC API Key" />
-                    </n-form-item>
-                </template>
-
-                <n-form-item :label="'Topcoin Limit'" path="topcoin_limit">
-                    <n-input-number v-model:value="filter.topcoin_limit" placeholder="Topcoin Limit" />
-                </n-form-item>
-
-                <n-form-item :label="'Volume Limit'" path="volume_limit">
-                    <n-input-number v-model:value="filter.volume" placeholder="Volume Limit" />
-                </n-form-item>
-
-                <n-form-item label="BTC Pulse" path="btc_pulse" label-placement="left">
-                    <n-checkbox v-model:checked="filter.btc_pulse" />
-                </n-form-item>
-
-            </n-form>
-        </n-card>
+        <ConfigFilterSection
+            ref="filterFormRef"
+            :filter="filter"
+            :rules="rules"
+            :show-asap-fields="signal.signal === 'asap'"
+        />
 
         
 
-        <n-card title="DCA settings">
-            <n-form ref="dcaFormRef" :model="dca" :rules="rules" label-width="auto" require-mark-placement="right-hanging"
-                :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Enabled" path="enabled" label-placement="left">
-                    <n-checkbox v-model:checked="dca.enabled" @change="handle_dca_select" />
-                </n-form-item>
+        <ConfigDcaSection
+            ref="dcaFormRef"
+            :dca="dca"
+            :rules="rules"
+            :sell-order-type-options="sellOrderTypeOptions"
+            :strategy-options="signal.strategy_plugins"
+        />
 
-                <!-- Dynamic check for Dynamic DCA settings -->
-                <template v-for="(index) in DCAForm" :key="index">
-                    <n-form-item label="Dynamic DCA" path="dynamic_dca" label-placement="left">
-                        <n-checkbox v-model:checked="dca.dynamic" @change="handle_dynamic_dca_select" />
-                    </n-form-item>
-                    <template v-for="(index) in dynamicDCAForm" :key="index">
-                        <n-form-item :label="'Dynamic DCA strategy'" :path="'strategy.' + index">
-                            <n-select v-model:value="dca.strategy" placeholder="Select"
-                                :options="signal.strategy_plugins" />
-                        </n-form-item>
-                    </template>
-                </template>
-                <n-form-item label="Take profit percentage" path="tp">
-                    <n-input-number v-model:value="dca.tp" placeholder="TP" />
-                </n-form-item>
-                <n-form-item label="Trailing Take profit percentage" path="ttp">
-                    <n-input-number v-model:value="dca.trailing_tp" placeholder="TTP" />
-                </n-form-item>
-                <n-form-item label="Max bots running" path="max_bots">
-                    <n-input-number v-model:value="dca.max_bots" placeholder="Bot count" />
-                </n-form-item>
-                <n-form-item label="Base order amount" path="bo">
-                    <n-input-number v-model:value="dca.bo" placeholder="BO" />
-                </n-form-item>
-                <n-form-item label="Sell order type" path="sell_order_type">
-                    <n-select
-                        v-model:value="dca.sell_order_type"
-                        placeholder="Select"
-                        :options="sellOrderTypeOptions"
-                    />
-                </n-form-item>
-                <template v-if="dca.sell_order_type === 'limit'">
-                    <n-form-item label="Limit sell timeout (seconds)" path="limit_sell_timeout_sec">
-                        <n-input-number v-model:value="dca.limit_sell_timeout_sec" placeholder="60" />
-                    </n-form-item>
-                    <n-form-item label="Fallback to market sell on timeout" path="limit_sell_fallback_to_market" label-placement="left">
-                        <n-checkbox v-model:checked="dca.limit_sell_fallback_to_market" />
-                    </n-form-item>
-                </template>
-                <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order amount" path="so">
-                    <n-input-number v-model:value="dca.so" placeholder="SO" />
-                </n-form-item>
-                <n-form-item v-if="dca.enabled" label="Max safety order count" path="mstc">
-                    <n-input-number v-model:value="dca.mstc" placeholder="MSTC" />
-                </n-form-item>
-                <n-form-item v-if="dca.enabled" label="Price deviation for first safety order" path="sos">
-                    <n-input-number v-model:value="dca.sos" placeholder="SOS" />
-                </n-form-item>
-                <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order step scale" path="ss">
-                    <n-input-number v-model:value="dca.ss" placeholder="SS" />
-                </n-form-item>
-                <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order volume scale" path="os">
-                    <n-input-number v-model:value="dca.os" placeholder="OS" />
-                </n-form-item>
-                <n-form-item label="Stop loss percentage" path="sl">
-                    <n-input-number v-model:value="dca.sl" placeholder="SL" />
-                </n-form-item>
-                <n-form-item
-                    v-if="dca.enabled && dca.dynamic"
-                    label="Safety order budget ratio"
-                    path="trade_safety_order_budget_ratio"
-                >
-                    <n-input-number
-                        v-model:value="dca.trade_safety_order_budget_ratio"
-                        :min="0.01"
-                        :max="1"
-                        :step="0.01"
-                        placeholder="0.95"
-                    />
-                </n-form-item>
-            </n-form>
-        </n-card>
+        <ConfigAutopilotSection
+            ref="autopilotFormRef"
+            :autopilot="autopilot"
+            :rules="rules"
+            :show-fields="autopilot.enabled"
+        />
 
-        <n-card title="Autopilot settings">
-            <n-form ref="autopilotFormRef" :model="autopilot" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
+        <ConfigMonitoringSection
+            ref="monitoringFormRef"
+            :can-test="canTestMonitoringTelegram()"
+            :monitoring="monitoring"
+            :on-test="testMonitoringTelegram"
+            :rules="rules"
+            :test-loading="monitoring_test_loading"
+        />
 
-                <n-form-item label="Enabled" path="enabled" label-placement="left">
-                    <n-checkbox v-model:checked="autopilot.enabled" @change="handle_ap_select" />
-                </n-form-item>
-
-                <!-- Dynamic check for Autopilot settings -->
-                <template v-for="(index) in APForm" :key="index">
-                    <n-form-item label="Max fund" path="maxfund">
-                        <n-input-number v-model:value="autopilot.max_fund" placeholder="Max fund" />
-                    </n-form-item>
-                    <n-form-item label="Max bots for high setting" path="highmad">
-                        <n-input-number v-model:value="autopilot.high_mad" placeholder="Max bots high" />
-                    </n-form-item>
-                    <n-form-item label="Take profit for high setting" path="hightp">
-                        <n-input-number v-model:value="autopilot.high_tp" placeholder="Take profit high" />
-                    </n-form-item>
-                    <n-form-item label="Stop loss for high setting" path="highsl">
-                        <n-input-number v-model:value="autopilot.high_sl" placeholder="Stop loss high" />
-                    </n-form-item>
-                    <n-form-item label="Time threshold (in days) for stop loss" path="highsl_timeout">
-                        <n-input-number v-model:value="autopilot.high_sl_timeout" placeholder="Stop loss timeout" />
-                    </n-form-item>
-                    <n-form-item label="Max threshold (in percent of max fund) for high setting" path="high_threshold">
-                        <n-input-number v-model:value="autopilot.high_threshold" placeholder="Fund threshold" />
-                    </n-form-item>
-                    <n-form-item label="Max bots for medium setting" path="mediummad">
-                        <n-input-number v-model:value="autopilot.medium_mad" placeholder="Max bots medium" />
-                    </n-form-item>
-                    <n-form-item label="Take profit for medium setting" path="mediumtp">
-                        <n-input-number v-model:value="autopilot.medium_tp" placeholder="Take profit medium" />
-                    </n-form-item>
-                    <n-form-item label="Stop loss for medium setting" path="highsl">
-                        <n-input-number v-model:value="autopilot.medium_sl" placeholder="Stop loss medium" />
-                    </n-form-item>
-                    <n-form-item label="Time threshold (in days) for stop loss" path="mediumsl_timeout">
-                        <n-input-number v-model:value="autopilot.medium_sl_timeout" placeholder="Stop loss timeout" />
-                    </n-form-item>
-                    <n-form-item label="Max threshold (in percent of max fund) for medium setting"
-                        path="medium_threshold">
-                        <n-input-number v-model:value="autopilot.medium_threshold" placeholder="Fund threshold" />
-                    </n-form-item>
-                </template>
-
-            </n-form>
-        </n-card>
-
-        <n-card title="Messaging / Monitoring settings">
-            <n-form ref="monitoringFormRef" :model="monitoring" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Enabled" path="monitoring_enabled" label-placement="left">
-                    <n-checkbox v-model:checked="monitoring.enabled" />
-                </n-form-item>
-                <n-form-item label="Telegram Bot Token" path="monitoring_telegram_bot_token">
-                    <n-input v-model:value="monitoring.telegram_bot_token" type="password" show-password-on="click"
-                        placeholder="123456:ABC-DEF..." />
-                </n-form-item>
-                <n-form-item label="Telegram API ID" path="monitoring_telegram_api_id">
-                    <n-input-number v-model:value="monitoring.telegram_api_id" placeholder="1234567" />
-                </n-form-item>
-                <n-form-item label="Telegram API Hash" path="monitoring_telegram_api_hash">
-                    <n-input v-model:value="monitoring.telegram_api_hash" type="password" show-password-on="click"
-                        placeholder="0123456789abcdef0123456789abcdef" />
-                </n-form-item>
-                <n-form-item label="Telegram Chat ID" path="monitoring_telegram_chat_id">
-                    <n-input v-model:value="monitoring.telegram_chat_id" placeholder="e.g. 123456789 or -100123..." />
-                </n-form-item>
-                <n-form-item label="Timeout (seconds)" path="monitoring_timeout_sec">
-                    <n-input-number v-model:value="monitoring.timeout_sec" placeholder="5" />
-                </n-form-item>
-                <n-form-item label="Retry count" path="monitoring_retry_count">
-                    <n-input-number v-model:value="monitoring.retry_count" placeholder="1" />
-                </n-form-item>
-                <n-form-item label="Telegram connectivity">
-                    <n-button
-                        secondary
-                        type="primary"
-                        :loading="monitoring_test_loading"
-                        :disabled="!canTestMonitoringTelegram()"
-                        @click="testMonitoringTelegram"
-                    >
-                        Test Telegram
-                    </n-button>
-                </n-form-item>
-            </n-form>
-        </n-card>
-
-        <n-card title="Indicator settings">
-            <n-form ref="indicatorFormRef" :model="indicator" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="UPNL history retention (days, 0 = infinite)" path="upnl_housekeeping_interval">
-                    <n-input-number v-model:value="indicator.upnl_housekeeping_interval"
-                        placeholder="UPNL retention" />
-                </n-form-item>
-                <n-form-item label="History Lookback Time" path="history_lookback_time">
-                    <n-select
-                        v-model:value="indicator.history_lookback_time"
-                        :options="historyLookbackOptions"
-                        filterable
-                        tag
-                        placeholder="e.g. 90d, 1y"
-                    />
-                </n-form-item>
-            </n-form>
-        </n-card>
+        <ConfigIndicatorSection
+            ref="indicatorFormRef"
+            :history-lookback-options="historyLookbackOptions"
+            :indicator="indicator"
+            :rules="rules"
+        />
 
         <n-alert
             :type="saveBannerType"
@@ -462,6 +101,14 @@
 </template>
 
 <script setup lang="ts">
+import ConfigAutopilotSection from './config/ConfigAutopilotSection.vue'
+import ConfigDcaSection from './config/ConfigDcaSection.vue'
+import ConfigExchangeSection from './config/ConfigExchangeSection.vue'
+import ConfigFilterSection from './config/ConfigFilterSection.vue'
+import ConfigGeneralSection from './config/ConfigGeneralSection.vue'
+import ConfigIndicatorSection from './config/ConfigIndicatorSection.vue'
+import ConfigMonitoringSection from './config/ConfigMonitoringSection.vue'
+import ConfigSignalSection from './config/ConfigSignalSection.vue'
 import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
 import {
     usePersistableStateTracking,
@@ -479,15 +126,15 @@ import {
 } from '../helpers/configForm'
 import { getAllTimeZones } from '../helpers/timezone'
 import { parseBooleanString, isJsonString, toNumberOrNull } from '../helpers/validators'
-import type { FormInst, FormItemRule, FormRules } from 'naive-ui/es/form'
+import type { FormItemRule, FormRules } from 'naive-ui/es/form'
 import { useMessage } from 'naive-ui/es/message'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import axios from 'axios'
 import { trackUiEvent } from '../utils/uiTelemetry'
 
-interface dynamicSelectItem {
-    value: string | null;
+interface ConfigSectionFormExpose {
+    validate: () => Promise<boolean>
 }
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -496,22 +143,14 @@ function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
 }
 
-// Signal strategy
-const dynamicSymSignalSettingsForm = ref<dynamicSelectItem[]>([])
-const dynamicAsapSignalSettingsForm = ref<dynamicSelectItem[]>([])
-const dynamicCsvSignalSettingsForm = ref<dynamicSelectItem[]>([])
-const dynamicDCAForm = ref<dynamicSelectItem[]>([])
-const DCAForm = ref<dynamicSelectItem[]>([])
-const APForm = ref<dynamicSelectItem[]>([])
-const generalFormRef = ref<FormInst | null>(null)
-const signalFormRef = ref<FormInst | null>(null)
-const filterFormRef = ref<FormInst | null>(null)
-const exchangeFormRef = ref<FormInst | null>(null)
-const dcaFormRef = ref<FormInst | null>(null)
-const autopilotFormRef = ref<FormInst | null>(null)
-const monitoringFormRef = ref<FormInst | null>(null)
-const indicatorFormRef = ref<FormInst | null>(null)
-const csvSignalFileInput = ref<HTMLInputElement | null>(null)
+const generalFormRef = ref<ConfigSectionFormExpose | null>(null)
+const signalFormRef = ref<ConfigSectionFormExpose | null>(null)
+const filterFormRef = ref<ConfigSectionFormExpose | null>(null)
+const exchangeFormRef = ref<ConfigSectionFormExpose | null>(null)
+const dcaFormRef = ref<ConfigSectionFormExpose | null>(null)
+const autopilotFormRef = ref<ConfigSectionFormExpose | null>(null)
+const monitoringFormRef = ref<ConfigSectionFormExpose | null>(null)
+const indicatorFormRef = ref<ConfigSectionFormExpose | null>(null)
 const message = useMessage()
 const router = useRouter()
 const isLoading = ref(true)
@@ -774,8 +413,6 @@ const indicator = ref({
     upnl_housekeeping_interval: 0,
     history_lookback_time: null,
 })
-const isCsvSignalSelected = computed(() => signal.value.signal === 'csv_signal')
-
 function resetSignalStrategySelection(): void {
     signal.value.strategy_enabled = false
     signal.value.strategy = null
@@ -1240,75 +877,23 @@ const rules: FormRules = {
 
 function handle_signal_settings_select() {
     if (signal.value.signal == "sym_signals") {
-        if (dynamicSymSignalSettingsForm.value.length === 0) {
-            dynamicSymSignalSettingsForm.value.push({ value: null })
-        }
         if (!signal.value.symsignal_url) {
             signal.value.symsignal_url = DEFAULT_SYMSIGNAL_URL
         }
         if (!signal.value.symsignal_version) {
             signal.value.symsignal_version = DEFAULT_SYMSIGNAL_VERSION
         }
-        dynamicAsapSignalSettingsForm.value = []
-        dynamicCsvSignalSettingsForm.value = []
     } else if (signal.value.signal == "asap") {
-        if (dynamicAsapSignalSettingsForm.value.length === 0) {
-            dynamicAsapSignalSettingsForm.value.push({ value: null })
-        }
-        dynamicSymSignalSettingsForm.value = []
-        dynamicCsvSignalSettingsForm.value = []
         if (!signal.value.asap_use_url) {
             void fetchAsapSymbolsForCurrency()
         }
     } else if (signal.value.signal == "csv_signal") {
-        if (dynamicCsvSignalSettingsForm.value.length === 0) {
-            dynamicCsvSignalSettingsForm.value.push({ value: null })
-        }
         resetSignalStrategySelection()
         if (!signal.value.csvsignal_mode) {
             signal.value.csvsignal_mode = 'source'
         }
-        dynamicSymSignalSettingsForm.value = []
-        dynamicAsapSignalSettingsForm.value = []
     } else {
-        dynamicSymSignalSettingsForm.value = []
-        dynamicAsapSignalSettingsForm.value = []
-        dynamicCsvSignalSettingsForm.value = []
     }
-}
-
-function handle_dynamic_dca_select() {
-    if (dca.value.dynamic && dca.value.enabled === true) {
-        // Add a new select item when activated
-        dynamicDCAForm.value.push({ value: null })
-    } else {
-        // Remove the last select item when deactivated
-        dynamicDCAForm.value.pop()
-    }
-}
-
-function handle_dca_select() {
-    if (dca.value.enabled === true) {
-        // Add a new select item when activated
-        DCAForm.value.push({ value: null })
-    } else {
-        // Remove the last select item when deactivated
-        DCAForm.value.pop()
-    }
-}
-
-function handle_ap_select() {
-    if (autopilot.value.enabled === true) {
-        // Add a new select item when activated
-        APForm.value.push({ value: null })
-    } else {
-        // Remove the last select item when deactivated
-        APForm.value.pop()
-    }
-}
-
-function openCsvSignalFilePicker(): void {
-    csvSignalFileInput.value?.click()
 }
 
 async function handleCsvSignalFileSelected(event: Event): Promise<void> {
@@ -1492,8 +1077,6 @@ async function fetchDefaultValues() {
 
             // Initial call for signal settings
             handle_signal_settings_select()
-            handle_dca_select()
-            handle_dynamic_dca_select()
             if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
                 await fetchAsapSymbolsForCurrency()
             }
@@ -1750,7 +1333,7 @@ async function testMonitoringTelegram() {
 
 function validateAndSubmit(): void {
     submitAttempted.value = true
-    const forms = [
+    const sectionForms = [
         generalFormRef.value,
         signalFormRef.value,
         filterFormRef.value,
@@ -1759,14 +1342,11 @@ function validateAndSubmit(): void {
         autopilotFormRef.value,
         monitoringFormRef.value,
         indicatorFormRef.value,
-    ].filter((form): form is FormInst => form !== null)
+    ].filter((form): form is ConfigSectionFormExpose => form !== null)
 
-    const validations = forms.map(
-        (form) =>
-            new Promise<boolean>((resolve) => {
-                form.validate((errors) => resolve(!errors))
-            }),
-    )
+    const validations = [
+        ...sectionForms.map((form) => form.validate()),
+    ]
 
     Promise.all(validations).then((results) => {
         if (results.every(Boolean)) {
