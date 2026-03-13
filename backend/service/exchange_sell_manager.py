@@ -21,13 +21,9 @@ class ExchangeSellManager:
         self,
         logger: Any,
         get_exchange: Callable[[], Any],
-        get_sell_retry_count: Callable[[], int],
-        set_sell_retry_count: Callable[[int], None],
     ):
         self._logger = logger
         self._get_exchange = get_exchange
-        self._get_sell_retry_count = get_sell_retry_count
-        self._set_sell_retry_count = set_sell_retry_count
 
     async def create_spot_sell(
         self,
@@ -184,7 +180,7 @@ class ExchangeSellManager:
                 )
 
             current_amount = float(order["total_amount"])
-            retry_count = self._get_sell_retry_count()
+            retry_count = int(order.get("_sell_retry_count", 0) or 0)
             if retry_count > 0:
                 reduced_amount = reduce_amount_by_step(
                     resolved_symbol,
@@ -251,7 +247,7 @@ class ExchangeSellManager:
                     order["total_amount"],
                     order["symbol"],
                 )
-                self._set_sell_retry_count(self._get_sell_retry_count() + 1)
+                order["_sell_retry_count"] = retry_count + 1
                 raise TryAgain
             if "filter failure: notional" in str(exc).lower():
                 self._logger.info(
@@ -294,12 +290,13 @@ class ExchangeSellManager:
 
         if order:
             if order.get("type") == "partial_sell":
+                order.pop("_sell_retry_count", None)
                 return order
 
             self._logger.info(
                 "Sold %s %s on Exchange.", order["total_amount"], order["symbol"]
             )
-            self._set_sell_retry_count(0)
+            order.pop("_sell_retry_count", None)
             return await build_sell_order_status(order)
 
         return None

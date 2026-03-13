@@ -40,9 +40,7 @@ class Exchange:
         self,
     ):
         self.utils = helper.Utils()
-        self.config = None
         self.status = True
-        Exchange.sell_retry_count = 0
         self._last_buy_precheck_result: dict[str, Any] | None = None
         self._client_manager = ExchangeClientManager(logging)
         self._balance_manager = ExchangeBalanceManager(
@@ -62,10 +60,6 @@ class Exchange:
         self._sell_manager = ExchangeSellManager(
             logger=logging,
             get_exchange=lambda: self.exchange,
-            get_sell_retry_count=lambda: Exchange.sell_retry_count,
-            set_sell_retry_count=lambda value: setattr(
-                Exchange, "sell_retry_count", value
-            ),
         )
         self._limit_sell_manager = ExchangeLimitSellManager(
             logger=logging,
@@ -366,11 +360,14 @@ class Exchange:
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     async def __get_trades_for_symbol(
-        self, symbol: str, orderid: str, order_timestamp: int | None = None
+        self,
+        symbol: str,
+        orderid: str,
+        order_check_range_seconds: int,
+        order_timestamp: int | None = None,
     ) -> dict | None:
         trade = None
         await asyncio.sleep(1)
-        order_check_range_seconds = int(self.config.get("order_check_range", 300))
         since = self.exchange.milliseconds() - (order_check_range_seconds * 1000)
         if order_timestamp:
             # Ensure we include all partial fills from order placement onward.
@@ -424,11 +421,19 @@ class Exchange:
 
         return trade
 
-    async def __parse_order_status(self, order: dict[str, Any]) -> dict[str, Any]:
+    async def __parse_order_status(
+        self,
+        order: dict[str, Any],
+        *,
+        order_check_range_seconds: int,
+    ) -> dict[str, Any]:
         data = {}
 
         trade = await self.__get_trades_for_symbol(
-            order["symbol"], order["id"], int(order.get("timestamp") or 0)
+            order["symbol"],
+            order["id"],
+            order_check_range_seconds,
+            int(order.get("timestamp") or 0),
         )
         if trade:
             data["timestamp"] = trade["timestamp"]
@@ -527,6 +532,14 @@ class Exchange:
     def __resolve_required_buy_quote(self, order: dict[str, Any]) -> float | None:
         """Return required quote amount for a buy order."""
         return resolve_required_buy_quote(order)
+
+    @staticmethod
+    def __get_order_check_range_seconds(config: dict[str, Any]) -> int:
+        """Return configured trade lookup window in seconds."""
+        try:
+            return int(config.get("order_check_range", 300))
+        except (TypeError, ValueError, AttributeError):
+            return 300
 
     def __is_limit_sell_notional_below_minimum(
         self,
@@ -694,8 +707,8 @@ class Exchange:
         """Create a spot market buy order."""
         await self.__ensure_exchange(config)
         await self.__ensure_markets_loaded()
-        self.config = config
         self._last_buy_precheck_result = None
+        order_check_range_seconds = self.__get_order_check_range_seconds(config)
         order["amount"] = await self.__get_amount_from_symbol(
             order["ordersize"], order["symbol"]
         )
@@ -723,8 +736,11 @@ class Exchange:
             return None
         return await self._buy_manager.finalize_market_buy(
             order=order,
-            config=self.config,
-            parse_order_status=self.__parse_order_status,
+            config=config,
+            parse_order_status=lambda order: self.__parse_order_status(
+                order,
+                order_check_range_seconds=order_check_range_seconds,
+            ),
             get_precision_for_symbol=self.__get_precision_for_symbol,
             resolve_symbol=self.__resolve_symbol,
             get_demo_taker_fee_for_symbol=self.__get_demo_taker_fee_for_symbol,
@@ -785,10 +801,16 @@ class Exchange:
         return True
 
     async def __build_sell_order_status(
-        self, order: dict[str, Any]
+        self,
+        order: dict[str, Any],
+        *,
+        order_check_range_seconds: int,
     ) -> dict[str, Any] | None:
         """Build normalized sell order status for closed trade processing."""
-        order_status = await self.__parse_order_status(order)
+        order_status = await self.__parse_order_status(
+            order,
+            order_check_range_seconds=order_check_range_seconds,
+        )
         if not order_status.get("total_amount"):
             logging.error(
                 "Sell order for %s returned empty amount.", order.get("symbol")
@@ -805,7 +827,7 @@ class Exchange:
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any] | None:
         """Create a spot limit sell order and delegate fill handling."""
-        self.config = config
+        order_check_range_seconds = self.__get_order_check_range_seconds(config)
         return await self._limit_order_manager.create_spot_limit_sell(
             order=order,
             config=config,
@@ -815,7 +837,15 @@ class Exchange:
             resolve_sell_amount=self.__resolve_sell_amount,
             is_notional_below_minimum=self.__is_limit_sell_notional_below_minimum,
             get_price_for_symbol=self.__get_price_for_symbol,
-            handle_limit_sell_fill=self.__handle_limit_sell_fill,
+            handle_limit_sell_fill=lambda sell_order, resolved_symbol, cfg, original: (
+                self.__handle_limit_sell_fill(
+                    sell_order,
+                    resolved_symbol,
+                    cfg,
+                    original,
+                    order_check_range_seconds=order_check_range_seconds,
+                )
+            ),
         )
 
     async def __handle_limit_sell_fill(
@@ -824,6 +854,8 @@ class Exchange:
         resolved_symbol: str,
         config: dict[str, Any],
         original_order: dict[str, Any],
+        *,
+        order_check_range_seconds: int,
     ) -> dict[str, Any] | None:
         """Delegate limit-sell timeout and partial-fill reconciliation."""
         return await self._limit_sell_manager.handle_limit_sell_fill(
@@ -831,8 +863,14 @@ class Exchange:
             resolved_symbol=resolved_symbol,
             config=config,
             original_order=original_order,
-            parse_order_status=self.__parse_order_status,
-            build_sell_order_status=self.__build_sell_order_status,
+            parse_order_status=lambda order: self.__parse_order_status(
+                order,
+                order_check_range_seconds=order_check_range_seconds,
+            ),
+            build_sell_order_status=lambda order: self.__build_sell_order_status(
+                order,
+                order_check_range_seconds=order_check_range_seconds,
+            ),
         )
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(200))
@@ -840,7 +878,7 @@ class Exchange:
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any] | None:
         """Create a spot market sell order via the sell manager."""
-        self.config = config
+        order_check_range_seconds = self.__get_order_check_range_seconds(config)
         return await self._sell_manager.create_spot_market_sell(
             order=order,
             config=config,
@@ -852,5 +890,8 @@ class Exchange:
             is_notional_below_minimum=self.__is_market_sell_notional_below_minimum,
             get_price_for_symbol=self.__get_price_for_symbol,
             log_remaining_sell_dust=self.__log_remaining_sell_dust,
-            build_sell_order_status=self.__build_sell_order_status,
+            build_sell_order_status=lambda order: self.__build_sell_order_status(
+                order,
+                order_check_range_seconds=order_check_range_seconds,
+            ),
         )

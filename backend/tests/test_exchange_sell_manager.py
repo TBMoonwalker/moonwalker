@@ -35,8 +35,6 @@ async def test_create_spot_sell_returns_partial_when_fallback_disabled() -> None
     manager = ExchangeSellManager(
         logger=_DummyLogger(),
         get_exchange=lambda: exchange,
-        get_sell_retry_count=lambda: 0,
-        set_sell_retry_count=lambda _value: None,
     )
 
     async def fake_limit_sell(
@@ -78,8 +76,6 @@ async def test_create_spot_market_sell_skips_below_notional() -> None:
     manager = ExchangeSellManager(
         logger=_DummyLogger(),
         get_exchange=lambda: exchange,
-        get_sell_retry_count=lambda: 0,
-        set_sell_retry_count=lambda _value: None,
     )
 
     async def fake_ensure_exchange(_config: dict[str, object]) -> None:
