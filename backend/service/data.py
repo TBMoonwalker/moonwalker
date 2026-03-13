@@ -341,17 +341,6 @@ class Data:
 
         return False
 
-    async def delete_ticker_data_for_trades(self, symbol: str) -> bool:
-        """Delete ticker data for a symbol."""
-        try:
-            query = await model.Tickers.filter(symbol=f"{symbol}").delete()
-            logging.info("Delete %s entries for symbol %s", query, symbol)
-            return True
-        except BaseORMException as e:
-            logging.error("Error deleting old ticker data for symbol %s: %s", symbol, e)
-
-        return False
-
     async def add_history_data_for_symbol(
         self,
         symbol: str,

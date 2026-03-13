@@ -178,25 +178,6 @@ class Exchange:
 
         return None
 
-    @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
-    async def parse_iso_timestamp(self, config: dict[str, Any], date: str) -> int:
-        """Parse an ISO-8601 date string using the exchange parser."""
-        await self.__ensure_exchange(config)
-        timestamp = None
-        try:
-            timestamp = self.exchange.parse8601(date)
-        except (
-            ccxt.ExchangeError,
-            ccxt.NetworkError,
-            ccxt.BaseError,
-            TypeError,
-            ValueError,
-            RuntimeError,
-        ) as exc:
-            self.__raise_retryable_exchange_error("Converting timestamp", exc)
-
-        return timestamp
-
     async def get_history_for_symbol(
         self,
         config: dict[str, Any],

@@ -63,18 +63,6 @@ def parse_history_lookback_to_days(value: Any) -> int | None:
     return amount * HISTORY_LOOKBACK_UNIT_TO_DAYS[unit]
 
 
-def format_history_lookback_days(days: int) -> str:
-    """Format day count into canonical lookback string."""
-    normalized_days = max(1, int(days))
-    if normalized_days % 365 == 0:
-        return f"{normalized_days // 365}y"
-    if normalized_days % 30 == 0:
-        return f"{normalized_days // 30}m"
-    if normalized_days % 7 == 0:
-        return f"{normalized_days // 7}w"
-    return f"{normalized_days}d"
-
-
 def resolve_history_lookback_days(
     config: dict[str, Any],
     timeframe: str | None = None,

@@ -243,14 +243,6 @@ class Trades:
             0,
         )
 
-    async def create_open_trades(self, payload: dict[str, Any]) -> None:
-        """Create an open trade entry."""
-        await self._write_db(
-            model.OpenTrades.create(**payload),
-            "Error creating open trade.",
-            f"Added open trade for {payload['symbol']}.",
-        )
-
     async def update_open_trades(self, payload: dict[str, Any], symbol: str) -> None:
         """Update open trades for a symbol."""
         if await self.get_open_trades_by_symbol(symbol):
@@ -287,28 +279,12 @@ class Trades:
         totals = self._normalize_partial_sell_execution(open_trade)
         return totals["sold_amount"], totals["sold_proceeds"]
 
-    async def create_trades(self, payload: dict[str, Any]) -> None:
-        """Create a trade entry."""
-        await self._write_db(
-            model.Trades.create(**payload),
-            "Error creating trade.",
-            f"Added trade for {payload['symbol']}.",
-        )
-
     async def delete_open_trades(self, symbol: str) -> None:
         """Delete open trades for a symbol."""
         await self._write_db(
             model.OpenTrades.filter(symbol=symbol).delete(),
             f"Error deleting open trades for {symbol}.",
             f"Deleted open trade for {symbol}.",
-        )
-
-    async def delete_trades(self, symbol: str) -> None:
-        """Delete trades for a symbol."""
-        await self._write_db(
-            model.Trades.filter(symbol=symbol).delete(),
-            f"Error deleting trades for {symbol}.",
-            f"Deleted trade for {symbol}.",
         )
 
     async def create_closed_trades(self, payload: dict[str, Any]) -> None:

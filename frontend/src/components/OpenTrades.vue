@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted, ref, watch } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { NButton } from 'naive-ui/es/button'
 import { NButtonGroup } from 'naive-ui/es/button-group'
 import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
@@ -31,6 +31,7 @@ import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
 import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
 import { fetchJson } from '../api/client'
+import { useTradeTableFeed } from '../composables/useTradeTableFeed'
 import { useViewport } from '../composables/useViewport'
 import {
     formatAssetAmount,
@@ -39,26 +40,14 @@ import {
 } from '../helpers/tradeTable'
 import OpenTradeExpandedRow from './OpenTradeExpandedRow.vue'
 
-const open_trade_store = useWebSocketDataStore("openTrades")
-const open_trade_data = storeToRefs(open_trade_store)
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
 const trades_store = useTradesStore()
-const open_trades = ref()
 
 const dialog = useDialog()
 const message = useMessage()
 
 const { isMobile, isTablet } = useViewport()
-const isTableLoading = computed(
-    () => !open_trade_data.hasReceivedData.value && open_trade_data.status.value !== 'CLOSED',
-)
-const tableEmptyText = computed(() => {
-    if (!open_trade_data.hasReceivedData.value) {
-        return 'Waiting for live open trades...'
-    }
-    return 'No open trades'
-})
 
 type TimeframeChoice = {
     timerange: string
@@ -122,16 +111,6 @@ async function loadConfiguredMinTimeframe(): Promise<void> {
     }
 }
 
-watch(open_trade_data.data, async (newData) => {
-    if (!Array.isArray(newData)) {
-        open_trades.value = []
-        return
-    }
-    const websocket_data = newData as any[]
-    trades_store.setOpenTrades(websocket_data)
-    open_trades.value = trades_store.openTrades
-}, { immediate: true })
-
 type RowData = {
     id: number
     symbol: string
@@ -145,13 +124,27 @@ type RowData = {
     so_count: number
     open_date: string
     baseorder: OrderData
-    safetyorder: Array<OrderData>
+    safetyorder: OrderData[]
     precision: number
     unsellable_amount?: number
     unsellable_reason?: string | null
     unsellable_min_notional?: number | null
     unsellable_estimated_notional?: number | null
 }
+
+const {
+    rows: open_trades,
+    isTableLoading,
+    tableEmptyText,
+} = useTradeTableFeed<RowData>({
+    websocketId: 'openTrades',
+    waitingText: 'Waiting for live open trades...',
+    emptyText: 'No open trades',
+    normalizeRows: (rawRows) => {
+        trades_store.setOpenTrades(rawRows as any[])
+        return trades_store.openTrades as RowData[]
+    },
+})
 
 type OrderData = {
     id: number

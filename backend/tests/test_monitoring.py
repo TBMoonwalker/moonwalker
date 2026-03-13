@@ -101,6 +101,31 @@ async def test_monitoring_service_fails_without_telegram_credentials() -> None:
     assert success is False
 
 
+@pytest.mark.asyncio
+async def test_monitoring_service_returns_false_when_send_raises_runtime_error(
+    monkeypatch,
+) -> None:
+    service = MonitoringService()
+
+    async def fake_send_telegram(*_args, **_kwargs) -> None:
+        raise RuntimeError("telegram temporarily unavailable")
+
+    monkeypatch.setattr(service, "_send_telegram", fake_send_telegram)
+
+    success, message = await service.send_test_notification(
+        {
+            "monitoring_telegram_api_id": 12345,
+            "monitoring_telegram_api_hash": "hash123",
+            "monitoring_telegram_bot_token": "token123",
+            "monitoring_telegram_chat_id": "987654321",
+            "monitoring_retry_count": 0,
+        },
+    )
+
+    assert success is False
+    assert message == "Monitoring Telegram test failed."
+
+
 def test_resolve_telegram_entity_numeric() -> None:
     service = MonitoringService()
     assert service._resolve_telegram_entity("-1001234567890") == -1001234567890

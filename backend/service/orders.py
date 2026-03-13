@@ -1,6 +1,7 @@
 """Order orchestration for exchange buy/sell actions."""
 
 import asyncio
+import sqlite3
 from datetime import datetime
 from typing import Any, TypeGuard
 
@@ -294,7 +295,7 @@ class Orders:
         base_order = await self.trades.get_trade_by_ordertype(symbol, baseorder=True)
         try:
             return float(base_order[0]["timestamp"])
-        except Exception as e:
+        except (IndexError, KeyError, TypeError, ValueError) as e:
             logging.debug(
                 "Did not found a timestamp - taking default value. Cause %s", e
             )
@@ -545,7 +546,14 @@ class Orders:
                 _persist_stop, f"stopping symbol {symbol}"
             )
             return True
-        except Exception as e:
+        except (
+            ConfigurationError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            OSError,
+            sqlite3.Error,
+        ) as e:
             logging.error(
                 "Cannot stop trade for %s. See trade logs for errors. Cause: %s",
                 symbol,

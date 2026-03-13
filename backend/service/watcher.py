@@ -14,7 +14,6 @@ from service.trades import Trades
 from service.watcher_runtime import (
     compose_ticker_symbols,
     get_mandatory_symbols,
-    merge_candle,
     normalize_symbols,
     prepare_ohlcv_write,
 )
@@ -629,11 +628,6 @@ class Watcher:
 
     def __prepare_ohlcv_write(self, symbol: str, ticker) -> dict | None:
         return prepare_ohlcv_write(Watcher.candles, symbol, ticker)
-
-    @staticmethod
-    def _merge_candle(last: list[Any], current: list[Any]) -> list[float]:
-        """Merge two candles for the same timestamp into one OHLCV candle."""
-        return merge_candle(last, current)
 
     # ------------------------------------------------------------------- #
     #                              Shutdown                               #
