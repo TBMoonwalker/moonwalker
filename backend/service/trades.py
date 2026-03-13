@@ -2,7 +2,7 @@
 
 import os
 from collections.abc import Awaitable
-from typing import Any, TypeVar
+from typing import Any, TypedDict, TypeVar
 
 import helper
 import model
@@ -13,6 +13,23 @@ from tortoise.models import Q
 
 logging = helper.LoggerFactory.get_logger("logs/trades.log", "trades")
 T = TypeVar("T")
+
+
+class PartialSellExecution(TypedDict):
+    """Accumulated partial-sell execution totals on an open trade."""
+
+    sold_amount: float
+    sold_proceeds: float
+
+
+class UnsellableTradeState(TypedDict):
+    """Unsellable remainder state carried on the open trade row."""
+
+    is_unsellable: bool
+    unsellable_reason: str | None
+    unsellable_amount: float
+    unsellable_min_notional: float | None
+    unsellable_estimated_notional: float | None
 
 
 class Trades:
@@ -26,6 +43,52 @@ class Trades:
     def _log_db_error(message: str, exc: BaseORMException) -> None:
         """Log database access failures consistently."""
         logging.error("%s Cause: %s", message, exc)
+
+    @staticmethod
+    def _normalize_partial_sell_execution(
+        open_trade: dict[str, Any] | None,
+    ) -> PartialSellExecution:
+        """Normalize persisted partial-sell totals from an open-trade row."""
+        if not open_trade:
+            return {"sold_amount": 0.0, "sold_proceeds": 0.0}
+        return {
+            "sold_amount": float(open_trade.get("sold_amount") or 0.0),
+            "sold_proceeds": float(open_trade.get("sold_proceeds") or 0.0),
+        }
+
+    @staticmethod
+    def _extract_unsellable_state(
+        open_trade: dict[str, Any] | None,
+    ) -> UnsellableTradeState:
+        """Normalize unsellable remainder state from an open-trade row."""
+        if not open_trade:
+            return {
+                "is_unsellable": False,
+                "unsellable_reason": None,
+                "unsellable_amount": 0.0,
+                "unsellable_min_notional": None,
+                "unsellable_estimated_notional": None,
+            }
+
+        unsellable_amount = float(open_trade.get("unsellable_amount") or 0.0)
+        unsellable_reason = open_trade.get("unsellable_reason")
+        return {
+            "is_unsellable": unsellable_amount > 0 and bool(unsellable_reason),
+            "unsellable_reason": (
+                str(unsellable_reason) if unsellable_reason is not None else None
+            ),
+            "unsellable_amount": unsellable_amount,
+            "unsellable_min_notional": (
+                float(open_trade["unsellable_min_notional"])
+                if open_trade.get("unsellable_min_notional") is not None
+                else None
+            ),
+            "unsellable_estimated_notional": (
+                float(open_trade["unsellable_estimated_notional"])
+                if open_trade.get("unsellable_estimated_notional") is not None
+                else None
+            ),
+        }
 
     async def _execute_db(
         self,
@@ -213,21 +276,16 @@ class Trades:
 
     async def get_partial_sell_execution(self, symbol: str) -> tuple[float, float]:
         """Return accumulated partial sell totals (amount, proceeds)."""
-        try:
-            open_trade = await model.OpenTrades.filter(symbol=symbol).first()
-            if not open_trade:
-                return 0.0, 0.0
-            return (
-                float(getattr(open_trade, "sold_amount", 0.0) or 0.0),
-                float(getattr(open_trade, "sold_proceeds", 0.0) or 0.0),
-            )
-        except BaseORMException as e:
-            logging.error(
-                "Error reading partial sell execution for %s. Cause %s",
-                symbol,
-                e,
-            )
-            return 0.0, 0.0
+        open_trade_rows = await self._execute_db(
+            model.OpenTrades.filter(symbol=symbol)
+            .limit(1)
+            .values("sold_amount", "sold_proceeds"),
+            f"Error reading partial sell execution for {symbol}.",
+            [],
+        )
+        open_trade = open_trade_rows[0] if open_trade_rows else None
+        totals = self._normalize_partial_sell_execution(open_trade)
+        return totals["sold_amount"], totals["sold_proceeds"]
 
     async def create_trades(self, payload: dict[str, Any]) -> None:
         """Create a trade entry."""
@@ -328,26 +386,13 @@ class Trades:
                 baseorder = min(trades, key=lambda trade: float(trade["timestamp"]))
 
             safetyorders_count = len(safetyorders)
-            is_unsellable = False
-            unsellable_reason = None
-            unsellable_amount = 0.0
-            unsellable_min_notional = None
-            unsellable_estimated_notional = None
+            unsellable_state = self._extract_unsellable_state(open_trade)
 
-            if open_trade:
-                unsellable_amount = float(open_trade.get("unsellable_amount") or 0.0)
-                unsellable_reason = open_trade.get("unsellable_reason")
-                unsellable_min_notional = open_trade.get("unsellable_min_notional")
-                unsellable_estimated_notional = open_trade.get(
-                    "unsellable_estimated_notional"
-                )
-                is_unsellable = unsellable_amount > 0 and bool(unsellable_reason)
-
-                # For unsellable remnants, OpenTrades carries the authoritative
-                # remaining amount/cost after partial close bookkeeping.
-                if is_unsellable:
-                    total_amount = float(open_trade.get("amount") or total_amount)
-                    total_cost = float(open_trade.get("cost") or total_cost)
+            # For unsellable remnants, OpenTrades carries the authoritative
+            # remaining amount/cost after partial close bookkeeping.
+            if unsellable_state["is_unsellable"] and open_trade:
+                total_amount = float(open_trade.get("amount") or total_amount)
+                total_cost = float(open_trade.get("cost") or total_cost)
 
             trade_data = {
                 "timestamp": latest_order["timestamp"],
@@ -363,11 +408,7 @@ class Trades:
                 "safetyorders": safetyorders,
                 "safetyorders_count": safetyorders_count,
                 "ordertype": baseorder["ordertype"],
-                "is_unsellable": is_unsellable,
-                "unsellable_reason": unsellable_reason,
-                "unsellable_amount": unsellable_amount,
-                "unsellable_min_notional": unsellable_min_notional,
-                "unsellable_estimated_notional": unsellable_estimated_notional,
+                **unsellable_state,
             }
 
             return trade_data

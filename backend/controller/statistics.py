@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from typing import Any
 
 import helper
+from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, websocket_stream
 from service.config import Config
 from service.exchange import Exchange
@@ -39,7 +40,7 @@ async def _get_available_funds() -> float | None:
         return await exchange.get_free_balance_for_asset(
             config_service._cache, currency
         )
-    except Exception as exc:  # noqa: BLE001 - Avoid breaking stats websocket updates.
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
         logging.warning("Failed to fetch available exchange funds: %s", exc)
         return None
 
@@ -86,13 +87,10 @@ async def profit() -> AsyncGenerator[str, None]:
     try:
         async for output in _profit_fanout.subscribe():
             yield output
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, WebSocketDisconnect):
         # Handle disconnection gracefully
         logging.info("Client disconnected from profit WebSocket")
         return
-    except Exception as exc:  # noqa: BLE001 - Catch all exceptions to prevent hang
-        logging.error("Error in profit WebSocket: %s", exc, exc_info=True)
-        raise
 
 
 @get(path="/statistic/profit/{timestamp:str}/{period:str}")

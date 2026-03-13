@@ -108,7 +108,7 @@ class Filter:
                     if entry["symbol"] == symbol:
                         marketcap = entry["rank"]
                         break
-        except Exception as e:
+        except (KeyError, TypeError, ValueError) as e:
             logging.error("Error getting CMC data. Cause: %s", e)
 
         return marketcap

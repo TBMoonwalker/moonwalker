@@ -2,6 +2,15 @@
 
 from typing import Any
 
+from service.exchange_types import PartialSellStatus, SoldCheckStatus
+
+
+def _optional_float(value: Any) -> float | None:
+    """Return a float for a present value, otherwise ``None``."""
+    if value is None:
+        return None
+    return float(value)
+
 
 def build_partial_sell_status(
     *,
@@ -13,7 +22,7 @@ def build_partial_sell_status(
     unsellable_reason: str | None = None,
     unsellable_min_notional: float | None = None,
     unsellable_estimated_notional: float | None = None,
-) -> dict[str, Any]:
+) -> PartialSellStatus:
     """Build a partial execution status for deferred close accounting."""
     return {
         "type": "partial_sell",
@@ -24,16 +33,8 @@ def build_partial_sell_status(
         "remaining_amount": float(remaining_amount),
         "unsellable": bool(unsellable),
         "unsellable_reason": unsellable_reason,
-        "unsellable_min_notional": (
-            float(unsellable_min_notional)
-            if unsellable_min_notional is not None
-            else None
-        ),
-        "unsellable_estimated_notional": (
-            float(unsellable_estimated_notional)
-            if unsellable_estimated_notional is not None
-            else None
-        ),
+        "unsellable_min_notional": _optional_float(unsellable_min_notional),
+        "unsellable_estimated_notional": _optional_float(unsellable_estimated_notional),
     }
 
 
@@ -42,9 +43,9 @@ def finalize_sell_order_status(
     *,
     total_cost: float,
     actual_pnl: Any,
-) -> dict[str, Any]:
+) -> SoldCheckStatus:
     """Enrich a normalized sell order status with close metrics."""
-    normalized = dict(order_status)
+    normalized: SoldCheckStatus = dict(order_status)
     normalized["type"] = "sold_check"
     normalized["sell"] = True
     normalized["total_cost"] = total_cost
@@ -68,8 +69,8 @@ def combine_partial_sell_statuses(
     symbol: str,
     first_partial_amount: float,
     first_partial_price: float,
-    second_status: dict[str, Any],
-) -> dict[str, Any]:
+    second_status: PartialSellStatus,
+) -> PartialSellStatus:
     """Combine two partial sell execution results into one partial status."""
     second_partial_amount = float(second_status.get("partial_filled_amount") or 0.0)
     second_partial_price = float(second_status.get("partial_avg_price") or 0.0)
@@ -94,28 +95,24 @@ def combine_partial_sell_statuses(
             if second_status.get("unsellable_reason")
             else None
         ),
-        unsellable_min_notional=(
-            float(second_status.get("unsellable_min_notional"))
-            if second_status.get("unsellable_min_notional") is not None
-            else None
+        unsellable_min_notional=_optional_float(
+            second_status.get("unsellable_min_notional")
         ),
-        unsellable_estimated_notional=(
-            float(second_status.get("unsellable_estimated_notional"))
-            if second_status.get("unsellable_estimated_notional") is not None
-            else None
+        unsellable_estimated_notional=_optional_float(
+            second_status.get("unsellable_estimated_notional")
         ),
     )
 
 
 def merge_partial_fill_with_market_sell(
-    market_status: dict[str, Any],
+    market_status: SoldCheckStatus,
     *,
     partial_amount: float,
     partial_price: float,
     total_cost: float,
-) -> dict[str, Any]:
+) -> SoldCheckStatus:
     """Merge a partial limit fill with a completed market fallback sell."""
-    merged = dict(market_status)
+    merged: SoldCheckStatus = dict(market_status)
     market_amount = float(merged.get("total_amount") or 0.0)
     market_price = float(merged.get("price") or 0.0)
     combined_amount = partial_amount + market_amount

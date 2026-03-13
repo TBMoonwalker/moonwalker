@@ -1,9 +1,9 @@
 """Sell execution orchestration helpers."""
 
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 import ccxt.async_support as ccxt
+from service.exchange_contexts import MarketSellExecutionContext, SellRoutingContext
 from service.exchange_helpers import safe_float
 from service.exchange_limit_sell import build_partial_status_from_fallback
 from service.exchange_sell_status import (
@@ -11,41 +11,30 @@ from service.exchange_sell_status import (
     combine_partial_sell_statuses,
     merge_partial_fill_with_market_sell,
 )
+from service.exchange_types import ExchangeOrderPayload
 from tenacity import TryAgain
 
 
 class ExchangeSellManager:
     """Own sell execution orchestration for market and limit fallback paths."""
 
-    def __init__(
-        self,
-        logger: Any,
-        get_exchange: Callable[[], Any],
-    ):
+    def __init__(self, logger: Any, get_exchange: Any):
         self._logger = logger
         self._get_exchange = get_exchange
 
     async def create_spot_sell(
         self,
         *,
-        order: dict[str, Any],
+        order: ExchangeOrderPayload,
         config: dict[str, Any],
-        create_spot_limit_sell: Callable[
-            [dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any] | None]
-        ],
-        create_spot_market_sell: Callable[
-            [dict[str, Any], dict[str, Any]], Awaitable[dict[str, Any] | None]
-        ],
-        can_fallback_to_market_sell: Callable[
-            [dict[str, Any], dict[str, Any]], Awaitable[bool]
-        ],
+        context: SellRoutingContext,
     ) -> dict[str, Any] | None:
         """Create a sell order using configured execution mode."""
         sell_order_type = str(config.get("sell_order_type", "market")).lower()
         if sell_order_type != "limit":
-            return await create_spot_market_sell(order, config)
+            return await context.create_spot_market_sell(order, config)
 
-        order_status = await create_spot_limit_sell(order, config)
+        order_status = await context.create_spot_limit_sell(order, config)
         if order_status:
             if not order_status.get("requires_market_fallback"):
                 return order_status
@@ -68,7 +57,7 @@ class ExchangeSellManager:
                     default_symbol=str(order.get("symbol")),
                 )
 
-            if not await can_fallback_to_market_sell(order, config):
+            if not await context.can_fallback_to_market_sell(order, config):
                 return build_partial_status_from_fallback(
                     order_status,
                     default_symbol=str(order.get("symbol")),
@@ -82,7 +71,9 @@ class ExchangeSellManager:
             remaining_order["total_amount"] = float(
                 order_status.get("remaining_amount") or 0.0
             )
-            market_status = await create_spot_market_sell(remaining_order, config)
+            market_status = await context.create_spot_market_sell(
+                remaining_order, config
+            )
             if not market_status:
                 return None
 
@@ -110,13 +101,13 @@ class ExchangeSellManager:
                     order.get("symbol"),
                 )
                 return None
-            if not await can_fallback_to_market_sell(order, config):
+            if not await context.can_fallback_to_market_sell(order, config):
                 return None
             self._logger.info(
                 "Limit sell for %s was not filled. Falling back to market sell.",
                 order.get("symbol"),
             )
-            return await create_spot_market_sell(order, config)
+            return await context.create_spot_market_sell(order, config)
 
         self._logger.info(
             "Limit sell for %s was not filled. Market fallback is disabled.",
@@ -127,32 +118,18 @@ class ExchangeSellManager:
     async def create_spot_market_sell(
         self,
         *,
-        order: dict[str, Any],
+        order: ExchangeOrderPayload,
         config: dict[str, Any],
-        ensure_exchange: Callable[[dict[str, Any]], Awaitable[None]],
-        ensure_markets_loaded: Callable[[], Awaitable[None]],
-        resolve_symbol: Callable[[str], str | None],
-        resolve_sell_amount: Callable[
-            [str, float], Awaitable[tuple[str, float] | None]
-        ],
-        reduce_amount_by_step: Callable[[str, float, int], float],
-        is_notional_below_minimum: Callable[
-            [str, float, float], tuple[bool, float | None, float]
-        ],
-        get_price_for_symbol: Callable[[str], Awaitable[str]],
-        log_remaining_sell_dust: Callable[[str], Awaitable[None]],
-        build_sell_order_status: Callable[
-            [dict[str, Any]], Awaitable[dict[str, Any] | None]
-        ],
+        context: MarketSellExecutionContext,
     ) -> dict[str, Any] | None:
         """Create a spot market sell order."""
         exchange = self._get_exchange()
         if exchange is None:
             return None
 
-        await ensure_exchange(config)
-        await ensure_markets_loaded()
-        resolved_symbol = resolve_symbol(order["symbol"])
+        await context.ensure_exchange(config)
+        await context.ensure_markets_loaded()
+        resolved_symbol = context.resolve_symbol(order["symbol"])
         if resolved_symbol is None:
             self._logger.error(
                 "Selling pair %s failed: symbol not found.", order["symbol"]
@@ -161,7 +138,10 @@ class ExchangeSellManager:
 
         try:
             requested_amount = float(order["total_amount"])
-            sell_amount = await resolve_sell_amount(resolved_symbol, requested_amount)
+            sell_amount = await context.resolve_sell_amount(
+                resolved_symbol,
+                requested_amount,
+            )
             if sell_amount is None:
                 self._logger.error(
                     "Skipping market sell for %s: no available amount to sell.",
@@ -182,7 +162,7 @@ class ExchangeSellManager:
             current_amount = float(order["total_amount"])
             retry_count = int(order.get("_sell_retry_count", 0) or 0)
             if retry_count > 0:
-                reduced_amount = reduce_amount_by_step(
+                reduced_amount = context.reduce_amount_by_step(
                     resolved_symbol,
                     current_amount,
                     retry_count,
@@ -200,14 +180,14 @@ class ExchangeSellManager:
             if notional_price_value is None or notional_price_value <= 0:
                 try:
                     notional_price_value = float(
-                        await get_price_for_symbol(resolved_symbol)
+                        await context.get_price_for_symbol(resolved_symbol)
                     )
                 except (ccxt.BaseError, RuntimeError, TypeError, ValueError):
                     notional_price_value = None
 
             if notional_price_value and notional_price_value > 0:
                 below_min_notional, min_notional, estimated_notional = (
-                    is_notional_below_minimum(
+                    context.is_notional_below_minimum(
                         resolved_symbol,
                         float(order["total_amount"]),
                         notional_price_value,
@@ -239,7 +219,7 @@ class ExchangeSellManager:
                 order["total_amount"],
             )
             order.update(trade)
-            await log_remaining_sell_dust(resolved_symbol)
+            await context.log_remaining_sell_dust(resolved_symbol)
         except ccxt.ExchangeError as exc:
             if "insufficient balance" in str(exc):
                 self._logger.error(
@@ -297,6 +277,6 @@ class ExchangeSellManager:
                 "Sold %s %s on Exchange.", order["total_amount"], order["symbol"]
             )
             order.pop("_sell_retry_count", None)
-            return await build_sell_order_status(order)
+            return await context.build_sell_order_status(order)
 
         return None

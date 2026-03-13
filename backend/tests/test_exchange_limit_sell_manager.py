@@ -1,6 +1,7 @@
 """Tests for exchange limit sell manager."""
 
 import pytest
+from service.exchange_contexts import LimitSellFillContext
 from service.exchange_limit_sell_manager import ExchangeLimitSellManager
 
 
@@ -125,8 +126,10 @@ async def test_handle_limit_sell_fill_returns_partial_fallback_status(
         resolved_symbol="BTC/USDT",
         config={"limit_sell_timeout_sec": 10},
         original_order={},
-        parse_order_status=fake_parse_order_status,
-        build_sell_order_status=fake_build_sell_order_status,
+        context=LimitSellFillContext(
+            parse_order_status=fake_parse_order_status,
+            build_sell_order_status=fake_build_sell_order_status,
+        ),
     )
 
     assert status == {
@@ -187,8 +190,10 @@ async def test_handle_limit_sell_fill_marks_unconfirmed_cancel(
         resolved_symbol="BTC/USDT",
         config={"limit_sell_timeout_sec": 10},
         original_order=original_order,
-        parse_order_status=fake_parse_order_status,
-        build_sell_order_status=fake_build_sell_order_status,
+        context=LimitSellFillContext(
+            parse_order_status=fake_parse_order_status,
+            build_sell_order_status=fake_build_sell_order_status,
+        ),
     )
 
     assert status is None

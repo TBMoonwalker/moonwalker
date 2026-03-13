@@ -5,6 +5,7 @@ import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import ccxt.async_support as ccxt
 import helper
 import model
 import pandas as pd
@@ -12,6 +13,7 @@ from cachetools import TTLCache
 from service.config import resolve_timeframe
 from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
+from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
 
@@ -65,8 +67,15 @@ class Data:
                     f"storing listing date for {symbol}",
                 )
                 return listing_date
-        except Exception as e:
-            # Broad catch to keep listing lookups resilient.
+        except (
+            BaseORMException,
+            ccxt.ExchangeError,
+            ccxt.NetworkError,
+            ccxt.BaseError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as e:
             logging.error("Error fetching OHLCV for %s: %s", symbol, e)
         finally:
             if not self.persist_exchange:
@@ -116,8 +125,14 @@ class Data:
             )
             self._symbols_cache[cache_key] = symbols
             return symbols
-        except Exception as e:
-            # Broad catch to keep symbol list retrieval resilient.
+        except (
+            ccxt.ExchangeError,
+            ccxt.NetworkError,
+            ccxt.BaseError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as e:
             logging.error("Error fetching exchange symbols for %s: %s", currency, e)
             return []
         finally:
@@ -311,15 +326,6 @@ class Data:
         df.dropna(subset=["time"], inplace=True)
         df["time"] = df["time"].astype(float) + float(offset_seconds)
         df.drop_duplicates(subset=["time"], inplace=True)
-        df.rename(
-            columns={
-                "open": "open",
-                "high": "high",
-                "low": "low",
-                "close": "close",
-            },
-            inplace=True,
-        )
         df.drop("volume", axis=1, inplace=True)
         df.drop("timestamp", axis=1, inplace=True)
         return df.to_json(orient="records")
@@ -330,8 +336,7 @@ class Data:
             query = await model.Tickers.filter(symbol=f"{symbol}").count()
             logging.debug("Counted %s entries for symbol %s", query, symbol)
             return query
-        except Exception as e:
-            # Broad catch to keep history endpoints responsive.
+        except BaseORMException as e:
             logging.error("Error counting history data for symbol %s: %s", symbol, e)
 
         return False
@@ -342,8 +347,7 @@ class Data:
             query = await model.Tickers.filter(symbol=f"{symbol}").delete()
             logging.info("Delete %s entries for symbol %s", query, symbol)
             return True
-        except Exception as e:
-            # Broad catch to keep delete endpoints responsive.
+        except BaseORMException as e:
             logging.error("Error deleting old ticker data for symbol %s: %s", symbol, e)
 
         return False
@@ -433,12 +437,39 @@ class Data:
                 symbol,
                 missing_count,
             )
-        except Exception as e:
+        except (
+            BaseORMException,
+            ccxt.ExchangeError,
+            ccxt.NetworkError,
+            ccxt.BaseError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as e:
             logging.error("Error adding history for %s. Cause: %s", symbol, e)
         finally:
             if not self.persist_exchange:
                 await self.exchange.close()
         return False
+
+    async def __get_dataframe_for_symbol_since(
+        self,
+        symbol: str,
+        start_timestamp: int | float,
+        fields: tuple[str, ...] | None = None,
+    ) -> pd.DataFrame | None:
+        """Return ticker rows for a symbol since a timestamp as a DataFrame."""
+        query = model.Tickers.filter(symbol=symbol).filter(
+            timestamp__gt=start_timestamp
+        )
+        rows = (
+            await query.order_by("timestamp").values(*fields)
+            if fields
+            else await query.order_by("timestamp").values()
+        )
+        if not rows:
+            return None
+        return await asyncio.to_thread(self._rows_to_dataframe, rows)
 
     async def get_ohlcv_for_pair(
         self, pair: str, timerange: str, timestamp_start: float, offset: float
@@ -448,16 +479,13 @@ class Data:
         # start_date = datetime.fromtimestamp(((float(timestamp_start) - 600000) / 1000.0),UTC,)
         symbol = self.utils.split_symbol(pair)
         start_timestamp = float(timestamp_start) - 60000
-        ohlcv = {}
-        query = (
-            await model.Tickers.filter(symbol=symbol)
-            .filter(timestamp__gt=start_timestamp)
-            .values("timestamp", "open", "high", "low", "close", "volume")
+        df_source = await self.__get_dataframe_for_symbol_since(
+            symbol,
+            start_timestamp,
+            fields=("timestamp", "open", "high", "low", "close", "volume"),
         )
-
-        df_source = (
-            await asyncio.to_thread(pd.DataFrame, query) if query else pd.DataFrame()
-        )
+        if df_source is None:
+            df_source = pd.DataFrame()
         live_candle = self.__get_live_candle_for_symbol(symbol, start_timestamp)
         if live_candle:
             df_source = await asyncio.to_thread(
@@ -467,11 +495,10 @@ class Data:
         if not df_source.empty:
             df = await asyncio.to_thread(self.resample_data, df_source, timerange)
             if df is not None and not df.empty:
-                ohlcv = await asyncio.to_thread(
+                return await asyncio.to_thread(
                     self._serialize_ohlcv_dataframe, df, offset
                 )
-
-        return ohlcv
+        return {}
 
     def __get_live_candle_for_symbol(
         self, symbol: str, start_timestamp: float
@@ -494,7 +521,14 @@ class Data:
                 "close": float(live[4]),
                 "volume": float(live[5]),
             }
-        except Exception:
+        except (
+            ImportError,
+            AttributeError,
+            KeyError,
+            IndexError,
+            TypeError,
+            ValueError,
+        ):
             return None
 
     async def get_data_for_pair(
@@ -503,20 +537,7 @@ class Data:
         """Return raw OHLCV rows for a pair."""
         symbol = self.utils.split_symbol(pair)
         start_date = self.__calculate_min_candle_date(timerange, length)
-
-        query = (
-            await model.Tickers.filter(symbol=symbol)
-            .filter(timestamp__gt=start_date)
-            .order_by("timestamp")
-            .values()
-        )
-
-        if query:
-            df = await asyncio.to_thread(self._rows_to_dataframe, query)
-        else:
-            df = None
-
-        return df
+        return await self.__get_dataframe_for_symbol_since(symbol, start_date)
 
     async def get_data_for_pair_by_days(
         self, pair: str, lookback_days: int
@@ -529,20 +550,7 @@ class Data:
             ).timestamp()
             * 1000
         )
-
-        query = (
-            await model.Tickers.filter(symbol=symbol)
-            .filter(timestamp__gt=start_date)
-            .order_by("timestamp")
-            .values()
-        )
-
-        if query:
-            df = await asyncio.to_thread(self._rows_to_dataframe, query)
-        else:
-            df = None
-
-        return df
+        return await self.__get_dataframe_for_symbol_since(symbol, start_date)
 
     def resample_data(self, ohlcv: pd.DataFrame, timerange: str) -> pd.DataFrame | None:
         """Resample OHLCV data to the requested timerange."""

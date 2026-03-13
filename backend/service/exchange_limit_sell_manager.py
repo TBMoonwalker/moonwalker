@@ -1,22 +1,46 @@
 """Limit sell polling and fallback orchestration helpers."""
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from typing import Any
 
 import ccxt.async_support as ccxt
+from service.exchange_contexts import LimitSellFillContext
 from service.exchange_limit_sell import (
     build_market_fallback_status,
     get_limit_sell_timeout_seconds,
 )
+from service.exchange_types import ExchangeOrderPayload
 
 
 class ExchangeLimitSellManager:
     """Own limit-sell timeout, cancel, and partial-fill reconciliation."""
 
-    def __init__(self, logger: Any, get_exchange: Callable[[], Any]):
+    def __init__(self, logger: Any, get_exchange: Any):
         self._logger = logger
         self._get_exchange = get_exchange
+
+    @staticmethod
+    def _merge_exchange_order_fields(
+        order: ExchangeOrderPayload,
+        exchange_order: dict[str, Any],
+    ) -> None:
+        """Merge relevant CCXT order fields into the mutable sell payload."""
+        if "id" in exchange_order:
+            order["id"] = str(exchange_order["id"])
+        if "symbol" in exchange_order:
+            order["symbol"] = str(exchange_order["symbol"])
+        if "amount" in exchange_order and exchange_order["amount"] is not None:
+            order["amount"] = exchange_order["amount"]
+        if "price" in exchange_order and exchange_order["price"] is not None:
+            order["price"] = exchange_order["price"]
+        if "cost" in exchange_order and exchange_order["cost"] is not None:
+            order["cost"] = float(exchange_order["cost"])
+        if "timestamp" in exchange_order and exchange_order["timestamp"] is not None:
+            order["timestamp"] = int(exchange_order["timestamp"])
+        if "fee" in exchange_order:
+            order["fee"] = exchange_order["fee"]
+        if "side" in exchange_order and exchange_order["side"] is not None:
+            order["side"] = str(exchange_order["side"])
 
     async def wait_for_limit_sell_fill(
         self,
@@ -105,14 +129,11 @@ class ExchangeLimitSellManager:
     async def handle_limit_sell_fill(
         self,
         *,
-        sell_order: dict[str, Any],
+        sell_order: ExchangeOrderPayload,
         resolved_symbol: str,
         config: dict[str, Any],
-        original_order: dict[str, Any],
-        parse_order_status: Callable[[dict[str, Any]], Awaitable[dict[str, Any]]],
-        build_sell_order_status: Callable[
-            [dict[str, Any]], Awaitable[dict[str, Any] | None]
-        ],
+        original_order: ExchangeOrderPayload,
+        context: LimitSellFillContext,
     ) -> dict[str, Any] | None:
         """Handle limit sell completion, timeout, and partial-fill fallback."""
         exchange = self._get_exchange()
@@ -147,8 +168,11 @@ class ExchangeLimitSellManager:
                         remaining_amount,
                     )
                     if remaining_amount <= 0:
-                        sell_order.update(latest_order_status)
-                        return await build_sell_order_status(sell_order)
+                        self._merge_exchange_order_fields(
+                            sell_order,
+                            latest_order_status,
+                        )
+                        return await context.build_sell_order_status(sell_order)
 
                     cancel_confirmed = await self.cancel_order_and_confirm(
                         resolved_symbol,
@@ -164,7 +188,7 @@ class ExchangeLimitSellManager:
                         )
                         return None
 
-                    partial_fill_status = await parse_order_status(sell_order)
+                    partial_fill_status = await context.parse_order_status(sell_order)
                     return build_market_fallback_status(
                         symbol=resolved_symbol,
                         remaining_amount=remaining_amount,
@@ -200,6 +224,6 @@ class ExchangeLimitSellManager:
                 original_order["_limit_cancel_confirmed"] = True
             return None
 
-        sell_order.update(filled_order)
+        self._merge_exchange_order_fields(sell_order, filled_order)
         self._logger.info("Limit sell for %s filled.", resolved_symbol)
-        return await build_sell_order_status(sell_order)
+        return await context.build_sell_order_status(sell_order)

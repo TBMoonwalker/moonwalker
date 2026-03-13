@@ -1,6 +1,7 @@
 """Tests for exchange sell manager."""
 
 import pytest
+from service.exchange_contexts import MarketSellExecutionContext, SellRoutingContext
 from service.exchange_sell_manager import ExchangeSellManager
 
 
@@ -60,9 +61,11 @@ async def test_create_spot_sell_returns_partial_when_fallback_disabled() -> None
     result = await manager.create_spot_sell(
         order={"symbol": "ERA/USDC"},
         config={"sell_order_type": "limit", "limit_sell_fallback_to_market": False},
-        create_spot_limit_sell=fake_limit_sell,
-        create_spot_market_sell=fake_market_sell,
-        can_fallback_to_market_sell=fake_guard,
+        context=SellRoutingContext(
+            create_spot_limit_sell=fake_limit_sell,
+            create_spot_market_sell=fake_market_sell,
+            can_fallback_to_market_sell=fake_guard,
+        ),
     )
 
     assert result is not None
@@ -109,15 +112,21 @@ async def test_create_spot_market_sell_skips_below_notional() -> None:
             "actual_pnl": 0.0,
         },
         config={},
-        ensure_exchange=fake_ensure_exchange,
-        ensure_markets_loaded=fake_ensure_markets_loaded,
-        resolve_symbol=lambda symbol: symbol,
-        resolve_sell_amount=fake_resolve_sell_amount,
-        reduce_amount_by_step=lambda _symbol, amount, _steps: amount,
-        is_notional_below_minimum=lambda _symbol, _amount, _price: (True, 5.0, 4.84),
-        get_price_for_symbol=fake_get_price_for_symbol,
-        log_remaining_sell_dust=fake_log_remaining_sell_dust,
-        build_sell_order_status=fake_build_sell_order_status,
+        context=MarketSellExecutionContext(
+            ensure_exchange=fake_ensure_exchange,
+            ensure_markets_loaded=fake_ensure_markets_loaded,
+            resolve_symbol=lambda symbol: symbol,
+            resolve_sell_amount=fake_resolve_sell_amount,
+            reduce_amount_by_step=lambda _symbol, amount, _steps: amount,
+            is_notional_below_minimum=lambda _symbol, _amount, _price: (
+                True,
+                5.0,
+                4.84,
+            ),
+            get_price_for_symbol=fake_get_price_for_symbol,
+            log_remaining_sell_dust=fake_log_remaining_sell_dust,
+            build_sell_order_status=fake_build_sell_order_status,
+        ),
     )
 
     assert result is not None

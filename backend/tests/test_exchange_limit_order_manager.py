@@ -1,6 +1,7 @@
 """Tests for exchange limit order manager."""
 
 import pytest
+from service.exchange_contexts import LimitSellPlacementContext
 from service.exchange_limit_order_manager import ExchangeLimitOrderManager
 
 
@@ -74,13 +75,19 @@ async def test_create_spot_limit_sell_returns_market_fallback_when_below_notiona
     status = await manager.create_spot_limit_sell(
         order={"symbol": "BTC/USDT", "total_amount": 0.01},
         config={},
-        ensure_exchange=fake_ensure_exchange,
-        ensure_markets_loaded=fake_ensure_markets_loaded,
-        resolve_symbol=lambda symbol: symbol,
-        resolve_sell_amount=fake_resolve_sell_amount,
-        is_notional_below_minimum=lambda _symbol, _amount, _price: (True, 10.0, 5.0),
-        get_price_for_symbol=fake_get_price_for_symbol,
-        handle_limit_sell_fill=fake_handle_limit_sell_fill,
+        context=LimitSellPlacementContext(
+            ensure_exchange=fake_ensure_exchange,
+            ensure_markets_loaded=fake_ensure_markets_loaded,
+            resolve_symbol=lambda symbol: symbol,
+            resolve_sell_amount=fake_resolve_sell_amount,
+            is_notional_below_minimum=lambda _symbol, _amount, _price: (
+                True,
+                10.0,
+                5.0,
+            ),
+            get_price_for_symbol=fake_get_price_for_symbol,
+            handle_limit_sell_fill=fake_handle_limit_sell_fill,
+        ),
     )
 
     assert status == {
@@ -130,13 +137,19 @@ async def test_create_spot_limit_sell_places_order_and_delegates_fill_handling()
     status = await manager.create_spot_limit_sell(
         order={"symbol": "ETH/USDT", "total_amount": 1.25, "current_price": 2500.0},
         config={},
-        ensure_exchange=fake_ensure_exchange,
-        ensure_markets_loaded=fake_ensure_markets_loaded,
-        resolve_symbol=lambda symbol: symbol,
-        resolve_sell_amount=fake_resolve_sell_amount,
-        is_notional_below_minimum=lambda _symbol, _amount, _price: (False, None, 0.0),
-        get_price_for_symbol=fake_get_price_for_symbol,
-        handle_limit_sell_fill=fake_handle_limit_sell_fill,
+        context=LimitSellPlacementContext(
+            ensure_exchange=fake_ensure_exchange,
+            ensure_markets_loaded=fake_ensure_markets_loaded,
+            resolve_symbol=lambda symbol: symbol,
+            resolve_sell_amount=fake_resolve_sell_amount,
+            is_notional_below_minimum=lambda _symbol, _amount, _price: (
+                False,
+                None,
+                0.0,
+            ),
+            get_price_for_symbol=fake_get_price_for_symbol,
+            handle_limit_sell_fill=fake_handle_limit_sell_fill,
+        ),
     )
 
     assert status == {"type": "sold_check", "symbol": "ETH/USDT"}

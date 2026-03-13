@@ -7,6 +7,7 @@ from typing import Any
 
 from controller import config as config_controller
 from controller import frontend as frontend_controller
+from controller import orders as orders_controller
 from controller import statistics as statistics_controller
 from controller import trades as trades_controller
 from litestar import Litestar
@@ -199,6 +200,34 @@ def test_config_single_blocks_switch_to_csv_signal_when_open_trades_exist(
     assert service.last_batch is None
 
 
+def test_config_single_invalid_json_returns_validation_error() -> None:
+    """Invalid JSON for single-key config update should return the legacy error."""
+    app = Litestar(route_handlers=[config_controller.update_config_key])
+    with TestClient(app=app) as client:
+        response = client.put(
+            "/config/single/signal",
+            content="{invalid",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Payload must be a JSON object"}
+
+
+def test_config_multiple_invalid_json_returns_validation_error() -> None:
+    """Invalid JSON for batch config update should return the legacy error."""
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/config/multiple",
+            content="{invalid",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "'data' must be a JSON object"}
+
+
 def test_trades_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> None:
     """Expected WebSocket disconnect should not trigger error logging."""
     errors: list[tuple[Any, ...]] = []
@@ -218,6 +247,33 @@ def test_trades_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> None
             assert payload == [{"id": 1}]
 
     # Give server side a short window to process close callback paths.
+    time.sleep(0.05)
+
+    assert errors == []
+
+
+def test_closed_trades_websocket_disconnect_is_not_logged_as_error(
+    monkeypatch,
+) -> None:
+    """Expected closed-trades WebSocket disconnect should not log errors."""
+    errors: list[tuple[Any, ...]] = []
+
+    async def _fake_closed_trades() -> list[dict[str, Any]]:
+        return [{"id": 2}]
+
+    monkeypatch.setattr(
+        trades_controller, "_get_closed_trades_cached", _fake_closed_trades
+    )
+    monkeypatch.setattr(
+        trades_controller.logging, "error", lambda *args, **kwargs: errors.append(args)
+    )
+
+    app = Litestar(route_handlers=[trades_controller.closed_trades])
+    with TestClient(app=app) as client:
+        with client.websocket_connect("/trades/closed") as socket:
+            payload = json.loads(socket.receive_text())
+            assert payload == [{"id": 2}]
+
     time.sleep(0.05)
 
     assert errors == []
@@ -247,3 +303,20 @@ def test_statistics_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> 
     time.sleep(0.05)
 
     assert errors == []
+
+
+def test_manual_buy_invalid_json_returns_validation_error() -> None:
+    """Invalid JSON for manual buy should return the legacy validation payload."""
+    app = Litestar(route_handlers=[orders_controller.add_manual_buy])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/orders/buy/manual",
+            content="{invalid",
+            headers={"content-type": "application/json"},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "result": "",
+        "error": "Payload must be a JSON object",
+    }

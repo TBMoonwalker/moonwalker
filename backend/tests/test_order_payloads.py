@@ -1,6 +1,8 @@
 from datetime import datetime
 
 from service.order_payloads import (
+    build_buy_monitor_payload,
+    build_buy_trade_payload,
     build_closed_trade_payloads,
     build_manual_buy_open_trade_payload,
     build_manual_buy_trade_payload,
@@ -67,3 +69,36 @@ def test_build_manual_buy_payload_helpers_return_expected_values() -> None:
     assert open_trade_payload["amount"] == 1.5
     assert open_trade_payload["cost"] == 140.0
     assert open_trade_payload["tp_price"] == (140.0 / 1.5) * 1.01
+
+
+def test_build_buy_payload_helpers_return_expected_values() -> None:
+    order_status = {
+        "timestamp": "1739400000000",
+        "ordersize": 25.0,
+        "fees": 0.001,
+        "precision": 8,
+        "amount_fee": 0.0,
+        "amount": 0.001,
+        "price": 25000.0,
+        "symbol": "BTC/USDT",
+        "orderid": "buy-1",
+        "botname": "asap_BTC/USDT",
+        "ordertype": "market",
+        "baseorder": True,
+        "safetyorder": False,
+        "order_count": 0,
+        "so_percentage": None,
+        "direction": "long",
+        "side": "buy",
+    }
+
+    trade_payload = build_buy_trade_payload(order_status)
+    monitor_payload = build_buy_monitor_payload(order_status)
+
+    assert trade_payload["symbol"] == "BTC/USDT"
+    assert trade_payload["bot"] == "asap_BTC/USDT"
+    assert trade_payload["fee"] == 0.001
+    assert trade_payload["direction"] == "long"
+    assert monitor_payload["symbol"] == "BTC/USDT"
+    assert monitor_payload["side"] == "buy"
+    assert monitor_payload["ordertype"] == "market"

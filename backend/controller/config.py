@@ -6,6 +6,7 @@ from typing import Any
 import helper
 from controller.responses import json_response
 from litestar.connection import Request
+from litestar.exceptions import SerializationException
 from litestar.handlers import get, post, put
 from model import OpenTrades
 from service.config import Config
@@ -96,7 +97,7 @@ async def update_config_key(key: str, request: Request[Any, Any, Any]) -> Any:
     """
     try:
         data = await request.json()
-    except Exception:  # noqa: BLE001 - Return explicit validation error payload.
+    except SerializationException:
         return json_response({"error": "Payload must be a JSON object"}, 400)
     if not isinstance(data, dict):
         return json_response({"error": "Payload must be a JSON object"}, 400)
@@ -133,7 +134,7 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
     """
     try:
         data = await request.json()
-    except Exception:  # noqa: BLE001 - Return explicit validation error payload.
+    except SerializationException:
         return json_response({"error": "'data' must be a JSON object"}, 400)
 
     if not isinstance(data, dict):

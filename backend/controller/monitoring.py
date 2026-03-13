@@ -5,6 +5,7 @@ from typing import Any
 import helper
 from controller.responses import json_response
 from litestar.connection import Request
+from litestar.exceptions import SerializationException
 from litestar.handlers import post
 from service.config import Config
 from service.monitoring import MonitoringService
@@ -19,7 +20,7 @@ async def test_monitoring_telegram(request: Request[Any, Any, Any]) -> Any:
     """Send a monitoring test message to Telegram."""
     try:
         payload = await request.json()
-    except Exception:  # noqa: BLE001 - Keep legacy behavior for empty/invalid JSON.
+    except SerializationException:
         payload = {}
     if payload is None:
         payload = {}

@@ -1,6 +1,7 @@
 """Exchange service for CCXT async operations."""
 
 import asyncio
+from collections.abc import Callable
 from typing import Any
 
 import ccxt.async_support as ccxt
@@ -8,6 +9,13 @@ import helper
 from service.exchange_balance_manager import ExchangeBalanceManager
 from service.exchange_buy_manager import ExchangeBuyManager
 from service.exchange_client_manager import ExchangeClientManager
+from service.exchange_contexts import (
+    BuyFinalizationContext,
+    LimitSellFillContext,
+    LimitSellPlacementContext,
+    MarketSellExecutionContext,
+    SellRoutingContext,
+)
 from service.exchange_helpers import (
     aggregate_matched_trades,
     is_matching_order_id,
@@ -24,6 +32,7 @@ from service.exchange_risk import (
 )
 from service.exchange_sell_manager import ExchangeSellManager
 from service.exchange_sell_status import finalize_sell_order_status
+from service.exchange_types import ExchangeOrderPayload, ParsedOrderStatus
 from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
 
 logging = helper.LoggerFactory.get_logger("logs/exchange.log", "exchange")
@@ -92,6 +101,40 @@ class Exchange:
     async def __ensure_markets_loaded(self) -> None:
         await self._client_manager.ensure_markets_loaded()
 
+    @staticmethod
+    def __raise_retryable_exchange_error(action: str, exc: Exception) -> None:
+        """Log a retryable exchange-related failure and request a retry."""
+        if isinstance(exc, ccxt.ExchangeError):
+            logging.error("%s failed due to an exchange error: %s", action, exc)
+        elif isinstance(exc, ccxt.NetworkError):
+            logging.error("%s failed due to a network error: %s", action, exc)
+        elif isinstance(exc, ccxt.BaseError):
+            logging.error("%s failed due to an error: %s", action, exc)
+        else:
+            logging.error("%s failed with: %s", action, exc)
+        raise TryAgain
+
+    def __build_notional_check(
+        self,
+        *,
+        is_market_order: bool,
+    ) -> Callable[[str, float, float], tuple[bool, float | None, float]]:
+        """Build a minimum-notional checker for market or limit orders."""
+
+        def notional_check(
+            symbol: str,
+            amount: float,
+            price: float,
+        ) -> tuple[bool, float | None, float]:
+            return self.__is_notional_below_minimum(
+                symbol,
+                amount,
+                price,
+                is_market_order=is_market_order,
+            )
+
+        return notional_check
+
     def __resolve_symbol(self, symbol: str) -> str | None:
         """Resolve a user-provided symbol to the exchange canonical symbol."""
         if not symbol:
@@ -142,19 +185,15 @@ class Exchange:
         timestamp = None
         try:
             timestamp = self.exchange.parse8601(date)
-        except ccxt.ExchangeError as e:
-            logging.error("Error converting timestamp due to an exchange error: %s", e)
-            raise TryAgain
-        except ccxt.NetworkError as e:
-            logging.error("Error converting timestamp due to a network error: %s", e)
-            raise TryAgain
-        except ccxt.BaseError as e:
-            logging.error("Converting timestamp failed due to an error: %s", e)
-            raise TryAgain
-        except (TypeError, ValueError, RuntimeError) as e:
-            # Broad catch to retry on unexpected exchange errors.
-            logging.error("Converting timestamp failed with: %s", e)
-            raise TryAgain
+        except (
+            ccxt.ExchangeError,
+            ccxt.NetworkError,
+            ccxt.BaseError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ) as exc:
+            self.__raise_retryable_exchange_error("Converting timestamp", exc)
 
         return timestamp
 
@@ -283,25 +322,17 @@ class Exchange:
                 raise TryAgain
             actual_price = float(ticker["last"])
             result = self.exchange.price_to_precision(resolved_pair, actual_price)
-        except ccxt.ExchangeError as e:
-            logging.error("Fetching ticker data failed due to an exchange error: %s", e)
-            raise TryAgain
-        except ccxt.NetworkError as e:
-            logging.error("Fetching ticker data failed due to a network error: %s", e)
-            raise TryAgain
-        except ccxt.BaseError as e:
-            logging.error("Fetching ticker data failed due to an error: %s", e)
-            raise TryAgain
         except TryAgain:
             raise
-        except (TypeError, ValueError, RuntimeError) as e:
-            # Broad catch to retry on unexpected exchange errors.
-            logging.error(
-                "Fetching ticker data failed with unexpected error type %s: %r",
-                type(e).__name__,
-                e,
-            )
-            raise TryAgain
+        except (
+            ccxt.ExchangeError,
+            ccxt.NetworkError,
+            ccxt.BaseError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ) as exc:
+            self.__raise_retryable_exchange_error("Fetching ticker data", exc)
 
         return result
 
@@ -316,19 +347,15 @@ class Exchange:
                 raise TryAgain
             market = self.exchange.market(resolved_pair)
             result = market["precision"]["amount"]
-        except ccxt.ExchangeError as e:
-            logging.error("Fetching market data failed due to an exchange error: %s", e)
-            raise TryAgain
-        except ccxt.NetworkError as e:
-            logging.error("Fetching market data failed due to a network error: %s", e)
-            raise TryAgain
-        except ccxt.BaseError as e:
-            logging.error("Fetching market data failed due to an error: %s", e)
-            raise TryAgain
-        except (TypeError, ValueError, RuntimeError) as e:
-            # Broad catch to retry on unexpected exchange errors.
-            logging.error("Fetching market data failed with: %s", e)
-            raise TryAgain
+        except (
+            ccxt.ExchangeError,
+            ccxt.NetworkError,
+            ccxt.BaseError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ) as exc:
+            self.__raise_retryable_exchange_error("Fetching market data", exc)
 
         return result
 
@@ -405,29 +432,37 @@ class Exchange:
                     matched_orders,
                 )
                 trade = aggregate_matched_trades(matched_orders, symbol)
-        except ccxt.NetworkError as e:
-            logging.error("Fetch trade order failed due to a network error: %s", e)
-            raise TryAgain
-        except ccxt.ExchangeError as e:
-            logging.error("Fetch trade order failed due to an exchange error: %s", e)
-            raise TryAgain
-        except ccxt.BaseError as e:
-            logging.error("Fetch trade order failed due to an error: %s", e)
-            raise TryAgain
-        except (TypeError, ValueError, RuntimeError, KeyError) as e:
-            # Broad catch to retry on unexpected exchange errors.
-            logging.error("Fetch trade order failed with: %s", e)
-            raise TryAgain
+        except (
+            ccxt.NetworkError,
+            ccxt.ExchangeError,
+            ccxt.BaseError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+            KeyError,
+        ) as exc:
+            self.__raise_retryable_exchange_error("Fetch trade order", exc)
 
         return trade
 
     async def __parse_order_status(
         self,
-        order: dict[str, Any],
+        order: ExchangeOrderPayload,
         *,
         order_check_range_seconds: int,
-    ) -> dict[str, Any]:
-        data = {}
+    ) -> ParsedOrderStatus:
+        data: ParsedOrderStatus = {
+            "timestamp": 0,
+            "amount": 0.0,
+            "total_amount": 0.0,
+            "price": 0.0,
+            "orderid": "",
+            "symbol": "",
+            "side": "",
+            "amount_fee": 0.0,
+            "base_fee": 0.0,
+            "ordersize": 0.0,
+        }
 
         trade = await self.__get_trades_for_symbol(
             order["symbol"],
@@ -475,23 +510,18 @@ class Exchange:
             amount = self.exchange.amount_to_precision(
                 resolved_symbol, float(ordersize) / float(price)
             )
-        except ccxt.NetworkError as e:
-            logging.error(
-                "Getting amount for %s failed due to a network error: %s", symbol, e
+        except (
+            ccxt.NetworkError,
+            ccxt.ExchangeError,
+            ccxt.BaseError,
+            TypeError,
+            ValueError,
+            RuntimeError,
+        ) as exc:
+            self.__raise_retryable_exchange_error(
+                f"Getting amount for {symbol}",
+                exc,
             )
-            raise TryAgain
-        except ccxt.ExchangeError as e:
-            logging.error(
-                "Getting amount for %s failed due to an exchange error: %s", symbol, e
-            )
-            raise TryAgain
-        except ccxt.BaseError as e:
-            logging.error("Getting amount for %s failed due to an error: %s", symbol, e)
-            raise TryAgain
-        except Exception as e:
-            # Broad catch to retry on unexpected exchange errors.
-            logging.error("Getting amount for %s failed with: %s", symbol, e)
-            raise TryAgain
 
         return amount
 
@@ -540,34 +570,6 @@ class Exchange:
             return int(config.get("order_check_range", 300))
         except (TypeError, ValueError, AttributeError):
             return 300
-
-    def __is_limit_sell_notional_below_minimum(
-        self,
-        symbol: str,
-        amount: float,
-        price: float,
-    ) -> tuple[bool, float | None, float]:
-        """Check minimum notional for a limit sell."""
-        return self.__is_notional_below_minimum(
-            symbol,
-            amount,
-            price,
-            is_market_order=False,
-        )
-
-    def __is_market_sell_notional_below_minimum(
-        self,
-        symbol: str,
-        amount: float,
-        price: float,
-    ) -> tuple[bool, float | None, float]:
-        """Check minimum notional for a market sell."""
-        return self.__is_notional_below_minimum(
-            symbol,
-            amount,
-            price,
-            is_market_order=True,
-        )
 
     async def __get_available_base_amount(
         self, symbol: str, force_refresh: bool = False
@@ -737,18 +739,25 @@ class Exchange:
         return await self._buy_manager.finalize_market_buy(
             order=order,
             config=config,
-            parse_order_status=lambda order: self.__parse_order_status(
-                order,
-                order_check_range_seconds=order_check_range_seconds,
+            context=BuyFinalizationContext(
+                parse_order_status=lambda buy_order: self.__parse_order_status(
+                    buy_order,
+                    order_check_range_seconds=order_check_range_seconds,
+                ),
+                get_precision_for_symbol=self.__get_precision_for_symbol,
+                resolve_symbol=self.__resolve_symbol,
+                get_demo_taker_fee_for_symbol=self.__get_demo_taker_fee_for_symbol,
             ),
-            get_precision_for_symbol=self.__get_precision_for_symbol,
-            resolve_symbol=self.__resolve_symbol,
-            get_demo_taker_fee_for_symbol=self.__get_demo_taker_fee_for_symbol,
         )
 
     async def __execute_market_buy(
         self, order: dict[str, Any]
     ) -> dict[str, Any] | None:
+        """Execute a market buy via the dedicated buy manager.
+
+        This private seam is kept explicit because several regression tests
+        monkeypatch it to isolate funds-guard behavior from order placement.
+        """
         return await self._buy_manager.execute_market_buy(order)
 
     async def create_spot_sell(
@@ -757,9 +766,11 @@ class Exchange:
         return await self._sell_manager.create_spot_sell(
             order=order,
             config=config,
-            create_spot_limit_sell=self.create_spot_limit_sell,
-            create_spot_market_sell=self.create_spot_market_sell,
-            can_fallback_to_market_sell=self.__can_fallback_to_market_sell,
+            context=SellRoutingContext(
+                create_spot_limit_sell=self.create_spot_limit_sell,
+                create_spot_market_sell=self.create_spot_market_sell,
+                can_fallback_to_market_sell=self.__can_fallback_to_market_sell,
+            ),
         )
 
     async def __can_fallback_to_market_sell(
@@ -831,20 +842,24 @@ class Exchange:
         return await self._limit_order_manager.create_spot_limit_sell(
             order=order,
             config=config,
-            ensure_exchange=self.__ensure_exchange,
-            ensure_markets_loaded=self.__ensure_markets_loaded,
-            resolve_symbol=self.__resolve_symbol,
-            resolve_sell_amount=self.__resolve_sell_amount,
-            is_notional_below_minimum=self.__is_limit_sell_notional_below_minimum,
-            get_price_for_symbol=self.__get_price_for_symbol,
-            handle_limit_sell_fill=lambda sell_order, resolved_symbol, cfg, original: (
-                self.__handle_limit_sell_fill(
-                    sell_order,
-                    resolved_symbol,
-                    cfg,
-                    original,
-                    order_check_range_seconds=order_check_range_seconds,
-                )
+            context=LimitSellPlacementContext(
+                ensure_exchange=self.__ensure_exchange,
+                ensure_markets_loaded=self.__ensure_markets_loaded,
+                resolve_symbol=self.__resolve_symbol,
+                resolve_sell_amount=self.__resolve_sell_amount,
+                is_notional_below_minimum=self.__build_notional_check(
+                    is_market_order=False
+                ),
+                get_price_for_symbol=self.__get_price_for_symbol,
+                handle_limit_sell_fill=lambda sell_order, resolved_symbol, cfg, original: (
+                    self.__handle_limit_sell_fill(
+                        sell_order,
+                        resolved_symbol,
+                        cfg,
+                        original,
+                        order_check_range_seconds=order_check_range_seconds,
+                    )
+                ),
             ),
         )
 
@@ -863,13 +878,15 @@ class Exchange:
             resolved_symbol=resolved_symbol,
             config=config,
             original_order=original_order,
-            parse_order_status=lambda order: self.__parse_order_status(
-                order,
-                order_check_range_seconds=order_check_range_seconds,
-            ),
-            build_sell_order_status=lambda order: self.__build_sell_order_status(
-                order,
-                order_check_range_seconds=order_check_range_seconds,
+            context=LimitSellFillContext(
+                parse_order_status=lambda limit_order: self.__parse_order_status(
+                    limit_order,
+                    order_check_range_seconds=order_check_range_seconds,
+                ),
+                build_sell_order_status=lambda limit_order: self.__build_sell_order_status(
+                    limit_order,
+                    order_check_range_seconds=order_check_range_seconds,
+                ),
             ),
         )
 
@@ -882,16 +899,20 @@ class Exchange:
         return await self._sell_manager.create_spot_market_sell(
             order=order,
             config=config,
-            ensure_exchange=self.__ensure_exchange,
-            ensure_markets_loaded=self.__ensure_markets_loaded,
-            resolve_symbol=self.__resolve_symbol,
-            resolve_sell_amount=self.__resolve_sell_amount,
-            reduce_amount_by_step=self.__reduce_amount_by_step,
-            is_notional_below_minimum=self.__is_market_sell_notional_below_minimum,
-            get_price_for_symbol=self.__get_price_for_symbol,
-            log_remaining_sell_dust=self.__log_remaining_sell_dust,
-            build_sell_order_status=lambda order: self.__build_sell_order_status(
-                order,
-                order_check_range_seconds=order_check_range_seconds,
+            context=MarketSellExecutionContext(
+                ensure_exchange=self.__ensure_exchange,
+                ensure_markets_loaded=self.__ensure_markets_loaded,
+                resolve_symbol=self.__resolve_symbol,
+                resolve_sell_amount=self.__resolve_sell_amount,
+                reduce_amount_by_step=self.__reduce_amount_by_step,
+                is_notional_below_minimum=self.__build_notional_check(
+                    is_market_order=True
+                ),
+                get_price_for_symbol=self.__get_price_for_symbol,
+                log_remaining_sell_dust=self.__log_remaining_sell_dust,
+                build_sell_order_status=lambda sell_order: self.__build_sell_order_status(
+                    sell_order,
+                    order_check_range_seconds=order_check_range_seconds,
+                ),
             ),
         )

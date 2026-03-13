@@ -5,6 +5,7 @@ from typing import Any
 import helper
 from controller.responses import json_response
 from litestar.connection import Request
+from litestar.exceptions import SerializationException
 from litestar.handlers import get, post
 from service.config import Config
 from service.orders import Orders
@@ -78,7 +79,7 @@ async def add_manual_buy(request: Request[Any, Any, Any]) -> Any:
     """Append a manual buy row without placing an exchange order."""
     try:
         payload = await request.json()
-    except Exception:  # noqa: BLE001 - Return explicit validation error payload.
+    except SerializationException:
         return json_response(
             {"result": "", "error": "Payload must be a JSON object"}, 400
         )

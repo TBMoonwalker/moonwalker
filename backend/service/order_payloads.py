@@ -4,6 +4,8 @@ import json
 from datetime import datetime
 from typing import Any
 
+from service.exchange_types import ExchangeOrderPayload, SoldCheckStatus
+
 
 def calculate_trade_duration(start_date_ms: float, end_date_ms: float) -> str:
     """Return trade duration as a JSON string from millisecond timestamps."""
@@ -27,7 +29,7 @@ def calculate_trade_duration(start_date_ms: float, end_date_ms: float) -> str:
 
 
 def build_closed_trade_payloads(
-    order_status: dict[str, Any],
+    order_status: SoldCheckStatus,
     *,
     so_count: int,
     open_timestamp_ms: float,
@@ -92,6 +94,47 @@ def build_closed_trade_payloads(
         "duration": duration_data,
     }
     return {"payload": payload, "monitor_payload": monitor_payload}
+
+
+def build_buy_trade_payload(order_status: ExchangeOrderPayload) -> dict[str, Any]:
+    """Build the trade-row payload for a filled exchange buy."""
+    return {
+        "timestamp": order_status["timestamp"],
+        "ordersize": order_status["ordersize"],
+        "fee": order_status["fees"],
+        "precision": order_status["precision"],
+        "amount_fee": order_status["amount_fee"],
+        "amount": order_status["amount"],
+        "price": order_status["price"],
+        "symbol": order_status["symbol"],
+        "orderid": order_status["orderid"],
+        "bot": order_status["botname"],
+        "ordertype": order_status["ordertype"],
+        "baseorder": order_status["baseorder"],
+        "safetyorder": order_status["safetyorder"],
+        "order_count": order_status["order_count"],
+        "so_percentage": order_status["so_percentage"],
+        "direction": order_status["direction"],
+        "side": order_status["side"],
+    }
+
+
+def build_buy_monitor_payload(order_status: ExchangeOrderPayload) -> dict[str, Any]:
+    """Build the monitoring payload for a filled exchange buy."""
+    return {
+        "symbol": order_status["symbol"],
+        "side": "buy",
+        "timestamp": order_status["timestamp"],
+        "ordersize": order_status["ordersize"],
+        "price": order_status["price"],
+        "amount": order_status["amount"],
+        "bot": order_status["botname"],
+        "ordertype": order_status["ordertype"],
+        "baseorder": order_status["baseorder"],
+        "safetyorder": order_status["safetyorder"],
+        "order_count": order_status["order_count"],
+        "so_percentage": order_status["so_percentage"],
+    }
 
 
 def build_manual_buy_trade_payload(

@@ -7,6 +7,7 @@ from typing import Any
 
 import helper
 from controller.responses import json_response
+from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
 from service.trades import Trades
 from service.websocket_fanout import WebSocketFanout
@@ -73,12 +74,9 @@ async def open_trades() -> AsyncGenerator[str, None]:
     try:
         async for output in _open_trades_fanout.subscribe():
             yield output
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, WebSocketDisconnect):
         logging.info("Client disconnected from open trades WebSocket")
         return
-    except Exception as exc:  # noqa: BLE001 - Keep stream alive diagnostics.
-        logging.error("Error in open_trades WebSocket: %s", exc, exc_info=True)
-        raise
 
 
 @websocket_stream(path="/trades/closed", warn_on_data_discard=False)
@@ -87,12 +85,9 @@ async def closed_trades() -> AsyncGenerator[str, None]:
     try:
         async for output in _closed_trades_fanout.subscribe():
             yield output
-    except asyncio.CancelledError:
+    except (asyncio.CancelledError, WebSocketDisconnect):
         logging.info("Client disconnected from closed trades WebSocket")
         return
-    except Exception as exc:  # noqa: BLE001 - Keep stream alive diagnostics.
-        logging.error("Error in closed_trades WebSocket: %s", exc, exc_info=True)
-        raise
 
 
 @get(path="/trades/closed/length")

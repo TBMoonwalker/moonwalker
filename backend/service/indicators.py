@@ -9,6 +9,14 @@ from service.config import resolve_history_lookback_days
 from service.data import Data
 
 logging = helper.LoggerFactory.get_logger("logs/indicators.log", "indicators")
+INDICATOR_CALCULATION_EXCEPTIONS = (
+    AttributeError,
+    IndexError,
+    KeyError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 class Indicators:
@@ -20,6 +28,11 @@ class Indicators:
             tuple[str, str, tuple[int, ...]], tuple[float | None, dict[str, Any]]
         ] = {}
         self._close_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
+
+    @staticmethod
+    def _log_indicator_error(name: str, symbol: str, exc: Exception) -> None:
+        """Log indicator calculation failures consistently."""
+        logging.error("%s cannot be calculated for %s. Cause: %s", name, symbol, exc)
 
     @staticmethod
     def _calculate_ema_sync(df: Any, lengths: list[int]) -> dict[str, Any]:
@@ -184,9 +197,8 @@ class Indicators:
             df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
             ema = await asyncio.to_thread(self._calculate_ema_sync, df, lengths)
             self._ema_cache[cache_key] = (latest_timestamp, ema)
-        except Exception as e:
-            # Broad catch to avoid breaking strategy execution.
-            logging.error("EMA cannot be calculated for %s. Cause: %s", symbol, e)
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("EMA", symbol, e)
             if cached:
                 return cached[1]
         return ema
@@ -207,11 +219,8 @@ class Indicators:
             close = df["close"]
             self._close_cache[cache_key] = (latest_timestamp, close)
             return close
-        except Exception as e:
-            # Broad catch to avoid breaking strategy execution.
-            logging.error(
-                "Close price cannot be calculated for %s. Cause: %s", symbol, e
-            )
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("Close price", symbol, e)
             if cached:
                 return cached[1]
             return None
@@ -228,8 +237,8 @@ class Indicators:
             df_raw = await self.data.get_data_for_pair(symbol, timerange, 60)
             df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
             result = await asyncio.to_thread(self._calculate_btc_pulse_sync, df)
-        except Exception as e:
-            logging.error("BTC Pulse cannot be calculated for %s. Cause: %s", symbol, e)
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("BTC Pulse", symbol, e)
             result = True
 
         return result
@@ -244,8 +253,8 @@ class Indicators:
                 return None
             df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
             return await asyncio.to_thread(self._calculate_rsi_sync, df, length)
-        except Exception as e:
-            logging.error("RSI cannot be calculated for %s. Cause: %s", symbol, e)
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("RSI", symbol, e)
             return None
 
     async def calculate_24h_volume(self, symbol: str) -> float | None:
@@ -257,10 +266,8 @@ class Indicators:
                 return None
             df = await asyncio.to_thread(self.data.resample_data, df_raw, "1h")
             return await asyncio.to_thread(self._calculate_24h_volume_sync, df)
-        except Exception as e:
-            logging.error(
-                "24h volume cannot be calculated for %s. Cause: %s", symbol, e
-            )
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("24h volume", symbol, e)
             return None
 
     async def calculate_atr_regime_multiplier(
@@ -304,10 +311,8 @@ class Indicators:
                 mid_k,
                 high_k,
             )
-        except Exception as e:
-            logging.error(
-                "ATR regime cannot be calculated for %s. Cause: %s", symbol, e
-            )
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("ATR regime", symbol, e)
             return 1.0, {"regime": "mid", "atr_percent": 0.0}
 
     async def calculate_ema_cross(self, symbol: str, timerange: str) -> str:
@@ -316,6 +321,6 @@ class Indicators:
             df_raw = await self.data.get_data_for_pair(symbol, timerange, 21)
             df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
             return await asyncio.to_thread(self._calculate_ema_cross_sync, df)
-        except Exception as e:
-            logging.error("EMA Cross cannot be calculated for %s. Cause: %s", symbol, e)
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("EMA Cross", symbol, e)
             return "none"

@@ -2,14 +2,21 @@
 
 import asyncio
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeGuard
 
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
+from service.exchange_types import (
+    ExchangeOrderPayload,
+    PartialSellStatus,
+    SoldCheckStatus,
+)
 from service.monitoring import MonitoringService
 from service.order_payloads import (
+    build_buy_monitor_payload,
+    build_buy_trade_payload,
     build_closed_trade_payloads,
     build_manual_buy_open_trade_payload,
     build_manual_buy_trade_payload,
@@ -22,6 +29,7 @@ from service.trade_math import (
     parse_date_to_ms,
 )
 from service.trades import Trades
+from tortoise.exceptions import ConfigurationError
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
@@ -73,7 +81,16 @@ class Orders:
                     logging.error("Failed creating sell order for %s", order["symbol"])
                     return
 
-                if await self.__handle_partial_sell_status(order_status, config):
+                if self._is_partial_sell_status(order_status):
+                    await self.__handle_partial_sell_status(order_status, config)
+                    return
+
+                if not self._is_sold_check_status(order_status):
+                    logging.error(
+                        "Unsupported sell order status for %s: %s",
+                        order["symbol"],
+                        order_status,
+                    )
                     return
 
                 close_context = await self.__calculate_closed_trade_stats(order_status)
@@ -89,15 +106,12 @@ class Orders:
                 await self.exchange.close()
 
     async def __handle_partial_sell_status(
-        self, order_status: dict[str, Any], config: dict[str, Any]
-    ) -> bool:
-        """Persist partial sell execution and return True when trade remains open."""
-        if order_status.get("type") != "partial_sell":
-            return False
-
+        self, order_status: PartialSellStatus, config: dict[str, Any]
+    ) -> None:
+        """Persist partial sell execution while keeping the trade open."""
         if bool(order_status.get("unsellable", False)):
             await self.__handle_unsellable_remainder(order_status, config)
-            return True
+            return
 
         partial_amount = float(order_status.get("partial_filled_amount") or 0.0)
         partial_proceeds = float(order_status.get("partial_proceeds") or 0.0)
@@ -114,10 +128,9 @@ class Orders:
                 partial_proceeds,
                 float(order_status.get("remaining_amount") or 0.0),
             )
-        return True
 
     async def __handle_unsellable_remainder(
-        self, order_status: dict[str, Any], config: dict[str, Any]
+        self, order_status: PartialSellStatus, config: dict[str, Any]
     ) -> None:
         """Persist partial close and mark remaining amount as unsellable."""
         symbol = str(order_status.get("symbol", ""))
@@ -243,7 +256,7 @@ class Orders:
         )
 
     async def __calculate_closed_trade_stats(
-        self, order_status: dict[str, Any]
+        self, order_status: SoldCheckStatus
     ) -> dict[str, Any]:
         """Build closed-trade payload and monitoring payload."""
         symbol = order_status["symbol"]
@@ -318,6 +331,54 @@ class Orders:
             raise ValueError(f"{field_name} must be greater than 0.")
         return parsed
 
+    @staticmethod
+    def _is_partial_sell_status(
+        order_status: dict[str, Any],
+    ) -> TypeGuard[PartialSellStatus]:
+        """Return whether an exchange sell result is a partial-sell status."""
+        return str(order_status.get("type") or "") == "partial_sell"
+
+    @staticmethod
+    def _is_sold_check_status(
+        order_status: dict[str, Any],
+    ) -> TypeGuard[SoldCheckStatus]:
+        """Return whether an exchange sell result is a finalized sell status."""
+        status_type = str(order_status.get("type") or "")
+        if status_type == "sold_check":
+            return True
+        return (
+            status_type == ""
+            and bool(order_status.get("symbol"))
+            and bool(order_status.get("total_amount"))
+        )
+
+    @staticmethod
+    def _has_valid_buy_fill(order_status: ExchangeOrderPayload) -> bool:
+        """Validate that an exchange buy payload contains the core filled values."""
+        return (
+            bool(order_status.get("price"))
+            and bool(order_status.get("amount"))
+            and (float(order_status["amount"]) > 0)
+        )
+
+    async def _reset_unsellable_state(self, symbol: str) -> None:
+        """Clear persisted unsellable markers after a successful buy."""
+        try:
+            await self.trades.update_open_trades(
+                {
+                    "unsellable_amount": 0.0,
+                    "unsellable_reason": None,
+                    "unsellable_min_notional": None,
+                    "unsellable_estimated_notional": None,
+                    "unsellable_since": None,
+                    "unsellable_notice_sent": False,
+                },
+                symbol,
+            )
+        except (RuntimeError, ConfigurationError):
+            # Tests may stub persistence without initializing DB context.
+            pass
+
     async def receive_buy_order(
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> bool:
@@ -330,36 +391,13 @@ class Orders:
             order_status = await self.exchange.create_spot_market_buy(order, config)
             logging.debug(order_status)
             if order_status:
-                if (
-                    not order_status.get("amount")
-                    or float(order_status["amount"]) <= 0
-                    or not order_status.get("price")
-                ):
+                if not self._has_valid_buy_fill(order_status):
                     logging.error(
                         "Skipping trade creation for %s: invalid order status.",
                         order.get("symbol"),
                     )
                     return False
-                # 2. Create trade
-                payload = {
-                    "timestamp": order_status["timestamp"],
-                    "ordersize": order_status["ordersize"],
-                    "fee": order_status["fees"],
-                    "precision": order_status["precision"],
-                    "amount_fee": order_status["amount_fee"],
-                    "amount": order_status["amount"],
-                    "price": order_status["price"],
-                    "symbol": order_status["symbol"],
-                    "orderid": order_status["orderid"],
-                    "bot": order_status["botname"],
-                    "ordertype": order_status["ordertype"],
-                    "baseorder": order_status["baseorder"],
-                    "safetyorder": order_status["safetyorder"],
-                    "order_count": order_status["order_count"],
-                    "so_percentage": order_status["so_percentage"],
-                    "direction": order_status["direction"],
-                    "side": order_status["side"],
-                }
+                payload = build_buy_trade_payload(order_status)
 
                 async def _persist_buy() -> None:
                     async with in_transaction() as conn:
@@ -374,37 +412,10 @@ class Orders:
                 await run_sqlite_write_with_retry(
                     _persist_buy, f"persisting buy order for {order['symbol']}"
                 )
-                try:
-                    await self.trades.update_open_trades(
-                        {
-                            "unsellable_amount": 0.0,
-                            "unsellable_reason": None,
-                            "unsellable_min_notional": None,
-                            "unsellable_estimated_notional": None,
-                            "unsellable_since": None,
-                            "unsellable_notice_sent": False,
-                        },
-                        order_status["symbol"],
-                    )
-                except RuntimeError:
-                    # Tests may stub persistence without initializing DB context.
-                    pass
+                await self._reset_unsellable_state(order_status["symbol"])
                 await self.monitoring.notify_trade(
                     "trade.buy",
-                    {
-                        "symbol": order_status["symbol"],
-                        "side": "buy",
-                        "timestamp": order_status["timestamp"],
-                        "ordersize": order_status["ordersize"],
-                        "price": order_status["price"],
-                        "amount": order_status["amount"],
-                        "bot": order_status["botname"],
-                        "ordertype": order_status["ordertype"],
-                        "baseorder": order_status["baseorder"],
-                        "safetyorder": order_status["safetyorder"],
-                        "order_count": order_status["order_count"],
-                        "so_percentage": order_status["so_percentage"],
-                    },
+                    build_buy_monitor_payload(order_status),
                     config,
                 )
                 return True

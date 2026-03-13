@@ -4,6 +4,7 @@ from typing import Any
 
 import helper
 from litestar.connection import Request
+from litestar.exceptions import SerializationException
 from litestar.handlers import get, post
 from service.config import Config
 from service.data import Data
@@ -46,7 +47,7 @@ async def get_exchange_symbols_from_draft(request: Request[Any, Any, Any]) -> An
     """Get exchange symbols using draft exchange settings from request payload."""
     try:
         payload = await request.json()
-    except Exception:  # noqa: BLE001 - Treat invalid/empty JSON as empty payload.
+    except SerializationException:
         payload = {}
 
     if not isinstance(payload, dict):

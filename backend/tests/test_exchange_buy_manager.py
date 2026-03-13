@@ -2,6 +2,7 @@
 
 import pytest
 from service.exchange_buy_manager import ExchangeBuyManager
+from service.exchange_contexts import BuyFinalizationContext
 
 
 class _DummyLogger:
@@ -87,10 +88,12 @@ async def test_finalize_market_buy_applies_demo_fee_and_base_fee_deduction() -> 
     result = await manager.finalize_market_buy(
         order={"symbol": "BTC/USDT", "id": "buy-1"},
         config={"dry_run": True, "fee_deduction": False},
-        parse_order_status=fake_parse_order_status,
-        get_precision_for_symbol=fake_get_precision_for_symbol,
-        resolve_symbol=lambda symbol: symbol,
-        get_demo_taker_fee_for_symbol=lambda _symbol: 0.0025,
+        context=BuyFinalizationContext(
+            parse_order_status=fake_parse_order_status,
+            get_precision_for_symbol=fake_get_precision_for_symbol,
+            resolve_symbol=lambda symbol: symbol,
+            get_demo_taker_fee_for_symbol=lambda _symbol: 0.0025,
+        ),
     )
 
     assert result is not None
@@ -120,10 +123,12 @@ async def test_finalize_market_buy_uses_live_fee_when_not_dry_run() -> None:
     result = await manager.finalize_market_buy(
         order={"symbol": "ETH/USDT", "id": "buy-2"},
         config={"dry_run": False, "fee_deduction": True},
-        parse_order_status=fake_parse_order_status,
-        get_precision_for_symbol=fake_get_precision_for_symbol,
-        resolve_symbol=lambda symbol: symbol,
-        get_demo_taker_fee_for_symbol=lambda _symbol: 0.0,
+        context=BuyFinalizationContext(
+            parse_order_status=fake_parse_order_status,
+            get_precision_for_symbol=fake_get_precision_for_symbol,
+            resolve_symbol=lambda symbol: symbol,
+            get_demo_taker_fee_for_symbol=lambda _symbol: 0.0,
+        ),
     )
 
     assert result is not None

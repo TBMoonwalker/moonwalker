@@ -3,6 +3,7 @@
 from typing import Any
 
 from service.exchange_sell_status import build_partial_sell_status
+from service.exchange_types import MarketFallbackStatus, PartialSellStatus
 
 
 def get_limit_sell_timeout_seconds(config: dict[str, Any]) -> int:
@@ -20,7 +21,7 @@ def build_market_fallback_status(
     partial_filled_amount: float = 0.0,
     partial_avg_price: float = 0.0,
     limit_cancel_confirmed: bool = True,
-) -> dict[str, Any]:
+) -> MarketFallbackStatus:
     """Build a status payload that signals market fallback handling."""
     return {
         "requires_market_fallback": True,
@@ -33,10 +34,10 @@ def build_market_fallback_status(
 
 
 def build_partial_status_from_fallback(
-    fallback_status: dict[str, Any],
+    fallback_status: MarketFallbackStatus,
     *,
     default_symbol: str,
-) -> dict[str, Any]:
+) -> PartialSellStatus:
     """Convert a fallback status payload into a partial sell status."""
     return build_partial_sell_status(
         symbol=str(fallback_status.get("symbol", default_symbol)),
