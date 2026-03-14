@@ -65,6 +65,9 @@ class LoggerFactory:
         """
         loglevel = LoggerFactory.__resolve_loglevel()
         logger = logging.getLogger(name)
+        log_dir = os.path.dirname(os.path.abspath(log_file))
+        if log_dir:
+            os.makedirs(log_dir, exist_ok=True)
 
         # Set the logging format
         formatter = logging.Formatter(
