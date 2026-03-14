@@ -214,6 +214,29 @@ class Data:
             return set()
         return set(range(required_since, required_until + 1, timeframe_ms))
 
+    @staticmethod
+    def _is_complete_since_first_available_candle(
+        stored_timestamps: set[int],
+        available_since: int | None,
+        required_until: int,
+        timeframe_ms: int,
+    ) -> bool:
+        """Return True when history is complete from the first available candle onward."""
+        if (
+            available_since is None
+            or timeframe_ms <= 0
+            or required_until < available_since
+        ):
+            return False
+        effective_required = Data._build_required_timestamps(
+            available_since,
+            required_until,
+            timeframe_ms,
+        )
+        return bool(effective_required) and effective_required.issubset(
+            stored_timestamps
+        )
+
     async def __get_stored_timestamps(
         self, symbol: str, since_ms: int, until_ms: int
     ) -> set[int]:
@@ -240,8 +263,8 @@ class Data:
         required_until: int,
         required_timestamps: set[int],
         existing_timestamps: set[int],
-    ) -> set[int]:
-        """Fetch OHLCV from exchange and insert only missing required candles."""
+    ) -> tuple[set[int], set[int]]:
+        """Fetch OHLCV from exchange and return fetched and inserted candle timestamps."""
         ohlcv_data = await self.exchange.get_history_for_symbol(
             config,
             symbol,
@@ -255,10 +278,11 @@ class Data:
                 symbol,
                 fetch_since_ms,
             )
-            return set()
+            return set(), set()
 
         normalized_symbol = self.utils.split_symbol(symbol)
         rows_to_insert: list[model.Tickers] = []
+        fetched_timestamps: set[int] = set()
         inserted_timestamps: set[int] = set()
 
         for candle in ohlcv_data:
@@ -267,6 +291,7 @@ class Data:
                 continue
             if timestamp not in required_timestamps:
                 continue
+            fetched_timestamps.add(timestamp)
             if timestamp in existing_timestamps or timestamp in inserted_timestamps:
                 continue
 
@@ -289,7 +314,7 @@ class Data:
                 f"bulk insert history for {normalized_symbol}",
             )
 
-        return inserted_timestamps
+        return fetched_timestamps, inserted_timestamps
 
     @staticmethod
     def _rows_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
@@ -383,20 +408,44 @@ class Data:
             if not fetch_starts:
                 fetch_starts.append(required_since)
 
+            earliest_available_timestamp: int | None = None
             for fetch_since in dict.fromkeys(fetch_starts):
-                inserted_timestamps = await self.__fetch_and_store_history_range(
-                    symbol=symbol,
-                    config=config,
-                    fetch_since_ms=fetch_since,
-                    required_since=required_since,
-                    required_until=required_until,
-                    required_timestamps=required_timestamps,
-                    existing_timestamps=stored_timestamps,
+                fetched_timestamps, inserted_timestamps = (
+                    await self.__fetch_and_store_history_range(
+                        symbol=symbol,
+                        config=config,
+                        fetch_since_ms=fetch_since,
+                        required_since=required_since,
+                        required_until=required_until,
+                        required_timestamps=required_timestamps,
+                        existing_timestamps=stored_timestamps,
+                    )
                 )
+                if fetched_timestamps:
+                    fetched_earliest = min(fetched_timestamps)
+                    if earliest_available_timestamp is None:
+                        earliest_available_timestamp = fetched_earliest
+                    else:
+                        earliest_available_timestamp = min(
+                            earliest_available_timestamp, fetched_earliest
+                        )
                 stored_timestamps.update(inserted_timestamps)
 
             if required_timestamps.issubset(stored_timestamps):
                 logging.info("Added missing history boundaries for %s", symbol)
+                return True
+
+            if self._is_complete_since_first_available_candle(
+                stored_timestamps=stored_timestamps,
+                available_since=earliest_available_timestamp,
+                required_until=required_until,
+                timeframe_ms=timeframe_ms,
+            ):
+                logging.info(
+                    "Added history for %s from first available exchange candle at %s",
+                    symbol,
+                    earliest_available_timestamp,
+                )
                 return True
 
             logging.info(
@@ -404,19 +453,43 @@ class Data:
                 "Retrying full-window refill without deleting local candles.",
                 symbol,
             )
-            inserted_timestamps = await self.__fetch_and_store_history_range(
-                symbol=symbol,
-                config=config,
-                fetch_since_ms=required_since,
-                required_since=required_since,
-                required_until=required_until,
-                required_timestamps=required_timestamps,
-                existing_timestamps=stored_timestamps,
+            refill_fetched_timestamps, refill_inserted_timestamps = (
+                await self.__fetch_and_store_history_range(
+                    symbol=symbol,
+                    config=config,
+                    fetch_since_ms=required_since,
+                    required_since=required_since,
+                    required_until=required_until,
+                    required_timestamps=required_timestamps,
+                    existing_timestamps=stored_timestamps,
+                )
             )
-            stored_timestamps.update(inserted_timestamps)
+            stored_timestamps.update(refill_inserted_timestamps)
+
+            if refill_fetched_timestamps:
+                refill_earliest = min(refill_fetched_timestamps)
+                if earliest_available_timestamp is None:
+                    earliest_available_timestamp = refill_earliest
+                else:
+                    earliest_available_timestamp = min(
+                        earliest_available_timestamp, refill_earliest
+                    )
 
             if required_timestamps.issubset(stored_timestamps):
                 logging.info("Added history for %s", symbol)
+                return True
+
+            if self._is_complete_since_first_available_candle(
+                stored_timestamps=stored_timestamps,
+                available_since=earliest_available_timestamp,
+                required_until=required_until,
+                timeframe_ms=timeframe_ms,
+            ):
+                logging.info(
+                    "Added history for %s from first available exchange candle at %s",
+                    symbol,
+                    earliest_available_timestamp,
+                )
                 return True
 
             missing_count = len(required_timestamps - stored_timestamps)
