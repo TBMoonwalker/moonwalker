@@ -109,7 +109,7 @@ import ConfigGeneralSection from './config/ConfigGeneralSection.vue'
 import ConfigIndicatorSection from './config/ConfigIndicatorSection.vue'
 import ConfigMonitoringSection from './config/ConfigMonitoringSection.vue'
 import ConfigSignalSection from './config/ConfigSignalSection.vue'
-import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
+import { MOONWALKER_API_ORIGIN } from '../config'
 import {
     usePersistableStateTracking,
     type PersistableState,
@@ -153,6 +153,7 @@ const monitoringFormRef = ref<ConfigSectionFormExpose | null>(null)
 const indicatorFormRef = ref<ConfigSectionFormExpose | null>(null)
 const message = useMessage()
 const router = useRouter()
+const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).toString()
 const isLoading = ref(true)
 const showAdvancedGeneral = ref(false)
 const monitoring_test_loading = ref(false)
@@ -667,7 +668,7 @@ async function fetchAsapSymbolsForCurrency(): Promise<void> {
     try {
         const quoteCurrency = String(exchange.value.currency).toUpperCase()
         const response = await axios.post(
-            `http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/data/exchange/symbols`,
+            apiUrl('/data/exchange/symbols'),
             {
                 currency: quoteCurrency,
                 exchange_config: {
@@ -919,7 +920,7 @@ async function handleCsvSignalFileSelected(event: Event): Promise<void> {
 
 async function fetchDefaultValues() {
     try {
-        const response = await axios.get(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/all`);
+        const response = await axios.get(apiUrl('/config/all'));
         if (response.status === 200) {
             general.value.timezone = response.data.timezone || getClientTimezone()
             general.value.debug = parseBooleanString(response.data.debug) ?? false
@@ -1219,7 +1220,7 @@ async function submitForm() {
         }
 
         // Assuming you have an API endpoint
-        const response = await axios.post(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/multiple`, formData);
+        const response = await axios.post(apiUrl('/config/multiple'), formData);
 
         if (response.status >= 200 && response.status < 300) {
             syncBaselineState()
@@ -1307,7 +1308,7 @@ async function testMonitoringTelegram() {
     monitoring_test_loading.value = true
     try {
         const response = await axios.post(
-            `http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/monitoring/test`,
+            apiUrl('/monitoring/test'),
             {
                 monitoring_telegram_api_id: monitoring.value.telegram_api_id,
                 monitoring_telegram_api_hash: monitoring.value.telegram_api_hash,
