@@ -302,3 +302,28 @@ async def test_create_spot_market_sell_skips_below_notional(monkeypatch) -> None
     assert result["partial_filled_amount"] == 0.0
     assert result["remaining_amount"] == pytest.approx(0.679)
     assert fake_exchange.market_sell_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_market_fallback_guard_uses_order_current_price(monkeypatch) -> None:
+    exchange = Exchange()
+
+    async def fail_price_lookup(_symbol: str) -> str:
+        raise AssertionError("ticker lookup should not run")
+
+    monkeypatch.setattr(
+        exchange,
+        "_Exchange__get_price_for_symbol",
+        fail_price_lookup,
+    )
+
+    allowed = await exchange._Exchange__can_fallback_to_market_sell(
+        {
+            "symbol": "SAHARA/USDC",
+            "current_price": 0.02582,
+            "fallback_min_price": 0.022749116460637608,
+        },
+        {"limit_sell_fallback_tp_guard": True},
+    )
+
+    assert allowed is True

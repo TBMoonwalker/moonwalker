@@ -191,11 +191,25 @@ class Exchange:
         await self._client_manager.ensure_markets_loaded(force_refresh=True)
         resolved_symbol = self.__resolve_symbol(symbol)
         if resolved_symbol is None:
+            exchange_config = self._client_manager.get_exchange_config() or {}
+            dry_run = bool(exchange_config.get("dry_run", False))
+            exchange_name = exchange_config.get("exchange", "unknown")
             logging.warning(
                 "Symbol '%s' is still unavailable after market refresh. "
-                "This can happen for unsupported demo/testnet pairs or stale signal inputs.",
+                "This can happen for unsupported demo/testnet pairs or stale signal inputs. "
+                "exchange=%s dry_run=%s",
                 symbol,
+                exchange_name,
+                dry_run,
             )
+            if dry_run:
+                logging.warning(
+                    "Symbol '%s' is missing from the %s demo market list. "
+                    "Public ticker/watcher data can still exist for live-listed symbols "
+                    "even when the demo trading venue does not expose them yet.",
+                    symbol,
+                    exchange_name,
+                )
         return resolved_symbol
 
     async def get_history_for_symbol(
@@ -799,10 +813,16 @@ class Exchange:
             return True
 
         try:
-            current_price = float(await self.__get_price_for_symbol(order["symbol"]))
+            payload_price = order.get("current_price")
+            if payload_price not in (None, ""):
+                current_price = float(payload_price)
+            else:
+                current_price = float(
+                    await self.__get_price_for_symbol(order["symbol"])
+                )
         except (ccxt.BaseError, RuntimeError, TypeError, ValueError) as exc:
             logging.warning(
-                "Skipping market fallback for %s: could not fetch current price (%s).",
+                "Skipping market fallback for %s: could not determine current price (%s).",
                 order.get("symbol"),
                 exc,
             )

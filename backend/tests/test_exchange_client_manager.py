@@ -102,3 +102,28 @@ async def test_close_resets_client_state(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert exchange.close_calls == 1
     assert manager.exchange is None
+
+
+@pytest.mark.asyncio
+async def test_ensure_exchange_rebuilds_when_sandbox_changes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = ExchangeClientManager(_DummyLogger())
+    created: list[_DummyExchange] = []
+
+    async def fake_init_exchange(_config: dict[str, object]) -> _DummyExchange:
+        exchange = _DummyExchange()
+        created.append(exchange)
+        return exchange
+
+    monkeypatch.setattr(manager, "_init_exchange", fake_init_exchange)
+
+    assert (
+        await manager.ensure_exchange({"exchange": "binance", "sandbox": False}) is True
+    )
+    assert (
+        await manager.ensure_exchange({"exchange": "binance", "sandbox": True}) is True
+    )
+
+    assert len(created) == 2
+    assert created[0].close_calls == 1

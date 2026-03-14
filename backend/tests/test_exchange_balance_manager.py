@@ -1,5 +1,6 @@
 """Tests for exchange balance manager."""
 
+import ccxt.async_support as ccxt
 import pytest
 from service.exchange_balance_manager import ExchangeBalanceManager
 
@@ -26,6 +27,19 @@ class _DummyExchange:
 
     def amount_to_precision(self, _symbol: str, amount: float) -> str:
         return f"{amount:.3f}"
+
+
+class _FlakyBalanceExchange(_DummyExchange):
+    def __init__(self) -> None:
+        super().__init__()
+        self._fail_once = True
+
+    async def fetch_balance(self) -> dict[str, object]:
+        self.fetch_balance_calls += 1
+        if self._fail_once:
+            self._fail_once = False
+            raise ccxt.NetworkError("502 Bad Gateway")
+        return self.balance
 
 
 def _resolve_symbol(symbol: str) -> str | None:
@@ -96,4 +110,20 @@ async def test_reset_clears_cached_balance() -> None:
     manager.reset()
     await manager.get_balance_snapshot()
 
+    assert exchange.fetch_balance_calls == 2
+
+
+@pytest.mark.asyncio
+async def test_get_balance_snapshot_retries_transient_fetch_failure() -> None:
+    exchange = _FlakyBalanceExchange()
+    manager = ExchangeBalanceManager(
+        logger=_DummyLogger(),
+        balance_cache_ttl_seconds=60.0,
+        get_exchange=lambda: exchange,
+        resolve_symbol=_resolve_symbol,
+    )
+
+    balance = await manager.get_balance_snapshot()
+
+    assert balance == exchange.balance
     assert exchange.fetch_balance_calls == 2

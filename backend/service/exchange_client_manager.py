@@ -42,6 +42,7 @@ class ExchangeClientManager:
             "secret": config.get("secret"),
             "market": config.get("market", "spot"),
             "dry_run": config.get("dry_run", True),
+            "sandbox": config.get("sandbox", False),
             "exchange_hostname": config.get("exchange_hostname"),
         }
 
@@ -84,6 +85,12 @@ class ExchangeClientManager:
                 self._markets_loaded = True
                 self._markets_loaded_ts = now
 
+    def get_exchange_config(self) -> dict[str, Any] | None:
+        """Return the normalized config of the active exchange client."""
+        if self._exchange_config is None:
+            return None
+        return dict(self._exchange_config)
+
     async def _init_exchange(self, config: dict[str, Any]) -> Any:
         exchange = None
 
@@ -118,6 +125,7 @@ class ExchangeClientManager:
                         "Dry run requires CCXT enableDemoTrading support, but "
                         f"'{config.get('exchange')}' could not enable demo trading."
                     ) from exc
+            exchange.set_sandbox_mode(config.get("sandbox", False))
             exchange.enableRateLimit = True
 
         return exchange

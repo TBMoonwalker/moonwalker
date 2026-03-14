@@ -11,6 +11,9 @@ from service.exchange_helpers import extract_free_amount
 class ExchangeBalanceManager:
     """Own cached balance state and balance-derived helper lookups."""
 
+    BALANCE_FETCH_ATTEMPTS = 3
+    BALANCE_FETCH_RETRY_DELAY_SECONDS = 2.0
+
     def __init__(
         self,
         *,
@@ -31,6 +34,37 @@ class ExchangeBalanceManager:
         """Clear any cached balance snapshot."""
         self._balance_cache = None
         self._balance_cache_ts = 0.0
+
+    async def _fetch_balance_with_retry(self, exchange: Any) -> dict[str, Any]:
+        """Fetch exchange balance with a short retry window for transient failures."""
+        last_exc: Exception | None = None
+        for attempt in range(1, self.BALANCE_FETCH_ATTEMPTS + 1):
+            try:
+                return await exchange.fetch_balance()
+            except asyncio.CancelledError:
+                raise
+            except (
+                ccxt.NetworkError,
+                ccxt.ExchangeError,
+                ccxt.BaseError,
+                OSError,
+                RuntimeError,
+            ) as exc:
+                last_exc = exc
+                if attempt >= self.BALANCE_FETCH_ATTEMPTS:
+                    raise
+                self._logger.warning(
+                    "Fetching balance failed on attempt %s/%s: %s. Retrying in %ss.",
+                    attempt,
+                    self.BALANCE_FETCH_ATTEMPTS,
+                    exc,
+                    int(self.BALANCE_FETCH_RETRY_DELAY_SECONDS),
+                )
+                await asyncio.sleep(self.BALANCE_FETCH_RETRY_DELAY_SECONDS)
+
+        raise RuntimeError(
+            "Balance fetch failed without raising an exception"
+        ) from last_exc
 
     async def get_balance_snapshot(
         self, force_refresh: bool = False
@@ -57,7 +91,7 @@ class ExchangeBalanceManager:
             ):
                 return self._balance_cache
 
-            balance = await exchange.fetch_balance()
+            balance = await self._fetch_balance_with_retry(exchange)
             self._balance_cache = balance
             self._balance_cache_ts = now
             return balance
