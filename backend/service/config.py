@@ -222,6 +222,13 @@ class Config:
         for subscriber in self._subscribers:
             subscriber(self._cache)
 
+    async def __clear_key(self, key: str) -> bool:
+        """Remove a config key from persistent storage and the in-memory cache."""
+        deleted_count = await AppConfig.filter(key=key).delete()
+        existed_in_cache = key in self._cache
+        self._cache.pop(key, None)
+        return bool(deleted_count or existed_in_cache)
+
     async def __publish_change(self, keys: list[str]) -> None:
         """Publish config changes to Redis if available.
 
@@ -294,14 +301,29 @@ class Config:
             True if the operation succeeded
         """
         update = self.__parse_update_payload(value)
-        serialized_value = self.__serialize_value_for_storage(
-            update["value"], update["type"]
+        value_type = update["type"]
+        value_data = update["value"]
+        is_numeric_value = isinstance(value_data, (int, float)) and not isinstance(
+            value_data, bool
         )
+        should_persist = (
+            bool(value_data)
+            or (value_type == "bool" and value_data is False)
+            or (value_type in {"int", "float"} and is_numeric_value and value_data == 0)
+        )
+        if not should_persist:
+            changed = await self.__clear_key(key)
+            if changed:
+                self.__notify_subscribers()
+                await self.__publish_change([key])
+            return True
+
+        serialized_value = self.__serialize_value_for_storage(value_data, value_type)
         await AppConfig.update_or_create(
             key=key,
-            defaults={"value": serialized_value, "value_type": update["type"]},
+            defaults={"value": serialized_value, "value_type": value_type},
         )
-        self._cache[key] = self.__set_type(serialized_value, update["type"])
+        self._cache[key] = self.__set_type(serialized_value, value_type)
         self.__notify_subscribers()
         # Notify all subscribers across processes (best effort)
         await self.__publish_change([key])
@@ -350,6 +372,8 @@ class Config:
                     defaults={"value": serialized_value, "value_type": value_type},
                 )
                 self._cache[key] = self.__set_type(serialized_value, value_type)
+                changed_keys.append(key)
+            elif await self.__clear_key(key):
                 changed_keys.append(key)
 
         if changed_keys:

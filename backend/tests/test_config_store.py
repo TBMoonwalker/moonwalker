@@ -52,6 +52,31 @@ async def test_config_batch_set_persists_false_bool(tmp_path, monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_config_batch_set_clears_false_string_value(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    config = Config()
+    await config.set("signal_strategy", {"value": "ema_low", "type": "str"})
+    await config.batch_set({"signal_strategy": '{"value": false, "type": "str"}'})
+    await config.load_all()
+
+    assert config.get("signal_strategy") is None
+
+    import model
+
+    assert await model.AppConfig.filter(key="signal_strategy").exists() is False
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_config_set_updates_cache_without_reload(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
