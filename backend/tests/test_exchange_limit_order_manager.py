@@ -96,6 +96,7 @@ async def test_create_spot_limit_sell_returns_market_fallback_when_below_notiona
     assert status == {
         "requires_market_fallback": True,
         "limit_cancel_confirmed": True,
+        "fallback_reason": "minimum_notional",
         "symbol": "BTC/USDT",
         "remaining_amount": 0.01,
         "partial_filled_amount": 0.0,

@@ -76,6 +76,7 @@ class ExchangeLimitOrderManager:
             return build_market_fallback_status(
                 symbol=resolved_symbol,
                 remaining_amount=float(amount_value),
+                fallback_reason="minimum_notional",
             )
 
         self._logger.info(
@@ -91,7 +92,11 @@ class ExchangeLimitOrderManager:
             order=order,
         )
         if not trade:
-            return None
+            return build_market_fallback_status(
+                symbol=resolved_symbol,
+                remaining_amount=float(amount_value),
+                fallback_reason="limit_order_placement_failed",
+            )
 
         sell_order = dict(order)
         sell_order.update(trade)
@@ -102,7 +107,11 @@ class ExchangeLimitOrderManager:
                 "Limit sell for %s returned no order id.",
                 resolved_symbol,
             )
-            return None
+            return build_market_fallback_status(
+                symbol=resolved_symbol,
+                remaining_amount=float(amount_value),
+                fallback_reason="limit_order_missing_id",
+            )
 
         return await context.handle_limit_sell_fill(
             sell_order,

@@ -201,6 +201,7 @@ class ExchangeLimitSellManager:
                             or latest_order_status.get("price")
                             or 0.0
                         ),
+                        fallback_reason="limit_order_partial_timeout",
                     )
 
             self._logger.info(
@@ -222,7 +223,14 @@ class ExchangeLimitSellManager:
                 original_order["_limit_cancel_confirmed"] = False
             else:
                 original_order["_limit_cancel_confirmed"] = True
-            return None
+            return build_market_fallback_status(
+                symbol=resolved_symbol,
+                remaining_amount=float(sell_order.get("total_amount") or 0.0),
+                limit_cancel_confirmed=bool(
+                    original_order.get("_limit_cancel_confirmed", True)
+                ),
+                fallback_reason="limit_order_timeout",
+            )
 
         self._merge_exchange_order_fields(sell_order, filled_order)
         self._logger.info("Limit sell for %s filled.", resolved_symbol)

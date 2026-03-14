@@ -358,29 +358,25 @@ class Statistic:
                 stats["current_price"] * stats["total_amount"] - stats["total_cost"]
             )
             open_timestamp = datetime.timestamp(datetime.now()) * 1000
-            should_update_open_trade = not (
-                stats["type"] == "tp_check" and bool(stats.get("sell"))
+
+            base_order = await self.trades.get_trade_by_ordertype(
+                stats["symbol"], baseorder=True
             )
 
-            if should_update_open_trade:
-                base_order = await self.trades.get_trade_by_ordertype(
-                    stats["symbol"], baseorder=True
-                )
-
-                try:
-                    if base_order and base_order[0].get("timestamp") is not None:
-                        open_timestamp = float(base_order[0]["timestamp"])
-                    else:
-                        logging.debug(
-                            "Did not find base-order timestamp for %s; using current time.",
-                            stats["symbol"],
-                        )
-                except (KeyError, IndexError, TypeError, ValueError) as e:
+            try:
+                if base_order and base_order[0].get("timestamp") is not None:
+                    open_timestamp = float(base_order[0]["timestamp"])
+                else:
                     logging.debug(
-                        "Invalid base-order timestamp for %s; using current time. Cause %s",
+                        "Did not find base-order timestamp for %s; using current time.",
                         stats["symbol"],
-                        e,
                     )
+            except (KeyError, IndexError, TypeError, ValueError) as e:
+                logging.debug(
+                    "Invalid base-order timestamp for %s; using current time. Cause %s",
+                    stats["symbol"],
+                    e,
+                )
         else:
             if stats["new_so"]:
                 logging.info("SO buy: %s", stats)
@@ -394,7 +390,6 @@ class Statistic:
         if stats["type"] == "tp_check":
             if stats.get("sell"):
                 logging.info("TP sell: %s", stats)
-                return
             else:
                 logging.trace("%s", stats)
 

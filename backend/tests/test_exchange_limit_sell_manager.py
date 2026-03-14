@@ -135,6 +135,7 @@ async def test_handle_limit_sell_fill_returns_partial_fallback_status(
     assert status == {
         "requires_market_fallback": True,
         "limit_cancel_confirmed": True,
+        "fallback_reason": "limit_order_partial_timeout",
         "symbol": "BTC/USDT",
         "remaining_amount": 0.5,
         "partial_filled_amount": 1.25,
@@ -196,5 +197,13 @@ async def test_handle_limit_sell_fill_marks_unconfirmed_cancel(
         ),
     )
 
-    assert status is None
+    assert status == {
+        "requires_market_fallback": True,
+        "limit_cancel_confirmed": False,
+        "fallback_reason": "limit_order_timeout",
+        "symbol": "BTC/USDT",
+        "remaining_amount": 0.0,
+        "partial_filled_amount": 0.0,
+        "partial_avg_price": 0.0,
+    }
     assert original_order["_limit_cancel_confirmed"] is False

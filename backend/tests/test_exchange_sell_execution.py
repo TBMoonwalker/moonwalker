@@ -61,7 +61,15 @@ async def test_create_spot_sell_falls_back_to_market(monkeypatch) -> None:
 
     async def fake_limit_sell(_order, _config) -> None:
         calls["limit"] += 1
-        return None
+        return {
+            "requires_market_fallback": True,
+            "limit_cancel_confirmed": True,
+            "fallback_reason": "limit_order_timeout",
+            "symbol": "BTC/USDT",
+            "remaining_amount": 1.0,
+            "partial_filled_amount": 0.0,
+            "partial_avg_price": 0.0,
+        }
 
     async def fake_market_sell(_order, _config) -> None:
         calls["market"] += 1

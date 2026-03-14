@@ -36,6 +36,7 @@ class ExchangeSellManager:
 
         order_status = await context.create_spot_limit_sell(order, config)
         if order_status:
+            fallback_reason = str(order_status.get("fallback_reason") or "")
             if not order_status.get("requires_market_fallback"):
                 return order_status
 
@@ -63,10 +64,7 @@ class ExchangeSellManager:
                     default_symbol=str(order.get("symbol")),
                 )
 
-            self._logger.info(
-                "Limit sell for %s was not filled. Falling back to market sell.",
-                order.get("symbol"),
-            )
+            self._log_market_fallback_reason(order, fallback_reason)
             remaining_order = dict(order)
             remaining_order["total_amount"] = float(
                 order_status.get("remaining_amount") or 0.0
@@ -75,6 +73,13 @@ class ExchangeSellManager:
                 remaining_order, config
             )
             if not market_status:
+                self._logger.warning(
+                    "Market fallback for %s did not create an exchange order. "
+                    "fallback_reason=%s remaining_amount=%s",
+                    order.get("symbol"),
+                    fallback_reason or "unknown",
+                    remaining_order.get("total_amount"),
+                )
                 return None
 
             partial_amount = float(order_status.get("partial_filled_amount") or 0.0)
@@ -93,27 +98,52 @@ class ExchangeSellManager:
                 total_cost=float(order.get("total_cost") or 0.0),
             )
 
-        if bool(config.get("limit_sell_fallback_to_market", True)):
-            if order.get("_limit_cancel_confirmed") is False:
-                self._logger.error(
-                    "Skipping market fallback for %s because limit cancel "
-                    "was not confirmed.",
-                    order.get("symbol"),
-                )
-                return None
-            if not await context.can_fallback_to_market_sell(order, config):
-                return None
-            self._logger.info(
-                "Limit sell for %s was not filled. Falling back to market sell.",
-                order.get("symbol"),
-            )
-            return await context.create_spot_market_sell(order, config)
-
         self._logger.info(
-            "Limit sell for %s was not filled. Market fallback is disabled.",
+            "Limit sell for %s failed before exchange confirmation. "
+            "No fallback status was returned.",
             order.get("symbol"),
         )
         return None
+
+    def _log_market_fallback_reason(
+        self,
+        order: ExchangeOrderPayload,
+        fallback_reason: str,
+    ) -> None:
+        """Log why a limit sell is being converted into a market sell."""
+        symbol = order.get("symbol")
+        if fallback_reason == "limit_order_placement_failed":
+            self._logger.warning(
+                "Limit sell for %s could not be placed on the exchange. "
+                "Falling back to market sell.",
+                symbol,
+            )
+            return
+        if fallback_reason == "limit_order_missing_id":
+            self._logger.warning(
+                "Limit sell for %s returned no exchange order id. "
+                "Falling back to market sell.",
+                symbol,
+            )
+            return
+        if fallback_reason == "limit_order_partial_timeout":
+            self._logger.info(
+                "Limit sell for %s partially filled and timed out. "
+                "Falling back to market sell for the remainder.",
+                symbol,
+            )
+            return
+        if fallback_reason == "minimum_notional":
+            self._logger.info(
+                "Limit sell for %s was below minimum notional. "
+                "Trying market fallback if possible.",
+                symbol,
+            )
+            return
+        self._logger.info(
+            "Limit sell for %s was not filled. Falling back to market sell.",
+            symbol,
+        )
 
     async def create_spot_market_sell(
         self,

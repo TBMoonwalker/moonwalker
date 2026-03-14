@@ -24,6 +24,7 @@ def test_build_market_fallback_status_shapes_result() -> None:
     assert status == {
         "requires_market_fallback": True,
         "limit_cancel_confirmed": True,
+        "fallback_reason": "limit_order_timeout",
         "symbol": "BTC/USDT",
         "remaining_amount": 0.75,
         "partial_filled_amount": 0.25,

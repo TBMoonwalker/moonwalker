@@ -21,11 +21,13 @@ def build_market_fallback_status(
     partial_filled_amount: float = 0.0,
     partial_avg_price: float = 0.0,
     limit_cancel_confirmed: bool = True,
+    fallback_reason: str = "limit_order_timeout",
 ) -> MarketFallbackStatus:
     """Build a status payload that signals market fallback handling."""
     return {
         "requires_market_fallback": True,
         "limit_cancel_confirmed": bool(limit_cancel_confirmed),
+        "fallback_reason": fallback_reason,
         "symbol": symbol,
         "remaining_amount": float(remaining_amount),
         "partial_filled_amount": float(partial_filled_amount),

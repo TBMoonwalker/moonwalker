@@ -163,3 +163,42 @@ async def test_update_statistic_data_uses_fallback_when_base_order_missing() -> 
     payload = captured["payload"]
     assert isinstance(payload, dict)
     assert float(payload["open_date"]) > 1_000_000_000_000
+
+
+@pytest.mark.asyncio
+async def test_update_statistic_data_updates_open_trade_during_tp_sell() -> None:
+    statistic = Statistic()
+    captured: dict[str, object] = {}
+
+    async def fake_get_trade_by_ordertype(
+        symbol: str, baseorder: bool = False
+    ) -> list[dict[str, object]]:
+        return [{"timestamp": 1_700_000_000_000}]
+
+    async def fake_update_open_trades(payload: dict[str, object], symbol: str) -> None:
+        captured["payload"] = payload
+        captured["symbol"] = symbol
+
+    statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.update_open_trades = fake_update_open_trades
+
+    stats = {
+        "type": "tp_check",
+        "symbol": "BTC/USDC",
+        "total_amount": 5.0,
+        "total_cost": 100.0,
+        "current_price": 25.0,
+        "tp_price": 24.0,
+        "avg_price": 20.0,
+        "actual_pnl": 25.0,
+        "sell": True,
+    }
+    await statistic.update_statistic_data(stats)
+
+    assert captured["symbol"] == "BTC/USDC"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["current_price"] == 25.0
+    assert payload["profit"] == 25.0
+    assert payload["profit_percent"] == 25.0
+    assert float(payload["open_date"]) == 1_700_000_000_000.0

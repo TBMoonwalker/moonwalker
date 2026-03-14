@@ -79,7 +79,11 @@ class Orders:
                 order_status = await self.exchange.create_spot_sell(order, config)
 
                 if not order_status:
-                    logging.error("Failed creating sell order for %s", order["symbol"])
+                    logging.error(
+                        "Failed creating sell order for %s. "
+                        "No exchange sell result was returned.",
+                        order["symbol"],
+                    )
                     return
 
                 if self._is_partial_sell_status(order_status):

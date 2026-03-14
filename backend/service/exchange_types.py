@@ -77,6 +77,7 @@ class MarketFallbackStatus(TypedDict, total=False):
 
     requires_market_fallback: bool
     limit_cancel_confirmed: bool
+    fallback_reason: str
     symbol: str
     remaining_amount: float
     partial_filled_amount: float
