@@ -36,13 +36,14 @@ class ExchangeClientManager:
 
     def build_exchange_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Normalize runtime config into the fields that require a client rebuild."""
+        dry_run = bool(config.get("dry_run", True))
         return {
             "exchange": config.get("exchange"),
             "key": config.get("key"),
             "secret": config.get("secret"),
             "market": config.get("market", "spot"),
-            "dry_run": config.get("dry_run", True),
-            "sandbox": config.get("sandbox", False),
+            "dry_run": dry_run,
+            "sandbox": False if dry_run else config.get("sandbox", False),
             "exchange_hostname": config.get("exchange_hostname"),
         }
 
@@ -125,7 +126,8 @@ class ExchangeClientManager:
                         "Dry run requires CCXT enableDemoTrading support, but "
                         f"'{config.get('exchange')}' could not enable demo trading."
                     ) from exc
-            exchange.set_sandbox_mode(config.get("sandbox", False))
+            elif config.get("sandbox", False):
+                exchange.set_sandbox_mode(True)
             exchange.enableRateLimit = True
 
         return exchange

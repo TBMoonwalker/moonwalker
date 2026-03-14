@@ -43,6 +43,65 @@ class _DummyExchange:
 
 
 @pytest.mark.asyncio
+async def test_create_spot_limit_sell_initializes_exchange_before_lookup() -> None:
+    holder: dict[str, _DummyExchange | None] = {"exchange": None}
+    manager = ExchangeLimitOrderManager(
+        _DummyLogger(),
+        get_exchange=lambda: holder["exchange"],
+    )
+
+    async def fake_ensure_exchange(_config: dict[str, object]) -> None:
+        holder["exchange"] = _DummyExchange()
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
+    async def fake_resolve_sell_amount(
+        _symbol: str,
+        _requested_amount: float,
+    ) -> tuple[str, float]:
+        return "ETH/USDT", 1.25
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        return "2500.0"
+
+    async def fake_handle_limit_sell_fill(
+        sell_order: dict[str, object],
+        resolved_symbol: str,
+        _config: dict[str, object],
+        _original_order: dict[str, object],
+    ) -> dict[str, object] | None:
+        return {
+            "type": "sold_check",
+            "symbol": resolved_symbol,
+            "id": sell_order["id"],
+        }
+
+    status = await manager.create_spot_limit_sell(
+        order={"symbol": "ETH/USDT", "total_amount": 1.25, "current_price": 2500.0},
+        config={},
+        context=LimitSellPlacementContext(
+            ensure_exchange=fake_ensure_exchange,
+            ensure_markets_loaded=fake_ensure_markets_loaded,
+            resolve_symbol=fake_resolve_symbol,
+            resolve_sell_amount=fake_resolve_sell_amount,
+            is_notional_below_minimum=lambda _symbol, _amount, _price: (
+                False,
+                None,
+                0.0,
+            ),
+            get_price_for_symbol=fake_get_price_for_symbol,
+            handle_limit_sell_fill=fake_handle_limit_sell_fill,
+        ),
+    )
+
+    assert status == {"type": "sold_check", "symbol": "ETH/USDT", "id": "limit-1"}
+
+
+@pytest.mark.asyncio
 async def test_create_spot_limit_sell_returns_market_fallback_when_below_notional() -> (
     None
 ):

@@ -24,6 +24,19 @@ class _DummyExchange:
         self.load_markets_calls += 1
 
 
+class _ConfigurableExchange(_DummyExchange):
+    def __init__(self, _params: dict[str, object]) -> None:
+        super().__init__()
+        self.demo_enabled = False
+        self.sandbox_enabled = False
+
+    def enableDemoTrading(self, enabled: bool) -> None:
+        self.demo_enabled = enabled
+
+    def set_sandbox_mode(self, enabled: bool) -> None:
+        self.sandbox_enabled = enabled
+
+
 @pytest.mark.asyncio
 async def test_ensure_exchange_reuses_same_config(
     monkeypatch: pytest.MonkeyPatch,
@@ -119,11 +132,77 @@ async def test_ensure_exchange_rebuilds_when_sandbox_changes(
     monkeypatch.setattr(manager, "_init_exchange", fake_init_exchange)
 
     assert (
-        await manager.ensure_exchange({"exchange": "binance", "sandbox": False}) is True
+        await manager.ensure_exchange(
+            {"exchange": "binance", "dry_run": False, "sandbox": False}
+        )
+        is True
     )
     assert (
-        await manager.ensure_exchange({"exchange": "binance", "sandbox": True}) is True
+        await manager.ensure_exchange(
+            {"exchange": "binance", "dry_run": False, "sandbox": True}
+        )
+        is True
     )
 
     assert len(created) == 2
     assert created[0].close_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_build_exchange_config_ignores_sandbox_in_dry_run() -> None:
+    manager = ExchangeClientManager(_DummyLogger())
+
+    desired = manager.build_exchange_config(
+        {
+            "exchange": "binance",
+            "dry_run": True,
+            "sandbox": True,
+        }
+    )
+
+    assert desired["dry_run"] is True
+    assert desired["sandbox"] is False
+
+
+@pytest.mark.asyncio
+async def test_init_exchange_uses_demo_without_sandbox_when_dry_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = ExchangeClientManager(_DummyLogger())
+    monkeypatch.setattr(
+        "service.exchange_client_manager.ccxt.binance", _ConfigurableExchange
+    )
+
+    exchange = await manager._init_exchange(
+        {
+            "exchange": "binance",
+            "market": "spot",
+            "dry_run": True,
+            "sandbox": True,
+        }
+    )
+
+    assert exchange.demo_enabled is True
+    assert exchange.sandbox_enabled is False
+
+
+@pytest.mark.asyncio
+async def test_init_exchange_uses_sandbox_only_when_not_dry_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = ExchangeClientManager(_DummyLogger())
+    monkeypatch.setattr(
+        "service.exchange_client_manager.ccxt.binance", _ConfigurableExchange
+    )
+
+    exchange = await manager._init_exchange(
+        {
+            "exchange": "binance",
+            "market": "spot",
+            "dry_run": False,
+            "sandbox": True,
+        }
+    )
+
+    assert exchange.demo_enabled is False
+    assert exchange.sandbox_enabled is True

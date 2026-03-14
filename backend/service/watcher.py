@@ -187,7 +187,8 @@ class Watcher:
                         "Dry run requires CCXT Pro enableDemoTrading support, but "
                         f"'{config.get('exchange')}' could not enable demo trading."
                     ) from exc
-            new_exchange.set_sandbox_mode(config.get("sandbox", False))
+            elif config.get("sandbox", False):
+                new_exchange.set_sandbox_mode(True)
             self.exchange = new_exchange
 
     def _schedule_btc_pulse_history_warmup(self, config: dict[str, Any]) -> None:

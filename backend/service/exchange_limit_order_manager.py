@@ -23,12 +23,15 @@ class ExchangeLimitOrderManager:
         context: LimitSellPlacementContext,
     ) -> dict[str, Any] | None:
         """Create a spot limit sell order and wait for fill handling."""
-        exchange = self._get_exchange()
-        if exchange is None:
-            return None
-
         await context.ensure_exchange(config)
         await context.ensure_markets_loaded()
+        exchange = self._get_exchange()
+        if exchange is None:
+            self._logger.error(
+                "Cannot place limit sell for %s: exchange client is unavailable.",
+                order.get("symbol"),
+            )
+            return None
 
         resolved_symbol = await context.resolve_symbol(order["symbol"])
         if resolved_symbol is None:

@@ -199,3 +199,34 @@ async def test_watcher_reload_coalesces_rapid_config_changes(monkeypatch) -> Non
     assert created_exchanges[0].closed is True
     assert created_exchanges[1].closed is False
     assert created_exchanges[1].params["options"]["defaultType"] == "future"
+
+
+@pytest.mark.asyncio
+async def test_watcher_reload_ignores_sandbox_in_dry_run(monkeypatch) -> None:
+    watcher = Watcher()
+    calls: list[str] = []
+
+    class FakeExchange:
+        def __init__(self, _params: dict) -> None:
+            return None
+
+        def enableDemoTrading(self, enabled: bool) -> None:
+            if enabled:
+                calls.append("demo")
+
+        def set_sandbox_mode(self, enabled: bool) -> None:
+            if enabled:
+                calls.append("sandbox")
+
+    monkeypatch.setattr(watcher_module.ccxtpro, "binance", FakeExchange)
+
+    await watcher._reload_exchange_client(
+        {
+            "exchange": "binance",
+            "market": "spot",
+            "dry_run": True,
+            "sandbox": True,
+        }
+    )
+
+    assert calls == ["demo"]

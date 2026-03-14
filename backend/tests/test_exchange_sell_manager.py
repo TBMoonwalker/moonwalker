@@ -31,6 +31,68 @@ class _DummyExchange:
 
 
 @pytest.mark.asyncio
+async def test_create_spot_market_sell_initializes_exchange_before_lookup() -> None:
+    holder: dict[str, _DummyExchange | None] = {"exchange": None}
+    manager = ExchangeSellManager(
+        logger=_DummyLogger(),
+        get_exchange=lambda: holder["exchange"],
+    )
+
+    async def fake_ensure_exchange(_config: dict[str, object]) -> None:
+        holder["exchange"] = _DummyExchange()
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
+    async def fake_resolve_sell_amount(
+        _symbol: str,
+        _requested_amount: float,
+    ) -> tuple[str, float]:
+        return "GMX/USDC", 1.0
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        return "10.0"
+
+    async def fake_log_remaining_sell_dust(_symbol: str) -> None:
+        return None
+
+    async def fake_build_sell_order_status(
+        order: dict[str, object],
+    ) -> dict[str, object] | None:
+        return {"type": "sold_check", "id": order.get("id")}
+
+    status = await manager.create_spot_market_sell(
+        order={
+            "symbol": "GMX/USDC",
+            "total_amount": 1.0,
+            "total_cost": 7.29,
+            "actual_pnl": 0.0,
+        },
+        config={},
+        context=MarketSellExecutionContext(
+            ensure_exchange=fake_ensure_exchange,
+            ensure_markets_loaded=fake_ensure_markets_loaded,
+            resolve_symbol=fake_resolve_symbol,
+            resolve_sell_amount=fake_resolve_sell_amount,
+            reduce_amount_by_step=lambda _symbol, amount, _steps: amount,
+            is_notional_below_minimum=lambda _symbol, _amount, _price: (
+                False,
+                None,
+                0.0,
+            ),
+            get_price_for_symbol=fake_get_price_for_symbol,
+            log_remaining_sell_dust=fake_log_remaining_sell_dust,
+            build_sell_order_status=fake_build_sell_order_status,
+        ),
+    )
+
+    assert status == {"type": "sold_check", "id": "sell-1"}
+
+
+@pytest.mark.asyncio
 async def test_create_spot_sell_returns_partial_when_fallback_disabled() -> None:
     exchange = _DummyExchange()
     manager = ExchangeSellManager(

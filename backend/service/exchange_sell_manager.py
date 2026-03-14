@@ -153,12 +153,15 @@ class ExchangeSellManager:
         context: MarketSellExecutionContext,
     ) -> dict[str, Any] | None:
         """Create a spot market sell order."""
-        exchange = self._get_exchange()
-        if exchange is None:
-            return None
-
         await context.ensure_exchange(config)
         await context.ensure_markets_loaded()
+        exchange = self._get_exchange()
+        if exchange is None:
+            self._logger.error(
+                "Skipping market sell for %s: exchange client is unavailable.",
+                order.get("symbol"),
+            )
+            return None
         resolved_symbol = await context.resolve_symbol(order["symbol"])
         if resolved_symbol is None:
             self._logger.error(
