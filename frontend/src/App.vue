@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from './config'
+import { MOONWALKER_API_ORIGIN } from './config'
 import { RouterView } from 'vue-router'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWebSocketDataStore } from './stores/websocket'
@@ -33,11 +33,13 @@ const wsHealthcheckIntervalMs = ref(DEFAULT_WS_HEALTHCHECK_INTERVAL_MS)
 const wsStaleTimeoutMs = ref(DEFAULT_WS_STALE_TIMEOUT_MS)
 const wsReconnectDebounceMs = ref(DEFAULT_WS_RECONNECT_DEBOUNCE_MS)
 
-const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
-const buildWsUrl = (path: string): string =>
-  `${wsProtocol}://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}${path}`
-const buildHttpUrl = (path: string): string =>
-  `${window.location.protocol}//${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}${path}`
+const buildHttpUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).toString()
+
+const buildWsUrl = (path: string): string => {
+  const url = new URL(path, MOONWALKER_API_ORIGIN)
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+  return url.toString()
+}
 
 const toNumberOrDefault = (value: unknown, fallback: number): number => {
   const parsed = Number(value)

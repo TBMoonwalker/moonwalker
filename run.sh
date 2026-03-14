@@ -77,11 +77,12 @@ start_services() {
     # Create lock file to indicate services are running
     touch "$LOCK_FILE"
 
-    echo "📂 Copying config..."
-    if [ -f "$FRONTEND_CONFIG" ]; then
-        rm "$FRONTEND_CONFIG"
+    echo "📂 Preparing frontend config..."
+    if [ -f config.ts ]; then
+        cp config.ts "$FRONTEND_CONFIG"
+    else
+        echo "ℹ️  No root config.ts found. Frontend will use automatic same-origin defaults."
     fi
-    cp config.ts frontend/src/
 
     echo "📦 Checking npm-run-all..."
     if ! npx --no-install run-p --version >/dev/null 2>&1; then
