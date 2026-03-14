@@ -59,9 +59,13 @@ class Watcher:
         self.status = True
         self.symbol_tasks: dict[str, asyncio.Task] = {}
         self.event_queue = asyncio.Queue()
-        self.dca_queue = asyncio.Queue(maxsize=self.DCA_QUEUE_MAXSIZE)
+        self.dca_queue: asyncio.Queue[str] = asyncio.Queue(
+            maxsize=self.DCA_QUEUE_MAXSIZE
+        )
         self.ohlcv_queue = asyncio.Queue(maxsize=self.OHLCV_QUEUE_MAXSIZE)
         self.last_price = {}
+        self._pending_dca_payloads: dict[str, dict[str, Any]] = {}
+        self._queued_dca_symbols: set[str] = set()
         self._worker_tasks: list[asyncio.Task] = []
         self._reload_lock = asyncio.Lock()
         self._reload_task: asyncio.Task | None = None
@@ -550,7 +554,7 @@ class Watcher:
                     "type": self.TICKER_PRICE_TYPE,
                     "ticker": {"symbol": symbol, "price": price},
                 }
-                self._queue_put(self.dca_queue, ticker_price, "dca")
+                self._queue_dca_payload(ticker_price)
                 payload = self.__prepare_ohlcv_write(symbol, ohlcv)
                 if payload:
                     self._queue_put(self.ohlcv_queue, payload, "ohlcv")
@@ -559,6 +563,34 @@ class Watcher:
             except (KeyError, RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps consumer running despite occasional bad events.
                 logging.error("Error processing event: %s", e, exc_info=True)
+
+    def _queue_dca_payload(self, payload: dict[str, Any]) -> None:
+        """Keep at most one queued DCA job per symbol and overwrite stale payloads."""
+        ticker = payload.get("ticker")
+        symbol = ticker.get("symbol") if isinstance(ticker, dict) else None
+        if not isinstance(symbol, str) or not symbol:
+            logging.warning("Skipping invalid DCA payload without symbol: %s", payload)
+            return
+
+        self._pending_dca_payloads[symbol] = payload
+        if symbol in self._queued_dca_symbols:
+            return
+
+        try:
+            self.dca_queue.put_nowait(symbol)
+            self._queued_dca_symbols.add(symbol)
+        except asyncio.QueueFull:
+            self._pending_dca_payloads.pop(symbol, None)
+            worker_summary = ", ".join(
+                f"{task.get_name()}={'done' if task.done() else 'alive'}"
+                for task in self._worker_tasks
+            )
+            logging.warning(
+                "dca queue full; dropping event for %s. qsize=%s workers=[%s]",
+                symbol,
+                self.dca_queue.qsize(),
+                worker_summary or "none",
+            )
 
     def _queue_put(self, queue: asyncio.Queue, payload: Any, name: str) -> None:
         try:
@@ -577,16 +609,20 @@ class Watcher:
 
     async def _process_dca_queue(self) -> None:
         while self.status:
-            ticker_price = None
+            symbol = None
             try:
-                ticker_price = await self.dca_queue.get()
+                symbol = await self.dca_queue.get()
+                self._queued_dca_symbols.discard(symbol)
+                ticker_price = self._pending_dca_payloads.pop(symbol, None)
+                if ticker_price is None:
+                    continue
                 await self.dca.process_ticker_data(ticker_price, self.config)
             except asyncio.CancelledError:
                 break
             except Exception as e:  # noqa: BLE001 - Keep worker alive on any failure.
                 logging.error("Error processing DCA queue: %s", e, exc_info=True)
             finally:
-                if ticker_price is not None:
+                if symbol is not None:
                     self.dca_queue.task_done()
 
     async def _process_ohlcv_queue(self) -> None:

@@ -13,7 +13,7 @@ class BuyFinalizationContext:
 
     parse_order_status: Callable[[ExchangeOrderPayload], Awaitable[ParsedOrderStatus]]
     get_precision_for_symbol: Callable[[str], Awaitable[int]]
-    resolve_symbol: Callable[[str], str | None]
+    resolve_symbol: Callable[[str], Awaitable[str | None]]
     get_demo_taker_fee_for_symbol: Callable[[str], float]
 
 
@@ -41,7 +41,7 @@ class MarketSellExecutionContext:
 
     ensure_exchange: Callable[[dict[str, Any]], Awaitable[None]]
     ensure_markets_loaded: Callable[[], Awaitable[None]]
-    resolve_symbol: Callable[[str], str | None]
+    resolve_symbol: Callable[[str], Awaitable[str | None]]
     resolve_sell_amount: Callable[
         [str, float],
         Awaitable[tuple[str, float] | None],
@@ -65,7 +65,7 @@ class LimitSellPlacementContext:
 
     ensure_exchange: Callable[[dict[str, Any]], Awaitable[None]]
     ensure_markets_loaded: Callable[[], Awaitable[None]]
-    resolve_symbol: Callable[[str], str | None]
+    resolve_symbol: Callable[[str], Awaitable[str | None]]
     resolve_sell_amount: Callable[
         [str, float],
         Awaitable[tuple[str, float] | None],

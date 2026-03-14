@@ -178,6 +178,26 @@ class Exchange:
 
         return None
 
+    async def __resolve_symbol_with_refresh(self, symbol: str) -> str | None:
+        """Resolve a symbol and refresh markets once when the cache is stale."""
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is not None or self.exchange is None:
+            return resolved_symbol
+
+        logging.info(
+            "Symbol '%s' not found in current market cache. Refreshing markets and retrying.",
+            symbol,
+        )
+        await self._client_manager.ensure_markets_loaded(force_refresh=True)
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is None:
+            logging.warning(
+                "Symbol '%s' is still unavailable after market refresh. "
+                "This can happen for unsupported demo/testnet pairs or stale signal inputs.",
+                symbol,
+            )
+        return resolved_symbol
+
     async def get_history_for_symbol(
         self,
         config: dict[str, Any],
@@ -286,13 +306,13 @@ class Exchange:
         result = None
 
         try:
-            resolved_pair = self.__resolve_symbol(pair)
+            resolved_pair = await self.__resolve_symbol_with_refresh(pair)
             if resolved_pair is None:
                 logging.debug(
-                    "Could not resolve symbol '%s' for ticker fetch. Will retry.",
+                    "Could not resolve symbol '%s' for ticker fetch after refresh.",
                     pair,
                 )
-                raise TryAgain
+                return ""
             # Fetch the ticker data for the trading pair
             ticker = await self.exchange.fetch_ticker(resolved_pair)
             # Extract the actual price from the ticker data
@@ -323,9 +343,13 @@ class Exchange:
         result = None
 
         try:
-            resolved_pair = self.__resolve_symbol(pair)
+            resolved_pair = await self.__resolve_symbol_with_refresh(pair)
             if resolved_pair is None:
-                raise TryAgain
+                logging.debug(
+                    "Could not resolve symbol '%s' for precision lookup after refresh.",
+                    pair,
+                )
+                return None
             market = self.exchange.market(resolved_pair)
             result = market["precision"]["amount"]
         except (
@@ -482,9 +506,13 @@ class Exchange:
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
     async def __get_amount_from_symbol(self, ordersize: float, symbol: str) -> str:
-        resolved_symbol = self.__resolve_symbol(symbol)
+        resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
         if resolved_symbol is None:
-            raise TryAgain
+            logging.debug(
+                "Could not resolve symbol '%s' for amount lookup after refresh.",
+                symbol,
+            )
+            return ""
         price = await self.__get_price_for_symbol(resolved_symbol)
         amount = None
         try:
@@ -588,7 +616,7 @@ class Exchange:
         self._last_buy_precheck_result = None
 
         symbol = str(order.get("symbol") or "")
-        resolved_symbol = self.__resolve_symbol(symbol)
+        resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
         if resolved_symbol is None:
             self._last_buy_precheck_result = build_buy_precheck_result(
                 ok=False,
@@ -661,7 +689,7 @@ class Exchange:
         self, symbol: str, requested_amount: float
     ) -> tuple[str, float] | None:
         """Resolve sell amount capped by current free balance."""
-        resolved_symbol = self.__resolve_symbol(symbol)
+        resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
         if resolved_symbol is None:
             return None
 
@@ -726,7 +754,7 @@ class Exchange:
                     order_check_range_seconds=order_check_range_seconds,
                 ),
                 get_precision_for_symbol=self.__get_precision_for_symbol,
-                resolve_symbol=self.__resolve_symbol,
+                resolve_symbol=self.__resolve_symbol_with_refresh,
                 get_demo_taker_fee_for_symbol=self.__get_demo_taker_fee_for_symbol,
             ),
         )
@@ -826,7 +854,7 @@ class Exchange:
             context=LimitSellPlacementContext(
                 ensure_exchange=self.__ensure_exchange,
                 ensure_markets_loaded=self.__ensure_markets_loaded,
-                resolve_symbol=self.__resolve_symbol,
+                resolve_symbol=self.__resolve_symbol_with_refresh,
                 resolve_sell_amount=self.__resolve_sell_amount,
                 is_notional_below_minimum=self.__build_notional_check(
                     is_market_order=False
@@ -883,7 +911,7 @@ class Exchange:
             context=MarketSellExecutionContext(
                 ensure_exchange=self.__ensure_exchange,
                 ensure_markets_loaded=self.__ensure_markets_loaded,
-                resolve_symbol=self.__resolve_symbol,
+                resolve_symbol=self.__resolve_symbol_with_refresh,
                 resolve_sell_amount=self.__resolve_sell_amount,
                 reduce_amount_by_step=self.__reduce_amount_by_step,
                 is_notional_below_minimum=self.__build_notional_check(

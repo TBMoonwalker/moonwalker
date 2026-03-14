@@ -67,6 +67,26 @@ async def test_ensure_markets_loaded_only_once(monkeypatch: pytest.MonkeyPatch) 
 
 
 @pytest.mark.asyncio
+async def test_ensure_markets_loaded_refreshes_after_ttl(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manager = ExchangeClientManager(_DummyLogger())
+    exchange = _DummyExchange()
+
+    async def fake_init_exchange(_config: dict[str, object]) -> _DummyExchange:
+        return exchange
+
+    monkeypatch.setattr(manager, "_init_exchange", fake_init_exchange)
+    await manager.ensure_exchange({"exchange": "binance"})
+
+    await manager.ensure_markets_loaded()
+    manager._markets_loaded_ts -= manager.MARKETS_REFRESH_TTL_SECONDS + 1
+    await manager.ensure_markets_loaded()
+
+    assert exchange.load_markets_calls == 2
+
+
+@pytest.mark.asyncio
 async def test_close_resets_client_state(monkeypatch: pytest.MonkeyPatch) -> None:
     manager = ExchangeClientManager(_DummyLogger())
     exchange = _DummyExchange()

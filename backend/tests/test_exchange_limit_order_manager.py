@@ -55,6 +55,9 @@ async def test_create_spot_limit_sell_returns_market_fallback_when_below_notiona
     async def fake_ensure_markets_loaded() -> None:
         return None
 
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
     async def fake_resolve_sell_amount(
         _symbol: str,
         _requested_amount: float,
@@ -78,7 +81,7 @@ async def test_create_spot_limit_sell_returns_market_fallback_when_below_notiona
         context=LimitSellPlacementContext(
             ensure_exchange=fake_ensure_exchange,
             ensure_markets_loaded=fake_ensure_markets_loaded,
-            resolve_symbol=lambda symbol: symbol,
+            resolve_symbol=fake_resolve_symbol,
             resolve_sell_amount=fake_resolve_sell_amount,
             is_notional_below_minimum=lambda _symbol, _amount, _price: (
                 True,
@@ -115,6 +118,9 @@ async def test_create_spot_limit_sell_places_order_and_delegates_fill_handling()
     async def fake_ensure_markets_loaded() -> None:
         return None
 
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
     async def fake_resolve_sell_amount(
         _symbol: str,
         _requested_amount: float,
@@ -140,7 +146,7 @@ async def test_create_spot_limit_sell_places_order_and_delegates_fill_handling()
         context=LimitSellPlacementContext(
             ensure_exchange=fake_ensure_exchange,
             ensure_markets_loaded=fake_ensure_markets_loaded,
-            resolve_symbol=lambda symbol: symbol,
+            resolve_symbol=fake_resolve_symbol,
             resolve_sell_amount=fake_resolve_sell_amount,
             is_notional_below_minimum=lambda _symbol, _amount, _price: (
                 False,

@@ -59,16 +59,55 @@ async def test_dca_worker_survives_unexpected_processing_exception() -> None:
     watcher.dca.process_ticker_data = fake_process_ticker_data
     worker = asyncio.create_task(watcher._process_dca_queue())
 
-    await watcher.dca_queue.put(
+    watcher._queue_dca_payload(
         {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 1.0}}
     )
-    await watcher.dca_queue.put(
-        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 2.0}}
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "ETH/USDC", "price": 2.0}}
     )
 
     await asyncio.wait_for(worker, timeout=2)
 
     assert calls == [1.0, 2.0]
+    assert watcher.dca_queue.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_dca_queue_coalesces_pending_updates_per_symbol() -> None:
+    watcher = Watcher()
+    watcher.config = {}
+    processed: list[float] = []
+    release_processing = asyncio.Event()
+    started_processing = asyncio.Event()
+
+    async def fake_process_ticker_data(ticker_price: dict, config: dict) -> None:
+        processed.append(float(ticker_price["ticker"]["price"]))
+        started_processing.set()
+        if len(processed) == 1:
+            await release_processing.wait()
+        else:
+            watcher.status = False
+
+    watcher.dca.process_ticker_data = fake_process_ticker_data
+    worker = asyncio.create_task(watcher._process_dca_queue())
+
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 1.0}}
+    )
+    await asyncio.wait_for(started_processing.wait(), timeout=1)
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 2.0}}
+    )
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 3.0}}
+    )
+
+    assert watcher.dca_queue.qsize() == 1
+
+    release_processing.set()
+    await asyncio.wait_for(worker, timeout=2)
+
+    assert processed == [1.0, 3.0]
     assert watcher.dca_queue.qsize() == 0
 
 

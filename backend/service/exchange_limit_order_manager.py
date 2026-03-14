@@ -30,7 +30,7 @@ class ExchangeLimitOrderManager:
         await context.ensure_exchange(config)
         await context.ensure_markets_loaded()
 
-        resolved_symbol = context.resolve_symbol(order["symbol"])
+        resolved_symbol = await context.resolve_symbol(order["symbol"])
         if resolved_symbol is None:
             self._logger.error(
                 "Cannot place limit sell. Symbol not found: %s",

@@ -129,7 +129,7 @@ class ExchangeSellManager:
 
         await context.ensure_exchange(config)
         await context.ensure_markets_loaded()
-        resolved_symbol = context.resolve_symbol(order["symbol"])
+        resolved_symbol = await context.resolve_symbol(order["symbol"])
         if resolved_symbol is None:
             self._logger.error(
                 "Selling pair %s failed: symbol not found.", order["symbol"]

@@ -161,3 +161,46 @@ async def test_create_spot_market_buy_runs_when_quote_balance_is_sufficient(
     precheck = exchange.get_last_buy_precheck_result()
     assert precheck is not None
     assert precheck["ok"] is True
+
+
+class _RefreshingTickerExchange:
+    def __init__(self) -> None:
+        self.fetch_calls = 0
+
+    async def fetch_ticker(self, _symbol: str) -> dict[str, float]:
+        self.fetch_calls += 1
+        return {"last": 42.5}
+
+    def price_to_precision(self, _symbol: str, price: float) -> str:
+        return f"{price:.1f}"
+
+
+@pytest.mark.asyncio
+async def test_price_lookup_refreshes_markets_when_symbol_is_missing(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    exchange.exchange = _RefreshingTickerExchange()
+    state = {"resolved": False, "refresh_calls": 0}
+
+    async def fake_ensure_markets_loaded(force_refresh: bool = False) -> None:
+        if force_refresh:
+            state["resolved"] = True
+            state["refresh_calls"] += 1
+
+    monkeypatch.setattr(
+        exchange._client_manager,
+        "ensure_markets_loaded",
+        fake_ensure_markets_loaded,
+    )
+    monkeypatch.setattr(
+        exchange,
+        "_Exchange__resolve_symbol",
+        lambda symbol: symbol if state["resolved"] else None,
+    )
+
+    price = await exchange._Exchange__get_price_for_symbol("SAHARA/USDC")
+
+    assert price == "42.5"
+    assert state["refresh_calls"] == 1
+    assert exchange.exchange.fetch_calls == 1

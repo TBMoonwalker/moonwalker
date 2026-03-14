@@ -87,6 +87,9 @@ async def test_create_spot_market_sell_skips_below_notional() -> None:
     async def fake_ensure_markets_loaded() -> None:
         return None
 
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
     async def fake_resolve_sell_amount(
         _symbol: str,
         _requested_amount: float,
@@ -115,7 +118,7 @@ async def test_create_spot_market_sell_skips_below_notional() -> None:
         context=MarketSellExecutionContext(
             ensure_exchange=fake_ensure_exchange,
             ensure_markets_loaded=fake_ensure_markets_loaded,
-            resolve_symbol=lambda symbol: symbol,
+            resolve_symbol=fake_resolve_symbol,
             resolve_sell_amount=fake_resolve_sell_amount,
             reduce_amount_by_step=lambda _symbol, amount, _steps: amount,
             is_notional_below_minimum=lambda _symbol, _amount, _price: (

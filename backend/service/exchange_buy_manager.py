@@ -109,7 +109,7 @@ class ExchangeBuyManager:
             return None
 
         order["precision"] = await context.get_precision_for_symbol(status_symbol)
-        resolved_symbol = context.resolve_symbol(status_symbol)
+        resolved_symbol = await context.resolve_symbol(status_symbol)
         if resolved_symbol is None:
             self._logger.error(
                 "Cannot finalize buy for %s: symbol not found.",

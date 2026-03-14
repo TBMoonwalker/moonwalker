@@ -85,13 +85,16 @@ async def test_finalize_market_buy_applies_demo_fee_and_base_fee_deduction() -> 
     async def fake_get_precision_for_symbol(_symbol: str) -> int:
         return 6
 
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
     result = await manager.finalize_market_buy(
         order={"symbol": "BTC/USDT", "id": "buy-1"},
         config={"dry_run": True, "fee_deduction": False},
         context=BuyFinalizationContext(
             parse_order_status=fake_parse_order_status,
             get_precision_for_symbol=fake_get_precision_for_symbol,
-            resolve_symbol=lambda symbol: symbol,
+            resolve_symbol=fake_resolve_symbol,
             get_demo_taker_fee_for_symbol=lambda _symbol: 0.0025,
         ),
     )
@@ -120,13 +123,16 @@ async def test_finalize_market_buy_uses_live_fee_when_not_dry_run() -> None:
     async def fake_get_precision_for_symbol(_symbol: str) -> int:
         return 4
 
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
     result = await manager.finalize_market_buy(
         order={"symbol": "ETH/USDT", "id": "buy-2"},
         config={"dry_run": False, "fee_deduction": True},
         context=BuyFinalizationContext(
             parse_order_status=fake_parse_order_status,
             get_precision_for_symbol=fake_get_precision_for_symbol,
-            resolve_symbol=lambda symbol: symbol,
+            resolve_symbol=fake_resolve_symbol,
             get_demo_taker_fee_for_symbol=lambda _symbol: 0.0,
         ),
     )
