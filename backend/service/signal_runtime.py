@@ -22,6 +22,23 @@ class CommonSignalRuntime:
     strategy_timeframe: str
 
 
+def _parse_pair_list(raw_value: Any, *, token_only: bool) -> list[str] | None:
+    """Parse optional pair lists while treating falsey sentinel values as empty."""
+    if raw_value is None or raw_value is False:
+        return None
+
+    normalized = str(raw_value).strip()
+    if not normalized or normalized.lower() in {"false", "none", "null"}:
+        return None
+
+    entries = [
+        entry.strip().upper() for entry in normalized.split(",") if entry.strip()
+    ]
+    if token_only:
+        return [entry.split("/")[0] for entry in entries] or None
+    return entries or None
+
+
 def parse_signal_settings(raw_value: Any) -> dict[str, Any]:
     """Parse signal settings from config string/dict payloads."""
     if isinstance(raw_value, dict):
@@ -46,14 +63,8 @@ def parse_signal_settings(raw_value: Any) -> dict[str, Any]:
 
 def build_common_runtime_settings(config: dict[str, Any]) -> CommonSignalRuntime:
     """Parse common signal runtime settings once per plugin run."""
-    pair_denylist = [
-        entry.strip().upper().split("/")[0]
-        for entry in str(config.get("pair_denylist", "")).split(",")
-        if entry.strip()
-    ] or None
-    pair_allowlist = [
-        entry.strip() for entry in str(config.get("pair_allowlist", "")).split(",")
-    ] or None
+    pair_denylist = _parse_pair_list(config.get("pair_denylist"), token_only=True)
+    pair_allowlist = _parse_pair_list(config.get("pair_allowlist"), token_only=False)
     raw_volume = config.get("volume")
     volume = json.loads(raw_volume) if raw_volume else None
     strategy_timeframe = resolve_timeframe(config)
