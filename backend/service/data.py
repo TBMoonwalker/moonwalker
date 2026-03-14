@@ -366,6 +366,51 @@ class Data:
 
         return False
 
+    async def get_resampled_history_candle_count(
+        self, symbol: str, timerange: str, minimum_candles: int
+    ) -> int:
+        """Return the number of stored closed candles available after resampling."""
+        if minimum_candles <= 0:
+            return 0
+
+        try:
+            df_raw = await self.get_data_for_pair(symbol, timerange, minimum_candles)
+            if df_raw is None or df_raw.empty:
+                return 0
+
+            df = await asyncio.to_thread(self.resample_data, df_raw, timerange)
+            if df is None or df.empty:
+                return 0
+
+            return int(len(df.index))
+        except (
+            BaseORMException,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as e:
+            logging.error(
+                "Error counting resampled history candles for %s (%s): %s",
+                symbol,
+                timerange,
+                e,
+            )
+            return 0
+
+    async def has_sufficient_resampled_history(
+        self, symbol: str, timerange: str, minimum_candles: int
+    ) -> bool:
+        """Return True when enough closed candles exist for the requested timeframe."""
+        if minimum_candles <= 0:
+            return True
+
+        available_candles = await self.get_resampled_history_candle_count(
+            symbol,
+            timerange,
+            minimum_candles,
+        )
+        return available_candles >= int(minimum_candles)
+
     async def add_history_data_for_symbol(
         self,
         symbol: str,

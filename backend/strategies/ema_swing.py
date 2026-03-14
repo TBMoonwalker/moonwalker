@@ -30,6 +30,11 @@ class Strategy:
         close = await self.indicators.get_close_price(symbol, self.timeframe, 8)
 
         try:
+            required_emas = ("ema_20", "ema_50", "ema_100", "ema_200")
+            if any(ema.get(key) is None for key in required_emas):
+                return False
+            if close is None:
+                return False
             close_series = close.dropna()
             if len(close_series) < 4:
                 return False

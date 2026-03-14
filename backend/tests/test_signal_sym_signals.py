@@ -355,3 +355,65 @@ async def test_sym_signals_error_event_logs_payload_and_uses_backoff(
     assert len(orders) == 1
     assert sleep_calls == [3]
     assert any("AUTH_401" in entry for entry in warning_logs)
+
+
+@pytest.mark.asyncio
+async def test_sym_signals_skips_buy_when_history_remains_insufficient(
+    monkeypatch,
+) -> None:
+    watcher_queue = asyncio.Queue()
+    plugin = SignalPlugin(watcher_queue)
+    plugin.config = {
+        "currency": "USDT",
+        "bo": 10,
+        "dynamic_dca": True,
+    }
+    plugin._currency = "USDT"
+    plugin._strategy_timeframe = "1m"
+    plugin._required_history_days = 30
+    plugin._required_history_candles = 200
+
+    monkeypatch.setattr(model, "Trades", DummyTrades)
+
+    async def fake_check_entry_point(*_args, **_kwargs) -> bool:
+        return True
+
+    async def fake_is_token_old_enough(*_args, **_kwargs) -> bool:
+        return True
+
+    async def fake_add_history_data_for_symbol(*_args, **_kwargs) -> bool:
+        return True
+
+    async def fake_get_resampled_history_candle_count(*_args, **_kwargs) -> int:
+        return 120
+
+    monkeypatch.setattr(
+        plugin, "_SignalPlugin__check_entry_point", fake_check_entry_point
+    )
+    plugin.data = types.SimpleNamespace(
+        is_token_old_enough=fake_is_token_old_enough,
+        add_history_data_for_symbol=fake_add_history_data_for_symbol,
+        get_resampled_history_candle_count=fake_get_resampled_history_candle_count,
+    )
+
+    orders = []
+
+    async def fake_receive_buy_order(order, _config) -> None:
+        orders.append(order)
+
+    plugin.orders = types.SimpleNamespace(receive_buy_order=fake_receive_buy_order)
+
+    await plugin._SignalPlugin__process_valid_signal(
+        {
+            "symbol": "BTC",
+            "signal": "BOT_START",
+            "signal_name_id": 1,
+            "market_cap_rank": 1,
+            "volume_24h": {"BINANCE": {"USDT": "10M"}},
+        },
+        "USDT",
+        30,
+    )
+
+    assert orders == []
+    assert watcher_queue.empty()

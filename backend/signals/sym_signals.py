@@ -20,6 +20,10 @@ from service.signal_runtime import (
     update_waiting_log_state,
 )
 from service.statistic import Statistic
+from service.strategy_capability import (
+    get_configured_strategy_history_lookback_days,
+    get_configured_strategy_min_history_candles,
+)
 from socketio.exceptions import ConnectionError as SocketConnectionError
 from socketio.exceptions import DisconnectedError, TimeoutError
 from tortoise.exceptions import BaseORMException
@@ -56,6 +60,8 @@ class SignalPlugin:
         self._volume: dict[str, Any] | None = None
         self._strategy_timeframe = "1m"
         self._exchange_name = ""
+        self._required_history_days = 0
+        self._required_history_candles = 0
 
     @staticmethod
     def _parse_signal_settings(raw_value: Any) -> dict[str, Any]:
@@ -74,6 +80,23 @@ class SignalPlugin:
         self._volume = runtime.volume
         self._strategy_timeframe = runtime.strategy_timeframe
         self._exchange_name = str(self.config.get("exchange", "")).upper()
+        configured_history_days = resolve_history_lookback_days(
+            self.config,
+            timeframe=self._strategy_timeframe,
+        )
+        strategy_history_days = get_configured_strategy_history_lookback_days(
+            self.config,
+            self._strategy_timeframe,
+            include_signal_strategy=False,
+        )
+        self._required_history_days = max(
+            configured_history_days,
+            strategy_history_days,
+        )
+        self._required_history_candles = get_configured_strategy_min_history_candles(
+            self.config,
+            include_signal_strategy=False,
+        )
 
     def __log_max_bots_waiting(self) -> None:
         """Log max-bot saturation with state/interval throttling."""
@@ -90,6 +113,29 @@ class SignalPlugin:
             return
 
         logging.debug("Max bots reached, waiting for a free slot.")
+
+    async def __has_sufficient_strategy_history(self, symbol: str) -> bool:
+        """Return True when local history satisfies configured DCA/TP warmup."""
+        if self._required_history_candles <= 0:
+            return True
+
+        available_candles = await self.data.get_resampled_history_candle_count(
+            symbol,
+            self._strategy_timeframe,
+            self._required_history_candles,
+        )
+        if available_candles >= self._required_history_candles:
+            return True
+
+        logging.warning(
+            "Not watching %s because only %s/%s %s candles are available after "
+            "history sync.",
+            symbol,
+            available_candles,
+            self._required_history_candles,
+            self._strategy_timeframe,
+        )
+        return False
 
     async def __check_max_bots(self) -> bool:
         """Check if the maximum number of bots has been reached.
@@ -192,10 +238,6 @@ class SignalPlugin:
         self.config = config
         self._max_bots_log_interval_sec = resolve_max_bots_log_interval(self.config)
         self._prepare_runtime_settings()
-        history_data = resolve_history_lookback_days(
-            self.config,
-            timeframe=self._strategy_timeframe,
-        )
         idle_timeout_count = 0
         received_events_since_connect = 0
         consecutive_error_events = 0
@@ -255,7 +297,7 @@ class SignalPlugin:
                         await self.__process_valid_signal(
                             event[1],
                             self._currency,
-                            history_data,
+                            self._required_history_days,
                         )
                     elif event[0] == "error":
                         error_payload = event[1] if len(event) == 2 else event[1:]
@@ -360,7 +402,7 @@ class SignalPlugin:
         logging.debug("Running trades: %s", running_trades)
         logging.info("Triggering new trade for %s", symbol)
 
-        if self.config.get("dynamic_dca", False):
+        if self.config.get("dynamic_dca", False) or self._required_history_candles > 0:
             success = await self.data.add_history_data_for_symbol(
                 symbol_full,
                 history_data,
@@ -371,6 +413,8 @@ class SignalPlugin:
                     "Not trading %s because history add failed. Please check data.log.",
                     symbol,
                 )
+                return
+            if not await self.__has_sufficient_strategy_history(symbol_full):
                 return
 
         await self.watcher_queue.put([symbol_full])
