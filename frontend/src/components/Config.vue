@@ -49,6 +49,7 @@
             :dca="dca"
             :rules="rules"
             :sell-order-type-options="sellOrderTypeOptions"
+            :show-advanced-general="showAdvancedGeneral"
             :strategy-options="signal.strategy_plugins"
         />
 
@@ -168,6 +169,8 @@ const ADVANCED_WS_RECONNECT_DEBOUNCE_MS = 2000
 
 const DEFAULT_SYMSIGNAL_URL = "https://stream.3cqs.com"
 const DEFAULT_SYMSIGNAL_VERSION = "3.0.1"
+const DEFAULT_TP_SPIKE_CONFIRM_SECONDS = 3
+const DEFAULT_TP_SPIKE_CONFIRM_TICKS = 0
 const timezone = ref([])
 const timerange = [
     {
@@ -375,6 +378,9 @@ const dca = ref({
     sell_order_type: 'market',
     limit_sell_timeout_sec: 60,
     limit_sell_fallback_to_market: true,
+    tp_spike_confirm_enabled: false,
+    tp_spike_confirm_seconds: DEFAULT_TP_SPIKE_CONFIRM_SECONDS,
+    tp_spike_confirm_ticks: DEFAULT_TP_SPIKE_CONFIRM_TICKS,
     so: null,
     mstc: null,
     sos: null,
@@ -1017,6 +1023,14 @@ async function fetchDefaultValues() {
                 toNumberOrNull(response.data.limit_sell_timeout_sec) ?? 60
             dca.value.limit_sell_fallback_to_market =
                 parseBooleanString(response.data.limit_sell_fallback_to_market) ?? true
+            dca.value.tp_spike_confirm_enabled =
+                parseBooleanString(response.data.tp_spike_confirm_enabled) ?? false
+            dca.value.tp_spike_confirm_seconds =
+                toNumberOrNull(response.data.tp_spike_confirm_seconds) ??
+                DEFAULT_TP_SPIKE_CONFIRM_SECONDS
+            dca.value.tp_spike_confirm_ticks =
+                toNumberOrNull(response.data.tp_spike_confirm_ticks) ??
+                DEFAULT_TP_SPIKE_CONFIRM_TICKS
             dca.value.so = toNumberOrNull(response.data.so)
             dca.value.mstc = toNumberOrNull(response.data.mstc)
             dca.value.sos = toNumberOrNull(response.data.sos)
@@ -1185,6 +1199,9 @@ async function submitForm() {
             sell_order_type: JSON.stringify({ 'value': dca.value.sell_order_type || 'market', 'type': "str" }),
             limit_sell_timeout_sec: JSON.stringify({ 'value': dca.value.limit_sell_timeout_sec ?? 60, 'type': "int" }),
             limit_sell_fallback_to_market: JSON.stringify({ 'value': dca.value.limit_sell_fallback_to_market ?? true, 'type': "bool" }),
+            tp_spike_confirm_enabled: JSON.stringify({ 'value': dca.value.tp_spike_confirm_enabled ?? false, 'type': "bool" }),
+            tp_spike_confirm_seconds: JSON.stringify({ 'value': dca.value.tp_spike_confirm_seconds ?? DEFAULT_TP_SPIKE_CONFIRM_SECONDS, 'type': "float" }),
+            tp_spike_confirm_ticks: JSON.stringify({ 'value': dca.value.tp_spike_confirm_ticks ?? DEFAULT_TP_SPIKE_CONFIRM_TICKS, 'type': "int" }),
             so: JSON.stringify({ 'value': dca.value.so || false, 'type': "int" }),
             mstc: JSON.stringify({ 'value': dca.value.mstc || false, 'type': "int" }),
             sos: JSON.stringify({ 'value': dca.value.sos || false, 'type': "float" }),

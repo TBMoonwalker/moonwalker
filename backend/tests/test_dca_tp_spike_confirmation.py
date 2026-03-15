@@ -1,0 +1,145 @@
+import pytest
+from service.dca import Dca
+
+
+def _build_trades() -> dict[str, object]:
+    return {
+        "symbol": "XPL/USDC",
+        "bot": "symsignal_XPLUSDC",
+        "direction": "long",
+        "total_cost": 100.0,
+        "total_amount": 1.0,
+        "fee": 0.0,
+        "timestamp": 1_742_000_000_000,
+        "safetyorders_count": 0,
+        "safetyorders": [],
+        "bo_price": 100.0,
+    }
+
+
+def _configure_dca(dca: Dca, **config_overrides: object) -> None:
+    dca.config = {
+        "trailing_tp": 0,
+        "mstc": 0,
+        "tp_spike_confirm_enabled": True,
+        "tp_spike_confirm_seconds": 3,
+        "tp_spike_confirm_ticks": 0,
+        **config_overrides,
+    }
+    dca.tp = 10.0
+    dca.sl = 5.0
+    dca.sl_timeout = 0
+
+
+@pytest.mark.asyncio
+async def test_tp_spike_confirmation_skips_single_tick_wick(monkeypatch) -> None:
+    dca = Dca()
+    _configure_dca(dca)
+    sell_calls: list[dict[str, object]] = []
+
+    async def fake_receive_sell_order(order, _config) -> None:
+        sell_calls.append(order)
+
+    async def fake_update_statistic_data(_payload) -> None:
+        return None
+
+    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.statistic, "update_statistic_data", fake_update_statistic_data
+    )
+    monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: 100.0)
+
+    await dca._Dca__calculate_tp(111.0, _build_trades())
+
+    assert sell_calls == []
+    assert "XPL/USDC" in dca._pending_tp_confirmations
+
+
+@pytest.mark.asyncio
+async def test_tp_spike_confirmation_sells_after_duration_and_tick_filter(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    _configure_dca(dca, tp_spike_confirm_ticks=2)
+    sell_calls: list[dict[str, object]] = []
+    clock = {"now": 100.0}
+
+    async def fake_receive_sell_order(order, _config) -> None:
+        sell_calls.append(order)
+
+    async def fake_update_statistic_data(_payload) -> None:
+        return None
+
+    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.statistic, "update_statistic_data", fake_update_statistic_data
+    )
+    monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: clock["now"])
+
+    trades = _build_trades()
+    await dca._Dca__calculate_tp(111.0, trades)
+    clock["now"] = 103.2
+    await dca._Dca__calculate_tp(111.4, trades)
+
+    assert len(sell_calls) == 1
+    assert sell_calls[0]["symbol"] == "XPL/USDC"
+    assert sell_calls[0]["fallback_min_price"] == pytest.approx(110.0)
+    assert "XPL/USDC" not in dca._pending_tp_confirmations
+
+
+@pytest.mark.asyncio
+async def test_tp_spike_confirmation_restarts_after_fade_below_tp(monkeypatch) -> None:
+    dca = Dca()
+    _configure_dca(dca)
+    sell_calls: list[dict[str, object]] = []
+    clock = {"now": 100.0}
+
+    async def fake_receive_sell_order(order, _config) -> None:
+        sell_calls.append(order)
+
+    async def fake_update_statistic_data(_payload) -> None:
+        return None
+
+    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.statistic, "update_statistic_data", fake_update_statistic_data
+    )
+    monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: clock["now"])
+
+    trades = _build_trades()
+    await dca._Dca__calculate_tp(111.0, trades)
+    clock["now"] = 101.0
+    await dca._Dca__calculate_tp(109.0, trades)
+    clock["now"] = 103.5
+    await dca._Dca__calculate_tp(111.2, trades)
+    clock["now"] = 106.7
+    await dca._Dca__calculate_tp(111.3, trades)
+
+    assert len(sell_calls) == 1
+    assert sell_calls[0]["fallback_min_price"] == pytest.approx(110.0)
+
+
+@pytest.mark.asyncio
+async def test_tp_spike_confirmation_does_not_delay_stop_loss(monkeypatch) -> None:
+    dca = Dca()
+    _configure_dca(dca)
+    sell_calls: list[dict[str, object]] = []
+
+    async def fake_receive_sell_order(order, _config) -> None:
+        sell_calls.append(order)
+
+    async def fake_update_statistic_data(_payload) -> None:
+        return None
+
+    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.statistic, "update_statistic_data", fake_update_statistic_data
+    )
+    monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: 100.0)
+
+    trades = _build_trades()
+    trades["safetyorders_count"] = 0
+    await dca._Dca__calculate_tp(94.0, trades)
+
+    assert len(sell_calls) == 1
+    assert sell_calls[0]["symbol"] == "XPL/USDC"

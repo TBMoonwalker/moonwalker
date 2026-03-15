@@ -168,3 +168,25 @@ async def test_config_reload_updates_only_changed_keys(tmp_path, monkeypatch) ->
     assert config.get("exchange") == "binance"
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_config_load_all_applies_tp_spike_defaults(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    config = Config()
+    await config.load_all()
+
+    assert config.get("tp_spike_confirm_enabled") is False
+    assert config.get("tp_spike_confirm_seconds") == 3.0
+    assert config.get("tp_spike_confirm_ticks") == 0
+    assert config._cache["tp_spike_confirm_enabled"] is False
+    assert config._cache["tp_spike_confirm_seconds"] == 3.0
+    assert config._cache["tp_spike_confirm_ticks"] == 0
+
+    await Tortoise.close_connections()

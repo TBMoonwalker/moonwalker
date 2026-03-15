@@ -29,6 +29,12 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
     "y": 365,
 }
 
+DEFAULT_CONFIG_VALUES = {
+    "tp_spike_confirm_enabled": False,
+    "tp_spike_confirm_seconds": 3.0,
+    "tp_spike_confirm_ticks": 0,
+}
+
 
 def resolve_timeframe(config: dict[str, Any], default: str = "1m") -> str:
     """Resolve the effective bot timeframe from the canonical key."""
@@ -159,8 +165,12 @@ class Config:
             if key not in loaded_keys:
                 self._cache.pop(key, None)
 
+        self.__refresh_runtime_metadata()
+
     def __refresh_runtime_metadata(self) -> None:
         """Refresh derived config metadata that is not stored in AppConfig."""
+        for key, value in DEFAULT_CONFIG_VALUES.items():
+            self._cache.setdefault(key, value)
         self._cache["strategies"] = self.__get_strategies()
         self._cache["signal_plugins"] = self.__get_signal_plugins()
 
@@ -288,7 +298,11 @@ class Config:
         Returns:
             The configuration value or default if key not found
         """
-        return self._cache.get(key, default)
+        if key in self._cache:
+            return self._cache[key]
+        if key in DEFAULT_CONFIG_VALUES:
+            return DEFAULT_CONFIG_VALUES[key]
+        return default
 
     async def set(self, key: str, value: dict[str, Any]) -> bool:
         """Set a configuration value in the database and notify subscribers.
@@ -314,6 +328,7 @@ class Config:
         if not should_persist:
             changed = await self.__clear_key(key)
             if changed:
+                self.__refresh_runtime_metadata()
                 self.__notify_subscribers()
                 await self.__publish_change([key])
             return True
@@ -374,6 +389,7 @@ class Config:
                 self._cache[key] = self.__set_type(serialized_value, value_type)
                 changed_keys.append(key)
             elif await self.__clear_key(key):
+                self.__refresh_runtime_metadata()
                 changed_keys.append(key)
 
         if changed_keys:

@@ -74,6 +74,39 @@
                     />
                 </n-form-item>
             </template>
+            <template v-if="showAdvancedGeneral">
+                <n-form-item
+                    label="TP spike confirmation"
+                    path="tp_spike_confirm_enabled"
+                    label-placement="left"
+                >
+                    <n-checkbox
+                        v-model:checked="dca.tp_spike_confirm_enabled"
+                    />
+                </n-form-item>
+                <template v-if="dca.tp_spike_confirm_enabled">
+                    <n-form-item
+                        label="TP confirmation window (seconds)"
+                        path="tp_spike_confirm_seconds"
+                    >
+                        <n-input-number
+                            v-model:value="dca.tp_spike_confirm_seconds"
+                            :min="0"
+                            placeholder="3"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Minimum qualifying TP ticks"
+                        path="tp_spike_confirm_ticks"
+                    >
+                        <n-input-number
+                            v-model:value="dca.tp_spike_confirm_ticks"
+                            :min="0"
+                            placeholder="0"
+                        />
+                    </n-form-item>
+                </template>
+            </template>
             <n-form-item
                 v-if="dca.enabled && !dca.dynamic"
                 label="Safety order amount"
@@ -145,6 +178,9 @@ interface DcaModel {
     sell_order_type: string
     limit_sell_timeout_sec: number
     limit_sell_fallback_to_market: boolean
+    tp_spike_confirm_enabled: boolean
+    tp_spike_confirm_seconds: number
+    tp_spike_confirm_ticks: number
     so: number | null
     mstc: number | null
     sos: number | null
@@ -159,6 +195,7 @@ defineProps<{
     dca: DcaModel
     rules: FormRules
     sellOrderTypeOptions: SelectOption[]
+    showAdvancedGeneral: boolean
     strategyOptions: SelectOption[]
 }>()
 
