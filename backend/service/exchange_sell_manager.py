@@ -218,6 +218,38 @@ class ExchangeSellManager:
                 except (ccxt.BaseError, RuntimeError, TypeError, ValueError):
                     notional_price_value = None
 
+            fallback_min_price = safe_float(order.get("fallback_min_price"))
+            if fallback_min_price and fallback_min_price > 0:
+                if notional_price_value is None or notional_price_value <= 0:
+                    self._logger.warning(
+                        "Skipping market sell for %s: could not verify current "
+                        "price against minimum sell price %.10f. Keeping "
+                        "position open for a later retry.",
+                        resolved_symbol,
+                        fallback_min_price,
+                    )
+                    return build_partial_sell_status(
+                        symbol=resolved_symbol,
+                        partial_amount=0.0,
+                        partial_avg_price=0.0,
+                        remaining_amount=float(order["total_amount"]),
+                    )
+                if notional_price_value < fallback_min_price:
+                    self._logger.info(
+                        "Skipping market sell for %s: current price %.10f is "
+                        "below minimum sell price %.10f. Keeping position open "
+                        "for a later retry.",
+                        resolved_symbol,
+                        notional_price_value,
+                        fallback_min_price,
+                    )
+                    return build_partial_sell_status(
+                        symbol=resolved_symbol,
+                        partial_amount=0.0,
+                        partial_avg_price=0.0,
+                        remaining_amount=float(order["total_amount"]),
+                    )
+
             if notional_price_value and notional_price_value > 0:
                 below_min_notional, min_notional, estimated_notional = (
                     context.is_notional_below_minimum(

@@ -199,3 +199,71 @@ async def test_create_spot_market_sell_skips_below_notional() -> None:
     assert result["symbol"] == "GMX/USDC"
     assert result["remaining_amount"] == pytest.approx(0.679)
     assert exchange.market_sell_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_create_spot_market_sell_skips_below_fallback_min_price() -> None:
+    exchange = _DummyExchange()
+    manager = ExchangeSellManager(
+        logger=_DummyLogger(),
+        get_exchange=lambda: exchange,
+    )
+
+    async def fake_ensure_exchange(_config: dict[str, object]) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
+    async def fake_resolve_sell_amount(
+        _symbol: str,
+        _requested_amount: float,
+    ) -> tuple[str, float]:
+        return "XPL/USDC", 101.9
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        return "0.106"
+
+    async def fake_log_remaining_sell_dust(_symbol: str) -> None:
+        return None
+
+    async def fake_build_sell_order_status(
+        _order: dict[str, object],
+    ) -> dict[str, object] | None:
+        return {"type": "sold_check"}
+
+    result = await manager.create_spot_market_sell(
+        order={
+            "symbol": "XPL/USDC",
+            "total_amount": 101.9,
+            "total_cost": 11.99,
+            "actual_pnl": 6.0,
+            "current_price": 0.106,
+            "fallback_min_price": 0.11,
+        },
+        config={},
+        context=MarketSellExecutionContext(
+            ensure_exchange=fake_ensure_exchange,
+            ensure_markets_loaded=fake_ensure_markets_loaded,
+            resolve_symbol=fake_resolve_symbol,
+            resolve_sell_amount=fake_resolve_sell_amount,
+            reduce_amount_by_step=lambda _symbol, amount, _steps: amount,
+            is_notional_below_minimum=lambda _symbol, _amount, _price: (
+                False,
+                None,
+                0.0,
+            ),
+            get_price_for_symbol=fake_get_price_for_symbol,
+            log_remaining_sell_dust=fake_log_remaining_sell_dust,
+            build_sell_order_status=fake_build_sell_order_status,
+        ),
+    )
+
+    assert result is not None
+    assert result["type"] == "partial_sell"
+    assert result["symbol"] == "XPL/USDC"
+    assert result["remaining_amount"] == pytest.approx(101.9)
+    assert exchange.market_sell_calls == 0
