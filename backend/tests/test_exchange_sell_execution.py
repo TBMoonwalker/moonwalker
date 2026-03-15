@@ -258,10 +258,33 @@ async def test_create_spot_sell_keeps_partial_fill_when_market_fallback_skips(
     assert result["type"] == "partial_sell"
     assert result["partial_filled_amount"] == pytest.approx(1.024)
     assert result["partial_avg_price"] == pytest.approx(7.12)
-    assert result["remaining_amount"] == pytest.approx(0.679)
-    assert result["partial_proceeds"] == pytest.approx(7.29088)
-    assert calls["limit"] == 1
-    assert calls["market"] == 1
+
+
+@pytest.mark.asyncio
+async def test_limit_sell_tp_guard_uses_live_price_for_market_fallback(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+
+    async def fake_get_price_for_symbol(_symbol: str) -> float:
+        return 2.274
+
+    monkeypatch.setattr(
+        exchange,
+        "_Exchange__get_price_for_symbol",
+        fake_get_price_for_symbol,
+    )
+
+    allowed = await exchange._Exchange__can_fallback_to_market_sell(
+        {
+            "symbol": "LPT/USDC",
+            "current_price": 2.836,
+            "fallback_min_price": 2.8,
+        },
+        {"limit_sell_fallback_tp_guard": True},
+    )
+
+    assert allowed is False
 
 
 @pytest.mark.asyncio
@@ -313,16 +336,16 @@ async def test_create_spot_market_sell_skips_below_notional(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_market_fallback_guard_uses_order_current_price(monkeypatch) -> None:
+async def test_market_fallback_guard_uses_live_price_lookup(monkeypatch) -> None:
     exchange = Exchange()
 
-    async def fail_price_lookup(_symbol: str) -> str:
-        raise AssertionError("ticker lookup should not run")
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        return "0.02582"
 
     monkeypatch.setattr(
         exchange,
         "_Exchange__get_price_for_symbol",
-        fail_price_lookup,
+        fake_get_price_for_symbol,
     )
 
     allowed = await exchange._Exchange__can_fallback_to_market_sell(

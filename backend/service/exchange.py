@@ -813,13 +813,7 @@ class Exchange:
             return True
 
         try:
-            payload_price = order.get("current_price")
-            if payload_price not in (None, ""):
-                current_price = float(payload_price)
-            else:
-                current_price = float(
-                    await self.__get_price_for_symbol(order["symbol"])
-                )
+            current_price = float(await self.__get_price_for_symbol(order["symbol"]))
         except (ccxt.BaseError, RuntimeError, TypeError, ValueError) as exc:
             logging.warning(
                 "Skipping market fallback for %s: could not determine current price (%s).",
