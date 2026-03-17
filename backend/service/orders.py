@@ -157,29 +157,30 @@ class Orders:
             else None
         )
 
-        trade_snapshot = await self.trades.get_trades_for_orders(symbol)
         open_trade_rows = await self.trades.get_open_trades_by_symbol(symbol)
         open_trade = open_trade_rows[0] if open_trade_rows else None
         already_notified = bool(open_trade and open_trade.get("unsellable_notice_sent"))
 
-        total_amount = (
-            float(trade_snapshot.get("total_amount") or 0.0) if trade_snapshot else 0.0
-        )
-        total_cost = (
-            float(trade_snapshot.get("total_cost") or 0.0) if trade_snapshot else 0.0
-        )
-        if total_amount <= 0 and open_trade:
-            total_amount = float(open_trade.get("amount") or 0.0)
-        if total_cost <= 0 and open_trade:
-            total_cost = float(open_trade.get("cost") or 0.0)
+        total_amount = float(open_trade.get("amount") or 0.0) if open_trade else 0.0
+        total_cost = float(open_trade.get("cost") or 0.0) if open_trade else 0.0
 
         avg_buy_price = (total_cost / total_amount) if total_amount > 0 else 0.0
         sold_cost = avg_buy_price * partial_amount
         remaining_cost = max(0.0, total_cost - sold_cost)
+        current_price = (
+            float(open_trade.get("current_price") or 0.0) if open_trade else 0.0
+        )
+        remaining_profit = current_price * remaining_amount - remaining_cost
+        remaining_profit_percent = (
+            ((current_price - avg_buy_price) / avg_buy_price) * 100
+            if avg_buy_price > 0
+            else 0.0
+        )
+        so_count = await self.__resolve_so_count(symbol)
+        open_date_value = open_trade.get("open_date") if open_trade else None
 
         if partial_amount > 0:
             open_timestamp = await self.__resolve_open_timestamp(symbol)
-            so_count = await self.__resolve_so_count(symbol)
             close_date = datetime.now()
             close_timestamp = close_date.timestamp() * 1000
             open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
@@ -210,30 +211,38 @@ class Orders:
                 }
             )
 
-        tp_percent = float(config.get("tp", 0.0) or 0.0)
-        next_tp_price = (
-            (remaining_cost / remaining_amount) * (1 + tp_percent / 100.0)
-            if remaining_amount > 0
-            else 0.0
-        )
-        await self.trades.update_open_trades(
-            {
-                "amount": remaining_amount,
-                "cost": remaining_cost,
-                "avg_price": (
-                    (remaining_cost / remaining_amount) if remaining_amount > 0 else 0.0
-                ),
-                "tp_price": next_tp_price,
-                "sold_amount": 0.0,
-                "sold_proceeds": 0.0,
-                "unsellable_amount": remaining_amount,
-                "unsellable_reason": reason,
-                "unsellable_min_notional": min_notional,
-                "unsellable_estimated_notional": estimated_notional,
-                "unsellable_since": datetime.now().isoformat(),
-                "unsellable_notice_sent": True,
-            },
-            symbol,
+        unsellable_since = datetime.now().isoformat()
+
+        async def _persist_unsellable_remainder() -> None:
+            async with in_transaction() as conn:
+                await model.UnsellableTrades.create(
+                    symbol=symbol,
+                    so_count=so_count,
+                    profit=remaining_profit,
+                    profit_percent=remaining_profit_percent,
+                    amount=remaining_amount,
+                    cost=remaining_cost,
+                    current_price=current_price,
+                    avg_price=(
+                        (remaining_cost / remaining_amount)
+                        if remaining_amount > 0
+                        else 0.0
+                    ),
+                    open_date=(
+                        str(open_date_value) if open_date_value is not None else None
+                    ),
+                    unsellable_reason=reason,
+                    unsellable_min_notional=min_notional,
+                    unsellable_estimated_notional=estimated_notional,
+                    unsellable_since=unsellable_since,
+                    using_db=conn,
+                )
+                await model.Trades.filter(symbol=symbol).using_db(conn).delete()
+                await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
+
+        await run_sqlite_write_with_retry(
+            _persist_unsellable_remainder,
+            f"persisting unsellable remainder for {symbol}",
         )
 
         if not already_notified:

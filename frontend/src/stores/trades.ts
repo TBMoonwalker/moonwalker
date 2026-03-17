@@ -36,6 +36,24 @@ export type ClosedTradeRow = {
   key: number
 }
 
+export type UnsellableTradeRow = {
+  id: number
+  symbol: string
+  amount: number | string
+  cost: number | string
+  profit: number | string
+  profit_percent: number | string
+  so_count: number
+  current_price: number | string
+  avg_price: number | string
+  open_date: string
+  unsellable_reason?: string | null
+  unsellable_min_notional?: number | null
+  unsellable_estimated_notional?: number | null
+  unsellable_since?: string | null
+  key: number
+}
+
 export type OrderData = {
   id: number
   timestamp: string
@@ -89,7 +107,8 @@ function formatDuration(raw: string): string {
 export const useTradesStore = defineStore('trades', {
   state: () => ({
     openTrades: [] as OpenTradeRow[],
-    closedTrades: [] as ClosedTradeRow[]
+    closedTrades: [] as ClosedTradeRow[],
+    unsellableTrades: [] as UnsellableTradeRow[]
   }),
   actions: {
     setOpenTrades(raw: any[]) {
@@ -151,6 +170,34 @@ export const useTradesStore = defineStore('trades', {
           key: val.id,
           close_date: String(val.close_date ?? ''),
           duration: formatDuration(val.duration)
+        }
+      })
+    },
+    setUnsellableTrades(raw: any[]) {
+      this.unsellableTrades = raw.map((val: any) => {
+        const amountPrecision = isFloat(val.amount)
+          ? val.amount.toString().split('.')[1].length
+          : 0
+        return {
+          ...val,
+          cost: formatDecimal(Number(val.cost), 2),
+          profit: formatDecimal(Number(val.profit), 2),
+          profit_percent: formatDecimal(Number(val.profit_percent), 2),
+          amount: Number(val.amount).toFixed(amountPrecision),
+          current_price: formatDecimal(Number(val.current_price), 2, 8),
+          avg_price: formatDecimal(Number(val.avg_price), 2, 8),
+          key: val.id,
+          open_date: String(val.open_date ?? ''),
+          unsellable_reason: val.unsellable_reason ?? null,
+          unsellable_min_notional:
+            val.unsellable_min_notional === null || val.unsellable_min_notional === undefined
+              ? null
+              : Number(val.unsellable_min_notional),
+          unsellable_estimated_notional:
+            val.unsellable_estimated_notional === null || val.unsellable_estimated_notional === undefined
+              ? null
+              : Number(val.unsellable_estimated_notional),
+          unsellable_since: val.unsellable_since ?? null
         }
       })
     }

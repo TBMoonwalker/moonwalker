@@ -177,6 +177,14 @@ class Trades:
 
         try:
             orders = await model.OpenTrades.all().values()
+            orders = [
+                order
+                for order in orders
+                if not (
+                    float(order.get("unsellable_amount") or 0.0) > 0
+                    and order.get("unsellable_reason")
+                )
+            ]
             symbols = [order["symbol"] for order in orders]
             if not symbols:
                 return []
@@ -213,6 +221,14 @@ class Trades:
             logging.error("Error getting open orders. Cause: %s", e)
             return []
 
+    async def get_unsellable_trades(self) -> list[dict[str, Any]]:
+        """Return archived unsellable trade remnants."""
+        return await self._execute_db(
+            model.UnsellableTrades.all().order_by("-id").values(),
+            "Error getting unsellable trades from database.",
+            [],
+        )
+
     async def get_closed_trades(self, page: int = 0) -> list[dict[str, Any]]:
         """Return paginated closed trades."""
         try:
@@ -242,6 +258,15 @@ class Trades:
             "Error getting closed order length.",
             0,
         )
+
+    async def delete_unsellable_trade(self, trade_id: int) -> bool:
+        """Delete an unsellable trade by its identifier."""
+        deleted_count = await self._execute_db(
+            model.UnsellableTrades.filter(id=trade_id).delete(),
+            f"Error deleting unsellable trade {trade_id}.",
+            0,
+        )
+        return deleted_count > 0
 
     async def update_open_trades(self, payload: dict[str, Any], symbol: str) -> None:
         """Update open trades for a symbol."""
@@ -292,6 +317,13 @@ class Trades:
         await self._write_db(
             model.ClosedTrades.create(**payload),
             "Error creating closed trade.",
+        )
+
+    async def create_unsellable_trade(self, payload: dict[str, Any]) -> None:
+        """Create an archived unsellable trade entry."""
+        await self._write_db(
+            model.UnsellableTrades.create(**payload),
+            "Error creating unsellable trade.",
         )
 
     async def delete_closed_trade(self, trade_id: int) -> bool:

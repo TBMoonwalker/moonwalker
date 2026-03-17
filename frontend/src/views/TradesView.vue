@@ -2,20 +2,28 @@
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import Statistics from '@/components/Statistics.vue'
 import WebSocketStatusBar from '@/components/WebSocketStatusBar.vue'
-import { ConstructOutline } from '@vicons/ionicons5'
+import { AlertCircleOutline, ConstructOutline } from '@vicons/ionicons5'
 import { useRouter } from 'vue-router'
+import { useWebSocketDataStore } from '@/stores/websocket'
+import { storeToRefs } from 'pinia'
 
 const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
 const ClosedTrades = defineAsyncComponent(() => import('../components/ClosedTrades.vue'))
+const UnsellableTrades = defineAsyncComponent(() => import('../components/UnsellableTrades.vue'))
 const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
 const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'))
 
 const router = useRouter()
+const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
+const unsellableTradesState = storeToRefs(unsellableTradesStore)
 const viewportWidth = ref(window.innerWidth)
 const isMobile = computed(() => viewportWidth.value < 768)
 const tabPadding = computed(() => (isMobile.value ? 12 : 20))
 const activeProfitTab = ref('profit-overall')
 const activeTradesTab = ref('open-trades')
+const unsellableTradesCount = computed(() =>
+  Array.isArray(unsellableTradesState.data.value) ? unsellableTradesState.data.value.length : 0
+)
 
 function handleResize() {
   viewportWidth.value = window.innerWidth
@@ -119,6 +127,18 @@ onUnmounted(() => {
           <n-tab-pane name="open-trades" tab="Open Trades">
             <OpenTrades v-if="activeTradesTab === 'open-trades'" />
           </n-tab-pane>
+          <n-tab-pane name="unsellable-trades">
+            <template #tab>
+              <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': unsellableTradesCount > 0 }">
+                <n-icon v-if="unsellableTradesCount > 0" size="16">
+                  <AlertCircleOutline />
+                </n-icon>
+                <span>Unsellable</span>
+                <span v-if="unsellableTradesCount > 0" class="trade-tab-count">{{ unsellableTradesCount }}</span>
+              </span>
+            </template>
+            <UnsellableTrades v-if="activeTradesTab === 'unsellable-trades'" />
+          </n-tab-pane>
           <n-tab-pane name="closed-trades" tab="Closed Trades">
             <ClosedTrades v-if="activeTradesTab === 'closed-trades'" />
           </n-tab-pane>
@@ -163,6 +183,21 @@ onUnmounted(() => {
 
 .header-statistics {
   width: 100%;
+}
+
+.trade-tab-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.trade-tab-label-warning {
+  color: #d97706;
+}
+
+.trade-tab-count {
+  font-size: 12px;
+  font-weight: 600;
 }
 
 @media (max-width: 768px) {

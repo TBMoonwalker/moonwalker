@@ -27,6 +27,7 @@ const theme = computed(() => (osThemeRef.value === 'dark' ? darkTheme : null))
 // Stores
 const open_trade_store = useWebSocketDataStore("openTrades")
 const closed_trade_store = useWebSocketDataStore("closedTrades")
+const unsellable_trade_store = useWebSocketDataStore("unsellableTrades")
 const statistics_store = useWebSocketDataStore("statistics")
 const wsWatchdogEnabled = ref(DEFAULT_WS_WATCHDOG_ENABLED)
 const wsHealthcheckIntervalMs = ref(DEFAULT_WS_HEALTHCHECK_INTERVAL_MS)
@@ -166,6 +167,11 @@ const managedSockets = [
   'closedTrades',
   buildWsUrl('/trades/closed'),
   closed_trade_store,
+  ),
+  createManagedSocket(
+  'unsellableTrades',
+  buildWsUrl('/trades/unsellable'),
+  unsellable_trade_store,
   ),
   createManagedSocket(
   'statistics',

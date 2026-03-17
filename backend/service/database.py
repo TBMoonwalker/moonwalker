@@ -8,8 +8,10 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 import helper
+import model
 from tortoise import Tortoise
 from tortoise.context import TortoiseContext
+from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
 
@@ -125,6 +127,16 @@ class Database:
                 ("symbol", "safetyorder", "baseorder"),
             ),
             ("closedtrades", "idx_closedtrades_close_date", ("close_date",)),
+            (
+                "unsellabletrades",
+                "idx_unsellabletrades_symbol",
+                ("symbol",),
+            ),
+            (
+                "unsellabletrades",
+                "idx_unsellabletrades_since",
+                ("unsellable_since",),
+            ),
             ("upnl_history", "idx_upnl_history_timestamp", ("timestamp",)),
             ("token_listings", "idx_token_listings_symbol", ("symbol",)),
         )
@@ -207,6 +219,61 @@ class Database:
                 ),
             )
 
+    async def _migrate_legacy_unsellable_open_trades(self) -> None:
+        """Move unsellable legacy OpenTrades rows into UnsellableTrades."""
+        legacy_rows = await model.OpenTrades.all().values()
+        for open_trade in legacy_rows:
+            unsellable_amount = float(open_trade.get("unsellable_amount") or 0.0)
+            unsellable_reason = open_trade.get("unsellable_reason")
+            if unsellable_amount <= 0 or not unsellable_reason:
+                continue
+
+            symbol = str(open_trade["symbol"])
+
+            async def _migrate_symbol() -> None:
+                async with in_transaction() as conn:
+                    await model.UnsellableTrades.create(
+                        symbol=symbol,
+                        so_count=int(open_trade.get("so_count") or 0),
+                        profit=float(open_trade.get("profit") or 0.0),
+                        profit_percent=float(open_trade.get("profit_percent") or 0.0),
+                        amount=float(open_trade.get("amount") or unsellable_amount),
+                        cost=float(open_trade.get("cost") or 0.0),
+                        current_price=float(open_trade.get("current_price") or 0.0),
+                        avg_price=float(open_trade.get("avg_price") or 0.0),
+                        open_date=(
+                            str(open_trade.get("open_date"))
+                            if open_trade.get("open_date") is not None
+                            else None
+                        ),
+                        unsellable_reason=str(unsellable_reason),
+                        unsellable_min_notional=(
+                            float(open_trade["unsellable_min_notional"])
+                            if open_trade.get("unsellable_min_notional") is not None
+                            else None
+                        ),
+                        unsellable_estimated_notional=(
+                            float(open_trade["unsellable_estimated_notional"])
+                            if open_trade.get("unsellable_estimated_notional")
+                            is not None
+                            else None
+                        ),
+                        unsellable_since=(
+                            str(open_trade.get("unsellable_since"))
+                            if open_trade.get("unsellable_since") is not None
+                            else None
+                        ),
+                        using_db=conn,
+                    )
+                    await model.Trades.filter(symbol=symbol).using_db(conn).delete()
+                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
+
+            await run_sqlite_write_with_retry(
+                _migrate_symbol,
+                f"migrating legacy unsellable trade for {symbol}",
+            )
+            logging.info("Migrated legacy unsellable open trade for %s", symbol)
+
     async def optimize_sqlite(self) -> None:
         """Run SQLite planner/index maintenance."""
         await optimize_sqlite_connection(self.db_url)
@@ -233,6 +300,7 @@ class Database:
             await Tortoise.generate_schemas()
             await self._ensure_open_trades_columns()
             await self._ensure_indexes()
+            await self._migrate_legacy_unsellable_open_trades()
             logging.info("Database initialized successfully")
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during init
             logging.error("Failed to initialize database: %s", exc, exc_info=True)
