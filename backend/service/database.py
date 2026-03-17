@@ -229,18 +229,31 @@ class Database:
                 continue
 
             symbol = str(open_trade["symbol"])
+            avg_price = float(open_trade.get("avg_price") or 0.0)
+            current_price = float(open_trade.get("current_price") or 0.0)
+            remaining_cost = (
+                avg_price * unsellable_amount
+                if avg_price > 0
+                else float(open_trade.get("cost") or 0.0)
+            )
+            remaining_profit = current_price * unsellable_amount - remaining_cost
+            remaining_profit_percent = (
+                ((current_price - avg_price) / avg_price) * 100
+                if avg_price > 0
+                else float(open_trade.get("profit_percent") or 0.0)
+            )
 
             async def _migrate_symbol() -> None:
                 async with in_transaction() as conn:
                     await model.UnsellableTrades.create(
                         symbol=symbol,
                         so_count=int(open_trade.get("so_count") or 0),
-                        profit=float(open_trade.get("profit") or 0.0),
-                        profit_percent=float(open_trade.get("profit_percent") or 0.0),
-                        amount=float(open_trade.get("amount") or unsellable_amount),
-                        cost=float(open_trade.get("cost") or 0.0),
-                        current_price=float(open_trade.get("current_price") or 0.0),
-                        avg_price=float(open_trade.get("avg_price") or 0.0),
+                        profit=remaining_profit,
+                        profit_percent=remaining_profit_percent,
+                        amount=unsellable_amount,
+                        cost=remaining_cost,
+                        current_price=current_price,
+                        avg_price=avg_price,
                         open_date=(
                             str(open_trade.get("open_date"))
                             if open_trade.get("open_date") is not None
