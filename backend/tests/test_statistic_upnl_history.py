@@ -17,8 +17,18 @@ async def test_get_upnl_history_all_returns_ordered_rows(tmp_path, monkeypatch) 
     first = datetime(2026, 2, 10, 10, 0, 0)
     second = first + timedelta(minutes=1)
 
-    await model.UpnlHistory.create(timestamp=second, upnl=2.0, profit_overall=2.5)
-    await model.UpnlHistory.create(timestamp=first, upnl=1.0, profit_overall=1.5)
+    await model.UpnlHistory.create(
+        timestamp=second,
+        upnl=2.0,
+        profit_overall=2.5,
+        funds_locked=6.0,
+    )
+    await model.UpnlHistory.create(
+        timestamp=first,
+        upnl=1.0,
+        profit_overall=1.5,
+        funds_locked=5.0,
+    )
 
     statistic = Statistic()
     data = await statistic.get_upnl_history_all()
@@ -26,8 +36,10 @@ async def test_get_upnl_history_all_returns_ordered_rows(tmp_path, monkeypatch) 
     assert len(data) == 2
     assert data[0]["timestamp"] == "2026-02-10 10:00:00"
     assert data[0]["profit_overall"] == 1.5
+    assert data[0]["funds_locked"] == 5.0
     assert data[1]["timestamp"] == "2026-02-10 10:01:00"
     assert data[1]["profit_overall"] == 2.5
+    assert data[1]["funds_locked"] == 6.0
 
     await Tortoise.close_connections()
 
@@ -44,12 +56,17 @@ async def test_store_upnl_snapshot_applies_sampling_interval(
     statistic = Statistic()
     statistic.snapshot_interval_seconds = 10_000
 
-    await statistic._store_upnl_snapshot({"upnl": 1.0, "profit_overall": 1.0})
-    await statistic._store_upnl_snapshot({"upnl": 2.0, "profit_overall": 2.0})
+    await statistic._store_upnl_snapshot(
+        {"upnl": 1.0, "profit_overall": 1.0, "funds_locked": 4.0}
+    )
+    await statistic._store_upnl_snapshot(
+        {"upnl": 2.0, "profit_overall": 2.0, "funds_locked": 5.0}
+    )
 
     rows = await model.UpnlHistory.all()
     assert len(rows) == 1
     assert rows[0].upnl == 1.0
+    assert rows[0].funds_locked == 4.0
 
     await Tortoise.close_connections()
 
@@ -63,13 +80,14 @@ async def test_profit_overall_uses_upnl_when_no_closed_trades(
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
     await Tortoise.generate_schemas()
 
-    await model.OpenTrades.create(symbol="BTC/USDT", profit=12.5)
+    await model.OpenTrades.create(symbol="BTC/USDT", profit=12.5, cost=42.0)
 
     statistic = Statistic()
     data = await statistic.get_profit()
 
     assert data["upnl"] == 12.5
     assert data["profit_overall"] == 12.5
+    assert data["funds_locked"] == 42.0
 
     await Tortoise.close_connections()
 
@@ -83,12 +101,23 @@ async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch) -> No
 
     now = datetime.utcnow()
     await model.UpnlHistory.create(
-        timestamp=now - timedelta(hours=2), upnl=1.0, profit_overall=10.0
+        timestamp=now - timedelta(hours=2),
+        upnl=1.0,
+        profit_overall=10.0,
+        funds_locked=100.0,
     )
     await model.UpnlHistory.create(
-        timestamp=now - timedelta(hours=1), upnl=2.0, profit_overall=11.0
+        timestamp=now - timedelta(hours=1),
+        upnl=2.0,
+        profit_overall=11.0,
+        funds_locked=101.0,
     )
-    await model.UpnlHistory.create(timestamp=now, upnl=3.0, profit_overall=12.0)
+    await model.UpnlHistory.create(
+        timestamp=now,
+        upnl=3.0,
+        profit_overall=12.0,
+        funds_locked=102.0,
+    )
 
     statistic = Statistic()
     timeline = await statistic.get_profit_overall_timeline()
@@ -96,6 +125,7 @@ async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch) -> No
     assert len(timeline) >= 1
     assert "timestamp" in timeline[-1]
     assert "profit_overall" in timeline[-1]
+    assert "funds_locked" in timeline[-1]
 
     await Tortoise.close_connections()
 

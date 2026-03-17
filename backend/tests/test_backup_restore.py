@@ -96,6 +96,7 @@ async def test_restore_backup_full_restores_trade_tables_and_clears_tickers(
         timestamp=datetime.now(timezone.utc),
         upnl=1.0,
         profit_overall=2.0,
+        funds_locked=3.0,
     )
     await model.Tickers.create(
         timestamp="1",

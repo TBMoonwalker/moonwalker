@@ -11,6 +11,7 @@ class UpnlHistory(Model):
     timestamp = fields.DatetimeField()
     upnl = fields.FloatField(default=0.0)
     profit_overall = fields.FloatField(default=0.0)
+    funds_locked = fields.FloatField(default=0.0)
 
     class Meta:
         table = "upnl_history"

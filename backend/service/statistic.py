@@ -114,12 +114,15 @@ class Statistic:
 
     @staticmethod
     def _build_profit_overall_timeline_sync(
-        rows: list[tuple[Any, Any]],
+        rows: list[tuple[Any, Any, Any]],
         now: datetime,
         timeline_horizons: dict[str, timedelta],
     ) -> list[dict[str, Any]]:
         """Build resampled profit timeline synchronously from raw rows."""
-        df = pd.DataFrame(rows, columns=["timestamp", "profit_overall"])
+        df = pd.DataFrame(
+            rows,
+            columns=["timestamp", "profit_overall", "funds_locked"],
+        )
         df["timestamp"] = pd.to_datetime(df["timestamp"], utc=True)
         df = df.set_index("timestamp")
         df = df[~df.index.duplicated(keep="last")]
@@ -133,27 +136,19 @@ class Statistic:
 
         year_slice = df[(df.index >= year_start) & (df.index < month_start)]
         if not year_slice.empty:
-            frames.append(
-                year_slice["profit_overall"].resample("1W").last().dropna().to_frame()
-            )
+            frames.append(year_slice.resample("1W").last().dropna())
 
         month_slice = df[(df.index >= month_start) & (df.index < week_start)]
         if not month_slice.empty:
-            frames.append(
-                month_slice["profit_overall"].resample("1D").last().dropna().to_frame()
-            )
+            frames.append(month_slice.resample("1D").last().dropna())
 
         week_slice = df[(df.index >= week_start) & (df.index < day_start)]
         if not week_slice.empty:
-            frames.append(
-                week_slice["profit_overall"].resample("4h").last().dropna().to_frame()
-            )
+            frames.append(week_slice.resample("4h").last().dropna())
 
         day_slice = df[df.index >= day_start]
         if not day_slice.empty:
-            frames.append(
-                day_slice["profit_overall"].resample("15min").last().dropna().to_frame()
-            )
+            frames.append(day_slice.resample("15min").last().dropna())
 
         if not frames:
             return []
@@ -167,6 +162,7 @@ class Statistic:
                 {
                     "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                     "profit_overall": float(row["profit_overall"]),
+                    "funds_locked": float(row["funds_locked"]),
                 }
             )
         return timeline
@@ -292,6 +288,7 @@ class Statistic:
                     timestamp=now,
                     upnl=float(profit_data.get("upnl") or 0.0),
                     profit_overall=float(profit_data.get("profit_overall") or 0.0),
+                    funds_locked=float(profit_data.get("funds_locked") or 0.0),
                 ),
                 "storing upnl snapshot",
             )
@@ -306,13 +303,14 @@ class Statistic:
             rows = (
                 await model.UpnlHistory.all()
                 .order_by("timestamp")
-                .values_list("timestamp", "profit_overall")
+                .values_list("timestamp", "profit_overall", "funds_locked")
             )
-            for timestamp, profit_overall in rows:
+            for timestamp, profit_overall, funds_locked in rows:
                 upnl_data.append(
                     {
                         "timestamp": timestamp.strftime("%Y-%m-%d %H:%M:%S"),
                         "profit_overall": profit_overall,
+                        "funds_locked": funds_locked,
                     }
                 )
         except BaseORMException as e:
@@ -336,7 +334,7 @@ class Statistic:
             rows = (
                 await model.UpnlHistory.filter(timestamp__gte=year_start)
                 .order_by("timestamp")
-                .values_list("timestamp", "profit_overall")
+                .values_list("timestamp", "profit_overall", "funds_locked")
             )
             if not rows:
                 return []

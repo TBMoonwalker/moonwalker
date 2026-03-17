@@ -219,6 +219,30 @@ class Database:
                 ),
             )
 
+    async def _ensure_upnl_history_columns(self) -> None:
+        """Ensure additive UpnlHistory columns exist on existing SQLite databases."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query("PRAGMA table_info('upnl_history')")
+        existing = {row["name"] for row in columns}
+        alter_statements = []
+        if "funds_locked" not in existing:
+            alter_statements.append(
+                "ALTER TABLE upnl_history "
+                "ADD COLUMN funds_locked REAL NOT NULL DEFAULT 0.0;"
+            )
+        if alter_statements:
+            await connection.execute_script("\n".join(alter_statements))
+            logging.info(
+                "Added missing UpnlHistory columns: %s",
+                ", ".join(
+                    statement.split("ADD COLUMN", 1)[1].split()[0].strip()
+                    for statement in alter_statements
+                ),
+            )
+
     async def _migrate_legacy_unsellable_open_trades(self) -> None:
         """Move unsellable legacy OpenTrades rows into UnsellableTrades."""
         legacy_rows = await model.OpenTrades.all().values()
@@ -312,6 +336,7 @@ class Database:
             # Generate the schema
             await Tortoise.generate_schemas()
             await self._ensure_open_trades_columns()
+            await self._ensure_upnl_history_columns()
             await self._ensure_indexes()
             await self._migrate_legacy_unsellable_open_trades()
             logging.info("Database initialized successfully")
