@@ -89,14 +89,14 @@ are not exposed in the UI and must be set via the API.
 | `autopilot_medium_threshold` | `int` | Max fund threshold percent (medium setting). | `60` |
 | `autopilot_green_phase_enabled` | `bool` | Enable Green Phase deal expansion. When active, Autopilot can temporarily raise effective max deals during strong profitable-close bursts. | `false` |
 | `autopilot_green_phase_ramp_days` | `int` | Ramp-up history window in days used to build the profitable-close speed baseline from `ClosedTrades`. | `30` |
-| `autopilot_green_phase_eval_interval_sec` | `int` | How often the Green Phase service refreshes its market-speed analysis. | `60` |
-| `autopilot_green_phase_window_minutes` | `int` | Rolling recent window used to measure current profitable-close speed. | `60` |
+| `autopilot_green_phase_eval_interval_sec` | `int` | How often the Green Phase service re-runs its analysis. Each run counts as one evaluation cycle for `confirm_cycles` and `release_cycles`. | `60` |
+| `autopilot_green_phase_window_minutes` | `int` | Rolling lookback window used on each evaluation to measure recent profitable-close speed. It does not define the cycle length. | `60` |
 | `autopilot_green_phase_min_profitable_close_ratio` | `float` | Minimum ratio of profitable closes required inside the recent window before Green Phase may activate. | `0.8` |
 | `autopilot_green_phase_speed_multiplier` | `float` | Minimum multiple of baseline profitable-close speed required to enter Green Phase. | `1.5` |
 | `autopilot_green_phase_exit_multiplier` | `float` | Lower speed threshold used to leave Green Phase again, providing hysteresis and avoiding flapping. | `1.15` |
 | `autopilot_green_phase_max_extra_deals` | `int` | Maximum number of additional deals Green Phase may add on top of the current effective `max_bots`. | `2` |
-| `autopilot_green_phase_confirm_cycles` | `int` | Number of consecutive evaluations that must satisfy the enter condition before Green Phase activates. | `2` |
-| `autopilot_green_phase_release_cycles` | `int` | Number of consecutive evaluations below the exit condition before Green Phase deactivates. | `4` |
+| `autopilot_green_phase_confirm_cycles` | `int` | Number of consecutive evaluation runs that must satisfy the enter condition before Green Phase activates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `2` |
+| `autopilot_green_phase_release_cycles` | `int` | Number of consecutive evaluation runs below the exit condition before Green Phase deactivates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `4` |
 | `autopilot_green_phase_max_locked_fund_percent` | `float` | Hard ceiling for locked funds, in percent of `autopilot_max_fund`, above which Green Phase may not add extra deals. | `85` |
 | `monitoring_enabled` | `bool` | Enable outbound monitoring notifications for executed buys/sells. | `false` |
 | `monitoring_telegram_api_id` | `int` | Telegram API ID used by Telethon client. | `1234567` |
@@ -114,6 +114,75 @@ Green Phase is an Autopilot extension that watches the speed of profitable close
 trades. If recent profitable closes rise clearly above the historical baseline,
 the bot treats that as a broader "green market phase" and can temporarily raise
 the effective maximum number of concurrent deals.
+
+In simple terms:
+
+- Moonwalker watches how quickly profitable trades are closing.
+- If profitable trades are closing faster than usual, it treats that as a
+  stronger market phase.
+- During that phase, it can temporarily allow a few more deals than normal.
+- It only does that when enough capital is still available for safety orders.
+
+Simple example:
+
+```json
+{
+  "autopilot": true,
+  "autopilot_green_phase_enabled": true,
+  "autopilot_green_phase_ramp_days": 30,
+  "autopilot_green_phase_window_minutes": 60,
+  "autopilot_green_phase_min_profitable_close_ratio": 0.8,
+  "autopilot_green_phase_speed_multiplier": 1.5,
+  "autopilot_green_phase_confirm_cycles": 2,
+  "autopilot_green_phase_max_extra_deals": 2
+}
+```
+
+What that means in practice:
+
+- Moonwalker first looks at the last 30 days of closed trades and builds a
+  baseline for how many profitable trades normally close per hour.
+- Then it keeps looking at the last 60 minutes and compares recent profitable
+  closes to that baseline.
+- It repeats that analysis every configured evaluation interval. By default,
+  this means every `60` seconds.
+- To activate Green Phase, the recent profitable-close speed must be at least
+  `1.5x` the baseline.
+- At least `80%` of the closes in that recent window must be profitable.
+- The condition must stay true for 2 consecutive evaluation runs before Green
+  Phase actually activates.
+
+How the timing works:
+
+- `autopilot_green_phase_window_minutes` is the size of the lookback window.
+  In this example, every check looks back over the last `60` minutes.
+- `autopilot_green_phase_eval_interval_sec` is how often that check runs. In
+  the default setup, it runs every `60` seconds.
+- `autopilot_green_phase_confirm_cycles = 2` means the enter condition must be
+  true on `2` checks in a row. With a `60` second evaluation interval, that is
+  roughly `2` minutes of confirmation.
+- `autopilot_green_phase_release_cycles` works the same way for switching Green
+  Phase off again.
+
+Illustrative activation example:
+
+- Assume the 30-day baseline is `1` profitable closed trade per hour.
+- With `autopilot_green_phase_speed_multiplier = 1.5`, the recent window must
+  reach at least `1.5` profitable closes per hour.
+- Because the window is 60 minutes in this example, that means Moonwalker needs
+  about `2` profitable closed trades within the last hour.
+- With `autopilot_green_phase_min_profitable_close_ratio = 0.8`, those recent
+  closes must also be mostly positive. For example:
+  `2` profitable and `0` losing closes works, and `4` profitable with `1`
+  losing close also works.
+- If those conditions remain true for 2 checks in a row, and the checks happen
+  every `60` seconds, Green Phase can turn on after roughly `2` minutes and
+  temporarily add up to 2 extra deals, as long as the capital guardrails still
+  allow it.
+
+This example is illustrative. The real trigger always depends on your own
+historical baseline from `ClosedTrades`, so the exact number of profitable
+closes needed can be higher or lower in your setup.
 
 The baseline is built from `ClosedTrades`, not from raw incoming signals. This
 keeps the feature tied to realized trade flow instead of noisy signal bursts.
