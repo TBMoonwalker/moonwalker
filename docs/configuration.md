@@ -43,11 +43,18 @@ are not exposed in the UI and must be set via the API.
 | `trailing_tp` | `float` | Trailing TP deviation (percent). | `0.5` |
 | `max_bots` | `int` | Max concurrent bots. | `3` |
 | `bo` | `float` | Base order size. | `10` |
+| `sell_order_type` | `string` | Sell execution type for TP/exit orders. Supported values are `market` and `limit`. | `market` |
+| `limit_sell_timeout_sec` | `int` | Timeout in seconds before an unfilled limit sell is treated as timed out. | `60` |
+| `limit_sell_fallback_to_market` | `bool` | Allow a timed-out limit sell to fall back to a market sell when guards still permit it. | `true` |
+| `tp_spike_confirm_enabled` | `bool` | Enable TP spike confirmation so a single wick above TP does not immediately trigger a sell. | `false` |
+| `tp_spike_confirm_seconds` | `float` | Required time the price must continue to qualify above TP before the sell is confirmed. | `3` |
+| `tp_spike_confirm_ticks` | `int` | Minimum number of qualifying ticker updates above TP required before the sell is confirmed. `0` disables the tick requirement. | `0` |
 | `so` | `float` | Safety order size. | `20` |
 | `sos` | `float` | Price deviation for first safety order (percent). | `1.5` |
 | `ss` | `float` | Safety order step scale. | `1.05` |
 | `os` | `float` | Safety order volume scale. | `1.2` |
 | `mstc` | `int` | Max safety order count. | `5` |
+| `trade_safety_order_budget_ratio` | `float` | Dynamic-DCA budget cap for a single safety order as a fraction of currently free quote balance. | `0.95` |
 | `dynamic_so_volume_enabled` | `bool` | Enable dynamic scaling for safety order amount. Trigger logic stays unchanged; only SO size is scaled. | `false` |
 | `dynamic_so_ath_lookback_value` | `int` | ATH lookback amount used by dynamic SO scaling. | `1` |
 | `dynamic_so_ath_lookback_unit` | `string` | Lookback unit for ATH: `day`, `week`, `month`, or `year`. | `month` |
@@ -65,6 +72,7 @@ are not exposed in the UI and must be set via the API.
 | `ordersize` | `float` | ASAP base order size (advanced). | `12` |
 | `housekeeping_interval` | `int` | Ticker cache cleanup interval (days). | `2` |
 | `history_from_data` | `int` | History lookback for indicator seed (days). | `30` |
+| `history_lookback_time` | `string` | Canonical indicator history lookback using `d/w/m/y` suffixes such as `30d`, `12w`, `6m`, or `1y`. | `90d` |
 | `upnl_housekeeping_interval` | `int` | uPNL history retention in days; `0` keeps all history forever. | `0` |
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |
 | `autopilot` | `bool` | Enable autopilot mode. | `false` |
@@ -79,6 +87,17 @@ are not exposed in the UI and must be set via the API.
 | `autopilot_medium_sl` | `float` | SL percent (medium setting). | `2.0` |
 | `autopilot_medium_sl_timeout` | `int` | SL timeout in days (medium setting). | `10` |
 | `autopilot_medium_threshold` | `int` | Max fund threshold percent (medium setting). | `60` |
+| `autopilot_green_phase_enabled` | `bool` | Enable Green Phase deal expansion. When active, Autopilot can temporarily raise effective max deals during strong profitable-close bursts. | `false` |
+| `autopilot_green_phase_ramp_days` | `int` | Ramp-up history window in days used to build the profitable-close speed baseline from `ClosedTrades`. | `30` |
+| `autopilot_green_phase_eval_interval_sec` | `int` | How often the Green Phase service refreshes its market-speed analysis. | `60` |
+| `autopilot_green_phase_window_minutes` | `int` | Rolling recent window used to measure current profitable-close speed. | `60` |
+| `autopilot_green_phase_min_profitable_close_ratio` | `float` | Minimum ratio of profitable closes required inside the recent window before Green Phase may activate. | `0.8` |
+| `autopilot_green_phase_speed_multiplier` | `float` | Minimum multiple of baseline profitable-close speed required to enter Green Phase. | `1.5` |
+| `autopilot_green_phase_exit_multiplier` | `float` | Lower speed threshold used to leave Green Phase again, providing hysteresis and avoiding flapping. | `1.15` |
+| `autopilot_green_phase_max_extra_deals` | `int` | Maximum number of additional deals Green Phase may add on top of the current effective `max_bots`. | `2` |
+| `autopilot_green_phase_confirm_cycles` | `int` | Number of consecutive evaluations that must satisfy the enter condition before Green Phase activates. | `2` |
+| `autopilot_green_phase_release_cycles` | `int` | Number of consecutive evaluations below the exit condition before Green Phase deactivates. | `4` |
+| `autopilot_green_phase_max_locked_fund_percent` | `float` | Hard ceiling for locked funds, in percent of `autopilot_max_fund`, above which Green Phase may not add extra deals. | `85` |
 | `monitoring_enabled` | `bool` | Enable outbound monitoring notifications for executed buys/sells. | `false` |
 | `monitoring_telegram_api_id` | `int` | Telegram API ID used by Telethon client. | `1234567` |
 | `monitoring_telegram_api_hash` | `string` | Telegram API hash used by Telethon client. | `0123456789abcdef...` |
@@ -88,3 +107,59 @@ are not exposed in the UI and must be set via the API.
 | `monitoring_retry_count` | `int` | Number of retries after a failed Telegram send. | `1` |
 | `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","bbands_cross"]` |
 | `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals"]` |
+
+## Autopilot Green Phase
+
+Green Phase is an Autopilot extension that watches the speed of profitable closed
+trades. If recent profitable closes rise clearly above the historical baseline,
+the bot treats that as a broader "green market phase" and can temporarily raise
+the effective maximum number of concurrent deals.
+
+The baseline is built from `ClosedTrades`, not from raw incoming signals. This
+keeps the feature tied to realized trade flow instead of noisy signal bursts.
+
+Green Phase only adjusts entry capacity in the current implementation:
+
+- It can increase effective `max_bots`.
+- It does not change TP, SL, or SL timeout.
+- It does not replace normal Autopilot `low` / `medium` / `high` mode logic.
+
+Before any extra deals are allowed, the service applies capital guardrails:
+
+- It blocks expansion when locked funds are already above
+  `autopilot_green_phase_max_locked_fund_percent`.
+- It estimates remaining safety-order reserve for existing open trades.
+- It requires enough free quote balance to cover that reserve plus the proposed
+  additional deals.
+
+This means Green Phase is intentionally conservative: market momentum alone is
+not enough to open more deals unless capital protection still looks safe.
+
+## TP Spike Confirmation
+
+TP spike confirmation adds a debounce layer to normal take-profit exits. When
+enabled, a trade is not sold immediately on the first price print above TP.
+Instead, Moonwalker waits until the move remains valid for the configured time
+window and, optionally, for a minimum number of ticker updates.
+
+- `tp_spike_confirm_seconds` is the primary time-based filter.
+- `tp_spike_confirm_ticks` is an optional extra filter.
+- Stop-loss exits are not delayed by this feature.
+
+This helps avoid selling into wick spikes that revert before the actual sell
+order is placed.
+
+## Limit Sell Timeout And Fallback
+
+When `sell_order_type` is set to `limit`, Moonwalker places a limit sell at the
+target price and waits for up to `limit_sell_timeout_sec` seconds.
+
+If the order is not filled in time and `limit_sell_fallback_to_market` is
+enabled, the bot may fall back to a market sell. That fallback is guarded:
+
+- if TP was the reason for the sell, Moonwalker checks that the live price is
+  still above the allowed fallback floor before sending the market order
+- if the price has already dropped back below that floor, the market fallback is
+  skipped and the trade remains open
+
+This protection is meant to reduce exits at a loss after short-lived spikes.
