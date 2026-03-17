@@ -9,11 +9,13 @@ from litestar.connection import Request
 from litestar.exceptions import SerializationException
 from litestar.handlers import get, post, put
 from model import OpenTrades
+from service.backup_restore import BackupService
 from service.config import Config
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
 CSV_SIGNAL_NAME = "csv_signal"
+backup_service = BackupService()
 
 
 def _extract_config_update_value(raw_value: Any) -> Any:
@@ -63,6 +65,12 @@ async def get_config() -> Any:
     """
     config = await Config.instance()
     return config._cache
+
+
+@get(path="/config/backup/export")
+async def export_backup(include_trade_data: bool = False) -> Any:
+    """Export config backup with optional trade data."""
+    return await backup_service.export_backup(include_trade_data)
 
 
 @get(path="/config/single/{key:str}")
@@ -156,9 +164,45 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
         return json_response({"error": "Update failed - check config.log"}, 400)
 
 
+@post(path="/config/backup/restore")
+async def restore_backup(request: Request[Any, Any, Any]) -> Any:
+    """Restore config-only or full backup payloads."""
+    try:
+        data = await request.json()
+    except SerializationException:
+        return json_response({"error": "Payload must be a JSON object"}, 400)
+
+    if not isinstance(data, dict):
+        return json_response({"error": "Payload must be a JSON object"}, 400)
+
+    backup_payload = data.get("backup")
+    restore_trade_data = bool(data.get("restore_trade_data", False))
+    if not isinstance(backup_payload, dict):
+        return json_response({"error": "Missing backup payload."}, 400)
+
+    try:
+        summary = await backup_service.restore_backup(
+            backup_payload,
+            restore_trade_data=restore_trade_data,
+        )
+    except ValueError as exc:
+        return json_response({"error": str(exc)}, 400)
+    except Exception as exc:  # noqa: BLE001 - surface restore failures to UI.
+        logging.error("Backup restore failed: %s", exc, exc_info=True)
+        return json_response({"error": "Backup restore failed."}, 500)
+
+    restored_scope = "full backup" if restore_trade_data else "configuration"
+    return {
+        "message": f"Restored {restored_scope} successfully.",
+        "result": summary,
+    }
+
+
 route_handlers = [
     get_config,
+    export_backup,
     get_config_key,
     update_config_key,
     update_multiple_config_keys,
+    restore_backup,
 ]

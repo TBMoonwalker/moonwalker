@@ -190,3 +190,30 @@ async def test_config_load_all_applies_tp_spike_defaults(tmp_path, monkeypatch) 
     assert config._cache["tp_spike_confirm_ticks"] == 0
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_config_load_all_clears_removed_keys(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    import model
+
+    await model.AppConfig.create(
+        key="timezone", value="Europe/Vienna", value_type="str"
+    )
+
+    config = Config()
+    await config.load_all()
+    assert config.get("timezone") == "Europe/Vienna"
+
+    await model.AppConfig.filter(key="timezone").delete()
+    await config.load_all()
+
+    assert config.get("timezone") is None
+
+    await Tortoise.close_connections()

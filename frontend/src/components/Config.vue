@@ -76,6 +76,78 @@
             :rules="rules"
         />
 
+        <n-card title="Backup & Restore" size="small" class="backup-restore-card">
+            <n-flex vertical :size="12">
+                <n-alert type="info" title="Portable backup">
+                    Download your configuration alone or include all trade data. Full restores do not import ticker candles and will fetch the required history again for restored active trades.
+                </n-alert>
+
+                <n-flex align="center" :wrap="true" :size="[12, 12]">
+                    <n-checkbox v-model:checked="backupIncludeTradeData">
+                        Include trade data in backup
+                    </n-checkbox>
+                    <n-button
+                        type="primary"
+                        secondary
+                        :loading="backupDownloadLoading"
+                        @click="handleBackupDownload"
+                    >
+                        Download backup
+                    </n-button>
+                </n-flex>
+
+                <n-divider />
+
+                <input
+                    ref="backupFileInputRef"
+                    type="file"
+                    accept="application/json,.json"
+                    class="backup-file-input"
+                    @change="handleBackupFileSelected"
+                >
+
+                <n-flex align="center" :wrap="true" :size="[12, 12]">
+                    <n-button secondary @click="openBackupFilePicker">
+                        Select backup file
+                    </n-button>
+                    <span v-if="selectedBackupFileName" class="backup-file-name">
+                        {{ selectedBackupFileName }}
+                    </span>
+                    <n-button
+                        v-if="selectedBackupFileName"
+                        quaternary
+                        @click="clearSelectedBackup"
+                    >
+                        Clear
+                    </n-button>
+                </n-flex>
+
+                <n-text v-if="selectedBackupPayload" depth="3">
+                    Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
+                </n-text>
+
+                <n-flex align="center" :wrap="true" :size="[12, 12]">
+                    <n-button
+                        type="warning"
+                        :loading="restoreLoading"
+                        :disabled="!selectedBackupPayload"
+                        @click="handleRestoreBackup('config')"
+                    >
+                        Restore config only
+                    </n-button>
+                    <n-button
+                        type="error"
+                        ghost
+                        :loading="restoreLoading"
+                        :disabled="!selectedBackupHasTradeData"
+                        @click="handleRestoreBackup('full')"
+                    >
+                        Restore full backup
+                    </n-button>
+                </n-flex>
+            </n-flex>
+        </n-card>
+
         <n-alert
             :type="saveBannerType"
             :title="saveBannerTitle"
@@ -139,6 +211,21 @@ interface ConfigSectionFormExpose {
 }
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+type BackupRestoreMode = 'config' | 'full'
+type BackupPayload = {
+    config?: unknown
+    trade_data?: unknown
+    includes_trade_data?: boolean
+}
+type RestoreSummary = {
+    config_keys?: number
+    history_refreshed_symbols?: string[]
+    history_failed_symbols?: string[]
+}
+type RestoreResponse = {
+    message?: string
+    result?: RestoreSummary
+}
 
 function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
@@ -158,6 +245,12 @@ const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).to
 const isLoading = ref(true)
 const showAdvancedGeneral = ref(false)
 const monitoring_test_loading = ref(false)
+const backupIncludeTradeData = ref(false)
+const backupDownloadLoading = ref(false)
+const restoreLoading = ref(false)
+const backupFileInputRef = ref<HTMLInputElement | null>(null)
+const selectedBackupFileName = ref<string | null>(null)
+const selectedBackupPayload = ref<BackupPayload | null>(null)
 const submitAttempted = ref(false)
 const saveState = ref<SaveState>('idle')
 const saveErrorMessage = ref<string | null>(null)
@@ -523,6 +616,13 @@ const saveBannerMessage = computed(() => {
 const isSubmitDisabled = computed(
     () => isLoading.value || saveState.value === 'saving' || !isDirty.value,
 )
+const selectedBackupHasTradeData = computed(() =>
+    Boolean(selectedBackupPayload.value && typeof selectedBackupPayload.value.trade_data === 'object')
+)
+const selectedBackupConfigCount = computed(() => {
+    const configRows = selectedBackupPayload.value?.config
+    return Array.isArray(configRows) ? configRows.length : 0
+})
 
 function hasUnsavedChanges(): boolean {
     return !isLoading.value && isDirty.value
@@ -531,6 +631,158 @@ function hasUnsavedChanges(): boolean {
 function setSaveError(messageText: string): void {
     saveState.value = 'error'
     saveErrorMessage.value = messageText
+}
+
+function isBackupPayload(value: unknown): value is BackupPayload {
+    return typeof value === 'object' && value !== null && 'config' in value
+}
+
+function buildBackupFilename(includeTradeData: boolean): string {
+    const timestamp = new Date().toISOString().replaceAll(':', '-')
+    const scope = includeTradeData ? 'full' : 'config'
+    return `moonwalker-backup-${scope}-${timestamp}.json`
+}
+
+function downloadTextFile(filename: string, content: string): void {
+    const blob = new Blob([content], { type: 'application/json;charset=utf-8' })
+    const url = window.URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    anchor.click()
+    window.URL.revokeObjectURL(url)
+}
+
+function openBackupFilePicker(): void {
+    backupFileInputRef.value?.click()
+}
+
+function clearSelectedBackup(): void {
+    selectedBackupFileName.value = null
+    selectedBackupPayload.value = null
+    if (backupFileInputRef.value) {
+        backupFileInputRef.value.value = ''
+    }
+}
+
+function extractAxiosErrorMessage(error: unknown, fallback: string): string {
+    if (axios.isAxiosError(error)) {
+        if (error.response?.data?.error) {
+            return String(error.response.data.error)
+        }
+        if (error.response?.data?.message) {
+            return String(error.response.data.message)
+        }
+        if (error.message) {
+            return error.message
+        }
+    }
+    if (error instanceof Error && error.message) {
+        return error.message
+    }
+    return fallback
+}
+
+async function handleBackupDownload(): Promise<void> {
+    if (backupDownloadLoading.value) {
+        return
+    }
+
+    backupDownloadLoading.value = true
+    try {
+        const response = await axios.get<BackupPayload>(apiUrl('/config/backup/export'), {
+            params: { include_trade_data: backupIncludeTradeData.value },
+        })
+        downloadTextFile(
+            buildBackupFilename(backupIncludeTradeData.value),
+            JSON.stringify(response.data, null, 2),
+        )
+        message.success('Backup downloaded successfully.')
+    } catch (error) {
+        message.error(extractAxiosErrorMessage(error, 'Backup download failed.'))
+    } finally {
+        backupDownloadLoading.value = false
+    }
+}
+
+async function handleBackupFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement
+    const selectedFile = input.files?.[0]
+    if (!selectedFile) {
+        return
+    }
+
+    try {
+        const rawText = await selectedFile.text()
+        const parsed = JSON.parse(rawText) as unknown
+        if (!isBackupPayload(parsed)) {
+            throw new Error('Selected file is not a valid Moonwalker backup.')
+        }
+        selectedBackupFileName.value = selectedFile.name
+        selectedBackupPayload.value = parsed
+        message.success(`Loaded backup ${selectedFile.name}`)
+    } catch (error) {
+        clearSelectedBackup()
+        message.error(
+            error instanceof Error
+                ? error.message
+                : 'Failed to read backup file.',
+        )
+    }
+}
+
+async function handleRestoreBackup(mode: BackupRestoreMode): Promise<void> {
+    if (!selectedBackupPayload.value) {
+        message.error('Please select a backup file first.')
+        return
+    }
+    if (restoreLoading.value) {
+        return
+    }
+    if (mode === 'full' && !selectedBackupHasTradeData.value) {
+        message.error('The selected backup does not include trade data.')
+        return
+    }
+
+    if (hasUnsavedChanges() && !window.confirm(
+        'You have unsaved configuration changes. Continue and replace them with the backup?'
+    )) {
+        return
+    }
+
+    const confirmationMessage = mode === 'full'
+        ? 'Restore the full backup now? This will replace the current configuration and all trade data.'
+        : 'Restore configuration only now? This will replace the current configuration.'
+    if (!window.confirm(confirmationMessage)) {
+        return
+    }
+
+    restoreLoading.value = true
+    try {
+        const response = await axios.post<RestoreResponse>(
+            apiUrl('/config/backup/restore'),
+            {
+                backup: selectedBackupPayload.value,
+                restore_trade_data: mode === 'full',
+            },
+        )
+
+        isLoading.value = true
+        await fetchDefaultValues()
+
+        const failedSymbols = response.data?.result?.history_failed_symbols ?? []
+        if (Array.isArray(failedSymbols) && failedSymbols.length > 0) {
+            message.warning(
+                `${response.data?.message || 'Restore completed.'} History refresh failed for: ${failedSymbols.join(', ')}`
+            )
+        } else {
+            message.success(response.data?.message || 'Restore completed successfully.')
+        }
+    } catch (error) {
+        message.error(extractAxiosErrorMessage(error, 'Backup restore failed.'))
+    } finally {
+        restoreLoading.value = false
+    }
 }
 
 function confirmDiscardUnsavedChanges(source: 'route_leave' | 'page_unload'): boolean {
@@ -1481,6 +1733,18 @@ onUnmounted(() => {
     flex-direction: column;
     gap: 16px;
     width: 100%;
+}
+
+.backup-restore-card {
+    width: 100%;
+}
+
+.backup-file-input {
+    display: none;
+}
+
+.backup-file-name {
+    font-size: 14px;
 }
 
 @media (max-width: 768px) {

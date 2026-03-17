@@ -143,6 +143,7 @@ class Config:
         Retrieves all AppConfig entries and converts their values to the appropriate types
         based on the value_type field. Also loads strategies and signal plugins.
         """
+        self._cache = {}
         rows = await AppConfig.all()
         for row in rows:
             value = self.__set_type(row.value, row.value_type)
