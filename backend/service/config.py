@@ -33,6 +33,17 @@ DEFAULT_CONFIG_VALUES = {
     "tp_spike_confirm_enabled": False,
     "tp_spike_confirm_seconds": 3.0,
     "tp_spike_confirm_ticks": 0,
+    "autopilot_green_phase_enabled": False,
+    "autopilot_green_phase_ramp_days": 30,
+    "autopilot_green_phase_eval_interval_sec": 60,
+    "autopilot_green_phase_window_minutes": 60,
+    "autopilot_green_phase_min_profitable_close_ratio": 0.8,
+    "autopilot_green_phase_speed_multiplier": 1.5,
+    "autopilot_green_phase_exit_multiplier": 1.15,
+    "autopilot_green_phase_max_extra_deals": 2,
+    "autopilot_green_phase_confirm_cycles": 2,
+    "autopilot_green_phase_release_cycles": 4,
+    "autopilot_green_phase_max_locked_fund_percent": 85.0,
 }
 
 

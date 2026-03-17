@@ -30,13 +30,26 @@ async def test_autopilot_high_threshold_triggers_db_write(monkeypatch) -> None:
     }
 
     autopilot = Autopilot()
+    autopilot.green_phase_service = types.SimpleNamespace(
+        get_override=_green_override(
+            green_phase_detected=True,
+            green_phase_active=True,
+            effective_extra_deals=2,
+            effective_max_bots=7,
+            phase_strength=2.4,
+            ramp_ready=True,
+            guardrail_block_reason=None,
+        )
+    )
     settings = await autopilot.calculate_trading_settings(90, config)
 
     assert settings["mode"] == "high"
-    assert settings["mad"] == 5
+    assert settings["mad"] == 7
     assert settings["tp"] == 1.2
     assert settings["sl"] == 2.5
     assert settings["sl_timeout"] == 7
+    assert settings["green_phase_active"] is True
+    assert settings["green_phase_extra_deals"] == 2
     assert created_modes == ["high"]
 
 
@@ -56,12 +69,29 @@ async def test_autopilot_enabled_below_threshold_persists_low_mode(
         "autopilot_max_fund": 100,
         "autopilot_high_threshold": 80,
         "autopilot_medium_threshold": 50,
+        "max_bots": 4,
     }
 
     autopilot = Autopilot()
+    autopilot.green_phase_service = types.SimpleNamespace(
+        get_override=_green_override(
+            green_phase_detected=True,
+            green_phase_active=True,
+            effective_extra_deals=1,
+            effective_max_bots=5,
+            phase_strength=1.8,
+            ramp_ready=True,
+            guardrail_block_reason=None,
+        )
+    )
     settings = await autopilot.calculate_trading_settings(10, config)
+    runtime_state = await autopilot.resolve_runtime_state(10, config)
 
     assert settings == {}
+    assert runtime_state["mode"] == "low"
+    assert runtime_state["effective_max_bots"] == 5
+    assert runtime_state["green_phase_active"] is True
+    assert runtime_state["green_phase_extra_deals"] == 1
     assert created_modes == ["low"]
 
 
@@ -76,6 +106,15 @@ async def test_autopilot_disabled_persists_none_mode(monkeypatch) -> None:
 
     autopilot = Autopilot()
     settings = await autopilot.calculate_trading_settings(10, {"autopilot": False})
+    runtime_state = await autopilot.resolve_runtime_state(10, {"autopilot": False})
 
     assert settings == {}
+    assert runtime_state["mode"] == "none"
     assert created_modes == ["none"]
+
+
+def _green_override(**values):
+    async def _inner(*_args, **_kwargs):
+        return values
+
+    return _inner

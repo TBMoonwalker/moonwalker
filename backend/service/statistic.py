@@ -8,6 +8,8 @@ from typing import Any
 import helper
 import model
 import pandas as pd
+from service.autopilot import Autopilot
+from service.config import Config
 from service.database import run_sqlite_write_with_retry
 from service.trades import Trades
 from tortoise.exceptions import BaseORMException
@@ -23,6 +25,7 @@ class Statistic:
 
     def __init__(self) -> None:
         self.trades = Trades()
+        self.autopilot = Autopilot()
         self.snapshot_interval_seconds = 60
         self.timeline_horizons = {
             "day": timedelta(days=1),
@@ -83,15 +86,6 @@ class Statistic:
         except BaseORMException as exc:
             logging.error(error_message, exc)
             return []
-
-    async def _get_autopilot_mode(self) -> str:
-        """Return the latest autopilot mode with a stable fallback."""
-        try:
-            autopilot = await model.Autopilot.all().order_by("-id").first()
-            return autopilot.mode if autopilot else "none"
-        except BaseORMException as exc:
-            logging.error("Error getting autopilot mode: %s", exc)
-            return "none"
 
     @staticmethod
     def _resample_profit_data_sync(
@@ -226,7 +220,6 @@ class Statistic:
             "cost",
             "Error getting funds: %s",
         )
-        autopilot_task = self._get_autopilot_mode()
         profit_week_task = self._get_profit_rows_since(
             begin_week,
             "Error getting profits for the week: %s",
@@ -236,13 +229,11 @@ class Statistic:
             upnl_value,
             closed_profit,
             funds_locked,
-            autopilot_mode,
             profit_week_rows,
         ) = await asyncio.gather(
             upnl_task,
             closed_profit_task,
             funds_locked_task,
-            autopilot_task,
             profit_week_task,
         )
 
@@ -257,14 +248,38 @@ class Statistic:
         # Funds locked in deals
         profit_data["funds_locked"] = funds_locked
 
-        # Autopilot mode
-        profit_data["autopilot"] = autopilot_mode
-
         profit_data["profit_week"] = self._group_profit_rows_by_date(profit_week_rows)
 
         profit_data["profit_overall_timestamp"] = datetime.now(timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
+        config = await Config.instance()
+        autopilot_state = await self.autopilot.resolve_runtime_state(
+            funds_locked=float(funds_locked or 0.0),
+            config=config._cache,
+        )
+        profit_data["autopilot"] = autopilot_state["mode"]
+        profit_data["autopilot_effective_max_bots"] = autopilot_state[
+            "effective_max_bots"
+        ]
+        profit_data["autopilot_green_phase_detected"] = autopilot_state[
+            "green_phase_detected"
+        ]
+        profit_data["autopilot_green_phase_active"] = autopilot_state[
+            "green_phase_active"
+        ]
+        profit_data["autopilot_green_phase_extra_deals"] = autopilot_state[
+            "green_phase_extra_deals"
+        ]
+        profit_data["autopilot_green_phase_strength"] = autopilot_state[
+            "green_phase_strength"
+        ]
+        profit_data["autopilot_green_phase_block_reason"] = autopilot_state[
+            "green_phase_block_reason"
+        ]
+        profit_data["autopilot_green_phase_ramp_ready"] = autopilot_state[
+            "green_phase_ramp_ready"
+        ]
         await self._store_upnl_snapshot(profit_data)
         return profit_data
 

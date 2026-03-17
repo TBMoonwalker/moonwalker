@@ -35,6 +35,8 @@
                             <component :is="autopilot_icon" />
                         </n-icon>
                     </span>
+                    <span class="autopilot-subtext">{{ autopilot_summary }}</span>
+                    <span v-if="green_phase_hint" class="autopilot-detail">{{ green_phase_hint }}</span>
                 </div>
             </div>
             <div class="stat-cell">
@@ -69,6 +71,31 @@ const funds_locked = ref(0)
 const funds_available = ref(0)
 const autopilot_class = ref<'green' | 'red' | 'orange' | 'muted'>('muted')
 const autopilot_state = ref<'high' | 'medium' | 'low' | 'none'>('none')
+const autopilot_effective_max_bots = ref(0)
+const autopilot_green_phase_detected = ref(false)
+const autopilot_green_phase_active = ref(false)
+const autopilot_green_phase_extra_deals = ref(0)
+const autopilot_green_phase_block_reason = ref<string | null>(null)
+
+const autopilot_summary = computed(() => {
+    if (autopilot_state.value === 'none') {
+        return 'Disabled'
+    }
+    return `Effective max bots ${autopilot_effective_max_bots.value}`
+})
+
+const green_phase_hint = computed(() => {
+    if (autopilot_state.value === 'none') {
+        return ''
+    }
+    if (autopilot_green_phase_active.value) {
+        return `Green phase active (+${autopilot_green_phase_extra_deals.value} deals)`
+    }
+    if (autopilot_green_phase_detected.value && autopilot_green_phase_block_reason.value) {
+        return `Green phase blocked: ${formatBlockReason(autopilot_green_phase_block_reason.value)}`
+    }
+    return 'Green phase idle'
+})
 
 const autopilot_icon = computed(() => {
     if (autopilot_state.value === 'high') {
@@ -106,6 +133,18 @@ watch(statistics_data.data, (newData) => {
         profit_class.value = row_classes(profit_overall.value)
         funds_locked.value = toNumberOrZero(websocket_data.funds_locked)
         funds_available.value = toNumberOrZero(websocket_data.funds_available)
+        autopilot_effective_max_bots.value =
+            toNumberOrZero(websocket_data.autopilot_effective_max_bots)
+        autopilot_green_phase_detected.value =
+            Boolean(websocket_data.autopilot_green_phase_detected)
+        autopilot_green_phase_active.value =
+            Boolean(websocket_data.autopilot_green_phase_active)
+        autopilot_green_phase_extra_deals.value =
+            toNumberOrZero(websocket_data.autopilot_green_phase_extra_deals)
+        autopilot_green_phase_block_reason.value =
+            typeof websocket_data.autopilot_green_phase_block_reason === 'string'
+                ? websocket_data.autopilot_green_phase_block_reason
+                : null
         if (websocket_data.autopilot == "high") {
             autopilot_state.value = 'high'
             autopilot_class.value = "red"
@@ -139,6 +178,10 @@ function toNumberOrZero(value: unknown): number {
 
 function formatFixed2(value: number): string {
     return value.toFixed(2)
+}
+
+function formatBlockReason(value: string): string {
+    return value.replaceAll('_', ' ')
 }
 
 </script>
@@ -201,6 +244,12 @@ function formatFixed2(value: number): string {
 .autopilot-label {
     font-size: 14px;
     color: var(--n-label-text-color, rgba(255, 255, 255, 0.65));
+}
+
+.autopilot-subtext,
+.autopilot-detail {
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.72);
 }
 
 .autopilot-icon {

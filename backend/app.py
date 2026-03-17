@@ -16,6 +16,7 @@ from litestar.config.compression import CompressionConfig
 from litestar.config.cors import CORSConfig
 from service.config import Config
 from service.database import Database
+from service.green_phase import GreenPhaseService
 from service.housekeeper import Housekeeper
 from service.redis import redis_client, start_redis, stop_redis
 from service.signal import Signal
@@ -32,6 +33,7 @@ class RuntimeState:
     conf: Config | None = None
     watcher: Watcher | None = None
     housekeeper: Housekeeper | None = None
+    green_phase_service: GreenPhaseService | None = None
     signal_plugin: Signal | None = None
     background_tasks: list[asyncio.Task[Any]] = field(default_factory=list)
 
@@ -54,6 +56,9 @@ async def startup() -> None:
 
     runtime_state.housekeeper = Housekeeper()
     await runtime_state.housekeeper.init()
+
+    runtime_state.green_phase_service = await GreenPhaseService.instance()
+    await runtime_state.green_phase_service.start()
 
     runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
     await runtime_state.database.run_with_context(runtime_state.signal_plugin.init)
@@ -95,6 +100,8 @@ async def shutdown() -> None:
         await runtime_state.watcher.shutdown()
     if runtime_state.housekeeper is not None:
         await runtime_state.housekeeper.shutdown()
+    if runtime_state.green_phase_service is not None:
+        await runtime_state.green_phase_service.shutdown()
     if runtime_state.database is not None:
         await runtime_state.database.shutdown()
 

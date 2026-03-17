@@ -83,11 +83,26 @@ async def test_profit_overall_uses_upnl_when_no_closed_trades(
     await model.OpenTrades.create(symbol="BTC/USDT", profit=12.5, cost=42.0)
 
     statistic = Statistic()
+    statistic.autopilot.resolve_runtime_state = _async_autopilot_state(
+        {
+            "mode": "low",
+            "effective_max_bots": 5,
+            "green_phase_detected": True,
+            "green_phase_active": True,
+            "green_phase_extra_deals": 1,
+            "green_phase_strength": 1.7,
+            "green_phase_block_reason": None,
+            "green_phase_ramp_ready": True,
+        }
+    )
     data = await statistic.get_profit()
 
     assert data["upnl"] == 12.5
     assert data["profit_overall"] == 12.5
     assert data["funds_locked"] == 42.0
+    assert data["autopilot"] == "low"
+    assert data["autopilot_effective_max_bots"] == 5
+    assert data["autopilot_green_phase_active"] is True
 
     await Tortoise.close_connections()
 
@@ -232,3 +247,10 @@ async def test_update_statistic_data_updates_open_trade_during_tp_sell() -> None
     assert payload["profit"] == 25.0
     assert payload["profit_percent"] == 25.0
     assert float(payload["open_date"]) == 1_700_000_000_000.0
+
+
+def _async_autopilot_state(value):
+    async def _inner(*_args, **_kwargs):
+        return value
+
+    return _inner

@@ -1,5 +1,10 @@
+import types
+
+import model
+import pytest
 from service.signal_runtime import (
     build_common_runtime_settings,
+    is_max_bots_reached,
     parse_signal_settings,
     resolve_max_bots_log_interval,
 )
@@ -42,3 +47,47 @@ def test_build_common_runtime_settings_treats_false_string_lists_as_empty() -> N
 def test_resolve_max_bots_log_interval_clamps_invalid_values() -> None:
     assert resolve_max_bots_log_interval({"max_bots_log_interval_sec": "0"}) == 1.0
     assert resolve_max_bots_log_interval({"max_bots_log_interval_sec": "bad"}) == 60.0
+
+
+class _DummyTradesModel:
+    @classmethod
+    def all(cls):
+        return cls()
+
+    def distinct(self):
+        return self
+
+    async def values_list(self, *_args, **_kwargs):
+        return ["bot-a", "bot-b"]
+
+
+@pytest.mark.asyncio
+async def test_is_max_bots_reached_prefers_effective_autopilot_limit(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(model, "Trades", _DummyTradesModel)
+
+    statistic = types.SimpleNamespace(
+        get_profit=_async_result(
+            {
+                "funds_locked": 120.0,
+                "autopilot_effective_max_bots": 1,
+            }
+        )
+    )
+    autopilot = types.SimpleNamespace(resolve_runtime_state=_async_result({}))
+
+    blocked = await is_max_bots_reached(
+        {"max_bots": 5},
+        statistic,
+        autopilot,
+    )
+
+    assert blocked is True
+
+
+def _async_result(value):
+    async def _inner(*_args, **_kwargs):
+        return value
+
+    return _inner

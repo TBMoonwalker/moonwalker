@@ -103,14 +103,16 @@ async def is_max_bots_reached(
     autopilot: Autopilot,
 ) -> bool:
     """Return whether the configured max-bot limit currently blocks new trades."""
-    max_bots = config.get("max_bots")
+    max_bots = int(config.get("max_bots", 0) or 0)
     all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
     profit = await statistic.get_profit()
-    if profit["funds_locked"] and profit["funds_locked"] > 0:
-        trading_settings = await autopilot.calculate_trading_settings(
-            profit["funds_locked"], config
+    effective_max_bots = profit.get("autopilot_effective_max_bots")
+    if effective_max_bots is None and config.get("autopilot", False):
+        runtime_state = await autopilot.resolve_runtime_state(
+            float(profit.get("funds_locked") or 0.0),
+            config,
         )
-        if trading_settings:
-            max_bots = trading_settings["mad"]
+        effective_max_bots = runtime_state["effective_max_bots"]
+    max_bots = int(effective_max_bots or max_bots)
 
     return bool(all_bots) and len(all_bots) >= int(max_bots)

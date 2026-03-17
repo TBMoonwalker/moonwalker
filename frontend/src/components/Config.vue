@@ -264,6 +264,16 @@ const DEFAULT_SYMSIGNAL_URL = "https://stream.3cqs.com"
 const DEFAULT_SYMSIGNAL_VERSION = "3.0.1"
 const DEFAULT_TP_SPIKE_CONFIRM_SECONDS = 3
 const DEFAULT_TP_SPIKE_CONFIRM_TICKS = 0
+const DEFAULT_GREEN_PHASE_RAMP_DAYS = 30
+const DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC = 60
+const DEFAULT_GREEN_PHASE_WINDOW_MINUTES = 60
+const DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO = 0.8
+const DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER = 1.5
+const DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER = 1.15
+const DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS = 2
+const DEFAULT_GREEN_PHASE_CONFIRM_CYCLES = 2
+const DEFAULT_GREEN_PHASE_RELEASE_CYCLES = 4
+const DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT = 85
 const timezone = ref([])
 const timerange = [
     {
@@ -497,6 +507,17 @@ const autopilot = ref({
     medium_sl: null,
     medium_sl_timeout: null,
     medium_threshold: null,
+    green_phase_enabled: false,
+    green_phase_ramp_days: DEFAULT_GREEN_PHASE_RAMP_DAYS,
+    green_phase_eval_interval_sec: DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC,
+    green_phase_window_minutes: DEFAULT_GREEN_PHASE_WINDOW_MINUTES,
+    green_phase_min_profitable_close_ratio: DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO,
+    green_phase_speed_multiplier: DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER,
+    green_phase_exit_multiplier: DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER,
+    green_phase_max_extra_deals: DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS,
+    green_phase_confirm_cycles: DEFAULT_GREEN_PHASE_CONFIRM_CYCLES,
+    green_phase_release_cycles: DEFAULT_GREEN_PHASE_RELEASE_CYCLES,
+    green_phase_max_locked_fund_percent: DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT,
 })
 
 const monitoring = ref({
@@ -1304,6 +1325,38 @@ async function fetchDefaultValues() {
             autopilot.value.medium_sl = toNumberOrNull(response.data.autopilot_medium_sl)
             autopilot.value.medium_sl_timeout = toNumberOrNull(response.data.autopilot_medium_sl_timeout)
             autopilot.value.medium_threshold = toNumberOrNull(response.data.autopilot_medium_threshold)
+            autopilot.value.green_phase_enabled =
+                parseBooleanString(response.data.autopilot_green_phase_enabled) ?? false
+            autopilot.value.green_phase_ramp_days =
+                toNumberOrNull(response.data.autopilot_green_phase_ramp_days) ??
+                DEFAULT_GREEN_PHASE_RAMP_DAYS
+            autopilot.value.green_phase_eval_interval_sec =
+                toNumberOrNull(response.data.autopilot_green_phase_eval_interval_sec) ??
+                DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC
+            autopilot.value.green_phase_window_minutes =
+                toNumberOrNull(response.data.autopilot_green_phase_window_minutes) ??
+                DEFAULT_GREEN_PHASE_WINDOW_MINUTES
+            autopilot.value.green_phase_min_profitable_close_ratio =
+                toNumberOrNull(response.data.autopilot_green_phase_min_profitable_close_ratio) ??
+                DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO
+            autopilot.value.green_phase_speed_multiplier =
+                toNumberOrNull(response.data.autopilot_green_phase_speed_multiplier) ??
+                DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER
+            autopilot.value.green_phase_exit_multiplier =
+                toNumberOrNull(response.data.autopilot_green_phase_exit_multiplier) ??
+                DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER
+            autopilot.value.green_phase_max_extra_deals =
+                toNumberOrNull(response.data.autopilot_green_phase_max_extra_deals) ??
+                DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS
+            autopilot.value.green_phase_confirm_cycles =
+                toNumberOrNull(response.data.autopilot_green_phase_confirm_cycles) ??
+                DEFAULT_GREEN_PHASE_CONFIRM_CYCLES
+            autopilot.value.green_phase_release_cycles =
+                toNumberOrNull(response.data.autopilot_green_phase_release_cycles) ??
+                DEFAULT_GREEN_PHASE_RELEASE_CYCLES
+            autopilot.value.green_phase_max_locked_fund_percent =
+                toNumberOrNull(response.data.autopilot_green_phase_max_locked_fund_percent) ??
+                DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT
             monitoring.value.enabled = parseBooleanString(response.data.monitoring_enabled) ?? false
             monitoring.value.telegram_bot_token =
                 response.data.monitoring_telegram_bot_token || null
@@ -1474,6 +1527,17 @@ async function submitForm() {
             autopilot_medium_sl: JSON.stringify({ 'value': autopilot.value.medium_sl || false, 'type': "float" }),
             autopilot_medium_sl_timeout: JSON.stringify({ 'value': autopilot.value.medium_sl_timeout || false, 'type': "int" }),
             autopilot_medium_threshold: JSON.stringify({ 'value': autopilot.value.medium_threshold || false, 'type': "int" }),
+            autopilot_green_phase_enabled: JSON.stringify({ 'value': autopilot.value.green_phase_enabled ?? false, 'type': "bool" }),
+            autopilot_green_phase_ramp_days: JSON.stringify({ 'value': autopilot.value.green_phase_ramp_days ?? DEFAULT_GREEN_PHASE_RAMP_DAYS, 'type': "int" }),
+            autopilot_green_phase_eval_interval_sec: JSON.stringify({ 'value': autopilot.value.green_phase_eval_interval_sec ?? DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC, 'type': "int" }),
+            autopilot_green_phase_window_minutes: JSON.stringify({ 'value': autopilot.value.green_phase_window_minutes ?? DEFAULT_GREEN_PHASE_WINDOW_MINUTES, 'type': "int" }),
+            autopilot_green_phase_min_profitable_close_ratio: JSON.stringify({ 'value': autopilot.value.green_phase_min_profitable_close_ratio ?? DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO, 'type': "float" }),
+            autopilot_green_phase_speed_multiplier: JSON.stringify({ 'value': autopilot.value.green_phase_speed_multiplier ?? DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER, 'type': "float" }),
+            autopilot_green_phase_exit_multiplier: JSON.stringify({ 'value': autopilot.value.green_phase_exit_multiplier ?? DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER, 'type': "float" }),
+            autopilot_green_phase_max_extra_deals: JSON.stringify({ 'value': autopilot.value.green_phase_max_extra_deals ?? DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS, 'type': "int" }),
+            autopilot_green_phase_confirm_cycles: JSON.stringify({ 'value': autopilot.value.green_phase_confirm_cycles ?? DEFAULT_GREEN_PHASE_CONFIRM_CYCLES, 'type': "int" }),
+            autopilot_green_phase_release_cycles: JSON.stringify({ 'value': autopilot.value.green_phase_release_cycles ?? DEFAULT_GREEN_PHASE_RELEASE_CYCLES, 'type': "int" }),
+            autopilot_green_phase_max_locked_fund_percent: JSON.stringify({ 'value': autopilot.value.green_phase_max_locked_fund_percent ?? DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT, 'type': "float" }),
             monitoring_enabled: JSON.stringify({ 'value': monitoring.value.enabled || false, 'type': "bool" }),
             monitoring_telegram_api_id: JSON.stringify({ 'value': monitoring.value.telegram_api_id || false, 'type': "int" }),
             monitoring_telegram_api_hash: JSON.stringify({ 'value': monitoring.value.telegram_api_hash || false, 'type': "str" }),
