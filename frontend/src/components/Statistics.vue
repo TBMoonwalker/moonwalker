@@ -51,7 +51,12 @@
 import { computed, ref, watch } from 'vue'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
-import { FlashOutline, PauseCircleOutline, SpeedometerOutline } from '@vicons/ionicons5'
+import {
+    AlertCircleOutline,
+    CheckmarkCircleOutline,
+    PauseCircleOutline,
+    WarningOutline,
+} from '@vicons/ionicons5'
 
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
@@ -62,15 +67,18 @@ const upnl = ref(0)
 const upnl_class = ref<'green' | 'red'>('green')
 const funds_locked = ref(0)
 const funds_available = ref(0)
-const autopilot_class = ref<'red' | 'orange' | 'muted'>('muted')
-const autopilot_state = ref<'high' | 'medium' | 'off'>('off')
+const autopilot_class = ref<'green' | 'red' | 'orange' | 'muted'>('muted')
+const autopilot_state = ref<'high' | 'medium' | 'low' | 'none'>('none')
 
 const autopilot_icon = computed(() => {
     if (autopilot_state.value === 'high') {
-        return FlashOutline
+        return AlertCircleOutline
     }
     if (autopilot_state.value === 'medium') {
-        return SpeedometerOutline
+        return WarningOutline
+    }
+    if (autopilot_state.value === 'low') {
+        return CheckmarkCircleOutline
     }
     return PauseCircleOutline
 })
@@ -82,7 +90,10 @@ const autopilot_aria_label = computed(() => {
     if (autopilot_state.value === 'medium') {
         return 'Autopilot mode medium'
     }
-    return 'Autopilot mode disabled'
+    if (autopilot_state.value === 'low') {
+        return 'Autopilot mode low'
+    }
+    return 'Autopilot disabled'
 })
 
 // Get new statistics data
@@ -101,8 +112,11 @@ watch(statistics_data.data, (newData) => {
         } else if (websocket_data.autopilot == "medium") {
             autopilot_state.value = 'medium'
             autopilot_class.value = "orange"
+        } else if (websocket_data.autopilot == "low") {
+            autopilot_state.value = 'low'
+            autopilot_class.value = "green"
         } else {
-            autopilot_state.value = 'off'
+            autopilot_state.value = 'none'
             autopilot_class.value = "muted"
         }
 
