@@ -20,13 +20,15 @@ runtime and multiple concurrent dashboard clients.
 | --- | --- | --- |
 | `GET` | `/config/all` | Return the full config snapshot used by the dashboard. |
 | `GET` | `/config/single/{key}` | Return a single config key. |
-| `PUT` | `/config/single/{key}` | Update one config key with a JSON body like `{"value": ...}`. |
+| `PUT` | `/config/single/{key}` | Update one config key with a JSON body like `{"value":{"value":"binance","type":"str"}}`. |
 | `POST` | `/config/multiple` | Update multiple config keys in one JSON payload. |
 | `GET` | `/config/backup/export?include_trade_data=false` | Export config-only backup payload. |
 | `GET` | `/config/backup/export?include_trade_data=true` | Export full backup payload including trade data. |
 | `POST` | `/config/backup/restore` | Restore config-only or full backup payloads. |
 
 Notes:
+- Config update payloads use nested typed objects such as
+  `{"dry_run":{"value":false,"type":"bool"}}`.
 - `POST /config/backup/restore` expects a JSON body with `backup` and optional
   `restore_trade_data`.
 - Switching the signal plugin to `csv_signal` is rejected while open trades

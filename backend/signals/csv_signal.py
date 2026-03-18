@@ -1,8 +1,6 @@
 """CSV-sourced signal plugin implementation."""
 
-import ast
 import asyncio
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -12,6 +10,7 @@ import model
 from service.config import resolve_history_lookback_days, resolve_timeframe
 from service.csv_signal_import import CSVSignalImportService
 from service.data import Data
+from service.signal_runtime import parse_signal_settings
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "csv_signal")
 
@@ -29,28 +28,6 @@ class SignalPlugin:
         self.import_service = CSVSignalImportService()
         self.data = Data(persist_exchange=True)
         self._import_finished = False
-
-    @staticmethod
-    def _parse_signal_settings(raw_value: Any) -> dict[str, Any]:
-        """Parse signal_settings payload from config."""
-        if isinstance(raw_value, dict):
-            return raw_value
-        if raw_value is None:
-            return {}
-
-        raw_text = str(raw_value).strip()
-        if not raw_text:
-            return {}
-
-        try:
-            parsed = json.loads(raw_text)
-        except json.JSONDecodeError:
-            parsed = ast.literal_eval(raw_text)
-
-        if not isinstance(parsed, dict):
-            raise TypeError("signal_settings must be a dictionary payload")
-
-        return parsed
 
     async def _load_csv_content(self, source: str) -> str:
         """Load CSV content from URL, filesystem path, or inline payload."""
@@ -112,7 +89,7 @@ class SignalPlugin:
             )
             return True
 
-        settings = self._parse_signal_settings(self.config.get("signal_settings"))
+        settings = parse_signal_settings(self.config.get("signal_settings"))
         csv_source = settings.get("csv_source")
         if not csv_source or str(csv_source).strip().lower() in {
             "",

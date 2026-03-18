@@ -25,7 +25,6 @@ are not exposed in the UI and must be set via the API.
 | `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema_cross` |
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
 | `pair_denylist` | `string` | Comma-separated denied symbols. | `SCAM,XYZ` |
-| `filter` | `string (json)` | UI filter payload (compat). | `{"rsi_max":70,"marketcap_cmc_api_key":"cmc_..."}` |
 | `volume` | `string (json)` | Minimum 24h volume filter. | `{"size":5,"range":"M"}` |
 | `topcoin_limit` | `int` | Max CoinMarketCap rank allowed. | `200` |
 | `marketcap_cmc_api_key` | `string` | CoinMarketCap API key for market cap filtering. | `cmc_...` |
@@ -73,12 +72,10 @@ are not exposed in the UI and must be set via the API.
 | `dynamic_so_min_scale` | `float` | Lower bound for dynamic SO multiplier. | `0.5` |
 | `dynamic_so_max_scale` | `float` | Upper bound for dynamic SO multiplier. | `3.0` |
 | `dynamic_so_loss_max_scale_threshold` | `float` | Absolute loss percentage at which dynamic SO uses `dynamic_so_max_scale` directly. | `30.0` |
-| `dynamic_so_ath_window` | `string` | Legacy compatibility key (`1d`/`1w`/`1m`) used only when lookback value/unit are not set. | `1m` |
 | `tp` | `float` | Take profit (percent). | `1.0` |
 | `sl` | `float` | Stop loss (percent). | `2.0` |
 | `ordersize` | `float` | ASAP base order size (advanced). | `12` |
 | `housekeeping_interval` | `int` | Ticker cache cleanup interval (days). | `2` |
-| `history_from_data` | `int` | History lookback for indicator seed (days). | `30` |
 | `history_lookback_time` | `string` | Canonical indicator history lookback using `d/w/m/y` suffixes such as `30d`, `12w`, `6m`, or `1y`. | `90d` |
 | `upnl_housekeeping_interval` | `int` | uPNL history retention in days; `0` keeps all history forever. | `0` |
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |

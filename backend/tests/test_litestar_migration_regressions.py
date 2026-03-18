@@ -140,7 +140,7 @@ def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
     )
 
     app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
-    payload = {"dry_run": '{"value": false, "type": "bool"}'}
+    payload = {"dry_run": {"value": False, "type": "bool"}}
     with TestClient(app=app) as client:
         response = client.post("/config/multiple", json=payload)
 
@@ -166,7 +166,7 @@ def test_config_multiple_blocks_switch_to_csv_signal_when_open_trades_exist(
     monkeypatch.setattr(config_controller, "OpenTrades", _DummyOpenTradesCount)
 
     app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
-    payload = {"signal": '{"value":"csv_signal","type":"str"}'}
+    payload = {"signal": {"value": "csv_signal", "type": "str"}}
     with TestClient(app=app) as client:
         response = client.post("/config/multiple", json=payload)
 
@@ -191,7 +191,7 @@ def test_config_single_blocks_switch_to_csv_signal_when_open_trades_exist(
     monkeypatch.setattr(config_controller, "OpenTrades", _DummyOpenTradesCount)
 
     app = Litestar(route_handlers=[config_controller.update_config_key])
-    payload = {"value": '{"value":"csv_signal","type":"str"}'}
+    payload = {"value": {"value": "csv_signal", "type": "str"}}
     with TestClient(app=app) as client:
         response = client.put("/config/single/signal", json=payload)
 
@@ -226,6 +226,39 @@ def test_config_multiple_invalid_json_returns_validation_error() -> None:
 
     assert response.status_code == 400
     assert response.json() == {"error": "'data' must be a JSON object"}
+
+
+def test_config_single_rejects_legacy_stringified_update_payload() -> None:
+    """Single-key config updates should reject legacy string payloads."""
+    app = Litestar(route_handlers=[config_controller.update_config_key])
+    with TestClient(app=app) as client:
+        response = client.put(
+            "/config/single/signal",
+            json={"value": '{"value":"csv_signal","type":"str"}'},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "Config value must be an object with 'value' and 'type'."
+    }
+
+
+def test_config_multiple_rejects_legacy_stringified_update_payloads() -> None:
+    """Batch config updates should reject legacy string payloads."""
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/config/multiple",
+            json={"dry_run": '{"value": false, "type": "bool"}'},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": (
+            "Config updates must be objects with 'value' and 'type'. "
+            "Invalid keys: dry_run"
+        )
+    }
 
 
 def test_trades_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> None:

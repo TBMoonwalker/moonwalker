@@ -1,6 +1,5 @@
 """Configuration API endpoints."""
 
-import json
 from typing import Any
 
 import helper
@@ -20,15 +19,14 @@ backup_service = BackupService()
 
 def _extract_config_update_value(raw_value: Any) -> Any:
     """Extract normalized `value` from config update payloads."""
-    parsed = raw_value
-    if isinstance(parsed, str):
-        try:
-            parsed = json.loads(parsed)
-        except json.JSONDecodeError:
-            return parsed
-    if isinstance(parsed, dict) and "value" in parsed:
-        return parsed["value"]
-    return parsed
+    if isinstance(raw_value, dict) and "value" in raw_value:
+        return raw_value["value"]
+    return raw_value
+
+
+def _is_config_update_payload(raw_value: Any) -> bool:
+    """Return whether a config update payload matches the supported API shape."""
+    return isinstance(raw_value, dict) and "value" in raw_value and "type" in raw_value
 
 
 async def _validate_csv_signal_switch(
@@ -98,7 +96,7 @@ async def update_config_key(key: str, request: Request[Any, Any, Any]) -> Any:
         key: Configuration key to update.
 
     Request body:
-        {"value": new_value}
+        {"value": {"value": new_value, "type": "str|bool|int|float"}}
 
     Returns:
         JSON response with success/error status.
@@ -112,9 +110,14 @@ async def update_config_key(key: str, request: Request[Any, Any, Any]) -> Any:
     if "value" not in data:
         return json_response({"error": "Missing 'value' in request"}, 400)
 
-    config = await Config.instance()
     value = data["value"]
+    if not _is_config_update_payload(value):
+        return json_response(
+            {"error": "Config value must be an object with 'value' and 'type'."},
+            400,
+        )
 
+    config = await Config.instance()
     if key == "signal":
         error_message = await _validate_csv_signal_switch(config, value)
         if error_message:
@@ -135,7 +138,11 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
     """Update multiple config keys via JSON body.
 
     Request body:
-        {"key1": "value1", "key2": "value2", ...}
+        {
+            "key1": {"value": new_value, "type": "str|bool|int|float"},
+            "key2": {"value": new_value, "type": "str|bool|int|float"},
+            ...
+        }
 
     Returns:
         JSON response with success/error status.
@@ -147,6 +154,20 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
 
     if not isinstance(data, dict):
         return json_response({"error": "'data' must be a JSON object"}, 400)
+    invalid_keys = [
+        key for key, value in data.items() if not _is_config_update_payload(value)
+    ]
+    if invalid_keys:
+        invalid_key_list = ", ".join(sorted(invalid_keys))
+        return json_response(
+            {
+                "error": (
+                    "Config updates must be objects with 'value' and 'type'. "
+                    f"Invalid keys: {invalid_key_list}"
+                )
+            },
+            400,
+        )
 
     config = await Config.instance()
     if "signal" in data:

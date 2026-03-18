@@ -1,4 +1,5 @@
 import {
+    type ConfigUpdatePayload,
     buildSignalSettingsValue,
     buildVolumeConfig,
     getDefaultHistoryLookbackByTimeframe,
@@ -149,7 +150,7 @@ export interface BuildConfigSubmitPayloadOptions {
     defaults: ConfigSubmitPayloadDefaults
 }
 
-export type ConfigSubmitPayload = Record<string, string>
+export type ConfigSubmitPayload = Record<string, ConfigUpdatePayload>
 
 export function buildConfigSubmitPayload(
     options: BuildConfigSubmitPayloadOptions,
@@ -226,13 +227,6 @@ export function buildConfigSubmitPayload(
             'str',
         ),
         symbol_list: serializeConfigValue(normalizedSymbolList, 'str'),
-        filter: serializeConfigValue(
-            {
-                rsi_max: filter.rsi ?? null,
-                marketcap_cmc_api_key: toNullableConfigString(filter.cmc_api_key),
-            },
-            'str',
-        ),
         rsi_max: serializeConfigValue(filter.rsi ?? false, 'float'),
         marketcap_cmc_api_key: serializeConfigValue(
             toNullableConfigString(filter.cmc_api_key),

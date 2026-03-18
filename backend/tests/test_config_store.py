@@ -44,7 +44,7 @@ async def test_config_batch_set_persists_false_bool(tmp_path, monkeypatch) -> No
     monkeypatch.setattr(config_module, "redis_client", DummyRedis())
 
     config = Config()
-    await config.batch_set({"dry_run": '{"value": false, "type": "bool"}'})
+    await config.batch_set({"dry_run": {"value": False, "type": "bool"}})
     await config.load_all()
 
     assert config.get("dry_run") is False
@@ -65,7 +65,7 @@ async def test_config_batch_set_clears_false_string_value(
 
     config = Config()
     await config.set("signal_strategy", {"value": "ema_low", "type": "str"})
-    await config.batch_set({"signal_strategy": '{"value": false, "type": "str"}'})
+    await config.batch_set({"signal_strategy": {"value": False, "type": "str"}})
     await config.load_all()
 
     assert config.get("signal_strategy") is None
@@ -88,7 +88,7 @@ async def test_config_batch_set_clears_null_string_value(tmp_path, monkeypatch) 
 
     config = Config()
     await config.set("timezone", {"value": "Europe/Vienna", "type": "str"})
-    await config.batch_set({"timezone": '{"value": null, "type": "str"}'})
+    await config.batch_set({"timezone": {"value": None, "type": "str"}})
     await config.load_all()
 
     assert config.get("timezone") is None
@@ -131,8 +131,8 @@ async def test_config_batch_set_updates_cache_without_reload(
     config = Config()
     await config.batch_set(
         {
-            "exchange": '{"value": "binance", "type": "str"}',
-            "dry_run": '{"value": false, "type": "bool"}',
+            "exchange": {"value": "binance", "type": "str"},
+            "dry_run": {"value": False, "type": "bool"},
         }
     )
 

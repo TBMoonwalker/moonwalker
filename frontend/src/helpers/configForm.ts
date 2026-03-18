@@ -10,6 +10,11 @@ const VOLUME_MULTIPLIERS: Record<string, number> = {
 type StructuredConfigValue = Record<string, unknown>
 export type ConfigValueType = 'str' | 'bool' | 'int' | 'float'
 
+export interface ConfigUpdatePayload {
+    value: unknown
+    type: ConfigValueType
+}
+
 export interface SignalSettingsInput {
     signal: string | null
     symsignal_url: string | null
@@ -24,8 +29,8 @@ export interface SignalSettingsInput {
 export function serializeConfigValue(
     value: unknown,
     type: ConfigValueType,
-): string {
-    return JSON.stringify({ value, type })
+): ConfigUpdatePayload {
+    return { value, type }
 }
 
 export function toNullableConfigString(
@@ -85,14 +90,8 @@ export function parseStructuredConfigValue(
         return null
     }
 
-    const normalized = raw
-        .replace(/'/g, '"')
-        .replace(/\bTrue\b/g, 'true')
-        .replace(/\bFalse\b/g, 'false')
-        .replace(/\bNone\b/g, 'null')
-
     try {
-        return JSON.parse(normalized) as StructuredConfigValue
+        return JSON.parse(raw) as StructuredConfigValue
     } catch (error) {
         console.error('Failed to parse structured config value:', error, raw)
         return null

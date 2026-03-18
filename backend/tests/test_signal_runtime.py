@@ -15,6 +15,11 @@ def test_parse_signal_settings_accepts_json_and_dict() -> None:
     assert parse_signal_settings('{"api_key":"x"}') == {"api_key": "x"}
 
 
+def test_parse_signal_settings_rejects_removed_python_literal_fallback() -> None:
+    with pytest.raises(ValueError):
+        parse_signal_settings("{'api_key': 'x'}")
+
+
 def test_build_common_runtime_settings_parses_shared_filters() -> None:
     runtime = build_common_runtime_settings(
         {

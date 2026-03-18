@@ -92,20 +92,15 @@ def resolve_history_lookback_days(
     config: dict[str, Any],
     timeframe: str | None = None,
 ) -> int:
-    """Resolve unified history lookback days with legacy fallback.
+    """Resolve unified history lookback days.
 
     Precedence:
     1) `history_lookback_time` (new canonical key)
-    2) `history_from_data` (legacy numeric days)
-    3) best-practice defaults by resolved timeframe
+    2) best-practice defaults by resolved timeframe
     """
     parsed = parse_history_lookback_to_days(config.get("history_lookback_time"))
     if parsed:
         return parsed
-
-    legacy_days = parse_history_lookback_to_days(config.get("history_from_data"))
-    if legacy_days:
-        return legacy_days
 
     effective_timeframe = timeframe or resolve_timeframe(config)
     default_window = HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME.get(
@@ -286,16 +281,12 @@ class Config:
             logging.warning("Failed to publish config change for '%s': %s", keys, exc)
 
     def __parse_update_payload(self, payload: Any) -> dict[str, Any]:
-        """Normalize update payloads from API clients.
-
-        Supports both legacy stringified JSON values and direct dict payloads.
-        """
-        parsed = json.loads(payload) if isinstance(payload, str) else payload
-        if not isinstance(parsed, dict):
+        """Normalize update payloads from API clients."""
+        if not isinstance(payload, dict):
             raise TypeError("Config payload must be a JSON object")
-        if "type" not in parsed or "value" not in parsed:
+        if "type" not in payload or "value" not in payload:
             raise KeyError("Config payload must include 'type' and 'value'")
-        return parsed
+        return payload
 
     def __build_entry(
         self,
@@ -406,7 +397,7 @@ class Config:
         """Update multiple configuration keys in the database at once.
 
         Args:
-            updates: Dictionary of key-value pairs where values are JSON strings
+            updates: Dictionary of key-value pairs with typed update payloads.
 
         Returns:
             True if the operation succeeded
@@ -415,7 +406,7 @@ class Config:
         for key, raw_value in updates.items():
             try:
                 action = self.__build_update_action(key, raw_value)
-            except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+            except (TypeError, ValueError, KeyError) as exc:
                 logging.warning(
                     "Skipping invalid config payload for '%s': %s", key, exc
                 )

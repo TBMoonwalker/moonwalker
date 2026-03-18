@@ -100,7 +100,6 @@ export function buildLoadedConfigState(
     defaults: ConfigLoadDefaults,
 ): LoadedConfigState {
     const signalSettings = parseStructuredConfigValue(response.signal_settings)
-    const filterIndicator = parseStructuredConfigValue(response.filter)
     const signalValue = toNullableString(response.signal)
     const signalStrategy = toNullableString(response.signal_strategy)
     const timeframe = toNullableString(response.timeframe)
@@ -198,13 +197,8 @@ export function buildLoadedConfigState(
             csvsignal_file_name: null,
         },
         filter: {
-            rsi:
-                toNumberOrNull(response.rsi_max) ??
-                toNumberOrNull(filterIndicator?.rsi_max) ??
-                null,
-            cmc_api_key:
-                toNullableString(response.marketcap_cmc_api_key) ??
-                toNullableString(filterIndicator?.marketcap_cmc_api_key),
+            rsi: toNumberOrNull(response.rsi_max),
+            cmc_api_key: toNullableString(response.marketcap_cmc_api_key),
             denylist: toTokenOnlyEntries(toNullableString(response.pair_denylist)),
             topcoin_limit: toNumberOrNull(response.topcoin_limit),
             volume:
