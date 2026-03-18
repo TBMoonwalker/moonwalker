@@ -46,7 +46,7 @@ This script:
 3. Copies built assets to backend/static/
 4. Creates Python virtual environment
 5. Installs Python dependencies
-6. Starts the Quart application
+6. Starts the Litestar application
 
 ## Project Overview
 
@@ -58,14 +58,22 @@ Moonwalker is a cryptocurrency trading bot that connects to exchanges (like Bina
 - REST API and WebSocket interface
 - Web-based UI built with Vue.js
 
+## Deployment Model
+
+- Moonwalker is intentionally designed to run as a **single-node, single-instance** application.
+- A running Moonwalker instance owns its own database, configuration, watcher/runtime state, and trading engine.
+- It is normal for **multiple dashboard clients** to connect to the same instance concurrently (for example desktop, mobile phone, or multiple browser tabs).
+- Separate Moonwalker installations are **intentionally isolated** from each other. Do not assume clustering, leader election, cross-instance coordination, or shared state between installations unless a task explicitly adds that.
+- When reviewing architecture or proposing changes, optimize for **single-instance reliability and safe multi-client access**, not distributed-system scale by default.
+
 ## Architecture
 
-### Backend (Python - Quart/Async)
-The backend is a Python application using Quart (async Flask) framework with the following structure:
+### Backend (Python - Litestar/Async)
+The backend is a Python application using Litestar with the following structure:
 
 **Main Entry Point:** `backend/app.py`
 - Initializes configuration, database, signal plugins, watcher, and housekeeper
-- Sets up Quart app with blueprints from controller
+- Sets up the Litestar app with route handlers from the controller package
 - Starts background tasks for watching symbols/tickers and running signal plugins
 
 **Key Components:**
@@ -157,7 +165,7 @@ This script:
 3. Copies built assets to backend/static/
 4. Creates Python virtual environment
 5. Installs Python dependencies
-6. Starts the Quart application
+6. Starts the Litestar application
 
 **Option 2: Manual setup**
 ```bash

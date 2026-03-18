@@ -2,7 +2,13 @@ import json
 
 import pandas as pd
 import pytest
+import service.data as data_module
 from service.data import Data
+from service.data_ohlcv import (
+    build_live_candle_payload,
+    resample_ohlcv_data,
+    serialize_ohlcv_dataframe,
+)
 
 
 @pytest.mark.parametrize(
@@ -27,7 +33,7 @@ def test_serialize_ohlcv_dataframe_uses_epoch_seconds_for_all_resolutions(
         }
     )
 
-    payload = Data._serialize_ohlcv_dataframe(frame, offset=0)
+    payload = serialize_ohlcv_dataframe(frame, offset=0)
     records = json.loads(payload)
 
     assert [record["time"] for record in records] == [
@@ -48,7 +54,70 @@ def test_serialize_ohlcv_dataframe_applies_offset_in_minutes() -> None:
         }
     )
 
-    payload = Data._serialize_ohlcv_dataframe(frame, offset=60)
+    payload = serialize_ohlcv_dataframe(frame, offset=60)
     records = json.loads(payload)
 
     assert records[0]["time"] == pytest.approx(1_700_003_600.0)
+
+
+def test_get_live_candle_for_symbol_uses_watcher_snapshot_api(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = Data()
+    captured: list[str] = []
+
+    def fake_get_live_candle_snapshot(symbol: str):
+        captured.append(symbol)
+        return [1_700_000_120_000, 1.0, 1.2, 0.8, 1.1, 10.0]
+
+    monkeypatch.setattr(
+        data_module, "get_live_candle_snapshot", fake_get_live_candle_snapshot
+    )
+
+    live = data._Data__get_live_candle_for_symbol("BTC/USDT", 1_700_000_000_000)
+
+    assert captured == ["BTC/USDT"]
+    assert live == {
+        "timestamp": 1_700_000_120_000.0,
+        "symbol": "BTC/USDT",
+        "open": 1.0,
+        "high": 1.2,
+        "low": 0.8,
+        "close": 1.1,
+        "volume": 10.0,
+    }
+
+
+def test_build_live_candle_payload_filters_outdated_snapshot() -> None:
+    payload = build_live_candle_payload(
+        [1_700_000_000_000, 1.0, 1.2, 0.8, 1.1, 10.0],
+        "BTC/USDT",
+        1_700_000_000_000,
+    )
+
+    assert payload is None
+
+
+def test_resample_ohlcv_data_returns_expected_closed_candle_frame() -> None:
+    frame = pd.DataFrame(
+        {
+            "timestamp": [
+                1_699_999_980_000,
+                1_700_000_040_000,
+                1_700_000_100_000,
+            ],
+            "open": [1.0, 2.0, 3.0],
+            "high": [1.2, 2.2, 3.2],
+            "low": [0.8, 1.8, 2.8],
+            "close": [1.1, 2.1, 3.1],
+            "volume": [10.0, 20.0, 30.0],
+        }
+    )
+
+    resampled = resample_ohlcv_data(frame, "2m")
+
+    assert resampled is not None
+    assert len(resampled.index) == 2
+    assert list(resampled["open"]) == [1.0, 2.0]
+    assert list(resampled["close"]) == [1.1, 3.1]
+    assert list(resampled["volume"]) == [10.0, 50.0]

@@ -4,6 +4,7 @@ import asyncio
 from typing import Any
 
 import ccxt.async_support as ccxt
+from service.config_views import ExchangeConnectionConfigView
 
 
 class ExchangeClientManager:
@@ -36,16 +37,7 @@ class ExchangeClientManager:
 
     def build_exchange_config(self, config: dict[str, Any]) -> dict[str, Any]:
         """Normalize runtime config into the fields that require a client rebuild."""
-        dry_run = bool(config.get("dry_run", True))
-        return {
-            "exchange": config.get("exchange"),
-            "key": config.get("key"),
-            "secret": config.get("secret"),
-            "market": config.get("market", "spot"),
-            "dry_run": dry_run,
-            "sandbox": False if dry_run else config.get("sandbox", False),
-            "exchange_hostname": config.get("exchange_hostname"),
-        }
+        return ExchangeConnectionConfigView.from_config(config).to_runtime_dict()
 
     async def ensure_exchange(self, config: dict[str, Any]) -> bool:
         """Ensure a client exists and matches the requested config."""

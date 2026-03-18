@@ -4,6 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "vite",
+    "test": "node --test tests/*.test.cjs",
     "type-check": "vue-tsc --noEmit",
     "build": "run-s type-check build-only",
     "preview": "vite preview",

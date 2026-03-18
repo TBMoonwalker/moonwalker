@@ -38,7 +38,7 @@ async def get_ohlcv_data(
 async def get_exchange_symbols(currency: str) -> Any:
     """Get exchange symbols for a configured quote currency."""
     config = await Config.instance()
-    symbols = await data.get_exchange_symbols_for_currency(config._cache, currency)
+    symbols = await data.get_exchange_symbols_for_currency(config.snapshot(), currency)
     return {"symbols": symbols}
 
 
@@ -54,7 +54,7 @@ async def get_exchange_symbols_from_draft(request: Request[Any, Any, Any]) -> An
         payload = {}
 
     config = await Config.instance()
-    exchange_config = dict(config._cache)
+    exchange_config = config.snapshot()
 
     draft_exchange_config = payload.get("exchange_config")
     if isinstance(draft_exchange_config, dict):

@@ -320,3 +320,60 @@ def test_manual_buy_invalid_json_returns_validation_error() -> None:
         "result": "",
         "error": "Payload must be a JSON object",
     }
+
+
+def test_order_mutations_require_post(monkeypatch) -> None:
+    """Sell, buy, and stop endpoints must reject GET and accept POST."""
+    service = _DummyConfigService()
+    captured_calls: list[tuple[str, tuple[Any, ...]]] = []
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    async def _fake_sell(symbol: str, _config: Any) -> bool:
+        captured_calls.append(("sell", (symbol,)))
+        return True
+
+    async def _fake_buy(symbol: str, ordersize: str, _config: Any) -> bool:
+        captured_calls.append(("buy", (symbol, ordersize)))
+        return True
+
+    async def _fake_stop(symbol: str) -> bool:
+        captured_calls.append(("stop", (symbol,)))
+        return True
+
+    monkeypatch.setattr(
+        orders_controller.Config, "instance", classmethod(_fake_instance)
+    )
+    monkeypatch.setattr(orders_controller.orders, "receive_sell_signal", _fake_sell)
+    monkeypatch.setattr(orders_controller.orders, "receive_buy_signal", _fake_buy)
+    monkeypatch.setattr(orders_controller.orders, "receive_stop_signal", _fake_stop)
+
+    app = Litestar(
+        route_handlers=[
+            orders_controller.sell_order,
+            orders_controller.buy_order,
+            orders_controller.stop_order,
+        ]
+    )
+
+    with TestClient(app=app) as client:
+        assert client.get("/orders/sell/btc-usdt").status_code == 405
+        assert client.get("/orders/buy/btc-usdt/10").status_code == 405
+        assert client.get("/orders/stop/btc-usdt").status_code == 405
+
+        sell_response = client.post("/orders/sell/btc-usdt")
+        buy_response = client.post("/orders/buy/btc-usdt/10")
+        stop_response = client.post("/orders/stop/btc-usdt")
+
+    assert sell_response.status_code == 200
+    assert sell_response.json() == {"result": "sell"}
+    assert buy_response.status_code == 200
+    assert buy_response.json() == {"result": "new_so"}
+    assert stop_response.status_code == 200
+    assert stop_response.json() == {"result": "stop"}
+    assert captured_calls == [
+        ("sell", ("btc-usdt",)),
+        ("buy", ("btc-usdt", "10")),
+        ("stop", ("btc-usdt",)),
+    ]

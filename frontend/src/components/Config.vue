@@ -29,7 +29,7 @@
             :on-asap-url-input="handleAsapUrlInput"
             :on-csv-file-selected="handleCsvSignalFileSelected"
             :on-fetch-asap-symbols="fetchAsapSymbolsForCurrency"
-            :on-signal-settings-select="handle_signal_settings_select"
+            :on-signal-settings-select="handleSignalSettingsSelect"
             :rules="rules"
             :signal="signal"
             :symsignals="symsignals"
@@ -66,7 +66,7 @@
             :monitoring="monitoring"
             :on-test="testMonitoringTelegram"
             :rules="rules"
-            :test-loading="monitoring_test_loading"
+            :test-loading="monitoringTestLoading"
         />
 
         <ConfigIndicatorSection
@@ -183,78 +183,33 @@ import ConfigIndicatorSection from './config/ConfigIndicatorSection.vue'
 import ConfigMonitoringSection from './config/ConfigMonitoringSection.vue'
 import ConfigSignalSection from './config/ConfigSignalSection.vue'
 import { MOONWALKER_API_ORIGIN } from '../config'
+import { useConfigAdvancedGeneral } from '../composables/useConfigAdvancedGeneral'
+import { useConfigBackupRestore } from '../composables/useConfigBackupRestore'
+import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
+import { useConfigMonitoringTest } from '../composables/useConfigMonitoringTest'
+import { useConfigPageState } from '../composables/useConfigPageState'
+import { useConfigPersistableState } from '../composables/useConfigPersistableState'
+import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
+import { useConfigSignalFlow } from '../composables/useConfigSignalFlow'
+import { useConfigValidationFlow } from '../composables/useConfigValidationFlow'
+import { buildConfigRules } from '../helpers/configRules'
 import {
-    usePersistableStateTracking,
-    type PersistableState,
-} from '../composables/usePersistableStateTracking'
-import {
-    buildSignalSettingsValue,
-    buildVolumeConfig,
-    getDefaultHistoryLookbackByTimeframe,
-    normalizePairEntries,
-    parseStructuredConfigValue,
-    parseSymbolListToArray,
-    parseVolumeLimitToNumber,
-    toTokenOnlyEntries,
-} from '../helpers/configForm'
-import { getAllTimeZones } from '../helpers/timezone'
-import { parseBooleanString, isJsonString, toNumberOrNull } from '../helpers/validators'
-import type { FormItemRule, FormRules } from 'naive-ui/es/form'
+    buildConfigSubmitPayload,
+    type ConfigSubmitPayloadDefaults,
+} from '../helpers/configSubmitPayload'
 import { useMessage } from 'naive-ui/es/message'
-import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
-import axios from 'axios'
-import { trackUiEvent } from '../utils/uiTelemetry'
-
-interface ConfigSectionFormExpose {
-    validate: () => Promise<boolean>
-}
-
-type SaveState = 'idle' | 'saving' | 'saved' | 'error'
-type BackupRestoreMode = 'config' | 'full'
-type BackupPayload = {
-    config?: unknown
-    trade_data?: unknown
-    includes_trade_data?: boolean
-}
-type RestoreSummary = {
-    config_keys?: number
-    history_refreshed_symbols?: string[]
-    history_failed_symbols?: string[]
-}
-type RestoreResponse = {
-    message?: string
-    result?: RestoreSummary
-}
 
 function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
 }
 
-const generalFormRef = ref<ConfigSectionFormExpose | null>(null)
-const signalFormRef = ref<ConfigSectionFormExpose | null>(null)
-const filterFormRef = ref<ConfigSectionFormExpose | null>(null)
-const exchangeFormRef = ref<ConfigSectionFormExpose | null>(null)
-const dcaFormRef = ref<ConfigSectionFormExpose | null>(null)
-const autopilotFormRef = ref<ConfigSectionFormExpose | null>(null)
-const monitoringFormRef = ref<ConfigSectionFormExpose | null>(null)
-const indicatorFormRef = ref<ConfigSectionFormExpose | null>(null)
 const message = useMessage()
 const router = useRouter()
 const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).toString()
 const isLoading = ref(true)
 const showAdvancedGeneral = ref(false)
-const monitoring_test_loading = ref(false)
-const backupIncludeTradeData = ref(false)
-const backupDownloadLoading = ref(false)
-const restoreLoading = ref(false)
-const backupFileInputRef = ref<HTMLInputElement | null>(null)
-const selectedBackupFileName = ref<string | null>(null)
-const selectedBackupPayload = ref<BackupPayload | null>(null)
-const submitAttempted = ref(false)
-const saveState = ref<SaveState>('idle')
-const saveErrorMessage = ref<string | null>(null)
-const lastSavedAt = ref<Date | null>(null)
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
 const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
 const ADVANCED_WS_STALE_TIMEOUT_MS = 20000
@@ -274,1511 +229,219 @@ const DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS = 2
 const DEFAULT_GREEN_PHASE_CONFIRM_CYCLES = 2
 const DEFAULT_GREEN_PHASE_RELEASE_CYCLES = 4
 const DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT = 85
-const timezone = ref([])
-const timerange = [
-    {
-        label: '1m',
-        value: '1m'
-    },
-    {
-        label: '15m',
-        value: '15m'
-    },
-    {
-        label: '30m',
-        value: '30m'
-    },
-    {
-        label: '1h',
-        value: '1h'
-    },
-    {
-        label: '4h',
-        value: '4h'
-    },
-    {
-        label: '1d',
-        value: '1d'
-    },
-]
-
-const historyLookbackOptions = [
-    { label: '30 days (1m default)', value: '30d' },
-    { label: '90 days (15m default)', value: '90d' },
-    { label: '180 days (1h default)', value: '180d' },
-    { label: '1 year (4h default)', value: '1y' },
-    { label: '3 years (1d default)', value: '3y' },
-]
-
-const exchanges = [
-    {
-        label: 'Binance',
-        value: 'binance'
-    },
-    {
-        label: 'Bybit',
-        value: 'bybit'
-    },
-]
-
-const currency = [
-    {
-        label: 'USDC',
-        value: 'usdc',
-    },
-    {
-        label: 'USDT',
-        value: 'usdt',
-    },
-]
-
-const market = [{
-    label: 'Spot',
-    value: 'spot'
-}]
-
-const sellOrderTypeOptions = [
-    {
-        label: 'Market',
-        value: 'market',
-    },
-    {
-        label: 'Limit',
-        value: 'limit',
-    },
-]
-
-const symsignals = [
-    { label: "12 - SymRank Top 10", value: 12 },
-    { label: "2 - SymRank Top 30", value: 2 },
-    { label: "11 - SymRank Top 50", value: 11 },
-    { label: "1 - SymRank Top 100 Triple Tracker", value: 1 },
-    { label: "6 - SymRank Top 100 Quadruple Tracker", value: 6 },
-    { label: "7 - SymRank Top 250 Quadruple Tracker", value: 7 },
-    { label: "13 - SymScore Super Bullish", value: 13 },
-    { label: "22 - SymScore Super Bullish Range", value: 22 },
-    { label: "29 - SymScore Super-Hyper Bullish Range", value: 29 },
-    { label: "14 - SymScore Hyper Bullish", value: 14 },
-    { label: "23 - SymScore Hyper Bullish Range", value: 23 },
-    { label: "27 - SymScore Hyper-Ultra Bullish Range", value: 27 },
-    { label: "15 - SymScore Ultra Bullish", value: 15 },
-    { label: "25 - SymScore Ultra Bullish Range", value: 25 },
-    { label: "31 - SymScore Ultra-X-Treme Bullish Range", value: 31 },
-    { label: "16 - SymScore X-Treme Bullish", value: 16 },
-    { label: "54 - SymScore Neutral", value: 54 },
-    { label: "17 - SymScore Super Bearish", value: 17 },
-    { label: "21 - SymScore Super Bearish Range", value: 21 },
-    { label: "30 - SymScore Super-Hyper Bearish Range", value: 30 },
-    { label: "18 - SymScore Hyper Bearish", value: 18 },
-    { label: "24 - SymScore Hyper Bearish Range", value: 24 },
-    { label: "28 - SymScore Hyper-Ultra Bearish Range", value: 28 },
-    { label: "19 - SymScore Ultra Bearish", value: 19 },
-    { label: "26 - SymScore Ultra Bearish Range", value: 26 },
-    { label: "32 - SymScore Ultra-X-Treme Bearish Range", value: 32 },
-    { label: "20 - SymScore X-Treme Bearish", value: 20 },
-    { label: "39 - SymSense Super Greed", value: 39 },
-    { label: "48 - SymSense Super Greed Range", value: 48 },
-    { label: "55 - SymSense Super-Hyper Greed Range", value: 55 },
-    { label: "40 - SymSense Hyper Greed", value: 40 },
-    { label: "49 - SymSense Hyper Greed Range", value: 49 },
-    { label: "56 - SymSense Hyper-Ultra Greed Range", value: 56 },
-    { label: "41 - SymSense Ultra Greed", value: 41 },
-    { label: "50 - SymSense Ultra Greed Range", value: 50 },
-    { label: "57 - SymSense Ultra-X-Treme Greed Range", value: 57 },
-    { label: "42 - SymSense X-Treme Greed", value: 42 },
-    { label: "43 - SymSense Neutral", value: 43 },
-    { label: "44 - SymSense Super Fear", value: 44 },
-    { label: "51 - SymSense Super Fear Range", value: 51 },
-    { label: "58 - SymSense Super-Hyper Fear Range", value: 58 },
-    { label: "45 - SymSense Hyper Fear", value: 45 },
-    { label: "52 - SymSense Hyper Fear Range", value: 52 },
-    { label: "59 - SymSense Hyper-Ultra Fear Range", value: 59 },
-    { label: "46 - SymSense Ultra Fear", value: 46 },
-    { label: "53 - SymSense Ultra Fear Range", value: 53 },
-    { label: "60 - SymSense Ultra-X-Treme Fear Range", value: 60 },
-    { label: "47 - SymSense X-Treme Fear", value: 47 },
-    { label: "61 - SymSync 100", value: 61 },
-    { label: "62 - SymSync 90", value: 62 },
-    { label: "63 - SymSync 80", value: 63 },
-    { label: "64 - SymSync 70", value: 64 },
-    { label: "65 - SymSync 60", value: 65 },
-    { label: "66 - SymSync 50", value: 66 },
-    { label: "9 - Super Volatility", value: 9 },
-    { label: "33 - Super Volatility Range", value: 33 },
-    { label: "36 - Super-Hyper Volatility Range", value: 36 },
-    { label: "10 - Super Volatility Double Tracker", value: 10 },
-    { label: "3 - Hyper Volatility", value: 3 },
-    { label: "34 - Hyper Volatility Range", value: 34 },
-    { label: "37 - Hyper-Ultra Volatility Range", value: 37 },
-    { label: "8 - Hyper Volatility Double Tracker", value: 8 },
-    { label: "4 - Ultra Volatility", value: 4 },
-    { label: "35 - Ultra Volatility Range", value: 35 },
-    { label: "38 - Ultra-X-Treme Volatility Range", value: 38 },
-    { label: "5 - X-Treme Volatility", value: 5 },
-]
-
-const general = ref({
-    timezone: null,
-    debug: false,
-    ws_watchdog_enabled: true,
-    ws_healthcheck_interval_ms: ADVANCED_WS_HEALTHCHECK_INTERVAL_MS,
-    ws_stale_timeout_ms: ADVANCED_WS_STALE_TIMEOUT_MS,
-    ws_reconnect_debounce_ms: ADVANCED_WS_RECONNECT_DEBOUNCE_MS,
-})
-
-const signal = ref({
-    symbol_list: null,
-    asap_use_url: true,
-    asap_symbol_select: [] as string[],
-    asap_symbol_options: [],
-    asap_symbols_loading: false,
-    asap_symbol_fetch_error: null,
-    signal: null,
-    plugins: [],
-    strategy: null,
-    strategy_enabled: false,
-    strategy_plugins: [],
-    timeframe: null,
-    symsignal_url: null,
-    symsignal_key: null,
-    symsignal_version: null,
-    symsignal_allowedsignals: [],
-    csvsignal_mode: "source",
-    csvsignal_source: null,
-    csvsignal_inline: null,
-    csvsignal_file_name: null,
-})
-
-const filter = ref({
-    rsi: null,
-    cmc_api_key: null,
-    denylist: null,
-    topcoin_limit: null,
-    volume: null,
-    btc_pulse: false,
-})
-
-const exchange = ref({
-    name: null,
-    timeframe: null,
-    key: null,
-    secret: null,
-    exchange_hostname: null,
-    dry_run: true,
-    currency: null,
-    market: "spot",
-    watcher_ohlcv: false,
-})
-
-const dca = ref({
-    enabled: false,
-    dynamic: false,
-    strategy: null,
-    timeframe: null,
-    trailing_tp: null,
-    max_bots: null,
-    bo: null,
-    sell_order_type: 'market',
-    limit_sell_timeout_sec: 60,
-    limit_sell_fallback_to_market: true,
-    tp_spike_confirm_enabled: false,
-    tp_spike_confirm_seconds: DEFAULT_TP_SPIKE_CONFIRM_SECONDS,
-    tp_spike_confirm_ticks: DEFAULT_TP_SPIKE_CONFIRM_TICKS,
-    so: null,
-    mstc: null,
-    sos: null,
-    ss: null,
-    os: null,
-    trade_safety_order_budget_ratio: 0.95,
-    tp: null,
-    sl: null,
-})
-
-const autopilot = ref({
-    enabled: false,
-    max_fund: null,
-    high_mad: null,
-    high_tp: null,
-    high_sl: null,
-    high_sl_timeout: null,
-    high_threshold: null,
-    medium_mad: null,
-    medium_tp: null,
-    medium_sl: null,
-    medium_sl_timeout: null,
-    medium_threshold: null,
-    green_phase_enabled: false,
-    green_phase_ramp_days: DEFAULT_GREEN_PHASE_RAMP_DAYS,
-    green_phase_eval_interval_sec: DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC,
-    green_phase_window_minutes: DEFAULT_GREEN_PHASE_WINDOW_MINUTES,
-    green_phase_min_profitable_close_ratio: DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO,
-    green_phase_speed_multiplier: DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER,
-    green_phase_exit_multiplier: DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER,
-    green_phase_max_extra_deals: DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS,
-    green_phase_confirm_cycles: DEFAULT_GREEN_PHASE_CONFIRM_CYCLES,
-    green_phase_release_cycles: DEFAULT_GREEN_PHASE_RELEASE_CYCLES,
-    green_phase_max_locked_fund_percent: DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT,
-})
-
-const monitoring = ref({
-    enabled: false,
-    telegram_bot_token: null,
-    telegram_api_id: null,
-    telegram_api_hash: null,
-    telegram_chat_id: null,
-    timeout_sec: 5,
-    retry_count: 1,
-})
-
-const indicator = ref({
-    upnl_housekeeping_interval: 0,
-    history_lookback_time: null,
-})
-function resetSignalStrategySelection(): void {
-    signal.value.strategy_enabled = false
-    signal.value.strategy = null
+const configSubmitPayloadDefaults: ConfigSubmitPayloadDefaults = {
+    advancedWsHealthcheckIntervalMs: ADVANCED_WS_HEALTHCHECK_INTERVAL_MS,
+    advancedWsStaleTimeoutMs: ADVANCED_WS_STALE_TIMEOUT_MS,
+    advancedWsReconnectDebounceMs: ADVANCED_WS_RECONNECT_DEBOUNCE_MS,
+    defaultTpSpikeConfirmSeconds: DEFAULT_TP_SPIKE_CONFIRM_SECONDS,
+    defaultTpSpikeConfirmTicks: DEFAULT_TP_SPIKE_CONFIRM_TICKS,
+    defaultGreenPhaseRampDays: DEFAULT_GREEN_PHASE_RAMP_DAYS,
+    defaultGreenPhaseEvalIntervalSec: DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC,
+    defaultGreenPhaseWindowMinutes: DEFAULT_GREEN_PHASE_WINDOW_MINUTES,
+    defaultGreenPhaseMinProfitableCloseRatio:
+        DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO,
+    defaultGreenPhaseSpeedMultiplier: DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER,
+    defaultGreenPhaseExitMultiplier: DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER,
+    defaultGreenPhaseMaxExtraDeals: DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS,
+    defaultGreenPhaseConfirmCycles: DEFAULT_GREEN_PHASE_CONFIRM_CYCLES,
+    defaultGreenPhaseReleaseCycles: DEFAULT_GREEN_PHASE_RELEASE_CYCLES,
+    defaultGreenPhaseMaxLockedFundPercent:
+        DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT,
 }
-
-const SECTION_LABELS: Record<string, string> = {
-    general: 'General',
-    signal: 'Signal',
-    filter: 'Filter',
-    exchange: 'Exchange',
-    dca: 'DCA',
-    autopilot: 'Autopilot',
-    monitoring: 'Monitoring',
-    indicator: 'Indicator',
-}
-
-function buildPersistableState(): PersistableState {
-    return {
-        general: {
-            ...general.value,
-            show_advanced_general: showAdvancedGeneral.value,
-        },
-        signal: {
-            symbol_list: signal.value.symbol_list,
-            asap_use_url: signal.value.asap_use_url,
-            asap_symbol_select: signal.value.asap_symbol_select,
-            signal: signal.value.signal,
-            strategy: signal.value.strategy,
-            strategy_enabled: signal.value.strategy_enabled,
-            timeframe: signal.value.timeframe,
-            symsignal_url: signal.value.symsignal_url,
-            symsignal_key: signal.value.symsignal_key,
-            symsignal_version: signal.value.symsignal_version,
-            symsignal_allowedsignals: signal.value.symsignal_allowedsignals,
-            csvsignal_mode: signal.value.csvsignal_mode,
-            csvsignal_source: signal.value.csvsignal_source,
-            csvsignal_inline: signal.value.csvsignal_inline,
-            csvsignal_file_name: signal.value.csvsignal_file_name,
-        },
-        filter: { ...filter.value },
-        exchange: { ...exchange.value },
-        dca: { ...dca.value },
-        autopilot: { ...autopilot.value },
-        monitoring: { ...monitoring.value },
-        indicator: { ...indicator.value },
-    }
-}
+const {
+    autopilot,
+    currency,
+    dca,
+    exchange,
+    exchanges,
+    filter,
+    general,
+    historyLookbackOptions,
+    indicator,
+    initializeTimezoneOptions,
+    market,
+    monitoring,
+    resetSignalStrategySelection,
+    sellOrderTypeOptions,
+    signal,
+    symsignals,
+    timerange,
+    timezone,
+} = useConfigPageState({
+    defaults: configSubmitPayloadDefaults,
+})
 const { changedSectionLabels, changedSections, isDirty, syncBaselineState } =
-    usePersistableStateTracking({
-        buildState: buildPersistableState,
-        sectionLabels: SECTION_LABELS,
+    useConfigPersistableState({
+        autopilot,
+        dca,
+        exchange,
+        filter,
+        general,
+        indicator,
+        monitoring,
+        showAdvancedGeneral,
+        signal,
     })
-const submitButtonLabel = computed(() => {
-    if (saveState.value === 'saving') {
-        return 'Saving...'
-    }
-    if (isDirty.value) {
-        return 'Submit changes'
-    }
-    return 'No changes'
+const { buildConfigLoadDefaults } = useConfigAdvancedGeneral({
+    advancedPreferenceKey: ADVANCED_GENERAL_PREFERENCE_KEY,
+    defaultSymSignalUrl: DEFAULT_SYMSIGNAL_URL,
+    defaultSymSignalVersion: DEFAULT_SYMSIGNAL_VERSION,
+    defaults: configSubmitPayloadDefaults,
+    exchange,
+    general,
+    getClientTimezone,
+    isLoading,
+    showAdvancedGeneral,
 })
-const saveBannerType = computed(() => {
-    if (saveState.value === 'error') {
-        return 'error'
-    }
-    if (saveState.value === 'saved') {
-        return 'success'
-    }
-    if (isDirty.value) {
-        return 'warning'
-    }
-    return 'info'
+const {
+    confirmDiscardUnsavedChanges,
+    handleBeforeUnload,
+    hasUnsavedChanges,
+    isSubmitDisabled,
+    resetSaveState,
+    saveBannerMessage,
+    saveBannerTitle,
+    saveBannerType,
+    saveState,
+    setSaveError,
+    submitButtonLabel,
+    submitForm,
+} = useConfigSaveFlow({
+    apiUrl,
+    buildPayload: () =>
+        buildConfigSubmitPayload({
+            general: general.value,
+            signal: signal.value,
+            filter: filter.value,
+            exchange: exchange.value,
+            dca: dca.value,
+            autopilot: autopilot.value,
+            monitoring: monitoring.value,
+            indicator: indicator.value,
+            showAdvancedGeneral: showAdvancedGeneral.value,
+            defaults: configSubmitPayloadDefaults,
+        }),
+    changedSectionLabels,
+    changedSections,
+    isDirty,
+    isLoading,
+    message,
+    onSaved: () => {
+        setTimeout(() => {
+            router.push('/')
+        }, 250)
+    },
+    syncBaselineState,
 })
-const saveBannerTitle = computed(() => {
-    if (saveState.value === 'error') {
-        return 'Save failed'
-    }
-    if (saveState.value === 'saved') {
-        return 'Saved'
-    }
-    if (isDirty.value) {
-        return 'Unsaved changes'
-    }
-    return 'No pending changes'
+const {
+    autopilotFormRef,
+    dcaFormRef,
+    exchangeFormRef,
+    filterFormRef,
+    generalFormRef,
+    handleGlobalKeydown,
+    handleValidateButtonClick,
+    indicatorFormRef,
+    monitoringFormRef,
+    signalFormRef,
+    submitAttempted,
+} = useConfigValidationFlow({
+    message,
+    onValidSubmit: submitForm,
+    setSaveError,
 })
-const saveBannerMessage = computed(() => {
-    if (saveState.value === 'error' && saveErrorMessage.value) {
-        return saveErrorMessage.value
-    }
-    if (saveState.value === 'saved' && lastSavedAt.value) {
-        return `Configuration saved at ${lastSavedAt.value.toLocaleTimeString()}`
-    }
-    if (isDirty.value) {
-        const changed = changedSectionLabels.value.join(', ')
-        return changed.length > 0
-            ? `Changed sections: ${changed}`
-            : 'You have unsaved changes.'
-    }
-    return 'Edit any field and submit to persist updates.'
-})
-const isSubmitDisabled = computed(
-    () => isLoading.value || saveState.value === 'saving' || !isDirty.value,
-)
-const selectedBackupHasTradeData = computed(() =>
-    Boolean(selectedBackupPayload.value && typeof selectedBackupPayload.value.trade_data === 'object')
-)
-const selectedBackupConfigCount = computed(() => {
-    const configRows = selectedBackupPayload.value?.config
-    return Array.isArray(configRows) ? configRows.length : 0
+const {
+    applySignalSettingsSelection,
+    fetchAsapSymbolsForCurrency,
+    getAsapMissingFieldsLabel,
+    handleAsapUrlInput,
+    handleCsvSignalFileSelected,
+    handleSignalSettingsSelect,
+    isAsapExchangeReady,
+    isCurrencyConfigured,
+    isUrlInput,
+} = useConfigSignalFlow({
+    apiUrl,
+    defaultSymSignalUrl: DEFAULT_SYMSIGNAL_URL,
+    defaultSymSignalVersion: DEFAULT_SYMSIGNAL_VERSION,
+    exchange,
+    isLoading,
+    message,
+    resetSignalStrategySelection,
+    signal,
 })
 
-function hasUnsavedChanges(): boolean {
-    return !isLoading.value && isDirty.value
-}
-
-function setSaveError(messageText: string): void {
-    saveState.value = 'error'
-    saveErrorMessage.value = messageText
-}
-
-function isBackupPayload(value: unknown): value is BackupPayload {
-    return typeof value === 'object' && value !== null && 'config' in value
-}
-
-function buildBackupFilename(includeTradeData: boolean): string {
-    const timestamp = new Date().toISOString().replaceAll(':', '-')
-    const scope = includeTradeData ? 'full' : 'config'
-    return `moonwalker-backup-${scope}-${timestamp}.json`
-}
-
-function downloadTextFile(filename: string, content: string): void {
-    const blob = new Blob([content], { type: 'application/json;charset=utf-8' })
-    const url = window.URL.createObjectURL(blob)
-    const anchor = document.createElement('a')
-    anchor.href = url
-    anchor.download = filename
-    anchor.click()
-    window.URL.revokeObjectURL(url)
-}
-
-function openBackupFilePicker(): void {
-    backupFileInputRef.value?.click()
-}
-
-function clearSelectedBackup(): void {
-    selectedBackupFileName.value = null
-    selectedBackupPayload.value = null
-    if (backupFileInputRef.value) {
-        backupFileInputRef.value.value = ''
-    }
-}
-
-function extractAxiosErrorMessage(error: unknown, fallback: string): string {
-    if (axios.isAxiosError(error)) {
-        if (error.response?.data?.error) {
-            return String(error.response.data.error)
-        }
-        if (error.response?.data?.message) {
-            return String(error.response.data.message)
-        }
-        if (error.message) {
-            return error.message
-        }
-    }
-    if (error instanceof Error && error.message) {
-        return error.message
-    }
-    return fallback
-}
-
-async function handleBackupDownload(): Promise<void> {
-    if (backupDownloadLoading.value) {
-        return
-    }
-
-    backupDownloadLoading.value = true
-    try {
-        const response = await axios.get<BackupPayload>(apiUrl('/config/backup/export'), {
-            params: { include_trade_data: backupIncludeTradeData.value },
-        })
-        downloadTextFile(
-            buildBackupFilename(backupIncludeTradeData.value),
-            JSON.stringify(response.data, null, 2),
-        )
-        message.success('Backup downloaded successfully.')
-    } catch (error) {
-        message.error(extractAxiosErrorMessage(error, 'Backup download failed.'))
-    } finally {
-        backupDownloadLoading.value = false
-    }
-}
-
-async function handleBackupFileSelected(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement
-    const selectedFile = input.files?.[0]
-    if (!selectedFile) {
-        return
-    }
-
-    try {
-        const rawText = await selectedFile.text()
-        const parsed = JSON.parse(rawText) as unknown
-        if (!isBackupPayload(parsed)) {
-            throw new Error('Selected file is not a valid Moonwalker backup.')
-        }
-        selectedBackupFileName.value = selectedFile.name
-        selectedBackupPayload.value = parsed
-        message.success(`Loaded backup ${selectedFile.name}`)
-    } catch (error) {
-        clearSelectedBackup()
-        message.error(
-            error instanceof Error
-                ? error.message
-                : 'Failed to read backup file.',
-        )
-    }
-}
-
-async function handleRestoreBackup(mode: BackupRestoreMode): Promise<void> {
-    if (!selectedBackupPayload.value) {
-        message.error('Please select a backup file first.')
-        return
-    }
-    if (restoreLoading.value) {
-        return
-    }
-    if (mode === 'full' && !selectedBackupHasTradeData.value) {
-        message.error('The selected backup does not include trade data.')
-        return
-    }
-
-    if (hasUnsavedChanges() && !window.confirm(
-        'You have unsaved configuration changes. Continue and replace them with the backup?'
-    )) {
-        return
-    }
-
-    const confirmationMessage = mode === 'full'
-        ? 'Restore the full backup now? This will replace the current configuration and all trade data.'
-        : 'Restore configuration only now? This will replace the current configuration.'
-    if (!window.confirm(confirmationMessage)) {
-        return
-    }
-
-    restoreLoading.value = true
-    try {
-        const response = await axios.post<RestoreResponse>(
-            apiUrl('/config/backup/restore'),
-            {
-                backup: selectedBackupPayload.value,
-                restore_trade_data: mode === 'full',
-            },
-        )
-
+const {
+    backupDownloadLoading,
+    backupFileInputRef,
+    backupIncludeTradeData,
+    clearSelectedBackup,
+    handleBackupDownload,
+    handleBackupFileSelected,
+    handleRestoreBackup,
+    openBackupFilePicker,
+    restoreLoading,
+    selectedBackupConfigCount,
+    selectedBackupFileName,
+    selectedBackupHasTradeData,
+    selectedBackupPayload,
+} = useConfigBackupRestore({
+    apiUrl,
+    hasUnsavedChanges,
+    message,
+    onBeforeReload: () => {
         isLoading.value = true
-        await fetchDefaultValues()
-
-        const failedSymbols = response.data?.result?.history_failed_symbols ?? []
-        if (Array.isArray(failedSymbols) && failedSymbols.length > 0) {
-            message.warning(
-                `${response.data?.message || 'Restore completed.'} History refresh failed for: ${failedSymbols.join(', ')}`
-            )
-        } else {
-            message.success(response.data?.message || 'Restore completed successfully.')
-        }
-    } catch (error) {
-        message.error(extractAxiosErrorMessage(error, 'Backup restore failed.'))
-    } finally {
-        restoreLoading.value = false
-    }
-}
-
-function confirmDiscardUnsavedChanges(source: 'route_leave' | 'page_unload'): boolean {
-    if (!hasUnsavedChanges()) {
-        return true
-    }
-    if (source === 'page_unload') {
-        return false
-    }
-    const confirmLeave = window.confirm(
-        'You have unsaved changes. Leave this page and discard them?',
-    )
-    trackUiEvent('config_unsaved_prompt', {
-        source,
-        confirmed: confirmLeave,
-        dirty_sections: changedSections.value.length,
-    })
-    return confirmLeave
-}
-
-const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-    if (confirmDiscardUnsavedChanges('page_unload')) {
-        return
-    }
-    event.preventDefault()
-    event.returnValue = ''
-}
-
-function getStoredAdvancedGeneralPreference(): boolean {
-    const raw = localStorage.getItem(ADVANCED_GENERAL_PREFERENCE_KEY)
-    return raw === 'true'
-}
-
-function resetAdvancedGeneralSettings(): void {
-    general.value.ws_watchdog_enabled = true
-    general.value.ws_healthcheck_interval_ms = ADVANCED_WS_HEALTHCHECK_INTERVAL_MS
-    general.value.ws_stale_timeout_ms = ADVANCED_WS_STALE_TIMEOUT_MS
-    general.value.ws_reconnect_debounce_ms = ADVANCED_WS_RECONNECT_DEBOUNCE_MS
-    exchange.value.exchange_hostname = null
-}
-
-function dcaFieldValidator(
-    fieldLabel: string,
-    requiredWhen: () => boolean = () => true,
-) {
-    return (_rule: FormItemRule, value: unknown) => {
-        if (!dca.value.enabled) {
-            return true
-        }
-        if (!requiredWhen()) {
-            return true
-        }
-        if (value === null || value === undefined) {
-            return new Error(`Please add ${fieldLabel}`)
-        }
-        if (typeof value === 'string' && value.trim().length === 0) {
-            return new Error(`Please add ${fieldLabel}`)
-        }
-        return true
-    }
-}
-
-function requiredAfterSubmit(messageText: string) {
-    return (_rule: FormItemRule, value: unknown) => {
-        if (!submitAttempted.value) {
-            return true
-        }
-        if (value === null || value === undefined) {
-            return new Error(messageText)
-        }
-        if (typeof value === 'string' && value.trim().length === 0) {
-            return new Error(messageText)
-        }
-        if (Array.isArray(value) && value.length === 0) {
-            return new Error(messageText)
-        }
-        return true
-    }
-}
-
-function isCurrencyConfigured(): boolean {
-    const configuredCurrency = exchange.value.currency
-    if (!configuredCurrency) {
-        return false
-    }
-    return String(configuredCurrency).trim().length > 0
-}
-
-function getAsapExchangeMissingFields(): string[] {
-    const missing: string[] = []
-    if (!exchange.value.name) {
-        missing.push('exchange')
-    }
-    if (!exchange.value.key) {
-        missing.push('key')
-    }
-    if (!exchange.value.secret) {
-        missing.push('secret')
-    }
-    if (!isCurrencyConfigured()) {
-        missing.push('currency')
-    }
-    return missing
-}
-
-function isAsapExchangeReady(): boolean {
-    return getAsapExchangeMissingFields().length === 0
-}
-
-function getAsapMissingFieldsLabel(): string {
-    return getAsapExchangeMissingFields().join(', ')
-}
-
-function isUrlInput(value: string | null): boolean {
-    if (!value) {
-        return false
-    }
-    return /^https?:\/\//i.test(value.trim())
-}
-
-const ASAP_URL_PARTIAL_PATTERN =
-    /^(?:|h|ht|htt|http|https|http:|https:|http:\/|https:\/|https?:\/\/[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]*)$/
-
-function handleAsapUrlInput(value: string): void {
-    if (ASAP_URL_PARTIAL_PATTERN.test(value)) {
-        signal.value.symbol_list = value
-    }
-}
-
-async function fetchAsapSymbolsForCurrency(): Promise<void> {
-    signal.value.asap_symbol_options = []
-    signal.value.asap_symbol_fetch_error = null
-    signal.value.asap_symbols_loading = true
-
-    if (!isAsapExchangeReady()) {
-        signal.value.asap_symbol_fetch_error = `Missing exchange configuration: ${getAsapMissingFieldsLabel()}`
-        signal.value.asap_symbols_loading = false
-        return
-    }
-
-    try {
-        const quoteCurrency = String(exchange.value.currency).toUpperCase()
-        const response = await axios.post(
-            apiUrl('/data/exchange/symbols'),
-            {
-                currency: quoteCurrency,
-                exchange_config: {
-                    exchange: exchange.value.name,
-                    key: exchange.value.key,
-                    secret: exchange.value.secret,
-                    exchange_hostname: exchange.value.exchange_hostname || undefined,
-                    market: exchange.value.market || "spot",
-                    dry_run: exchange.value.dry_run ?? true,
-                },
-            },
-        )
-        const symbols = Array.isArray(response.data?.symbols) ? response.data.symbols : []
-        const missing = Array.isArray(response.data?.missing) ? response.data.missing : []
-        if (missing.length > 0) {
-            signal.value.asap_symbol_fetch_error = `Missing exchange configuration: ${missing.join(', ')}`
-            signal.value.asap_symbol_options = []
-            return
-        }
-        signal.value.asap_symbol_options = symbols.map((symbol: string) => ({
-            label: symbol,
-            value: symbol,
-        }))
-
-        if (
-            typeof signal.value.symbol_list === 'string' &&
-            signal.value.symbol_list.length > 0
-        ) {
-            const configuredSymbols = parseSymbolListToArray(signal.value.symbol_list)
-            const optionValues = new Set(
-                signal.value.asap_symbol_options.map((option) => option.value as string)
-            )
-            signal.value.asap_symbol_select = configuredSymbols.filter((symbol) =>
-                optionValues.has(symbol)
-            )
-        }
-    } catch (error) {
-        console.error('Error fetching ASAP symbols:', error)
-        signal.value.asap_symbol_fetch_error = 'Failed to fetch symbols from exchange.'
-    } finally {
-        signal.value.asap_symbols_loading = false
-    }
-}
-
-const rules: FormRules = {
-    timezone: {
-        validator: requiredAfterSubmit('Please select timezone'),
-        trigger: ['submit', 'change']
     },
-    signal: {
-        validator: requiredAfterSubmit('Please select signal plugin'),
-        trigger: ['submit', 'change']
-    },
-    signal_settings: {
-        validator: requiredAfterSubmit('Please configure signal'),
-        trigger: ['submit', 'change']
-    },
-    symbol_list: {
-        validator: () => {
-            if (!submitAttempted.value || signal.value.signal !== 'asap') {
-                return true
-            }
-            if (signal.value.asap_use_url) {
-                if (
-                    signal.value.symbol_list === null ||
-                    signal.value.symbol_list === undefined ||
-                    String(signal.value.symbol_list).trim().length === 0
-                ) {
-                    return new Error('Please add symbol list URL')
-                }
-                if (!isUrlInput(String(signal.value.symbol_list))) {
-                    return new Error('Please provide a valid URL (http/https)')
-                }
-                return true
-            }
+    reloadConfig: () => fetchDefaultValues(),
+})
+const rules = buildConfigRules({
+    dca,
+    getAsapMissingFieldsLabel,
+    isAsapExchangeReady,
+    isCurrencyConfigured,
+    isUrlInput,
+    signal,
+    submitAttempted,
+})
 
-            if (!isCurrencyConfigured()) {
-                return new Error('Please configure currency before selecting symbols')
-            }
-
-            if (!isAsapExchangeReady()) {
-                return new Error(`Please configure ${getAsapMissingFieldsLabel()} before selecting symbols`)
-            }
-
-            if (!signal.value.asap_symbol_select) {
-                return new Error('Please select at least one symbol')
-            }
-
-            if (Array.isArray(signal.value.asap_symbol_select) && signal.value.asap_symbol_select.length === 0) {
-                return new Error('Please select at least one symbol')
-            }
-
-            return true
-        },
-        trigger: ['submit', 'change']
-    },
-    csv_signal_source: {
-        validator: () => {
-            if (
-                !submitAttempted.value ||
-                signal.value.signal !== 'csv_signal' ||
-                signal.value.csvsignal_mode !== 'source'
-            ) {
-                return true
-            }
-            if (
-                signal.value.csvsignal_source === null ||
-                signal.value.csvsignal_source === undefined ||
-                String(signal.value.csvsignal_source).trim().length === 0
-            ) {
-                return new Error('Please add CSV source path or URL')
-            }
-            return true
-        },
-        trigger: ['submit', 'change']
-    },
-    csv_signal_inline: {
-        validator: () => {
-            if (
-                !submitAttempted.value ||
-                signal.value.signal !== 'csv_signal' ||
-                signal.value.csvsignal_mode !== 'inline'
-            ) {
-                return true
-            }
-            if (
-                signal.value.csvsignal_inline === null ||
-                signal.value.csvsignal_inline === undefined ||
-                String(signal.value.csvsignal_inline).trim().length === 0
-            ) {
-                return new Error('Please paste CSV text or upload a CSV file')
-            }
-            return true
-        },
-        trigger: ['submit', 'change']
-    },
-    name: {
-        validator: requiredAfterSubmit('Please select exchange'),
-        trigger: ['submit', 'change']
-    },
-    timeframe: {
-        validator: requiredAfterSubmit('Please select timeframe'),
-        trigger: ['submit', 'change']
-    },
-    key: {
-        validator: requiredAfterSubmit('Please add key'),
-        trigger: ['submit', 'change']
-    },
-    secret: {
-        validator: requiredAfterSubmit('Please add secret'),
-        trigger: ['submit', 'change']
-    },
-    currency: {
-        validator: requiredAfterSubmit('Please select currency'),
-        trigger: ['submit', 'change']
-    },
-    max_bots: {
-        validator: requiredAfterSubmit('Please add max bots'),
-        trigger: ['submit', 'change']
-    },
-    bo: {
-        validator: requiredAfterSubmit('Please add bo'),
-        trigger: ['submit', 'change']
-    },
-    so: {
-        validator: dcaFieldValidator(
-            'safety order amount',
-            () => !dca.value.dynamic,
-        ),
-        trigger: ['submit'],
-    },
-    mstc: {
-        validator: dcaFieldValidator('max safety order count'),
-        trigger: ['submit'],
-    },
-    sos: {
-        validator: dcaFieldValidator('price deviation'),
-        trigger: ['submit'],
-    },
-    ss: {
-        validator: dcaFieldValidator(
-            'step scale',
-            () => !dca.value.dynamic,
-        ),
-        trigger: ['submit'],
-    },
-    os: {
-        validator: dcaFieldValidator(
-            'volume scale',
-            () => !dca.value.dynamic,
-        ),
-        trigger: ['submit'],
-    },
-    tp: {
-        validator: requiredAfterSubmit('Please add tp'),
-        trigger: ['submit', 'change']
-    },
-    upnl_housekeeping_interval: {
-        validator: requiredAfterSubmit('Please add UPNL history retention'),
-        trigger: ['submit', 'change']
-    },
-    history_lookback_time: {
-        validator: requiredAfterSubmit('Please add history lookback time'),
-        trigger: ['submit', 'change']
-    },
-}
-
-function handle_signal_settings_select() {
-    if (signal.value.signal == "sym_signals") {
-        if (!signal.value.symsignal_url) {
-            signal.value.symsignal_url = DEFAULT_SYMSIGNAL_URL
+const { fetchDefaultValues } = useConfigLoadFlow({
+    apiUrl,
+    buildDefaults: buildConfigLoadDefaults,
+    general,
+    signal,
+    filter,
+    exchange,
+    dca,
+    autopilot,
+    monitoring,
+    indicator,
+    showAdvancedGeneral,
+    isLoading,
+    message,
+    onAfterLoad: async () => {
+        if (signal.value.strategy) {
+            signal.value.strategy_enabled = true
         }
-        if (!signal.value.symsignal_version) {
-            signal.value.symsignal_version = DEFAULT_SYMSIGNAL_VERSION
-        }
-    } else if (signal.value.signal == "asap") {
-        if (!signal.value.asap_use_url) {
-            void fetchAsapSymbolsForCurrency()
-        }
-    } else if (signal.value.signal == "csv_signal") {
-        resetSignalStrategySelection()
-        if (!signal.value.csvsignal_mode) {
-            signal.value.csvsignal_mode = 'source'
-        }
-    } else {
-    }
-}
-
-async function handleCsvSignalFileSelected(event: Event): Promise<void> {
-    const input = event.target as HTMLInputElement
-    const selectedFile = input.files?.[0]
-    if (!selectedFile) {
-        return
-    }
-
-    try {
-        const csvText = await selectedFile.text()
-        signal.value.csvsignal_mode = 'inline'
-        signal.value.csvsignal_inline = csvText
-        signal.value.csvsignal_file_name = selectedFile.name
-        message.success(`Loaded ${selectedFile.name}`)
-    } catch (error) {
-        console.error('Error loading CSV file:', error)
-        message.error('Failed to read CSV file.')
-    } finally {
-        input.value = ''
-    }
-}
-
-async function fetchDefaultValues() {
-    try {
-        const response = await axios.get(apiUrl('/config/all'));
-        if (response.status === 200) {
-            general.value.timezone = response.data.timezone || getClientTimezone()
-            general.value.debug = parseBooleanString(response.data.debug) ?? false
-            general.value.ws_watchdog_enabled =
-                parseBooleanString(response.data.ws_watchdog_enabled) ?? true
-            general.value.ws_healthcheck_interval_ms =
-                toNumberOrNull(response.data.ws_healthcheck_interval_ms) ?? ADVANCED_WS_HEALTHCHECK_INTERVAL_MS
-            general.value.ws_stale_timeout_ms =
-                toNumberOrNull(response.data.ws_stale_timeout_ms) ?? ADVANCED_WS_STALE_TIMEOUT_MS
-            general.value.ws_reconnect_debounce_ms =
-                toNumberOrNull(response.data.ws_reconnect_debounce_ms) ?? ADVANCED_WS_RECONNECT_DEBOUNCE_MS
-            signal.value.signal = response.data.signal
-            signal.value.strategy = response.data.signal_strategy
-            signal.value.timeframe = response.data.timeframe
-            const signalSettings = parseStructuredConfigValue(response.data.signal_settings)
-            if (signalSettings) {
-                signal.value.symsignal_url = String(signalSettings["api_url"] || DEFAULT_SYMSIGNAL_URL)
-                signal.value.symsignal_key = String(signalSettings["api_key"] || "")
-                signal.value.symsignal_version = String(signalSettings["api_version"] || DEFAULT_SYMSIGNAL_VERSION)
-                const allowedSignals = signalSettings["allowed_signals"]
-                signal.value.symsignal_allowedsignals = Array.isArray(allowedSignals) ? allowedSignals : []
-                const csvSourceRaw = signalSettings["csv_source"]
-                if (csvSourceRaw) {
-                    const csvSource = String(csvSourceRaw)
-                    const isInlineCsv = csvSource.includes('\n') && csvSource.includes(';')
-                    if (isInlineCsv) {
-                        signal.value.csvsignal_mode = 'inline'
-                        signal.value.csvsignal_inline = csvSource
-                        signal.value.csvsignal_source = null
-                    } else {
-                        signal.value.csvsignal_mode = 'source'
-                        signal.value.csvsignal_source = csvSource
-                        signal.value.csvsignal_inline = null
-                    }
-                } else {
-                    signal.value.csvsignal_mode = 'source'
-                    signal.value.csvsignal_source = null
-                    signal.value.csvsignal_inline = null
-                }
-                signal.value.csvsignal_file_name = null
-            } else {
-                signal.value.csvsignal_mode = 'source'
-                signal.value.csvsignal_source = null
-                signal.value.csvsignal_inline = null
-                signal.value.csvsignal_file_name = null
-            }
-            signal.value.symbol_list = response.data.symbol_list
-            if (isUrlInput(response.data.symbol_list)) {
-                signal.value.asap_use_url = true
-                signal.value.asap_symbol_select = []
-                signal.value.asap_symbol_options = []
-            } else {
-                signal.value.asap_use_url = false
-                const configuredSymbols = parseSymbolListToArray(response.data.symbol_list)
-                signal.value.asap_symbol_select = configuredSymbols
-                signal.value.asap_symbol_options = configuredSymbols.map((symbol) => ({
-                    label: symbol,
-                    value: symbol,
-                }))
-            }
-            const filter_indicator = parseStructuredConfigValue(response.data.filter)
-            filter.value.rsi =
-                toNumberOrNull(response.data.rsi_max) ??
-                toNumberOrNull(filter_indicator?.rsi_max) ??
-                null
-            filter.value.cmc_api_key =
-                response.data.marketcap_cmc_api_key ||
-                String(filter_indicator?.marketcap_cmc_api_key || '') ||
-                null
-            filter.value.denylist = toTokenOnlyEntries(response.data.pair_denylist)
-            filter.value.topcoin_limit = response.data.topcoin_limit
-            filter.value.volume =
-                toNumberOrNull(response.data.volume) ??
-                parseVolumeLimitToNumber(response.data.volume)
-            filter.value.btc_pulse = parseBooleanString(response.data.btc_pulse) ?? false
-            exchange.value.name = response.data.exchange
-            exchange.value.timeframe = response.data.timeframe
-            exchange.value.key = response.data.key
-            exchange.value.secret = response.data.secret
-            exchange.value.exchange_hostname = response.data.exchange_hostname || null
-            exchange.value.dry_run = parseBooleanString(response.data.dry_run) ?? true
-            exchange.value.currency = response.data.currency
-            exchange.value.market = response.data.market || "spot"
-            exchange.value.watcher_ohlcv = parseBooleanString(response.data.watcher_ohlcv) ?? false
-            dca.value.enabled = parseBooleanString(response.data.dca) ?? false
-            dca.value.dynamic = parseBooleanString(response.data.dynamic_dca) ?? false
-            dca.value.strategy = response.data.dca_strategy
-            dca.value.timeframe = response.data.timeframe
-            dca.value.trailing_tp = toNumberOrNull(response.data.trailing_tp)
-            dca.value.max_bots = toNumberOrNull(response.data.max_bots)
-            dca.value.bo = toNumberOrNull(response.data.bo)
-            dca.value.sell_order_type = response.data.sell_order_type || 'market'
-            dca.value.limit_sell_timeout_sec =
-                toNumberOrNull(response.data.limit_sell_timeout_sec) ?? 60
-            dca.value.limit_sell_fallback_to_market =
-                parseBooleanString(response.data.limit_sell_fallback_to_market) ?? true
-            dca.value.tp_spike_confirm_enabled =
-                parseBooleanString(response.data.tp_spike_confirm_enabled) ?? false
-            dca.value.tp_spike_confirm_seconds =
-                toNumberOrNull(response.data.tp_spike_confirm_seconds) ??
-                DEFAULT_TP_SPIKE_CONFIRM_SECONDS
-            dca.value.tp_spike_confirm_ticks =
-                toNumberOrNull(response.data.tp_spike_confirm_ticks) ??
-                DEFAULT_TP_SPIKE_CONFIRM_TICKS
-            dca.value.so = toNumberOrNull(response.data.so)
-            dca.value.mstc = toNumberOrNull(response.data.mstc)
-            dca.value.sos = toNumberOrNull(response.data.sos)
-            dca.value.ss = toNumberOrNull(response.data.ss)
-            dca.value.os = toNumberOrNull(response.data.os)
-            dca.value.trade_safety_order_budget_ratio =
-                toNumberOrNull(response.data.trade_safety_order_budget_ratio) ?? 0.95
-            dca.value.tp = toNumberOrNull(response.data.tp)
-            dca.value.sl = toNumberOrNull(response.data.sl)
-            autopilot.value.enabled = parseBooleanString(response.data.autopilot) ?? false
-            autopilot.value.max_fund = toNumberOrNull(response.data.autopilot_max_fund)
-            autopilot.value.high_mad = toNumberOrNull(response.data.autopilot_high_mad)
-            autopilot.value.high_tp = toNumberOrNull(response.data.autopilot_high_tp)
-            autopilot.value.high_sl = toNumberOrNull(response.data.autopilot_high_sl)
-            autopilot.value.high_sl_timeout = toNumberOrNull(response.data.autopilot_high_sl_timeout)
-            autopilot.value.high_threshold = toNumberOrNull(response.data.autopilot_high_threshold)
-            autopilot.value.medium_mad = toNumberOrNull(response.data.autopilot_medium_mad)
-            autopilot.value.medium_tp = toNumberOrNull(response.data.autopilot_medium_tp)
-            autopilot.value.medium_sl = toNumberOrNull(response.data.autopilot_medium_sl)
-            autopilot.value.medium_sl_timeout = toNumberOrNull(response.data.autopilot_medium_sl_timeout)
-            autopilot.value.medium_threshold = toNumberOrNull(response.data.autopilot_medium_threshold)
-            autopilot.value.green_phase_enabled =
-                parseBooleanString(response.data.autopilot_green_phase_enabled) ?? false
-            autopilot.value.green_phase_ramp_days =
-                toNumberOrNull(response.data.autopilot_green_phase_ramp_days) ??
-                DEFAULT_GREEN_PHASE_RAMP_DAYS
-            autopilot.value.green_phase_eval_interval_sec =
-                toNumberOrNull(response.data.autopilot_green_phase_eval_interval_sec) ??
-                DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC
-            autopilot.value.green_phase_window_minutes =
-                toNumberOrNull(response.data.autopilot_green_phase_window_minutes) ??
-                DEFAULT_GREEN_PHASE_WINDOW_MINUTES
-            autopilot.value.green_phase_min_profitable_close_ratio =
-                toNumberOrNull(response.data.autopilot_green_phase_min_profitable_close_ratio) ??
-                DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO
-            autopilot.value.green_phase_speed_multiplier =
-                toNumberOrNull(response.data.autopilot_green_phase_speed_multiplier) ??
-                DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER
-            autopilot.value.green_phase_exit_multiplier =
-                toNumberOrNull(response.data.autopilot_green_phase_exit_multiplier) ??
-                DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER
-            autopilot.value.green_phase_max_extra_deals =
-                toNumberOrNull(response.data.autopilot_green_phase_max_extra_deals) ??
-                DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS
-            autopilot.value.green_phase_confirm_cycles =
-                toNumberOrNull(response.data.autopilot_green_phase_confirm_cycles) ??
-                DEFAULT_GREEN_PHASE_CONFIRM_CYCLES
-            autopilot.value.green_phase_release_cycles =
-                toNumberOrNull(response.data.autopilot_green_phase_release_cycles) ??
-                DEFAULT_GREEN_PHASE_RELEASE_CYCLES
-            autopilot.value.green_phase_max_locked_fund_percent =
-                toNumberOrNull(response.data.autopilot_green_phase_max_locked_fund_percent) ??
-                DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT
-            monitoring.value.enabled = parseBooleanString(response.data.monitoring_enabled) ?? false
-            monitoring.value.telegram_bot_token =
-                response.data.monitoring_telegram_bot_token || null
-            monitoring.value.telegram_api_id =
-                toNumberOrNull(response.data.monitoring_telegram_api_id)
-            monitoring.value.telegram_api_hash =
-                response.data.monitoring_telegram_api_hash || null
-            monitoring.value.telegram_chat_id =
-                response.data.monitoring_telegram_chat_id || null
-            monitoring.value.timeout_sec =
-                toNumberOrNull(response.data.monitoring_timeout_sec) ?? 5
-            monitoring.value.retry_count =
-                toNumberOrNull(response.data.monitoring_retry_count) ?? 1
-            indicator.value.upnl_housekeeping_interval = toNumberOrNull(response.data.upnl_housekeeping_interval) ?? 0
-            indicator.value.history_lookback_time =
-                response.data.history_lookback_time ||
-                getDefaultHistoryLookbackByTimeframe(exchange.value.timeframe)
-
-            showAdvancedGeneral.value = getStoredAdvancedGeneralPreference()
-            if (!showAdvancedGeneral.value) {
-                resetAdvancedGeneralSettings()
-            }
-
-            signal.value.strategy_plugins = response.data.strategies.map(v => ({
-                label: v,
-                value: v
-            }))
-            signal.value.plugins = response.data.signal_plugins.map(v => ({
-                label: v,
-                value: v
-            }))
-            exchange.value.name = response.data.exchange
-
-            // Show hidden strategy fields if enabled
-            if (signal.value.strategy) {
-                signal.value.strategy_enabled = true
-            }
-
-            // Initial call for signal settings
-            handle_signal_settings_select()
-            if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
-                await fetchAsapSymbolsForCurrency()
-            }
-
-            syncBaselineState()
-            saveState.value = 'idle'
-            saveErrorMessage.value = null
-            lastSavedAt.value = null
-            trackUiEvent('config_baseline_loaded')
-
-        } else {
-            message.error('Failed to load default values')
-            setSaveError('Failed to load configuration.')
-        }
-    } catch (error) {
-        console.error('Error fetching default values:', error);
-        message.error('An unexpected error occurred while loading default values.')
-        setSaveError('An unexpected error occurred while loading default values.')
-    } finally {
-        isLoading.value = false; // Set loading state to false after fetch
-    }
-}
-
-async function submitForm() {
-    if (!isDirty.value) {
-        message.info('No unsaved changes to submit.')
-        trackUiEvent('config_submit_skipped_no_changes')
-        return
-    }
-    if (saveState.value === 'saving') {
-        return
-    }
-
-    const submitStartedAt = performance.now()
-    const dirtySectionsBeforeSubmit = changedSections.value.length
-    trackUiEvent('config_submit_requested')
-    saveState.value = 'saving'
-    saveErrorMessage.value = null
-
-    try {
-        const quoteCurrency = String(exchange.value.currency || "USDT").toUpperCase()
-        const normalizedSymbolList = signal.value.signal === "asap"
-            ? normalizePairEntries(
-                signal.value.asap_use_url
-                    ? signal.value.symbol_list
-                    : signal.value.asap_symbol_select.join(","),
-                quoteCurrency,
-            )
-            : false
-        const normalizedDenyList = normalizePairEntries(
-            filter.value.denylist,
-            quoteCurrency,
-        )
-
-        const formData = {
-            timezone: JSON.stringify({ 'value': general.value.timezone || false, 'type': "str" }),
-            debug: JSON.stringify({ 'value': general.value.debug || false, 'type': "bool" }),
-            ws_watchdog_enabled: JSON.stringify({ 'value': general.value.ws_watchdog_enabled ?? true, 'type': "bool" }),
-            ws_healthcheck_interval_ms: JSON.stringify({ 'value': general.value.ws_healthcheck_interval_ms ?? ADVANCED_WS_HEALTHCHECK_INTERVAL_MS, 'type': "int" }),
-            ws_stale_timeout_ms: JSON.stringify({ 'value': general.value.ws_stale_timeout_ms ?? ADVANCED_WS_STALE_TIMEOUT_MS, 'type': "int" }),
-            ws_reconnect_debounce_ms: JSON.stringify({ 'value': general.value.ws_reconnect_debounce_ms ?? ADVANCED_WS_RECONNECT_DEBOUNCE_MS, 'type': "int" }),
-            signal: JSON.stringify({ 'value': signal.value.signal || false, 'type': "str" }),
-            signal_strategy: JSON.stringify({
-                'value': signal.value.signal === 'csv_signal'
-                    ? false
-                    : (signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false),
-                'type': "str"
-            }),
-            signal_settings: JSON.stringify({
-                'value': buildSignalSettingsValue({
-                    signal: signal.value.signal,
-                    symsignal_url: signal.value.symsignal_url,
-                    symsignal_key: signal.value.symsignal_key,
-                    symsignal_version: signal.value.symsignal_version,
-                    symsignal_allowedsignals: signal.value.symsignal_allowedsignals,
-                    csvsignal_mode: signal.value.csvsignal_mode,
-                    csvsignal_source: signal.value.csvsignal_source,
-                    csvsignal_inline: signal.value.csvsignal_inline,
-                }),
-                'type': "str",
-            }),
-            symbol_list: JSON.stringify({ 'value': normalizedSymbolList, 'type': "str" }),
-            filter: JSON.stringify({ 'value': { 'rsi_max': filter.value.rsi || false, 'marketcap_cmc_api_key': filter.value.cmc_api_key || false }, 'type': "str" }),
-            rsi_max: JSON.stringify({ 'value': filter.value.rsi ?? false, 'type': "float" }),
-            marketcap_cmc_api_key: JSON.stringify({ 'value': filter.value.cmc_api_key || false, 'type': "str" }),
-            volume: JSON.stringify({ 'value': buildVolumeConfig(filter.value.volume), 'type': "str" }),
-            pair_denylist: JSON.stringify({ 'value': normalizedDenyList, 'type': "str" }),
-            topcoin_limit: JSON.stringify({ 'value': filter.value.topcoin_limit || false, 'type': "int" }),
-            btc_pulse: JSON.stringify({ 'value': filter.value.btc_pulse || false, 'type': "bool" }),
-            exchange: JSON.stringify({ 'value': exchange.value.name || false, 'type': "str" }),
-            timeframe: JSON.stringify({ 'value': exchange.value.timeframe || false, 'type': "str" }),
-            key: JSON.stringify({ 'value': exchange.value.key || false, 'type': "str" }),
-            secret: JSON.stringify({ 'value': exchange.value.secret || false, 'type': "str" }),
-            exchange_hostname: JSON.stringify({ 'value': showAdvancedGeneral.value ? (exchange.value.exchange_hostname || false) : false, 'type': "str" }),
-            dry_run: JSON.stringify({ 'value': exchange.value.dry_run || false, 'type': "bool" }),
-            currency: JSON.stringify({ 'value': exchange.value.currency || false, 'type': "str" }),
-            market: JSON.stringify({ 'value': exchange.value.market || false, 'type': "str" }),
-            watcher_ohlcv: JSON.stringify({ 'value': exchange.value.watcher_ohlcv || false, 'type': "bool" }),
-            dca: JSON.stringify({ 'value': dca.value.enabled || false, 'type': "bool" }),
-            dynamic_dca: JSON.stringify({ 'value': dca.value.dynamic || false, 'type': "bool" }),
-            dca_strategy: JSON.stringify({ 'value': dca.value.strategy || false, 'type': "str" }),
-            trailing_tp: JSON.stringify({ 'value': dca.value.trailing_tp || false, 'type': "float" }),
-            max_bots: JSON.stringify({ 'value': dca.value.max_bots || false, 'type': "int" }),
-            bo: JSON.stringify({ 'value': dca.value.bo || false, 'type': "int" }),
-            sell_order_type: JSON.stringify({ 'value': dca.value.sell_order_type || 'market', 'type': "str" }),
-            limit_sell_timeout_sec: JSON.stringify({ 'value': dca.value.limit_sell_timeout_sec ?? 60, 'type': "int" }),
-            limit_sell_fallback_to_market: JSON.stringify({ 'value': dca.value.limit_sell_fallback_to_market ?? true, 'type': "bool" }),
-            tp_spike_confirm_enabled: JSON.stringify({ 'value': dca.value.tp_spike_confirm_enabled ?? false, 'type': "bool" }),
-            tp_spike_confirm_seconds: JSON.stringify({ 'value': dca.value.tp_spike_confirm_seconds ?? DEFAULT_TP_SPIKE_CONFIRM_SECONDS, 'type': "float" }),
-            tp_spike_confirm_ticks: JSON.stringify({ 'value': dca.value.tp_spike_confirm_ticks ?? DEFAULT_TP_SPIKE_CONFIRM_TICKS, 'type': "int" }),
-            so: JSON.stringify({ 'value': dca.value.so || false, 'type': "int" }),
-            mstc: JSON.stringify({ 'value': dca.value.mstc || false, 'type': "int" }),
-            sos: JSON.stringify({ 'value': dca.value.sos || false, 'type': "float" }),
-            ss: JSON.stringify({ 'value': dca.value.ss || false, 'type': "float" }),
-            os: JSON.stringify({ 'value': dca.value.dynamic ? false : (dca.value.os || false), 'type': "float" }),
-            trade_safety_order_budget_ratio: JSON.stringify({ 'value': dca.value.trade_safety_order_budget_ratio ?? 0.95, 'type': "float" }),
-            tp: JSON.stringify({ 'value': dca.value.tp || false, 'type': "float" }),
-            sl: JSON.stringify({ 'value': dca.value.sl || false, 'type': "float" }),
-            autopilot: JSON.stringify({ 'value': autopilot.value.enabled || false, 'type': "bool" }),
-            autopilot_max_fund: JSON.stringify({ 'value': autopilot.value.max_fund || false, 'type': "int" }),
-            autopilot_high_mad: JSON.stringify({ 'value': autopilot.value.high_mad || false, 'type': "int" }),
-            autopilot_high_tp: JSON.stringify({ 'value': autopilot.value.high_tp || false, 'type': "float" }),
-            autopilot_high_sl: JSON.stringify({ 'value': autopilot.value.high_sl || false, 'type': "float" }),
-            autopilot_high_sl_timeout: JSON.stringify({ 'value': autopilot.value.high_sl_timeout || false, 'type': "int" }),
-            autopilot_high_threshold: JSON.stringify({ 'value': autopilot.value.high_threshold || false, 'type': "int" }),
-            autopilot_medium_mad: JSON.stringify({ 'value': autopilot.value.medium_mad || false, 'type': "int" }),
-            autopilot_medium_tp: JSON.stringify({ 'value': autopilot.value.medium_tp || false, 'type': "float" }),
-            autopilot_medium_sl: JSON.stringify({ 'value': autopilot.value.medium_sl || false, 'type': "float" }),
-            autopilot_medium_sl_timeout: JSON.stringify({ 'value': autopilot.value.medium_sl_timeout || false, 'type': "int" }),
-            autopilot_medium_threshold: JSON.stringify({ 'value': autopilot.value.medium_threshold || false, 'type': "int" }),
-            autopilot_green_phase_enabled: JSON.stringify({ 'value': autopilot.value.green_phase_enabled ?? false, 'type': "bool" }),
-            autopilot_green_phase_ramp_days: JSON.stringify({ 'value': autopilot.value.green_phase_ramp_days ?? DEFAULT_GREEN_PHASE_RAMP_DAYS, 'type': "int" }),
-            autopilot_green_phase_eval_interval_sec: JSON.stringify({ 'value': autopilot.value.green_phase_eval_interval_sec ?? DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC, 'type': "int" }),
-            autopilot_green_phase_window_minutes: JSON.stringify({ 'value': autopilot.value.green_phase_window_minutes ?? DEFAULT_GREEN_PHASE_WINDOW_MINUTES, 'type': "int" }),
-            autopilot_green_phase_min_profitable_close_ratio: JSON.stringify({ 'value': autopilot.value.green_phase_min_profitable_close_ratio ?? DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO, 'type': "float" }),
-            autopilot_green_phase_speed_multiplier: JSON.stringify({ 'value': autopilot.value.green_phase_speed_multiplier ?? DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER, 'type': "float" }),
-            autopilot_green_phase_exit_multiplier: JSON.stringify({ 'value': autopilot.value.green_phase_exit_multiplier ?? DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER, 'type': "float" }),
-            autopilot_green_phase_max_extra_deals: JSON.stringify({ 'value': autopilot.value.green_phase_max_extra_deals ?? DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS, 'type': "int" }),
-            autopilot_green_phase_confirm_cycles: JSON.stringify({ 'value': autopilot.value.green_phase_confirm_cycles ?? DEFAULT_GREEN_PHASE_CONFIRM_CYCLES, 'type': "int" }),
-            autopilot_green_phase_release_cycles: JSON.stringify({ 'value': autopilot.value.green_phase_release_cycles ?? DEFAULT_GREEN_PHASE_RELEASE_CYCLES, 'type': "int" }),
-            autopilot_green_phase_max_locked_fund_percent: JSON.stringify({ 'value': autopilot.value.green_phase_max_locked_fund_percent ?? DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT, 'type': "float" }),
-            monitoring_enabled: JSON.stringify({ 'value': monitoring.value.enabled || false, 'type': "bool" }),
-            monitoring_telegram_api_id: JSON.stringify({ 'value': monitoring.value.telegram_api_id || false, 'type': "int" }),
-            monitoring_telegram_api_hash: JSON.stringify({ 'value': monitoring.value.telegram_api_hash || false, 'type': "str" }),
-            monitoring_telegram_bot_token: JSON.stringify({ 'value': monitoring.value.telegram_bot_token || false, 'type': "str" }),
-            monitoring_telegram_chat_id: JSON.stringify({ 'value': monitoring.value.telegram_chat_id || false, 'type': "str" }),
-            monitoring_timeout_sec: JSON.stringify({ 'value': monitoring.value.timeout_sec ?? 5, 'type': "int" }),
-            monitoring_retry_count: JSON.stringify({ 'value': monitoring.value.retry_count ?? 1, 'type': "int" }),
-            upnl_housekeeping_interval: JSON.stringify({ 'value': indicator.value.upnl_housekeeping_interval ?? false, 'type': "int" }),
-            history_lookback_time: JSON.stringify({
-                'value': indicator.value.history_lookback_time || getDefaultHistoryLookbackByTimeframe(exchange.value.timeframe),
-                'type': "str"
-            }),
-        }
-
-        // Assuming you have an API endpoint
-        const response = await axios.post(apiUrl('/config/multiple'), formData);
-
-        if (response.status >= 200 && response.status < 300) {
-            syncBaselineState()
-            saveState.value = 'saved'
-            saveErrorMessage.value = null
-            lastSavedAt.value = new Date()
-            trackUiEvent('config_submit_success', {
-                status_code: response.status,
-                duration_ms: Math.round(performance.now() - submitStartedAt),
-                dirty_sections: dirtySectionsBeforeSubmit,
-            })
-            message.success('Form submitted successfully')
-            setTimeout(() => {
-                router.push('/')
-            }, 250)
-        } else {
-            setSaveError('An unexpected error occurred while submitting the configuration.')
-            trackUiEvent('config_submit_error', {
-                status_code: response.status,
-                duration_ms: Math.round(performance.now() - submitStartedAt),
-                category: 'non_2xx_response',
-            })
-            let errorMessage = 'An unexpected error occurred'
-            try {
-                errorMessage = response.data.message || JSON.stringify(response.data);
-            } catch (e) {
-                console.error('Error parsing error message:', e)
-            }
-            setSaveError(errorMessage)
-            message.error(errorMessage)
-        }
-    } catch (error) {
-        if (error.response) {
-            trackUiEvent('config_submit_error', {
-                status_code: error.response.status || null,
-                duration_ms: Math.round(performance.now() - submitStartedAt),
-                category: 'exception_response',
-            })
-            // Server responded with a status other than 2xx
-            let errorMessage = 'An unexpected error occurred'
-            try {
-                errorMessage = error.response.data.message || JSON.stringify(error.response.data);
-            } catch (e) {
-                console.error('Error parsing error message:', e)
-            }
-            setSaveError(errorMessage)
-            message.error(errorMessage)
-        } else if (error.request) {
-            trackUiEvent('config_submit_error', {
-                status_code: null,
-                duration_ms: Math.round(performance.now() - submitStartedAt),
-                category: 'no_response',
-            })
-            // No response was received
-            setSaveError('No response from server. Please try again later.')
-            message.error('No response from server. Please try again later.')
-        } else {
-            trackUiEvent('config_submit_error', {
-                status_code: null,
-                duration_ms: Math.round(performance.now() - submitStartedAt),
-                category: 'request_setup',
-            })
-            // Something happened while setting up the request
-            setSaveError(`Request failed: ${error.message}`)
-            message.error(`Request failed: ${error.message}`)
-        }
-    }
-}
-
-function canTestMonitoringTelegram(): boolean {
-    return Boolean(
-        monitoring.value.telegram_api_id &&
-        monitoring.value.telegram_api_hash &&
-        monitoring.value.telegram_bot_token &&
-        monitoring.value.telegram_chat_id
-    )
-}
-
-async function testMonitoringTelegram() {
-    if (!canTestMonitoringTelegram()) {
-        message.error('Please add valid Telegram settings first.')
-        return
-    }
-
-    monitoring_test_loading.value = true
-    try {
-        const response = await axios.post(
-            apiUrl('/monitoring/test'),
-            {
-                monitoring_telegram_api_id: monitoring.value.telegram_api_id,
-                monitoring_telegram_api_hash: monitoring.value.telegram_api_hash,
-                monitoring_telegram_bot_token: monitoring.value.telegram_bot_token,
-                monitoring_telegram_chat_id: monitoring.value.telegram_chat_id,
-                monitoring_timeout_sec: monitoring.value.timeout_sec ?? 5,
-                monitoring_retry_count: monitoring.value.retry_count ?? 1,
-            },
-        )
-        message.success(response.data?.message || 'Monitoring Telegram test sent.')
-    } catch (error) {
-        if (error.response) {
-            message.error(error.response.data?.error || 'Monitoring Telegram test failed.')
-        } else if (error.request) {
-            message.error('No response from server. Please try again later.')
-        } else {
-            message.error(`Request failed: ${error.message}`)
-        }
-    } finally {
-        monitoring_test_loading.value = false
-    }
-}
-
-function validateAndSubmit(): void {
-    submitAttempted.value = true
-    const sectionForms = [
-        generalFormRef.value,
-        signalFormRef.value,
-        filterFormRef.value,
-        exchangeFormRef.value,
-        dcaFormRef.value,
-        autopilotFormRef.value,
-        monitoringFormRef.value,
-        indicatorFormRef.value,
-    ].filter((form): form is ConfigSectionFormExpose => form !== null)
-
-    const validations = [
-        ...sectionForms.map((form) => form.validate()),
-    ]
-
-    Promise.all(validations).then((results) => {
-        if (results.every(Boolean)) {
-            trackUiEvent('config_validation_success')
-            submitForm()
-        } else {
-            setSaveError('Missing/invalid configuration input')
-            trackUiEvent('config_validation_failed')
-            message.error('Missing/invalid configuration input')
-        }
-    })
-}
-
-function handleValidateButtonClick(e: MouseEvent) {
-    e.preventDefault()
-    validateAndSubmit()
-}
-
-function handleGlobalKeydown(event: KeyboardEvent): void {
-    const key = event.key.toLowerCase()
-    if ((event.ctrlKey || event.metaKey) && key === 's') {
-        event.preventDefault()
-        trackUiEvent('config_submit_shortcut_used')
-        validateAndSubmit()
-    }
-}
-
-watch(
-    () => showAdvancedGeneral.value,
-    (enabled) => {
-        if (isLoading.value) {
-            return
-        }
-        localStorage.setItem(ADVANCED_GENERAL_PREFERENCE_KEY, enabled ? 'true' : 'false')
-        if (!enabled) {
-            resetAdvancedGeneralSettings()
-        }
+        await applySignalSettingsSelection({ awaitAsapFetch: true })
     },
-)
-
-watch(
-    () => signal.value.asap_use_url,
-    async (useUrl) => {
-        if (isLoading.value) {
-            return
-        }
-        if (signal.value.signal !== "asap") {
-            return
-        }
-        if (useUrl) {
-            signal.value.asap_symbol_select = []
-            signal.value.asap_symbol_options = []
-            signal.value.asap_symbol_fetch_error = null
-            if (!isUrlInput(signal.value.symbol_list)) {
-                signal.value.symbol_list = null
-            }
-            return
-        }
-        signal.value.asap_symbol_options = []
-        signal.value.asap_symbol_fetch_error = null
-    },
-)
-
-watch(
-    () => [exchange.value.currency, exchange.value.name, exchange.value.key, exchange.value.secret, exchange.value.exchange_hostname],
-    async () => {
-        if (isLoading.value) {
-            return
-        }
-        if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
-            signal.value.asap_symbol_options = []
-            signal.value.asap_symbol_select = []
-            signal.value.asap_symbol_fetch_error = null
-        }
-    },
-)
-
-watch(
-    () => signal.value.asap_symbol_select,
-    (selectedSymbol) => {
-        if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
-            if (Array.isArray(selectedSymbol)) {
-                signal.value.symbol_list = selectedSymbol.join(",")
-            } else {
-                signal.value.symbol_list = null
-            }
-        }
-    },
-)
+    resetSaveState,
+    setSaveError,
+    syncBaselineState,
+})
+const {
+    canTestMonitoringTelegram,
+    monitoringTestLoading,
+    testMonitoringTelegram,
+} = useConfigMonitoringTest({
+    apiUrl,
+    message,
+    monitoring,
+})
 
 onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
 
 onMounted(() => {
-    timezone.value = getAllTimeZones()
-    const clientTimezone = getClientTimezone()
-    if (!timezone.value.some((tz) => tz.value === clientTimezone)) {
-        timezone.value.unshift({ label: clientTimezone, value: clientTimezone })
-    }
+    initializeTimezoneOptions(getClientTimezone())
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('keydown', handleGlobalKeydown)
     void fetchDefaultValues()

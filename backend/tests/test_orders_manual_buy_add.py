@@ -1,7 +1,7 @@
 from typing import Any
 
 import pytest
-import service.orders as orders_module
+import service.order_persistence as persistence_module
 from service.orders import Orders
 
 
@@ -55,10 +55,12 @@ async def test_receive_manual_buy_add_appends_safety_order(monkeypatch) -> None:
     async def fake_run_sqlite(operation, _name) -> None:
         await operation()
 
-    monkeypatch.setattr(orders_module, "run_sqlite_write_with_retry", fake_run_sqlite)
-    monkeypatch.setattr(orders_module, "in_transaction", lambda: _DummyTx())
-    monkeypatch.setattr(orders_module.model, "Trades", _DummyTradesModel)
-    monkeypatch.setattr(orders_module.model, "OpenTrades", _DummyOpenTradesModel)
+    monkeypatch.setattr(
+        persistence_module, "run_sqlite_write_with_retry", fake_run_sqlite
+    )
+    monkeypatch.setattr(persistence_module, "in_transaction", lambda: _DummyTx())
+    monkeypatch.setattr(persistence_module.model, "Trades", _DummyTradesModel)
+    monkeypatch.setattr(persistence_module.model, "OpenTrades", _DummyOpenTradesModel)
 
     async def fake_get_open_trades_by_symbol(_symbol: str) -> list[dict[str, Any]]:
         return [

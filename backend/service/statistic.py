@@ -11,6 +11,7 @@ import pandas as pd
 from service.autopilot import Autopilot
 from service.config import Config
 from service.database import run_sqlite_write_with_retry
+from service.green_phase import AVAILABLE_QUOTE_UNSET
 from service.trades import Trades
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
@@ -197,9 +198,21 @@ class Statistic:
         """Return profit, uPNL, and autopilot summaries."""
         return copy.deepcopy(await self._get_profit_cached())
 
+    async def get_profit_for_dashboard(
+        self, available_quote: float | None
+    ) -> dict[str, Any]:
+        """Return profit data enriched for the dashboard websocket stream."""
+        profit_data = copy.deepcopy(await self._get_profit_base_cached())
+        await self._apply_autopilot_runtime_state(
+            profit_data,
+            available_quote=available_quote,
+        )
+        profit_data["funds_available"] = available_quote
+        return profit_data
+
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
-    async def _get_profit_cached(self) -> dict[str, Any]:
-        """Compute and cache profit, uPNL, and autopilot summaries."""
+    async def _get_profit_base_cached(self) -> dict[str, Any]:
+        """Compute and cache DB-backed profit aggregates."""
         profit_data = {}
         begin_week = (
             datetime.now() + timedelta(days=(0 - datetime.now().weekday()))
@@ -237,26 +250,30 @@ class Statistic:
             profit_week_task,
         )
 
-        # uPNL
         profit_data["upnl"] = upnl_value
-
-        # Profit overall
         profit_data["profit_overall"] = closed_profit + float(
             profit_data["upnl"] or 0.0
         )
-
-        # Funds locked in deals
         profit_data["funds_locked"] = funds_locked
-
         profit_data["profit_week"] = self._group_profit_rows_by_date(profit_week_rows)
-
         profit_data["profit_overall_timestamp"] = datetime.now(timezone.utc).strftime(
             "%Y-%m-%d %H:%M:%S"
         )
+        await self._store_upnl_snapshot(profit_data)
+        return profit_data
+
+    async def _apply_autopilot_runtime_state(
+        self,
+        profit_data: dict[str, Any],
+        *,
+        available_quote: float | None | object = AVAILABLE_QUOTE_UNSET,
+    ) -> None:
+        """Attach current Autopilot/Green Phase state to profit payloads."""
         config = await Config.instance()
         autopilot_state = await self.autopilot.resolve_runtime_state(
-            funds_locked=float(funds_locked or 0.0),
-            config=config._cache,
+            funds_locked=float(profit_data.get("funds_locked") or 0.0),
+            config=config.snapshot(),
+            available_quote=available_quote,
         )
         profit_data["autopilot"] = autopilot_state["mode"]
         profit_data["autopilot_effective_max_bots"] = autopilot_state[
@@ -280,7 +297,12 @@ class Statistic:
         profit_data["autopilot_green_phase_ramp_ready"] = autopilot_state[
             "green_phase_ramp_ready"
         ]
-        await self._store_upnl_snapshot(profit_data)
+
+    @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
+    async def _get_profit_cached(self) -> dict[str, Any]:
+        """Compute and cache profit, uPNL, and autopilot summaries."""
+        profit_data = copy.deepcopy(await self._get_profit_base_cached())
+        await self._apply_autopilot_runtime_state(profit_data)
         return profit_data
 
     async def _store_upnl_snapshot(self, profit_data: dict[str, Any]) -> None:

@@ -85,3 +85,14 @@ async def test_housekeeper_deletes_only_old_inactive_symbol_rows(
     ]
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_housekeeper_shutdown_is_instance_local() -> None:
+    first = Housekeeper()
+    second = Housekeeper()
+
+    await first.shutdown()
+
+    assert first._running is False
+    assert second._running is True

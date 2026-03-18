@@ -22,15 +22,13 @@ class Housekeeper:
 
     def __init__(self) -> None:
         self.config = None
-
-        # Class variables
-        Housekeeper.status = True
+        self._running = True
 
     async def init(self) -> None:
         """Initialize the housekeeper with current configuration."""
         config = await Config.instance()
         config.subscribe(self.on_config_change)
-        self.on_config_change(config._cache)
+        self.on_config_change(config.snapshot())
 
     def on_config_change(self, config: dict[str, Any]) -> None:
         """Reload housekeeping configuration."""
@@ -59,7 +57,7 @@ class Housekeeper:
 
     async def cleanup_ticker_database(self) -> None:
         """Remove old ticker data for inactive symbols."""
-        while Housekeeper.status:
+        while self._running:
             if self.config:
                 retention_days = self._get_ticker_retention_days()
                 actual_timestamp = datetime.now()
@@ -128,4 +126,4 @@ class Housekeeper:
 
     async def shutdown(self) -> None:
         """Stop housekeeping loop."""
-        Housekeeper.status = False
+        self._running = False

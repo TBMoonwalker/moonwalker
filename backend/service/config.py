@@ -1,18 +1,22 @@
 """Configuration management for runtime settings."""
 
 import asyncio
+import copy
 import json
 import os
 import re
 import uuid
+from pathlib import Path
 from typing import Any, Callable
 
 import helper
 from model import AppConfig
+from service.config_persistence import should_persist_config_value
 from service.redis import CONFIG_CHANNEL, redis_client
 from service.strategy_capability import filter_supported_strategies
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
 HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
     "1m": "30d",
@@ -239,10 +243,14 @@ class Config:
             return json.dumps(value)
         return value
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return a defensive copy of the current config state."""
+        return copy.deepcopy(self._cache)
+
     def __notify_subscribers(self) -> None:
         """Notify local subscribers that cache values changed."""
         for subscriber in self._subscribers:
-            subscriber(self._cache)
+            subscriber(self.snapshot())
 
     async def __clear_key(self, key: str) -> bool:
         """Remove a config key from persistent storage and the in-memory cache."""
@@ -329,14 +337,7 @@ class Config:
         update = self.__parse_update_payload(value)
         value_type = update["type"]
         value_data = update["value"]
-        is_numeric_value = isinstance(value_data, (int, float)) and not isinstance(
-            value_data, bool
-        )
-        should_persist = (
-            bool(value_data)
-            or (value_type == "bool" and value_data is False)
-            or (value_type in {"int", "float"} and is_numeric_value and value_data == 0)
-        )
+        should_persist = should_persist_config_value(value_type, value_data)
         if not should_persist:
             changed = await self.__clear_key(key)
             if changed:
@@ -378,18 +379,7 @@ class Config:
 
             value_type = value["type"]
             value_data = value["value"]
-            is_numeric_value = isinstance(value_data, (int, float)) and not isinstance(
-                value_data, bool
-            )
-            should_persist = (
-                bool(value["value"])
-                or (value_type == "bool" and value_data is False)
-                or (
-                    value_type in {"int", "float"}
-                    and is_numeric_value
-                    and value_data == 0
-                )
-            )
+            should_persist = should_persist_config_value(value_type, value_data)
             if should_persist:
                 serialized_value = self.__serialize_value_for_storage(
                     value_data, value_type
@@ -413,8 +403,8 @@ class Config:
     def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Subscribe a callback function to configuration changes.
 
-        The callback will be called with the full configuration cache whenever
-        a configuration change is detected.
+        The callback will be called with a defensive copy of the configuration
+        state whenever a configuration change is detected.
 
         Args:
             callback: A callable that takes a dictionary of configuration values
@@ -431,8 +421,7 @@ class Config:
             await self.__load_keys(keys)
         else:
             await self.load_all()
-        for subscriber in self._subscribers:
-            subscriber(self._cache)
+        self.__notify_subscribers()
 
     async def _handle_change_message(self, payload: Any) -> None:
         """Apply a Redis change payload, skipping self-originated updates."""
@@ -484,7 +473,7 @@ class Config:
         """Get a list of filenames in the specified directory.
 
         Args:
-            directory: The path to the directory (relative to current working directory)
+            directory: The path to the directory relative to the backend root.
             sort: Whether to sort the filenames alphabetically. Default is True.
 
         Returns:
@@ -494,16 +483,16 @@ class Config:
             ValueError: If the specified path is not a valid directory
             IOError: If an error occurs while reading the directory
         """
-        directory = os.getcwd() + "/" + directory
-        if not os.path.isdir(directory):
+        directory_path = BACKEND_ROOT / directory
+        if not directory_path.is_dir():
             raise ValueError(
-                f"The specified path '{directory}' is not a valid directory."
+                f"The specified path '{directory_path}' is not a valid directory."
             )
 
         # Get all file paths matching the pattern
         try:
             all_files = []
-            for root, dirs, files in os.walk(directory):
+            for root, dirs, files in os.walk(directory_path):
                 # Exclude certain directories
                 dirs[:] = [
                     d for d in dirs if not d.startswith(".") and d != "__pycache__"

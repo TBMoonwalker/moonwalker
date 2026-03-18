@@ -4,7 +4,7 @@ from typing import Any
 
 import helper
 import model
-from service.green_phase import GreenPhaseService
+from service.green_phase import AVAILABLE_QUOTE_UNSET, GreenPhaseService
 
 logging = helper.LoggerFactory.get_logger("logs/autopilot.log", "autopilot")
 
@@ -56,7 +56,11 @@ class Autopilot:
         }
 
     async def resolve_runtime_state(
-        self, funds_locked: float, config: dict[str, Any]
+        self,
+        funds_locked: float,
+        config: dict[str, Any],
+        *,
+        available_quote: float | None | object = AVAILABLE_QUOTE_UNSET,
     ) -> dict[str, Any]:
         """Return merged Autopilot runtime state including Green Phase."""
         runtime_state = self._build_default_runtime_state(config)
@@ -111,6 +115,7 @@ class Autopilot:
             config=config,
             funds_locked=funds_locked,
             base_max_bots=int(runtime_state["base_max_bots"] or 0),
+            available_quote=available_quote,
         )
 
         runtime_state["mode"] = autopilot_mode
@@ -150,10 +155,18 @@ class Autopilot:
         return runtime_state
 
     async def calculate_trading_settings(
-        self, funds_locked: float, config: dict[str, Any]
+        self,
+        funds_locked: float,
+        config: dict[str, Any],
+        *,
+        available_quote: float | None | object = AVAILABLE_QUOTE_UNSET,
     ) -> dict[str, Any]:
         """Return trading settings based on locked funds and thresholds."""
-        runtime_state = await self.resolve_runtime_state(funds_locked, config)
+        runtime_state = await self.resolve_runtime_state(
+            funds_locked,
+            config,
+            available_quote=available_quote,
+        )
         if not runtime_state["uses_risk_overrides"]:
             return {}
         return {

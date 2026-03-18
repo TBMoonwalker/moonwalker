@@ -112,9 +112,7 @@ class BackupService:
         await config.reload()
 
         if validated_trade_data:
-            refreshed, failed = await self._refresh_required_history(
-                dict(config._cache)
-            )
+            refreshed, failed = await self._refresh_required_history(config.snapshot())
             restore_summary["history_refreshed_symbols"] = refreshed
             restore_summary["history_failed_symbols"] = failed
 

@@ -113,6 +113,53 @@ async def test_autopilot_disabled_persists_none_mode(monkeypatch) -> None:
     assert created_modes == ["none"]
 
 
+@pytest.mark.asyncio
+async def test_autopilot_passes_available_quote_override_to_green_phase(
+    monkeypatch,
+) -> None:
+    created_modes = []
+    captured: dict[str, object] = {}
+
+    async def fake_create(**kwargs) -> None:
+        created_modes.append(kwargs.get("mode"))
+
+    async def fake_get_override(*_args, **kwargs):
+        captured["available_quote"] = kwargs.get("available_quote")
+        return {
+            "green_phase_detected": False,
+            "green_phase_active": False,
+            "effective_extra_deals": 0,
+            "effective_max_bots": 4,
+            "phase_strength": 0.0,
+            "ramp_ready": False,
+            "guardrail_block_reason": None,
+        }
+
+    monkeypatch.setattr(model, "Autopilot", types.SimpleNamespace(create=fake_create))
+
+    autopilot = Autopilot()
+    autopilot.green_phase_service = types.SimpleNamespace(
+        get_override=fake_get_override
+    )
+    config = {
+        "autopilot": True,
+        "autopilot_max_fund": 100,
+        "autopilot_high_threshold": 80,
+        "autopilot_medium_threshold": 50,
+        "max_bots": 4,
+    }
+
+    runtime_state = await autopilot.resolve_runtime_state(
+        10,
+        config,
+        available_quote=321.5,
+    )
+
+    assert runtime_state["effective_max_bots"] == 4
+    assert captured["available_quote"] == 321.5
+    assert created_modes == ["low"]
+
+
 def _green_override(**values):
     async def _inner(*_args, **_kwargs):
         return values

@@ -64,7 +64,7 @@ async def get_config() -> Any:
         JSON response containing the full configuration cache.
     """
     config = await Config.instance()
-    return config._cache
+    return config.snapshot()
 
 
 @get(path="/config/backup/export")

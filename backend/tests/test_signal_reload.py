@@ -69,3 +69,66 @@ async def test_signal_reload_coalesces_rapid_config_changes(monkeypatch) -> None
     assert signal.signal_plugin is created_plugins[1]
 
     await signal.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_signal_reload_rejects_module_without_signal_plugin(monkeypatch) -> None:
+    signal = Signal(asyncio.Queue())
+
+    def fake_import_module(_module_name: str) -> types.SimpleNamespace:
+        return types.SimpleNamespace()
+
+    monkeypatch.setattr(signal_module.importlib, "import_module", fake_import_module)
+
+    await signal._reload_plugin({"signal": "broken"})
+
+    assert signal.signal_name is None
+    assert signal.signal_plugin is None
+    assert signal._task is None
+
+
+@pytest.mark.asyncio
+async def test_signal_reload_rejects_non_async_run(monkeypatch) -> None:
+    signal = Signal(asyncio.Queue())
+
+    def fake_import_module(_module_name: str) -> types.SimpleNamespace:
+        class FakePlugin:
+            def __init__(self, _watcher_queue: asyncio.Queue[list[str]]) -> None:
+                return None
+
+            def run(self, _config: dict[str, object]) -> None:
+                return None
+
+            async def shutdown(self) -> None:
+                return None
+
+        return types.SimpleNamespace(SignalPlugin=FakePlugin)
+
+    monkeypatch.setattr(signal_module.importlib, "import_module", fake_import_module)
+
+    await signal._reload_plugin({"signal": "broken"})
+
+    assert signal.signal_name is None
+    assert signal.signal_plugin is None
+    assert signal._task is None
+
+
+@pytest.mark.asyncio
+async def test_signal_shutdown_cancels_inflight_reload() -> None:
+    signal = Signal(asyncio.Queue())
+    cancelled = asyncio.Event()
+
+    async def blocked_reload() -> None:
+        try:
+            await asyncio.sleep(3600)
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
+
+    signal._reload_task = asyncio.create_task(blocked_reload())
+    await asyncio.sleep(0)
+
+    await signal.shutdown()
+
+    assert cancelled.is_set()
+    assert signal._reload_task is None

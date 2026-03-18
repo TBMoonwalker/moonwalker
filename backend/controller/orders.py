@@ -6,7 +6,7 @@ import helper
 from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
-from litestar.handlers import get, post
+from litestar.handlers import post
 from service.config import Config
 from service.orders import Orders
 
@@ -14,7 +14,7 @@ logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_ord
 orders = Orders()
 
 
-@get(path="/orders/sell/{symbol:str}")
+@post(path="/orders/sell/{symbol:str}", status_code=200)
 async def sell_order(symbol: str) -> dict[str, Any]:
     """Create a sell order for the specified symbol.
 
@@ -34,7 +34,7 @@ async def sell_order(symbol: str) -> dict[str, Any]:
         return {"result": ""}
 
 
-@get(path="/orders/buy/{symbol:str}/{ordersize:str}")
+@post(path="/orders/buy/{symbol:str}/{ordersize:str}", status_code=200)
 async def buy_order(symbol: str, ordersize: str) -> dict[str, Any]:
     """Create a buy order for the specified symbol and size.
 
@@ -55,7 +55,7 @@ async def buy_order(symbol: str, ordersize: str) -> dict[str, Any]:
         return {"result": ""}
 
 
-@get(path="/orders/stop/{symbol:str}")
+@post(path="/orders/stop/{symbol:str}", status_code=200)
 async def stop_order(symbol: str) -> dict[str, Any]:
     """Stop an active order for the specified symbol.
 

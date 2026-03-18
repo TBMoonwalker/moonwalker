@@ -8,6 +8,7 @@ const VOLUME_MULTIPLIERS: Record<string, number> = {
 }
 
 type StructuredConfigValue = Record<string, unknown>
+export type ConfigValueType = 'str' | 'bool' | 'int' | 'float'
 
 export interface SignalSettingsInput {
     signal: string | null
@@ -18,6 +19,23 @@ export interface SignalSettingsInput {
     csvsignal_mode: string | null
     csvsignal_source: string | null
     csvsignal_inline: string | null
+}
+
+export function serializeConfigValue(
+    value: unknown,
+    type: ConfigValueType,
+): string {
+    return JSON.stringify({ value, type })
+}
+
+export function toNullableConfigString(
+    value: string | null | undefined,
+): string | null {
+    if (value === null || value === undefined) {
+        return null
+    }
+
+    return value.trim().length > 0 ? value : null
 }
 
 export function getDefaultHistoryLookbackByTimeframe(
@@ -97,13 +115,13 @@ export function parseVolumeLimitToNumber(raw: unknown): number | null {
 
 export function buildVolumeConfig(
     rawVolume: number | null,
-): StructuredConfigValue | false {
+): StructuredConfigValue | null {
     if (rawVolume === null || rawVolume === undefined) {
-        return false
+        return null
     }
     const value = Number(rawVolume)
     if (!Number.isFinite(value) || value <= 0) {
-        return false
+        return null
     }
 
     const ranges: Array<{ range: string; multiplier: number }> = [
@@ -155,14 +173,14 @@ export function toTokenOnlyEntries(raw: string | null): string | null {
 export function normalizePairEntries(
     raw: string | null,
     quoteCurrency: string,
-): string | false {
+) : string | null {
     if (!raw) {
-        return false
+        return null
     }
 
     const normalizedRaw = raw.trim()
     if (!normalizedRaw) {
-        return false
+        return null
     }
 
     if (URL_PATTERN.test(normalizedRaw)) {
@@ -171,7 +189,7 @@ export function normalizePairEntries(
 
     const entries = splitEntries(normalizedRaw)
     if (entries.length === 0) {
-        return false
+        return null
     }
 
     const quote = quoteCurrency.toUpperCase()
@@ -192,12 +210,12 @@ export function normalizePairEntries(
 
 export function buildSignalSettingsValue(
     input: SignalSettingsInput,
-): StructuredConfigValue | false {
+): StructuredConfigValue | null {
     if (input.signal === 'sym_signals') {
         return {
-            api_url: input.symsignal_url || false,
-            api_key: input.symsignal_key || false,
-            api_version: input.symsignal_version || false,
+            api_url: toNullableConfigString(input.symsignal_url),
+            api_key: toNullableConfigString(input.symsignal_key),
+            api_version: toNullableConfigString(input.symsignal_version),
             allowed_signals: input.symsignal_allowedsignals,
         }
     }
@@ -207,8 +225,8 @@ export function buildSignalSettingsValue(
                 ? input.csvsignal_inline
                 : input.csvsignal_source
         return {
-            csv_source: csvSourceValue || false,
+            csv_source: toNullableConfigString(csvSourceValue),
         }
     }
-    return false
+    return null
 }

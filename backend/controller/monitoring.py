@@ -28,7 +28,7 @@ async def test_monitoring_telegram(request: Request[Any, Any, Any]) -> Any:
         return json_response({"error": "Payload must be a JSON object."}, 400)
 
     config = await Config.instance()
-    effective_config = dict(config._cache)
+    effective_config = config.snapshot()
     effective_config.update(payload)
 
     monitoring_service = MonitoringService()
