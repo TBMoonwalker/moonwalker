@@ -3,9 +3,10 @@
 from typing import Any
 
 import helper
-from controller import controller
-from quart import jsonify, request
-from quart_cors import route_cors
+from controller.responses import json_response
+from litestar.connection import Request
+from litestar.exceptions import SerializationException
+from litestar.handlers import post
 from service.config import Config
 from service.monitoring import MonitoringService
 
@@ -14,13 +15,17 @@ logging = helper.LoggerFactory.get_logger(
 )
 
 
-@controller.route("/monitoring/test", methods=["POST"])
-@route_cors(allow_origin="*")
-async def test_monitoring_telegram() -> tuple[Any, int]:
+@post(path="/monitoring/test")
+async def test_monitoring_telegram(request: Request[Any, Any, Any]) -> Any:
     """Send a monitoring test message to Telegram."""
-    payload = await request.get_json(silent=True) or {}
+    try:
+        payload = await request.json()
+    except SerializationException:
+        payload = {}
+    if payload is None:
+        payload = {}
     if not isinstance(payload, dict):
-        return jsonify({"error": "Payload must be a JSON object."}), 400
+        return json_response({"error": "Payload must be a JSON object."}, 400)
 
     config = await Config.instance()
     effective_config = dict(config._cache)
@@ -29,5 +34,8 @@ async def test_monitoring_telegram() -> tuple[Any, int]:
     monitoring_service = MonitoringService()
     success, message = await monitoring_service.send_test_notification(effective_config)
     if not success:
-        return jsonify({"error": message}), 400
-    return jsonify({"message": message}), 200
+        return json_response({"error": message}, 400)
+    return {"message": message}
+
+
+route_handlers = [test_monitoring_telegram]

@@ -37,6 +37,16 @@ class Strategy:
         )
         close = await self.indicators.get_close_price(symbol, self.timeframe, 5)
         try:
+            required_emas = ("ema_20", "ema_50", "ema_100", "ema_200")
+            if any(ema.get(key) is None for key in required_emas):
+                return False
+
+            if close is None:
+                return False
+            close_series = close.dropna()
+            if len(close_series) < 3:
+                return False
+
             if (
                 ema["ema_20"] < ema["ema_200"]
                 and ema["ema_50"] < ema["ema_200"]
@@ -44,15 +54,15 @@ class Strategy:
             ):
                 # Check if rebound happened
                 if (
-                    close.dropna().iloc[-2] > ema["ema_20"]
-                    and close.dropna().iloc[-3] < ema["ema_20"]
+                    close_series.iloc[-2] > ema["ema_20"]
+                    and close_series.iloc[-3] < ema["ema_20"]
                 ):
                     result = True
 
             logging_json = {
                 "symbol": symbol,
                 "ema(20/50/100/200)": f"{ema['ema_20']}, {ema['ema_50']}, {ema['ema_100']}, {ema['ema_200']}",
-                "close price(last)": f"{close.dropna().iloc[-1]}",
+                "close price(last)": f"{close_series.iloc[-1]}",
                 "creating_order": result,
             }
             if self._last_log_by_symbol.get(symbol) != logging_json:

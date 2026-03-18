@@ -3,9 +3,9 @@
 from typing import Any
 
 import helper
-from controller import controller
-from quart import jsonify, request
-from quart_cors import route_cors
+from litestar.connection import Request
+from litestar.exceptions import SerializationException
+from litestar.handlers import get, post
 from service.config import Config
 from service.data import Data
 
@@ -14,11 +14,7 @@ data = Data()
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_data")
 
 
-@controller.route(
-    "/data/ohlcv/<symbol>/<timerange>/<timestamp_start>/<offset>",
-    methods=["GET"],
-)
-@route_cors(allow_origin="*")
+@get(path="/data/ohlcv/{symbol:str}/{timerange:str}/{timestamp_start:str}/{offset:str}")
 async def get_ohlcv_data(
     symbol: str, timerange: str, timestamp_start: str, offset: str
 ) -> Any:
@@ -38,20 +34,24 @@ async def get_ohlcv_data(
     return response
 
 
-@controller.route("/data/exchange/symbols/<currency>", methods=["GET"])
-@route_cors(allow_origin="*")
+@get(path="/data/exchange/symbols/{currency:str}")
 async def get_exchange_symbols(currency: str) -> Any:
     """Get exchange symbols for a configured quote currency."""
     config = await Config.instance()
     symbols = await data.get_exchange_symbols_for_currency(config._cache, currency)
-    return jsonify({"symbols": symbols})
+    return {"symbols": symbols}
 
 
-@controller.route("/data/exchange/symbols", methods=["POST"])
-@route_cors(allow_origin="*")
-async def get_exchange_symbols_from_draft() -> Any:
+@post(path="/data/exchange/symbols")
+async def get_exchange_symbols_from_draft(request: Request[Any, Any, Any]) -> Any:
     """Get exchange symbols using draft exchange settings from request payload."""
-    payload = await request.get_json(silent=True) or {}
+    try:
+        payload = await request.json()
+    except SerializationException:
+        payload = {}
+
+    if not isinstance(payload, dict):
+        payload = {}
 
     config = await Config.instance()
     exchange_config = dict(config._cache)
@@ -62,12 +62,19 @@ async def get_exchange_symbols_from_draft() -> Any:
 
     currency = payload.get("currency") or exchange_config.get("currency")
     if not currency:
-        return jsonify({"symbols": [], "missing": ["currency"]})
+        return {"symbols": [], "missing": ["currency"]}
 
     required_fields = ("exchange", "key", "secret")
     missing = [field for field in required_fields if not exchange_config.get(field)]
     if missing:
-        return jsonify({"symbols": [], "missing": missing})
+        return {"symbols": [], "missing": missing}
 
     symbols = await data.get_exchange_symbols_for_currency(exchange_config, currency)
-    return jsonify({"symbols": symbols, "missing": []})
+    return {"symbols": symbols, "missing": []}
+
+
+route_handlers = [
+    get_ohlcv_data,
+    get_exchange_symbols,
+    get_exchange_symbols_from_draft,
+]

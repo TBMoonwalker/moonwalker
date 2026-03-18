@@ -7,9 +7,18 @@ from typing import Any
 
 import helper
 from telethon import TelegramClient
+from telethon.errors import RPCError
 from telethon.sessions import MemorySession
 
 logging = helper.LoggerFactory.get_logger("logs/monitoring.log", "monitoring")
+MONITORING_SEND_EXCEPTIONS = (
+    asyncio.TimeoutError,
+    OSError,
+    RPCError,
+    RuntimeError,
+    TypeError,
+    ValueError,
+)
 
 
 class MonitoringService:
@@ -88,7 +97,7 @@ class MonitoringService:
                     timeout=timeout_seconds,
                 )
                 return True
-            except Exception as exc:  # noqa: BLE001 - Monitoring must never crash flow.
+            except MONITORING_SEND_EXCEPTIONS as exc:
                 logging.error(
                     "Monitoring telegram failed (attempt %s/%s): %s",
                     attempt + 1,

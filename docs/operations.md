@@ -48,3 +48,74 @@ Priority order:
 
 ## Statistics API
 - Canonical endpoint: `/statistic/profit-overall/timeline`
+
+## Backup And Restore
+
+Backup and restore is available directly from the Configuration page.
+
+Two backup scopes are available:
+
+- Config only: exports persisted configuration values only.
+- Full backup: exports configuration plus trade-related data.
+
+Full backups include:
+
+- open trades
+- closed trades
+- unsellable trades
+- trade/order history required by Moonwalker state
+- autopilot history
+- uPNL history
+
+Full backups do not include ticker candle history. On full restore, Moonwalker
+clears current ticker history and fetches the required history again for
+restored active trades.
+
+Two restore modes are available:
+
+- Restore config only: replaces configuration, leaves current trade data in
+  place.
+- Restore full backup: replaces both configuration and the included trade data.
+
+## Unsellable Trades
+
+When a sell succeeds only partially and the leftover amount falls below the
+exchange minimum notional or similar constraints, Moonwalker archives the
+remainder as an unsellable trade.
+
+Important behavior:
+
+- the sold portion is still recorded correctly in closed trades
+- the unsellable remainder is moved out of active open trades
+- unsellable trades no longer count against active open-trade slots
+- the UI shows them in a dedicated `Unsellable` tab
+
+Use the `Resolve` action after you have manually cleaned up the remainder on the
+exchange side and want to remove it from the archive.
+
+## Sell Protection
+
+Moonwalker has two main protections against selling into short-lived spikes:
+
+- TP spike confirmation can delay TP sells until the move remains valid long
+  enough.
+- Limit-sell market fallback uses a live-price floor guard before switching to a
+  market sell.
+
+This means a wick can still trigger evaluation, but Moonwalker tries to avoid
+closing the trade at a worse price after the spike has already faded.
+
+## Live Statistics
+
+The dashboard statistics panel includes live runtime state beyond raw PnL:
+
+- `Funds locked`: capital currently tied up in open deals
+- `Funds available`: free quote balance when available from the exchange
+- `Autopilot mode`: base Autopilot state (`low`, `medium`, `high`, or `none`)
+- `Effective max bots`: the currently active max-deals limit after Autopilot and
+  Green Phase are combined
+- `Green phase` status: whether the market-speed monitor detected momentum and
+  whether the guardrails allowed the temporary expansion
+
+Green Phase can be detected but still blocked if reserve protection or locked
+fund ceilings say there is not enough safe capacity left.

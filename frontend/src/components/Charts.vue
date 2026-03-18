@@ -20,7 +20,7 @@ import { BarChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
-import { NSpin } from 'naive-ui'
+import { formatTradingViewDate } from '../helpers/date'
 const range = defineProps<{ period: string }>()
 const profit_store = useProfitDatastore()
 const statistics_store = useWebSocketDataStore("statistics")
@@ -149,13 +149,7 @@ watch([statistics_data.data, profit_store_refs.data], async ([newData]) => {
                         color: "#fff",
                         margin: 8,
                         hideOverlap: true,
-                        formatter: (value: string) => {
-                            if (isMobile.value && range['period'] === 'daily' && value.includes('-')) {
-                                const parts = value.split('-')
-                                return `${parts[1]}-${parts[2]}`
-                            }
-                            return value
-                        }
+                        formatter: (value: string) => formatTradingViewDate(value),
                     },
                     type: 'category',
                     data: chart_data.value.labels,

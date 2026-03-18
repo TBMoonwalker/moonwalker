@@ -56,11 +56,22 @@ class Utils:
         """
         symbol = pair
         if "-" in pair:
-            pair, market = pair.split("-")
+            pair, market = pair.split("-", 1)
             symbol = f"{pair}/{market}"
         elif "/" not in pair:
-            pair, market = pair.split(currency)
-            symbol = f"{pair}/{currency}"
+            if not currency:
+                raise ValueError("Currency is required to split unsuffixed symbols.")
+            normalized_currency = str(currency)
+            if not pair.endswith(normalized_currency):
+                raise ValueError(
+                    f"Pair '{pair}' does not end with quote currency '{currency}'."
+                )
+            base = pair[: -len(normalized_currency)]
+            if not base:
+                raise ValueError(
+                    f"Pair '{pair}' has no base asset before '{currency}'."
+                )
+            symbol = f"{base}/{normalized_currency}"
 
         return symbol
 

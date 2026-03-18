@@ -2,23 +2,32 @@
 
 import asyncio
 import importlib
-import json
 import random
-import time
 from typing import Any, Optional
 
 import helper
 import model
 import requests
 from service.autopilot import Autopilot
-from service.config import resolve_history_lookback_days, resolve_timeframe
+from service.config import resolve_history_lookback_days
 from service.data import Data
 from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
+from service.signal_runtime import (
+    build_common_runtime_settings,
+    is_max_bots_reached,
+    resolve_max_bots_log_interval,
+    update_waiting_log_state,
+)
 from service.statistic import Statistic
-from service.strategy_capability import ensure_strategy_supported
+from service.strategy_capability import (
+    ensure_strategy_supported,
+    get_configured_strategy_history_lookback_days,
+    get_configured_strategy_min_history_candles,
+)
 from tenacity import retry, wait_fixed
+from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "asap")
 
@@ -55,30 +64,34 @@ class SignalPlugin:
         self._volume: dict[str, Any] | None = None
         self._strategy_timeframe = "1m"
         self._signal_strategy_plugin: Any | None = None
+        self._required_history_days = 0
+        self._required_history_candles = 0
 
     def __prepare_runtime_settings(self) -> None:
         """Cache parsed runtime settings and strategy instance for hot loops."""
-        self._pair_denylist = (
-            [
-                entry.strip().upper().split("/")[0]
-                for entry in self.config.get("pair_denylist", None).split(",")
-                if entry.strip()
-            ]
-            if self.config.get("pair_denylist", None)
-            else None
-        )
-        self._pair_allowlist = (
-            self.config.get("pair_allowlist", None).split(",")
-            if self.config.get("pair_allowlist", None)
-            else None
-        )
-        self._volume = (
-            json.loads(self.config.get("volume", None))
-            if self.config.get("volume", None)
-            else None
-        )
-        self._strategy_timeframe = resolve_timeframe(self.config)
+        runtime = build_common_runtime_settings(self.config)
+        self._pair_denylist = runtime.pair_denylist
+        self._pair_allowlist = runtime.pair_allowlist
+        self._volume = runtime.volume
+        self._strategy_timeframe = runtime.strategy_timeframe
         self._signal_strategy_plugin = None
+        configured_history_days = resolve_history_lookback_days(
+            self.config,
+            timeframe=self._strategy_timeframe,
+        )
+        strategy_history_days = get_configured_strategy_history_lookback_days(
+            self.config,
+            self._strategy_timeframe,
+            include_signal_strategy=True,
+        )
+        self._required_history_days = max(
+            configured_history_days,
+            strategy_history_days,
+        )
+        self._required_history_candles = get_configured_strategy_min_history_candles(
+            self.config,
+            include_signal_strategy=True,
+        )
 
         signal_strategy_name = self.config.get("signal_strategy", None)
         if signal_strategy_name:
@@ -92,16 +105,41 @@ class SignalPlugin:
 
     def __log_max_bots_waiting(self) -> None:
         """Log max-bot saturation with state/interval throttling."""
-        now = time.monotonic()
-        should_log = (not self._max_bots_blocked) or (
-            now - self._max_bots_last_log >= self._max_bots_log_interval_sec
+        (
+            self._max_bots_blocked,
+            self._max_bots_last_log,
+            should_log,
+        ) = update_waiting_log_state(
+            self._max_bots_blocked,
+            self._max_bots_last_log,
+            self._max_bots_log_interval_sec,
         )
         if not should_log:
             return
 
-        logging.debug("Max bots reached, waiting for a free slot.")
-        self._max_bots_blocked = True
-        self._max_bots_last_log = now
+            logging.debug("Max bots reached, waiting for a free slot.")
+
+    async def __has_sufficient_strategy_history(self, symbol: str) -> bool:
+        """Return True when local history satisfies the configured strategy warmup."""
+        required_candles = max(1, self._required_history_candles)
+
+        available_candles = await self.data.get_resampled_history_candle_count(
+            symbol,
+            self._strategy_timeframe,
+            required_candles,
+        )
+        if available_candles >= required_candles:
+            return True
+
+        logging.warning(
+            "Not watching %s because only %s/%s %s candles are available after "
+            "history sync.",
+            symbol,
+            available_candles,
+            required_candles,
+            self._strategy_timeframe,
+        )
+        return False
 
     async def __check_max_bots(self) -> bool:
         """Check if the maximum number of bots has been reached.
@@ -117,38 +155,25 @@ class SignalPlugin:
             ValueError: If configuration is invalid
             RuntimeError: If database operation fails
         """
-        result = False
-        max_bots = self.config.get("max_bots")
         try:
-            all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
-
-            profit = await self.statistic.get_profit()
-            if profit["funds_locked"] and profit["funds_locked"] > 0:
-                trading_settings = await self.autopilot.calculate_trading_settings(
-                    profit["funds_locked"], self.config
-                )
-                if trading_settings:
-                    max_bots = trading_settings["mad"]
-
-            if all_bots and (len(all_bots) >= max_bots):
-                result = True
+            return await is_max_bots_reached(
+                self.config, self.statistic, self.autopilot
+            )
         except ValueError as e:
             logging.error(
                 f"Invalid configuration for max bots check - not starting new deals! Cause: {e}"
             )
-            result = True
+            return True
         except RuntimeError as e:
             logging.error(
                 f"Database error while checking max bots - not starting new deals! Cause: {e}"
             )
-            result = True
-        except Exception as e:
+            return True
+        except (BaseORMException, TypeError) as e:
             logging.error(
                 f"Unexpected error checking max bots - not starting new deals! Cause: {e}"
             )
-            result = True
-
-        return result
+            return True
 
     async def __fetch_symbol_list_from_url(self, url: str) -> list[str]:
         """Fetch symbol list JSON from a remote URL without blocking the event loop."""
@@ -181,10 +206,6 @@ class SignalPlugin:
         """
         # New symbols
         symbol_list = self.config.get("symbol_list", None)
-        history_data = resolve_history_lookback_days(
-            self.config,
-            timeframe=resolve_timeframe(self.config),
-        )
         if symbol_list:
             if "http" in symbol_list:
                 symbol_list = await self.__fetch_symbol_list_from_url(symbol_list)
@@ -199,21 +220,35 @@ class SignalPlugin:
 
             logging.debug(symbol_list)
 
+            eligible_symbols: list[str] = []
             # Add history data for indicators
             for symbol in symbol_list:
                 if symbol not in running_symbols:
-                    if await self.data.count_history_data_for_symbol(symbol) < 1:
+                    required_candles = max(1, self._required_history_candles)
+                    if not await self.data.has_sufficient_resampled_history(
+                        symbol,
+                        self._strategy_timeframe,
+                        required_candles,
+                    ):
                         if not await self.data.add_history_data_for_symbol(
-                            symbol, history_data, self.config
+                            symbol,
+                            self._required_history_days,
+                            self.config,
                         ):
                             logging.error(
-                                f"Not trading {symbol} because history add failed. Please check data.log."
+                                "Not trading %s because history add failed. Please "
+                                "check data.log.",
+                                symbol,
                             )
-                            symbol_list.remove(symbol)
-            await self.watcher_queue.put(symbol_list)
+                            continue
+                        if not await self.__has_sufficient_strategy_history(symbol):
+                            continue
+                eligible_symbols.append(symbol)
+            await self.watcher_queue.put(eligible_symbols)
 
             logging.debug(f"Running symbols: {running_symbols}")
-            logging.debug(f"New symbols: {symbol_list}")
+            logging.debug(f"New symbols: {eligible_symbols}")
+            return eligible_symbols
         return symbol_list
 
     @retry(wait=wait_fixed(3))
@@ -317,14 +352,14 @@ class SignalPlugin:
                 try:
                     if not await self._signal_strategy_plugin.run(symbol, "buy"):
                         return False
-                except Exception as e:
+                except (AttributeError, RuntimeError, TypeError, ValueError) as e:
                     # Broad catch to keep signal processing resilient.
                     logging.error(f"Error running buy strategy. Cause: {e}")
                     return False
 
             return True
 
-        except Exception as e:
+        except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as e:
             logging.debug(
                 f"No data yet for {symbol} - you need to enable dynamic dca - error: {e}"
             )
@@ -343,12 +378,7 @@ class SignalPlugin:
             None
         """
         self.config = config
-        try:
-            self._max_bots_log_interval_sec = max(
-                1.0, float(self.config.get("max_bots_log_interval_sec", 60))
-            )
-        except (TypeError, ValueError):
-            self._max_bots_log_interval_sec = 60.0
+        self._max_bots_log_interval_sec = resolve_max_bots_log_interval(self.config)
         self.__prepare_runtime_settings()
 
         while self.status:

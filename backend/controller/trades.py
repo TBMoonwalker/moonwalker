@@ -1,16 +1,16 @@
 """Trade API endpoints."""
 
 import asyncio
-import inspect
 import json
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import helper
-from controller import controller
-from quart import jsonify, request, websocket
-from quart_cors import route_cors
-from service.config import Config
+from controller.responses import json_response
+from litestar.exceptions import WebSocketDisconnect
+from litestar.handlers import get, post, websocket_stream
 from service.trades import Trades
+from service.websocket_fanout import WebSocketFanout
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_trades")
 trades = Trades()
@@ -30,161 +30,144 @@ async def _get_closed_trades_cached() -> list[dict[str, Any]]:
     return await trades.get_closed_trades()
 
 
-@controller.websocket("/trades/open")
-async def open_trades() -> None:
-    """WebSocket endpoint for streaming open trades data.
-
-    Sends open trades data to connected clients every 5 seconds.
-
-    Raises:
-        asyncio.CancelledError: When client disconnects.
-    """
-    try:
-        while True:
-            output = await _get_open_trades_cached()
-            await websocket.send(_json_dumps(output))
-            await asyncio.sleep(5)
-    except asyncio.CancelledError:
-        # Handle disconnection gracefully
-        logging.info("Client disconnected from open trades WebSocket")
-        raise
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - Catch all exceptions to prevent WebSocket hang
-        logging.error("Error in open_trades WebSocket: %s", exc, exc_info=True)
-        raise
+@helper.async_ttl_cache(maxsize=1, ttl=2)
+async def _get_unsellable_trades_cached() -> list[dict[str, Any]]:
+    return await trades.get_unsellable_trades()
 
 
-@controller.websocket("/trades/closed")
-async def closed_trades() -> None:
-    """WebSocket endpoint for streaming closed trades data.
-
-    Sends closed trades data to connected clients every 5 seconds.
-
-    Raises:
-        asyncio.CancelledError: When client disconnects.
-    """
-    try:
-        while True:
-            output = await _get_closed_trades_cached()
-            await websocket.send(_json_dumps(output))
-            await asyncio.sleep(5)
-    except asyncio.CancelledError:
-        # Handle disconnection gracefully
-        logging.info("Client disconnected from closed trades WebSocket")
-        raise
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - Catch all exceptions to prevent WebSocket hang
-        logging.error("Error in closed_trades WebSocket: %s", exc, exc_info=True)
-        raise
+async def _build_open_trades_payload() -> str:
+    """Build serialized payload for open-trades stream."""
+    output = await _get_open_trades_cached()
+    return _json_dumps(output)
 
 
-@controller.route("/trades/closed/length")
-@route_cors(
-    allow_methods=["GET"],
-    allow_origin=["*"],
+async def _build_closed_trades_payload() -> str:
+    """Build serialized payload for closed-trades stream."""
+    output = await _get_closed_trades_cached()
+    return _json_dumps(output)
+
+
+async def _build_unsellable_trades_payload() -> str:
+    """Build serialized payload for unsellable-trades stream."""
+    output = await _get_unsellable_trades_cached()
+    return _json_dumps(output)
+
+
+_open_trades_fanout = WebSocketFanout(
+    name="open_trades",
+    interval_seconds=5,
+    producer=_build_open_trades_payload,
+    logger=logging,
 )
+_closed_trades_fanout = WebSocketFanout(
+    name="closed_trades",
+    interval_seconds=5,
+    producer=_build_closed_trades_payload,
+    logger=logging,
+)
+_unsellable_trades_fanout = WebSocketFanout(
+    name="unsellable_trades",
+    interval_seconds=5,
+    producer=_build_unsellable_trades_payload,
+    logger=logging,
+)
+
+
+async def start_websocket_fanout() -> None:
+    """Start shared websocket fan-out workers for trades streams."""
+    await _open_trades_fanout.start()
+    await _closed_trades_fanout.start()
+    await _unsellable_trades_fanout.start()
+
+
+async def stop_websocket_fanout() -> None:
+    """Stop shared websocket fan-out workers for trades streams."""
+    await _open_trades_fanout.stop()
+    await _closed_trades_fanout.stop()
+    await _unsellable_trades_fanout.stop()
+
+
+@websocket_stream(path="/trades/open", warn_on_data_discard=False)
+async def open_trades() -> AsyncGenerator[str, None]:
+    """WebSocket endpoint for streaming open trades data every 5 seconds."""
+    try:
+        async for output in _open_trades_fanout.subscribe():
+            yield output
+    except (asyncio.CancelledError, WebSocketDisconnect):
+        logging.info("Client disconnected from open trades WebSocket")
+        return
+
+
+@websocket_stream(path="/trades/closed", warn_on_data_discard=False)
+async def closed_trades() -> AsyncGenerator[str, None]:
+    """WebSocket endpoint for streaming closed trades data every 5 seconds."""
+    try:
+        async for output in _closed_trades_fanout.subscribe():
+            yield output
+    except (asyncio.CancelledError, WebSocketDisconnect):
+        logging.info("Client disconnected from closed trades WebSocket")
+        return
+
+
+@websocket_stream(path="/trades/unsellable", warn_on_data_discard=False)
+async def unsellable_trades() -> AsyncGenerator[str, None]:
+    """WebSocket endpoint for streaming unsellable trades data every 5 seconds."""
+    try:
+        async for output in _unsellable_trades_fanout.subscribe():
+            yield output
+    except (asyncio.CancelledError, WebSocketDisconnect):
+        logging.info("Client disconnected from unsellable trades WebSocket")
+        return
+
+
+@get(path="/trades/closed/length")
 async def closed_trades_length() -> dict[str, Any]:
-    """Get the count of closed trades.
-
-    Returns:
-        Dictionary with the count of closed trades.
-
-    Example:
-        {"result": 42}
-    """
+    """Get the count of closed trades."""
     response = await trades.get_closed_trades_length()
     return {"result": response}
 
 
-@controller.route("/trades/closed/<page>")
-@route_cors(
-    allow_methods=["GET"],
-    allow_origin=["*"],
-)
+@get(path="/trades/closed/{page:str}")
 async def closed_trades_pagination(page: str) -> dict[str, Any]:
-    """Get paginated closed trades data.
-
-    Args:
-        page: Page number to retrieve.
-
-    Returns:
-        Dictionary with closed trades data for the requested page.
-
-    Example:
-        {"result": [...]} or {"result": ""}
-    """
+    """Get paginated closed trades data."""
     response = await trades.get_closed_trades(int(page))
     return {"result": response}
 
 
-@controller.route("/trades/closed/delete/<trade_id>", methods=["POST"])
-@route_cors(
-    allow_methods=["POST"],
-    allow_origin=["*"],
-)
+@post(path="/trades/closed/delete/{trade_id:str}")
 async def closed_trade_delete(trade_id: str) -> Any:
     """Delete a closed trade by ID."""
     try:
         trade_identifier = int(trade_id)
     except ValueError:
-        return jsonify({"result": "", "error": "Invalid trade id."}), 400
+        return json_response({"result": "", "error": "Invalid trade id."}, 400)
 
     deleted = await trades.delete_closed_trade(trade_identifier)
     if deleted:
-        return jsonify({"result": "deleted"})
-    return jsonify({"result": "", "error": "Trade not found."}), 404
+        return {"result": "deleted"}
+    return json_response({"result": "", "error": "Trade not found."}, 404)
 
 
-async def _read_upload_as_text(upload: Any) -> str:
-    """Read an uploaded file object and return UTF-8 text."""
-    raw_content = upload.read()
-    if inspect.isawaitable(raw_content):
-        raw_content = await raw_content
-
-    if isinstance(raw_content, bytes):
-        return raw_content.decode("utf-8-sig")
-    if isinstance(raw_content, str):
-        return raw_content
-    return ""
-
-
-@controller.route("/trades/import/csv", methods=["POST"])
-@route_cors(
-    allow_methods=["POST"],
-    allow_origin=["*"],
-)
-async def import_open_trades_csv() -> Any:
-    """Import open trades from CSV content."""
+@post(path="/trades/unsellable/delete/{trade_id:str}")
+async def unsellable_trade_delete(trade_id: str) -> Any:
+    """Delete an unsellable trade by ID after manual cleanup."""
     try:
-        files = await request.files
-        csv_file = files.get("file")
-        if csv_file is None:
-            return jsonify({"result": "", "error": "Missing file field 'file'."}), 400
+        trade_identifier = int(trade_id)
+    except ValueError:
+        return json_response({"result": "", "error": "Invalid trade id."}, 400)
 
-        form = await request.form
-        overwrite_raw = str(form.get("overwrite", "false")).strip().lower()
-        overwrite = overwrite_raw in {"1", "true", "yes", "on"}
+    deleted = await trades.delete_unsellable_trade(trade_identifier)
+    if deleted:
+        return {"result": "deleted"}
+    return json_response({"result": "", "error": "Trade not found."}, 404)
 
-        csv_content = await _read_upload_as_text(csv_file)
-        config = await Config.instance()
-        quote_currency = str(config.get("currency", "USDT")).upper().strip()
-        take_profit = float(config.get("take_profit", 0.0) or 0.0)
-        first_so_deviation = float(config.get("sos", 0.0) or 0.0)
-        safety_step_scale = float(config.get("ss", 1.0) or 1.0)
 
-        result = await trades.import_open_trades_from_csv(
-            csv_content=csv_content,
-            quote_currency=quote_currency,
-            take_profit=take_profit,
-            first_so_deviation=first_so_deviation,
-            safety_step_scale=safety_step_scale,
-            overwrite=overwrite,
-        )
-        return jsonify({"result": "ok", **result})
-    except ValueError as exc:
-        return jsonify({"result": "", "error": str(exc)}), 400
-    except Exception as exc:  # noqa: BLE001 - Keep API resilient on import errors.
-        logging.error("Failed importing trades from CSV: %s", exc, exc_info=True)
-        return jsonify({"result": "", "error": "Failed importing CSV."}), 500
+route_handlers = [
+    open_trades,
+    closed_trades,
+    unsellable_trades,
+    closed_trades_length,
+    closed_trades_pagination,
+    closed_trade_delete,
+    unsellable_trade_delete,
+]

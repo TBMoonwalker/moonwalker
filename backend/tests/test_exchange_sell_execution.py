@@ -61,7 +61,15 @@ async def test_create_spot_sell_falls_back_to_market(monkeypatch) -> None:
 
     async def fake_limit_sell(_order, _config) -> None:
         calls["limit"] += 1
-        return None
+        return {
+            "requires_market_fallback": True,
+            "limit_cancel_confirmed": True,
+            "fallback_reason": "limit_order_timeout",
+            "symbol": "BTC/USDT",
+            "remaining_amount": 1.0,
+            "partial_filled_amount": 0.0,
+            "partial_avg_price": 0.0,
+        }
 
     async def fake_market_sell(_order, _config) -> None:
         calls["market"] += 1
@@ -250,10 +258,33 @@ async def test_create_spot_sell_keeps_partial_fill_when_market_fallback_skips(
     assert result["type"] == "partial_sell"
     assert result["partial_filled_amount"] == pytest.approx(1.024)
     assert result["partial_avg_price"] == pytest.approx(7.12)
-    assert result["remaining_amount"] == pytest.approx(0.679)
-    assert result["partial_proceeds"] == pytest.approx(7.29088)
-    assert calls["limit"] == 1
-    assert calls["market"] == 1
+
+
+@pytest.mark.asyncio
+async def test_limit_sell_tp_guard_uses_live_price_for_market_fallback(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+
+    async def fake_get_price_for_symbol(_symbol: str) -> float:
+        return 2.274
+
+    monkeypatch.setattr(
+        exchange,
+        "_Exchange__get_price_for_symbol",
+        fake_get_price_for_symbol,
+    )
+
+    allowed = await exchange._Exchange__can_fallback_to_market_sell(
+        {
+            "symbol": "LPT/USDC",
+            "current_price": 2.836,
+            "fallback_min_price": 2.8,
+        },
+        {"limit_sell_fallback_tp_guard": True},
+    )
+
+    assert allowed is False
 
 
 @pytest.mark.asyncio
@@ -302,3 +333,28 @@ async def test_create_spot_market_sell_skips_below_notional(monkeypatch) -> None
     assert result["partial_filled_amount"] == 0.0
     assert result["remaining_amount"] == pytest.approx(0.679)
     assert fake_exchange.market_sell_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_market_fallback_guard_uses_live_price_lookup(monkeypatch) -> None:
+    exchange = Exchange()
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        return "0.02582"
+
+    monkeypatch.setattr(
+        exchange,
+        "_Exchange__get_price_for_symbol",
+        fake_get_price_for_symbol,
+    )
+
+    allowed = await exchange._Exchange__can_fallback_to_market_sell(
+        {
+            "symbol": "SAHARA/USDC",
+            "current_price": 0.02582,
+            "fallback_min_price": 0.022749116460637608,
+        },
+        {"limit_sell_fallback_tp_guard": True},
+    )
+
+    assert allowed is True

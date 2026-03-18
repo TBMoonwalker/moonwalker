@@ -1,3 +1,0 @@
-export const MOONWALKER_API_PORT = 8130
-export const MOONWALKER_API_HOST = "127.0.0.1"
-//export const MOONWALKER_API_HOST = "window.location.hostname"

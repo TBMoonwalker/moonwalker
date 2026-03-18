@@ -1,22 +1,35 @@
 """Trade persistence and retrieval helpers."""
 
-import csv
-import io
 import os
-from collections import defaultdict
-from datetime import datetime
-from typing import Any
+from collections.abc import Awaitable
+from typing import Any, TypedDict, TypeVar
 
 import helper
 import model
-from service.database import run_sqlite_write_with_retry
 from tortoise.exceptions import BaseORMException
 from tortoise.expressions import F
 from tortoise.functions import Sum
 from tortoise.models import Q
-from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/trades.log", "trades")
+T = TypeVar("T")
+
+
+class PartialSellExecution(TypedDict):
+    """Accumulated partial-sell execution totals on an open trade."""
+
+    sold_amount: float
+    sold_proceeds: float
+
+
+class UnsellableTradeState(TypedDict):
+    """Unsellable remainder state carried on the open trade row."""
+
+    is_unsellable: bool
+    unsellable_reason: str | None
+    unsellable_amount: float
+    unsellable_min_notional: float | None
+    unsellable_estimated_notional: float | None
 
 
 class Trades:
@@ -26,16 +39,85 @@ class Trades:
         1, int(os.getenv("MOONWALKER_CLOSED_TRADES_PAGE_SIZE", "10"))
     )
 
-    _DATE_FORMATS = (
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%d",
-        "%d.%m.%Y %H:%M:%S",
-        "%d.%m.%Y",
-        "%d/%m/%Y %H:%M:%S",
-        "%d/%m/%Y",
-        "%m/%d/%Y %H:%M:%S",
-        "%m/%d/%Y",
-    )
+    @staticmethod
+    def _log_db_error(message: str, exc: BaseORMException) -> None:
+        """Log database access failures consistently."""
+        logging.error("%s Cause: %s", message, exc)
+
+    @staticmethod
+    def _normalize_partial_sell_execution(
+        open_trade: dict[str, Any] | None,
+    ) -> PartialSellExecution:
+        """Normalize persisted partial-sell totals from an open-trade row."""
+        if not open_trade:
+            return {"sold_amount": 0.0, "sold_proceeds": 0.0}
+        return {
+            "sold_amount": float(open_trade.get("sold_amount") or 0.0),
+            "sold_proceeds": float(open_trade.get("sold_proceeds") or 0.0),
+        }
+
+    @staticmethod
+    def _extract_unsellable_state(
+        open_trade: dict[str, Any] | None,
+    ) -> UnsellableTradeState:
+        """Normalize unsellable remainder state from an open-trade row."""
+        if not open_trade:
+            return {
+                "is_unsellable": False,
+                "unsellable_reason": None,
+                "unsellable_amount": 0.0,
+                "unsellable_min_notional": None,
+                "unsellable_estimated_notional": None,
+            }
+
+        unsellable_amount = float(open_trade.get("unsellable_amount") or 0.0)
+        unsellable_reason = open_trade.get("unsellable_reason")
+        return {
+            "is_unsellable": unsellable_amount > 0 and bool(unsellable_reason),
+            "unsellable_reason": (
+                str(unsellable_reason) if unsellable_reason is not None else None
+            ),
+            "unsellable_amount": unsellable_amount,
+            "unsellable_min_notional": (
+                float(open_trade["unsellable_min_notional"])
+                if open_trade.get("unsellable_min_notional") is not None
+                else None
+            ),
+            "unsellable_estimated_notional": (
+                float(open_trade["unsellable_estimated_notional"])
+                if open_trade.get("unsellable_estimated_notional") is not None
+                else None
+            ),
+        }
+
+    async def _execute_db(
+        self,
+        operation: Awaitable[T],
+        error_message: str,
+        default: T,
+    ) -> T:
+        """Execute a database operation and fall back to a safe default on ORM errors."""
+        try:
+            return await operation
+        except BaseORMException as exc:
+            self._log_db_error(error_message, exc)
+            return default
+
+    async def _write_db(
+        self,
+        operation: Awaitable[Any],
+        error_message: str,
+        success_message: str | None = None,
+    ) -> bool:
+        """Execute a write operation and log consistent success/error messages."""
+        try:
+            await operation
+            if success_message:
+                logging.debug(success_message)
+            return True
+        except BaseORMException as exc:
+            self._log_db_error(error_message, exc)
+            return False
 
     @helper.async_ttl_cache(maxsize=1024, ttl=60)
     async def get_trade_by_ordertype(
@@ -45,49 +127,47 @@ class Trades:
         Gives back the specific trade entries for an
         open order (baseorder or safetyorder)
         """
+        trade: list[dict[str, Any]] = []
+
         # Get baseorders
         if baseorder:
-            try:
-                trade = await model.Trades.filter(
+            trade = await self._execute_db(
+                model.Trades.filter(
                     Q(baseorder=True), Q(symbol=symbol), join_type="AND"
-                ).values()
-            except BaseORMException as e:
-                # Broad catch to prevent trade queries from crashing call sites.
-                logging.error("Error getting baseorders from database. Cause: %s", e)
+                ).values(),
+                "Error getting baseorders from database.",
+                [],
+            )
         # Get safetyorders
         else:
-            try:
-                trade = await model.Trades.filter(
+            trade = await self._execute_db(
+                model.Trades.filter(
                     Q(safetyorder=True),
                     Q(baseorder=False),
                     Q(symbol=symbol),
                     join_type="AND",
-                ).values()
-            except BaseORMException as e:
-                # Broad catch to prevent trade queries from crashing call sites.
-                logging.error("Error getting safetyorders from database. Cause: %s", e)
+                ).values(),
+                "Error getting safetyorders from database.",
+                [],
+            )
 
         return trade
 
-    async def get_open_trades_by_symbol(
-        self, symbol: str
-    ) -> list[dict[str, Any]] | None:
+    async def get_open_trades_by_symbol(self, symbol: str) -> list[dict[str, Any]]:
         """Return open trades for a symbol."""
-        try:
-            open_trades = await model.OpenTrades.filter(symbol=symbol).values()
-            return open_trades
-        except BaseORMException as e:
-            # Broad catch to return partial results when database errors occur.
-            logging.error("Error getting open trades from database. Cause: %s", e)
+        return await self._execute_db(
+            model.OpenTrades.filter(symbol=symbol).values(),
+            "Error getting open trades from database.",
+            [],
+        )
 
-    async def get_trades_by_symbol(self, symbol: str) -> list[dict[str, Any]] | None:
+    async def get_trades_by_symbol(self, symbol: str) -> list[dict[str, Any]]:
         """Return all trades for a symbol."""
-        try:
-            trades = await model.Trades.filter(symbol=symbol).values()
-            return trades
-        except BaseORMException as e:
-            # Broad catch to return partial results when database errors occur.
-            logging.error("Error getting trades from database. Cause: %s", e)
+        return await self._execute_db(
+            model.Trades.filter(symbol=symbol).values(),
+            "Error getting trades from database.",
+            [],
+        )
 
     async def get_open_trades(self) -> list[dict[str, Any]]:
         """
@@ -97,6 +177,14 @@ class Trades:
 
         try:
             orders = await model.OpenTrades.all().values()
+            orders = [
+                order
+                for order in orders
+                if not (
+                    float(order.get("unsellable_amount") or 0.0) > 0
+                    and order.get("unsellable_reason")
+                )
+            ]
             symbols = [order["symbol"] for order in orders]
             if not symbols:
                 return []
@@ -133,6 +221,14 @@ class Trades:
             logging.error("Error getting open orders. Cause: %s", e)
             return []
 
+    async def get_unsellable_trades(self) -> list[dict[str, Any]]:
+        """Return archived unsellable trade remnants."""
+        return await self._execute_db(
+            model.UnsellableTrades.all().order_by("-id").values(),
+            "Error getting unsellable trades from database.",
+            [],
+        )
+
     async def get_closed_trades(self, page: int = 0) -> list[dict[str, Any]]:
         """Return paginated closed trades."""
         try:
@@ -157,115 +253,89 @@ class Trades:
 
     async def get_closed_trades_length(self) -> int:
         """Return the total number of closed trades."""
-        try:
-            order_length = await model.ClosedTrades.all().count()
-            return order_length
-        except BaseORMException as e:
-            # Broad catch to keep count endpoint responsive.
-            logging.error("Error getting closed order length. Cause: %s", e)
-            return 0
+        return await self._execute_db(
+            model.ClosedTrades.all().count(),
+            "Error getting closed order length.",
+            0,
+        )
 
-    async def create_open_trades(self, payload: dict[str, Any]) -> None:
-        """Create an open trade entry."""
-        try:
-            await model.OpenTrades.create(**payload)
-            logging.debug("Added open trade for %s.", payload["symbol"])
-        except BaseORMException as e:
-            # Broad catch to avoid crashing on database write errors.
-            logging.error("Error creating open trade. Cause %s", e)
+    async def delete_unsellable_trade(self, trade_id: int) -> bool:
+        """Delete an unsellable trade by its identifier."""
+        deleted_count = await self._execute_db(
+            model.UnsellableTrades.filter(id=trade_id).delete(),
+            f"Error deleting unsellable trade {trade_id}.",
+            0,
+        )
+        return deleted_count > 0
 
     async def update_open_trades(self, payload: dict[str, Any], symbol: str) -> None:
         """Update open trades for a symbol."""
-        try:
-            if await self.get_open_trades_by_symbol(symbol):
-                await model.OpenTrades.update_or_create(
+        if await self.get_open_trades_by_symbol(symbol):
+            await self._write_db(
+                model.OpenTrades.update_or_create(
                     defaults=payload,
                     symbol=symbol,
-                )
-        except BaseORMException as e:
-            # Broad catch to avoid crashing on database write errors.
-            logging.error("Error updating SO count for %s. Cause %s", symbol, e)
+                ),
+                f"Error updating SO count for {symbol}.",
+            )
 
     async def add_partial_sell_execution(
         self, symbol: str, sold_amount: float, sold_proceeds: float
     ) -> None:
         """Accumulate partial sell execution totals on the open trade row."""
-        try:
-            await model.OpenTrades.filter(symbol=symbol).update(
+        await self._write_db(
+            model.OpenTrades.filter(symbol=symbol).update(
                 sold_amount=F("sold_amount") + float(sold_amount),
                 sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
-            )
-        except BaseORMException as e:
-            logging.error(
-                "Error updating partial sell execution for %s. Cause %s",
-                symbol,
-                e,
-            )
+            ),
+            f"Error updating partial sell execution for {symbol}.",
+        )
 
     async def get_partial_sell_execution(self, symbol: str) -> tuple[float, float]:
         """Return accumulated partial sell totals (amount, proceeds)."""
-        try:
-            open_trade = await model.OpenTrades.filter(symbol=symbol).first()
-            if not open_trade:
-                return 0.0, 0.0
-            return (
-                float(getattr(open_trade, "sold_amount", 0.0) or 0.0),
-                float(getattr(open_trade, "sold_proceeds", 0.0) or 0.0),
-            )
-        except BaseORMException as e:
-            logging.error(
-                "Error reading partial sell execution for %s. Cause %s",
-                symbol,
-                e,
-            )
-            return 0.0, 0.0
-
-    async def create_trades(self, payload: dict[str, Any]) -> None:
-        """Create a trade entry."""
-        try:
-            await model.Trades.create(**payload)
-            logging.debug("Added trade for %s.", payload["symbol"])
-        except BaseORMException as e:
-            # Broad catch to avoid crashing on database write errors.
-            logging.error("Error creating trade. Cause %s", e)
+        open_trade_rows = await self._execute_db(
+            model.OpenTrades.filter(symbol=symbol)
+            .limit(1)
+            .values("sold_amount", "sold_proceeds"),
+            f"Error reading partial sell execution for {symbol}.",
+            [],
+        )
+        open_trade = open_trade_rows[0] if open_trade_rows else None
+        totals = self._normalize_partial_sell_execution(open_trade)
+        return totals["sold_amount"], totals["sold_proceeds"]
 
     async def delete_open_trades(self, symbol: str) -> None:
         """Delete open trades for a symbol."""
-        try:
-            await model.OpenTrades.filter(symbol=symbol).delete()
-            logging.debug("Deleted open trade for %s.", symbol)
-        except BaseORMException as e:
-            # Broad catch to avoid crashing on database write errors.
-            logging.error("Error deleting open trades for %s. Cause %s", symbol, e)
-
-    async def delete_trades(self, symbol: str) -> None:
-        """Delete trades for a symbol."""
-        try:
-            await model.Trades.filter(symbol=symbol).delete()
-            logging.debug("Deleted trade for %s.", symbol)
-        except BaseORMException as e:
-            # Broad catch to avoid crashing on database write errors.
-            logging.error("Error deleting trades for %s. Cause %s", symbol, e)
+        await self._write_db(
+            model.OpenTrades.filter(symbol=symbol).delete(),
+            f"Error deleting open trades for {symbol}.",
+            f"Deleted open trade for {symbol}.",
+        )
 
     async def create_closed_trades(self, payload: dict[str, Any]) -> None:
         """Create a closed trade entry."""
-        try:
-            await model.ClosedTrades.create(**payload)
-        except BaseORMException as e:
-            # Broad catch to avoid crashing on database write errors.
-            logging.error("Error creating closed trade. Cause %s", e)
+        await self._write_db(
+            model.ClosedTrades.create(**payload),
+            "Error creating closed trade.",
+        )
+
+    async def create_unsellable_trade(self, payload: dict[str, Any]) -> None:
+        """Create an archived unsellable trade entry."""
+        await self._write_db(
+            model.UnsellableTrades.create(**payload),
+            "Error creating unsellable trade.",
+        )
 
     async def delete_closed_trade(self, trade_id: int) -> bool:
         """Delete a closed trade by its identifier."""
-        try:
-            deleted_count = await model.ClosedTrades.filter(id=trade_id).delete()
-            return deleted_count > 0
-        except BaseORMException as e:
-            # Broad catch to avoid crashing on database write errors.
-            logging.error("Error deleting closed trade %s. Cause %s", trade_id, e)
-            return False
+        deleted_count = await self._execute_db(
+            model.ClosedTrades.filter(id=trade_id).delete(),
+            f"Error deleting closed trade {trade_id}.",
+            0,
+        )
+        return deleted_count > 0
 
-    async def get_token_amount_from_trades(self, symbol: str) -> float | None:
+    async def get_token_amount_from_trades(self, symbol: str) -> float:
         """Return total token amount for a symbol."""
         try:
             result = (
@@ -273,11 +343,11 @@ class Trades:
                 .annotate(total_amount=Sum(F("amount")))
                 .values_list("total_amount", flat=True)
             )
-            return result[0]
+            return float(result[0] or 0.0)
         except BaseORMException as e:
             # Broad catch to avoid crashing on database aggregation errors.
             logging.error("Error getting total amount from %s. Cause %s", symbol, e)
-            return None
+            return 0.0
 
     @helper.async_ttl_cache(maxsize=2048, ttl=2)
     async def get_trades_for_orders(self, symbol: str) -> dict[str, Any] | None:
@@ -324,26 +394,13 @@ class Trades:
                 baseorder = min(trades, key=lambda trade: float(trade["timestamp"]))
 
             safetyorders_count = len(safetyorders)
-            is_unsellable = False
-            unsellable_reason = None
-            unsellable_amount = 0.0
-            unsellable_min_notional = None
-            unsellable_estimated_notional = None
+            unsellable_state = self._extract_unsellable_state(open_trade)
 
-            if open_trade:
-                unsellable_amount = float(open_trade.get("unsellable_amount") or 0.0)
-                unsellable_reason = open_trade.get("unsellable_reason")
-                unsellable_min_notional = open_trade.get("unsellable_min_notional")
-                unsellable_estimated_notional = open_trade.get(
-                    "unsellable_estimated_notional"
-                )
-                is_unsellable = unsellable_amount > 0 and bool(unsellable_reason)
-
-                # For unsellable remnants, OpenTrades carries the authoritative
-                # remaining amount/cost after partial close bookkeeping.
-                if is_unsellable:
-                    total_amount = float(open_trade.get("amount") or total_amount)
-                    total_cost = float(open_trade.get("cost") or total_cost)
+            # For unsellable remnants, OpenTrades carries the authoritative
+            # remaining amount/cost after partial close bookkeeping.
+            if unsellable_state["is_unsellable"] and open_trade:
+                total_amount = float(open_trade.get("amount") or total_amount)
+                total_cost = float(open_trade.get("cost") or total_cost)
 
             trade_data = {
                 "timestamp": latest_order["timestamp"],
@@ -359,11 +416,7 @@ class Trades:
                 "safetyorders": safetyorders,
                 "safetyorders_count": safetyorders_count,
                 "ordertype": baseorder["ordertype"],
-                "is_unsellable": is_unsellable,
-                "unsellable_reason": unsellable_reason,
-                "unsellable_amount": unsellable_amount,
-                "unsellable_min_notional": unsellable_min_notional,
-                "unsellable_estimated_notional": unsellable_estimated_notional,
+                **unsellable_state,
             }
 
             return trade_data
@@ -374,310 +427,8 @@ class Trades:
 
     async def get_symbols(self) -> list[str]:
         """Return distinct trade symbols."""
-        data = await model.Trades.all().distinct().values_list("symbol", flat=True)
-        return data
-
-    async def import_open_trades_from_csv(
-        self,
-        csv_content: str,
-        quote_currency: str,
-        take_profit: float,
-        first_so_deviation: float,
-        safety_step_scale: float,
-        overwrite: bool = False,
-    ) -> dict[str, Any]:
-        """Import open trades from CSV.
-
-        Args:
-            csv_content: Raw CSV data with `;` as delimiter.
-            quote_currency: Running bot quote currency.
-            take_profit: Configured take-profit percentage.
-            overwrite: Whether existing symbols should be replaced.
-
-        Returns:
-            Summary dictionary for imported rows and symbols.
-        """
-        rows_by_symbol = self._parse_csv_rows(csv_content, quote_currency)
-        symbols = sorted(rows_by_symbol.keys())
-
-        if not overwrite:
-            open_symbols = await model.OpenTrades.filter(
-                symbol__in=symbols
-            ).values_list("symbol", flat=True)
-            trade_symbols = await model.Trades.filter(symbol__in=symbols).values_list(
-                "symbol", flat=True
-            )
-            existing_symbols = sorted(set(open_symbols) | set(trade_symbols))
-            if existing_symbols:
-                joined = ", ".join(existing_symbols)
-                raise ValueError(
-                    "Import blocked. Existing symbols found: "
-                    f"{joined}. Enable overwrite to replace them."
-                )
-
-        trade_rows: list[model.Trades] = []
-        open_trade_payloads: list[dict[str, Any]] = []
-        imported_rows = 0
-
-        for symbol in symbols:
-            entries = sorted(rows_by_symbol[symbol], key=lambda row: row["timestamp"])
-            if not entries:
-                continue
-
-            first_timestamp = int(entries[0]["timestamp"])
-            total_amount = 0.0
-            total_cost = 0.0
-            base_price = float(entries[0]["price"])
-            imported_so_percentages: list[float] = []
-
-            for index, entry in enumerate(entries):
-                amount = float(entry["amount"])
-                price = float(entry["price"])
-                ordersize = price * amount
-                total_amount += amount
-                total_cost += ordersize
-                is_base = index == 0
-                so_percentage = 0.0
-                if not is_base and base_price > 0:
-                    so_percentage = self._derive_import_so_percentage(
-                        so_index=index,
-                        imported_so_percentages=imported_so_percentages,
-                        first_so_deviation=first_so_deviation,
-                        safety_step_scale=safety_step_scale,
-                        base_price=base_price,
-                        entry_price=price,
-                    )
-                    imported_so_percentages.append(so_percentage)
-
-                trade_rows.append(
-                    model.Trades(
-                        timestamp=str(entry["timestamp"]),
-                        ordersize=ordersize,
-                        fee=0.0,
-                        precision=entry["precision"],
-                        amount=amount,
-                        amount_fee=amount,
-                        price=price,
-                        symbol=symbol,
-                        orderid=(
-                            f"manual-import-{symbol.replace('/', '')}-"
-                            f"{entry['timestamp']}-{index}"
-                        ),
-                        bot="manual-import",
-                        ordertype="market",
-                        baseorder=is_base,
-                        safetyorder=not is_base,
-                        order_count=index,
-                        so_percentage=so_percentage,
-                        direction="long",
-                        side="buy",
-                    )
-                )
-                imported_rows += 1
-
-            avg_price = total_cost / total_amount if total_amount > 0 else 0.0
-            tp_price = avg_price * (1 + (take_profit / 100)) if take_profit else 0.0
-            open_trade_payloads.append(
-                {
-                    "symbol": symbol,
-                    "so_count": max(0, len(entries) - 1),
-                    "profit": 0.0,
-                    "profit_percent": 0.0,
-                    "amount": total_amount,
-                    "cost": total_cost,
-                    "current_price": 0.0,
-                    "tp_price": tp_price,
-                    "avg_price": avg_price,
-                    "open_date": str(first_timestamp),
-                }
-            )
-
-        async def _persist_import() -> None:
-            async with in_transaction() as conn:
-                if overwrite:
-                    await model.Trades.filter(symbol__in=symbols).using_db(
-                        conn
-                    ).delete()
-                    await model.OpenTrades.filter(symbol__in=symbols).using_db(
-                        conn
-                    ).delete()
-
-                if trade_rows:
-                    await model.Trades.bulk_create(trade_rows, using_db=conn)
-
-                for payload in open_trade_payloads:
-                    await model.OpenTrades.create(**payload, using_db=conn)
-
-        await run_sqlite_write_with_retry(_persist_import, "importing open trades csv")
-
-        return {
-            "symbols": symbols,
-            "symbol_count": len(symbols),
-            "row_count": imported_rows,
-            "fee_currency": quote_currency,
-            "overwrite": overwrite,
-        }
-
-    def _parse_csv_rows(
-        self, csv_content: str, quote_currency: str
-    ) -> dict[str, list[dict[str, Any]]]:
-        """Parse and validate CSV rows grouped by symbol."""
-        normalized_content = (csv_content or "").strip()
-        if not normalized_content:
-            raise ValueError("CSV is empty.")
-
-        csv_reader = csv.reader(io.StringIO(normalized_content), delimiter=";")
-        first_row = next(csv_reader, None)
-        if first_row is None:
-            raise ValueError("CSV header is missing.")
-        expected_header = ["date", "symbol", "price", "amount"]
-        normalized_first_row = [column.strip().lower() for column in first_row]
-        has_header = normalized_first_row == expected_header
-
-        rows_to_process: list[tuple[int, list[str]]] = []
-        if has_header:
-            start_line = 2
-        else:
-            start_line = 1
-            rows_to_process.append((1, first_row))
-
-        grouped_rows: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        rows_to_process.extend(
-            (line_number, row)
-            for line_number, row in enumerate(csv_reader, start=start_line + 1)
+        return await self._execute_db(
+            model.Trades.all().distinct().values_list("symbol", flat=True),
+            "Error getting trade symbols.",
+            [],
         )
-
-        for line_number, row in rows_to_process:
-            if not row or all(not str(cell).strip() for cell in row):
-                continue
-            if len(row) != 4:
-                raise ValueError(
-                    f"Invalid CSV at line {line_number}. Expected 4 columns."
-                )
-
-            date_raw = row[0].strip()
-            symbol_raw = row[1].strip()
-            price_raw = row[2].strip().replace(",", ".")
-            amount_raw = row[3].strip().replace(",", ".")
-            if not date_raw or not symbol_raw or not price_raw or not amount_raw:
-                raise ValueError(
-                    f"Invalid CSV at line {line_number}. Empty value detected."
-                )
-
-            timestamp_ms = self._parse_date_to_ms(date_raw)
-            if timestamp_ms is None:
-                raise ValueError(f"Invalid date at line {line_number}: '{date_raw}'.")
-
-            try:
-                price = float(price_raw)
-                amount = float(amount_raw)
-            except ValueError as exc:
-                raise ValueError(
-                    f"Invalid numeric value at line {line_number}."
-                ) from exc
-
-            if price <= 0 or amount <= 0:
-                raise ValueError(
-                    f"Invalid CSV at line {line_number}. Price and amount must be > 0."
-                )
-
-            precision = self._count_decimal_places(price_raw)
-            symbol = self._normalize_symbol(symbol_raw, quote_currency)
-            grouped_rows[symbol].append(
-                {
-                    "timestamp": timestamp_ms,
-                    "price": price,
-                    "amount": amount,
-                    "precision": precision,
-                }
-            )
-
-        if not grouped_rows:
-            raise ValueError("CSV does not contain importable rows.")
-
-        return grouped_rows
-
-    def _derive_import_so_percentage(
-        self,
-        so_index: int,
-        imported_so_percentages: list[float],
-        first_so_deviation: float,
-        safety_step_scale: float,
-        base_price: float,
-        entry_price: float,
-    ) -> float:
-        """Derive safety-order percentage aligned with DCA progression.
-
-        If DCA config values are unavailable, fall back to the imported entry drawdown
-        versus base order price.
-        """
-        if first_so_deviation > 0 and safety_step_scale > 0:
-            # DCA persists SO percentage as step increment per order.
-            # so_index=1 => first safety order increment, so_index=2 => second increment...
-            incremental = abs(first_so_deviation) * (
-                safety_step_scale ** (so_index - 1)
-            )
-            return round(incremental, 2)
-
-        # Fallback for incomplete DCA config.
-        return abs(round(((entry_price - base_price) / base_price) * 100, 2))
-
-    def _normalize_symbol(self, symbol_raw: str, quote_currency: str) -> str:
-        """Normalize symbol to `BASE/QUOTE` format."""
-        symbol = symbol_raw.strip().upper().replace(" ", "")
-        symbol = symbol.replace("_", "/")
-        if "-" in symbol and "/" not in symbol:
-            symbol = symbol.replace("-", "/")
-
-        if "/" in symbol:
-            parts = symbol.split("/")
-            if len(parts) != 2 or not parts[0] or not parts[1]:
-                raise ValueError(f"Invalid symbol '{symbol_raw}'.")
-            base, quote = parts[0], parts[1]
-            return f"{base}/{quote}"
-
-        if quote_currency and symbol.endswith(quote_currency):
-            base = symbol[: -len(quote_currency)]
-            if base:
-                return f"{base}/{quote_currency}"
-
-        if "/" not in symbol and "-" not in symbol:
-            return f"{symbol}/{quote_currency}"
-
-        raise ValueError(
-            f"Invalid symbol '{symbol_raw}'. Use BASE/QUOTE or BASE-{quote_currency}."
-        )
-
-    def _parse_date_to_ms(self, value: str) -> int | None:
-        """Parse date-like values to Unix milliseconds."""
-        normalized_value = value.strip()
-        if not normalized_value:
-            return None
-
-        if normalized_value.isdigit():
-            numeric = int(normalized_value)
-            if numeric > 10_000_000_000:
-                return numeric
-            return numeric * 1000
-
-        iso_value = normalized_value.replace("Z", "+00:00")
-        try:
-            iso_dt = datetime.fromisoformat(iso_value)
-            return int(iso_dt.timestamp() * 1000)
-        except ValueError:
-            pass
-
-        for date_format in self._DATE_FORMATS:
-            try:
-                parsed = datetime.strptime(normalized_value, date_format)
-                return int(parsed.timestamp() * 1000)
-            except ValueError:
-                continue
-
-        return None
-
-    def _count_decimal_places(self, value: str) -> int:
-        """Count decimal places for a numeric string."""
-        if "." not in value:
-            return 0
-        return len(value.split(".", maxsplit=1)[1].rstrip("0"))

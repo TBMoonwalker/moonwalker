@@ -11,6 +11,17 @@ from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
 from service.trades import Trades
+from service.watcher_runtime import (
+    compose_ticker_symbols,
+    get_mandatory_symbols,
+    normalize_symbols,
+    prepare_ohlcv_write,
+)
+from service.watcher_tasks import (
+    ensure_worker_tasks,
+    start_worker_tasks,
+    sync_symbol_tasks,
+)
 from tortoise import BaseDBAsyncClient
 from tortoise.signals import post_save
 
@@ -48,12 +59,17 @@ class Watcher:
         self.status = True
         self.symbol_tasks: dict[str, asyncio.Task] = {}
         self.event_queue = asyncio.Queue()
-        self.dca_queue = asyncio.Queue(maxsize=self.DCA_QUEUE_MAXSIZE)
+        self.dca_queue: asyncio.Queue[str] = asyncio.Queue(
+            maxsize=self.DCA_QUEUE_MAXSIZE
+        )
         self.ohlcv_queue = asyncio.Queue(maxsize=self.OHLCV_QUEUE_MAXSIZE)
         self.last_price = {}
+        self._pending_dca_payloads: dict[str, dict[str, Any]] = {}
+        self._queued_dca_symbols: set[str] = set()
         self._worker_tasks: list[asyncio.Task] = []
         self._reload_lock = asyncio.Lock()
         self._reload_task: asyncio.Task | None = None
+        self._pending_reload_config: dict[str, Any] | None = None
         self._btc_warmup_task: asyncio.Task | None = None
         self._btc_warmup_key: tuple[Any, ...] | None = None
 
@@ -71,9 +87,9 @@ class Watcher:
         """Reload watcher configuration and exchange client."""
         logging.info("Reload watcher")
         self.config = config
-        if self._reload_task and not self._reload_task.done():
-            self._reload_task.cancel()
-        self._reload_task = asyncio.create_task(self._reload_exchange_client(config))
+        self._pending_reload_config = dict(config)
+        if self._reload_task is None or self._reload_task.done():
+            self._reload_task = asyncio.create_task(self._drain_exchange_reloads())
 
         Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
         Watcher.timeframe = resolve_timeframe(config)
@@ -84,29 +100,46 @@ class Watcher:
             Watcher.symbol_update_event.set()
         self._schedule_btc_pulse_history_warmup(config)
 
+    async def _drain_exchange_reloads(self) -> None:
+        """Serialize watcher exchange reloads and coalesce rapid config bursts."""
+        while self._pending_reload_config is not None:
+            config = self._pending_reload_config
+            self._pending_reload_config = None
+
+            try:
+                await self._reload_exchange_client(config)
+            except asyncio.CancelledError:
+                raise
+            except (
+                AttributeError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                ccxtpro.BaseError,
+                OSError,
+            ) as exc:
+                logging.error(
+                    "Failed to reload watcher exchange client: %s",
+                    exc,
+                    exc_info=True,
+                )
+
     @staticmethod
     def __get_mandatory_symbols(config: dict[str, Any]) -> set[str]:
         """Return symbols that must always be watched regardless of plugin queues."""
-        if not config.get("btc_pulse", False):
-            return set()
-        currency = str(config.get("currency", "USDC")).upper().strip()
-        if not currency:
-            return set()
-        return {f"BTC/{currency}"}
+        return get_mandatory_symbols(config)
 
     @staticmethod
     def __compose_ticker_symbols(base_symbols: list[str]) -> list[Any]:
         """Merge trades, signal symbols, and mandatory symbols into watch targets."""
-        merged_symbols = list(
-            dict.fromkeys(
-                base_symbols
-                + sorted(Watcher.signal_symbols)
-                + sorted(Watcher.mandatory_symbols)
-            )
+        return compose_ticker_symbols(
+            utils,
+            base_symbols=base_symbols,
+            signal_symbols=Watcher.signal_symbols,
+            mandatory_symbols=Watcher.mandatory_symbols,
+            exchange_watcher_ohlcv=Watcher.exchange_watcher_ohlcv,
+            timeframe=Watcher.timeframe,
         )
-        if Watcher.exchange_watcher_ohlcv:
-            return utils.convert_symbols(merged_symbols, Watcher.timeframe)
-        return merged_symbols
 
     async def _reload_exchange_client(self, config: dict[str, Any]) -> None:
         """Close any existing client and recreate it from latest config."""
@@ -154,7 +187,8 @@ class Watcher:
                         "Dry run requires CCXT Pro enableDemoTrading support, but "
                         f"'{config.get('exchange')}' could not enable demo trading."
                     ) from exc
-            new_exchange.set_sandbox_mode(config.get("sandbox", False))
+            elif config.get("sandbox", False):
+                new_exchange.set_sandbox_mode(True)
             self.exchange = new_exchange
 
     def _schedule_btc_pulse_history_warmup(self, config: dict[str, Any]) -> None:
@@ -342,45 +376,13 @@ class Watcher:
         return None
 
     def _start_worker_tasks(self) -> None:
-        self._worker_tasks = [
-            asyncio.create_task(
-                self._process_dca_queue(),
-                name=self.DCA_WORKER_TASK_NAME,
-            ),
-            asyncio.create_task(
-                self._process_ohlcv_queue(),
-                name=self.OHLCV_WORKER_TASK_NAME,
-            ),
-        ]
+        self._worker_tasks = start_worker_tasks(
+            [self.DCA_WORKER_TASK_NAME, self.OHLCV_WORKER_TASK_NAME],
+            self._create_worker_task,
+        )
 
     def _ensure_worker_tasks(self) -> None:
-        for idx, task in enumerate(list(self._worker_tasks)):
-            if not task.done():
-                continue
-
-            task_name = task.get_name()
-            if task.cancelled():
-                logging.warning(
-                    "Worker task '%s' was cancelled; restarting.", task_name
-                )
-            else:
-                exc = task.exception()
-                if exc:
-                    logging.error(
-                        "Worker task '%s' crashed; restarting. Cause: %s",
-                        task_name,
-                        exc,
-                        exc_info=True,
-                    )
-                else:
-                    logging.warning(
-                        "Worker task '%s' stopped unexpectedly; restarting.",
-                        task_name,
-                    )
-
-            replacement = self._create_worker_task(task_name)
-            if replacement:
-                self._worker_tasks[idx] = replacement
+        ensure_worker_tasks(self._worker_tasks, self._create_worker_task, logging)
 
     async def watch_tickers(self) -> None:
         """Main loop that syncs symbol watchers and restarts them if needed."""
@@ -418,60 +420,20 @@ class Watcher:
         Flatten nested symbol lists, filter out invalid entries,
         and always return a valid list of trading pair strings.
         """
-        if not symbols:
-            return []
-
-        flat = []
-        for s in symbols:
-            if isinstance(s, list):
-                flat.extend(s)
-            elif isinstance(s, str):
-                flat.append(s)
-
-        # Keep only real trading pairs (strings containing "/")
-        valid = [s for s in flat if isinstance(s, str) and "/" in s]
-
-        # Remove duplicates while preserving order
-        return list(dict.fromkeys(valid))
+        return normalize_symbols(symbols)
 
     async def __sync_symbol_tasks(self) -> None:
-        # Ensure we have watcher tasks for all active symbols.
-        current_symbols = set(self.symbol_tasks.keys())
-
         # Normalize and sanitize ticker symbols
         flat_symbols = self.__normalize_symbols(Watcher.ticker_symbols)
         Watcher.ticker_symbols = flat_symbols  # keep class-level in sync
-        desired_symbols = set(flat_symbols)
-
-        # Nothing to do if there are no valid symbols yet
-        if not desired_symbols:
-            logging.info("No active symbols to watch. Waiting for new trades...")
-            # Optional: cancel existing tasks if any remain
-            for sym, task in list(self.symbol_tasks.items()):
-                task.cancel()
-                del self.symbol_tasks[sym]
-            await asyncio.sleep(5)
-            return
-
-        # Add new watcher tasks
-        for sym in desired_symbols - current_symbols:
-            logging.info("Starting new watcher for %s", sym)
-            task = asyncio.create_task(self.watch_symbol_with_reconnect(sym))
-            self.symbol_tasks[sym] = task
-
-        # Remove watchers for symbols that are no longer active
-        for sym in current_symbols - desired_symbols:
-            logging.info("Stopping watcher for %s", sym)
-            task = self.symbol_tasks.pop(sym)
-            task.cancel()
-
-        # Restart crashed tasks
-        for sym, task in list(self.symbol_tasks.items()):
-            if task.done() and not task.cancelled():
-                logging.warning("Watcher for %s crashed — restarting...", sym)
-                self.symbol_tasks[sym] = asyncio.create_task(
-                    self.watch_symbol_with_reconnect(sym)
-                )
+        await sync_symbol_tasks(
+            self.symbol_tasks,
+            set(flat_symbols),
+            lambda symbol: asyncio.create_task(
+                self.watch_symbol_with_reconnect(symbol)
+            ),
+            logging,
+        )
 
     # ------------------------------------------------------------------- #
     #                    Symbol watcher with reconnection                 #
@@ -558,7 +520,7 @@ class Watcher:
                 except ValueError as e:
                     logging.error("%s: value error %s", symbol, e)
                     await asyncio.sleep(5)
-                except (RuntimeError, TypeError, ValueError, OSError) as e:
+                except (IndexError, KeyError, RuntimeError, TypeError, OSError) as e:
                     # Broad catch avoids dropping the websocket loop on unknown errors.
                     logging.error(
                         "Unexpected error for %s: %s", symbol, e, exc_info=True
@@ -593,7 +555,7 @@ class Watcher:
                     "type": self.TICKER_PRICE_TYPE,
                     "ticker": {"symbol": symbol, "price": price},
                 }
-                self._queue_put(self.dca_queue, ticker_price, "dca")
+                self._queue_dca_payload(ticker_price)
                 payload = self.__prepare_ohlcv_write(symbol, ohlcv)
                 if payload:
                     self._queue_put(self.ohlcv_queue, payload, "ohlcv")
@@ -602,6 +564,34 @@ class Watcher:
             except (KeyError, RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps consumer running despite occasional bad events.
                 logging.error("Error processing event: %s", e, exc_info=True)
+
+    def _queue_dca_payload(self, payload: dict[str, Any]) -> None:
+        """Keep at most one queued DCA job per symbol and overwrite stale payloads."""
+        ticker = payload.get("ticker")
+        symbol = ticker.get("symbol") if isinstance(ticker, dict) else None
+        if not isinstance(symbol, str) or not symbol:
+            logging.warning("Skipping invalid DCA payload without symbol: %s", payload)
+            return
+
+        self._pending_dca_payloads[symbol] = payload
+        if symbol in self._queued_dca_symbols:
+            return
+
+        try:
+            self.dca_queue.put_nowait(symbol)
+            self._queued_dca_symbols.add(symbol)
+        except asyncio.QueueFull:
+            self._pending_dca_payloads.pop(symbol, None)
+            worker_summary = ", ".join(
+                f"{task.get_name()}={'done' if task.done() else 'alive'}"
+                for task in self._worker_tasks
+            )
+            logging.warning(
+                "dca queue full; dropping event for %s. qsize=%s workers=[%s]",
+                symbol,
+                self.dca_queue.qsize(),
+                worker_summary or "none",
+            )
 
     def _queue_put(self, queue: asyncio.Queue, payload: Any, name: str) -> None:
         try:
@@ -620,16 +610,20 @@ class Watcher:
 
     async def _process_dca_queue(self) -> None:
         while self.status:
-            ticker_price = None
+            symbol = None
             try:
-                ticker_price = await self.dca_queue.get()
+                symbol = await self.dca_queue.get()
+                self._queued_dca_symbols.discard(symbol)
+                ticker_price = self._pending_dca_payloads.pop(symbol, None)
+                if ticker_price is None:
+                    continue
                 await self.dca.process_ticker_data(ticker_price, self.config)
             except asyncio.CancelledError:
                 break
             except Exception as e:  # noqa: BLE001 - Keep worker alive on any failure.
                 logging.error("Error processing DCA queue: %s", e, exc_info=True)
             finally:
-                if ticker_price is not None:
+                if symbol is not None:
                     self.dca_queue.task_done()
 
     async def _process_ohlcv_queue(self) -> None:
@@ -670,52 +664,7 @@ class Watcher:
             logging.error("Error writing OHLCV batch: %s", e, exc_info=True)
 
     def __prepare_ohlcv_write(self, symbol: str, ticker) -> dict | None:
-        current_candle = ticker[-1]
-        timestamp = current_candle[0]
-
-        last = Watcher.candles.get(symbol)
-        if not last or last[0] < timestamp:
-            if last:
-                t, o1, h1, l1, c1, v1 = last[:6]
-                payload = {
-                    "timestamp": t,
-                    "symbol": symbol,
-                    "open": o1,
-                    "high": h1,
-                    "low": l1,
-                    "close": c1,
-                    "volume": v1,
-                }
-            else:
-                payload = None
-            Watcher.candles[symbol] = current_candle
-            return payload
-        if last[0] == timestamp:
-            # Keep the in-progress candle fresh between rollovers so the closed row
-            # reflects full OHLCV, not only the first tick in the interval.
-            Watcher.candles[symbol] = self._merge_candle(last, current_candle)
-        return None
-
-    @staticmethod
-    def _merge_candle(last: list[Any], current: list[Any]) -> list[float]:
-        """Merge two candles for the same timestamp into one OHLCV candle."""
-        t = float(last[0])
-        open_price = float(last[1])
-        high_price = max(float(last[2]), float(current[2]))
-        low_price = min(float(last[3]), float(current[3]))
-        close_price = float(current[4])
-
-        # `watchOHLCV` streams cumulative candle volume while trade-derived candles
-        # are incremental; handle both without double counting.
-        last_volume = float(last[5])
-        current_volume = float(current[5])
-        volume = (
-            current_volume
-            if current_volume >= last_volume
-            else last_volume + current_volume
-        )
-
-        return [t, open_price, high_price, low_price, close_price, volume]
+        return prepare_ohlcv_write(Watcher.candles, symbol, ticker)
 
     # ------------------------------------------------------------------- #
     #                              Shutdown                               #
@@ -724,6 +673,10 @@ class Watcher:
     async def shutdown(self) -> None:
         """Stop watchers and close exchange resources."""
         self.status = False
+        self._pending_reload_config = None
+        if self._reload_task is not None and not self._reload_task.done():
+            await asyncio.gather(self._reload_task, return_exceptions=True)
+            self._reload_task = None
         if self._btc_warmup_task and not self._btc_warmup_task.done():
             self._btc_warmup_task.cancel()
         for task in self.symbol_tasks.values():

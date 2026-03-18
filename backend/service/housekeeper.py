@@ -63,26 +63,10 @@ class Housekeeper:
             if self.config:
                 retention_days = self._get_ticker_retention_days()
                 actual_timestamp = datetime.now()
-                cleanup_timestamp = actual_timestamp - timedelta(days=retention_days)
                 try:
-                    active_symbols = await Trades().get_symbols()
-                    ticker_symbols = await Data().get_ticker_symbol_list()
-                    # Do not housekeep active trades
-                    for symbol in ticker_symbols:
-                        if symbol not in active_symbols:
-                            query = await run_sqlite_write_with_retry(
-                                lambda: model.Tickers.filter(
-                                    timestamp__lt=cleanup_timestamp.timestamp()
-                                ).delete(),
-                                "housekeeping ticker cleanup",
-                            )
-                            logging.info(
-                                "Start housekeeping. Delete %s entries older than %s "
-                                "(retention_days=%s)",
-                                query,
-                                cleanup_timestamp,
-                                retention_days,
-                            )
+                    await self._cleanup_inactive_ticker_history(
+                        actual_timestamp, retention_days
+                    )
                     await self._cleanup_upnl_history(actual_timestamp)
                     await optimize_sqlite_connection()
                 except Exception as e:
@@ -92,6 +76,35 @@ class Housekeeper:
                 await asyncio.sleep(self.CLEANUP_LOOP_INTERVAL_SECONDS)
             else:
                 await asyncio.sleep(5)
+
+    async def _cleanup_inactive_ticker_history(
+        self, actual_timestamp: datetime, retention_days: int
+    ) -> int:
+        """Delete expired ticker rows only for symbols without active trades."""
+        cleanup_timestamp = actual_timestamp - timedelta(days=retention_days)
+        active_symbols = set(await Trades().get_symbols())
+        ticker_symbols = set(await Data().get_ticker_symbol_list())
+        inactive_symbols = sorted(ticker_symbols - active_symbols)
+
+        if not inactive_symbols:
+            return 0
+
+        deleted = await run_sqlite_write_with_retry(
+            lambda: model.Tickers.filter(
+                symbol__in=inactive_symbols,
+                timestamp__lt=cleanup_timestamp.timestamp(),
+            ).delete(),
+            "housekeeping ticker cleanup",
+        )
+        logging.info(
+            "Housekeeping deleted %s ticker entries older than %s for %s inactive symbols "
+            "(retention_days=%s)",
+            deleted,
+            cleanup_timestamp,
+            len(inactive_symbols),
+            retention_days,
+        )
+        return int(deleted or 0)
 
     async def _cleanup_upnl_history(self, actual_timestamp: datetime) -> None:
         """Remove old uPNL snapshots based on retention policy."""

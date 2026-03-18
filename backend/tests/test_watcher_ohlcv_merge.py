@@ -1,6 +1,7 @@
 import asyncio
 
 import pytest
+import service.watcher as watcher_module
 from service.watcher import Watcher
 
 
@@ -58,16 +59,55 @@ async def test_dca_worker_survives_unexpected_processing_exception() -> None:
     watcher.dca.process_ticker_data = fake_process_ticker_data
     worker = asyncio.create_task(watcher._process_dca_queue())
 
-    await watcher.dca_queue.put(
+    watcher._queue_dca_payload(
         {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 1.0}}
     )
-    await watcher.dca_queue.put(
-        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 2.0}}
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "ETH/USDC", "price": 2.0}}
     )
 
     await asyncio.wait_for(worker, timeout=2)
 
     assert calls == [1.0, 2.0]
+    assert watcher.dca_queue.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_dca_queue_coalesces_pending_updates_per_symbol() -> None:
+    watcher = Watcher()
+    watcher.config = {}
+    processed: list[float] = []
+    release_processing = asyncio.Event()
+    started_processing = asyncio.Event()
+
+    async def fake_process_ticker_data(ticker_price: dict, config: dict) -> None:
+        processed.append(float(ticker_price["ticker"]["price"]))
+        started_processing.set()
+        if len(processed) == 1:
+            await release_processing.wait()
+        else:
+            watcher.status = False
+
+    watcher.dca.process_ticker_data = fake_process_ticker_data
+    worker = asyncio.create_task(watcher._process_dca_queue())
+
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 1.0}}
+    )
+    await asyncio.wait_for(started_processing.wait(), timeout=1)
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 2.0}}
+    )
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 3.0}}
+    )
+
+    assert watcher.dca_queue.qsize() == 1
+
+    release_processing.set()
+    await asyncio.wait_for(worker, timeout=2)
+
+    assert processed == [1.0, 3.0]
     assert watcher.dca_queue.qsize() == 0
 
 
@@ -96,3 +136,97 @@ async def test_ensure_worker_tasks_restarts_crashed_dca_worker() -> None:
     watcher.status = False
     replacement.cancel()
     await asyncio.gather(replacement, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_watcher_reload_coalesces_rapid_config_changes(monkeypatch) -> None:
+    watcher = Watcher()
+    events: list[str] = []
+    old_close_started = asyncio.Event()
+    old_close_release = asyncio.Event()
+    created_exchanges: list[object] = []
+
+    class ExistingExchange:
+        async def close(self) -> None:
+            events.append("old_close_start")
+            old_close_started.set()
+            await old_close_release.wait()
+            events.append("old_close_end")
+
+    class FakeExchange:
+        def __init__(self, params: dict) -> None:
+            self.params = params
+            self.closed = False
+            created_exchanges.append(self)
+
+        def set_sandbox_mode(self, _enabled: bool) -> None:
+            return None
+
+        async def close(self) -> None:
+            self.closed = True
+            events.append(self.params["options"]["defaultType"])
+
+    monkeypatch.setattr(watcher_module.ccxtpro, "binance", FakeExchange)
+
+    watcher.exchange = ExistingExchange()
+
+    watcher.on_config_change(
+        {
+            "exchange": "binance",
+            "market": "spot",
+            "dry_run": False,
+            "sandbox": False,
+        }
+    )
+    await asyncio.wait_for(old_close_started.wait(), timeout=1)
+
+    first_reload_task = watcher._reload_task
+    watcher.on_config_change(
+        {
+            "exchange": "binance",
+            "market": "future",
+            "dry_run": False,
+            "sandbox": False,
+        }
+    )
+
+    assert watcher._reload_task is first_reload_task
+
+    old_close_release.set()
+    await asyncio.wait_for(watcher._reload_task, timeout=1)
+
+    assert len(created_exchanges) == 2
+    assert created_exchanges[0].closed is True
+    assert created_exchanges[1].closed is False
+    assert created_exchanges[1].params["options"]["defaultType"] == "future"
+
+
+@pytest.mark.asyncio
+async def test_watcher_reload_ignores_sandbox_in_dry_run(monkeypatch) -> None:
+    watcher = Watcher()
+    calls: list[str] = []
+
+    class FakeExchange:
+        def __init__(self, _params: dict) -> None:
+            return None
+
+        def enableDemoTrading(self, enabled: bool) -> None:
+            if enabled:
+                calls.append("demo")
+
+        def set_sandbox_mode(self, enabled: bool) -> None:
+            if enabled:
+                calls.append("sandbox")
+
+    monkeypatch.setattr(watcher_module.ccxtpro, "binance", FakeExchange)
+
+    await watcher._reload_exchange_client(
+        {
+            "exchange": "binance",
+            "market": "spot",
+            "dry_run": True,
+            "sandbox": True,
+        }
+    )
+
+    assert calls == ["demo"]

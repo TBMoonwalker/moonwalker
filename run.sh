@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 set -e
 
-FRONTEND_CONFIG=frontend/src/config.ts
 PID_FILE="moonwalker.pid"
 LOCK_FILE="moonwalker.lock"
 
@@ -77,12 +76,6 @@ start_services() {
     # Create lock file to indicate services are running
     touch "$LOCK_FILE"
 
-    echo "📂 Copying config..."
-    if [ -f "$FRONTEND_CONFIG" ]; then
-        rm "$FRONTEND_CONFIG"
-    fi
-    cp config.ts frontend/src/
-
     echo "📦 Checking npm-run-all..."
     if ! npx --no-install run-p --version >/dev/null 2>&1; then
       echo "⬇️  Installing npm-run-all..."
@@ -110,7 +103,7 @@ start_services() {
     cp -r frontend/dist/assets backend/static/
     cp frontend/dist/index.html backend/templates/
 
-    echo "🐍 Installing Python venv and deps & starting Quart..."
+    echo "🐍 Installing Python venv and deps & starting Litestar..."
     python3 -m venv .venv
     cd backend
     ../.venv/bin/pip install -r requirements.txt

@@ -5,6 +5,7 @@ import { fetchJson } from '../api/client'
 type UpnlPoint = {
   timestamp: string
   profit_overall: number
+  funds_locked: number
 }
 
 export const useUpnlDatastore = defineStore('upnl', () => {

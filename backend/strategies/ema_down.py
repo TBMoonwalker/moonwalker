@@ -28,6 +28,9 @@ class Strategy:
             symbol, self.timeframe, [20, 50, 100, 200]
         )
         try:
+            if ema.get("ema_20") is None or ema.get("ema_50") is None:
+                return False
+
             if ema["ema_20"] < ema["ema_50"]:
                 logging.debug(f"EMA down for {symbol}")
                 result = True

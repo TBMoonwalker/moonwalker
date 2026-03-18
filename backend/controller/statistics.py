@@ -2,15 +2,16 @@
 
 import asyncio
 import json
+from collections.abc import AsyncGenerator
 from typing import Any
 
 import helper
-from controller import controller
-from quart import websocket
-from quart_cors import route_cors
+from litestar.exceptions import WebSocketDisconnect
+from litestar.handlers import get, websocket_stream
 from service.config import Config
 from service.exchange import Exchange
 from service.statistic import Statistic
+from service.websocket_fanout import WebSocketFanout
 
 logging = helper.LoggerFactory.get_logger(
     "logs/controller.log", "controller_statistics"
@@ -39,7 +40,7 @@ async def _get_available_funds() -> float | None:
         return await exchange.get_free_balance_for_asset(
             config_service._cache, currency
         )
-    except Exception as exc:  # noqa: BLE001 - Avoid breaking stats websocket updates.
+    except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
         logging.warning("Failed to fetch available exchange funds: %s", exc)
         return None
 
@@ -51,8 +52,31 @@ async def _get_profit_cached() -> dict[str, Any]:
     return profit
 
 
-@controller.websocket("/statistic/profit")
-async def profit() -> None:
+async def _build_profit_payload() -> str:
+    """Build serialized payload for profit websocket stream."""
+    return json.dumps(await _get_profit_cached())
+
+
+_profit_fanout = WebSocketFanout(
+    name="profit",
+    interval_seconds=5,
+    producer=_build_profit_payload,
+    logger=logging,
+)
+
+
+async def start_websocket_fanout() -> None:
+    """Start shared websocket fan-out worker for statistics stream."""
+    await _profit_fanout.start()
+
+
+async def stop_websocket_fanout() -> None:
+    """Stop shared websocket fan-out worker for statistics stream."""
+    await _profit_fanout.stop()
+
+
+@websocket_stream(path="/statistic/profit", warn_on_data_discard=False)
+async def profit() -> AsyncGenerator[str, None]:
     """WebSocket endpoint for streaming profit statistics.
 
     Sends profit data to connected clients every 5 seconds.
@@ -61,27 +85,16 @@ async def profit() -> None:
         asyncio.CancelledError: When client disconnects.
     """
     try:
-        while True:
-            output = json.dumps(await _get_profit_cached())
-            await websocket.send(output)
-            await asyncio.sleep(5)
-    except asyncio.CancelledError:
+        async for output in _profit_fanout.subscribe():
+            yield output
+    except (asyncio.CancelledError, WebSocketDisconnect):
         # Handle disconnection gracefully
         logging.info("Client disconnected from profit WebSocket")
-        raise
-    except (
-        Exception
-    ) as exc:  # noqa: BLE001 - Catch all exceptions to prevent WebSocket hang
-        logging.error("Error in profit WebSocket: %s", exc, exc_info=True)
-        raise
+        return
 
 
-@controller.route("/statistic/profit/<timestamp>/<period>")
-@route_cors(
-    allow_methods=["GET"],
-    allow_origin=["*"],
-)
-async def profit_statistics(timestamp: str, period: str) -> str | dict[str, Any]:
+@get(path="/statistic/profit/{timestamp:str}/{period:str}")
+async def profit_statistics(timestamp: str, period: str) -> dict[str, Any]:
     """Get profit statistics for a specific time period.
 
     Args:
@@ -89,27 +102,21 @@ async def profit_statistics(timestamp: str, period: str) -> str | dict[str, Any]
         period: Time period for the query.
 
     Returns:
-        JSON string with profit statistics, or empty dict if no data.
+        Profit statistics as JSON-serializable dictionary.
 
     Example:
         {"result": "..."} or {"result": ""}
     """
-    response = json.dumps(await statistic.get_profits_overall(timestamp, period))
-    if not response:
-        response = {"result": ""}
-
+    response = await statistic.get_profits_overall(timestamp, period)
+    if response is None:
+        return {"result": ""}
     return response
 
 
-@controller.route("/statistic/profit-overall/timeline")
-@route_cors(
-    allow_methods=["GET"],
-    allow_origin=["*"],
-)
-async def profit_overall_timeline() -> str | dict[str, Any]:
+@get(path="/statistic/profit-overall/timeline")
+async def profit_overall_timeline() -> list[dict[str, Any]]:
     """Get last-12-month profit-overall timeline with adaptive resolution."""
-    response = json.dumps(await statistic.get_profit_overall_timeline())
-    if not response:
-        response = {"result": ""}
+    return await statistic.get_profit_overall_timeline()
 
-    return response
+
+route_handlers = [profit, profit_statistics, profit_overall_timeline]

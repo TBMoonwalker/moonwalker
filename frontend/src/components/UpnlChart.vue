@@ -20,14 +20,14 @@ import { computed, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { use } from 'echarts/core'
 import { LineChart } from 'echarts/charts'
-import { GridComponent, TooltipComponent } from 'echarts/components'
+import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
-import { NSpin } from 'naive-ui'
 import { useUpnlDatastore } from '../stores/upnl'
 import { useWebSocketDataStore } from '../stores/websocket'
+import { formatTradingViewDate } from '../helpers/date'
 
-use([GridComponent, TooltipComponent, LineChart, CanvasRenderer])
+use([GridComponent, LegendComponent, TooltipComponent, LineChart, CanvasRenderer])
 
 const upnlStore = useUpnlDatastore()
 const { data } = storeToRefs(upnlStore)
@@ -60,14 +60,15 @@ function toMinuteBucket(timestamp: string): string {
   return `${year}-${month}-${day} ${hour}:${min}`
 }
 
-function pushRealtimePoint(profitOverall: number, timestamp: string): void {
-  if (!Number.isFinite(profitOverall) || !timestamp) {
+function pushRealtimePoint(profitOverall: number, fundsLocked: number, timestamp: string): void {
+  if (!Number.isFinite(profitOverall) || !Number.isFinite(fundsLocked) || !timestamp) {
     return
   }
 
   const point = {
     timestamp,
     profit_overall: profitOverall,
+    funds_locked: fundsLocked,
   }
 
   if (data.value.length === 0) {
@@ -86,20 +87,30 @@ function pushRealtimePoint(profitOverall: number, timestamp: string): void {
 
 const option = computed(() => {
   const labels = data.value.map((point) => point.timestamp)
-  const values = data.value.map((point) => Number(point.profit_overall))
-  const latestValue = values.length > 0 ? values[values.length - 1] : 0
-  const isNegative = latestValue < 0
-  const lineColor = isNegative ? 'rgb(224, 108, 117)' : 'rgb(99, 226, 183)'
-  const areaColor = isNegative ? 'rgba(224, 108, 117, 0.18)' : 'rgba(99, 226, 183, 0.18)'
+  const profitValues = data.value.map((point) => Number(point.profit_overall))
+  const lockedValues = data.value.map((point) => Number(point.funds_locked))
+  const latestProfitValue = profitValues.length > 0 ? profitValues[profitValues.length - 1] : 0
+  const isNegative = latestProfitValue < 0
+  const profitLineColor = isNegative ? 'rgb(224, 108, 117)' : 'rgb(99, 226, 183)'
+  const profitAreaColor = isNegative ? 'rgba(224, 108, 117, 0.18)' : 'rgba(99, 226, 183, 0.18)'
+  const lockedLineColor = 'rgb(245, 166, 35)'
 
   return {
     grid: {
       show: false,
       left: 12,
       right: 8,
-      top: 16,
+      top: 44,
       bottom: 24,
       containLabel: true,
+    },
+    legend: {
+      top: 8,
+      right: 8,
+      textStyle: {
+        color: '#fff',
+      },
+      data: ['Profit overall', 'Funds locked'],
     },
     tooltip: {
       trigger: 'axis',
@@ -115,6 +126,7 @@ const option = computed(() => {
       axisLabel: {
         color: '#fff',
         hideOverlap: true,
+        formatter: (value: string) => formatTradingViewDate(value),
       },
       boundaryGap: false,
     },
@@ -125,19 +137,35 @@ const option = computed(() => {
     },
     series: [
       {
-        data: values,
+        name: 'Profit overall',
+        data: profitValues,
         type: 'line',
         smooth: 0.35,
         symbol: 'none',
         lineStyle: {
           width: 2,
-          color: lineColor,
+          color: profitLineColor,
         },
         areaStyle: {
-          color: areaColor,
+          color: profitAreaColor,
         },
         itemStyle: {
-          color: lineColor,
+          color: profitLineColor,
+        },
+      },
+      {
+        name: 'Funds locked',
+        data: lockedValues,
+        type: 'line',
+        smooth: 0.35,
+        symbol: 'none',
+        lineStyle: {
+          width: 2,
+          type: 'dotted',
+          color: lockedLineColor,
+        },
+        itemStyle: {
+          color: lockedLineColor,
         },
       },
     ],
@@ -161,10 +189,12 @@ watch(
     }
     const websocketData = newData as {
       profit_overall?: number
+      funds_locked?: number
       profit_overall_timestamp?: string
     }
     if (
       websocketData.profit_overall === undefined ||
+      websocketData.funds_locked === undefined ||
       !websocketData.profit_overall_timestamp
     ) {
       return
@@ -172,6 +202,7 @@ watch(
 
     pushRealtimePoint(
       Number(websocketData.profit_overall),
+      Number(websocketData.funds_locked),
       websocketData.profit_overall_timestamp,
     )
     showEmptyState.value = data.value.length === 0

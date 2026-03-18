@@ -4,6 +4,7 @@ import asyncio
 import json
 import os
 import re
+import uuid
 from typing import Any, Callable
 
 import helper
@@ -26,6 +27,23 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
     "w": 7,
     "m": 30,
     "y": 365,
+}
+
+DEFAULT_CONFIG_VALUES = {
+    "tp_spike_confirm_enabled": False,
+    "tp_spike_confirm_seconds": 3.0,
+    "tp_spike_confirm_ticks": 0,
+    "autopilot_green_phase_enabled": False,
+    "autopilot_green_phase_ramp_days": 30,
+    "autopilot_green_phase_eval_interval_sec": 60,
+    "autopilot_green_phase_window_minutes": 60,
+    "autopilot_green_phase_min_profitable_close_ratio": 0.8,
+    "autopilot_green_phase_speed_multiplier": 1.5,
+    "autopilot_green_phase_exit_multiplier": 1.15,
+    "autopilot_green_phase_max_extra_deals": 2,
+    "autopilot_green_phase_confirm_cycles": 2,
+    "autopilot_green_phase_release_cycles": 4,
+    "autopilot_green_phase_max_locked_fund_percent": 85.0,
 }
 
 
@@ -60,18 +78,6 @@ def parse_history_lookback_to_days(value: Any) -> int | None:
         return None
 
     return amount * HISTORY_LOOKBACK_UNIT_TO_DAYS[unit]
-
-
-def format_history_lookback_days(days: int) -> str:
-    """Format day count into canonical lookback string."""
-    normalized_days = max(1, int(days))
-    if normalized_days % 365 == 0:
-        return f"{normalized_days // 365}y"
-    if normalized_days % 30 == 0:
-        return f"{normalized_days // 30}m"
-    if normalized_days % 7 == 0:
-        return f"{normalized_days // 7}w"
-    return f"{normalized_days}d"
 
 
 def resolve_history_lookback_days(
@@ -121,6 +127,7 @@ class Config:
         self._cache: dict[str, Any] = {}
         self._subscribers: set[Callable[[dict[str, Any]], None]] = set()
         self._listener_task: asyncio.Task | None = None
+        self._instance_id = uuid.uuid4().hex
 
     @classmethod
     async def instance(cls) -> "Config":
@@ -147,13 +154,36 @@ class Config:
         Retrieves all AppConfig entries and converts their values to the appropriate types
         based on the value_type field. Also loads strategies and signal plugins.
         """
+        self._cache = {}
         rows = await AppConfig.all()
         for row in rows:
             value = self.__set_type(row.value, row.value_type)
             self._cache[row.key] = value
-        # get strategies
+        self.__refresh_runtime_metadata()
+
+    async def __load_keys(self, keys: list[str]) -> None:
+        """Refresh only the specified config keys from the database cache source."""
+        normalized_keys = [str(key).strip() for key in keys if str(key).strip()]
+        if not normalized_keys:
+            return
+
+        rows = await AppConfig.filter(key__in=normalized_keys)
+        loaded_keys = set()
+        for row in rows:
+            self._cache[row.key] = self.__set_type(row.value, row.value_type)
+            loaded_keys.add(row.key)
+
+        for key in normalized_keys:
+            if key not in loaded_keys:
+                self._cache.pop(key, None)
+
+        self.__refresh_runtime_metadata()
+
+    def __refresh_runtime_metadata(self) -> None:
+        """Refresh derived config metadata that is not stored in AppConfig."""
+        for key, value in DEFAULT_CONFIG_VALUES.items():
+            self._cache.setdefault(key, value)
         self._cache["strategies"] = self.__get_strategies()
-        # get signal plugins
         self._cache["signal_plugins"] = self.__get_signal_plugins()
 
     def __set_type(self, value: str, type: str) -> Any:
@@ -214,15 +244,31 @@ class Config:
         for subscriber in self._subscribers:
             subscriber(self._cache)
 
-    async def __publish_change(self, key: str) -> None:
+    async def __clear_key(self, key: str) -> bool:
+        """Remove a config key from persistent storage and the in-memory cache."""
+        deleted_count = await AppConfig.filter(key=key).delete()
+        existed_in_cache = key in self._cache
+        self._cache.pop(key, None)
+        return bool(deleted_count or existed_in_cache)
+
+    async def __publish_change(self, keys: list[str]) -> None:
         """Publish config changes to Redis if available.
 
         Redis publish failures should not roll back DB writes.
         """
+        if not keys:
+            return
+
+        message = json.dumps(
+            {
+                "source": self._instance_id,
+                "keys": [str(key).strip() for key in keys if str(key).strip()],
+            }
+        )
         try:
-            await redis_client.publish(CONFIG_CHANNEL, key)
+            await redis_client.publish(CONFIG_CHANNEL, message)
         except Exception as exc:  # noqa: BLE001 - Keep local updates working.
-            logging.warning("Failed to publish config change for '%s': %s", key, exc)
+            logging.warning("Failed to publish config change for '%s': %s", keys, exc)
 
     def __parse_update_payload(self, payload: Any) -> dict[str, Any]:
         """Normalize update payloads from API clients.
@@ -264,7 +310,11 @@ class Config:
         Returns:
             The configuration value or default if key not found
         """
-        return self._cache.get(key, default)
+        if key in self._cache:
+            return self._cache[key]
+        if key in DEFAULT_CONFIG_VALUES:
+            return DEFAULT_CONFIG_VALUES[key]
+        return default
 
     async def set(self, key: str, value: dict[str, Any]) -> bool:
         """Set a configuration value in the database and notify subscribers.
@@ -277,17 +327,33 @@ class Config:
             True if the operation succeeded
         """
         update = self.__parse_update_payload(value)
-        serialized_value = self.__serialize_value_for_storage(
-            update["value"], update["type"]
+        value_type = update["type"]
+        value_data = update["value"]
+        is_numeric_value = isinstance(value_data, (int, float)) and not isinstance(
+            value_data, bool
         )
+        should_persist = (
+            bool(value_data)
+            or (value_type == "bool" and value_data is False)
+            or (value_type in {"int", "float"} and is_numeric_value and value_data == 0)
+        )
+        if not should_persist:
+            changed = await self.__clear_key(key)
+            if changed:
+                self.__refresh_runtime_metadata()
+                self.__notify_subscribers()
+                await self.__publish_change([key])
+            return True
+
+        serialized_value = self.__serialize_value_for_storage(value_data, value_type)
         await AppConfig.update_or_create(
             key=key,
-            defaults={"value": serialized_value, "value_type": update["type"]},
+            defaults={"value": serialized_value, "value_type": value_type},
         )
-        self._cache[key] = self.__set_type(serialized_value, update["type"])
+        self._cache[key] = self.__set_type(serialized_value, value_type)
         self.__notify_subscribers()
         # Notify all subscribers across processes (best effort)
-        await self.__publish_change(key)
+        await self.__publish_change([key])
 
         return True
 
@@ -300,7 +366,7 @@ class Config:
         Returns:
             True if the operation succeeded
         """
-        changed = False
+        changed_keys: list[str] = []
         for key, raw_value in updates.items():
             try:
                 value = self.__parse_update_payload(raw_value)
@@ -333,14 +399,14 @@ class Config:
                     defaults={"value": serialized_value, "value_type": value_type},
                 )
                 self._cache[key] = self.__set_type(serialized_value, value_type)
-                changed = True
+                changed_keys.append(key)
+            elif await self.__clear_key(key):
+                self.__refresh_runtime_metadata()
+                changed_keys.append(key)
 
-        if changed:
+        if changed_keys:
             self.__notify_subscribers()
-
-        # Notify all subscribers across processes
-        # ToDo - create an Array as String with changed files instead of "multiple"
-        await self.__publish_change("multiple")
+            await self.__publish_change(changed_keys)
 
         return True
 
@@ -355,15 +421,50 @@ class Config:
         """
         self._subscribers.add(callback)
 
-    async def reload(self) -> None:
+    async def reload(self, keys: list[str] | None = None) -> None:
         """Reload all configuration from the database and notify subscribers.
 
         This method is called automatically when a configuration change is detected
         via the Redis pub/sub channel, or can be called manually to force a reload.
         """
-        await self.load_all()
+        if keys:
+            await self.__load_keys(keys)
+        else:
+            await self.load_all()
         for subscriber in self._subscribers:
             subscriber(self._cache)
+
+    async def _handle_change_message(self, payload: Any) -> None:
+        """Apply a Redis change payload, skipping self-originated updates."""
+        keys: list[str] | None = None
+        source = None
+
+        if isinstance(payload, str):
+            stripped = payload.strip()
+            if stripped:
+                try:
+                    parsed = json.loads(stripped)
+                except json.JSONDecodeError:
+                    keys = [stripped]
+                else:
+                    if isinstance(parsed, dict):
+                        source = parsed.get("source")
+                        raw_keys = parsed.get("keys")
+                        if isinstance(raw_keys, list):
+                            keys = [
+                                str(key).strip() for key in raw_keys if str(key).strip()
+                            ]
+                    elif isinstance(parsed, list):
+                        keys = [str(key).strip() for key in parsed if str(key).strip()]
+
+        if source == self._instance_id:
+            return
+
+        if keys:
+            await self.reload(keys)
+            return
+
+        await self.reload()
 
     async def _listen(self) -> None:
         """Listen for configuration change notifications via Redis pub/sub.
@@ -375,7 +476,7 @@ class Config:
         await pubsub.subscribe(CONFIG_CHANNEL)
         async for message in pubsub.listen():
             if message["type"] == "message":
-                await self.reload()
+                await self._handle_change_message(message.get("data"))
 
     def __get_filenames_in_directory(
         self, directory: str, sort: bool = True

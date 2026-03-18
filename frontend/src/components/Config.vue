@@ -1,447 +1,260 @@
 <template>
-    <n-flex vertical :style="{ display: 'flex', flexDirection: 'column', gap: '16px', width: '98%' }">
-        <n-card title="General settings">
-            <n-form ref="generalFormRef" :model="general" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Timezone" path="timezone">
-                    <n-select v-model:value="general.timezone" placeholder="Select" :options="timezone" filterable />
-                </n-form-item>
-                <n-form-item label="Debug mode" path="debug" label-placement="left">
-                    <n-checkbox v-model:checked="general.debug" />
-                </n-form-item>
-                <n-form-item label="Advanced configuration" label-placement="left">
-                    <n-switch v-model:value="showAdvancedGeneral" />
-                </n-form-item>
-                <template v-if="showAdvancedGeneral">
-                    <n-form-item label="WebSocket watchdog enabled" path="ws_watchdog_enabled" label-placement="left">
-                        <n-checkbox v-model:checked="general.ws_watchdog_enabled" />
-                    </n-form-item>
-                    <n-form-item label="WebSocket healthcheck interval (ms)" path="ws_healthcheck_interval_ms">
-                        <n-input-number v-model:value="general.ws_healthcheck_interval_ms" :min="1000" />
-                    </n-form-item>
-                    <n-form-item label="WebSocket stale timeout (ms)" path="ws_stale_timeout_ms">
-                        <n-input-number v-model:value="general.ws_stale_timeout_ms" :min="5000" />
-                    </n-form-item>
-                    <n-form-item label="WebSocket reconnect debounce (ms)" path="ws_reconnect_debounce_ms">
-                        <n-input-number v-model:value="general.ws_reconnect_debounce_ms" :min="500" />
-                    </n-form-item>
-                </template>
-            </n-form>
-        </n-card>
+    <n-flex vertical class="config-form-shell">
+        <ConfigGeneralSection
+            ref="generalFormRef"
+            :general="general"
+            :rules="rules"
+            :show-advanced-general="showAdvancedGeneral"
+            :timezone="timezone"
+            @update:show-advanced-general="showAdvancedGeneral = $event"
+        />
 
         
 
-        <n-card title="Exchange settings">
-            <n-form ref="exchangeFormRef" :model="exchange" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Exchange" path="name">
-                    <n-select v-model:value="exchange.name" placeholder="Select" :options="exchanges" />
-                </n-form-item>
-                <n-form-item label="Timerange" path="timeframe">
-                    <n-select v-model:value="exchange.timeframe" placeholder="Select" :options="timerange" />
-                </n-form-item>
-                <n-form-item label="Key" path="key">
-                    <n-input v-model:value="exchange.key" type="password" show-password-on="click"
-                        placeholder="Exchange Key" />
-                </n-form-item>
-                <n-form-item label="Secret" path="secret">
-                    <n-input v-model:value="exchange.secret" type="password" show-password-on="click"
-                        placeholder="Exchange Secret" />
-                </n-form-item>
-                <n-form-item v-if="showAdvancedGeneral" label="Exchange Hostname" path="exchange_hostname">
-                    <n-input v-model:value="exchange.exchange_hostname" placeholder="e.g. bybit.eu" />
-                </n-form-item>
-                <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="left">
-                    <n-checkbox v-model:checked="exchange.dry_run" />
-                </n-form-item>
-                <n-form-item label="Currency" path="currency">
-                    <n-select v-model:value="exchange.currency" placeholder="Select" :options="currency" />
-                </n-form-item>
-                <n-form-item label="Market" path="market">
-                    <n-select v-model:value="exchange.market" placeholder="Select" :options="market" />
-                </n-form-item>
-                <n-form-item label="Use OHCLV" path="watcher" label-placement="left">
-                    <n-checkbox v-model:checked="exchange.watcher_ohlcv" />
-                </n-form-item>
-            </n-form>
-        </n-card>
+        <ConfigExchangeSection
+            ref="exchangeFormRef"
+            :currency="currency"
+            :exchange="exchange"
+            :exchanges="exchanges"
+            :market="market"
+            :rules="rules"
+            :show-advanced-general="showAdvancedGeneral"
+            :timerange="timerange"
+        />
 
-        <n-card title=" Signal settings">
-            <n-form ref="signalFormRef" :model="signal" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Signal Plugin" path="signal">
-                    <n-select v-model:value="signal.signal" placeholder="Select" :options="signal.plugins"
-                        @update:value="handle_signal_settings_select" @blur="handle_signal_settings_select" />
-                </n-form-item>
+        <ConfigSignalSection
+            ref="signalFormRef"
+            :asap-missing-fields-label="getAsapMissingFieldsLabel()"
+            :is-asap-exchange-ready="isAsapExchangeReady()"
+            :on-asap-url-input="handleAsapUrlInput"
+            :on-csv-file-selected="handleCsvSignalFileSelected"
+            :on-fetch-asap-symbols="fetchAsapSymbolsForCurrency"
+            :on-signal-settings-select="handle_signal_settings_select"
+            :rules="rules"
+            :signal="signal"
+            :symsignals="symsignals"
+        />
 
-                <!-- Dynamic check for Sym Signal settings -->
-                <template v-for="(index) in dynamicSymSignalSettingsForm" :key="index">
-                    <n-form-item :label="'URL'" :path="'url.' + index">
-                        <n-input v-model:value="signal.symsignal_url" placeholder="URL" />
-                    </n-form-item>
-                    <n-form-item :label="'Key'" :path="'key.' + index">
-                        <n-input v-model:value="signal.symsignal_key" type="password" show-password-on="click"
-                            placeholder="Key" />
-                    </n-form-item>
-                    <n-form-item :label="'Version'" :path="'version.' + index">
-                        <n-input v-model:value="signal.symsignal_version" placeholder="Version" />
-                    </n-form-item>
-                    <n-form-item label="Allowed Signals" path="signals">
-                        <n-select v-model:value="signal.symsignal_allowedsignals" placeholder="Select"
-                            :options="symsignals" multiple filterable />
-                    </n-form-item>
-                </template>
-
-                <!-- Dynamic check for ASAP Signal settings -->
-                <template v-for="(index) in dynamicAsapSignalSettingsForm" :key="index">
-                    <n-form-item label="Use URL input" path="asap_use_url" label-placement="left">
-                        <n-switch v-model:value="signal.asap_use_url" />
-                    </n-form-item>
-                    <n-form-item v-if="signal.asap_use_url" label="Token/Coin List or URL" path="symbol_list">
-                        <n-input
-                            :value="signal.symbol_list"
-                            placeholder="https://example.com/symbols.txt"
-                            @update:value="handleAsapUrlInput"
-                        />
-                    </n-form-item>
-                    <n-form-item v-else label="ASAP Symbol" path="symbol_list">
-                        <n-flex vertical :style="{ width: '100%' }">
-                            <n-alert v-if="!isAsapExchangeReady()" type="info">
-                                Please configure {{ getAsapMissingFieldsLabel() }} in Exchange settings first.
-                            </n-alert>
-                            <n-alert v-else-if="signal.asap_symbol_fetch_error" type="warning">
-                                {{ signal.asap_symbol_fetch_error }}
-                            </n-alert>
-                            <n-button
-                                secondary
-                                type="primary"
-                                :loading="signal.asap_symbols_loading"
-                                :disabled="!isAsapExchangeReady()"
-                                @click="fetchAsapSymbolsForCurrency"
-                            >
-                                Load symbols from exchange
-                            </n-button>
-                            <n-select v-model:value="signal.asap_symbol_select" :options="signal.asap_symbol_options"
-                                multiple
-                                :loading="signal.asap_symbols_loading" :disabled="!isAsapExchangeReady() || signal.asap_symbol_options.length === 0"
-                                placeholder="Select symbol" filterable />
-                        </n-flex>
-                    </n-form-item>
-                </template>
-
-                <!-- Dynamic check for Strategy settings -->
-                <n-form-item label="Signal initial buy strategy" path="selectValue" label-placement="left">
-                    <n-checkbox v-model:checked="signal.strategy_enabled" />
-                </n-form-item>
-                <template v-if="signal.strategy_enabled">
-                    <n-form-item label="Strategy" path="strategy">
-                        <n-select v-model:value="signal.strategy" placeholder="Select"
-                            :options="signal.strategy_plugins" />
-                    </n-form-item>
-                </template>
-            </n-form>
-        </n-card>
-
-        <n-card title="Filter settings">
-            <n-form ref="filterFormRef" :model="filter" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Denylist" path="denylist">
-                    <n-input v-model:value="filter.denylist" placeholder="Textarea" type="textarea" :autosize="{
-                        minRows: 3,
-                        maxRows: 5,
-                    }" />
-                </n-form-item>
-                <template v-for="(index) in dynamicAsapSignalSettingsForm" :key="index">
-                    <n-form-item :label="'RSI Maximum'" :path="'rsi.' + index">
-                        <n-input-number v-model:value="filter.rsi" placeholder="RSI Maximum" />
-                    </n-form-item>
-                    <n-form-item :label="'CMC API Key'" :path="'cmc_api_key.' + index">
-                        <n-input v-model:value="filter.cmc_api_key" type="password" show-password-on="click"
-                            placeholder="CMC API Key" />
-                    </n-form-item>
-                </template>
-
-                <n-form-item :label="'Topcoin Limit'" path="topcoin_limit">
-                    <n-input-number v-model:value="filter.topcoin_limit" placeholder="Topcoin Limit" />
-                </n-form-item>
-
-                <n-form-item :label="'Volume Limit'" path="volume_limit">
-                    <n-input-number v-model:value="filter.volume" placeholder="Volume Limit" />
-                </n-form-item>
-
-                <n-form-item label="BTC Pulse" path="btc_pulse" label-placement="left">
-                    <n-checkbox v-model:checked="filter.btc_pulse" />
-                </n-form-item>
-
-            </n-form>
-        </n-card>
+        <ConfigFilterSection
+            ref="filterFormRef"
+            :filter="filter"
+            :rules="rules"
+            :show-asap-fields="signal.signal === 'asap'"
+        />
 
         
 
-        <n-card title="DCA settings">
-            <n-form ref="dcaFormRef" :model="dca" :rules="rules" label-width="auto" require-mark-placement="right-hanging"
-                :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Enabled" path="enabled" label-placement="left">
-                    <n-checkbox v-model:checked="dca.enabled" @change="handle_dca_select" />
-                </n-form-item>
+        <ConfigDcaSection
+            ref="dcaFormRef"
+            :dca="dca"
+            :rules="rules"
+            :sell-order-type-options="sellOrderTypeOptions"
+            :show-advanced-general="showAdvancedGeneral"
+            :strategy-options="signal.strategy_plugins"
+        />
 
-                <!-- Dynamic check for Dynamic DCA settings -->
-                <template v-for="(index) in DCAForm" :key="index">
-                    <n-form-item label="Dynamic DCA" path="dynamic_dca" label-placement="left">
-                        <n-checkbox v-model:checked="dca.dynamic" @change="handle_dynamic_dca_select" />
-                    </n-form-item>
-                    <template v-for="(index) in dynamicDCAForm" :key="index">
-                        <n-form-item :label="'Dynamic DCA strategy'" :path="'strategy.' + index">
-                            <n-select v-model:value="dca.strategy" placeholder="Select"
-                                :options="signal.strategy_plugins" />
-                        </n-form-item>
-                    </template>
-                </template>
-                <n-form-item label="Take profit percentage" path="tp">
-                    <n-input-number v-model:value="dca.tp" placeholder="TP" />
-                </n-form-item>
-                <n-form-item label="Trailing Take profit percentage" path="ttp">
-                    <n-input-number v-model:value="dca.trailing_tp" placeholder="TTP" />
-                </n-form-item>
-                <n-form-item label="Max bots running" path="max_bots">
-                    <n-input-number v-model:value="dca.max_bots" placeholder="Bot count" />
-                </n-form-item>
-                <n-form-item label="Base order amount" path="bo">
-                    <n-input-number v-model:value="dca.bo" placeholder="BO" />
-                </n-form-item>
-                <n-form-item label="Sell order type" path="sell_order_type">
-                    <n-select
-                        v-model:value="dca.sell_order_type"
-                        placeholder="Select"
-                        :options="sellOrderTypeOptions"
-                    />
-                </n-form-item>
-                <template v-if="dca.sell_order_type === 'limit'">
-                    <n-form-item label="Limit sell timeout (seconds)" path="limit_sell_timeout_sec">
-                        <n-input-number v-model:value="dca.limit_sell_timeout_sec" placeholder="60" />
-                    </n-form-item>
-                    <n-form-item label="Fallback to market sell on timeout" path="limit_sell_fallback_to_market" label-placement="left">
-                        <n-checkbox v-model:checked="dca.limit_sell_fallback_to_market" />
-                    </n-form-item>
-                </template>
-                <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order amount" path="so">
-                    <n-input-number v-model:value="dca.so" placeholder="SO" />
-                </n-form-item>
-                <n-form-item v-if="dca.enabled" label="Max safety order count" path="mstc">
-                    <n-input-number v-model:value="dca.mstc" placeholder="MSTC" />
-                </n-form-item>
-                <n-form-item v-if="dca.enabled" label="Price deviation for first safety order" path="sos">
-                    <n-input-number v-model:value="dca.sos" placeholder="SOS" />
-                </n-form-item>
-                <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order step scale" path="ss">
-                    <n-input-number v-model:value="dca.ss" placeholder="SS" />
-                </n-form-item>
-                <n-form-item v-if="dca.enabled && !dca.dynamic" label="Safety order volume scale" path="os">
-                    <n-input-number v-model:value="dca.os" placeholder="OS" />
-                </n-form-item>
-                <n-form-item label="Stop loss percentage" path="sl">
-                    <n-input-number v-model:value="dca.sl" placeholder="SL" />
-                </n-form-item>
-                <n-form-item
-                    v-if="dca.enabled && dca.dynamic"
-                    label="Safety order budget ratio"
-                    path="trade_safety_order_budget_ratio"
-                >
-                    <n-input-number
-                        v-model:value="dca.trade_safety_order_budget_ratio"
-                        :min="0.01"
-                        :max="1"
-                        :step="0.01"
-                        placeholder="0.95"
-                    />
-                </n-form-item>
-            </n-form>
-        </n-card>
+        <ConfigAutopilotSection
+            ref="autopilotFormRef"
+            :autopilot="autopilot"
+            :rules="rules"
+            :show-fields="autopilot.enabled"
+        />
 
-        <n-card title="Autopilot settings">
-            <n-form ref="autopilotFormRef" :model="autopilot" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
+        <ConfigMonitoringSection
+            ref="monitoringFormRef"
+            :can-test="canTestMonitoringTelegram()"
+            :monitoring="monitoring"
+            :on-test="testMonitoringTelegram"
+            :rules="rules"
+            :test-loading="monitoring_test_loading"
+        />
 
-                <n-form-item label="Enabled" path="enabled" label-placement="left">
-                    <n-checkbox v-model:checked="autopilot.enabled" @change="handle_ap_select" />
-                </n-form-item>
+        <ConfigIndicatorSection
+            ref="indicatorFormRef"
+            :history-lookback-options="historyLookbackOptions"
+            :indicator="indicator"
+            :rules="rules"
+        />
 
-                <!-- Dynamic check for Autopilot settings -->
-                <template v-for="(index) in APForm" :key="index">
-                    <n-form-item label="Max fund" path="maxfund">
-                        <n-input-number v-model:value="autopilot.max_fund" placeholder="Max fund" />
-                    </n-form-item>
-                    <n-form-item label="Max bots for high setting" path="highmad">
-                        <n-input-number v-model:value="autopilot.high_mad" placeholder="Max bots high" />
-                    </n-form-item>
-                    <n-form-item label="Take profit for high setting" path="hightp">
-                        <n-input-number v-model:value="autopilot.high_tp" placeholder="Take profit high" />
-                    </n-form-item>
-                    <n-form-item label="Stop loss for high setting" path="highsl">
-                        <n-input-number v-model:value="autopilot.high_sl" placeholder="Stop loss high" />
-                    </n-form-item>
-                    <n-form-item label="Time threshold (in days) for stop loss" path="highsl_timeout">
-                        <n-input-number v-model:value="autopilot.high_sl_timeout" placeholder="Stop loss timeout" />
-                    </n-form-item>
-                    <n-form-item label="Max threshold (in percent of max fund) for high setting" path="high_threshold">
-                        <n-input-number v-model:value="autopilot.high_threshold" placeholder="Fund threshold" />
-                    </n-form-item>
-                    <n-form-item label="Max bots for medium setting" path="mediummad">
-                        <n-input-number v-model:value="autopilot.medium_mad" placeholder="Max bots medium" />
-                    </n-form-item>
-                    <n-form-item label="Take profit for medium setting" path="mediumtp">
-                        <n-input-number v-model:value="autopilot.medium_tp" placeholder="Take profit medium" />
-                    </n-form-item>
-                    <n-form-item label="Stop loss for medium setting" path="highsl">
-                        <n-input-number v-model:value="autopilot.medium_sl" placeholder="Stop loss medium" />
-                    </n-form-item>
-                    <n-form-item label="Time threshold (in days) for stop loss" path="mediumsl_timeout">
-                        <n-input-number v-model:value="autopilot.medium_sl_timeout" placeholder="Stop loss timeout" />
-                    </n-form-item>
-                    <n-form-item label="Max threshold (in percent of max fund) for medium setting"
-                        path="medium_threshold">
-                        <n-input-number v-model:value="autopilot.medium_threshold" placeholder="Fund threshold" />
-                    </n-form-item>
-                </template>
+        <n-card title="Backup & Restore" size="small" class="backup-restore-card">
+            <n-flex vertical :size="12">
+                <n-alert type="info" title="Portable backup">
+                    Download your configuration alone or include all trade data. Full restores do not import ticker candles and will fetch the required history again for restored active trades.
+                </n-alert>
 
-            </n-form>
-        </n-card>
-
-        <n-card title="Messaging / Monitoring settings">
-            <n-form ref="monitoringFormRef" :model="monitoring" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="Enabled" path="monitoring_enabled" label-placement="left">
-                    <n-checkbox v-model:checked="monitoring.enabled" />
-                </n-form-item>
-                <n-form-item label="Telegram Bot Token" path="monitoring_telegram_bot_token">
-                    <n-input v-model:value="monitoring.telegram_bot_token" type="password" show-password-on="click"
-                        placeholder="123456:ABC-DEF..." />
-                </n-form-item>
-                <n-form-item label="Telegram API ID" path="monitoring_telegram_api_id">
-                    <n-input-number v-model:value="monitoring.telegram_api_id" placeholder="1234567" />
-                </n-form-item>
-                <n-form-item label="Telegram API Hash" path="monitoring_telegram_api_hash">
-                    <n-input v-model:value="monitoring.telegram_api_hash" type="password" show-password-on="click"
-                        placeholder="0123456789abcdef0123456789abcdef" />
-                </n-form-item>
-                <n-form-item label="Telegram Chat ID" path="monitoring_telegram_chat_id">
-                    <n-input v-model:value="monitoring.telegram_chat_id" placeholder="e.g. 123456789 or -100123..." />
-                </n-form-item>
-                <n-form-item label="Timeout (seconds)" path="monitoring_timeout_sec">
-                    <n-input-number v-model:value="monitoring.timeout_sec" placeholder="5" />
-                </n-form-item>
-                <n-form-item label="Retry count" path="monitoring_retry_count">
-                    <n-input-number v-model:value="monitoring.retry_count" placeholder="1" />
-                </n-form-item>
-                <n-form-item label="Telegram connectivity">
+                <n-flex align="center" :wrap="true" :size="[12, 12]">
+                    <n-checkbox v-model:checked="backupIncludeTradeData">
+                        Include trade data in backup
+                    </n-checkbox>
                     <n-button
-                        secondary
                         type="primary"
-                        :loading="monitoring_test_loading"
-                        :disabled="!canTestMonitoringTelegram()"
-                        @click="testMonitoringTelegram"
+                        secondary
+                        :loading="backupDownloadLoading"
+                        @click="handleBackupDownload"
                     >
-                        Test Telegram
+                        Download backup
                     </n-button>
-                </n-form-item>
-            </n-form>
+                </n-flex>
+
+                <n-divider />
+
+                <input
+                    ref="backupFileInputRef"
+                    type="file"
+                    accept="application/json,.json"
+                    class="backup-file-input"
+                    @change="handleBackupFileSelected"
+                >
+
+                <n-flex align="center" :wrap="true" :size="[12, 12]">
+                    <n-button secondary @click="openBackupFilePicker">
+                        Select backup file
+                    </n-button>
+                    <span v-if="selectedBackupFileName" class="backup-file-name">
+                        {{ selectedBackupFileName }}
+                    </span>
+                    <n-button
+                        v-if="selectedBackupFileName"
+                        quaternary
+                        @click="clearSelectedBackup"
+                    >
+                        Clear
+                    </n-button>
+                </n-flex>
+
+                <n-text v-if="selectedBackupPayload" depth="3">
+                    Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
+                </n-text>
+
+                <n-flex align="center" :wrap="true" :size="[12, 12]">
+                    <n-button
+                        type="warning"
+                        :loading="restoreLoading"
+                        :disabled="!selectedBackupPayload"
+                        @click="handleRestoreBackup('config')"
+                    >
+                        Restore config only
+                    </n-button>
+                    <n-button
+                        type="error"
+                        ghost
+                        :loading="restoreLoading"
+                        :disabled="!selectedBackupHasTradeData"
+                        @click="handleRestoreBackup('full')"
+                    >
+                        Restore full backup
+                    </n-button>
+                </n-flex>
+            </n-flex>
         </n-card>
 
-        <n-card title="Indicator settings">
-            <n-form ref="indicatorFormRef" :model="indicator" :rules="rules" label-width="auto"
-                require-mark-placement="right-hanging" :style="{
-                    maxWidth: '640px',
-                }">
-                <n-form-item label="UPNL history retention (days, 0 = infinite)" path="upnl_housekeeping_interval">
-                    <n-input-number v-model:value="indicator.upnl_housekeeping_interval"
-                        placeholder="UPNL retention" />
-                </n-form-item>
-                <n-form-item label="History Lookback Time" path="history_lookback_time">
-                    <n-select
-                        v-model:value="indicator.history_lookback_time"
-                        :options="historyLookbackOptions"
-                        filterable
-                        tag
-                        placeholder="e.g. 90d, 1y"
-                    />
-                </n-form-item>
-            </n-form>
-        </n-card>
+        <n-alert
+            :type="saveBannerType"
+            :title="saveBannerTitle"
+            role="status"
+            aria-live="polite"
+        >
+            {{ saveBannerMessage }}
+        </n-alert>
 
-        <n-button round type="primary" @click="handleValidateButtonClick">
-            Submit
+        <n-button
+            class="submit-button"
+            round
+            type="primary"
+            :loading="saveState === 'saving'"
+            :disabled="isSubmitDisabled"
+            aria-label="Submit configuration changes"
+            aria-keyshortcuts="Control+S Meta+S"
+            @click="handleValidateButtonClick"
+        >
+            {{ submitButtonLabel }}
         </n-button>
     </n-flex>
 
 </template>
 
 <script setup lang="ts">
-import { MOONWALKER_API_PORT, MOONWALKER_API_HOST } from '../config'
+import ConfigAutopilotSection from './config/ConfigAutopilotSection.vue'
+import ConfigDcaSection from './config/ConfigDcaSection.vue'
+import ConfigExchangeSection from './config/ConfigExchangeSection.vue'
+import ConfigFilterSection from './config/ConfigFilterSection.vue'
+import ConfigGeneralSection from './config/ConfigGeneralSection.vue'
+import ConfigIndicatorSection from './config/ConfigIndicatorSection.vue'
+import ConfigMonitoringSection from './config/ConfigMonitoringSection.vue'
+import ConfigSignalSection from './config/ConfigSignalSection.vue'
+import { MOONWALKER_API_ORIGIN } from '../config'
+import {
+    usePersistableStateTracking,
+    type PersistableState,
+} from '../composables/usePersistableStateTracking'
+import {
+    buildSignalSettingsValue,
+    buildVolumeConfig,
+    getDefaultHistoryLookbackByTimeframe,
+    normalizePairEntries,
+    parseStructuredConfigValue,
+    parseSymbolListToArray,
+    parseVolumeLimitToNumber,
+    toTokenOnlyEntries,
+} from '../helpers/configForm'
 import { getAllTimeZones } from '../helpers/timezone'
 import { parseBooleanString, isJsonString, toNumberOrNull } from '../helpers/validators'
-import {
-  NAlert,
-  NButton,
-  NCard,
-  NCheckbox,
-  NFlex,
-  NForm,
-  NFormItem,
-  NInput,
-  NInputNumber,
-  NSelect,
-  NSwitch,
-  type FormInst,
-  type FormItemRule,
-  type FormRules,
-  useMessage
-} from 'naive-ui'
-import { ref, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import type { FormItemRule, FormRules } from 'naive-ui/es/form'
+import { useMessage } from 'naive-ui/es/message'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import axios from 'axios'
+import { trackUiEvent } from '../utils/uiTelemetry'
 
-interface dynamicSelectItem {
-    value: string | null;
+interface ConfigSectionFormExpose {
+    validate: () => Promise<boolean>
+}
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'error'
+type BackupRestoreMode = 'config' | 'full'
+type BackupPayload = {
+    config?: unknown
+    trade_data?: unknown
+    includes_trade_data?: boolean
+}
+type RestoreSummary = {
+    config_keys?: number
+    history_refreshed_symbols?: string[]
+    history_failed_symbols?: string[]
+}
+type RestoreResponse = {
+    message?: string
+    result?: RestoreSummary
 }
 
 function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
 }
 
-// Signal strategy
-const dynamicSymSignalSettingsForm = ref<dynamicSelectItem[]>([])
-const dynamicAsapSignalSettingsForm = ref<dynamicSelectItem[]>([])
-const dynamicDCAForm = ref<dynamicSelectItem[]>([])
-const DCAForm = ref<dynamicSelectItem[]>([])
-const APForm = ref<dynamicSelectItem[]>([])
-const generalFormRef = ref<FormInst | null>(null)
-const signalFormRef = ref<FormInst | null>(null)
-const filterFormRef = ref<FormInst | null>(null)
-const exchangeFormRef = ref<FormInst | null>(null)
-const dcaFormRef = ref<FormInst | null>(null)
-const autopilotFormRef = ref<FormInst | null>(null)
-const monitoringFormRef = ref<FormInst | null>(null)
-const indicatorFormRef = ref<FormInst | null>(null)
+const generalFormRef = ref<ConfigSectionFormExpose | null>(null)
+const signalFormRef = ref<ConfigSectionFormExpose | null>(null)
+const filterFormRef = ref<ConfigSectionFormExpose | null>(null)
+const exchangeFormRef = ref<ConfigSectionFormExpose | null>(null)
+const dcaFormRef = ref<ConfigSectionFormExpose | null>(null)
+const autopilotFormRef = ref<ConfigSectionFormExpose | null>(null)
+const monitoringFormRef = ref<ConfigSectionFormExpose | null>(null)
+const indicatorFormRef = ref<ConfigSectionFormExpose | null>(null)
 const message = useMessage()
 const router = useRouter()
+const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).toString()
 const isLoading = ref(true)
 const showAdvancedGeneral = ref(false)
 const monitoring_test_loading = ref(false)
+const backupIncludeTradeData = ref(false)
+const backupDownloadLoading = ref(false)
+const restoreLoading = ref(false)
+const backupFileInputRef = ref<HTMLInputElement | null>(null)
+const selectedBackupFileName = ref<string | null>(null)
+const selectedBackupPayload = ref<BackupPayload | null>(null)
 const submitAttempted = ref(false)
+const saveState = ref<SaveState>('idle')
+const saveErrorMessage = ref<string | null>(null)
+const lastSavedAt = ref<Date | null>(null)
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
 const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
 const ADVANCED_WS_STALE_TIMEOUT_MS = 20000
@@ -449,6 +262,18 @@ const ADVANCED_WS_RECONNECT_DEBOUNCE_MS = 2000
 
 const DEFAULT_SYMSIGNAL_URL = "https://stream.3cqs.com"
 const DEFAULT_SYMSIGNAL_VERSION = "3.0.1"
+const DEFAULT_TP_SPIKE_CONFIRM_SECONDS = 3
+const DEFAULT_TP_SPIKE_CONFIRM_TICKS = 0
+const DEFAULT_GREEN_PHASE_RAMP_DAYS = 30
+const DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC = 60
+const DEFAULT_GREEN_PHASE_WINDOW_MINUTES = 60
+const DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO = 0.8
+const DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER = 1.5
+const DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER = 1.15
+const DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS = 2
+const DEFAULT_GREEN_PHASE_CONFIRM_CYCLES = 2
+const DEFAULT_GREEN_PHASE_RELEASE_CYCLES = 4
+const DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT = 85
 const timezone = ref([])
 const timerange = [
     {
@@ -618,6 +443,10 @@ const signal = ref({
     symsignal_key: null,
     symsignal_version: null,
     symsignal_allowedsignals: [],
+    csvsignal_mode: "source",
+    csvsignal_source: null,
+    csvsignal_inline: null,
+    csvsignal_file_name: null,
 })
 
 const filter = ref({
@@ -652,6 +481,9 @@ const dca = ref({
     sell_order_type: 'market',
     limit_sell_timeout_sec: 60,
     limit_sell_fallback_to_market: true,
+    tp_spike_confirm_enabled: false,
+    tp_spike_confirm_seconds: DEFAULT_TP_SPIKE_CONFIRM_SECONDS,
+    tp_spike_confirm_ticks: DEFAULT_TP_SPIKE_CONFIRM_TICKS,
     so: null,
     mstc: null,
     sos: null,
@@ -675,6 +507,17 @@ const autopilot = ref({
     medium_sl: null,
     medium_sl_timeout: null,
     medium_threshold: null,
+    green_phase_enabled: false,
+    green_phase_ramp_days: DEFAULT_GREEN_PHASE_RAMP_DAYS,
+    green_phase_eval_interval_sec: DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC,
+    green_phase_window_minutes: DEFAULT_GREEN_PHASE_WINDOW_MINUTES,
+    green_phase_min_profitable_close_ratio: DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO,
+    green_phase_speed_multiplier: DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER,
+    green_phase_exit_multiplier: DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER,
+    green_phase_max_extra_deals: DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS,
+    green_phase_confirm_cycles: DEFAULT_GREEN_PHASE_CONFIRM_CYCLES,
+    green_phase_release_cycles: DEFAULT_GREEN_PHASE_RELEASE_CYCLES,
+    green_phase_max_locked_fund_percent: DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT,
 })
 
 const monitoring = ref({
@@ -691,25 +534,302 @@ const indicator = ref({
     upnl_housekeeping_interval: 0,
     history_lookback_time: null,
 })
+function resetSignalStrategySelection(): void {
+    signal.value.strategy_enabled = false
+    signal.value.strategy = null
+}
 
-function getDefaultHistoryLookbackByTimeframe(timeframe: string | null): string {
-    const normalized = String(timeframe || '').trim().toLowerCase()
-    if (normalized === '1m') {
-        return '30d'
+const SECTION_LABELS: Record<string, string> = {
+    general: 'General',
+    signal: 'Signal',
+    filter: 'Filter',
+    exchange: 'Exchange',
+    dca: 'DCA',
+    autopilot: 'Autopilot',
+    monitoring: 'Monitoring',
+    indicator: 'Indicator',
+}
+
+function buildPersistableState(): PersistableState {
+    return {
+        general: {
+            ...general.value,
+            show_advanced_general: showAdvancedGeneral.value,
+        },
+        signal: {
+            symbol_list: signal.value.symbol_list,
+            asap_use_url: signal.value.asap_use_url,
+            asap_symbol_select: signal.value.asap_symbol_select,
+            signal: signal.value.signal,
+            strategy: signal.value.strategy,
+            strategy_enabled: signal.value.strategy_enabled,
+            timeframe: signal.value.timeframe,
+            symsignal_url: signal.value.symsignal_url,
+            symsignal_key: signal.value.symsignal_key,
+            symsignal_version: signal.value.symsignal_version,
+            symsignal_allowedsignals: signal.value.symsignal_allowedsignals,
+            csvsignal_mode: signal.value.csvsignal_mode,
+            csvsignal_source: signal.value.csvsignal_source,
+            csvsignal_inline: signal.value.csvsignal_inline,
+            csvsignal_file_name: signal.value.csvsignal_file_name,
+        },
+        filter: { ...filter.value },
+        exchange: { ...exchange.value },
+        dca: { ...dca.value },
+        autopilot: { ...autopilot.value },
+        monitoring: { ...monitoring.value },
+        indicator: { ...indicator.value },
     }
-    if (normalized === '15m') {
-        return '90d'
+}
+const { changedSectionLabels, changedSections, isDirty, syncBaselineState } =
+    usePersistableStateTracking({
+        buildState: buildPersistableState,
+        sectionLabels: SECTION_LABELS,
+    })
+const submitButtonLabel = computed(() => {
+    if (saveState.value === 'saving') {
+        return 'Saving...'
     }
-    if (normalized === '1h') {
-        return '180d'
+    if (isDirty.value) {
+        return 'Submit changes'
     }
-    if (normalized === '4h') {
-        return '1y'
+    return 'No changes'
+})
+const saveBannerType = computed(() => {
+    if (saveState.value === 'error') {
+        return 'error'
     }
-    if (normalized === '1d') {
-        return '3y'
+    if (saveState.value === 'saved') {
+        return 'success'
     }
-    return '90d'
+    if (isDirty.value) {
+        return 'warning'
+    }
+    return 'info'
+})
+const saveBannerTitle = computed(() => {
+    if (saveState.value === 'error') {
+        return 'Save failed'
+    }
+    if (saveState.value === 'saved') {
+        return 'Saved'
+    }
+    if (isDirty.value) {
+        return 'Unsaved changes'
+    }
+    return 'No pending changes'
+})
+const saveBannerMessage = computed(() => {
+    if (saveState.value === 'error' && saveErrorMessage.value) {
+        return saveErrorMessage.value
+    }
+    if (saveState.value === 'saved' && lastSavedAt.value) {
+        return `Configuration saved at ${lastSavedAt.value.toLocaleTimeString()}`
+    }
+    if (isDirty.value) {
+        const changed = changedSectionLabels.value.join(', ')
+        return changed.length > 0
+            ? `Changed sections: ${changed}`
+            : 'You have unsaved changes.'
+    }
+    return 'Edit any field and submit to persist updates.'
+})
+const isSubmitDisabled = computed(
+    () => isLoading.value || saveState.value === 'saving' || !isDirty.value,
+)
+const selectedBackupHasTradeData = computed(() =>
+    Boolean(selectedBackupPayload.value && typeof selectedBackupPayload.value.trade_data === 'object')
+)
+const selectedBackupConfigCount = computed(() => {
+    const configRows = selectedBackupPayload.value?.config
+    return Array.isArray(configRows) ? configRows.length : 0
+})
+
+function hasUnsavedChanges(): boolean {
+    return !isLoading.value && isDirty.value
+}
+
+function setSaveError(messageText: string): void {
+    saveState.value = 'error'
+    saveErrorMessage.value = messageText
+}
+
+function isBackupPayload(value: unknown): value is BackupPayload {
+    return typeof value === 'object' && value !== null && 'config' in value
+}
+
+function buildBackupFilename(includeTradeData: boolean): string {
+    const timestamp = new Date().toISOString().replaceAll(':', '-')
+    const scope = includeTradeData ? 'full' : 'config'
+    return `moonwalker-backup-${scope}-${timestamp}.json`
+}
+
+function downloadTextFile(filename: string, content: string): void {
+    const blob = new Blob([content], { type: 'application/json;charset=utf-8' })
+    const url = window.URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    anchor.click()
+    window.URL.revokeObjectURL(url)
+}
+
+function openBackupFilePicker(): void {
+    backupFileInputRef.value?.click()
+}
+
+function clearSelectedBackup(): void {
+    selectedBackupFileName.value = null
+    selectedBackupPayload.value = null
+    if (backupFileInputRef.value) {
+        backupFileInputRef.value.value = ''
+    }
+}
+
+function extractAxiosErrorMessage(error: unknown, fallback: string): string {
+    if (axios.isAxiosError(error)) {
+        if (error.response?.data?.error) {
+            return String(error.response.data.error)
+        }
+        if (error.response?.data?.message) {
+            return String(error.response.data.message)
+        }
+        if (error.message) {
+            return error.message
+        }
+    }
+    if (error instanceof Error && error.message) {
+        return error.message
+    }
+    return fallback
+}
+
+async function handleBackupDownload(): Promise<void> {
+    if (backupDownloadLoading.value) {
+        return
+    }
+
+    backupDownloadLoading.value = true
+    try {
+        const response = await axios.get<BackupPayload>(apiUrl('/config/backup/export'), {
+            params: { include_trade_data: backupIncludeTradeData.value },
+        })
+        downloadTextFile(
+            buildBackupFilename(backupIncludeTradeData.value),
+            JSON.stringify(response.data, null, 2),
+        )
+        message.success('Backup downloaded successfully.')
+    } catch (error) {
+        message.error(extractAxiosErrorMessage(error, 'Backup download failed.'))
+    } finally {
+        backupDownloadLoading.value = false
+    }
+}
+
+async function handleBackupFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement
+    const selectedFile = input.files?.[0]
+    if (!selectedFile) {
+        return
+    }
+
+    try {
+        const rawText = await selectedFile.text()
+        const parsed = JSON.parse(rawText) as unknown
+        if (!isBackupPayload(parsed)) {
+            throw new Error('Selected file is not a valid Moonwalker backup.')
+        }
+        selectedBackupFileName.value = selectedFile.name
+        selectedBackupPayload.value = parsed
+        message.success(`Loaded backup ${selectedFile.name}`)
+    } catch (error) {
+        clearSelectedBackup()
+        message.error(
+            error instanceof Error
+                ? error.message
+                : 'Failed to read backup file.',
+        )
+    }
+}
+
+async function handleRestoreBackup(mode: BackupRestoreMode): Promise<void> {
+    if (!selectedBackupPayload.value) {
+        message.error('Please select a backup file first.')
+        return
+    }
+    if (restoreLoading.value) {
+        return
+    }
+    if (mode === 'full' && !selectedBackupHasTradeData.value) {
+        message.error('The selected backup does not include trade data.')
+        return
+    }
+
+    if (hasUnsavedChanges() && !window.confirm(
+        'You have unsaved configuration changes. Continue and replace them with the backup?'
+    )) {
+        return
+    }
+
+    const confirmationMessage = mode === 'full'
+        ? 'Restore the full backup now? This will replace the current configuration and all trade data.'
+        : 'Restore configuration only now? This will replace the current configuration.'
+    if (!window.confirm(confirmationMessage)) {
+        return
+    }
+
+    restoreLoading.value = true
+    try {
+        const response = await axios.post<RestoreResponse>(
+            apiUrl('/config/backup/restore'),
+            {
+                backup: selectedBackupPayload.value,
+                restore_trade_data: mode === 'full',
+            },
+        )
+
+        isLoading.value = true
+        await fetchDefaultValues()
+
+        const failedSymbols = response.data?.result?.history_failed_symbols ?? []
+        if (Array.isArray(failedSymbols) && failedSymbols.length > 0) {
+            message.warning(
+                `${response.data?.message || 'Restore completed.'} History refresh failed for: ${failedSymbols.join(', ')}`
+            )
+        } else {
+            message.success(response.data?.message || 'Restore completed successfully.')
+        }
+    } catch (error) {
+        message.error(extractAxiosErrorMessage(error, 'Backup restore failed.'))
+    } finally {
+        restoreLoading.value = false
+    }
+}
+
+function confirmDiscardUnsavedChanges(source: 'route_leave' | 'page_unload'): boolean {
+    if (!hasUnsavedChanges()) {
+        return true
+    }
+    if (source === 'page_unload') {
+        return false
+    }
+    const confirmLeave = window.confirm(
+        'You have unsaved changes. Leave this page and discard them?',
+    )
+    trackUiEvent('config_unsaved_prompt', {
+        source,
+        confirmed: confirmLeave,
+        dirty_sections: changedSections.value.length,
+    })
+    return confirmLeave
+}
+
+const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+    if (confirmDiscardUnsavedChanges('page_unload')) {
+        return
+    }
+    event.preventDefault()
+    event.returnValue = ''
 }
 
 function getStoredAdvancedGeneralPreference(): boolean {
@@ -813,89 +933,6 @@ function handleAsapUrlInput(value: string): void {
     }
 }
 
-function parseSymbolListToArray(raw: string | null): string[] {
-    if (!raw) {
-        return []
-    }
-    return raw
-        .split(/[\n,]+/)
-        .map((entry) => entry.trim().replace(/^['"]|['"]$/g, ""))
-        .filter((entry) => entry.length > 0)
-}
-
-function parseStructuredConfigValue(raw: unknown): Record<string, unknown> | null {
-    if (!raw) {
-        return null
-    }
-
-    if (typeof raw === 'object') {
-        return raw as Record<string, unknown>
-    }
-
-    if (typeof raw !== 'string') {
-        return null
-    }
-
-    const normalized = raw
-        .replace(/'/g, '"')
-        .replace(/\bTrue\b/g, 'true')
-        .replace(/\bFalse\b/g, 'false')
-        .replace(/\bNone\b/g, 'null')
-
-    try {
-        return JSON.parse(normalized) as Record<string, unknown>
-    } catch (error) {
-        console.error('Failed to parse structured config value:', error, raw)
-        return null
-    }
-}
-
-const VOLUME_MULTIPLIERS: Record<string, number> = {
-    K: 1_000,
-    M: 1_000_000,
-    B: 1_000_000_000,
-    T: 1_000_000_000_000,
-}
-
-function parseVolumeLimitToNumber(raw: unknown): number | null {
-    const parsed = parseStructuredConfigValue(raw)
-    if (!parsed) {
-        return null
-    }
-    const range = String(parsed.range || '').toUpperCase()
-    const size = Number(parsed.size)
-    const multiplier = VOLUME_MULTIPLIERS[range]
-    if (!Number.isFinite(size) || !multiplier) {
-        return null
-    }
-    return size * multiplier
-}
-
-function buildVolumeConfig(rawVolume: number | null): Record<string, unknown> | false {
-    if (rawVolume === null || rawVolume === undefined) {
-        return false
-    }
-    const value = Number(rawVolume)
-    if (!Number.isFinite(value) || value <= 0) {
-        return false
-    }
-
-    const ranges: Array<{ range: string; multiplier: number }> = [
-        { range: 'T', multiplier: 1_000_000_000_000 },
-        { range: 'B', multiplier: 1_000_000_000 },
-        { range: 'M', multiplier: 1_000_000 },
-        { range: 'K', multiplier: 1_000 },
-    ]
-    const selected =
-        ranges.find((entry) => value >= entry.multiplier) ||
-        { range: 'K', multiplier: 1_000 }
-
-    return {
-        size: Number((value / selected.multiplier).toFixed(3)),
-        range: selected.range,
-    }
-}
-
 async function fetchAsapSymbolsForCurrency(): Promise<void> {
     signal.value.asap_symbol_options = []
     signal.value.asap_symbol_fetch_error = null
@@ -910,7 +947,7 @@ async function fetchAsapSymbolsForCurrency(): Promise<void> {
     try {
         const quoteCurrency = String(exchange.value.currency).toUpperCase()
         const response = await axios.post(
-            `http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/data/exchange/symbols`,
+            apiUrl('/data/exchange/symbols'),
             {
                 currency: quoteCurrency,
                 exchange_config: {
@@ -1007,6 +1044,46 @@ const rules: FormRules = {
         },
         trigger: ['submit', 'change']
     },
+    csv_signal_source: {
+        validator: () => {
+            if (
+                !submitAttempted.value ||
+                signal.value.signal !== 'csv_signal' ||
+                signal.value.csvsignal_mode !== 'source'
+            ) {
+                return true
+            }
+            if (
+                signal.value.csvsignal_source === null ||
+                signal.value.csvsignal_source === undefined ||
+                String(signal.value.csvsignal_source).trim().length === 0
+            ) {
+                return new Error('Please add CSV source path or URL')
+            }
+            return true
+        },
+        trigger: ['submit', 'change']
+    },
+    csv_signal_inline: {
+        validator: () => {
+            if (
+                !submitAttempted.value ||
+                signal.value.signal !== 'csv_signal' ||
+                signal.value.csvsignal_mode !== 'inline'
+            ) {
+                return true
+            }
+            if (
+                signal.value.csvsignal_inline === null ||
+                signal.value.csvsignal_inline === undefined ||
+                String(signal.value.csvsignal_inline).trim().length === 0
+            ) {
+                return new Error('Please paste CSV text or upload a CSV file')
+            }
+            return true
+        },
+        trigger: ['submit', 'change']
+    },
     name: {
         validator: requiredAfterSubmit('Please select exchange'),
         trigger: ['submit', 'change']
@@ -1080,60 +1157,49 @@ const rules: FormRules = {
 
 function handle_signal_settings_select() {
     if (signal.value.signal == "sym_signals") {
-        if (dynamicSymSignalSettingsForm.value.length === 0) {
-            dynamicSymSignalSettingsForm.value.push({ value: null })
-        }
         if (!signal.value.symsignal_url) {
             signal.value.symsignal_url = DEFAULT_SYMSIGNAL_URL
         }
         if (!signal.value.symsignal_version) {
             signal.value.symsignal_version = DEFAULT_SYMSIGNAL_VERSION
         }
-        dynamicAsapSignalSettingsForm.value.pop()
     } else if (signal.value.signal == "asap") {
-        if (dynamicAsapSignalSettingsForm.value.length === 0) {
-            dynamicAsapSignalSettingsForm.value.push({ value: null })
-        }
-        dynamicSymSignalSettingsForm.value.pop()
         if (!signal.value.asap_use_url) {
             void fetchAsapSymbolsForCurrency()
         }
+    } else if (signal.value.signal == "csv_signal") {
+        resetSignalStrategySelection()
+        if (!signal.value.csvsignal_mode) {
+            signal.value.csvsignal_mode = 'source'
+        }
+    } else {
     }
 }
 
-function handle_dynamic_dca_select() {
-    if (dca.value.dynamic && dca.value.enabled === true) {
-        // Add a new select item when activated
-        dynamicDCAForm.value.push({ value: null })
-    } else {
-        // Remove the last select item when deactivated
-        dynamicDCAForm.value.pop()
+async function handleCsvSignalFileSelected(event: Event): Promise<void> {
+    const input = event.target as HTMLInputElement
+    const selectedFile = input.files?.[0]
+    if (!selectedFile) {
+        return
     }
-}
 
-function handle_dca_select() {
-    if (dca.value.enabled === true) {
-        // Add a new select item when activated
-        DCAForm.value.push({ value: null })
-    } else {
-        // Remove the last select item when deactivated
-        DCAForm.value.pop()
-    }
-}
-
-function handle_ap_select() {
-    if (autopilot.value.enabled === true) {
-        // Add a new select item when activated
-        APForm.value.push({ value: null })
-    } else {
-        // Remove the last select item when deactivated
-        APForm.value.pop()
+    try {
+        const csvText = await selectedFile.text()
+        signal.value.csvsignal_mode = 'inline'
+        signal.value.csvsignal_inline = csvText
+        signal.value.csvsignal_file_name = selectedFile.name
+        message.success(`Loaded ${selectedFile.name}`)
+    } catch (error) {
+        console.error('Error loading CSV file:', error)
+        message.error('Failed to read CSV file.')
+    } finally {
+        input.value = ''
     }
 }
 
 async function fetchDefaultValues() {
     try {
-        const response = await axios.get(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/all`);
+        const response = await axios.get(apiUrl('/config/all'));
         if (response.status === 200) {
             general.value.timezone = response.data.timezone || getClientTimezone()
             general.value.debug = parseBooleanString(response.data.debug) ?? false
@@ -1155,6 +1221,30 @@ async function fetchDefaultValues() {
                 signal.value.symsignal_version = String(signalSettings["api_version"] || DEFAULT_SYMSIGNAL_VERSION)
                 const allowedSignals = signalSettings["allowed_signals"]
                 signal.value.symsignal_allowedsignals = Array.isArray(allowedSignals) ? allowedSignals : []
+                const csvSourceRaw = signalSettings["csv_source"]
+                if (csvSourceRaw) {
+                    const csvSource = String(csvSourceRaw)
+                    const isInlineCsv = csvSource.includes('\n') && csvSource.includes(';')
+                    if (isInlineCsv) {
+                        signal.value.csvsignal_mode = 'inline'
+                        signal.value.csvsignal_inline = csvSource
+                        signal.value.csvsignal_source = null
+                    } else {
+                        signal.value.csvsignal_mode = 'source'
+                        signal.value.csvsignal_source = csvSource
+                        signal.value.csvsignal_inline = null
+                    }
+                } else {
+                    signal.value.csvsignal_mode = 'source'
+                    signal.value.csvsignal_source = null
+                    signal.value.csvsignal_inline = null
+                }
+                signal.value.csvsignal_file_name = null
+            } else {
+                signal.value.csvsignal_mode = 'source'
+                signal.value.csvsignal_source = null
+                signal.value.csvsignal_inline = null
+                signal.value.csvsignal_file_name = null
             }
             signal.value.symbol_list = response.data.symbol_list
             if (isUrlInput(response.data.symbol_list)) {
@@ -1206,6 +1296,14 @@ async function fetchDefaultValues() {
                 toNumberOrNull(response.data.limit_sell_timeout_sec) ?? 60
             dca.value.limit_sell_fallback_to_market =
                 parseBooleanString(response.data.limit_sell_fallback_to_market) ?? true
+            dca.value.tp_spike_confirm_enabled =
+                parseBooleanString(response.data.tp_spike_confirm_enabled) ?? false
+            dca.value.tp_spike_confirm_seconds =
+                toNumberOrNull(response.data.tp_spike_confirm_seconds) ??
+                DEFAULT_TP_SPIKE_CONFIRM_SECONDS
+            dca.value.tp_spike_confirm_ticks =
+                toNumberOrNull(response.data.tp_spike_confirm_ticks) ??
+                DEFAULT_TP_SPIKE_CONFIRM_TICKS
             dca.value.so = toNumberOrNull(response.data.so)
             dca.value.mstc = toNumberOrNull(response.data.mstc)
             dca.value.sos = toNumberOrNull(response.data.sos)
@@ -1227,6 +1325,38 @@ async function fetchDefaultValues() {
             autopilot.value.medium_sl = toNumberOrNull(response.data.autopilot_medium_sl)
             autopilot.value.medium_sl_timeout = toNumberOrNull(response.data.autopilot_medium_sl_timeout)
             autopilot.value.medium_threshold = toNumberOrNull(response.data.autopilot_medium_threshold)
+            autopilot.value.green_phase_enabled =
+                parseBooleanString(response.data.autopilot_green_phase_enabled) ?? false
+            autopilot.value.green_phase_ramp_days =
+                toNumberOrNull(response.data.autopilot_green_phase_ramp_days) ??
+                DEFAULT_GREEN_PHASE_RAMP_DAYS
+            autopilot.value.green_phase_eval_interval_sec =
+                toNumberOrNull(response.data.autopilot_green_phase_eval_interval_sec) ??
+                DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC
+            autopilot.value.green_phase_window_minutes =
+                toNumberOrNull(response.data.autopilot_green_phase_window_minutes) ??
+                DEFAULT_GREEN_PHASE_WINDOW_MINUTES
+            autopilot.value.green_phase_min_profitable_close_ratio =
+                toNumberOrNull(response.data.autopilot_green_phase_min_profitable_close_ratio) ??
+                DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO
+            autopilot.value.green_phase_speed_multiplier =
+                toNumberOrNull(response.data.autopilot_green_phase_speed_multiplier) ??
+                DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER
+            autopilot.value.green_phase_exit_multiplier =
+                toNumberOrNull(response.data.autopilot_green_phase_exit_multiplier) ??
+                DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER
+            autopilot.value.green_phase_max_extra_deals =
+                toNumberOrNull(response.data.autopilot_green_phase_max_extra_deals) ??
+                DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS
+            autopilot.value.green_phase_confirm_cycles =
+                toNumberOrNull(response.data.autopilot_green_phase_confirm_cycles) ??
+                DEFAULT_GREEN_PHASE_CONFIRM_CYCLES
+            autopilot.value.green_phase_release_cycles =
+                toNumberOrNull(response.data.autopilot_green_phase_release_cycles) ??
+                DEFAULT_GREEN_PHASE_RELEASE_CYCLES
+            autopilot.value.green_phase_max_locked_fund_percent =
+                toNumberOrNull(response.data.autopilot_green_phase_max_locked_fund_percent) ??
+                DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT
             monitoring.value.enabled = parseBooleanString(response.data.monitoring_enabled) ?? false
             monitoring.value.telegram_bot_token =
                 response.data.monitoring_telegram_bot_token || null
@@ -1267,96 +1397,55 @@ async function fetchDefaultValues() {
 
             // Initial call for signal settings
             handle_signal_settings_select()
-            handle_dca_select()
-            handle_dynamic_dca_select()
             if (signal.value.signal === "asap" && !signal.value.asap_use_url) {
                 await fetchAsapSymbolsForCurrency()
             }
 
+            syncBaselineState()
+            saveState.value = 'idle'
+            saveErrorMessage.value = null
+            lastSavedAt.value = null
+            trackUiEvent('config_baseline_loaded')
+
         } else {
             message.error('Failed to load default values')
+            setSaveError('Failed to load configuration.')
         }
     } catch (error) {
         console.error('Error fetching default values:', error);
         message.error('An unexpected error occurred while loading default values.')
+        setSaveError('An unexpected error occurred while loading default values.')
     } finally {
         isLoading.value = false; // Set loading state to false after fetch
     }
 }
 
-function splitEntries(raw: string): string[] {
-    return raw
-        .split(/[\n,]+/)
-        .map((entry) => entry.trim().replace(/^['"]|['"]$/g, ""))
-        .filter((entry) => entry.length > 0)
-}
-
-function toTokenOnlyEntries(raw: string | null): string | null {
-    if (!raw) {
-        return raw
-    }
-
-    const normalizedRaw = raw.trim()
-    if (!normalizedRaw || /^https?:\/\//i.test(normalizedRaw)) {
-        return raw
-    }
-
-    const entries = splitEntries(normalizedRaw)
-    if (entries.length === 0) {
-        return raw
-    }
-
-    const tokens = entries.map((entry) =>
-        entry.toUpperCase().replace("-", "/").split("/")[0]
-    )
-    return tokens.join(",")
-}
-
-function normalizePairEntries(raw: string | null, quoteCurrency: string): string | false {
-    if (!raw) {
-        return false
-    }
-
-    const normalizedRaw = raw.trim()
-    if (!normalizedRaw) {
-        return false
-    }
-
-    if (/^https?:\/\//i.test(normalizedRaw)) {
-        return normalizedRaw
-    }
-
-    const entries = splitEntries(normalizedRaw)
-    if (entries.length === 0) {
-        return false
-    }
-
-    const quote = quoteCurrency.toUpperCase()
-    const pairs = entries.map((entry) => {
-        const normalizedEntry = entry.toUpperCase().replace("-", "/")
-        if (normalizedEntry.includes("/")) {
-            const [base, q] = normalizedEntry.split("/")
-            if (base && q) {
-                return `${base}/${q}`
-            }
-            return `${base}/${quote}`
-        }
-        return `${normalizedEntry}/${quote}`
-    })
-
-    return pairs.join(",")
-}
-
 async function submitForm() {
+    if (!isDirty.value) {
+        message.info('No unsaved changes to submit.')
+        trackUiEvent('config_submit_skipped_no_changes')
+        return
+    }
+    if (saveState.value === 'saving') {
+        return
+    }
+
+    const submitStartedAt = performance.now()
+    const dirtySectionsBeforeSubmit = changedSections.value.length
+    trackUiEvent('config_submit_requested')
+    saveState.value = 'saving'
+    saveErrorMessage.value = null
+
     try {
         const quoteCurrency = String(exchange.value.currency || "USDT").toUpperCase()
-        const asapInputValue = signal.value.asap_use_url
-            ? signal.value.symbol_list
-            : signal.value.asap_symbol_select.join(",")
-        const normalizedSymbolList = normalizePairEntries(
-            asapInputValue,
-            quoteCurrency,
-        )
+        const normalizedSymbolList = signal.value.signal === "asap"
+            ? normalizePairEntries(
+                signal.value.asap_use_url
+                    ? signal.value.symbol_list
+                    : signal.value.asap_symbol_select.join(","),
+                quoteCurrency,
+            )
+            : false
         const normalizedDenyList = normalizePairEntries(
             filter.value.denylist,
             quoteCurrency,
@@ -1370,8 +1459,25 @@ async function submitForm() {
             ws_stale_timeout_ms: JSON.stringify({ 'value': general.value.ws_stale_timeout_ms ?? ADVANCED_WS_STALE_TIMEOUT_MS, 'type': "int" }),
             ws_reconnect_debounce_ms: JSON.stringify({ 'value': general.value.ws_reconnect_debounce_ms ?? ADVANCED_WS_RECONNECT_DEBOUNCE_MS, 'type': "int" }),
             signal: JSON.stringify({ 'value': signal.value.signal || false, 'type': "str" }),
-            signal_strategy: JSON.stringify({ 'value': signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false, 'type': "str" }),
-            signal_settings: JSON.stringify({ 'value': { 'api_url': signal.value.symsignal_url || false, 'api_key': signal.value.symsignal_key || false, 'api_version': signal.value.symsignal_version || false, 'allowed_signals': signal.value.symsignal_allowedsignals }, 'type': "str" }),
+            signal_strategy: JSON.stringify({
+                'value': signal.value.signal === 'csv_signal'
+                    ? false
+                    : (signal.value.strategy_enabled && signal.value.strategy ? signal.value.strategy : false),
+                'type': "str"
+            }),
+            signal_settings: JSON.stringify({
+                'value': buildSignalSettingsValue({
+                    signal: signal.value.signal,
+                    symsignal_url: signal.value.symsignal_url,
+                    symsignal_key: signal.value.symsignal_key,
+                    symsignal_version: signal.value.symsignal_version,
+                    symsignal_allowedsignals: signal.value.symsignal_allowedsignals,
+                    csvsignal_mode: signal.value.csvsignal_mode,
+                    csvsignal_source: signal.value.csvsignal_source,
+                    csvsignal_inline: signal.value.csvsignal_inline,
+                }),
+                'type': "str",
+            }),
             symbol_list: JSON.stringify({ 'value': normalizedSymbolList, 'type': "str" }),
             filter: JSON.stringify({ 'value': { 'rsi_max': filter.value.rsi || false, 'marketcap_cmc_api_key': filter.value.cmc_api_key || false }, 'type': "str" }),
             rsi_max: JSON.stringify({ 'value': filter.value.rsi ?? false, 'type': "float" }),
@@ -1398,6 +1504,9 @@ async function submitForm() {
             sell_order_type: JSON.stringify({ 'value': dca.value.sell_order_type || 'market', 'type': "str" }),
             limit_sell_timeout_sec: JSON.stringify({ 'value': dca.value.limit_sell_timeout_sec ?? 60, 'type': "int" }),
             limit_sell_fallback_to_market: JSON.stringify({ 'value': dca.value.limit_sell_fallback_to_market ?? true, 'type': "bool" }),
+            tp_spike_confirm_enabled: JSON.stringify({ 'value': dca.value.tp_spike_confirm_enabled ?? false, 'type': "bool" }),
+            tp_spike_confirm_seconds: JSON.stringify({ 'value': dca.value.tp_spike_confirm_seconds ?? DEFAULT_TP_SPIKE_CONFIRM_SECONDS, 'type': "float" }),
+            tp_spike_confirm_ticks: JSON.stringify({ 'value': dca.value.tp_spike_confirm_ticks ?? DEFAULT_TP_SPIKE_CONFIRM_TICKS, 'type': "int" }),
             so: JSON.stringify({ 'value': dca.value.so || false, 'type': "int" }),
             mstc: JSON.stringify({ 'value': dca.value.mstc || false, 'type': "int" }),
             sos: JSON.stringify({ 'value': dca.value.sos || false, 'type': "float" }),
@@ -1418,6 +1527,17 @@ async function submitForm() {
             autopilot_medium_sl: JSON.stringify({ 'value': autopilot.value.medium_sl || false, 'type': "float" }),
             autopilot_medium_sl_timeout: JSON.stringify({ 'value': autopilot.value.medium_sl_timeout || false, 'type': "int" }),
             autopilot_medium_threshold: JSON.stringify({ 'value': autopilot.value.medium_threshold || false, 'type': "int" }),
+            autopilot_green_phase_enabled: JSON.stringify({ 'value': autopilot.value.green_phase_enabled ?? false, 'type': "bool" }),
+            autopilot_green_phase_ramp_days: JSON.stringify({ 'value': autopilot.value.green_phase_ramp_days ?? DEFAULT_GREEN_PHASE_RAMP_DAYS, 'type': "int" }),
+            autopilot_green_phase_eval_interval_sec: JSON.stringify({ 'value': autopilot.value.green_phase_eval_interval_sec ?? DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC, 'type': "int" }),
+            autopilot_green_phase_window_minutes: JSON.stringify({ 'value': autopilot.value.green_phase_window_minutes ?? DEFAULT_GREEN_PHASE_WINDOW_MINUTES, 'type': "int" }),
+            autopilot_green_phase_min_profitable_close_ratio: JSON.stringify({ 'value': autopilot.value.green_phase_min_profitable_close_ratio ?? DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO, 'type': "float" }),
+            autopilot_green_phase_speed_multiplier: JSON.stringify({ 'value': autopilot.value.green_phase_speed_multiplier ?? DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER, 'type': "float" }),
+            autopilot_green_phase_exit_multiplier: JSON.stringify({ 'value': autopilot.value.green_phase_exit_multiplier ?? DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER, 'type': "float" }),
+            autopilot_green_phase_max_extra_deals: JSON.stringify({ 'value': autopilot.value.green_phase_max_extra_deals ?? DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS, 'type': "int" }),
+            autopilot_green_phase_confirm_cycles: JSON.stringify({ 'value': autopilot.value.green_phase_confirm_cycles ?? DEFAULT_GREEN_PHASE_CONFIRM_CYCLES, 'type': "int" }),
+            autopilot_green_phase_release_cycles: JSON.stringify({ 'value': autopilot.value.green_phase_release_cycles ?? DEFAULT_GREEN_PHASE_RELEASE_CYCLES, 'type': "int" }),
+            autopilot_green_phase_max_locked_fund_percent: JSON.stringify({ 'value': autopilot.value.green_phase_max_locked_fund_percent ?? DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT, 'type': "float" }),
             monitoring_enabled: JSON.stringify({ 'value': monitoring.value.enabled || false, 'type': "bool" }),
             monitoring_telegram_api_id: JSON.stringify({ 'value': monitoring.value.telegram_api_id || false, 'type': "int" }),
             monitoring_telegram_api_hash: JSON.stringify({ 'value': monitoring.value.telegram_api_hash || false, 'type': "str" }),
@@ -1431,27 +1551,47 @@ async function submitForm() {
                 'type': "str"
             }),
         }
-        console.log(formData)
 
         // Assuming you have an API endpoint
-        const response = await axios.post(`http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/config/multiple`, formData);
+        const response = await axios.post(apiUrl('/config/multiple'), formData);
 
-        if (response.status === 200) {
+        if (response.status >= 200 && response.status < 300) {
+            syncBaselineState()
+            saveState.value = 'saved'
+            saveErrorMessage.value = null
+            lastSavedAt.value = new Date()
+            trackUiEvent('config_submit_success', {
+                status_code: response.status,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                dirty_sections: dirtySectionsBeforeSubmit,
+            })
             message.success('Form submitted successfully')
             setTimeout(() => {
                 router.push('/')
             }, 250)
         } else {
+            setSaveError('An unexpected error occurred while submitting the configuration.')
+            trackUiEvent('config_submit_error', {
+                status_code: response.status,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                category: 'non_2xx_response',
+            })
             let errorMessage = 'An unexpected error occurred'
             try {
                 errorMessage = response.data.message || JSON.stringify(response.data);
             } catch (e) {
                 console.error('Error parsing error message:', e)
             }
+            setSaveError(errorMessage)
             message.error(errorMessage)
         }
     } catch (error) {
         if (error.response) {
+            trackUiEvent('config_submit_error', {
+                status_code: error.response.status || null,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                category: 'exception_response',
+            })
             // Server responded with a status other than 2xx
             let errorMessage = 'An unexpected error occurred'
             try {
@@ -1459,12 +1599,25 @@ async function submitForm() {
             } catch (e) {
                 console.error('Error parsing error message:', e)
             }
+            setSaveError(errorMessage)
             message.error(errorMessage)
         } else if (error.request) {
+            trackUiEvent('config_submit_error', {
+                status_code: null,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                category: 'no_response',
+            })
             // No response was received
+            setSaveError('No response from server. Please try again later.')
             message.error('No response from server. Please try again later.')
         } else {
+            trackUiEvent('config_submit_error', {
+                status_code: null,
+                duration_ms: Math.round(performance.now() - submitStartedAt),
+                category: 'request_setup',
+            })
             // Something happened while setting up the request
+            setSaveError(`Request failed: ${error.message}`)
             message.error(`Request failed: ${error.message}`)
         }
     }
@@ -1488,7 +1641,7 @@ async function testMonitoringTelegram() {
     monitoring_test_loading.value = true
     try {
         const response = await axios.post(
-            `http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}/monitoring/test`,
+            apiUrl('/monitoring/test'),
             {
                 monitoring_telegram_api_id: monitoring.value.telegram_api_id,
                 monitoring_telegram_api_hash: monitoring.value.telegram_api_hash,
@@ -1512,10 +1665,9 @@ async function testMonitoringTelegram() {
     }
 }
 
-function handleValidateButtonClick(e: MouseEvent) {
-    e.preventDefault()
+function validateAndSubmit(): void {
     submitAttempted.value = true
-    const forms = [
+    const sectionForms = [
         generalFormRef.value,
         signalFormRef.value,
         filterFormRef.value,
@@ -1524,22 +1676,36 @@ function handleValidateButtonClick(e: MouseEvent) {
         autopilotFormRef.value,
         monitoringFormRef.value,
         indicatorFormRef.value,
-    ].filter((form): form is FormInst => form !== null)
+    ].filter((form): form is ConfigSectionFormExpose => form !== null)
 
-    const validations = forms.map(
-        (form) =>
-            new Promise<boolean>((resolve) => {
-                form.validate((errors) => resolve(!errors))
-            }),
-    )
+    const validations = [
+        ...sectionForms.map((form) => form.validate()),
+    ]
 
     Promise.all(validations).then((results) => {
         if (results.every(Boolean)) {
+            trackUiEvent('config_validation_success')
             submitForm()
         } else {
+            setSaveError('Missing/invalid configuration input')
+            trackUiEvent('config_validation_failed')
             message.error('Missing/invalid configuration input')
         }
     })
+}
+
+function handleValidateButtonClick(e: MouseEvent) {
+    e.preventDefault()
+    validateAndSubmit()
+}
+
+function handleGlobalKeydown(event: KeyboardEvent): void {
+    const key = event.key.toLowerCase()
+    if ((event.ctrlKey || event.metaKey) && key === 's') {
+        event.preventDefault()
+        trackUiEvent('config_submit_shortcut_used')
+        validateAndSubmit()
+    }
 }
 
 watch(
@@ -1605,13 +1771,49 @@ watch(
     },
 )
 
+onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
+
 onMounted(() => {
     timezone.value = getAllTimeZones()
     const clientTimezone = getClientTimezone()
     if (!timezone.value.some((tz) => tz.value === clientTimezone)) {
         timezone.value.unshift({ label: clientTimezone, value: clientTimezone })
     }
-    fetchDefaultValues(); // Fetch default values when component is mounted
-});
+    window.addEventListener('beforeunload', handleBeforeUnload)
+    window.addEventListener('keydown', handleGlobalKeydown)
+    void fetchDefaultValues()
+})
+
+onUnmounted(() => {
+    window.removeEventListener('beforeunload', handleBeforeUnload)
+    window.removeEventListener('keydown', handleGlobalKeydown)
+})
 
 </script>
+
+<style scoped>
+.config-form-shell {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    width: 100%;
+}
+
+.backup-restore-card {
+    width: 100%;
+}
+
+.backup-file-input {
+    display: none;
+}
+
+.backup-file-name {
+    font-size: 14px;
+}
+
+@media (max-width: 768px) {
+    .submit-button {
+        width: 100%;
+    }
+}
+</style>

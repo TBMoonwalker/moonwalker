@@ -1,8 +1,9 @@
 """DCA strategy handling and order logic."""
 
+import asyncio
 import importlib
 from datetime import datetime, timedelta
-from typing import Any
+from typing import Any, TypedDict
 
 import helper
 from service.ath import AthService
@@ -16,6 +17,16 @@ from service.strategy_capability import ensure_strategy_supported
 from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
+
+
+class TpConfirmationState(TypedDict):
+    """In-memory TP confirmation state for a single open trade."""
+
+    started_at: float
+    qualifying_ticks: int
+    peak_price: float
+    tp_price: float
+    trade_timestamp: int
 
 
 class Dca:
@@ -34,9 +45,148 @@ class Dca:
         self.utils = helper.Utils()
         self.config: dict[str, Any] | None = None
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
+        self._pending_tp_confirmations: dict[str, TpConfirmationState] = {}
 
         # Class attributes
         Dca.pnl = {}
+
+    def __get_monotonic_time(self) -> float:
+        """Return a monotonic timestamp for TP confirmation timing."""
+        return asyncio.get_running_loop().time()
+
+    def __tp_confirmation_enabled(self) -> bool:
+        """Return whether TP spike confirmation is enabled."""
+        return bool(self.config and self.config.get("tp_spike_confirm_enabled", False))
+
+    def __get_tp_confirmation_seconds(self) -> float:
+        """Return the TP confirmation duration in seconds."""
+        if not self.config:
+            return 0.0
+        try:
+            return max(
+                0.0, float(self.config.get("tp_spike_confirm_seconds", 3.0) or 0.0)
+            )
+        except (TypeError, ValueError):
+            return 0.0
+
+    def __get_tp_confirmation_ticks(self) -> int:
+        """Return the optional TP confirmation tick count."""
+        if not self.config:
+            return 0
+        try:
+            return max(0, int(self.config.get("tp_spike_confirm_ticks", 0) or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def __clear_tp_confirmation(
+        self,
+        symbol: str,
+        *,
+        reason: str,
+        current_price: float | None = None,
+        tp_price: float | None = None,
+    ) -> None:
+        """Clear pending TP confirmation state and log why it was removed."""
+        state = self._pending_tp_confirmations.pop(symbol, None)
+        if state is None:
+            return
+
+        logging.info(
+            "Cleared TP confirmation for %s: reason=%s current_price=%s tp_price=%s "
+            "peak_price=%s qualifying_ticks=%s",
+            symbol,
+            reason,
+            (round(float(current_price), 10) if current_price is not None else "n/a"),
+            round(float(tp_price or state["tp_price"]), 10),
+            round(float(state["peak_price"]), 10),
+            int(state["qualifying_ticks"]),
+        )
+
+    def __evaluate_tp_confirmation(
+        self,
+        *,
+        symbol: str,
+        trade_timestamp: int,
+        current_price: float,
+        tp_price: float,
+    ) -> bool:
+        """Return whether TP remained above threshold long enough to sell."""
+        seconds_required = self.__get_tp_confirmation_seconds()
+        ticks_required = self.__get_tp_confirmation_ticks()
+        if seconds_required <= 0 and ticks_required <= 0:
+            return True
+
+        now = self.__get_monotonic_time()
+        state = self._pending_tp_confirmations.get(symbol)
+        if state and state["trade_timestamp"] != trade_timestamp:
+            self.__clear_tp_confirmation(
+                symbol,
+                reason="trade_changed",
+                current_price=current_price,
+                tp_price=tp_price,
+            )
+            state = None
+
+        if state and abs(state["tp_price"] - tp_price) > 1e-12:
+            self.__clear_tp_confirmation(
+                symbol,
+                reason="tp_price_changed",
+                current_price=current_price,
+                tp_price=tp_price,
+            )
+            state = None
+
+        if state is None:
+            self._pending_tp_confirmations[symbol] = {
+                "started_at": now,
+                "qualifying_ticks": 1,
+                "peak_price": current_price,
+                "tp_price": tp_price,
+                "trade_timestamp": trade_timestamp,
+            }
+            logging.info(
+                "Started TP confirmation for %s: current_price=%s tp_price=%s "
+                "seconds_required=%s ticks_required=%s",
+                symbol,
+                round(current_price, 10),
+                round(tp_price, 10),
+                round(seconds_required, 4),
+                ticks_required,
+            )
+            return False
+
+        state["qualifying_ticks"] += 1
+        state["peak_price"] = max(float(state["peak_price"]), current_price)
+
+        elapsed = now - float(state["started_at"])
+        seconds_met = seconds_required <= 0 or elapsed >= seconds_required
+        ticks_met = ticks_required <= 0 or state["qualifying_ticks"] >= ticks_required
+        if seconds_met and ticks_met:
+            self._pending_tp_confirmations.pop(symbol, None)
+            logging.info(
+                "TP confirmation passed for %s: current_price=%s tp_price=%s "
+                "elapsed=%.4f qualifying_ticks=%s peak_price=%s",
+                symbol,
+                round(current_price, 10),
+                round(tp_price, 10),
+                elapsed,
+                int(state["qualifying_ticks"]),
+                round(float(state["peak_price"]), 10),
+            )
+            return True
+
+        logging.debug(
+            "Waiting for TP confirmation on %s: current_price=%s tp_price=%s "
+            "elapsed=%.4f qualifying_ticks=%s seconds_required=%s ticks_required=%s",
+            symbol,
+            round(current_price, 10),
+            round(tp_price, 10),
+            elapsed,
+            int(state["qualifying_ticks"]),
+            round(seconds_required, 4),
+            ticks_required,
+        )
+        return False
 
     async def __dynamic_dca_strategy(self, symbol: str) -> tuple[bool, bool]:
         result = False
@@ -247,6 +397,8 @@ class Dca:
         max_safety_orders = self.config.get("mstc", 0)
         sell = False
         is_unsellable = bool(trades.get("is_unsellable", False))
+        tp_confirmation_pending = False
+        tp_confirmation_ticks = 0
 
         # Last sell fee has to be considered
         total_cost = trades["total_cost"] + (trades["total_cost"] * trades["fee"])
@@ -255,10 +407,32 @@ class Dca:
         # Calculate TP/SL
         take_profit_price = average_buy_price * (1 + (self.tp / 100))
         stop_loss_price = average_buy_price * (1 - (self.sl / 100))
+        tp_reached = not is_unsellable and current_price >= take_profit_price
 
-        # Check if TP is reached
-        if not is_unsellable and current_price >= take_profit_price:
+        if tp_reached and trailing_tp <= 0 and self.__tp_confirmation_enabled():
+            trade_timestamp = int(float(trades["timestamp"]))
+            sell = self.__evaluate_tp_confirmation(
+                symbol=trades["symbol"],
+                trade_timestamp=trade_timestamp,
+                current_price=current_price,
+                tp_price=take_profit_price,
+            )
+            tp_confirmation_pending = not sell
+        elif tp_reached:
+            self.__clear_tp_confirmation(
+                trades["symbol"],
+                reason="tp_confirmation_not_required",
+                current_price=current_price,
+                tp_price=take_profit_price,
+            )
             sell = True
+        elif trailing_tp <= 0:
+            self.__clear_tp_confirmation(
+                trades["symbol"],
+                reason="price_fell_below_tp",
+                current_price=current_price,
+                tp_price=take_profit_price,
+            )
 
         # Check if SL is reached
         if (
@@ -266,6 +440,12 @@ class Dca:
             and current_price <= stop_loss_price
             and max_safety_orders == trades["safetyorders_count"]
         ):
+            self.__clear_tp_confirmation(
+                trades["symbol"],
+                reason="stop_loss_triggered",
+                current_price=current_price,
+                tp_price=take_profit_price,
+            )
             sell = True
 
         # Actual PNL in percent (value for profit calculation)
@@ -332,10 +512,22 @@ class Dca:
                     "Selling %s because of autopilot settings.",
                     trades["symbol"],
                 )
+                self.__clear_tp_confirmation(
+                    trades["symbol"],
+                    reason="autopilot_timeout_triggered",
+                    current_price=current_price,
+                    tp_price=take_profit_price,
+                )
                 sell = True
 
         # TP reached - sell order (market)
         if sell:
+            self.__clear_tp_confirmation(
+                trades["symbol"],
+                reason="sell_submitted",
+                current_price=current_price,
+                tp_price=take_profit_price,
+            )
             order = {
                 "symbol": trades["symbol"],
                 "direction": trades["direction"],
@@ -358,6 +550,14 @@ class Dca:
                 trades.get("unsellable_reason"),
             )
 
+        pending_state = self._pending_tp_confirmations.get(trades["symbol"])
+        if pending_state:
+            tp_confirmation_pending = True
+            tp_confirmation_ticks = int(pending_state["qualifying_ticks"])
+        else:
+            tp_confirmation_pending = False
+            tp_confirmation_ticks = 0
+
         # Logging configuration
         logging_json = {
             "type": "tp_check",
@@ -373,6 +573,8 @@ class Dca:
             "direction": trades["direction"],
             "unsellable": is_unsellable,
             "unsellable_reason": trades.get("unsellable_reason"),
+            "tp_confirmation_pending": tp_confirmation_pending,
+            "tp_confirmation_ticks": tp_confirmation_ticks,
         }
         await self.statistic.update_statistic_data(logging_json)
 

@@ -1,6 +1,6 @@
-import { MOONWALKER_API_HOST, MOONWALKER_API_PORT } from '../config'
+import { MOONWALKER_API_ORIGIN } from '../config'
 
-const baseUrl = `http://${MOONWALKER_API_HOST}:${MOONWALKER_API_PORT}`
+const baseUrl = MOONWALKER_API_ORIGIN
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, init)

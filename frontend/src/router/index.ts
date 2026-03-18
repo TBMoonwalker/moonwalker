@@ -87,6 +87,11 @@ function isConfigComplete(config: ConfigPayload): boolean {
     )
   }
 
+  if (signal === 'csv_signal') {
+    const settings = parseSignalSettings(config.signal_settings)
+    return hasRequiredValue(settings.csv_source)
+  }
+
   return true
 }
 

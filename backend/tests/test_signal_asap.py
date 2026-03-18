@@ -64,3 +64,34 @@ async def test_asap_run_triggers_buy_order(monkeypatch) -> None:
     assert len(orders) == 1
     assert orders[0]["symbol"] == "BTC/USDT"
     assert orders[0]["ordersize"] == 10
+
+
+@pytest.mark.asyncio
+async def test_asap_skips_symbols_with_insufficient_history(monkeypatch) -> None:
+    watcher_queue = asyncio.Queue()
+    plugin = SignalPlugin(watcher_queue)
+    plugin.config = {"symbol_list": "BTC/USDT"}
+    plugin._strategy_timeframe = "1m"
+    plugin._required_history_days = 30
+    plugin._required_history_candles = 200
+
+    async def fake_has_sufficient_resampled_history(*_args, **_kwargs) -> bool:
+        return False
+
+    async def fake_add_history_data_for_symbol(*_args, **_kwargs) -> bool:
+        return True
+
+    async def fake_get_resampled_history_candle_count(*_args, **_kwargs) -> int:
+        return 120
+
+    plugin.data = types.SimpleNamespace(
+        has_sufficient_resampled_history=fake_has_sufficient_resampled_history,
+        add_history_data_for_symbol=fake_add_history_data_for_symbol,
+        get_resampled_history_candle_count=fake_get_resampled_history_candle_count,
+    )
+
+    symbols = await plugin._SignalPlugin__get_new_symbol_list(tuple())
+
+    assert symbols == []
+    queued_symbols = await watcher_queue.get()
+    assert queued_symbols == []

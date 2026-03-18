@@ -1,17 +1,36 @@
 """Order orchestration for exchange buy/sell actions."""
 
 import asyncio
-import json
-import time
+import sqlite3
 from datetime import datetime
-from typing import Any
+from typing import Any, TypeGuard
 
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
+from service.exchange_types import (
+    ExchangeOrderPayload,
+    PartialSellStatus,
+    SoldCheckStatus,
+)
 from service.monitoring import MonitoringService
+from service.order_payloads import (
+    build_buy_monitor_payload,
+    build_buy_trade_payload,
+    build_closed_trade_payloads,
+    build_manual_buy_open_trade_payload,
+    build_manual_buy_trade_payload,
+    calculate_trade_duration,
+)
+from service.trade_math import (
+    calculate_order_size,
+    calculate_so_percentage,
+    count_decimal_places,
+    parse_date_to_ms,
+)
 from service.trades import Trades
+from tortoise.exceptions import ConfigurationError
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
@@ -60,10 +79,23 @@ class Orders:
                 order_status = await self.exchange.create_spot_sell(order, config)
 
                 if not order_status:
-                    logging.error("Failed creating sell order for %s", order["symbol"])
+                    logging.error(
+                        "Failed creating sell order for %s. "
+                        "No exchange sell result was returned.",
+                        order["symbol"],
+                    )
                     return
 
-                if await self.__handle_partial_sell_status(order_status, config):
+                if self._is_partial_sell_status(order_status):
+                    await self.__handle_partial_sell_status(order_status, config)
+                    return
+
+                if not self._is_sold_check_status(order_status):
+                    logging.error(
+                        "Unsupported sell order status for %s: %s",
+                        order["symbol"],
+                        order_status,
+                    )
                     return
 
                 close_context = await self.__calculate_closed_trade_stats(order_status)
@@ -79,15 +111,12 @@ class Orders:
                 await self.exchange.close()
 
     async def __handle_partial_sell_status(
-        self, order_status: dict[str, Any], config: dict[str, Any]
-    ) -> bool:
-        """Persist partial sell execution and return True when trade remains open."""
-        if order_status.get("type") != "partial_sell":
-            return False
-
+        self, order_status: PartialSellStatus, config: dict[str, Any]
+    ) -> None:
+        """Persist partial sell execution while keeping the trade open."""
         if bool(order_status.get("unsellable", False)):
             await self.__handle_unsellable_remainder(order_status, config)
-            return True
+            return
 
         partial_amount = float(order_status.get("partial_filled_amount") or 0.0)
         partial_proceeds = float(order_status.get("partial_proceeds") or 0.0)
@@ -104,10 +133,9 @@ class Orders:
                 partial_proceeds,
                 float(order_status.get("remaining_amount") or 0.0),
             )
-        return True
 
     async def __handle_unsellable_remainder(
-        self, order_status: dict[str, Any], config: dict[str, Any]
+        self, order_status: PartialSellStatus, config: dict[str, Any]
     ) -> None:
         """Persist partial close and mark remaining amount as unsellable."""
         symbol = str(order_status.get("symbol", ""))
@@ -129,35 +157,34 @@ class Orders:
             else None
         )
 
-        trade_snapshot = await self.trades.get_trades_for_orders(symbol)
         open_trade_rows = await self.trades.get_open_trades_by_symbol(symbol)
         open_trade = open_trade_rows[0] if open_trade_rows else None
         already_notified = bool(open_trade and open_trade.get("unsellable_notice_sent"))
 
-        total_amount = (
-            float(trade_snapshot.get("total_amount") or 0.0) if trade_snapshot else 0.0
-        )
-        total_cost = (
-            float(trade_snapshot.get("total_cost") or 0.0) if trade_snapshot else 0.0
-        )
-        if total_amount <= 0 and open_trade:
-            total_amount = float(open_trade.get("amount") or 0.0)
-        if total_cost <= 0 and open_trade:
-            total_cost = float(open_trade.get("cost") or 0.0)
+        total_amount = float(open_trade.get("amount") or 0.0) if open_trade else 0.0
+        total_cost = float(open_trade.get("cost") or 0.0) if open_trade else 0.0
 
         avg_buy_price = (total_cost / total_amount) if total_amount > 0 else 0.0
         sold_cost = avg_buy_price * partial_amount
         remaining_cost = max(0.0, total_cost - sold_cost)
+        current_price = (
+            float(open_trade.get("current_price") or 0.0) if open_trade else 0.0
+        )
+        remaining_profit = current_price * remaining_amount - remaining_cost
+        remaining_profit_percent = (
+            ((current_price - avg_buy_price) / avg_buy_price) * 100
+            if avg_buy_price > 0
+            else 0.0
+        )
+        so_count = await self.__resolve_so_count(symbol)
+        open_date_value = open_trade.get("open_date") if open_trade else None
 
         if partial_amount > 0:
             open_timestamp = await self.__resolve_open_timestamp(symbol)
-            so_count = await self.__resolve_so_count(symbol)
-            close_timestamp = time.mktime(datetime.now().timetuple()) * 1000
             close_date = datetime.now()
+            close_timestamp = close_date.timestamp() * 1000
             open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
-            duration_data = self.__calculate_trade_duration(
-                open_timestamp, close_timestamp
-            )
+            duration_data = calculate_trade_duration(open_timestamp, close_timestamp)
             partial_avg_sell_price = (
                 partial_proceeds / partial_amount if partial_amount > 0 else 0.0
             )
@@ -184,30 +211,38 @@ class Orders:
                 }
             )
 
-        tp_percent = float(config.get("tp", 0.0) or 0.0)
-        next_tp_price = (
-            (remaining_cost / remaining_amount) * (1 + tp_percent / 100.0)
-            if remaining_amount > 0
-            else 0.0
-        )
-        await self.trades.update_open_trades(
-            {
-                "amount": remaining_amount,
-                "cost": remaining_cost,
-                "avg_price": (
-                    (remaining_cost / remaining_amount) if remaining_amount > 0 else 0.0
-                ),
-                "tp_price": next_tp_price,
-                "sold_amount": 0.0,
-                "sold_proceeds": 0.0,
-                "unsellable_amount": remaining_amount,
-                "unsellable_reason": reason,
-                "unsellable_min_notional": min_notional,
-                "unsellable_estimated_notional": estimated_notional,
-                "unsellable_since": datetime.now().isoformat(),
-                "unsellable_notice_sent": True,
-            },
-            symbol,
+        unsellable_since = datetime.now().isoformat()
+
+        async def _persist_unsellable_remainder() -> None:
+            async with in_transaction() as conn:
+                await model.UnsellableTrades.create(
+                    symbol=symbol,
+                    so_count=so_count,
+                    profit=remaining_profit,
+                    profit_percent=remaining_profit_percent,
+                    amount=remaining_amount,
+                    cost=remaining_cost,
+                    current_price=current_price,
+                    avg_price=(
+                        (remaining_cost / remaining_amount)
+                        if remaining_amount > 0
+                        else 0.0
+                    ),
+                    open_date=(
+                        str(open_date_value) if open_date_value is not None else None
+                    ),
+                    unsellable_reason=reason,
+                    unsellable_min_notional=min_notional,
+                    unsellable_estimated_notional=estimated_notional,
+                    unsellable_since=unsellable_since,
+                    using_db=conn,
+                )
+                await model.Trades.filter(symbol=symbol).using_db(conn).delete()
+                await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
+
+        await run_sqlite_write_with_retry(
+            _persist_unsellable_remainder,
+            f"persisting unsellable remainder for {symbol}",
         )
 
         if not already_notified:
@@ -235,7 +270,7 @@ class Orders:
         )
 
     async def __calculate_closed_trade_stats(
-        self, order_status: dict[str, Any]
+        self, order_status: SoldCheckStatus
     ) -> dict[str, Any]:
         """Build closed-trade payload and monitoring payload."""
         symbol = order_status["symbol"]
@@ -245,61 +280,13 @@ class Orders:
             symbol
         )
 
-        final_amount = float(order_status.get("total_amount") or 0.0)
-        final_price = float(order_status.get("price") or 0.0)
-        total_amount = partial_amount + final_amount
-        total_proceeds = partial_proceeds + (final_amount * final_price)
-        total_cost = float(order_status.get("total_cost") or 0.0)
-
-        if total_amount > 0:
-            avg_sell_price = total_proceeds / total_amount
-            avg_buy_price = total_cost / total_amount if total_cost else 0.0
-            profit = total_proceeds - total_cost
-            profit_percent = (
-                ((avg_sell_price - avg_buy_price) / avg_buy_price) * 100
-                if avg_buy_price > 0
-                else 0.0
-            )
-            order_status["total_amount"] = total_amount
-            order_status["price"] = avg_sell_price
-            order_status["tp_price"] = avg_sell_price
-            order_status["avg_price"] = avg_buy_price
-            order_status["profit"] = profit
-            order_status["profit_percent"] = profit_percent
-
-        sell_timestamp = time.mktime(datetime.now().timetuple()) * 1000
-        sell_date = datetime.now()
-        open_date = datetime.fromtimestamp((open_timestamp / 1000.0))
-        duration_data = self.__calculate_trade_duration(open_timestamp, sell_timestamp)
-
-        payload = {
-            "symbol": symbol,
-            "so_count": so_count,
-            "profit": order_status["profit"],
-            "profit_percent": order_status["profit_percent"],
-            "amount": order_status["total_amount"],
-            "cost": order_status["total_cost"],
-            "tp_price": order_status["tp_price"],
-            "avg_price": order_status["avg_price"],
-            "open_date": open_date,
-            "close_date": sell_date,
-            "duration": duration_data,
-        }
-        monitor_payload = {
-            "symbol": symbol,
-            "side": "sell",
-            "amount": order_status["total_amount"],
-            "cost": order_status["total_cost"],
-            "avg_price": order_status["avg_price"],
-            "tp_price": order_status["tp_price"],
-            "profit": order_status["profit"],
-            "profit_percent": order_status["profit_percent"],
-            "so_count": so_count,
-            "open_date": open_date.isoformat(),
-            "close_date": sell_date.isoformat(),
-            "duration": duration_data,
-        }
-        return {"payload": payload, "monitor_payload": monitor_payload}
+        return build_closed_trade_payloads(
+            order_status,
+            so_count=so_count,
+            open_timestamp_ms=open_timestamp,
+            partial_amount=partial_amount,
+            partial_proceeds=partial_proceeds,
+        )
 
     async def __persist_closed_trade(
         self, symbol: str, payload: dict[str, Any]
@@ -321,7 +308,7 @@ class Orders:
         base_order = await self.trades.get_trade_by_ordertype(symbol, baseorder=True)
         try:
             return float(base_order[0]["timestamp"])
-        except Exception as e:
+        except (IndexError, KeyError, TypeError, ValueError) as e:
             logging.debug(
                 "Did not found a timestamp - taking default value. Cause %s", e
             )
@@ -333,6 +320,78 @@ class Orders:
         if open_trade:
             return int(open_trade[0]["so_count"])
         return 0
+
+    @staticmethod
+    def _normalize_symbol(symbol: str) -> str:
+        """Normalize symbol into BASE/QUOTE format."""
+        normalized = str(symbol or "").strip().upper().replace(" ", "")
+        normalized = normalized.replace("_", "/")
+        if "-" in normalized and "/" not in normalized:
+            normalized = normalized.replace("-", "/")
+
+        parts = normalized.split("/")
+        if len(parts) != 2 or not parts[0] or not parts[1]:
+            raise ValueError("Invalid symbol. Use BASE/QUOTE format.")
+        return f"{parts[0]}/{parts[1]}"
+
+    @staticmethod
+    def _parse_positive_float(value: Any, field_name: str) -> float:
+        """Parse and validate positive numeric payload fields."""
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"Invalid {field_name}.") from exc
+        if parsed <= 0:
+            raise ValueError(f"{field_name} must be greater than 0.")
+        return parsed
+
+    @staticmethod
+    def _is_partial_sell_status(
+        order_status: dict[str, Any],
+    ) -> TypeGuard[PartialSellStatus]:
+        """Return whether an exchange sell result is a partial-sell status."""
+        return str(order_status.get("type") or "") == "partial_sell"
+
+    @staticmethod
+    def _is_sold_check_status(
+        order_status: dict[str, Any],
+    ) -> TypeGuard[SoldCheckStatus]:
+        """Return whether an exchange sell result is a finalized sell status."""
+        status_type = str(order_status.get("type") or "")
+        if status_type == "sold_check":
+            return True
+        return (
+            status_type == ""
+            and bool(order_status.get("symbol"))
+            and bool(order_status.get("total_amount"))
+        )
+
+    @staticmethod
+    def _has_valid_buy_fill(order_status: ExchangeOrderPayload) -> bool:
+        """Validate that an exchange buy payload contains the core filled values."""
+        return (
+            bool(order_status.get("price"))
+            and bool(order_status.get("amount"))
+            and (float(order_status["amount"]) > 0)
+        )
+
+    async def _reset_unsellable_state(self, symbol: str) -> None:
+        """Clear persisted unsellable markers after a successful buy."""
+        try:
+            await self.trades.update_open_trades(
+                {
+                    "unsellable_amount": 0.0,
+                    "unsellable_reason": None,
+                    "unsellable_min_notional": None,
+                    "unsellable_estimated_notional": None,
+                    "unsellable_since": None,
+                    "unsellable_notice_sent": False,
+                },
+                symbol,
+            )
+        except (RuntimeError, ConfigurationError):
+            # Tests may stub persistence without initializing DB context.
+            pass
 
     async def receive_buy_order(
         self, order: dict[str, Any], config: dict[str, Any]
@@ -346,36 +405,13 @@ class Orders:
             order_status = await self.exchange.create_spot_market_buy(order, config)
             logging.debug(order_status)
             if order_status:
-                if (
-                    not order_status.get("amount")
-                    or float(order_status["amount"]) <= 0
-                    or not order_status.get("price")
-                ):
+                if not self._has_valid_buy_fill(order_status):
                     logging.error(
                         "Skipping trade creation for %s: invalid order status.",
                         order.get("symbol"),
                     )
                     return False
-                # 2. Create trade
-                payload = {
-                    "timestamp": order_status["timestamp"],
-                    "ordersize": order_status["ordersize"],
-                    "fee": order_status["fees"],
-                    "precision": order_status["precision"],
-                    "amount_fee": order_status["amount_fee"],
-                    "amount": order_status["amount"],
-                    "price": order_status["price"],
-                    "symbol": order_status["symbol"],
-                    "orderid": order_status["orderid"],
-                    "bot": order_status["botname"],
-                    "ordertype": order_status["ordertype"],
-                    "baseorder": order_status["baseorder"],
-                    "safetyorder": order_status["safetyorder"],
-                    "order_count": order_status["order_count"],
-                    "so_percentage": order_status["so_percentage"],
-                    "direction": order_status["direction"],
-                    "side": order_status["side"],
-                }
+                payload = build_buy_trade_payload(order_status)
 
                 async def _persist_buy() -> None:
                     async with in_transaction() as conn:
@@ -390,45 +426,121 @@ class Orders:
                 await run_sqlite_write_with_retry(
                     _persist_buy, f"persisting buy order for {order['symbol']}"
                 )
-                try:
-                    await self.trades.update_open_trades(
-                        {
-                            "unsellable_amount": 0.0,
-                            "unsellable_reason": None,
-                            "unsellable_min_notional": None,
-                            "unsellable_estimated_notional": None,
-                            "unsellable_since": None,
-                            "unsellable_notice_sent": False,
-                        },
-                        order_status["symbol"],
-                    )
-                except RuntimeError:
-                    # Tests may stub persistence without initializing DB context.
-                    pass
+                await self._reset_unsellable_state(order_status["symbol"])
                 await self.monitoring.notify_trade(
                     "trade.buy",
-                    {
-                        "symbol": order_status["symbol"],
-                        "side": "buy",
-                        "timestamp": order_status["timestamp"],
-                        "ordersize": order_status["ordersize"],
-                        "price": order_status["price"],
-                        "amount": order_status["amount"],
-                        "bot": order_status["botname"],
-                        "ordertype": order_status["ordertype"],
-                        "baseorder": order_status["baseorder"],
-                        "safetyorder": order_status["safetyorder"],
-                        "order_count": order_status["order_count"],
-                        "so_percentage": order_status["so_percentage"],
-                    },
+                    build_buy_monitor_payload(order_status),
                     config,
                 )
                 return True
             else:
-                logging.error("Failed creating buy order for %s", order["symbol"])
+                precheck = self.exchange.get_last_buy_precheck_result()
+                if precheck and not bool(precheck.get("ok", False)):
+                    logging.warning(
+                        "Skipping buy order for %s: funds pre-check failed (%s). required=%s available=%s",
+                        order["symbol"],
+                        precheck.get("reason", "unknown"),
+                        precheck.get("required_quote"),
+                        precheck.get("available_quote"),
+                    )
+                else:
+                    logging.error("Failed creating buy order for %s", order["symbol"])
                 return False
         finally:
             await self.exchange.close()
+
+    async def receive_manual_buy_add(
+        self,
+        symbol: str,
+        date_input: Any,
+        price_raw: Any,
+        amount_raw: Any,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Append a manual buy as a safety-order row without exchange execution."""
+        normalized_symbol = self._normalize_symbol(symbol)
+        price = self._parse_positive_float(price_raw, "price")
+        amount = self._parse_positive_float(amount_raw, "amount")
+        timestamp_ms = parse_date_to_ms(str(date_input or "").strip())
+        if timestamp_ms is None:
+            raise ValueError("Invalid date.")
+
+        open_trade_rows = await self.trades.get_open_trades_by_symbol(normalized_symbol)
+        if not open_trade_rows:
+            raise ValueError(f"No open trade found for {normalized_symbol}.")
+        open_trade = open_trade_rows[0]
+
+        existing_trades = await self.trades.get_trades_by_symbol(normalized_symbol)
+        if not existing_trades:
+            raise ValueError(f"No existing trade rows found for {normalized_symbol}.")
+
+        last_trade = max(
+            existing_trades,
+            key=lambda trade: float(trade.get("timestamp") or 0.0),
+        )
+        last_timestamp = int(float(last_trade.get("timestamp") or 0.0))
+        if int(timestamp_ms) < last_timestamp:
+            raise ValueError(
+                "Date must be greater than or equal to the latest existing buy date."
+            )
+
+        trade_data = await self.trades.get_trades_for_orders(normalized_symbol)
+        if not trade_data:
+            raise ValueError(f"Cannot resolve trade context for {normalized_symbol}.")
+
+        previous_price = float(last_trade.get("price") or 0.0)
+        ordersize = calculate_order_size(price=price, amount=amount)
+        so_percentage = calculate_so_percentage(
+            price=price,
+            previous_price=previous_price,
+            is_base=False,
+        )
+        safetyorders_count = int(trade_data.get("safetyorders_count") or 0)
+        order_count = safetyorders_count + 1
+        amount_precision = count_decimal_places(str(amount_raw))
+
+        trade_payload = build_manual_buy_trade_payload(
+            normalized_symbol=normalized_symbol,
+            timestamp_ms=int(timestamp_ms),
+            price=float(price),
+            amount=float(amount),
+            ordersize=float(ordersize),
+            amount_precision=amount_precision,
+            order_count=order_count,
+            so_percentage=so_percentage,
+            trade_data=trade_data,
+        )
+        open_trade_payload = build_manual_buy_open_trade_payload(
+            open_trade=open_trade,
+            amount=float(amount),
+            ordersize=float(ordersize),
+            order_count=order_count,
+            tp_percent=float(config.get("tp", 0.0) or 0.0),
+        )
+
+        async def _persist_manual_buy() -> None:
+            async with in_transaction() as conn:
+                await model.Trades.create(**trade_payload, using_db=conn)
+                updated = (
+                    await model.OpenTrades.filter(symbol=normalized_symbol)
+                    .using_db(conn)
+                    .update(**open_trade_payload)
+                )
+                if updated == 0:
+                    raise ValueError(f"No open trade found for {normalized_symbol}.")
+
+        await run_sqlite_write_with_retry(
+            _persist_manual_buy, f"persisting manual buy add for {normalized_symbol}"
+        )
+        return {
+            "symbol": normalized_symbol,
+            "timestamp": int(timestamp_ms),
+            "price": float(price),
+            "amount": float(amount),
+            "ordersize": float(ordersize),
+            "so_percentage": float(so_percentage),
+            "order_count": order_count,
+        }
 
     async def receive_stop_signal(self, symbol: str) -> bool:
         """Stop trading for a symbol."""
@@ -447,7 +559,14 @@ class Orders:
                 _persist_stop, f"stopping symbol {symbol}"
             )
             return True
-        except Exception as e:
+        except (
+            ConfigurationError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            OSError,
+            sqlite3.Error,
+        ) as e:
             logging.error(
                 "Cannot stop trade for %s. See trade logs for errors. Cause: %s",
                 symbol,
@@ -521,29 +640,3 @@ class Orders:
             return True
         else:
             return False
-
-    def __calculate_trade_duration(self, start_date: float, end_date: float) -> str:
-        """Calculate trade duration as a JSON string."""
-        # Convert Unix timestamps to datetime objects
-        date1 = datetime.fromtimestamp((start_date / 1000.0))
-        date2 = datetime.fromtimestamp(end_date / 1000.0)
-
-        # Calculate the time difference
-        time_difference = date2 - date1
-
-        # Extract days, seconds, and microseconds
-        days = time_difference.days
-        seconds = time_difference.seconds
-
-        # Calculate hours, minutes, and seconds
-        hours, reminder = divmod(seconds, 3600)
-        minutes, seconds = divmod(reminder, 60)
-
-        return json.dumps(
-            {
-                "days": days,
-                "hours": hours,
-                "minutes": minutes,
-                "seconds": seconds,
-            }
-        )
