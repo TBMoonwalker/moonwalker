@@ -1,10 +1,33 @@
 # Operations
 
 ## CI / Tests
-Run all backend linting, type checks, and tests:
+Run the full backend and frontend verification suite:
 ```bash
-./scripts/ci.sh
+cd scripts && ./ci.sh
 ```
+
+Current CI checks include:
+- backend format (`black --check`)
+- backend lint (`ruff`)
+- backend import ordering (`isort --check-only`)
+- backend type checking (`mypy`)
+- backend guardrail checks
+- backend pytest suite
+- frontend type-check (`vue-tsc`)
+- frontend tests (`node --test`)
+- frontend production build (`vite build`)
+
+## Runtime Model
+
+Moonwalker runs as a single-node, single-instance application.
+
+- one instance owns its own DB, config, watcher state, and trading engine
+- multiple dashboard clients can connect to the same instance concurrently
+- websocket streams are shared fan-out producers, not one producer per client
+
+`./run.sh start` builds the frontend, copies the assets into the backend,
+creates or reuses `.venv`, installs backend requirements, and starts the
+Litestar app in the background.
 
 ## Logging
 You can see information about DCA and TP status in `statistics.log`. Other logs
@@ -46,8 +69,19 @@ Priority order:
 2. `MOONWALKER_DEBUG=True` (set by `./run.sh start --debug`)
 3. Default `INFO`
 
-## Statistics API
-- Canonical endpoint: `/statistic/profit-overall/timeline`
+## Dashboard Streams
+
+Main live dashboard endpoints:
+- `WS /trades/open`
+- `WS /trades/closed`
+- `WS /trades/unsellable`
+- `WS /statistic/profit`
+
+Main REST statistics endpoint:
+- `GET /statistic/profit-overall/timeline`
+
+These websocket streams refresh every 5 seconds and broadcast shared payloads
+to all connected dashboard clients.
 
 ## Backup And Restore
 

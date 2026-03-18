@@ -95,3 +95,47 @@ async def test_asap_skips_symbols_with_insufficient_history(monkeypatch) -> None
     assert symbols == []
     queued_symbols = await watcher_queue.get()
     assert queued_symbols == []
+
+
+@pytest.mark.asyncio
+async def test_asap_fetches_symbol_list_with_async_http_client(monkeypatch) -> None:
+    watcher_queue = asyncio.Queue()
+    plugin = SignalPlugin(watcher_queue)
+    captured: dict[str, Any] = {}
+
+    class DummyResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, list[str]]:
+            return {"pairs": ["BTC/USDT", "ETH/USDT"]}
+
+    class DummyAsyncClient:
+        def __init__(self, *args, **kwargs) -> None:
+            captured["timeout"] = kwargs.get("timeout")
+
+        async def __aenter__(self) -> "DummyAsyncClient":
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb) -> None:
+            return None
+
+        async def get(self, url: str) -> DummyResponse:
+            captured["url"] = url
+            return DummyResponse()
+
+    async def fail_to_thread(*_args, **_kwargs) -> None:
+        raise AssertionError(
+            "ASAP URL fetch should not offload sync HTTP via to_thread"
+        )
+
+    monkeypatch.setattr(asap_module.httpx, "AsyncClient", DummyAsyncClient)
+    monkeypatch.setattr(asap_module.asyncio, "to_thread", fail_to_thread)
+
+    result = await plugin._SignalPlugin__fetch_symbol_list_from_url(
+        "https://example.invalid/pairs"
+    )
+
+    assert result == ["BTC/USDT", "ETH/USDT"]
+    assert captured["url"] == "https://example.invalid/pairs"
+    assert captured["timeout"] == 10.0

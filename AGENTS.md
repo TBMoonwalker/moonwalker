@@ -66,6 +66,42 @@ Moonwalker is a cryptocurrency trading bot that connects to exchanges (like Bina
 - Separate Moonwalker installations are **intentionally isolated** from each other. Do not assume clustering, leader election, cross-instance coordination, or shared state between installations unless a task explicitly adds that.
 - When reviewing architecture or proposing changes, optimize for **single-instance reliability and safe multi-client access**, not distributed-system scale by default.
 
+## Review And Code Smell Analysis
+
+- When the user asks for a **review**, **engineering analysis**, **project analysis**, or **code smell** check, treat the standards in this file as **review criteria**, not only as implementation guidance.
+- Do not stop at architecture or correctness findings alone. Also inspect lower-severity hygiene categories that are explicitly covered by this file.
+- If a review category is checked and no issues are found, say that explicitly instead of silently skipping the category.
+
+### Code Smell Review Checklist
+
+When performing a code smell analysis or engineering-style review, inspect and report findings across all of these categories:
+
+- Architecture and responsibility boundaries
+- Hidden coupling and mutable shared state
+- API design and unsafe behaviors
+- Error handling and exception boundaries
+- Async I/O discipline and event-loop safety
+- Logging quality and logging safety
+- Type safety and schema clarity
+- Test coverage gaps and CI enforcement
+- Documentation drift
+- Performance hotspots that matter for Moonwalker's single-instance deployment model
+
+Logging review must explicitly include:
+
+- f-string logging or other eager string interpolation instead of parameterized logging
+- inconsistent exception logging patterns
+- use of `exc_info=True` where stack traces are needed
+- possible logging of secrets, credentials, or sensitive payloads
+- noisy logging that obscures operational signals
+
+Async I/O review must explicitly include:
+
+- blocking I/O on the event loop (`requests`, file I/O, subprocess waits, `time.sleep`, etc.)
+- synchronous I/O hidden behind `asyncio.to_thread()` or executors when a native async library is already available
+- repeated thread offloading in hot paths where async-native I/O would be clearer and cheaper
+- any use of sync libraries in async services/plugins must be called out unless there is a documented compatibility reason
+
 ## Architecture
 
 ### Backend (Python - Litestar/Async)
@@ -207,8 +243,11 @@ Key configuration sections:
 The project uses standard Python and JavaScript testing approaches:
 
 **Python testing:**
-- 16 test files in `backend/tests/` covering: autopilot, config store, DCA (dynamic percentage guard, dynamic SO sizing), exchange sell execution, filter, history lookback, monitoring, signal plugins (ASAP, SymSignals), statistic uPNL history, strategy capability, strategy EMA swing, trades amounts, watcher OHLCV merge
-- Run tests: `cd scripts && ./ci.sh` (runs pytest with all checks) or `pytest backend/tests/` directly
+- `backend/tests/` contains regression coverage for config, data/history sync,
+  DCA, exchange execution, filters, monitoring, orders, signal plugins, stats,
+  strategies, trades, watcher runtime, websocket fan-out, and related services.
+- Run tests: `cd scripts && ./ci.sh` (runs pytest with all checks) or
+  `pytest backend/tests/` directly
 
 **Frontend testing:**
 - Vue Test Utils for component testing
@@ -426,6 +465,9 @@ logger.info("Job started")
 - Use `async`/`await` for I/O‑bound work.
 - Do not block the event loop.
 - Prefer `asyncio`, `httpx`, and native async libraries.
+- Prefer native async I/O over wrapping synchronous libraries in `asyncio.to_thread()`.
+- `asyncio.to_thread()` is acceptable for CPU-bound helpers or narrow compatibility bridges, but it is not the preferred end state for network or filesystem I/O when an async-native library already exists.
+- During code smell reviews, treat “non-blocking because it runs in a thread” and “async-native I/O” as different quality levels and call out the latter when it matters.
 
 ```python
 async def fetch_data(client: httpx.AsyncClient, url: str) -> str:

@@ -6,8 +6,8 @@ import random
 from typing import Any, Optional
 
 import helper
+import httpx
 import model
-import requests
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
 from service.data import Data
@@ -117,7 +117,7 @@ class SignalPlugin:
         if not should_log:
             return
 
-            logging.debug("Max bots reached, waiting for a free slot.")
+        logging.debug("Max bots reached, waiting for a free slot.")
 
     async def __has_sufficient_strategy_history(self, symbol: str) -> bool:
         """Return True when local history satisfies the configured strategy warmup."""
@@ -161,35 +161,39 @@ class SignalPlugin:
             )
         except ValueError as e:
             logging.error(
-                f"Invalid configuration for max bots check - not starting new deals! Cause: {e}"
+                "Invalid configuration for max bots check - not starting new "
+                "deals! Cause: %s",
+                e,
             )
             return True
         except RuntimeError as e:
             logging.error(
-                f"Database error while checking max bots - not starting new deals! Cause: {e}"
+                "Database error while checking max bots - not starting new "
+                "deals! Cause: %s",
+                e,
             )
             return True
         except (BaseORMException, TypeError) as e:
             logging.error(
-                f"Unexpected error checking max bots - not starting new deals! Cause: {e}"
+                "Unexpected error checking max bots - not starting new deals! "
+                "Cause: %s",
+                e,
             )
             return True
 
     async def __fetch_symbol_list_from_url(self, url: str) -> list[str]:
-        """Fetch symbol list JSON from a remote URL without blocking the event loop."""
-
-        def _fetch() -> list[str]:
-            response = requests.get(url, timeout=10)
+        """Fetch symbol list JSON from a remote URL using async HTTP I/O."""
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            response = await client.get(url)
             response.raise_for_status()
-            payload = response.json()
-            pairs = payload.get("pairs", [])
-            if not isinstance(pairs, list):
-                raise ValueError(
-                    "Invalid symbol list payload format: expected 'pairs' list"
-                )
-            return pairs
 
-        return await asyncio.to_thread(_fetch)
+        payload = response.json()
+        pairs = payload.get("pairs", [])
+        if not isinstance(pairs, list):
+            raise ValueError(
+                "Invalid symbol list payload format: expected 'pairs' list"
+            )
+        return pairs
 
     @helper.async_ttl_cache(maxsize=1024, ttl=900)
     async def __get_new_symbol_list(self, running_list: tuple) -> Optional[list[str]]:
@@ -218,7 +222,7 @@ class SignalPlugin:
                 for botsuffix, symbol in [item.split("_") for item in running_list]
             ]
 
-            logging.debug(symbol_list)
+            logging.debug("Fetched symbol list: %s", symbol_list)
 
             eligible_symbols: list[str] = []
             # Add history data for indicators
@@ -246,8 +250,8 @@ class SignalPlugin:
                 eligible_symbols.append(symbol)
             await self.watcher_queue.put(eligible_symbols)
 
-            logging.debug(f"Running symbols: {running_symbols}")
-            logging.debug(f"New symbols: {eligible_symbols}")
+            logging.debug("Running symbols: %s", running_symbols)
+            logging.debug("New symbols: %s", eligible_symbols)
             return eligible_symbols
         return symbol_list
 
@@ -276,7 +280,9 @@ class SignalPlugin:
             symbol_only, self._pair_allowlist
         ) and self.filter.is_on_deny_list(symbol_only, self._pair_denylist):
             logging.info(
-                f"Symbol {symbol} is not in your allowlist or is set in your denylist. Ignoring it."
+                "Symbol %s is not in your allowlist or is set in your "
+                "denylist. Ignoring it.",
+                symbol,
             )
             return False
 
@@ -288,7 +294,9 @@ class SignalPlugin:
                     self._strategy_timeframe,
                 ):
                     logging.debug(
-                        f"Not starting trade for {symbol}, because BTC-Pulse indicates downtrend"
+                        "Not starting trade for %s, because BTC-Pulse indicates "
+                        "downtrend",
+                        symbol,
                     )
                     return False
 
@@ -354,14 +362,16 @@ class SignalPlugin:
                         return False
                 except (AttributeError, RuntimeError, TypeError, ValueError) as e:
                     # Broad catch to keep signal processing resilient.
-                    logging.error(f"Error running buy strategy. Cause: {e}")
+                    logging.error("Error running buy strategy. Cause: %s", e)
                     return False
 
             return True
 
         except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as e:
             logging.debug(
-                f"No data yet for {symbol} - you need to enable dynamic dca - error: {e}"
+                "No data yet for %s - you need to enable dynamic dca - error: " "%s",
+                symbol,
+                e,
             )
             return False
 
@@ -402,7 +412,7 @@ class SignalPlugin:
                             and not max_bots
                             and signal
                         ):
-                            logging.info(f"Triggering new trade for {symbol}")
+                            logging.info("Triggering new trade for %s", symbol)
                             order = {
                                 "ordersize": self.config.get("bo", 12),
                                 "symbol": symbol,

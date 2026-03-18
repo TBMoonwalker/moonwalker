@@ -4,6 +4,7 @@ import time
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import ccxt.async_support as ccxt
 import helper
 import model
 from service.config import resolve_history_lookback_days
@@ -118,7 +119,7 @@ class AthService:
                 limit=500,
                 since=since,
             )
-        except Exception as exc:  # noqa: BLE001
+        except (ccxt.BaseError, OSError, RuntimeError) as exc:
             logging.error("Failed to fetch ATH candles for %s: %s", symbol, exc)
             return 0.0
 

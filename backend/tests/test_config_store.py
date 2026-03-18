@@ -155,7 +155,7 @@ async def test_config_handle_change_message_ignores_same_instance(
     monkeypatch.setattr(config_module, "redis_client", redis)
 
     config = Config()
-    config._cache["timezone"] = "Europe/Vienna"
+    await config.set("timezone", {"value": "Europe/Vienna", "type": "str"})
 
     await config._handle_change_message(
         '{"source": "%s", "keys": ["timezone"]}' % config._instance_id
@@ -309,6 +309,30 @@ def test_config_discovers_runtime_metadata_relative_to_backend_root(
     assert "asap" in signal_plugins
 
 
+def test_config_directory_scan_wraps_oserror(monkeypatch) -> None:
+    config = Config()
+
+    def fail_walk(*_args, **_kwargs):
+        raise OSError("disk failure")
+
+    monkeypatch.setattr(config_module.os, "walk", fail_walk)
+
+    with pytest.raises(IOError, match="disk failure"):
+        config._Config__get_filenames_in_directory("strategies")
+
+
+def test_config_directory_scan_propagates_unexpected_errors(monkeypatch) -> None:
+    config = Config()
+
+    def fail_walk(*_args, **_kwargs):
+        raise TypeError("unexpected walker bug")
+
+    monkeypatch.setattr(config_module.os, "walk", fail_walk)
+
+    with pytest.raises(TypeError, match="unexpected walker bug"):
+        config._Config__get_filenames_in_directory("strategies")
+
+
 def test_should_persist_config_value_matches_existing_semantics() -> None:
     assert should_persist_config_value("str", "binance") is True
     assert should_persist_config_value("str", None) is False
@@ -316,3 +340,25 @@ def test_should_persist_config_value_matches_existing_semantics() -> None:
     assert should_persist_config_value("bool", False) is True
     assert should_persist_config_value("int", 0) is True
     assert should_persist_config_value("float", 0.0) is True
+
+
+@pytest.mark.asyncio
+async def test_config_snapshot_keeps_defaults_and_metadata_out_of_persisted_entries(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    config = Config()
+    await config.load_all()
+
+    assert "tp_spike_confirm_enabled" not in config._store._entries
+    assert "signal_plugins" not in config._store._entries
+    assert config.snapshot()["tp_spike_confirm_enabled"] is False
+    assert "asap" in config.snapshot()["signal_plugins"]
+
+    await Tortoise.close_connections()

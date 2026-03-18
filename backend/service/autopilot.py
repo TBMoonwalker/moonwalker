@@ -4,6 +4,10 @@ from typing import Any
 
 import helper
 import model
+from service.autopilot_runtime import (
+    AutopilotRuntimeState,
+    get_shared_autopilot_runtime_state,
+)
 from service.green_phase import AVAILABLE_QUOTE_UNSET, GreenPhaseService
 
 logging = helper.LoggerFactory.get_logger("logs/autopilot.log", "autopilot")
@@ -12,11 +16,17 @@ logging = helper.LoggerFactory.get_logger("logs/autopilot.log", "autopilot")
 class Autopilot:
     """Compute dynamic trading settings based on locked funds."""
 
-    def __init__(self) -> None:
-        """Initialize runtime caches."""
-        Autopilot.threshold_percent = None
-        Autopilot.mode = None
+    def __init__(
+        self,
+        runtime_state: AutopilotRuntimeState | None = None,
+    ) -> None:
+        """Initialize runtime collaborators and dedupe state."""
         self.green_phase_service: GreenPhaseService | None = None
+        self._runtime_state = (
+            runtime_state
+            if runtime_state is not None
+            else get_shared_autopilot_runtime_state()
+        )
 
     async def _get_green_phase_service(self) -> GreenPhaseService:
         """Return the shared Green Phase service instance."""
@@ -26,9 +36,8 @@ class Autopilot:
 
     async def _persist_mode(self, autopilot_mode: str) -> None:
         """Persist the current autopilot mode when it changes."""
-        if autopilot_mode == Autopilot.mode:
+        if not self._runtime_state.update_mode(autopilot_mode):
             return
-        Autopilot.mode = autopilot_mode
         await model.Autopilot.create(mode=autopilot_mode)
 
     @staticmethod
@@ -143,8 +152,7 @@ class Autopilot:
             or runtime_state["effective_max_bots"]
         )
 
-        if threshold_percent != Autopilot.threshold_percent:
-            Autopilot.threshold_percent = threshold_percent
+        if self._runtime_state.update_threshold_percent(threshold_percent):
             logging.debug(
                 "we reached autopilot %s values - threshold: %s%%",
                 autopilot_mode,

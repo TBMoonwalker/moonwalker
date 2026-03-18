@@ -422,7 +422,6 @@ class Trades:
             return trade_data
         except BaseORMException:
             # Broad catch to return None when trade aggregation fails.
-            # logging.debug(f"No trade for symbol {symbol} - Cause: {e}")
             return None
 
     async def get_symbols(self) -> list[str]:

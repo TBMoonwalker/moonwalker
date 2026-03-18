@@ -51,10 +51,10 @@ class Strategy:
                 "creating_order": result,
             }
             if self._last_log_by_symbol.get(symbol) != logging_json:
-                logging.debug(f"{logging_json}")
+                logging.debug("%s", logging_json)
                 self._last_log_by_symbol[symbol] = logging_json.copy()
 
         except ValueError as e:
-            logging.error(f"JSON Message is garbage: {e}")
+            logging.error("JSON Message is garbage: %s", e)
 
         return result

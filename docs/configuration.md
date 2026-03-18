@@ -4,6 +4,13 @@
 2. Open the UI at `http://<host>:<port>`
 3. Save your settings (they are persisted in the DB).
 
+Runtime configuration is stored in the `AppConfig` table and served to the UI
+through `/config/all`. The dashboard typically updates settings via
+`PUT /config/single/{key}` or `POST /config/multiple`.
+
+For signal-plugin-specific payloads and examples, see [signals.md](signals.md).
+For backup/restore and related config endpoints, see [api.md](api.md).
+
 ## Configuration Reference
 All supported configuration keys are listed below. Keys marked "(advanced)"
 are not exposed in the UI and must be set via the API.
@@ -107,6 +114,10 @@ are not exposed in the UI and must be set via the API.
 | `monitoring_retry_count` | `int` | Number of retries after a failed Telegram send. | `1` |
 | `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","bbands_cross"]` |
 | `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals"]` |
+
+Read-only metadata keys such as `strategies` and `signal_plugins` are returned
+in config snapshots for the dashboard and should not be treated as persisted
+user-entered values.
 
 ## Autopilot Green Phase
 
