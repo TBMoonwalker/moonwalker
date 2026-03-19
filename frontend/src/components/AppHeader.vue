@@ -63,7 +63,7 @@ function handleMenuSelect(key: string | number): void {
           </span>
           <span class="brand-copy">
             <span class="brand-title">Moonwalker</span>
-            <span class="brand-caption">single-instance trading console</span>
+            <span class="brand-caption">Trading Bot Framework</span>
           </span>
         </RouterLink>
         <div class="header-menu-wrap">
@@ -99,17 +99,21 @@ function handleMenuSelect(key: string | number): void {
 }
 
 .header-shell {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
   gap: 16px;
   align-items: center;
+  width: 100%;
 }
 
 .brand-link {
   display: inline-flex;
   align-items: center;
   gap: 12px;
+  flex: 0 1 auto;
   min-width: 0;
+  max-width: 100%;
   text-decoration: none;
   color: inherit;
 }
@@ -117,8 +121,8 @@ function handleMenuSelect(key: string | number): void {
 .brand-mark {
   display: inline-flex;
   flex: 0 0 auto;
-  width: 88px;
-  height: 58px;
+  width: 72px;
+  height: 48px;
   align-items: center;
   justify-content: center;
 }
@@ -134,6 +138,7 @@ function handleMenuSelect(key: string | number): void {
   display: inline-flex;
   flex-direction: column;
   gap: 2px;
+  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -152,17 +157,22 @@ function handleMenuSelect(key: string | number): void {
 
 .header-menu-wrap {
   display: flex;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   justify-content: flex-end;
+  margin-left: auto;
 }
 
 .header-menu {
   width: auto;
-  min-width: 0;
+  max-width: 100%;
   background: transparent;
 }
 
 :deep(.header-menu .n-menu) {
   background: transparent;
+  max-width: 100%;
 }
 
 :deep(.header-menu .n-menu-item-content) {
@@ -183,7 +193,6 @@ function handleMenuSelect(key: string | number): void {
   }
 
   .header-shell {
-    grid-template-columns: 1fr;
     align-items: flex-start;
   }
 
@@ -197,8 +206,8 @@ function handleMenuSelect(key: string | number): void {
   }
 
   .brand-mark {
-    width: 72px;
-    height: 48px;
+    width: 60px;
+    height: 40px;
   }
 }
 </style>
