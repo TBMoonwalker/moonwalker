@@ -183,13 +183,14 @@ function handleMenuSelect(key: string | number): void {
   }
 
   .header-shell {
-    grid-template-columns: 1fr;
-    align-items: flex-start;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
   }
 
   .header-menu-wrap {
-    width: 100%;
-    justify-content: flex-start;
+    width: auto;
+    justify-content: flex-end;
   }
 
   .brand-title {
@@ -197,8 +198,20 @@ function handleMenuSelect(key: string | number): void {
   }
 
   .brand-mark {
-    width: 60px;
-    height: 40px;
+    width: 54px;
+    height: 36px;
+  }
+
+  :deep(.header-menu .n-menu-item-content-header) {
+    display: none;
+  }
+
+  :deep(.header-menu .n-menu-item-content__icon) {
+    margin-right: 0;
+  }
+
+  :deep(.header-menu .n-menu-item-content) {
+    padding-inline: 10px;
   }
 }
 </style>
