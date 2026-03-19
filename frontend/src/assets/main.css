@@ -17,15 +17,17 @@ body {
   width: 100%;
   max-width: 1600px;
   margin: 0 auto;
-  padding-inline: 10px;
   display: flex;
   flex-direction: column;
   gap: 16px;
 }
 
-.page-header,
-.page-section {
+.page-header {
   width: 100%;
+}
+
+.page-section {
+  min-width: 0;
 }
 
 @media (min-width: 1280px) {
@@ -43,9 +45,5 @@ body {
 @media (max-width: 768px) {
   #app {
     padding: 12px;
-  }
-
-  .page-shell {
-    padding-inline: 6px;
   }
 }

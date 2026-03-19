@@ -104,7 +104,16 @@ onUnmounted(() => {
 
 <style scoped>
 .trades-page {
-  gap: 10px;
+  gap: 0;
+}
+
+.page-section {
+  margin-inline: 10px;
+  margin-bottom: 10px;
+}
+
+.page-section:last-child {
+  margin-bottom: 0;
 }
 
 .trades-header {
@@ -135,6 +144,10 @@ onUnmounted(() => {
 }
 
 @media (max-width: 768px) {
+  .page-section {
+    margin-inline: 6px;
+  }
+
   .trades-header {
     align-items: flex-start;
   }

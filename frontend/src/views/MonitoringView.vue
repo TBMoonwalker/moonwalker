@@ -27,13 +27,28 @@ import WebSocketStatusBar from '../components/WebSocketStatusBar.vue'
 
 <style scoped>
 .monitoring-page {
-  gap: 10px;
+  gap: 0;
+}
+
+.page-section {
+  margin-inline: 10px;
+  margin-bottom: 10px;
+}
+
+.page-section:last-child {
+  margin-bottom: 0;
 }
 
 .monitoring-kicker {
   font-size: 0.82rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+@media (max-width: 768px) {
+  .page-section {
+    margin-inline: 6px;
+  }
 }
 
 </style>
