@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import MonitoringLogPanel from '../components/MonitoringLogPanel.vue'
 import WebSocketStatusBar from '../components/WebSocketStatusBar.vue'
 </script>
 
@@ -17,6 +18,9 @@ import WebSocketStatusBar from '../components/WebSocketStatusBar.vue'
     </n-flex>
     <n-flex class="page-section" vertical>
       <WebSocketStatusBar />
+    </n-flex>
+    <n-flex class="page-section" vertical>
+      <MonitoringLogPanel />
     </n-flex>
   </div>
 </template>

@@ -62,6 +62,28 @@ Moonwalker normalizes several Telethon-compatible target formats:
 - On send errors, Moonwalker retries based on `monitoring_retry_count`.
 - Monitoring errors are logged to `logs/monitoring.log`.
 
+## Monitoring Page Logs
+The Monitoring page also exposes a read-only live log viewer for selected
+allowlisted backend log files.
+
+Behavior:
+- Endpoint list: `GET /monitoring/logs`
+- Endpoint batches: `GET /monitoring/logs/{source}`
+- Transport: polling over HTTP, not WebSocket
+- The UI polls for newer complete lines and can request older lines when you
+  scroll to the top of the log panel.
+
+Supported query parameters for `GET /monitoring/logs/{source}`:
+- `limit`: max lines to return per request, capped server-side
+- `cursor`: fetch newer complete lines after the previous cursor
+- `before`: fetch older lines before the current oldest cursor
+
+Notes:
+- Only allowlisted sources are exposed to the frontend.
+- Missing log files return an empty payload with `available: false`.
+- If a log file rotates or truncates while the page is open, the response sets
+  `rotated: true` so the UI can reset to the latest available lines.
+
 ## Example API Payload (Test)
 ```json
 {

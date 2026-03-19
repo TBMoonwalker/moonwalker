@@ -7,11 +7,13 @@ from typing import Any
 
 from controller import config as config_controller
 from controller import frontend as frontend_controller
+from controller import monitoring as monitoring_controller
 from controller import orders as orders_controller
 from controller import statistics as statistics_controller
 from controller import trades as trades_controller
 from litestar import Litestar
 from litestar.testing import TestClient
+from service.log_viewer import LogReadResult
 
 
 class _DummyConfigService:
@@ -126,6 +128,86 @@ def test_statistics_http_endpoints_return_native_json(monkeypatch) -> None:
         assert timeline_response.json() == [
             {"timestamp": "2026-03-01 12:00:00", "profit_overall": 1.23}
         ]
+
+
+def test_monitoring_logs_endpoint_returns_source_metadata(monkeypatch) -> None:
+    """Monitoring log metadata endpoint should return native JSON."""
+
+    monkeypatch.setattr(
+        monitoring_controller.log_viewer_service,
+        "list_sources",
+        lambda: [
+            {"source": "watcher", "label": "Watcher", "available": True},
+            {"source": "signal", "label": "Signal", "available": False},
+        ],
+    )
+
+    app = Litestar(route_handlers=[monitoring_controller.get_monitoring_log_sources])
+    with TestClient(app=app) as client:
+        response = client.get("/monitoring/logs")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "sources": [
+            {"source": "watcher", "label": "Watcher", "available": True},
+            {"source": "signal", "label": "Signal", "available": False},
+        ]
+    }
+
+
+def test_monitoring_logs_endpoint_returns_log_batches(monkeypatch) -> None:
+    """Monitoring log batch endpoint should pass through the log payload."""
+
+    monkeypatch.setattr(
+        monitoring_controller.log_viewer_service,
+        "read_source",
+        lambda source, cursor, before, limit: LogReadResult(
+            source=source,
+            label="Watcher",
+            available=True,
+            lines=["2026-03-19 - INFO - watcher : started"],
+            cursor=128,
+            oldest_cursor=64,
+            has_more_before=True,
+            rotated=False,
+        ),
+    )
+
+    app = Litestar(route_handlers=[monitoring_controller.get_monitoring_log_source])
+    with TestClient(app=app) as client:
+        response = client.get("/monitoring/logs/watcher?cursor=64&limit=100")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "source": "watcher",
+        "label": "Watcher",
+        "available": True,
+        "lines": ["2026-03-19 - INFO - watcher : started"],
+        "cursor": 128,
+        "oldest_cursor": 64,
+        "has_more_before": True,
+        "rotated": False,
+    }
+
+
+def test_monitoring_logs_endpoint_rejects_unknown_source(monkeypatch) -> None:
+    """Unknown log sources should return 404."""
+
+    def _raise_unknown(*_args: Any, **_kwargs: Any) -> LogReadResult:
+        raise ValueError("Unknown log source: missing")
+
+    monkeypatch.setattr(
+        monitoring_controller.log_viewer_service,
+        "read_source",
+        _raise_unknown,
+    )
+
+    app = Litestar(route_handlers=[monitoring_controller.get_monitoring_log_source])
+    with TestClient(app=app) as client:
+        response = client.get("/monitoring/logs/missing")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "Unknown log source: missing"}
 
 
 def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
