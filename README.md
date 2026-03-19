@@ -1,5 +1,9 @@
 # Moonwalker
 
+<p align="center">
+  <img src="docs/assets/logo-moonwalker.png" alt="Moonwalker logo" width="320" />
+</p>
+
 ## Summary
 Moonwalker is a self-hosted cryptocurrency trading bot with a Litestar backend,
 Vue dashboard, exchange integration via CCXT/CCXT Pro, and support for both
