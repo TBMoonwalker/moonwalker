@@ -80,10 +80,16 @@ function handleMenuSelect(key: string | number): void {
   width: 100%;
   max-width: 1600px;
   margin: 0 auto;
+  padding-inline: 10px;
 }
 
 .app-header-card {
   width: 100%;
+  border: 1px solid var(--color-border-hover);
+  background:
+    linear-gradient(135deg, rgba(99, 226, 183, 0.12), transparent 58%),
+    linear-gradient(180deg, var(--color-background-soft), var(--color-background-mute));
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.08);
 }
 
 .header-shell {
@@ -126,11 +132,27 @@ function handleMenuSelect(key: string | number): void {
   background: transparent;
 }
 
+:deep(.header-menu .n-menu) {
+  background: transparent;
+}
+
+:deep(.header-menu .n-menu-item-content) {
+  border-radius: 10px;
+}
+
+:deep(.header-menu .n-menu-item-content::before) {
+  border-radius: 10px;
+}
+
 :deep(.header-menu .n-menu-item-content-header) {
   font-weight: 600;
 }
 
 @media (max-width: 768px) {
+  .app-header {
+    padding-inline: 6px;
+  }
+
   .header-shell {
     grid-template-columns: 1fr;
     align-items: flex-start;
