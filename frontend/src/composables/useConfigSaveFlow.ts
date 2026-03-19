@@ -95,7 +95,7 @@ export function useConfigSaveFlow<TPayload>(
             return saveErrorMessage.value
         }
         if (saveState.value === 'saved' && lastSavedAt.value) {
-            return `Configuration saved at ${lastSavedAt.value.toLocaleTimeString()}`
+            return `Settings saved at ${lastSavedAt.value.toLocaleTimeString()}`
         }
         if (options.isDirty.value) {
             const changed = options.changedSectionLabels.value.join(', ')

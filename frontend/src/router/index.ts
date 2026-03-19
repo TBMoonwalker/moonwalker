@@ -104,15 +104,21 @@ const router = createRouter({
       component: () => import('../views/TradesView.vue')
     },
     {
-      path: '/config',
-      name: 'config',
+      path: '/settings',
+      alias: '/config',
+      name: 'settings',
       component: () => import('../views/ConfigView.vue')
+    },
+    {
+      path: '/monitoring',
+      name: 'monitoring',
+      component: () => import('../views/MonitoringView.vue')
     },
   ]
 })
 
 router.beforeEach(async (to) => {
-  if (to.name === 'config') {
+  if (to.name === 'settings') {
     return true
   }
 
@@ -121,7 +127,7 @@ router.beforeEach(async (to) => {
     if (isConfigComplete(config)) {
       return true
     }
-    return { name: 'config', query: { setup: 'required' } }
+    return { name: 'settings', query: { setup: 'required' } }
   } catch {
     return true
   }

@@ -5,6 +5,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWebSocketDataStore } from './stores/websocket'
 import { useWebSocket } from '@vueuse/core'
 import axios from 'axios'
+import AppHeader from './components/AppHeader.vue'
 import { trackUiEvent } from './utils/uiTelemetry'
 import type { WebSocketStatus } from './stores/websocket'
 import { NConfigProvider } from 'naive-ui/es/config-provider'
@@ -246,7 +247,10 @@ onMounted(() => {
         <n-modal-provider>
           <n-dialog-provider>
             <div class="app-layout">
-              <RouterView />
+              <AppHeader />
+              <main class="app-content">
+                <RouterView />
+              </main>
             </div>
           </n-dialog-provider>
         </n-modal-provider>
@@ -257,6 +261,13 @@ onMounted(() => {
 
 <style scoped>
 .app-layout {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.app-content {
   width: 100%;
 }
 </style>
