@@ -210,6 +210,65 @@ def test_monitoring_logs_endpoint_rejects_unknown_source(monkeypatch) -> None:
     assert response.json() == {"error": "Unknown log source: missing"}
 
 
+def test_monitoring_logs_download_endpoint_returns_attachment(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Monitoring log downloads should use an attachment response."""
+
+    download_path = tmp_path / "watcher.log"
+    download_path.write_text(
+        "2026-03-19 - INFO - watcher : started\n",
+        encoding="utf-8",
+    )
+
+    class _Source:
+        source = "watcher"
+
+    monkeypatch.setattr(
+        monitoring_controller.log_viewer_service,
+        "get_download_path",
+        lambda source: (_Source(), download_path),
+    )
+
+    app = Litestar(
+        route_handlers=[monitoring_controller.download_monitoring_log_source]
+    )
+    with TestClient(app=app) as client:
+        response = client.get("/monitoring/logs/watcher/download")
+
+    assert response.status_code == 200
+    assert response.text == "2026-03-19 - INFO - watcher : started\n"
+    assert response.headers["content-type"].startswith("text/plain")
+    assert (
+        response.headers["content-disposition"]
+        == 'attachment; filename="moonwalker-watcher.log"'
+    )
+
+
+def test_monitoring_logs_download_endpoint_returns_404_for_missing_file(
+    monkeypatch,
+) -> None:
+    """Missing current log files should return 404 on download."""
+
+    def _raise_missing(*_args: Any, **_kwargs: Any) -> tuple[Any, Any]:
+        raise FileNotFoundError("Log source file does not exist: watcher")
+
+    monkeypatch.setattr(
+        monitoring_controller.log_viewer_service,
+        "get_download_path",
+        _raise_missing,
+    )
+
+    app = Litestar(
+        route_handlers=[monitoring_controller.download_monitoring_log_source]
+    )
+    with TestClient(app=app) as client:
+        response = client.get("/monitoring/logs/watcher/download")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "Log source file does not exist: watcher"}
+
+
 def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
     """Ensure config batch endpoint uses a successful 2xx response."""
     service = _DummyConfigService()

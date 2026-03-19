@@ -83,6 +83,8 @@ Notes:
 - Missing log files return an empty payload with `available: false`.
 - If a log file rotates or truncates while the page is open, the response sets
   `rotated: true` so the UI can reset to the latest available lines.
+- The selected current log file can be downloaded from the Monitoring page
+  through `GET /monitoring/logs/{source}/download`.
 
 ## Example API Payload (Test)
 ```json

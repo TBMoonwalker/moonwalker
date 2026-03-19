@@ -121,6 +121,19 @@ async function loadSources(): Promise<void> {
   selectedSource.value = defaultSource?.source ?? null
 }
 
+function downloadCurrentLog(): void {
+  if (selectedSource.value === null || !sourceAvailable.value) {
+    return
+  }
+
+  const link = document.createElement('a')
+  link.href = `/monitoring/logs/${encodeURIComponent(selectedSource.value)}/download`
+  link.rel = 'noopener'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+}
+
 async function loadLatestLines(source: string): Promise<void> {
   isLoading.value = true
   errorMessage.value = null
@@ -303,6 +316,13 @@ onUnmounted(() => {
           @click="selectedSource && loadLatestLines(selectedSource)"
         >
           Refresh
+        </n-button>
+        <n-button
+          secondary
+          :disabled="selectedSource === null || !sourceAvailable"
+          @click="downloadCurrentLog"
+        >
+          Download log
         </n-button>
       </n-flex>
 

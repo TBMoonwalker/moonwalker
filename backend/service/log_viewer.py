@@ -131,6 +131,13 @@ class LogViewerService:
             return self._read_after_cursor(path, source, cursor, normalized_limit)
         return self._read_latest(path, source, normalized_limit)
 
+    def get_download_path(self, source_name: str) -> tuple[LogSource, Path]:
+        """Return the current file path for a downloadable log source."""
+        source = self._resolve_source(source_name)
+        if not source.path.exists():
+            raise FileNotFoundError(f"Log source file does not exist: {source_name}")
+        return source, source.path
+
     def _resolve_source(self, source_name: str) -> LogSource:
         source = self._sources.get(source_name)
         if source is None:

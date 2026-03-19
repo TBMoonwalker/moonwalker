@@ -128,3 +128,25 @@ def test_log_viewer_returns_empty_payload_for_known_missing_source(
     assert result.available is False
     assert result.lines == []
     assert result.cursor == 0
+
+
+def test_log_viewer_resolves_download_path_for_existing_source(tmp_path: Path) -> None:
+    log_path = tmp_path / "watcher.log"
+    log_path.write_text("2026-03-19 - INFO - watcher : download\n", encoding="utf-8")
+    service = _build_service(log_path)
+
+    source, resolved_path = service.get_download_path("watcher")
+
+    assert source.source == "watcher"
+    assert resolved_path == log_path
+
+
+def test_log_viewer_rejects_download_for_missing_file(tmp_path: Path) -> None:
+    service = _build_service(tmp_path / "watcher.log")
+
+    try:
+        service.get_download_path("missing")
+    except FileNotFoundError as exc:
+        assert "missing" in str(exc)
+    else:
+        raise AssertionError("Expected FileNotFoundError for missing log source")
