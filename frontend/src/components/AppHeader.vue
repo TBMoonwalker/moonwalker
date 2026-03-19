@@ -99,21 +99,17 @@ function handleMenuSelect(key: string | number): void {
 }
 
 .header-shell {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 16px;
   align-items: center;
-  width: 100%;
 }
 
 .brand-link {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  flex: 0 1 auto;
   min-width: 0;
-  max-width: 100%;
   text-decoration: none;
   color: inherit;
 }
@@ -138,7 +134,6 @@ function handleMenuSelect(key: string | number): void {
   display: inline-flex;
   flex-direction: column;
   gap: 2px;
-  flex: 1 1 auto;
   min-width: 0;
 }
 
@@ -157,22 +152,17 @@ function handleMenuSelect(key: string | number): void {
 
 .header-menu-wrap {
   display: flex;
-  flex: 0 1 auto;
-  min-width: 0;
-  max-width: 100%;
   justify-content: flex-end;
-  margin-left: auto;
 }
 
 .header-menu {
   width: auto;
-  max-width: 100%;
+  min-width: 0;
   background: transparent;
 }
 
 :deep(.header-menu .n-menu) {
   background: transparent;
-  max-width: 100%;
 }
 
 :deep(.header-menu .n-menu-item-content) {
@@ -193,6 +183,7 @@ function handleMenuSelect(key: string | number): void {
   }
 
   .header-shell {
+    grid-template-columns: 1fr;
     align-items: flex-start;
   }
 

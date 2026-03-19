@@ -22,12 +22,9 @@ body {
   gap: 16px;
 }
 
-.page-header {
-  width: 100%;
-}
-
+.page-header,
 .page-section {
-  min-width: 0;
+  width: 100%;
 }
 
 @media (min-width: 1280px) {
