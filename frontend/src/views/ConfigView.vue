@@ -22,16 +22,7 @@ import Config from '../components/Config.vue'
 
 <style scoped>
 .settings-page {
-    gap: 0;
-}
-
-.page-section {
-    margin-inline: 10px;
-    margin-bottom: 10px;
-}
-
-.page-section:last-child {
-    margin-bottom: 0;
+    gap: 10px;
 }
 
 .settings-kicker {
@@ -40,9 +31,4 @@ import Config from '../components/Config.vue'
     text-transform: uppercase;
 }
 
-@media (max-width: 768px) {
-    .page-section {
-        margin-inline: 6px;
-    }
-}
 </style>

@@ -17,6 +17,7 @@ body {
   width: 100%;
   max-width: 1600px;
   margin: 0 auto;
+  padding-inline: 10px;
   display: flex;
   flex-direction: column;
   gap: 16px;
@@ -42,5 +43,9 @@ body {
 @media (max-width: 768px) {
   #app {
     padding: 12px;
+  }
+
+  .page-shell {
+    padding-inline: 6px;
   }
 }
