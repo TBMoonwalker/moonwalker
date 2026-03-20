@@ -220,3 +220,4 @@ package-lock.json
 
 # AI
 Claude.md
+.gstack/
