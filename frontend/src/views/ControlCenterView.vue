@@ -34,6 +34,7 @@ import type {
     ControlCenterTransitionIntent,
 } from '../control-center/types'
 import { deriveControlCenterViewState } from '../control-center/viewState'
+import { waitForTargetElement } from '../control-center/focusFlow'
 import { useConfigAdvancedGeneral } from '../composables/useConfigAdvancedGeneral'
 import { useConfigBackupRestore } from '../composables/useConfigBackupRestore'
 import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
@@ -552,19 +553,21 @@ async function navigateToControlCenter(
 }
 
 async function focusTarget(target: ControlCenterTarget): Promise<boolean> {
-    await nextTick()
-    const element = targetElements[target].value
+    const element = await waitForTargetElement({
+        nextTick,
+        read: () => targetElements[target].value,
+    })
     if (!element) {
         return false
     }
     element.scrollIntoView({
-        behavior: 'smooth',
+        behavior: 'auto',
         block: 'start',
     })
     const focusAnchor =
         element.querySelector<HTMLElement>('[data-control-center-anchor]') ??
         element
-    focusAnchor.focus()
+    focusAnchor.focus({ preventScroll: true })
     announce(deriveGuidedFocusTarget(target).announcement)
     return true
 }
