@@ -24,10 +24,15 @@ interface WaitForTargetElementOptions<TElement> {
     requestAnimationFrame?: (callback: FrameRequestCallback) => number
 }
 
+const DEFAULT_TARGET_ELEMENT_ATTEMPTS = 24
+
 export async function waitForTargetElement<TElement>(
     options: WaitForTargetElementOptions<TElement>,
 ): Promise<TElement | null> {
-    const attempts = Math.max(1, options.attempts ?? 6)
+    const attempts = Math.max(
+        1,
+        options.attempts ?? DEFAULT_TARGET_ELEMENT_ATTEMPTS,
+    )
     const flushDom = options.nextTick ?? (async () => {})
     const scheduleFrame =
         options.requestAnimationFrame ??

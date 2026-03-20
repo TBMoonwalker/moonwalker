@@ -574,12 +574,17 @@ async function focusTarget(target: ControlCenterTarget): Promise<boolean> {
 
 async function guideToTarget(target: ControlCenterTarget): Promise<void> {
     const task = getTaskPresentation(target)
+    const requiresRouteTransition =
+        routeState.value.mode !== task.defaultMode ||
+        routeState.value.target !== target
     trackUiEvent('control_center_fix_this_requested', {
         target,
         mode: task.defaultMode,
     })
     await navigateToControlCenter(task.defaultMode, target)
-    await focusTarget(target)
+    if (!requiresRouteTransition) {
+        await focusTarget(target)
+    }
 }
 
 async function handleModeSelect(mode: ControlCenterMode): Promise<void> {
@@ -813,6 +818,7 @@ watch(
             await focusTarget(routeState.value.target)
         }
     },
+    { flush: 'post' },
 )
 
 onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
@@ -1049,7 +1055,7 @@ onUnmounted(() => {
                                 </n-card>
 
                                 <div
-                                    ref="bindTargetElement('live-activation')"
+                                    :ref="bindTargetElement('live-activation')"
                                     class="status-card"
                                     id="control-center-live-activation"
                                 >
@@ -1094,7 +1100,7 @@ onUnmounted(() => {
 
             <template v-else-if="routeState.mode === 'setup'">
                 <div
-                    ref="bindTargetElement('general')"
+                    :ref="bindTargetElement('general')"
                     class="task-section"
                     id="control-center-general"
                 >
@@ -1113,7 +1119,7 @@ onUnmounted(() => {
                 </div>
 
                 <div
-                    ref="bindTargetElement('exchange')"
+                    :ref="bindTargetElement('exchange')"
                     class="task-section"
                     id="control-center-exchange"
                 >
@@ -1134,7 +1140,7 @@ onUnmounted(() => {
                 </div>
 
                 <div
-                    ref="bindTargetElement('signal')"
+                    :ref="bindTargetElement('signal')"
                     class="task-section"
                     id="control-center-signal"
                 >
@@ -1157,7 +1163,7 @@ onUnmounted(() => {
                 </div>
 
                 <div
-                    ref="bindTargetElement('dca')"
+                    :ref="bindTargetElement('dca')"
                     class="task-section"
                     id="control-center-dca"
                 >
@@ -1176,7 +1182,7 @@ onUnmounted(() => {
                 </div>
 
                 <div
-                    ref="bindTargetElement('monitoring')"
+                    :ref="bindTargetElement('monitoring')"
                     class="task-section"
                     id="control-center-monitoring"
                 >
@@ -1274,7 +1280,7 @@ onUnmounted(() => {
 
             <template v-else>
                 <div
-                    ref="bindTargetElement('backup-restore')"
+                    :ref="bindTargetElement('backup-restore')"
                     class="task-section"
                     id="control-center-backup-restore"
                 >
