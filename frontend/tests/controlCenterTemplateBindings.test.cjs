@@ -39,3 +39,21 @@ test('control center target sections use dynamic element refs', () => {
         false,
     )
 })
+
+test('control center keeps setup essentials-only and reserves expert fields for advanced mode', () => {
+    // Regression: ISSUE-004 — Setup and Advanced looked nearly identical because
+    // Setup still exposed the shared advanced toggle and advanced-only fields.
+    // Found by /qa on 2026-03-20
+    const requiredSnippets = [
+        ':show-advanced-general="setupShowsAdvancedFields"',
+        ':show-advanced-toggle="false"',
+        "const setupShowsAdvancedFields = computed(() => false)",
+    ]
+
+    for (const snippet of requiredSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+})

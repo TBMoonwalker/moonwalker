@@ -211,9 +211,7 @@ const {
     defaults: configSubmitPayloadDefaults,
 })
 
-const effectiveShowAdvancedGeneral = computed(
-    () => showAdvancedGeneral.value || routeState.value.mode === 'advanced',
-)
+const setupShowsAdvancedFields = computed(() => false)
 
 const { changedSectionLabels, changedSections, isDirty, syncBaselineState } =
     useConfigPersistableState({
@@ -295,7 +293,7 @@ const {
             autopilot: autopilot.value,
             monitoring: monitoring.value,
             indicator: indicator.value,
-            showAdvancedGeneral: effectiveShowAdvancedGeneral.value,
+            showAdvancedGeneral: routeState.value.mode === 'advanced',
             defaults: configSubmitPayloadDefaults,
         }),
     changedSectionLabels,
@@ -802,16 +800,6 @@ async function checkForExternalConfigChanges(): Promise<void> {
 }
 
 watch(
-    () => routeState.value.mode,
-    (mode) => {
-        if (mode === 'advanced') {
-            showAdvancedGeneral.value = true
-        }
-    },
-    { immediate: true },
-)
-
-watch(
     () => `${routeState.value.mode}:${routeState.value.target ?? ''}`,
     async () => {
         if (routeState.value.target) {
@@ -1112,9 +1100,9 @@ onUnmounted(() => {
                         ref="generalFormRef"
                         :general="general"
                         :rules="rules"
-                        :show-advanced-general="effectiveShowAdvancedGeneral"
+                        :show-advanced-general="setupShowsAdvancedFields"
+                        :show-advanced-toggle="false"
                         :timezone="timezone"
-                        @update:show-advanced-general="showAdvancedGeneral = $event"
                     />
                 </div>
 
@@ -1134,7 +1122,7 @@ onUnmounted(() => {
                         :exchanges="exchanges"
                         :market="market"
                         :rules="rules"
-                        :show-advanced-general="effectiveShowAdvancedGeneral"
+                        :show-advanced-general="setupShowsAdvancedFields"
                         :timerange="timerange"
                     />
                 </div>
@@ -1176,7 +1164,7 @@ onUnmounted(() => {
                         :dca="dca"
                         :rules="rules"
                         :sell-order-type-options="sellOrderTypeOptions"
-                        :show-advanced-general="effectiveShowAdvancedGeneral"
+                        :show-advanced-general="setupShowsAdvancedFields"
                         :strategy-options="signal.strategy_plugins"
                     />
                 </div>
@@ -1221,8 +1209,8 @@ onUnmounted(() => {
                         :general="general"
                         :rules="rules"
                         :show-advanced-general="true"
+                        :show-advanced-toggle="false"
                         :timezone="timezone"
-                        @update:show-advanced-general="showAdvancedGeneral = $event"
                     />
                     <ConfigExchangeSection
                         v-else-if="task.target === 'exchange'"
