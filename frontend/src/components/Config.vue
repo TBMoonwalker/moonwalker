@@ -279,7 +279,6 @@ const { changedSectionLabels, changedSections, isDirty, syncBaselineState } =
         general,
         indicator,
         monitoring,
-        showAdvancedGeneral,
         signal,
     })
 const { buildConfigLoadDefaults } = useConfigAdvancedGeneral({
@@ -287,7 +286,6 @@ const { buildConfigLoadDefaults } = useConfigAdvancedGeneral({
     defaultSymSignalUrl: DEFAULT_SYMSIGNAL_URL,
     defaultSymSignalVersion: DEFAULT_SYMSIGNAL_VERSION,
     defaults: configSubmitPayloadDefaults,
-    exchange,
     general,
     getClientTimezone,
     isLoading,

@@ -53,7 +53,7 @@
                     placeholder="1"
                 />
             </n-form-item>
-            <n-form-item label="Telegram connectivity">
+            <n-form-item v-if="showTestAction" label="Telegram connectivity">
                 <n-button
                     secondary
                     type="primary"
@@ -82,13 +82,16 @@ interface MonitoringModel {
     retry_count: number
 }
 
-defineProps<{
+withDefaults(defineProps<{
     canTest: boolean
     monitoring: MonitoringModel
     onTest: () => void
     rules: FormRules
+    showTestAction?: boolean
     testLoading: boolean
-}>()
+}>(), {
+    showTestAction: true,
+})
 
 const formRef = ref<FormInst | null>(null)
 

@@ -1,6 +1,8 @@
 import axios from 'axios'
 import { computed, ref } from 'vue'
 
+import type { OperationResult } from '../control-center/operationResults'
+
 type BackupRestoreMode = 'config' | 'full'
 
 type BackupPayload = {
@@ -32,6 +34,7 @@ interface UseConfigBackupRestoreOptions {
     message: MessageApiLike
     onBeforeReload: () => void
     reloadConfig: () => Promise<void>
+    surfaceMessages?: boolean
 }
 
 function isBackupPayload(value: unknown): value is BackupPayload {
@@ -105,9 +108,12 @@ export function useConfigBackupRestore(
         }
     }
 
-    async function handleBackupDownload(): Promise<void> {
+    async function handleBackupDownload(): Promise<OperationResult> {
         if (backupDownloadLoading.value) {
-            return
+            return {
+                status: 'noop',
+                message: 'Backup download is already in progress.',
+            }
         }
 
         backupDownloadLoading.value = true
@@ -124,11 +130,25 @@ export function useConfigBackupRestore(
                 buildBackupFilename(backupIncludeTradeData.value),
                 JSON.stringify(response.data, null, 2),
             )
-            options.message.success('Backup downloaded successfully.')
+            if (options.surfaceMessages !== false) {
+                options.message.success('Backup downloaded successfully.')
+            }
+            return {
+                status: 'success',
+                message: 'Backup downloaded successfully.',
+            }
         } catch (error) {
-            options.message.error(
-                extractAxiosErrorMessage(error, 'Backup download failed.'),
+            const message = extractAxiosErrorMessage(
+                error,
+                'Backup download failed.',
             )
+            if (options.surfaceMessages !== false) {
+                options.message.error(message)
+            }
+            return {
+                status: 'error',
+                message,
+            }
         } finally {
             backupDownloadLoading.value = false
         }
@@ -160,19 +180,34 @@ export function useConfigBackupRestore(
         }
     }
 
-    async function handleRestoreBackup(mode: BackupRestoreMode): Promise<void> {
+    async function handleRestoreBackup(
+        mode: BackupRestoreMode,
+    ): Promise<OperationResult> {
         if (!selectedBackupPayload.value) {
-            options.message.error('Please select a backup file first.')
-            return
+            const message = 'Please select a backup file first.'
+            if (options.surfaceMessages !== false) {
+                options.message.error(message)
+            }
+            return {
+                status: 'error',
+                message,
+            }
         }
         if (restoreLoading.value) {
-            return
+            return {
+                status: 'noop',
+                message: 'Backup restore is already in progress.',
+            }
         }
         if (mode === 'full' && !selectedBackupHasTradeData.value) {
-            options.message.error(
-                'The selected backup does not include trade data.',
-            )
-            return
+            const message = 'The selected backup does not include trade data.'
+            if (options.surfaceMessages !== false) {
+                options.message.error(message)
+            }
+            return {
+                status: 'error',
+                message,
+            }
         }
 
         if (
@@ -181,7 +216,10 @@ export function useConfigBackupRestore(
                 'You have unsaved configuration changes. Continue and replace them with the backup?',
             )
         ) {
-            return
+            return {
+                status: 'noop',
+                message: 'Backup restore cancelled.',
+            }
         }
 
         const confirmationMessage =
@@ -189,7 +227,10 @@ export function useConfigBackupRestore(
                 ? 'Restore the full backup now? This will replace the current configuration and all trade data.'
                 : 'Restore configuration only now? This will replace the current configuration.'
         if (!window.confirm(confirmationMessage)) {
-            return
+            return {
+                status: 'noop',
+                message: 'Backup restore cancelled.',
+            }
         }
 
         restoreLoading.value = true
@@ -208,18 +249,37 @@ export function useConfigBackupRestore(
             const failedSymbols =
                 response.data?.result?.history_failed_symbols ?? []
             if (Array.isArray(failedSymbols) && failedSymbols.length > 0) {
-                options.message.warning(
-                    `${response.data?.message || 'Restore completed.'} History refresh failed for: ${failedSymbols.join(', ')}`,
-                )
+                const message = `${response.data?.message || 'Restore completed.'} History refresh failed for: ${failedSymbols.join(', ')}`
+                if (options.surfaceMessages !== false) {
+                    options.message.warning(message)
+                }
+                return {
+                    status: 'success',
+                    message,
+                }
             } else {
-                options.message.success(
-                    response.data?.message || 'Restore completed successfully.',
-                )
+                const message =
+                    response.data?.message || 'Restore completed successfully.'
+                if (options.surfaceMessages !== false) {
+                    options.message.success(message)
+                }
+                return {
+                    status: 'success',
+                    message,
+                }
             }
         } catch (error) {
-            options.message.error(
-                extractAxiosErrorMessage(error, 'Backup restore failed.'),
+            const message = extractAxiosErrorMessage(
+                error,
+                'Backup restore failed.',
             )
+            if (options.surfaceMessages !== false) {
+                options.message.error(message)
+            }
+            return {
+                status: 'error',
+                message,
+            }
         } finally {
             restoreLoading.value = false
         }

@@ -3,7 +3,6 @@ import { watch, type Ref } from 'vue'
 import type { ConfigLoadDefaults } from '../helpers/configLoad'
 import type {
     ConfigSubmitPayloadDefaults,
-    ExchangeConfigSection,
     GeneralConfigSection,
 } from '../helpers/configSubmitPayload'
 
@@ -12,7 +11,6 @@ interface UseConfigAdvancedGeneralOptions {
     defaultSymSignalUrl: string
     defaultSymSignalVersion: string
     defaults: ConfigSubmitPayloadDefaults
-    exchange: Ref<ExchangeConfigSection>
     general: Ref<GeneralConfigSection>
     getClientTimezone: () => string
     isLoading: Ref<boolean>
@@ -66,17 +64,6 @@ export function useConfigAdvancedGeneral(
         }
     }
 
-    function resetAdvancedGeneralSettings(): void {
-        options.general.value.ws_watchdog_enabled = true
-        options.general.value.ws_healthcheck_interval_ms =
-            options.defaults.advancedWsHealthcheckIntervalMs
-        options.general.value.ws_stale_timeout_ms =
-            options.defaults.advancedWsStaleTimeoutMs
-        options.general.value.ws_reconnect_debounce_ms =
-            options.defaults.advancedWsReconnectDebounceMs
-        options.exchange.value.exchange_hostname = null
-    }
-
     watch(
         () => options.showAdvancedGeneral.value,
         (enabled) => {
@@ -87,9 +74,6 @@ export function useConfigAdvancedGeneral(
                 options.advancedPreferenceKey,
                 enabled ? 'true' : 'false',
             )
-            if (!enabled) {
-                resetAdvancedGeneralSettings()
-            }
         },
     )
 

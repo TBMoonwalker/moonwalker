@@ -23,15 +23,15 @@ const menuOptions: MenuOption[] = [
     icon: renderMenuIcon(PulseOutline),
   },
   {
-    label: 'Settings',
-    key: 'settings',
+    label: 'Control Center',
+    key: 'controlCenter',
     icon: renderMenuIcon(SettingsOutline),
   },
 ]
 
 const activeMenuKey = computed<string | null>(() => {
-  if (route.name === 'settings') {
-    return 'settings'
+  if (route.name === 'controlCenter') {
+    return 'controlCenter'
   }
 
   if (route.name === 'monitoring') {
@@ -42,8 +42,8 @@ const activeMenuKey = computed<string | null>(() => {
 })
 
 function handleMenuSelect(key: string | number): void {
-  if (key === 'settings') {
-    void router.push({ name: 'settings' })
+  if (key === 'controlCenter') {
+    void router.push({ name: 'controlCenter' })
     return
   }
 

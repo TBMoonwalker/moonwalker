@@ -6,6 +6,7 @@ import {
     type ConfigLoadDefaults,
     type LoadedSignalConfigSection,
 } from '../helpers/configLoad'
+import type { OperationResult } from '../control-center/operationResults'
 import type {
     AutopilotConfigSection,
     DcaConfigSection,
@@ -24,6 +25,7 @@ interface MessageApiLike {
 interface UseConfigLoadFlowOptions {
     apiUrl: (path: string) => string
     buildDefaults: () => ConfigLoadDefaults
+    loadConfig?: () => Promise<Record<string, unknown> | null>
     general: Ref<GeneralConfigSection>
     signal: Ref<LoadedSignalConfigSection>
     filter: Ref<FilterConfigSection>
@@ -38,50 +40,68 @@ interface UseConfigLoadFlowOptions {
     onAfterLoad?: () => Promise<void> | void
     resetSaveState: () => void
     setSaveError: (message: string) => void
+    surfaceMessages?: boolean
     syncBaselineState: () => void
 }
 
 export function useConfigLoadFlow(options: UseConfigLoadFlowOptions) {
-    async function fetchDefaultValues(): Promise<void> {
+    async function fetchDefaultValues(): Promise<OperationResult> {
         options.isLoading.value = true
 
         try {
-            const response = await axios.get(options.apiUrl('/config/all'))
-            if (response.status === 200) {
-                const defaults = options.buildDefaults()
-                const loadedConfig = buildLoadedConfigState(
-                    response.data,
-                    defaults,
-                )
+            const payload = options.loadConfig
+                ? await options.loadConfig()
+                : (
+                      await axios.get<Record<string, unknown>>(
+                          options.apiUrl('/config/all'),
+                      )
+                  ).data
+            if (!payload) {
+                const message = 'Failed to load configuration.'
+                options.setSaveError(message)
+                if (options.surfaceMessages !== false) {
+                    options.message.error(message)
+                }
+                return {
+                    status: 'error',
+                    message,
+                }
+            }
 
-                Object.assign(options.general.value, loadedConfig.general)
-                Object.assign(options.signal.value, loadedConfig.signal)
-                Object.assign(options.filter.value, loadedConfig.filter)
-                Object.assign(options.exchange.value, loadedConfig.exchange)
-                Object.assign(options.dca.value, loadedConfig.dca)
-                Object.assign(options.autopilot.value, loadedConfig.autopilot)
-                Object.assign(options.monitoring.value, loadedConfig.monitoring)
-                Object.assign(options.indicator.value, loadedConfig.indicator)
-                options.showAdvancedGeneral.value =
-                    loadedConfig.showAdvancedGeneral
+            const defaults = options.buildDefaults()
+            const loadedConfig = buildLoadedConfigState(payload, defaults)
 
-                await options.onAfterLoad?.()
+            Object.assign(options.general.value, loadedConfig.general)
+            Object.assign(options.signal.value, loadedConfig.signal)
+            Object.assign(options.filter.value, loadedConfig.filter)
+            Object.assign(options.exchange.value, loadedConfig.exchange)
+            Object.assign(options.dca.value, loadedConfig.dca)
+            Object.assign(options.autopilot.value, loadedConfig.autopilot)
+            Object.assign(options.monitoring.value, loadedConfig.monitoring)
+            Object.assign(options.indicator.value, loadedConfig.indicator)
+            options.showAdvancedGeneral.value = loadedConfig.showAdvancedGeneral
 
-                options.syncBaselineState()
-                options.resetSaveState()
-                trackUiEvent('config_baseline_loaded')
-            } else {
-                options.message.error('Failed to load default values')
-                options.setSaveError('Failed to load configuration.')
+            await options.onAfterLoad?.()
+
+            options.syncBaselineState()
+            options.resetSaveState()
+            trackUiEvent('config_baseline_loaded')
+            return {
+                status: 'success',
+                message: 'Configuration loaded.',
             }
         } catch (error) {
             console.error('Error fetching default values:', error)
-            options.message.error(
-                'An unexpected error occurred while loading default values.',
-            )
-            options.setSaveError(
-                'An unexpected error occurred while loading default values.',
-            )
+            const message =
+                'An unexpected error occurred while loading default values.'
+            if (options.surfaceMessages !== false) {
+                options.message.error(message)
+            }
+            options.setSaveError(message)
+            return {
+                status: 'error',
+                message,
+            }
         } finally {
             options.isLoading.value = false
         }

@@ -19,9 +19,11 @@ runtime and multiple concurrent dashboard clients.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/config/all` | Return the full config snapshot used by the dashboard. |
+| `GET` | `/config/freshness` | Return the latest persisted config `updated_at` timestamp so dashboard clients can detect stale local snapshots. |
 | `GET` | `/config/single/{key}` | Return a single config key. |
 | `PUT` | `/config/single/{key}` | Update one config key with a JSON body like `{"value":{"value":"binance","type":"str"}}`. |
 | `POST` | `/config/multiple` | Update multiple config keys in one JSON payload. |
+| `POST` | `/config/live/activate` | Switch the instance from dry run to live mode after backend readiness checks pass. |
 | `GET` | `/config/backup/export?include_trade_data=false` | Export config-only backup payload. |
 | `GET` | `/config/backup/export?include_trade_data=true` | Export full backup payload including trade data. |
 | `POST` | `/config/backup/restore` | Restore config-only or full backup payloads. |
@@ -29,6 +31,10 @@ runtime and multiple concurrent dashboard clients.
 Notes:
 - Config update payloads use nested typed objects such as
   `{"dry_run":{"value":false,"type":"bool"}}`.
+- Generic config saves cannot switch `dry_run` from `true` to `false`; that
+  transition is rejected unless it goes through `POST /config/live/activate`.
+- `POST /config/live/activate` expects `{"confirm": true}` and returns `409`
+  with a `blockers` array when required setup is still incomplete.
 - `POST /config/backup/restore` expects a JSON body with `backup` and optional
   `restore_trade_data`.
 - Switching the signal plugin to `csv_signal` is rejected while open trades

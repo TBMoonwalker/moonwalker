@@ -164,7 +164,6 @@ export function buildConfigSubmitPayload(
         autopilot,
         monitoring,
         indicator,
-        showAdvancedGeneral,
         defaults,
     } = options
 
@@ -244,9 +243,7 @@ export function buildConfigSubmitPayload(
         key: serializeConfigValue(toNullableConfigString(exchange.key), 'str'),
         secret: serializeConfigValue(toNullableConfigString(exchange.secret), 'str'),
         exchange_hostname: serializeConfigValue(
-            showAdvancedGeneral
-                ? toNullableConfigString(exchange.exchange_hostname)
-                : null,
+            toNullableConfigString(exchange.exchange_hostname),
             'str',
         ),
         dry_run: serializeConfigValue(exchange.dry_run || false, 'bool'),

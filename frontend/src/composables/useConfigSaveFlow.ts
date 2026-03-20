@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
+import type { OperationResult } from '../control-center/operationResults'
 import { trackUiEvent } from '../utils/uiTelemetry'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -21,7 +22,8 @@ interface UseConfigSaveFlowOptions<TPayload> {
     isDirty: ComputedRef<boolean>
     isLoading: Ref<boolean>
     message: MessageApiLike
-    onSaved?: () => void
+    onSaved?: () => Promise<void> | void
+    surfaceMessages?: boolean
     syncBaselineState: () => void
 }
 
@@ -154,14 +156,22 @@ export function useConfigSaveFlow<TPayload>(
         event.returnValue = ''
     }
 
-    async function submitForm(): Promise<void> {
+    async function submitForm(): Promise<OperationResult> {
         if (!options.isDirty.value) {
-            options.message.info('No unsaved changes to submit.')
+            if (options.surfaceMessages !== false) {
+                options.message.info('No unsaved changes to submit.')
+            }
             trackUiEvent('config_submit_skipped_no_changes')
-            return
+            return {
+                status: 'noop',
+                message: 'No unsaved changes to submit.',
+            }
         }
         if (saveState.value === 'saving') {
-            return
+            return {
+                status: 'noop',
+                message: 'A save request is already in progress.',
+            }
         }
 
         const submitStartedAt = performance.now()
@@ -186,9 +196,15 @@ export function useConfigSaveFlow<TPayload>(
                     duration_ms: Math.round(performance.now() - submitStartedAt),
                     dirty_sections: dirtySectionsBeforeSubmit,
                 })
-                options.message.success('Form submitted successfully')
-                options.onSaved?.()
-                return
+                if (options.surfaceMessages !== false) {
+                    options.message.success('Form submitted successfully')
+                }
+                await options.onSaved?.()
+                return {
+                    status: 'success',
+                    message: 'Configuration saved successfully.',
+                    statusCode: response.status,
+                }
             }
 
             const errorMessage = extractAxiosErrorMessage(
@@ -201,7 +217,14 @@ export function useConfigSaveFlow<TPayload>(
                 duration_ms: Math.round(performance.now() - submitStartedAt),
                 category: 'non_2xx_response',
             })
-            options.message.error(errorMessage)
+            if (options.surfaceMessages !== false) {
+                options.message.error(errorMessage)
+            }
+            return {
+                status: response.status === 409 ? 'blocked' : 'error',
+                message: errorMessage,
+                statusCode: response.status,
+            }
         } catch (error) {
             const category = axios.isAxiosError(error)
                 ? error.response
@@ -230,7 +253,19 @@ export function useConfigSaveFlow<TPayload>(
                 category,
             })
             setSaveError(errorMessage)
-            options.message.error(errorMessage)
+            if (options.surfaceMessages !== false) {
+                options.message.error(errorMessage)
+            }
+            return {
+                status: statusCode === 409 ? 'blocked' : 'error',
+                message: errorMessage,
+                statusCode,
+                blockers:
+                    axios.isAxiosError(error) && error.response?.data?.blockers
+                        ? error.response.data.blockers
+                        : undefined,
+                category,
+            }
         }
     }
 

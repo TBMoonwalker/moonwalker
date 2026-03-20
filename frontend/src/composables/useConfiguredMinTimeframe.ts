@@ -1,23 +1,23 @@
 import { ref } from 'vue'
 
-import { fetchJson } from '../api/client'
+import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 import {
     DEFAULT_MIN_TIMEFRAME,
     resolveMinTimeframe,
-    type OpenTradesConfigResponse,
     type TimeframeChoice,
 } from '../helpers/openTrades'
 
 export function useConfiguredMinTimeframe() {
     const configuredMinTimeframe = ref<TimeframeChoice>(DEFAULT_MIN_TIMEFRAME)
+    const configSnapshotStore = useSharedConfigSnapshot()
 
     async function loadConfiguredMinTimeframe(): Promise<void> {
         try {
-            const config = await fetchJson<OpenTradesConfigResponse>(
-                '/config/all',
-            )
+            const config =
+                (await configSnapshotStore.ensureLoaded(false)) ??
+                configSnapshotStore.snapshot.value
             configuredMinTimeframe.value = resolveMinTimeframe(
-                config.timeframe,
+                config?.timeframe ?? null,
             )
         } catch (_error) {
             configuredMinTimeframe.value = resolveMinTimeframe(null)

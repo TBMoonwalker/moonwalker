@@ -23,7 +23,6 @@ interface UseConfigPersistableStateOptions {
     general: Ref<GeneralConfigSection>
     indicator: Ref<IndicatorConfigSection>
     monitoring: Ref<MonitoringConfigSection>
-    showAdvancedGeneral: Ref<boolean>
     signal: Ref<LoadedSignalConfigSection>
 }
 
@@ -42,10 +41,7 @@ function buildPersistableState(
     options: UseConfigPersistableStateOptions,
 ): PersistableState {
     return {
-        general: {
-            ...options.general.value,
-            show_advanced_general: options.showAdvancedGeneral.value,
-        },
+        general: { ...options.general.value },
         signal: {
             symbol_list: options.signal.value.symbol_list,
             asap_use_url: options.signal.value.asap_use_url,
@@ -53,7 +49,6 @@ function buildPersistableState(
             signal: options.signal.value.signal,
             strategy: options.signal.value.strategy,
             strategy_enabled: options.signal.value.strategy_enabled,
-            timeframe: options.signal.value.timeframe,
             symsignal_url: options.signal.value.symsignal_url,
             symsignal_key: options.signal.value.symsignal_key,
             symsignal_version: options.signal.value.symsignal_version,
@@ -61,7 +56,6 @@ function buildPersistableState(
             csvsignal_mode: options.signal.value.csvsignal_mode,
             csvsignal_source: options.signal.value.csvsignal_source,
             csvsignal_inline: options.signal.value.csvsignal_inline,
-            csvsignal_file_name: options.signal.value.csvsignal_file_name,
         },
         filter: { ...options.filter.value },
         exchange: { ...options.exchange.value },

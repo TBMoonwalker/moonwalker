@@ -5,8 +5,12 @@
 3. Save your settings (they are persisted in the DB).
 
 Runtime configuration is stored in the `AppConfig` table and served to the UI
-through `/config/all`. The dashboard typically updates settings via
-`PUT /config/single/{key}` or `POST /config/multiple`.
+through `/config/all`. Dashboard clients can also poll `/config/freshness` to
+detect whether another browser or tab has changed the saved configuration.
+Most settings are updated via `PUT /config/single/{key}` or
+`POST /config/multiple`, but switching `dry_run` from `true` to `false` must go
+through `POST /config/live/activate` so the backend can enforce readiness
+checks.
 
 For signal-plugin-specific payloads and examples, see [signals.md](signals.md).
 For backup/restore and related config endpoints, see [api.md](api.md).

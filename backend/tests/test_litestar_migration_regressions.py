@@ -2,6 +2,7 @@
 
 import json
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -21,18 +22,25 @@ class _DummyConfigService:
 
     def __init__(self) -> None:
         self.last_batch: dict[str, Any] | None = None
+        self.last_single: tuple[str, Any] | None = None
         self._cache: dict[str, Any] = {"signal": "asap"}
 
     async def batch_set(self, payload: dict[str, Any]) -> bool:
         self.last_batch = payload
+        for key, value in payload.items():
+            self._cache[key] = value.get("value") if isinstance(value, dict) else value
         return True
 
     async def set(self, key: str, value: Any) -> bool:
-        self._cache[key] = value
+        self.last_single = (key, value)
+        self._cache[key] = value.get("value") if isinstance(value, dict) else value
         return True
 
     def get(self, key: str, default: Any | None = None) -> Any | None:
         return self._cache.get(key, default)
+
+    def snapshot(self) -> dict[str, Any]:
+        return dict(self._cache)
 
 
 class _DummyOpenTradesCount:
@@ -46,6 +54,29 @@ class _DummyOpenTradesCount:
 
     async def count(self) -> int:
         return self.count_value
+
+
+class _DummyAppConfigQuery:
+    """AppConfig query stub for freshness endpoint coverage."""
+
+    def __init__(self, latest_row: Any) -> None:
+        self._latest_row = latest_row
+
+    def order_by(self, *_args: Any, **_kwargs: Any) -> "_DummyAppConfigQuery":
+        return self
+
+    async def first(self) -> Any:
+        return self._latest_row
+
+
+class _DummyAppConfigModel:
+    """AppConfig stub exposing latest updated_at metadata."""
+
+    latest_row: Any = None
+
+    @classmethod
+    def all(cls) -> _DummyAppConfigQuery:
+        return _DummyAppConfigQuery(cls.latest_row)
 
 
 def test_frontend_routes_serve_index_and_assets(tmp_path: Path, monkeypatch) -> None:
@@ -281,7 +312,7 @@ def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
     )
 
     app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
-    payload = {"dry_run": {"value": False, "type": "bool"}}
+    payload = {"debug": {"value": False, "type": "bool"}}
     with TestClient(app=app) as client:
         response = client.post("/config/multiple", json=payload)
 
@@ -289,6 +320,27 @@ def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
     assert response.status_code == 201
     assert response.json() == {"message": "Config updated"}
     assert service.last_batch == payload
+
+
+def test_config_multiple_rejects_generic_live_activation(monkeypatch) -> None:
+    """Generic config batch saves must not switch the instance live."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {"dry_run": {"value": False, "type": "bool"}}
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 409
+    assert "live activation" in response.json().get("error", "").lower()
+    assert service.last_batch is None
 
 
 def test_config_multiple_blocks_switch_to_csv_signal_when_open_trades_exist(
@@ -339,6 +391,159 @@ def test_config_single_blocks_switch_to_csv_signal_when_open_trades_exist(
     assert response.status_code == 409
     assert "open trades" in response.json().get("error", "").lower()
     assert service.last_batch is None
+
+
+def test_config_single_rejects_generic_live_activation(monkeypatch) -> None:
+    """Single-key config saves must not switch the instance live."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_config_key])
+    payload = {"value": {"value": False, "type": "bool"}}
+    with TestClient(app=app) as client:
+        response = client.put("/config/single/dry_run", json=payload)
+
+    assert response.status_code == 409
+    assert "live activation" in response.json().get("error", "").lower()
+    assert service.last_single is None
+
+
+def test_live_activation_endpoint_blocks_when_setup_is_incomplete(monkeypatch) -> None:
+    """Dedicated live activation must enforce readiness checks."""
+    service = _DummyConfigService()
+    service._cache.update(
+        {
+            "dry_run": True,
+            "signal": "asap",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "currency": "USDT",
+        }
+    )
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.activate_live_trading])
+    with TestClient(app=app) as client:
+        response = client.post("/config/live/activate", json={"confirm": True})
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["error"] == "Live activation blocked until setup is complete."
+    assert any(blocker["key"] == "key" for blocker in payload["blockers"])
+    assert service.last_single is None
+
+
+def test_live_activation_endpoint_switches_dry_run_off(monkeypatch) -> None:
+    """Dedicated live activation should persist dry_run=false when ready."""
+    service = _DummyConfigService()
+    service._cache.update(
+        {
+            "dry_run": True,
+            "timezone": "Europe/Vienna",
+            "signal": "asap",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "key": "api-key",
+            "secret": "api-secret",
+            "currency": "USDT",
+            "max_bots": 2,
+            "bo": 20,
+            "tp": 1.5,
+            "history_lookback_time": "180d",
+            "symbol_list": "BTC/USDT",
+        }
+    )
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.activate_live_trading])
+    with TestClient(app=app) as client:
+        response = client.post("/config/live/activate", json={"confirm": True})
+
+    assert response.status_code == 201
+    assert response.json() == {
+        "message": "Live trading activated.",
+        "already_live": False,
+    }
+    assert service.last_single == (
+        "dry_run",
+        {"value": False, "type": "bool"},
+    )
+
+
+def test_config_route_handlers_expose_freshness_and_live_activation(
+    monkeypatch,
+) -> None:
+    """The real config route list should expose freshness and live activation."""
+    service = _DummyConfigService()
+    service._cache.update(
+        {
+            "dry_run": True,
+            "timezone": "Europe/Vienna",
+            "signal": "asap",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "key": "api-key",
+            "secret": "api-secret",
+            "currency": "USDT",
+            "max_bots": 2,
+            "bo": 20,
+            "tp": 1.5,
+            "history_lookback_time": "180d",
+            "symbol_list": "BTC/USDT",
+        }
+    )
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    freshness_timestamp = datetime(2026, 3, 20, 17, 38, tzinfo=timezone.utc)
+    _DummyAppConfigModel.latest_row = type(
+        "_DummyAppConfigRow",
+        (),
+        {"updated_at": freshness_timestamp},
+    )()
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+    monkeypatch.setattr(config_controller, "AppConfig", _DummyAppConfigModel)
+
+    app = Litestar(route_handlers=config_controller.route_handlers)
+    with TestClient(app=app) as client:
+        freshness_response = client.get("/config/freshness")
+        activation_response = client.post(
+            "/config/live/activate", json={"confirm": True}
+        )
+
+    assert freshness_response.status_code == 200
+    assert freshness_response.json() == {"updated_at": freshness_timestamp.isoformat()}
+    assert activation_response.status_code == 201
+    assert activation_response.json() == {
+        "message": "Live trading activated.",
+        "already_live": False,
+    }
+    assert service.last_single == (
+        "dry_run",
+        {"value": False, "type": "bool"},
+    )
 
 
 def test_config_single_invalid_json_returns_validation_error() -> None:

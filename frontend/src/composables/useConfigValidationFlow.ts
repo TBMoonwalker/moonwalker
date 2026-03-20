@@ -13,6 +13,7 @@ interface MessageApiLike {
 interface UseConfigValidationFlowOptions {
     message: MessageApiLike
     onValidSubmit: () => Promise<void> | void
+    onInvalid?: (sectionKey: string) => Promise<void> | void
     setSaveError: (message: string) => void
 }
 
@@ -29,33 +30,52 @@ export function useConfigValidationFlow(
     const indicatorFormRef = ref<ConfigSectionFormExpose | null>(null)
     const submitAttempted = ref(false)
 
-    async function validateAndSubmit(): Promise<void> {
+    async function validateAndSubmit(): Promise<{
+        valid: boolean
+        invalidSection: string | null
+    }> {
         submitAttempted.value = true
 
         const sectionForms = [
-            generalFormRef.value,
-            signalFormRef.value,
-            filterFormRef.value,
-            exchangeFormRef.value,
-            dcaFormRef.value,
-            autopilotFormRef.value,
-            monitoringFormRef.value,
-            indicatorFormRef.value,
-        ].filter((form): form is ConfigSectionFormExpose => form !== null)
+            ['general', generalFormRef.value],
+            ['signal', signalFormRef.value],
+            ['filter', filterFormRef.value],
+            ['exchange', exchangeFormRef.value],
+            ['dca', dcaFormRef.value],
+            ['autopilot', autopilotFormRef.value],
+            ['monitoring', monitoringFormRef.value],
+            ['indicator', indicatorFormRef.value],
+        ].filter(
+            (
+                entry,
+            ): entry is [string, ConfigSectionFormExpose] => entry[1] !== null,
+        )
 
         const results = await Promise.all(
-            sectionForms.map((form) => form.validate()),
+            sectionForms.map(([, form]) => form.validate()),
         )
 
         if (results.every(Boolean)) {
             trackUiEvent('config_validation_success')
             await options.onValidSubmit()
-            return
+            return {
+                valid: true,
+                invalidSection: null,
+            }
         }
 
+        const invalidIndex = results.findIndex((result) => !result)
+        const invalidSection = sectionForms[invalidIndex]?.[0] ?? null
         options.setSaveError('Missing/invalid configuration input')
         trackUiEvent('config_validation_failed')
         options.message.error('Missing/invalid configuration input')
+        if (invalidSection) {
+            await options.onInvalid?.(invalidSection)
+        }
+        return {
+            valid: false,
+            invalidSection,
+        }
     }
 
     function handleValidateButtonClick(event: MouseEvent): void {

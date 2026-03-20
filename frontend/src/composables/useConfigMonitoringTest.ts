@@ -1,6 +1,7 @@
 import axios from 'axios'
 import { ref, type Ref } from 'vue'
 
+import type { OperationResult } from '../control-center/operationResults'
 import type { MonitoringConfigSection } from '../helpers/configSubmitPayload'
 
 interface MessageApiLike {
@@ -12,6 +13,7 @@ interface UseConfigMonitoringTestOptions {
     apiUrl: (path: string) => string
     message: MessageApiLike
     monitoring: Ref<MonitoringConfigSection>
+    surfaceMessages?: boolean
 }
 
 export function useConfigMonitoringTest(
@@ -28,10 +30,16 @@ export function useConfigMonitoringTest(
         )
     }
 
-    async function testMonitoringTelegram(): Promise<void> {
+    async function testMonitoringTelegram(): Promise<OperationResult> {
         if (!canTestMonitoringTelegram()) {
-            options.message.error('Please add valid Telegram settings first.')
-            return
+            const message = 'Please add valid Telegram settings first.'
+            if (options.surfaceMessages !== false) {
+                options.message.error(message)
+            }
+            return {
+                status: 'error',
+                message,
+            }
         }
 
         monitoringTestLoading.value = true
@@ -53,21 +61,55 @@ export function useConfigMonitoringTest(
                         options.monitoring.value.retry_count ?? 1,
                 },
             )
-            options.message.success(
-                response.data?.message || 'Monitoring Telegram test sent.',
-            )
+            const message =
+                response.data?.message || 'Monitoring Telegram test sent.'
+            if (options.surfaceMessages !== false) {
+                options.message.success(message)
+            }
+            return {
+                status: 'success',
+                message,
+            }
         } catch (error) {
             if (axios.isAxiosError(error) && error.response) {
-                options.message.error(
+                const message =
                     error.response.data?.error ||
-                        'Monitoring Telegram test failed.',
-                )
+                    'Monitoring Telegram test failed.'
+                if (options.surfaceMessages !== false) {
+                    options.message.error(message)
+                }
+                return {
+                    status: 'error',
+                    message,
+                    statusCode: error.response.status,
+                }
             } else if (axios.isAxiosError(error) && error.request) {
-                options.message.error('No response from server. Please try again later.')
+                const message = 'No response from server. Please try again later.'
+                if (options.surfaceMessages !== false) {
+                    options.message.error(message)
+                }
+                return {
+                    status: 'error',
+                    message,
+                }
             } else if (error instanceof Error) {
-                options.message.error(`Request failed: ${error.message}`)
+                const message = `Request failed: ${error.message}`
+                if (options.surfaceMessages !== false) {
+                    options.message.error(message)
+                }
+                return {
+                    status: 'error',
+                    message,
+                }
             } else {
-                options.message.error('Monitoring Telegram test failed.')
+                const message = 'Monitoring Telegram test failed.'
+                if (options.surfaceMessages !== false) {
+                    options.message.error(message)
+                }
+                return {
+                    status: 'error',
+                    message,
+                }
             }
         } finally {
             monitoringTestLoading.value = false

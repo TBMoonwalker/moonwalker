@@ -150,16 +150,6 @@ export function buildLoadedConfigState(
         watcher_ohlcv: parseBooleanString(response.watcher_ohlcv) ?? false,
     }
 
-    if (!defaults.showAdvancedGeneral) {
-        general.ws_watchdog_enabled = true
-        general.ws_healthcheck_interval_ms =
-            defaults.advancedWsHealthcheckIntervalMs
-        general.ws_stale_timeout_ms = defaults.advancedWsStaleTimeoutMs
-        general.ws_reconnect_debounce_ms =
-            defaults.advancedWsReconnectDebounceMs
-        exchange.exchange_hostname = null
-    }
-
     return {
         general,
         signal: {
