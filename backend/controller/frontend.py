@@ -68,10 +68,10 @@ async def serve_vue(path: str) -> File:
     return await _serve_vue_path(path)
 
 
-@get(path="/control-center", include_in_schema=False)
-@get(path="/monitoring", include_in_schema=False)
-@get(path="/config", include_in_schema=False)
-@get(path="/settings", include_in_schema=False)
+@get(
+    path=["/control-center", "/monitoring", "/config", "/settings"],
+    include_in_schema=False,
+)
 async def serve_spa_top_level_routes() -> File:
     """Serve top-level SPA routes that would otherwise collide with API prefixes."""
     return await _serve_vue_path("")
