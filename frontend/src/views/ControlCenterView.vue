@@ -21,6 +21,7 @@ import {
     buildControlCenterQuery,
     normalizeControlCenterRouteState,
 } from '../control-center/routeState'
+import { submitControlCenterWorkspace } from '../control-center/saveWorkflow'
 import {
     getTaskPresentation,
     getTasksForMode,
@@ -322,7 +323,6 @@ const {
     monitoringFormRef,
     signalFormRef,
     submitAttempted,
-    validateAndSubmit,
 } = useConfigValidationFlow({
     message,
     onInvalid: async (sectionKey) => {
@@ -331,41 +331,8 @@ const {
             await guideToTarget(invalidTarget)
         }
     },
-    onValidSubmit: async () => {
-        const result = await submitForm()
-        if (result.status === 'success') {
-            await navigateToControlCenter('overview')
-            setTransitionIntent({
-                kind: 'save',
-                status: 'success',
-                message: 'Configuration saved.',
-                at: Date.now(),
-                mode: 'overview',
-            })
-            announce('Configuration saved.')
-            return
-        }
-        if (result.status === 'blocked') {
-            setTransitionIntent({
-                kind: 'save',
-                status: 'blocked',
-                message: result.message,
-                at: Date.now(),
-                blockers: normalizeBackendBlockers(result.blockers),
-            })
-            announce(result.message)
-            return
-        }
-        if (result.status === 'error') {
-            setTransitionIntent({
-                kind: 'save',
-                status: 'error',
-                message: result.message,
-                at: Date.now(),
-            })
-            announce(result.message)
-        }
-    },
+    onSubmitShortcut: handleSubmitWorkspace,
+    onValidSubmit: handleSubmitWorkspace,
     setSaveError,
 })
 
@@ -635,7 +602,13 @@ async function handleMissionPrimaryAction(): Promise<void> {
 }
 
 async function handleSubmitWorkspace(): Promise<void> {
-    await validateAndSubmit()
+    await submitControlCenterWorkspace({
+        announce,
+        navigateToMode: async (mode) => navigateToControlCenter(mode),
+        normalizeBlockers: normalizeBackendBlockers,
+        setTransitionIntent,
+        submitForm,
+    })
 }
 
 async function handleBackupDownloadAction(): Promise<void> {

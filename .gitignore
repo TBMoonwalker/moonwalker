@@ -14,6 +14,9 @@ test*.py
 !backend/tests/
 !backend/tests/**/*
 !backend/tests/**/*.py
+!frontend/tests/
+!frontend/tests/**/*
+!frontend/tests/**/*.cjs
 debugdb.py
 backend/strategies/btc.py
 moonwalker.lock

@@ -14,6 +14,7 @@ interface UseConfigValidationFlowOptions {
     message: MessageApiLike
     onValidSubmit: () => Promise<void> | void
     onInvalid?: (sectionKey: string) => Promise<void> | void
+    onSubmitShortcut?: () => Promise<void> | void
     setSaveError: (message: string) => void
 }
 
@@ -88,7 +89,8 @@ export function useConfigValidationFlow(
         if ((event.ctrlKey || event.metaKey) && key === 's') {
             event.preventDefault()
             trackUiEvent('config_submit_shortcut_used')
-            void validateAndSubmit()
+            const action = options.onSubmitShortcut ?? validateAndSubmit
+            void action()
         }
     }
 
