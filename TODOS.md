@@ -26,18 +26,11 @@
 **Priority:** P3
 **Depends on:** Shared hydrated config store and lightweight stale detection shipping first
 
-## Design System
+## Completed
 
 ### Create a repo-level DESIGN.md after the Control Center ships
 
-**What:** Create a shared `DESIGN.md` that captures Moonwalker's visual vocabulary, interaction tone, spacing and density rules, and accessibility expectations after the Control Center implementation lands.
+**Completed:** 2026-03-21
 
-**Why:** This prevents future frontend work from drifting back into ad-hoc page-by-page design decisions.
-
-**Context:** The Control Center design review intentionally stayed feature-scoped: it fully specified the new operator surface without expanding into a whole-app design-system project. This follow-up should happen after the Control Center ships so the documented patterns are based on real implemented UI, not hypotheticals.
-
-**Effort:** M
-**Priority:** P3
-**Depends on:** Control Center implementation shipping first
-
-## Completed
+**What shipped:** Added the repo-level `DESIGN.md` and then refined it with the
+surface-treatment rule that keeps gradients atmospheric and working panels flat.

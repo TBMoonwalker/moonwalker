@@ -1,7 +1,7 @@
 # Configuration
 
 1. Start the app with `./run.sh start`.
-2. Open the UI at `http://<host>:<port>`
+2. Open the Control Center at `http://<host>:<port>/control-center`.
 3. Save your settings (they are persisted in the DB).
 
 Runtime configuration is stored in the `AppConfig` table and served to the UI
@@ -11,6 +11,8 @@ Most settings are updated via `PUT /config/single/{key}` or
 `POST /config/multiple`, but switching `dry_run` from `true` to `false` must go
 through `POST /config/live/activate` so the backend can enforce readiness
 checks.
+
+Legacy `/config` and `/settings` links now redirect into the Control Center.
 
 For signal-plugin-specific payloads and examples, see [signals.md](signals.md).
 For backup/restore and related config endpoints, see [api.md](api.md).

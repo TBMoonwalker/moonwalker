@@ -85,7 +85,12 @@ to all connected dashboard clients.
 
 ## Backup And Restore
 
-Backup and restore is available directly from the Configuration page.
+Backup and restore lives in the Control Center:
+
+- On first run, `Restore existing installation` is available on the opening
+  entry screen.
+- After the instance is configured, the same tools live in
+  `Control Center -> Utilities -> Backup and restore`.
 
 Two backup scopes are available:
 

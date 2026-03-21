@@ -111,7 +111,15 @@ Draft exchange-symbol lookup accepts a JSON body with optional `currency` and
 
 | Method | Path | Purpose |
 | --- | --- | --- |
+| `GET` | `/monitoring/logs` | Return the allowlisted log sources visible in the Monitoring page. |
+| `GET` | `/monitoring/logs/{source}` | Return tailed or backfilled log lines for one allowlisted source. |
+| `GET` | `/monitoring/logs/{source}/download` | Download the current file for one allowlisted log source. |
 | `POST` | `/monitoring/test` | Send a Telegram test notification using current or overridden monitoring settings. |
+
+`GET /monitoring/logs/{source}` accepts:
+- `limit` for batch size
+- `cursor` to request newer complete lines after the current tail
+- `before` to request older lines before the current oldest batch
 
 `POST /monitoring/test` accepts an optional JSON payload that overrides the
 persisted monitoring config for the test request only.
