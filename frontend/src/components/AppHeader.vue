@@ -55,7 +55,7 @@ function handleMenuSelect(key: string | number): void {
 
 <template>
   <header class="app-header">
-    <n-card class="app-header-card" content-style="padding: 10px 16px;">
+    <n-card class="app-header-card" content-style="padding: 6px 4px 2px;">
       <div class="header-shell">
         <RouterLink class="brand-link" :to="{ name: 'trades' }">
           <span class="brand-mark" aria-hidden="true">
@@ -90,9 +90,10 @@ function handleMenuSelect(key: string | number): void {
 
 .app-header-card {
   width: 100%;
-  border: 1px solid var(--mw-color-border);
-  background: var(--mw-surface-header);
-  box-shadow: var(--mw-shadow-card);
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .header-shell {
