@@ -763,8 +763,26 @@ function handleSetupStyleChange(style: SetupStyle): void {
     trackUiEvent('control_center_setup_style_selected', { style })
 }
 
+function isInteractiveTarget(target: EventTarget | null): boolean {
+    return (
+        target instanceof Element &&
+        target.closest('button, a, input, select, textarea, label, [role="button"]') !==
+            null
+    )
+}
+
 async function handleSetupTaskSelect(target: ControlCenterTarget): Promise<void> {
     await navigateToControlCenter('setup', target)
+}
+
+async function handleSetupSectionShellClick(
+    target: ControlCenterTarget,
+    event: MouseEvent,
+): Promise<void> {
+    if (isSetupTaskExpanded(target) || isInteractiveTarget(event.target)) {
+        return
+    }
+    await handleSetupTaskSelect(target)
 }
 
 async function handleMissionPrimaryAction(): Promise<void> {
@@ -1494,6 +1512,7 @@ onUnmounted(() => {
                         class="task-section task-section-shell"
                         :class="{ 'task-section-collapsed': !isSetupTaskExpanded('general') }"
                         id="control-center-general"
+                        @click="handleSetupSectionShellClick('general', $event)"
                     >
                         <div class="task-section-heading-row">
                             <div
@@ -1529,6 +1548,7 @@ onUnmounted(() => {
                         class="task-section task-section-shell"
                         :class="{ 'task-section-collapsed': !isSetupTaskExpanded('exchange') }"
                         id="control-center-exchange"
+                        @click="handleSetupSectionShellClick('exchange', $event)"
                     >
                         <div class="task-section-heading-row">
                             <div
@@ -1565,6 +1585,7 @@ onUnmounted(() => {
                         class="task-section task-section-shell"
                         :class="{ 'task-section-collapsed': !isSetupTaskExpanded('signal') }"
                         id="control-center-signal"
+                        @click="handleSetupSectionShellClick('signal', $event)"
                     >
                         <div class="task-section-heading-row">
                             <div
@@ -1603,6 +1624,7 @@ onUnmounted(() => {
                         class="task-section task-section-shell"
                         :class="{ 'task-section-collapsed': !isSetupTaskExpanded('dca') }"
                         id="control-center-dca"
+                        @click="handleSetupSectionShellClick('dca', $event)"
                     >
                         <div class="task-section-heading-row">
                             <div
@@ -1637,6 +1659,7 @@ onUnmounted(() => {
                         class="task-section task-section-shell"
                         :class="{ 'task-section-collapsed': !isSetupTaskExpanded('monitoring') }"
                         id="control-center-monitoring"
+                        @click="handleSetupSectionShellClick('monitoring', $event)"
                     >
                         <div class="task-section-heading-row">
                             <div
@@ -2053,6 +2076,7 @@ onUnmounted(() => {
 
 .task-section-collapsed {
     background: var(--mw-surface-card-subtle);
+    cursor: pointer;
 }
 
 .task-section-heading-row {

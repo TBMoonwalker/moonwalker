@@ -87,3 +87,23 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         'expected advanced view to avoid a duplicate intro card heading',
     )
 })
+
+test('collapsed setup shells route clicks to their section', () => {
+    const requiredSnippets = [
+        'function isInteractiveTarget(',
+        'function handleSetupSectionShellClick(',
+        "target.closest('button, a, input, select, textarea, label, [role=\"button\"]')",
+        `@click="handleSetupSectionShellClick('general', $event)"`,
+        `@click="handleSetupSectionShellClick('exchange', $event)"`,
+        `@click="handleSetupSectionShellClick('signal', $event)"`,
+        `@click="handleSetupSectionShellClick('dca', $event)"`,
+        `@click="handleSetupSectionShellClick('monitoring', $event)"`,
+    ]
+
+    for (const snippet of requiredSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+})
