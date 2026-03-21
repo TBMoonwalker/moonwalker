@@ -2104,6 +2104,12 @@ onUnmounted(() => {
     gap: 4px;
 }
 
+.task-section-header:focus,
+.task-section-header:focus-visible {
+    outline: none;
+    box-shadow: none;
+}
+
 .task-section-header h2,
 .status-card-title {
     color: var(--mw-color-text-primary);
