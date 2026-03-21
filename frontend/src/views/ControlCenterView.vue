@@ -1437,7 +1437,9 @@ onUnmounted(() => {
                                 </div>
                                 <n-button
                                     v-if="readiness.firstRun"
-                                    quaternary
+                                    class="setup-style-restore-action"
+                                    type="warning"
+                                    secondary
                                     @click="handleSetupEntryChoice('restore')"
                                 >
                                     Restore instead
@@ -2090,6 +2092,10 @@ onUnmounted(() => {
 .advanced-intro-card {
     border: 1px solid rgba(29, 92, 73, 0.14);
     background: var(--mw-surface-shell);
+}
+
+.setup-style-restore-action {
+    font-weight: 600;
 }
 
 .task-section-header {
