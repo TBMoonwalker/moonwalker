@@ -46,6 +46,7 @@
   - error `#B4443F`
   - info `#356D86`
 - **Dark mode:** keep the same hierarchy but reduce saturation by roughly 10 to 15 percent and lift contrast through surfaces rather than brighter accents. Dark mode should read as “night operator console,” not neon terminal cosplay.
+- **Surface treatment:** gradients belong to page atmosphere or rare emphasis, not to primary working surfaces. Headers, cards, shells, and setup panels should stay flat or near-flat so hierarchy comes from spacing, borders, contrast, and shadow instead of decorative fill.
 
 ## Spacing
 - **Base unit:** `8px`
@@ -284,3 +285,4 @@ adding deeper controls, not by restating the same fields.
 | 2026-03-21 | Made `Guided setup` vs `Full control` the second decision | This preserves expert agency without forking the information architecture |
 | 2026-03-21 | Declared restore a first-run entry workflow and a later utility, not an advanced setting | Restore is lifecycle-dependent, not expertise-dependent |
 | 2026-03-21 | Declared one-home rule for editable settings | Duplicate fields between Setup and Advanced destroy operator focus |
+| 2026-03-21 | Reserved gradients for atmosphere and rare emphasis, not core work surfaces | Flat panels preserve calm hierarchy and keep dark mode from feeling noisy |
