@@ -31,11 +31,9 @@
   --mw-surface-card-subtle: rgba(247, 248, 246, 0.86);
   --mw-surface-card-success: rgba(227, 243, 236, 0.9);
   --mw-surface-card-warning: rgba(255, 248, 236, 0.94);
-  --mw-surface-header:
-    radial-gradient(circle at top left, rgba(29, 92, 73, 0.14), transparent 32%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(236, 239, 234, 0.96));
-  --mw-surface-shell:
-    linear-gradient(180deg, rgba(247, 248, 246, 0.96), rgba(236, 239, 234, 0.88));
+  --mw-surface-header: rgba(255, 255, 255, 0.9);
+  --mw-surface-shell: rgba(255, 255, 255, 0.88);
+  --mw-surface-mission: rgba(227, 243, 236, 0.72);
   --mw-shadow-soft: 0 12px 28px rgba(24, 33, 29, 0.08);
   --mw-shadow-card: 0 10px 24px rgba(24, 33, 29, 0.05);
 
@@ -71,11 +69,9 @@
     --mw-surface-card-subtle: rgba(17, 23, 20, 0.78);
     --mw-surface-card-success: rgba(36, 95, 78, 0.22);
     --mw-surface-card-warning: rgba(183, 121, 31, 0.16);
-    --mw-surface-header:
-      radial-gradient(circle at top left, rgba(183, 138, 46, 0.12), transparent 32%),
-      linear-gradient(180deg, rgba(29, 40, 35, 0.96), rgba(23, 32, 28, 0.96));
-    --mw-surface-shell:
-      linear-gradient(180deg, rgba(29, 40, 35, 0.96), rgba(23, 32, 28, 0.9));
+    --mw-surface-header: rgba(24, 33, 29, 0.92);
+    --mw-surface-shell: rgba(24, 33, 29, 0.9);
+    --mw-surface-mission: rgba(36, 95, 78, 0.22);
     --mw-shadow-soft: 0 12px 28px rgba(0, 0, 0, 0.28);
     --mw-shadow-card: 0 10px 24px rgba(0, 0, 0, 0.22);
 

@@ -92,7 +92,7 @@ function handleMenuSelect(key: string | number): void {
   width: 100%;
   border: 1px solid var(--mw-color-border);
   background: var(--mw-surface-header);
-  box-shadow: var(--mw-shadow-soft);
+  box-shadow: var(--mw-shadow-card);
 }
 
 .header-shell {

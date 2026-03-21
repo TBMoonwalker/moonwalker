@@ -1879,18 +1879,16 @@ onUnmounted(() => {
     font-size: 0.82rem;
     letter-spacing: 0.12em;
     text-transform: uppercase;
-    color: rgba(236, 239, 234, 0.78);
+    color: var(--mw-color-text-muted);
     font-family: var(--mw-font-body);
     font-weight: 600;
 }
 
 .mission-panel {
     border: 1px solid rgba(29, 92, 73, 0.26);
-    background:
-        radial-gradient(circle at top left, rgba(183, 138, 46, 0.2), transparent 34%),
-        linear-gradient(135deg, rgba(29, 92, 73, 0.98), rgba(24, 33, 29, 0.96));
-    box-shadow: 0 18px 36px rgba(24, 33, 29, 0.14);
-    color: rgba(255, 255, 255, 0.95);
+    background: var(--mw-surface-mission);
+    box-shadow: var(--mw-shadow-card);
+    color: var(--mw-color-text-primary);
 }
 
 .mission-heading-group {
