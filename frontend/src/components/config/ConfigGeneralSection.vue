@@ -18,7 +18,12 @@
                     filterable
                 />
             </n-form-item>
-            <n-form-item label="Debug mode" path="debug" label-placement="left">
+            <n-form-item
+                v-if="showDebug"
+                label="Debug mode"
+                path="debug"
+                label-placement="left"
+            >
                 <n-checkbox v-model:checked="general.debug" />
             </n-form-item>
             <n-form-item
@@ -93,11 +98,13 @@ withDefaults(
     defineProps<{
         general: GeneralModel
         rules: FormRules
+        showDebug?: boolean
         showAdvancedGeneral: boolean
         showAdvancedToggle?: boolean
         timezone: SelectOption[]
     }>(),
     {
+        showDebug: true,
         showAdvancedToggle: true,
     },
 )

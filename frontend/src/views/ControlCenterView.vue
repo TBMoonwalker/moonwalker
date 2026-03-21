@@ -5,9 +5,12 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
 
 import ConfigAutopilotSection from '../components/config/ConfigAutopilotSection.vue'
+import ConfigDcaAdvancedSection from '../components/config/ConfigDcaAdvancedSection.vue'
 import ConfigDcaSection from '../components/config/ConfigDcaSection.vue'
+import ConfigExchangeAdvancedSection from '../components/config/ConfigExchangeAdvancedSection.vue'
 import ConfigExchangeSection from '../components/config/ConfigExchangeSection.vue'
 import ConfigFilterSection from '../components/config/ConfigFilterSection.vue'
+import ConfigGeneralAdvancedSection from '../components/config/ConfigGeneralAdvancedSection.vue'
 import ConfigGeneralSection from '../components/config/ConfigGeneralSection.vue'
 import ConfigIndicatorSection from '../components/config/ConfigIndicatorSection.vue'
 import ConfigMonitoringSection from '../components/config/ConfigMonitoringSection.vue'
@@ -107,6 +110,35 @@ function createAnnouncement(message: string | null): string {
     return message ? message.trim() : ''
 }
 
+type SetupEntryChoice = 'restore' | 'new'
+type SetupStyle = 'guided' | 'full'
+
+function getStoredSetupEntryChoice(preferenceKey: string): SetupEntryChoice | null {
+    const rawValue = window.localStorage.getItem(preferenceKey)
+    return rawValue === 'restore' || rawValue === 'new' ? rawValue : null
+}
+
+function storeSetupEntryChoice(
+    preferenceKey: string,
+    choice: SetupEntryChoice | null,
+): void {
+    if (!choice) {
+        window.localStorage.removeItem(preferenceKey)
+        return
+    }
+    window.localStorage.setItem(preferenceKey, choice)
+}
+
+function getStoredSetupStyle(preferenceKey: string): SetupStyle {
+    return window.localStorage.getItem(preferenceKey) === 'full'
+        ? 'full'
+        : 'guided'
+}
+
+function storeSetupStyle(preferenceKey: string, style: SetupStyle): void {
+    window.localStorage.setItem(preferenceKey, style)
+}
+
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
@@ -116,6 +148,8 @@ const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).to
 const isLoading = ref(true)
 const activationLoading = ref(false)
 const showAdvancedGeneral = ref(false)
+const setupEntryChoice = ref<SetupEntryChoice | null>(null)
+const setupStyle = ref<SetupStyle>('guided')
 const loadRescueMessage = ref<string | null>(null)
 const staleDetected = ref(false)
 const staleUpdatedAt = ref<string | null>(null)
@@ -126,6 +160,8 @@ let transitionTimeoutId: number | null = null
 let staleCheckIntervalId: number | null = null
 
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
+const CONTROL_CENTER_ENTRY_CHOICE_KEY = 'moonwalker.controlCenter.entryChoice'
+const CONTROL_CENTER_SETUP_STYLE_KEY = 'moonwalker.controlCenter.setupStyle'
 const STALE_CHECK_INTERVAL_MS = 15000
 const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
 const ADVANCED_WS_STALE_TIMEOUT_MS = 20000
@@ -211,8 +247,6 @@ const {
     defaults: configSubmitPayloadDefaults,
 })
 
-const setupShowsAdvancedFields = computed(() => false)
-
 const { changedSectionLabels, changedSections, isDirty, syncBaselineState } =
     useConfigPersistableState({
         autopilot,
@@ -293,7 +327,9 @@ const {
             autopilot: autopilot.value,
             monitoring: monitoring.value,
             indicator: indicator.value,
-            showAdvancedGeneral: routeState.value.mode === 'advanced',
+            showAdvancedGeneral:
+                routeState.value.mode === 'advanced' ||
+                setupShowsAdvancedFields.value,
             defaults: configSubmitPayloadDefaults,
         }),
     changedSectionLabels,
@@ -466,7 +502,65 @@ const routeState = computed(() =>
     }),
 )
 
-const advancedTasks = computed(() => getTasksForMode('advanced'))
+const isPreReadiness = computed(() => !readiness.value.complete)
+const showModeStrip = computed(() => readiness.value.complete)
+const setupShowsAdvancedFields = computed(
+    () => isPreReadiness.value && setupStyle.value === 'full',
+)
+const showSetupEntryGate = computed(
+    () => readiness.value.firstRun && setupEntryChoice.value === null,
+)
+const showRestoreSetupFlow = computed(
+    () => readiness.value.firstRun && setupEntryChoice.value === 'restore',
+)
+const showSetupStyleSelector = computed(
+    () => isPreReadiness.value && !showSetupEntryGate.value && !showRestoreSetupFlow.value,
+)
+const setupTasks = computed(() => getTasksForMode('setup'))
+const activeSetupTarget = computed<ControlCenterTarget>(() => {
+    const requestedTarget = routeState.value.target
+    if (
+        requestedTarget &&
+        getTaskPresentation(requestedTarget).modes.includes('setup')
+    ) {
+        return requestedTarget
+    }
+    const nextTarget = readiness.value.nextTarget
+    if (nextTarget && getTaskPresentation(nextTarget).modes.includes('setup')) {
+        return nextTarget
+    }
+    return 'general'
+})
+const advancedSections = computed(() => {
+    const expertDomains = getTasksForMode('advanced').filter((task) =>
+        ['filter', 'autopilot', 'indicator'].includes(task.target),
+    )
+
+    return [
+        {
+            target: 'general',
+            title: 'Runtime diagnostics',
+            summary:
+                'Debug logging and WebSocket watchdog tuning for experienced operators.',
+            sectionId: 'control-center-general',
+        },
+        {
+            target: 'exchange',
+            title: 'Exchange overrides',
+            summary:
+                'Rare hostname overrides for custom exchange domains and edge deployments.',
+            sectionId: 'control-center-exchange',
+        },
+        {
+            target: 'dca',
+            title: 'Expert safeguards',
+            summary:
+                'Advanced take-profit confirmation controls for noisy or thin markets.',
+            sectionId: 'control-center-dca',
+        },
+        ...expertDomains,
+    ]
+})
 
 const missionPrimaryLabel = computed(() => {
     if (!readiness.value.complete) {
@@ -503,6 +597,59 @@ const dirtySummary = computed(() => {
     }
     return `Draft changes: ${changedSectionLabels.value.join(', ')}`
 })
+
+function rememberSetupEntryChoice(choice: SetupEntryChoice | null): void {
+    setupEntryChoice.value = choice
+    storeSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY, choice)
+}
+
+function rememberSetupStyle(style: SetupStyle): void {
+    setupStyle.value = style
+    storeSetupStyle(CONTROL_CENTER_SETUP_STYLE_KEY, style)
+}
+
+function findSetupBlocker(target: ControlCenterTarget): ControlCenterBlocker | undefined {
+    return visibleBlockers.value.find((blocker) => blocker.target === target)
+}
+
+function isSetupTaskExpanded(target: ControlCenterTarget): boolean {
+    return setupStyle.value === 'full' || activeSetupTarget.value === target
+}
+
+function getSetupTaskStatus(target: ControlCenterTarget): {
+    label: string
+    type: 'default' | 'info' | 'warning' | 'success'
+} {
+    if (activeSetupTarget.value === target) {
+        return {
+            label: 'Current',
+            type: 'info',
+        }
+    }
+
+    if (findSetupBlocker(target)) {
+        return {
+            label: 'Needs attention',
+            type: 'warning',
+        }
+    }
+
+    return {
+        label: 'Ready',
+        type: 'success',
+    }
+}
+
+function getSetupTaskSummary(target: ControlCenterTarget): string {
+    const blocker = findSetupBlocker(target)
+    if (blocker) {
+        return blocker.description
+    }
+    if (activeSetupTarget.value === target) {
+        return 'Current setup step.'
+    }
+    return 'Saved and ready to review.'
+}
 
 function announce(messageText: string | null): void {
     liveRegionMessage.value = ''
@@ -593,6 +740,24 @@ async function handleModeSelect(mode: ControlCenterMode): Promise<void> {
             ? currentTarget
             : null
     await navigateToControlCenter(mode, nextTarget)
+}
+
+async function handleSetupEntryChoice(choice: SetupEntryChoice): Promise<void> {
+    rememberSetupEntryChoice(choice)
+    trackUiEvent('control_center_setup_entry_selected', { choice })
+    await navigateToControlCenter(
+        'setup',
+        choice === 'new' ? readiness.value.nextTarget ?? 'exchange' : null,
+    )
+}
+
+function handleSetupStyleChange(style: SetupStyle): void {
+    rememberSetupStyle(style)
+    trackUiEvent('control_center_setup_style_selected', { style })
+}
+
+async function handleSetupTaskSelect(target: ControlCenterTarget): Promise<void> {
+    await navigateToControlCenter('setup', target)
 }
 
 async function handleMissionPrimaryAction(): Promise<void> {
@@ -809,10 +974,23 @@ watch(
     { flush: 'post' },
 )
 
+watch(
+    () => readiness.value.firstRun,
+    (firstRun) => {
+        if (!firstRun && setupEntryChoice.value === 'restore') {
+            rememberSetupEntryChoice('new')
+        }
+    },
+)
+
 onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
 
 onMounted(async () => {
     initializeTimezoneOptions(getClientTimezone())
+    rememberSetupEntryChoice(
+        getStoredSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY),
+    )
+    rememberSetupStyle(getStoredSetupStyle(CONTROL_CENTER_SETUP_STYLE_KEY))
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('keydown', handleGlobalKeydown)
     window.addEventListener('focus', checkForExternalConfigChanges)
@@ -938,38 +1116,49 @@ onUnmounted(() => {
             </n-card>
         </n-flex>
 
-        <n-flex class="page-section" vertical>
-            <n-card class="mode-strip-card" content-style="padding: 10px 12px;">
-                <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
-                    <n-button
-                        :type="routeState.mode === 'overview' ? 'primary' : 'default'"
-                        secondary
-                        @click="handleModeSelect('overview')"
-                    >
-                        Overview
-                    </n-button>
-                    <n-button
-                        :type="routeState.mode === 'setup' ? 'primary' : 'default'"
-                        secondary
-                        @click="handleModeSelect('setup')"
-                    >
-                        Setup
-                    </n-button>
-                    <n-button
-                        :type="routeState.mode === 'advanced' ? 'primary' : 'default'"
-                        secondary
-                        @click="handleModeSelect('advanced')"
-                    >
-                        Advanced
-                    </n-button>
-                    <n-button
-                        :type="routeState.mode === 'utilities' ? 'primary' : 'default'"
-                        secondary
-                        @click="handleModeSelect('utilities')"
-                    >
-                        Utilities
-                    </n-button>
-                </n-flex>
+        <n-flex v-if="showModeStrip" class="page-section" vertical>
+            <n-card class="mode-strip-card" content-style="padding: 12px 14px;">
+                <div class="mode-strip-shell">
+                    <div class="mode-group">
+                        <n-text depth="3" class="mode-group-label">Primary</n-text>
+                        <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
+                            <n-button
+                                :type="routeState.mode === 'overview' ? 'primary' : 'default'"
+                                secondary
+                                @click="handleModeSelect('overview')"
+                            >
+                                Overview
+                            </n-button>
+                            <n-button
+                                :type="routeState.mode === 'setup' ? 'primary' : 'default'"
+                                secondary
+                                @click="handleModeSelect('setup')"
+                            >
+                                Setup
+                            </n-button>
+                        </n-flex>
+                    </div>
+
+                    <div class="mode-group">
+                        <n-text depth="3" class="mode-group-label">Expert and utility</n-text>
+                        <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
+                            <n-button
+                                :type="routeState.mode === 'advanced' ? 'primary' : 'default'"
+                                secondary
+                                @click="handleModeSelect('advanced')"
+                            >
+                                Advanced
+                            </n-button>
+                            <n-button
+                                :type="routeState.mode === 'utilities' ? 'primary' : 'default'"
+                                secondary
+                                @click="handleModeSelect('utilities')"
+                            >
+                                Utilities
+                            </n-button>
+                        </n-flex>
+                    </div>
+                </div>
             </n-card>
         </n-flex>
 
@@ -1087,181 +1276,452 @@ onUnmounted(() => {
             </template>
 
             <template v-else-if="routeState.mode === 'setup'">
-                <div
-                    :ref="bindTargetElement('general')"
-                    class="task-section"
-                    id="control-center-general"
+                <n-card
+                    v-if="showSetupEntryGate"
+                    class="workspace-card setup-entry-card"
+                    content-style="padding: 20px 22px;"
                 >
-                    <div class="task-section-header" tabindex="-1" data-control-center-anchor>
-                        <h2>{{ getTaskPresentation('general').title }}</h2>
-                        <n-text depth="3">{{ getTaskPresentation('general').summary }}</n-text>
-                    </div>
-                    <ConfigGeneralSection
-                        ref="generalFormRef"
-                        :general="general"
-                        :rules="rules"
-                        :show-advanced-general="setupShowsAdvancedFields"
-                        :show-advanced-toggle="false"
-                        :timezone="timezone"
-                    />
-                </div>
+                    <n-flex vertical :size="18">
+                        <div>
+                            <h2 class="workspace-title">How do you want to begin?</h2>
+                            <n-text depth="3" class="workspace-summary">
+                                Start with your intent, not with a wall of options. Operators
+                                migrating an existing instance should restore first. New
+                                installations should begin with a safe dry-run setup.
+                            </n-text>
+                        </div>
 
-                <div
-                    :ref="bindTargetElement('exchange')"
-                    class="task-section"
-                    id="control-center-exchange"
-                >
-                    <div class="task-section-header" tabindex="-1" data-control-center-anchor>
-                        <h2>{{ getTaskPresentation('exchange').title }}</h2>
-                        <n-text depth="3">{{ getTaskPresentation('exchange').summary }}</n-text>
-                    </div>
-                    <ConfigExchangeSection
-                        ref="exchangeFormRef"
-                        :currency="currency"
-                        :exchange="exchange"
-                        :exchanges="exchanges"
-                        :market="market"
-                        :rules="rules"
-                        :show-advanced-general="setupShowsAdvancedFields"
-                        :timerange="timerange"
-                    />
-                </div>
+                        <n-flex class="entry-choice-grid" :wrap="true" :size="[16, 16]">
+                            <n-card size="small" class="entry-choice-card">
+                                <n-flex vertical :size="12">
+                                    <div>
+                                        <h3 class="entry-choice-title">
+                                            Restore existing installation
+                                        </h3>
+                                        <n-text depth="3">
+                                            Import a config-only or full backup, then review
+                                            readiness before anything goes live.
+                                        </n-text>
+                                    </div>
+                                    <n-button
+                                        type="primary"
+                                        secondary
+                                        @click="handleSetupEntryChoice('restore')"
+                                    >
+                                        Restore existing installation
+                                    </n-button>
+                                </n-flex>
+                            </n-card>
 
-                <div
-                    :ref="bindTargetElement('signal')"
-                    class="task-section"
-                    id="control-center-signal"
-                >
-                    <div class="task-section-header" tabindex="-1" data-control-center-anchor>
-                        <h2>{{ getTaskPresentation('signal').title }}</h2>
-                        <n-text depth="3">{{ getTaskPresentation('signal').summary }}</n-text>
-                    </div>
-                    <ConfigSignalSection
-                        ref="signalFormRef"
-                        :asap-missing-fields-label="getAsapMissingFieldsLabel()"
-                        :is-asap-exchange-ready="isAsapExchangeReady()"
-                        :on-asap-url-input="handleAsapUrlInput"
-                        :on-csv-file-selected="handleCsvSignalFileSelected"
-                        :on-fetch-asap-symbols="fetchAsapSymbolsForCurrency"
-                        :on-signal-settings-select="handleSignalSettingsSelect"
-                        :rules="rules"
-                        :signal="signal"
-                        :symsignals="symsignals"
-                    />
-                </div>
+                            <n-card size="small" class="entry-choice-card">
+                                <n-flex vertical :size="12">
+                                    <div>
+                                        <h3 class="entry-choice-title">Start a new setup</h3>
+                                        <n-text depth="3">
+                                            Configure the essentials needed for a safe dry run
+                                            before expert tuning or utilities appear.
+                                        </n-text>
+                                    </div>
+                                    <n-button
+                                        type="primary"
+                                        @click="handleSetupEntryChoice('new')"
+                                    >
+                                        Start a new setup
+                                    </n-button>
+                                </n-flex>
+                            </n-card>
+                        </n-flex>
+                    </n-flex>
+                </n-card>
 
-                <div
-                    :ref="bindTargetElement('dca')"
-                    class="task-section"
-                    id="control-center-dca"
-                >
-                    <div class="task-section-header" tabindex="-1" data-control-center-anchor>
-                        <h2>{{ getTaskPresentation('dca').title }}</h2>
-                        <n-text depth="3">{{ getTaskPresentation('dca').summary }}</n-text>
-                    </div>
-                    <ConfigDcaSection
-                        ref="dcaFormRef"
-                        :dca="dca"
-                        :rules="rules"
-                        :sell-order-type-options="sellOrderTypeOptions"
-                        :show-advanced-general="setupShowsAdvancedFields"
-                        :strategy-options="signal.strategy_plugins"
-                    />
-                </div>
+                <template v-else-if="showRestoreSetupFlow">
+                    <n-card
+                        class="workspace-card setup-flow-card"
+                        content-style="padding: 20px 22px;"
+                    >
+                        <n-flex vertical :size="18">
+                            <n-flex justify="space-between" align="center" :wrap="true">
+                                <div>
+                                    <h2 class="workspace-title">Restore and review</h2>
+                                    <n-text depth="3" class="workspace-summary">
+                                        Bring an existing Moonwalker installation forward first,
+                                        then land in a readiness review before making changes.
+                                    </n-text>
+                                </div>
+                                <n-button quaternary @click="handleSetupEntryChoice('new')">
+                                    Start a new setup instead
+                                </n-button>
+                            </n-flex>
 
-                <div
-                    :ref="bindTargetElement('monitoring')"
-                    class="task-section"
-                    id="control-center-monitoring"
-                >
-                    <div class="task-section-header" tabindex="-1" data-control-center-anchor>
-                        <h2>{{ getTaskPresentation('monitoring').title }}</h2>
-                        <n-text depth="3">{{ getTaskPresentation('monitoring').summary }}</n-text>
+                            <n-alert type="info" title="Import first, review second">
+                                Restoring does not skip safety review. Moonwalker will reload the
+                                imported configuration and send you to a readiness check after the
+                                backend completes the restore.
+                            </n-alert>
+
+                            <input
+                                ref="backupFileInputRef"
+                                type="file"
+                                accept="application/json,.json"
+                                class="backup-file-input"
+                                @change="handleBackupFileSelected"
+                            >
+
+                            <n-flex align="center" :wrap="true" :size="[12, 12]">
+                                <n-button secondary @click="openBackupFilePicker">
+                                    Select backup file
+                                </n-button>
+                                <span v-if="selectedBackupFileName" class="backup-file-name">
+                                    {{ selectedBackupFileName }}
+                                </span>
+                                <n-button
+                                    v-if="selectedBackupFileName"
+                                    quaternary
+                                    @click="clearSelectedBackup"
+                                >
+                                    Clear
+                                </n-button>
+                            </n-flex>
+
+                            <n-text v-if="selectedBackupPayload" depth="3">
+                                Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
+                            </n-text>
+
+                            <n-flex align="center" :wrap="true" :size="[12, 12]">
+                                <n-button
+                                    type="warning"
+                                    :loading="restoreLoading"
+                                    :disabled="!selectedBackupPayload"
+                                    @click="handleRestoreBackupAction('config')"
+                                >
+                                    Restore config only
+                                </n-button>
+                                <n-button
+                                    type="error"
+                                    ghost
+                                    :loading="restoreLoading"
+                                    :disabled="!selectedBackupHasTradeData"
+                                    @click="handleRestoreBackupAction('full')"
+                                >
+                                    Restore full backup
+                                </n-button>
+                            </n-flex>
+                        </n-flex>
+                    </n-card>
+                </template>
+
+                <template v-else>
+                    <n-card
+                        v-if="showSetupStyleSelector"
+                        class="workspace-card setup-style-card"
+                        content-style="padding: 18px 20px;"
+                    >
+                        <n-flex vertical :size="12">
+                            <n-flex justify="space-between" align="center" :wrap="true">
+                                <div>
+                                    <h2 class="workspace-title">Choose your setup pace</h2>
+                                    <n-text depth="3" class="workspace-summary">
+                                        Guided setup keeps the operator focused on the essentials.
+                                        Full control reveals expert controls inline while you work.
+                                    </n-text>
+                                </div>
+                                <n-button
+                                    v-if="readiness.firstRun"
+                                    quaternary
+                                    @click="handleSetupEntryChoice('restore')"
+                                >
+                                    Restore instead
+                                </n-button>
+                            </n-flex>
+
+                            <n-flex :wrap="true" :size="[10, 10]">
+                                <n-button
+                                    :type="setupStyle === 'guided' ? 'primary' : 'default'"
+                                    secondary
+                                    @click="handleSetupStyleChange('guided')"
+                                >
+                                    Guided setup
+                                </n-button>
+                                <n-button
+                                    :type="setupStyle === 'full' ? 'primary' : 'default'"
+                                    secondary
+                                    @click="handleSetupStyleChange('full')"
+                                >
+                                    Full control
+                                </n-button>
+                            </n-flex>
+                        </n-flex>
+                    </n-card>
+
+                    <div class="setup-progress-grid">
+                        <button
+                            v-for="task in setupTasks"
+                            :key="task.target"
+                            class="setup-progress-card"
+                            :class="{
+                                'setup-progress-card-active':
+                                    activeSetupTarget === task.target,
+                                'setup-progress-card-blocked': !!findSetupBlocker(task.target),
+                                'setup-progress-card-ready':
+                                    !findSetupBlocker(task.target) &&
+                                    activeSetupTarget !== task.target,
+                            }"
+                            type="button"
+                            @click="handleSetupTaskSelect(task.target)"
+                        >
+                            <span class="setup-progress-status">
+                                {{ getSetupTaskStatus(task.target).label }}
+                            </span>
+                            <strong>{{ task.title }}</strong>
+                            <span>{{ getSetupTaskSummary(task.target) }}</span>
+                        </button>
                     </div>
-                    <ConfigMonitoringSection
-                        ref="monitoringFormRef"
-                        :can-test="canTestMonitoringTelegram()"
-                        :monitoring="monitoring"
-                        :on-test="handleMonitoringTestAction"
-                        :rules="rules"
-                        :show-test-action="false"
-                        :test-loading="monitoringTestLoading"
-                    />
-                </div>
+
+                    <div
+                        :ref="bindTargetElement('general')"
+                        class="task-section task-section-shell"
+                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('general') }"
+                        id="control-center-general"
+                    >
+                        <div class="task-section-heading-row">
+                            <div
+                                class="task-section-header"
+                                tabindex="-1"
+                                data-control-center-anchor
+                            >
+                                <h2>{{ getTaskPresentation('general').title }}</h2>
+                                <n-text depth="3">{{ getTaskPresentation('general').summary }}</n-text>
+                            </div>
+                            <n-button
+                                quaternary
+                                @click="handleSetupTaskSelect('general')"
+                            >
+                                {{ isSetupTaskExpanded('general') ? 'Current step' : 'Open' }}
+                            </n-button>
+                        </div>
+                        <div v-show="isSetupTaskExpanded('general')" class="task-section-body">
+                            <ConfigGeneralSection
+                                ref="generalFormRef"
+                                :general="general"
+                                :rules="rules"
+                                :show-advanced-general="setupShowsAdvancedFields"
+                                :show-advanced-toggle="false"
+                                :show-debug="setupShowsAdvancedFields"
+                                :timezone="timezone"
+                            />
+                        </div>
+                    </div>
+
+                    <div
+                        :ref="bindTargetElement('exchange')"
+                        class="task-section task-section-shell"
+                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('exchange') }"
+                        id="control-center-exchange"
+                    >
+                        <div class="task-section-heading-row">
+                            <div
+                                class="task-section-header"
+                                tabindex="-1"
+                                data-control-center-anchor
+                            >
+                                <h2>{{ getTaskPresentation('exchange').title }}</h2>
+                                <n-text depth="3">{{ getTaskPresentation('exchange').summary }}</n-text>
+                            </div>
+                            <n-button
+                                quaternary
+                                @click="handleSetupTaskSelect('exchange')"
+                            >
+                                {{ isSetupTaskExpanded('exchange') ? 'Current step' : 'Open' }}
+                            </n-button>
+                        </div>
+                        <div v-show="isSetupTaskExpanded('exchange')" class="task-section-body">
+                            <ConfigExchangeSection
+                                ref="exchangeFormRef"
+                                :currency="currency"
+                                :exchange="exchange"
+                                :exchanges="exchanges"
+                                :market="market"
+                                :rules="rules"
+                                :show-advanced-general="setupShowsAdvancedFields"
+                                :timerange="timerange"
+                            />
+                        </div>
+                    </div>
+
+                    <div
+                        :ref="bindTargetElement('signal')"
+                        class="task-section task-section-shell"
+                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('signal') }"
+                        id="control-center-signal"
+                    >
+                        <div class="task-section-heading-row">
+                            <div
+                                class="task-section-header"
+                                tabindex="-1"
+                                data-control-center-anchor
+                            >
+                                <h2>{{ getTaskPresentation('signal').title }}</h2>
+                                <n-text depth="3">{{ getTaskPresentation('signal').summary }}</n-text>
+                            </div>
+                            <n-button
+                                quaternary
+                                @click="handleSetupTaskSelect('signal')"
+                            >
+                                {{ isSetupTaskExpanded('signal') ? 'Current step' : 'Open' }}
+                            </n-button>
+                        </div>
+                        <div v-show="isSetupTaskExpanded('signal')" class="task-section-body">
+                            <ConfigSignalSection
+                                ref="signalFormRef"
+                                :asap-missing-fields-label="getAsapMissingFieldsLabel()"
+                                :is-asap-exchange-ready="isAsapExchangeReady()"
+                                :on-asap-url-input="handleAsapUrlInput"
+                                :on-csv-file-selected="handleCsvSignalFileSelected"
+                                :on-fetch-asap-symbols="fetchAsapSymbolsForCurrency"
+                                :on-signal-settings-select="handleSignalSettingsSelect"
+                                :rules="rules"
+                                :signal="signal"
+                                :symsignals="symsignals"
+                            />
+                        </div>
+                    </div>
+
+                    <div
+                        :ref="bindTargetElement('dca')"
+                        class="task-section task-section-shell"
+                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('dca') }"
+                        id="control-center-dca"
+                    >
+                        <div class="task-section-heading-row">
+                            <div
+                                class="task-section-header"
+                                tabindex="-1"
+                                data-control-center-anchor
+                            >
+                                <h2>{{ getTaskPresentation('dca').title }}</h2>
+                                <n-text depth="3">{{ getTaskPresentation('dca').summary }}</n-text>
+                            </div>
+                            <n-button
+                                quaternary
+                                @click="handleSetupTaskSelect('dca')"
+                            >
+                                {{ isSetupTaskExpanded('dca') ? 'Current step' : 'Open' }}
+                            </n-button>
+                        </div>
+                        <div v-show="isSetupTaskExpanded('dca')" class="task-section-body">
+                            <ConfigDcaSection
+                                ref="dcaFormRef"
+                                :dca="dca"
+                                :rules="rules"
+                                :sell-order-type-options="sellOrderTypeOptions"
+                                :show-advanced-general="setupShowsAdvancedFields"
+                                :strategy-options="signal.strategy_plugins"
+                            />
+                        </div>
+                    </div>
+
+                    <div
+                        :ref="bindTargetElement('monitoring')"
+                        class="task-section task-section-shell"
+                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('monitoring') }"
+                        id="control-center-monitoring"
+                    >
+                        <div class="task-section-heading-row">
+                            <div
+                                class="task-section-header"
+                                tabindex="-1"
+                                data-control-center-anchor
+                            >
+                                <h2>{{ getTaskPresentation('monitoring').title }}</h2>
+                                <n-text depth="3">{{ getTaskPresentation('monitoring').summary }}</n-text>
+                            </div>
+                            <n-button
+                                quaternary
+                                @click="handleSetupTaskSelect('monitoring')"
+                            >
+                                {{ isSetupTaskExpanded('monitoring') ? 'Current step' : 'Open' }}
+                            </n-button>
+                        </div>
+                        <div v-show="isSetupTaskExpanded('monitoring')" class="task-section-body">
+                            <ConfigMonitoringSection
+                                ref="monitoringFormRef"
+                                :can-test="canTestMonitoringTelegram()"
+                                :monitoring="monitoring"
+                                :on-test="handleMonitoringTestAction"
+                                :rules="rules"
+                                :show-test-action="false"
+                                :test-loading="monitoringTestLoading"
+                            />
+                        </div>
+                    </div>
+                </template>
             </template>
 
             <template v-else-if="routeState.mode === 'advanced'">
+                <n-card
+                    class="workspace-card advanced-intro-card"
+                    content-style="padding: 18px 20px;"
+                >
+                    <n-flex vertical :size="10">
+                        <h2 class="workspace-title">Expert tuning</h2>
+                        <n-text depth="3" class="workspace-summary">
+                            Setup owns the dry-run essentials. Advanced keeps the
+                            runtime, exchange, filtering, and autopilot controls that
+                            experienced operators tune deliberately.
+                        </n-text>
+                    </n-flex>
+                </n-card>
+
                 <div
-                    v-for="task in advancedTasks"
-                    :id="task.sectionId"
-                    :key="task.target"
-                    :ref="bindTargetElement(task.target)"
+                    v-for="section in advancedSections"
+                    :id="section.sectionId"
+                    :key="section.target"
+                    :ref="bindTargetElement(section.target)"
                     class="task-section"
                 >
                     <div class="task-section-header" tabindex="-1" data-control-center-anchor>
-                        <h2>{{ task.title }}</h2>
-                        <n-text depth="3">{{ task.summary }}</n-text>
+                        <h2>{{ section.title }}</h2>
+                        <n-text depth="3">{{ section.summary }}</n-text>
                     </div>
 
-                    <ConfigGeneralSection
-                        v-if="task.target === 'general'"
+                    <ConfigGeneralAdvancedSection
+                        v-if="section.target === 'general'"
                         ref="generalFormRef"
                         :general="general"
                         :rules="rules"
-                        :show-advanced-general="true"
-                        :show-advanced-toggle="false"
-                        :timezone="timezone"
                     />
-                    <ConfigExchangeSection
-                        v-else-if="task.target === 'exchange'"
+                    <ConfigExchangeAdvancedSection
+                        v-else-if="section.target === 'exchange'"
                         ref="exchangeFormRef"
-                        :currency="currency"
                         :exchange="exchange"
-                        :exchanges="exchanges"
-                        :market="market"
                         :rules="rules"
-                        :show-advanced-general="true"
-                        :timerange="timerange"
                     />
-                    <ConfigDcaSection
-                        v-else-if="task.target === 'dca'"
+                    <ConfigDcaAdvancedSection
+                        v-else-if="section.target === 'dca'"
                         ref="dcaFormRef"
                         :dca="dca"
                         :rules="rules"
-                        :sell-order-type-options="sellOrderTypeOptions"
-                        :show-advanced-general="true"
-                        :strategy-options="signal.strategy_plugins"
                     />
                     <ConfigFilterSection
-                        v-else-if="task.target === 'filter'"
+                        v-else-if="section.target === 'filter'"
                         ref="filterFormRef"
                         :filter="filter"
                         :rules="rules"
                         :show-asap-fields="signal.signal === 'asap'"
                     />
                     <ConfigAutopilotSection
-                        v-else-if="task.target === 'autopilot'"
+                        v-else-if="section.target === 'autopilot'"
                         ref="autopilotFormRef"
                         :autopilot="autopilot"
                         :rules="rules"
                         :show-fields="autopilot.enabled"
                     />
                     <ConfigIndicatorSection
-                        v-else-if="task.target === 'indicator'"
+                        v-else-if="section.target === 'indicator'"
                         ref="indicatorFormRef"
                         :history-lookback-options="historyLookbackOptions"
                         :indicator="indicator"
                         :rules="rules"
-                    />
-                    <ConfigMonitoringSection
-                        v-else-if="task.target === 'monitoring'"
-                        ref="monitoringFormRef"
-                        :can-test="canTestMonitoringTelegram()"
-                        :monitoring="monitoring"
-                        :on-test="handleMonitoringTestAction"
-                        :rules="rules"
-                        :show-test-action="false"
-                        :test-loading="monitoringTestLoading"
                     />
                 </div>
             </template>
@@ -1376,7 +1836,7 @@ onUnmounted(() => {
                                     {{
                                         canTestMonitoringTelegram()
                                             ? 'Saved monitoring credentials are ready for a test message.'
-                                            : 'Complete Telegram credentials in Setup or Advanced first.'
+                                            : 'Complete Telegram credentials in Setup first.'
                                     }}
                                 </n-text>
                             </n-flex>
@@ -1442,6 +1902,25 @@ onUnmounted(() => {
     border: 1px solid var(--color-border-hover);
 }
 
+.mode-strip-shell {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 18px;
+    justify-content: space-between;
+}
+
+.mode-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.mode-group-label {
+    font-size: 0.78rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
 .mode-strip {
     align-items: center;
 }
@@ -1451,10 +1930,133 @@ onUnmounted(() => {
     width: 100%;
 }
 
+.workspace-title {
+    font-size: 1.18rem;
+    line-height: 1.2;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+}
+
+.workspace-summary {
+    display: block;
+    margin-top: 6px;
+    max-width: 68ch;
+}
+
+.setup-progress-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.setup-progress-card {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 14px 16px;
+    border: 1px solid rgba(29, 92, 73, 0.12);
+    border-radius: 12px;
+    background: rgba(247, 248, 246, 0.92);
+    color: inherit;
+    text-align: left;
+    cursor: pointer;
+    transition:
+        border-color 120ms ease,
+        box-shadow 120ms ease,
+        transform 120ms ease;
+}
+
+.setup-progress-card:hover {
+    border-color: rgba(29, 92, 73, 0.28);
+    box-shadow: 0 8px 18px rgba(24, 33, 29, 0.06);
+    transform: translateY(-1px);
+}
+
+.setup-progress-card strong {
+    font-size: 0.96rem;
+}
+
+.setup-progress-card span:last-child {
+    font-size: 0.88rem;
+    color: rgba(51, 64, 58, 0.82);
+}
+
+.setup-progress-status {
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: rgba(29, 92, 73, 0.78);
+}
+
+.setup-progress-card-active {
+    border-color: rgba(29, 92, 73, 0.35);
+    background: rgba(227, 243, 236, 0.9);
+}
+
+.setup-progress-card-blocked {
+    border-color: rgba(183, 121, 31, 0.26);
+    background: rgba(255, 248, 236, 0.94);
+}
+
+.setup-progress-card-ready {
+    border-color: rgba(46, 125, 91, 0.2);
+}
+
 .task-section {
     display: flex;
     flex-direction: column;
     gap: 10px;
+}
+
+.task-section-shell {
+    border: 1px solid rgba(29, 92, 73, 0.12);
+    border-radius: 14px;
+    padding: 16px 18px;
+    background: rgba(255, 255, 255, 0.92);
+}
+
+.task-section-collapsed {
+    background: rgba(247, 248, 246, 0.86);
+}
+
+.task-section-heading-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+}
+
+.task-section-body {
+    margin-top: 6px;
+}
+
+.entry-choice-grid {
+    align-items: stretch;
+}
+
+.entry-choice-card {
+    min-width: min(320px, 100%);
+    flex: 1 1 320px;
+    border: 1px solid rgba(29, 92, 73, 0.16);
+}
+
+.entry-choice-title {
+    font-size: 1.08rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
+.setup-entry-card,
+.setup-flow-card,
+.setup-style-card,
+.advanced-intro-card {
+    border: 1px solid rgba(29, 92, 73, 0.14);
+    background: linear-gradient(
+        180deg,
+        rgba(247, 248, 246, 0.96),
+        rgba(236, 239, 234, 0.88)
+    );
 }
 
 .task-section-header {
@@ -1498,6 +2100,18 @@ onUnmounted(() => {
 @media (max-width: 768px) {
     .page-section {
         margin-inline: 6px;
+    }
+
+    .mode-strip-shell {
+        gap: 12px;
+    }
+
+    .setup-progress-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .task-section-heading-row {
+        flex-direction: column;
     }
 
     .mission-panel :deep(.n-alert) {

@@ -22,6 +22,7 @@ frontend/tests/helpers/*
 !frontend/tests/controlCenterSaveWorkflow.test.cjs
 !frontend/tests/useConfigValidationFlow.test.cjs
 !frontend/tests/controlCenterTemplateBindings.test.cjs
+!frontend/tests/controlCenterRouterGuard.test.cjs
 debugdb.py
 backend/strategies/btc.py
 moonwalker.lock

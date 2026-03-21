@@ -40,14 +40,38 @@ test('control center target sections use dynamic element refs', () => {
     )
 })
 
-test('control center keeps setup essentials-only and reserves expert fields for advanced mode', () => {
-    // Regression: ISSUE-004 — Setup and Advanced looked nearly identical because
-    // Setup still exposed the shared advanced toggle and advanced-only fields.
-    // Found by /qa on 2026-03-20
+test('control center gates first-run setup behind explicit onboarding choices', () => {
+    // Regression: FINDING-001/FINDING-004 — first run exposed all peer modes
+    // immediately and buried restore inside Utilities instead of asking for the
+    // operator's intent up front.
     const requiredSnippets = [
-        ':show-advanced-general="setupShowsAdvancedFields"',
-        ':show-advanced-toggle="false"',
-        "const setupShowsAdvancedFields = computed(() => false)",
+        "const showSetupEntryGate = computed(",
+        "const showRestoreSetupFlow = computed(",
+        "const setupShowsAdvancedFields = computed(",
+        "setupStyle.value === 'full'",
+        'How do you want to begin?',
+        'Restore existing installation',
+        'Start a new setup',
+    ]
+
+    for (const snippet of requiredSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+})
+
+test('control center keeps guided setup focused and moves expert-only controls into advanced', () => {
+    const requiredSnippets = [
+        'class="setup-progress-grid"',
+        "v-show=\"isSetupTaskExpanded('general')\"",
+        ':show-debug="setupShowsAdvancedFields"',
+        'ConfigGeneralAdvancedSection',
+        'ConfigExchangeAdvancedSection',
+        'ConfigDcaAdvancedSection',
+        'Expert tuning',
+        'Complete Telegram credentials in Setup first.',
     ]
 
     for (const snippet of requiredSnippets) {

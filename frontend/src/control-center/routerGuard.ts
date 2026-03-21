@@ -1,5 +1,6 @@
 import type { RouteLocationNormalized } from 'vue-router'
 
+import { getTaskPresentation, isKnownControlCenterTarget } from './taskRegistry'
 import { type ControlCenterReadiness } from './types'
 import { buildControlCenterQuery, normalizeControlCenterRouteState } from './routeState'
 import { deriveControlCenterViewState } from './viewState'
@@ -28,6 +29,34 @@ export function resolveControlCenterNavigation(
         readiness: ControlCenterReadiness
     },
 ): Record<string, unknown> | true {
+    if (!options.loadError && !options.readiness.complete) {
+        const rawTarget = Array.isArray(to.query.target)
+            ? to.query.target[0]
+            : to.query.target
+        const requestedTarget = isKnownControlCenterTarget(rawTarget)
+            ? rawTarget
+            : null
+        const nextTarget =
+            requestedTarget &&
+            getTaskPresentation(requestedTarget).modes.includes('setup')
+                ? requestedTarget
+                : options.readiness.nextTarget
+        const normalizedQuery = buildControlCenterQuery({
+            mode: 'setup',
+            target: nextTarget,
+        })
+
+        if (to.name === 'controlCenter' && areQueriesEqual(to, normalizedQuery)) {
+            return true
+        }
+
+        return {
+            name: 'controlCenter',
+            query: normalizedQuery,
+            replace: true,
+        }
+    }
+
     if (to.name === 'controlCenter') {
         const viewState = deriveControlCenterViewState({
             loadError: options.loadError,
@@ -47,16 +76,6 @@ export function resolveControlCenterNavigation(
             name: 'controlCenter',
             query: normalizedQuery,
             replace: true,
-        }
-    }
-
-    if (!options.loadError && !options.readiness.complete) {
-        return {
-            name: 'controlCenter',
-            query: buildControlCenterQuery({
-                mode: 'setup',
-                target: options.readiness.nextTarget,
-            }),
         }
     }
 
