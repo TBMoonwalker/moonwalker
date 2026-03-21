@@ -54,6 +54,8 @@ You also need to install the ta-lib library for your OS. Please see: https://ta-
 
 ## Documentation
 - Documentation index: `docs/README.md`
+- Release notes: `CHANGELOG.md`
+- Current tracked release version: `VERSION`
 - Configuration and full key reference: `docs/configuration.md`
 - API and websocket reference: `docs/api.md`
 - Monitoring (Telegram): `docs/monitoring.md`

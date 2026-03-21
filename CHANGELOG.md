@@ -6,6 +6,6 @@ All notable changes to Moonwalker are documented in this file.
 
 ### Changed
 
-- Let the expanded open-trade chart fill its card while preserving the card's rounded clipping.
-- Strengthened active-state contrast across Control Center, Monitoring, Utilities, and Trades so selected tabs and primary actions no longer look inactive.
-- Aligned the trades tab row with the line-style active treatment used by the profit tabs.
+- Let the expanded open-trade chart use the full card surface while preserving rounded clipping.
+- Make selected tabs and primary actions read clearly active across Control Center, Monitoring, Utilities, and Trades.
+- Give the trades tab row the same line-style active treatment as the profit tabs.
