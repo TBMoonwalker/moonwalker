@@ -1039,7 +1039,7 @@ onUnmounted(() => {
                                 Control Center
                             </n-text>
                             <div class="mission-heading-group">
-                                <n-tag size="small" :type="missionSummaryTone">
+                                <n-tag class="mission-status-tag" :type="missionSummaryTone">
                                     {{ viewState.badge }}
                                 </n-tag>
                                 <h1 class="mission-title">
@@ -1887,6 +1887,17 @@ onUnmounted(() => {
     flex-wrap: wrap;
     align-items: center;
     gap: 10px;
+}
+
+.mission-heading-group :deep(.mission-status-tag) {
+    border-radius: 999px;
+    padding: 6px 12px;
+}
+
+.mission-heading-group :deep(.mission-status-tag .n-tag__content) {
+    font-size: 0.95rem;
+    font-weight: 600;
+    line-height: 1;
 }
 
 .mission-title {
