@@ -24,6 +24,67 @@ const DEFAULT_WS_RECONNECT_DEBOUNCE_MS = 2000
 
 const osThemeRef = useOsTheme()
 const theme = computed(() => (osThemeRef.value === 'dark' ? darkTheme : null))
+const themeOverrides = computed(() => {
+  if (osThemeRef.value === 'dark') {
+    return {
+      common: {
+        fontFamily: "'Source Sans 3', 'Segoe UI', sans-serif",
+        fontFamilyMono: "'IBM Plex Mono', 'SFMono-Regular', monospace",
+        fontWeightStrong: '600',
+        primaryColor: '#245f4e',
+        primaryColorHover: '#2e7d5b',
+        primaryColorPressed: '#1b4b3d',
+        primaryColorSuppl: '#245f4e',
+        infoColor: '#356d86',
+        successColor: '#2e7d5b',
+        warningColor: '#b7791f',
+        errorColor: '#b4443f',
+        bodyColor: '#111714',
+        baseColor: '#1d2823',
+        cardColor: '#1d2823',
+        modalColor: '#1d2823',
+        popoverColor: '#1d2823',
+        borderColor: 'rgba(213, 219, 213, 0.2)',
+        dividerColor: 'rgba(213, 219, 213, 0.16)',
+        textColorBase: '#f7f8f6',
+        textColor1: '#f7f8f6',
+        textColor2: 'rgba(247, 248, 246, 0.84)',
+        textColor3: 'rgba(213, 219, 213, 0.72)',
+        borderRadius: '10px',
+        borderRadiusSmall: '6px',
+      },
+    }
+  }
+
+  return {
+    common: {
+      fontFamily: "'Source Sans 3', 'Segoe UI', sans-serif",
+      fontFamilyMono: "'IBM Plex Mono', 'SFMono-Regular', monospace",
+      fontWeightStrong: '600',
+      primaryColor: '#1d5c49',
+      primaryColorHover: '#2e7d5b',
+      primaryColorPressed: '#18413a',
+      primaryColorSuppl: '#1d5c49',
+      infoColor: '#356d86',
+      successColor: '#2e7d5b',
+      warningColor: '#b7791f',
+      errorColor: '#b4443f',
+      bodyColor: '#f7f8f6',
+      baseColor: '#ffffff',
+      cardColor: '#ffffff',
+      modalColor: '#ffffff',
+      popoverColor: '#ffffff',
+      borderColor: '#d5dbd5',
+      dividerColor: 'rgba(24, 33, 29, 0.08)',
+      textColorBase: '#18211d',
+      textColor1: '#18211d',
+      textColor2: '#33403a',
+      textColor3: '#8a948d',
+      borderRadius: '10px',
+      borderRadiusSmall: '6px',
+    },
+  }
+})
 
 // Stores
 const open_trade_store = useWebSocketDataStore("openTrades")
@@ -244,7 +305,7 @@ watch(
 </script>
 
 <template>
-  <n-config-provider :theme="theme">
+  <n-config-provider :theme="theme" :theme-overrides="themeOverrides">
     <n-global-style />
     <n-message-provider>
       <n-notification-provider>
@@ -273,7 +334,7 @@ watch(
 
 .app-content {
   width: 100%;
-  max-width: 1600px;
+  max-width: var(--mw-content-width);
   margin: 0 auto;
 }
 </style>

@@ -84,24 +84,23 @@ function handleMenuSelect(key: string | number): void {
 <style scoped>
 .app-header {
   width: 100%;
-  max-width: 1600px;
+  max-width: var(--mw-content-width);
   margin: 0 auto;
-  padding-inline: 10px;
 }
 
 .app-header-card {
   width: 100%;
-  border: 1px solid var(--color-border-hover);
+  border: 1px solid var(--mw-color-border);
   background:
-    linear-gradient(135deg, rgba(99, 226, 183, 0.12), transparent 58%),
-    linear-gradient(180deg, var(--color-background-soft), var(--color-background-mute));
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.08);
+    radial-gradient(circle at top left, rgba(29, 92, 73, 0.14), transparent 32%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(236, 239, 234, 0.96));
+  box-shadow: 0 12px 28px rgba(24, 33, 29, 0.08);
 }
 
 .header-shell {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
+  gap: 18px;
   align-items: center;
 }
 
@@ -138,16 +137,17 @@ function handleMenuSelect(key: string | number): void {
 }
 
 .brand-title {
-  font-size: 1.05rem;
+  color: var(--mw-color-text-primary);
+  font-family: var(--mw-font-display);
+  font-size: 1.3rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .brand-caption {
-  font-size: 0.74rem;
-  letter-spacing: 0.02em;
-  opacity: 0.7;
+  color: var(--mw-color-text-muted);
+  font-size: 0.88rem;
+  letter-spacing: 0.01em;
 }
 
 .header-menu-wrap {
@@ -166,22 +166,28 @@ function handleMenuSelect(key: string | number): void {
 }
 
 :deep(.header-menu .n-menu-item-content) {
-  border-radius: 10px;
+  border-radius: var(--mw-radius-md);
 }
 
 :deep(.header-menu .n-menu-item-content::before) {
-  border-radius: 10px;
+  border-radius: var(--mw-radius-md);
 }
 
 :deep(.header-menu .n-menu-item-content-header) {
+  color: var(--mw-color-text-secondary);
+  font-family: var(--mw-font-body);
   font-weight: 600;
 }
 
-@media (max-width: 768px) {
-  .app-header {
-    padding-inline: 6px;
-  }
+:deep(.header-menu .n-menu-item-content--selected) {
+  background: rgba(29, 92, 73, 0.1);
+}
 
+:deep(.header-menu .n-menu-item-content--selected .n-menu-item-content-header) {
+  color: var(--mw-color-primary);
+}
+
+@media (max-width: 768px) {
   .header-shell {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 10px;
@@ -194,7 +200,7 @@ function handleMenuSelect(key: string | number): void {
   }
 
   .brand-title {
-    font-size: 0.95rem;
+    font-size: 1.05rem;
   }
 
   .brand-mark {

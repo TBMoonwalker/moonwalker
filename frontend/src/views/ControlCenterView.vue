@@ -1854,8 +1854,7 @@ onUnmounted(() => {
 }
 
 .page-section {
-    margin-inline: 10px;
-    margin-bottom: 10px;
+    margin-bottom: 12px;
 }
 
 .page-section:last-child {
@@ -1870,13 +1869,17 @@ onUnmounted(() => {
     font-size: 0.82rem;
     letter-spacing: 0.12em;
     text-transform: uppercase;
+    color: rgba(236, 239, 234, 0.78);
+    font-family: var(--mw-font-body);
+    font-weight: 600;
 }
 
 .mission-panel {
-    border: 1px solid rgba(24, 65, 58, 0.18);
+    border: 1px solid rgba(29, 92, 73, 0.26);
     background:
-        radial-gradient(circle at top left, rgba(99, 226, 183, 0.18), transparent 34%),
-        linear-gradient(135deg, rgba(18, 40, 37, 0.96), rgba(16, 24, 32, 0.96));
+        radial-gradient(circle at top left, rgba(183, 138, 46, 0.2), transparent 34%),
+        linear-gradient(135deg, rgba(29, 92, 73, 0.98), rgba(24, 33, 29, 0.96));
+    box-shadow: 0 18px 36px rgba(24, 33, 29, 0.14);
     color: rgba(255, 255, 255, 0.95);
 }
 
@@ -1888,6 +1891,7 @@ onUnmounted(() => {
 }
 
 .mission-title {
+    font-family: var(--mw-font-display);
     font-size: clamp(1.5rem, 3vw, 2.25rem);
     line-height: 1.1;
     font-weight: 700;
@@ -1931,7 +1935,9 @@ onUnmounted(() => {
 }
 
 .workspace-title {
-    font-size: 1.18rem;
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
+    font-size: clamp(1.35rem, 2.4vw, 1.8rem);
     line-height: 1.2;
     font-weight: 700;
     letter-spacing: -0.02em;
@@ -1945,8 +1951,8 @@ onUnmounted(() => {
 
 .setup-progress-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+    gap: 16px;
 }
 
 .setup-progress-card {
@@ -1974,6 +1980,8 @@ onUnmounted(() => {
 }
 
 .setup-progress-card strong {
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
     font-size: 0.96rem;
 }
 
@@ -1987,6 +1995,7 @@ onUnmounted(() => {
     letter-spacing: 0.08em;
     text-transform: uppercase;
     color: rgba(29, 92, 73, 0.78);
+    font-family: var(--mw-font-mono);
 }
 
 .setup-progress-card-active {
@@ -2011,7 +2020,7 @@ onUnmounted(() => {
 
 .task-section-shell {
     border: 1px solid rgba(29, 92, 73, 0.12);
-    border-radius: 14px;
+    border-radius: var(--mw-radius-lg);
     padding: 16px 18px;
     background: rgba(255, 255, 255, 0.92);
 }
@@ -2039,10 +2048,14 @@ onUnmounted(() => {
     min-width: min(320px, 100%);
     flex: 1 1 320px;
     border: 1px solid rgba(29, 92, 73, 0.16);
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: 0 10px 24px rgba(24, 33, 29, 0.05);
 }
 
 .entry-choice-title {
-    font-size: 1.08rem;
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
+    font-size: 1.12rem;
     font-weight: 700;
     letter-spacing: -0.01em;
 }
@@ -2067,6 +2080,8 @@ onUnmounted(() => {
 
 .task-section-header h2,
 .status-card-title {
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
     font-size: 1.05rem;
     font-weight: 700;
     letter-spacing: -0.01em;
