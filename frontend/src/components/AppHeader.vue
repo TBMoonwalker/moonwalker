@@ -178,12 +178,23 @@ function handleMenuSelect(key: string | number): void {
   font-weight: 600;
 }
 
+:deep(.header-menu .n-menu-item-content__icon) {
+  color: var(--mw-color-text-secondary);
+  transition: color 120ms ease;
+}
+
 :deep(.header-menu .n-menu-item-content--selected) {
-  background: var(--mw-color-primary-soft);
+  background: rgba(29, 92, 73, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(29, 92, 73, 0.12);
 }
 
 :deep(.header-menu .n-menu-item-content--selected .n-menu-item-content-header) {
-  color: var(--mw-color-primary);
+  color: #18413a;
+  font-weight: 700;
+}
+
+:deep(.header-menu .n-menu-item-content--selected .n-menu-item-content__icon) {
+  color: #18413a;
 }
 
 @media (max-width: 768px) {

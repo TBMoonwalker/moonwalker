@@ -1777,6 +1777,7 @@ onUnmounted(() => {
                                     Include trade data in backup
                                 </n-checkbox>
                                 <n-button
+                                    class="utility-action-button"
                                     type="primary"
                                     secondary
                                     :loading="backupDownloadLoading"
@@ -1797,7 +1798,11 @@ onUnmounted(() => {
                             >
 
                             <n-flex align="center" :wrap="true" :size="[12, 12]">
-                                <n-button secondary @click="openBackupFilePicker">
+                                <n-button
+                                    class="utility-action-button"
+                                    secondary
+                                    @click="openBackupFilePicker"
+                                >
                                     Select backup file
                                 </n-button>
                                 <span v-if="selectedBackupFileName" class="backup-file-name">
@@ -1818,6 +1823,7 @@ onUnmounted(() => {
 
                             <n-flex align="center" :wrap="true" :size="[12, 12]">
                                 <n-button
+                                    class="utility-action-button"
                                     type="warning"
                                     :loading="restoreLoading"
                                     :disabled="!selectedBackupPayload"
@@ -1826,6 +1832,7 @@ onUnmounted(() => {
                                     Restore config only
                                 </n-button>
                                 <n-button
+                                    class="utility-action-button"
                                     type="error"
                                     ghost
                                     :loading="restoreLoading"
@@ -1853,6 +1860,7 @@ onUnmounted(() => {
                             </n-text>
                             <n-flex align="center" :wrap="true" :size="[12, 12]">
                                 <n-button
+                                    class="utility-action-button"
                                     secondary
                                     type="primary"
                                     :loading="monitoringTestLoading"
@@ -1973,6 +1981,20 @@ onUnmounted(() => {
     color: #f7f8f6;
     font-weight: 700;
     letter-spacing: 0.01em;
+}
+
+:deep(.utility-action-button:not(.n-button--disabled) .n-button__content) {
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+:deep(.utility-action-button.n-button--primary-type.n-button--secondary:not(.n-button--disabled) .n-button__content),
+:deep(.utility-action-button.n-button--primary-type.n-button--secondary:not(.n-button--disabled) .n-button__icon) {
+    color: #18413a;
+}
+
+:deep(.utility-action-button.n-button--default-type.n-button--secondary:not(.n-button--disabled) .n-button__content) {
+    color: var(--mw-color-text-primary);
 }
 
 .workspace-card,
