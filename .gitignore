@@ -227,5 +227,5 @@ backend/templates/index.html
 package-lock.json
 
 # AI
-Claude.md
+!CLAUDE.md
 .gstack/
