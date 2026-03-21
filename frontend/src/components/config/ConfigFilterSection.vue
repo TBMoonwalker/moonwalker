@@ -1,5 +1,5 @@
 <template>
-    <n-card title="Filter settings">
+    <n-card :title="cardTitle === null ? undefined : cardTitle ?? 'Filter settings'">
         <n-form
             ref="formRef"
             :model="filter"
@@ -76,6 +76,7 @@ defineProps<{
     filter: FilterModel
     rules: FormRules
     showAsapFields: boolean
+    cardTitle?: string | null
 }>()
 
 const formRef = ref<FormInst | null>(null)

@@ -1,5 +1,5 @@
 <template>
-    <n-card title="Exchange overrides">
+    <n-card>
         <n-form
             ref="formRef"
             :model="exchange"

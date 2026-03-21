@@ -1670,20 +1670,6 @@ onUnmounted(() => {
             </template>
 
             <template v-else-if="routeState.mode === 'advanced'">
-                <n-card
-                    class="workspace-card advanced-intro-card"
-                    content-style="padding: 18px 20px;"
-                >
-                    <n-flex vertical :size="10">
-                        <h2 class="workspace-title">Expert tuning</h2>
-                        <n-text depth="3" class="workspace-summary">
-                            Setup owns the dry-run essentials. Advanced keeps the
-                            runtime, exchange, filtering, and autopilot controls that
-                            experienced operators tune deliberately.
-                        </n-text>
-                    </n-flex>
-                </n-card>
-
                 <div
                     v-for="section in advancedSections"
                     :id="section.sectionId"
@@ -1717,6 +1703,7 @@ onUnmounted(() => {
                     <ConfigFilterSection
                         v-else-if="section.target === 'filter'"
                         ref="filterFormRef"
+                        :card-title="null"
                         :filter="filter"
                         :rules="rules"
                         :show-asap-fields="signal.signal === 'asap'"
@@ -1725,11 +1712,13 @@ onUnmounted(() => {
                         v-else-if="section.target === 'autopilot'"
                         ref="autopilotFormRef"
                         :autopilot="autopilot"
+                        :card-title="null"
                         :rules="rules"
                         :show-fields="autopilot.enabled"
                     />
                     <ConfigIndicatorSection
                         v-else-if="section.target === 'indicator'"
+                        :card-title="null"
                         ref="indicatorFormRef"
                         :history-lookback-options="historyLookbackOptions"
                         :indicator="indicator"
@@ -2088,8 +2077,7 @@ onUnmounted(() => {
 
 .setup-entry-card,
 .setup-flow-card,
-.setup-style-card,
-.advanced-intro-card {
+.setup-style-card {
     border: 1px solid rgba(29, 92, 73, 0.14);
     background: var(--mw-surface-shell);
 }

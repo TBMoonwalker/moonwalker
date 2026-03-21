@@ -1,5 +1,5 @@
 <template>
-    <n-card title="Runtime diagnostics">
+    <n-card>
         <n-form
             ref="formRef"
             :model="general"

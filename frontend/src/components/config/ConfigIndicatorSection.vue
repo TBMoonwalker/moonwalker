@@ -1,5 +1,5 @@
 <template>
-    <n-card title="Indicator settings">
+    <n-card :title="cardTitle === null ? undefined : cardTitle ?? 'Indicator settings'">
         <n-form
             ref="formRef"
             :model="indicator"
@@ -50,6 +50,7 @@ defineProps<{
     historyLookbackOptions: SelectOption[]
     indicator: IndicatorModel
     rules: FormRules
+    cardTitle?: string | null
 }>()
 
 const formRef = ref<FormInst | null>(null)

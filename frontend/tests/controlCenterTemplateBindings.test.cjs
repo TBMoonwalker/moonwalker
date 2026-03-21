@@ -62,7 +62,7 @@ test('control center gates first-run setup behind explicit onboarding choices', 
     }
 })
 
-test('control center keeps guided setup focused and moves expert-only controls into advanced', () => {
+test('control center keeps guided setup focused and avoids duplicate advanced headings', () => {
     const requiredSnippets = [
         'class="setup-progress-grid"',
         "v-show=\"isSetupTaskExpanded('general')\"",
@@ -70,7 +70,7 @@ test('control center keeps guided setup focused and moves expert-only controls i
         'ConfigGeneralAdvancedSection',
         'ConfigExchangeAdvancedSection',
         'ConfigDcaAdvancedSection',
-        'Expert tuning',
+        ':card-title="null"',
         'Complete Telegram credentials in Setup first.',
     ]
 
@@ -80,4 +80,10 @@ test('control center keeps guided setup focused and moves expert-only controls i
             `expected control center to include ${snippet}`,
         )
     }
+
+    assert.equal(
+        controlCenterViewSource.includes('Expert tuning'),
+        false,
+        'expected advanced view to avoid a duplicate intro card heading',
+    )
 })

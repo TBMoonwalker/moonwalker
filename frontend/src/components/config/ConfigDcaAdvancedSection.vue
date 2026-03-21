@@ -1,5 +1,5 @@
 <template>
-    <n-card title="Expert safeguards">
+    <n-card>
         <n-form
             ref="formRef"
             :model="dca"
