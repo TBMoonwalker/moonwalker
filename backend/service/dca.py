@@ -9,6 +9,7 @@ import helper
 from service.ath import AthService
 from service.autopilot import Autopilot
 from service.config import resolve_timeframe
+from service.config_views import DcaRuntimeConfigView
 from service.exchange import Exchange
 from service.indicators import Indicators
 from service.orders import Orders
@@ -46,37 +47,27 @@ class Dca:
         self.config: dict[str, Any] | None = None
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
         self._pending_tp_confirmations: dict[str, TpConfirmationState] = {}
-
-        # Class attributes
-        Dca.pnl = {}
+        self._trailing_tp_peaks: dict[str, float] = {}
 
     def __get_monotonic_time(self) -> float:
         """Return a monotonic timestamp for TP confirmation timing."""
         return asyncio.get_running_loop().time()
 
+    def __runtime_config(self) -> DcaRuntimeConfigView:
+        """Return the typed DCA runtime settings for the current config snapshot."""
+        return DcaRuntimeConfigView.from_config(self.config or {})
+
     def __tp_confirmation_enabled(self) -> bool:
         """Return whether TP spike confirmation is enabled."""
-        return bool(self.config and self.config.get("tp_spike_confirm_enabled", False))
+        return self.__runtime_config().tp_spike_confirm_enabled
 
     def __get_tp_confirmation_seconds(self) -> float:
         """Return the TP confirmation duration in seconds."""
-        if not self.config:
-            return 0.0
-        try:
-            return max(
-                0.0, float(self.config.get("tp_spike_confirm_seconds", 3.0) or 0.0)
-            )
-        except (TypeError, ValueError):
-            return 0.0
+        return self.__runtime_config().tp_spike_confirm_seconds
 
     def __get_tp_confirmation_ticks(self) -> int:
         """Return the optional TP confirmation tick count."""
-        if not self.config:
-            return 0
-        try:
-            return max(0, int(self.config.get("tp_spike_confirm_ticks", 0) or 0))
-        except (TypeError, ValueError):
-            return 0
+        return self.__runtime_config().tp_spike_confirm_ticks
 
     def __clear_tp_confirmation(
         self,
@@ -191,11 +182,12 @@ class Dca:
     async def __dynamic_dca_strategy(self, symbol: str) -> tuple[bool, bool]:
         result = False
         payload_changed = True
+        runtime_config = self.__runtime_config()
 
-        if self.config.get("dca_strategy", None):
-            strategy_timeframe = resolve_timeframe(self.config)
+        if runtime_config.dca_strategy:
+            strategy_timeframe = resolve_timeframe(self.config or {})
             dca_strategy_plugin = self.__get_strategy_plugin(
-                self.config.get("dca_strategy"),
+                runtime_config.dca_strategy,
                 strategy_timeframe,
                 "dca",
             )
@@ -217,11 +209,12 @@ class Dca:
 
     def __tp_strategy(self, symbol: str) -> bool:
         result = False
+        runtime_config = self.__runtime_config()
 
-        if self.config.get("tp_strategy", None):
-            strategy_timeframe = resolve_timeframe(self.config)
+        if runtime_config.tp_strategy:
+            strategy_timeframe = resolve_timeframe(self.config or {})
             tp_strategy_plugin = self.__get_strategy_plugin(
-                self.config.get("tp_strategy"),
+                runtime_config.tp_strategy,
                 strategy_timeframe,
                 "tp",
             )
@@ -255,6 +248,7 @@ class Dca:
         threshold_percentage: float,
         dynamic_dca: bool,
     ) -> tuple[float, dict[str, float | str]]:
+        runtime_config = self.__runtime_config()
         if dynamic_dca:
             return await self.__resolve_dynamic_dca_safety_order_size(
                 trades=trades,
@@ -264,8 +258,7 @@ class Dca:
                 threshold_percentage=threshold_percentage,
             )
 
-        configured_so_size = float(self.config.get("so", 0) or 0)
-        base_size = configured_so_size
+        base_size = runtime_config.safety_order_size
         if trades["safetyorders"]:
             base_size = float(trades["safetyorders"][-1]["ordersize"]) * volume_scale
         final_size = round(base_size, 8)
@@ -284,7 +277,8 @@ class Dca:
         so_index: int,
         threshold_percentage: float,
     ) -> tuple[float, dict[str, float | str]]:
-        base_cost = float(self.config.get("bo", 0.0) or 0.0)
+        runtime_config = self.__runtime_config()
+        base_cost = runtime_config.base_order_amount
         if base_cost <= 0:
             return 0.0, {
                 "error": "Dynamic DCA requires a positive base order amount (bo).",
@@ -300,32 +294,21 @@ class Dca:
         ath, window = await self.ath_service.get_recent_ath(
             symbol=trades["symbol"],
             config=self.config,
-            cache_ttl_seconds=int(self.config.get("dynamic_dca_ath_cache_ttl", 60)),
+            cache_ttl_seconds=runtime_config.dynamic_dca_ath_cache_ttl,
         )
         if ath <= 0:
             ath = current_price
         ath_distance = max(0.0, (ath - current_price) / ath) if ath > 0 else 0.0
         ath_factor = 1 + ath_distance
 
-        atr_timeframe = str(
-            self.config.get(
-                "dynamic_so_atr_timeframe",
-                self.config.get("dynamic_dca_ath_timeframe", "1h"),
-            )
-            or "1h"
-        ).strip()
-        atr_length = int(self.config.get("dynamic_so_atr_length", 14) or 14)
-        low_k = float(self.config.get("dynamic_so_atr_regime_low_k", 2.2) or 2.2)
-        mid_k = float(self.config.get("dynamic_so_atr_regime_mid_k", 1.8) or 1.8)
-        high_k = float(self.config.get("dynamic_so_atr_regime_high_k", 1.4) or 1.4)
         vol_factor, atr_details = await self.indicators.calculate_atr_regime_multiplier(
             symbol=trades["symbol"],
-            timerange=atr_timeframe,
+            timerange=runtime_config.atr_timeframe,
             config=self.config,
-            length=atr_length,
-            low_k=low_k,
-            mid_k=mid_k,
-            high_k=high_k,
+            length=runtime_config.atr_length,
+            low_k=runtime_config.atr_regime_low_k,
+            mid_k=runtime_config.atr_regime_mid_k,
+            high_k=runtime_config.atr_regime_high_k,
         )
 
         progression_factor = 1 + min(max(so_index, 1) * 0.15, 0.75)
@@ -339,9 +322,7 @@ class Dca:
             * progression_factor
         )
 
-        budget_ratio = float(
-            self.config.get("trade_safety_order_budget_ratio", 0.95) or 0.95
-        )
+        budget_ratio = runtime_config.trade_safety_order_budget_ratio
         if budget_ratio <= 0:
             budget_ratio = 0.95
         budget_ratio = min(budget_ratio, 1.0)
@@ -393,8 +374,9 @@ class Dca:
     async def __calculate_tp(
         self, current_price: float, trades: dict[str, Any]
     ) -> None:
-        trailing_tp = self.config.get("trailing_tp", 0)
-        max_safety_orders = self.config.get("mstc", 0)
+        runtime_config = self.__runtime_config()
+        trailing_tp = runtime_config.trailing_tp
+        max_safety_orders = runtime_config.max_safety_orders
         sell = False
         is_unsellable = bool(trades.get("is_unsellable", False))
         tp_confirmation_pending = False
@@ -452,7 +434,7 @@ class Dca:
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
 
         # TP strategy
-        if not is_unsellable and self.config.get("tp_strategy", None) and sell:
+        if not is_unsellable and runtime_config.tp_strategy and sell:
             logging.debug("Check if we should sell ...")
             if self.__tp_strategy(trades["symbol"]):
                 sell = True
@@ -461,22 +443,22 @@ class Dca:
 
         # Trailing TP
         if not is_unsellable and trailing_tp > 0:
-            if sell or trades["symbol"] in Dca.pnl:
+            if sell or trades["symbol"] in self._trailing_tp_peaks:
                 # Initialize new symbols
-                if trades["symbol"] not in Dca.pnl:
-                    Dca.pnl[trades["symbol"]] = 0.0
+                if trades["symbol"] not in self._trailing_tp_peaks:
+                    self._trailing_tp_peaks[trades["symbol"]] = 0.0
 
                 if (
-                    actual_pnl != Dca.pnl[trades["symbol"]]
-                    and Dca.pnl[trades["symbol"]] != 0.0
+                    actual_pnl != self._trailing_tp_peaks[trades["symbol"]]
+                    and self._trailing_tp_peaks[trades["symbol"]] != 0.0
                 ):
-                    diff = actual_pnl - Dca.pnl[trades["symbol"]]
+                    diff = actual_pnl - self._trailing_tp_peaks[trades["symbol"]]
 
                     logging.debug(
                         "TTP Check: %s - Actual PNL: %s, Top-PNL: %s, PNL Difference: %s",
                         trades["symbol"],
                         actual_pnl,
-                        Dca.pnl[trades["symbol"]],
+                        self._trailing_tp_peaks[trades["symbol"]],
                         diff,
                     )
 
@@ -490,13 +472,13 @@ class Dca:
                             diff,
                         )
                         sell = True
-                        Dca.pnl.pop(trades["symbol"])
+                        self._trailing_tp_peaks.pop(trades["symbol"])
                     else:
                         sell = False
-                        if actual_pnl > Dca.pnl[trades["symbol"]]:
-                            Dca.pnl[trades["symbol"]] = actual_pnl
+                        if actual_pnl > self._trailing_tp_peaks[trades["symbol"]]:
+                            self._trailing_tp_peaks[trades["symbol"]] = actual_pnl
                 else:
-                    Dca.pnl[trades["symbol"]] = actual_pnl
+                    self._trailing_tp_peaks[trades["symbol"]] = actual_pnl
                     sell = False
 
         # Sell if Autopilot is enabled and SL is set
@@ -581,21 +563,22 @@ class Dca:
     async def __calculate_dca(
         self, current_price: float, trades: dict[str, Any]
     ) -> None:
-        dynamic_dca = self.config.get("dynamic_dca", False)
-        volume_scale = float(self.config.get("os", 1.0) or 1.0)
+        runtime_config = self.__runtime_config()
+        dynamic_dca = runtime_config.dynamic_dca
+        volume_scale = runtime_config.safety_order_volume_scale
         if volume_scale <= 0:
             logging.warning(
                 "Invalid safety order volume scale (os=%s). Falling back to 1.0.",
                 volume_scale,
             )
             volume_scale = 1.0
-        step_scale = self.config.get("ss", 0)
-        max_safety_orders = self.config.get("mstc", 0)
-        price_deviation = self.config.get("sos")
+        step_scale = runtime_config.step_scale
+        max_safety_orders = runtime_config.max_safety_orders
+        price_deviation = runtime_config.safety_order_step_percentage
         # Apply price deviation for the first safety order
         next_so_percentage = price_deviation
         trigger_threshold = -abs(next_so_percentage)
-        safety_order_size = float(self.config.get("so", 0.0) or 0.0)
+        safety_order_size = runtime_config.safety_order_size
         new_so = False
         placed_new_so = False
         dynamic_so_details: dict[str, float | str] = {"enabled": "false"}
@@ -774,6 +757,7 @@ class Dca:
             price = ticker["ticker"]["price"]
             trades = await self.trades.get_trades_for_orders(ticker["ticker"]["symbol"])
             if trades:
+                runtime_config = self.__runtime_config()
 
                 # Check Autopilot
                 profit = await self.statistic.get_profit()
@@ -791,13 +775,13 @@ class Dca:
                     self.autopilot_mode = trading_settings["mode"]
                 # Use base settings
                 else:
-                    self.tp = self.config.get("tp", 10000)
-                    self.sl = self.config.get("sl", 10000)
+                    self.tp = runtime_config.take_profit
+                    self.sl = runtime_config.stop_loss
                     self.sl_timeout = 0
                     self.autopilot_mode = None
 
                 # Check DCA (only when DCA is enabled)
-                if self.config.get("dca", False) and not trades.get(
+                if runtime_config.dca_enabled and not trades.get(
                     "is_unsellable", False
                 ):
                     await self.__calculate_dca(price, trades)

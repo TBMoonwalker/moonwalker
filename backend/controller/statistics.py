@@ -16,9 +16,11 @@ from service.websocket_fanout import WebSocketFanout
 logging = helper.LoggerFactory.get_logger(
     "logs/controller.log", "controller_statistics"
 )
+PROFIT_STREAM_INTERVAL_SECONDS = 5
+STATISTICS_BALANCE_CACHE_TTL_SECONDS = float(PROFIT_STREAM_INTERVAL_SECONDS)
 
 statistic = Statistic()
-exchange = Exchange()
+exchange = Exchange(balance_cache_ttl_seconds=STATISTICS_BALANCE_CACHE_TTL_SECONDS)
 _config_service: Config | None = None
 
 
@@ -38,7 +40,7 @@ async def _get_available_funds() -> float | None:
         if not currency:
             return None
         return await exchange.get_free_balance_for_asset(
-            config_service._cache, currency
+            config_service.snapshot(), currency
         )
     except (AttributeError, RuntimeError, TypeError, ValueError) as exc:
         logging.warning("Failed to fetch available exchange funds: %s", exc)
@@ -47,9 +49,8 @@ async def _get_available_funds() -> float | None:
 
 @helper.async_ttl_cache(maxsize=1, ttl=2)
 async def _get_profit_cached() -> dict[str, Any]:
-    profit = await statistic.get_profit()
-    profit["funds_available"] = await _get_available_funds()
-    return profit
+    available_funds = await _get_available_funds()
+    return await statistic.get_profit_for_dashboard(available_funds)
 
 
 async def _build_profit_payload() -> str:
@@ -59,7 +60,7 @@ async def _build_profit_payload() -> str:
 
 _profit_fanout = WebSocketFanout(
     name="profit",
-    interval_seconds=5,
+    interval_seconds=PROFIT_STREAM_INTERVAL_SECONDS,
     producer=_build_profit_payload,
     logger=logging,
 )

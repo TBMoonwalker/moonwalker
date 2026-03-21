@@ -4,7 +4,8 @@ import { RouterView } from 'vue-router'
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useWebSocketDataStore } from './stores/websocket'
 import { useWebSocket } from '@vueuse/core'
-import axios from 'axios'
+import AppHeader from './components/AppHeader.vue'
+import { useSharedConfigSnapshot } from './control-center/configSnapshotStore'
 import { trackUiEvent } from './utils/uiTelemetry'
 import type { WebSocketStatus } from './stores/websocket'
 import { NConfigProvider } from 'naive-ui/es/config-provider'
@@ -23,6 +24,67 @@ const DEFAULT_WS_RECONNECT_DEBOUNCE_MS = 2000
 
 const osThemeRef = useOsTheme()
 const theme = computed(() => (osThemeRef.value === 'dark' ? darkTheme : null))
+const themeOverrides = computed(() => {
+  if (osThemeRef.value === 'dark') {
+    return {
+      common: {
+        fontFamily: "'Source Sans 3', 'Segoe UI', sans-serif",
+        fontFamilyMono: "'IBM Plex Mono', 'SFMono-Regular', monospace",
+        fontWeightStrong: '600',
+        primaryColor: '#245f4e',
+        primaryColorHover: '#2e7d5b',
+        primaryColorPressed: '#1b4b3d',
+        primaryColorSuppl: '#245f4e',
+        infoColor: '#356d86',
+        successColor: '#2e7d5b',
+        warningColor: '#b7791f',
+        errorColor: '#b4443f',
+        bodyColor: '#111714',
+        baseColor: '#1d2823',
+        cardColor: '#1d2823',
+        modalColor: '#1d2823',
+        popoverColor: '#1d2823',
+        borderColor: 'rgba(213, 219, 213, 0.2)',
+        dividerColor: 'rgba(213, 219, 213, 0.16)',
+        textColorBase: '#f7f8f6',
+        textColor1: '#f7f8f6',
+        textColor2: 'rgba(247, 248, 246, 0.84)',
+        textColor3: 'rgba(213, 219, 213, 0.72)',
+        borderRadius: '10px',
+        borderRadiusSmall: '6px',
+      },
+    }
+  }
+
+  return {
+    common: {
+      fontFamily: "'Source Sans 3', 'Segoe UI', sans-serif",
+      fontFamilyMono: "'IBM Plex Mono', 'SFMono-Regular', monospace",
+      fontWeightStrong: '600',
+      primaryColor: '#1d5c49',
+      primaryColorHover: '#2e7d5b',
+      primaryColorPressed: '#18413a',
+      primaryColorSuppl: '#1d5c49',
+      infoColor: '#356d86',
+      successColor: '#2e7d5b',
+      warningColor: '#b7791f',
+      errorColor: '#b4443f',
+      bodyColor: '#f7f8f6',
+      baseColor: '#ffffff',
+      cardColor: '#ffffff',
+      modalColor: '#ffffff',
+      popoverColor: '#ffffff',
+      borderColor: '#d5dbd5',
+      dividerColor: 'rgba(24, 33, 29, 0.08)',
+      textColorBase: '#18211d',
+      textColor1: '#18211d',
+      textColor2: '#33403a',
+      textColor3: '#8a948d',
+      borderRadius: '10px',
+      borderRadiusSmall: '6px',
+    },
+  }
+})
 
 // Stores
 const open_trade_store = useWebSocketDataStore("openTrades")
@@ -33,8 +95,7 @@ const wsWatchdogEnabled = ref(DEFAULT_WS_WATCHDOG_ENABLED)
 const wsHealthcheckIntervalMs = ref(DEFAULT_WS_HEALTHCHECK_INTERVAL_MS)
 const wsStaleTimeoutMs = ref(DEFAULT_WS_STALE_TIMEOUT_MS)
 const wsReconnectDebounceMs = ref(DEFAULT_WS_RECONNECT_DEBOUNCE_MS)
-
-const buildHttpUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).toString()
+const configSnapshotStore = useSharedConfigSnapshot()
 
 const buildWsUrl = (path: string): string => {
   const url = new URL(path, MOONWALKER_API_ORIGIN)
@@ -63,37 +124,32 @@ const toBooleanOrDefault = (value: unknown, fallback: boolean): boolean => {
   return fallback
 }
 
-const loadWsWatchdogConfig = async () => {
-  try {
-    const response = await axios.get(buildHttpUrl('/config/all'))
-    wsWatchdogEnabled.value = toBooleanOrDefault(
-      response.data?.ws_watchdog_enabled,
-      DEFAULT_WS_WATCHDOG_ENABLED,
-    )
-    wsHealthcheckIntervalMs.value = Math.max(
-      1000,
-      toNumberOrDefault(
-        response.data?.ws_healthcheck_interval_ms,
-        DEFAULT_WS_HEALTHCHECK_INTERVAL_MS,
-      ),
-    )
-    wsStaleTimeoutMs.value = Math.max(
-      5000,
-      toNumberOrDefault(
-        response.data?.ws_stale_timeout_ms,
-        DEFAULT_WS_STALE_TIMEOUT_MS,
-      ),
-    )
-    wsReconnectDebounceMs.value = Math.max(
-      500,
-      toNumberOrDefault(
-        response.data?.ws_reconnect_debounce_ms,
-        DEFAULT_WS_RECONNECT_DEBOUNCE_MS,
-      ),
-    )
-  } catch (error) {
-    console.debug('[ws] using default watchdog config', error)
-  }
+const applyWsWatchdogConfig = (config: Record<string, unknown> | null) => {
+  wsWatchdogEnabled.value = toBooleanOrDefault(
+    config?.ws_watchdog_enabled,
+    DEFAULT_WS_WATCHDOG_ENABLED,
+  )
+  wsHealthcheckIntervalMs.value = Math.max(
+    1000,
+    toNumberOrDefault(
+      config?.ws_healthcheck_interval_ms,
+      DEFAULT_WS_HEALTHCHECK_INTERVAL_MS,
+    ),
+  )
+  wsStaleTimeoutMs.value = Math.max(
+    5000,
+    toNumberOrDefault(
+      config?.ws_stale_timeout_ms,
+      DEFAULT_WS_STALE_TIMEOUT_MS,
+    ),
+  )
+  wsReconnectDebounceMs.value = Math.max(
+    500,
+    toNumberOrDefault(
+      config?.ws_reconnect_debounce_ms,
+      DEFAULT_WS_RECONNECT_DEBOUNCE_MS,
+    ),
+  )
 }
 
 const createManagedSocket = (
@@ -230,23 +286,36 @@ onUnmounted(() => {
 })
 
 onMounted(() => {
-  loadWsWatchdogConfig()
+  void configSnapshotStore.ensureLoaded(false).catch((error) => {
+    console.debug('[ws] using default watchdog config', error)
+  })
   runHealthcheck()
   window.addEventListener('focus', onActiveAgain)
   window.addEventListener('online', onActiveAgain)
   document.addEventListener('visibilitychange', visibilityHandler)
 })
+
+watch(
+  () => configSnapshotStore.snapshot.value,
+  (nextSnapshot) => {
+    applyWsWatchdogConfig(nextSnapshot)
+  },
+  { immediate: true },
+)
 </script>
 
 <template>
-  <n-config-provider :theme="theme">
+  <n-config-provider :theme="theme" :theme-overrides="themeOverrides">
     <n-global-style />
     <n-message-provider>
       <n-notification-provider>
         <n-modal-provider>
           <n-dialog-provider>
             <div class="app-layout">
-              <RouterView />
+              <AppHeader />
+              <main class="app-content">
+                <RouterView />
+              </main>
             </div>
           </n-dialog-provider>
         </n-modal-provider>
@@ -258,5 +327,14 @@ onMounted(() => {
 <style scoped>
 .app-layout {
   width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.app-content {
+  width: 100%;
+  max-width: var(--mw-content-width);
+  margin: 0 auto;
 }
 </style>

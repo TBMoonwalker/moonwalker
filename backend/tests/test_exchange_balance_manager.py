@@ -2,6 +2,7 @@
 
 import ccxt.async_support as ccxt
 import pytest
+from service.exchange import Exchange
 from service.exchange_balance_manager import ExchangeBalanceManager
 
 
@@ -127,3 +128,9 @@ async def test_get_balance_snapshot_retries_transient_fetch_failure() -> None:
 
     assert balance == exchange.balance
     assert exchange.fetch_balance_calls == 2
+
+
+def test_exchange_accepts_custom_balance_cache_ttl() -> None:
+    exchange = Exchange(balance_cache_ttl_seconds=5.0)
+
+    assert exchange._balance_manager._balance_cache_ttl_seconds == 5.0

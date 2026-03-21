@@ -1,5 +1,5 @@
 <template>
-    <n-card title="Autopilot settings">
+    <n-card :title="cardTitle === null ? undefined : cardTitle ?? 'Autopilot settings'">
         <n-form
             ref="formRef"
             :model="autopilot"
@@ -218,6 +218,7 @@ defineProps<{
     autopilot: AutopilotModel
     rules: FormRules
     showFields: boolean
+    cardTitle?: string | null
 }>()
 
 const formRef = ref<FormInst | null>(null)

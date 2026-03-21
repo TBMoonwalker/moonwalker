@@ -13,6 +13,10 @@ fi
 
 "$PYTHON_BIN" -m pip install -r "$ROOT_DIR/backend/requirements.txt" -r "$ROOT_DIR/backend/requirements-dev.txt"
 
+if [ ! -d "$ROOT_DIR/frontend/node_modules" ]; then
+    npm --prefix "$ROOT_DIR/frontend" ci
+fi
+
 run_step() {
     local name="$1"
     shift
@@ -38,6 +42,9 @@ run_step "Backend tests (pytest)" env \
     PYTEST_ASYNCIO_MODE=auto \
     PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 \
     "$PYTHON_BIN" "$ROOT_DIR/scripts/run_pytest.py" -p pytest_asyncio.plugin "$ROOT_DIR/backend/tests"
+run_step "Frontend type check (vue-tsc)" npm --prefix "$ROOT_DIR/frontend" run type-check
+run_step "Frontend tests (node --test)" npm --prefix "$ROOT_DIR/frontend" run test
+run_step "Frontend build (vite)" npm --prefix "$ROOT_DIR/frontend" run build-only
 run_step "Frontend unused export check (optional)" bash "$ROOT_DIR/scripts/check_frontend_unused_exports.sh"
 set -e
 

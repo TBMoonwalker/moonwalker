@@ -47,14 +47,20 @@ class Exchange:
 
     def __init__(
         self,
-    ):
+        *,
+        balance_cache_ttl_seconds: float | None = None,
+    ) -> None:
         self.utils = helper.Utils()
         self.status = True
         self._last_buy_precheck_result: dict[str, Any] | None = None
         self._client_manager = ExchangeClientManager(logging)
         self._balance_manager = ExchangeBalanceManager(
             logger=logging,
-            balance_cache_ttl_seconds=self.BALANCE_CACHE_TTL_SECONDS,
+            balance_cache_ttl_seconds=(
+                self.BALANCE_CACHE_TTL_SECONDS
+                if balance_cache_ttl_seconds is None
+                else float(balance_cache_ttl_seconds)
+            ),
             get_exchange=lambda: self.exchange,
             resolve_symbol=self.__resolve_symbol,
         )

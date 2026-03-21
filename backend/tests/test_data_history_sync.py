@@ -3,6 +3,11 @@ import types
 
 import pytest
 from service.data import Data
+from service.data_history_sync import (
+    HistorySyncState,
+    HistorySyncWindow,
+    plan_boundary_fetch_starts,
+)
 from tortoise import Tortoise
 
 
@@ -15,6 +20,40 @@ def _make_candle(timestamp: int, close: float) -> list[float]:
         close,
         10.0,
     ]
+
+
+def test_plan_boundary_fetch_starts_prefers_missing_edges_only() -> None:
+    window = HistorySyncWindow.build(
+        required_since=1000,
+        required_until=4000,
+        timeframe_ms=1000,
+    )
+
+    fetch_starts = plan_boundary_fetch_starts(
+        window=window,
+        stored_timestamps={2000, 3000},
+    )
+
+    assert fetch_starts == [1000, 4000]
+
+
+def test_history_sync_state_tracks_first_available_and_missing_count() -> None:
+    window = HistorySyncWindow.build(
+        required_since=1000,
+        required_until=4000,
+        timeframe_ms=1000,
+    )
+    state = HistorySyncState(stored_timestamps={3000, 4000})
+
+    state.record_fetch(
+        fetched_timestamps={3000, 4000},
+        inserted_timestamps={3000, 4000},
+    )
+
+    assert state.earliest_available_timestamp == 3000
+    assert state.is_required_complete(window) is False
+    assert state.is_complete_from_first_available(window) is True
+    assert state.missing_count(window) == 2
 
 
 @pytest.mark.asyncio

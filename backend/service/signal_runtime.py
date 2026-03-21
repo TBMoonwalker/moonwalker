@@ -1,6 +1,5 @@
 """Shared helpers for signal plugin runtime settings and throttling."""
 
-import ast
 import json
 import time
 from dataclasses import dataclass
@@ -50,10 +49,7 @@ def parse_signal_settings(raw_value: Any) -> dict[str, Any]:
     if not raw_text:
         return {}
 
-    try:
-        parsed = json.loads(raw_text)
-    except json.JSONDecodeError:
-        parsed = ast.literal_eval(raw_text)
+    parsed = json.loads(raw_text)
 
     if not isinstance(parsed, dict):
         raise TypeError("signal_settings must be a dictionary payload")

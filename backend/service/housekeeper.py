@@ -1,6 +1,7 @@
 """Periodic cleanup tasks for stale ticker data."""
 
 import asyncio
+import sqlite3
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -10,8 +11,16 @@ from service.config import Config, resolve_history_lookback_days, resolve_timefr
 from service.data import Data
 from service.database import optimize_sqlite_connection, run_sqlite_write_with_retry
 from service.trades import Trades
+from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/housekeeper.log", "housekeeper")
+
+RECOVERABLE_HOUSEKEEPER_EXCEPTIONS = (
+    BaseORMException,
+    OSError,
+    RuntimeError,
+    sqlite3.Error,
+)
 
 
 class Housekeeper:
@@ -22,15 +31,13 @@ class Housekeeper:
 
     def __init__(self) -> None:
         self.config = None
-
-        # Class variables
-        Housekeeper.status = True
+        self._running = True
 
     async def init(self) -> None:
         """Initialize the housekeeper with current configuration."""
         config = await Config.instance()
         config.subscribe(self.on_config_change)
-        self.on_config_change(config._cache)
+        self.on_config_change(config.snapshot())
 
     def on_config_change(self, config: dict[str, Any]) -> None:
         """Reload housekeeping configuration."""
@@ -59,23 +66,28 @@ class Housekeeper:
 
     async def cleanup_ticker_database(self) -> None:
         """Remove old ticker data for inactive symbols."""
-        while Housekeeper.status:
+        while self._running:
             if self.config:
                 retention_days = self._get_ticker_retention_days()
                 actual_timestamp = datetime.now()
                 try:
-                    await self._cleanup_inactive_ticker_history(
-                        actual_timestamp, retention_days
-                    )
-                    await self._cleanup_upnl_history(actual_timestamp)
-                    await optimize_sqlite_connection()
-                except Exception as e:
-                    # Broad catch to keep the housekeeping loop running.
-                    logging.error("Error db housekeeping: %s", e)
+                    await self._run_cleanup_cycle(actual_timestamp, retention_days)
+                except RECOVERABLE_HOUSEKEEPER_EXCEPTIONS as exc:
+                    logging.error("Error db housekeeping: %s", exc, exc_info=True)
 
                 await asyncio.sleep(self.CLEANUP_LOOP_INTERVAL_SECONDS)
             else:
                 await asyncio.sleep(5)
+
+    async def _run_cleanup_cycle(
+        self,
+        actual_timestamp: datetime,
+        retention_days: int,
+    ) -> None:
+        """Run one housekeeping cycle without swallowing unexpected failures."""
+        await self._cleanup_inactive_ticker_history(actual_timestamp, retention_days)
+        await self._cleanup_upnl_history(actual_timestamp)
+        await optimize_sqlite_connection()
 
     async def _cleanup_inactive_ticker_history(
         self, actual_timestamp: datetime, retention_days: int
@@ -128,4 +140,4 @@ class Housekeeper:
 
     async def shutdown(self) -> None:
         """Stop housekeeping loop."""
-        Housekeeper.status = False
+        self._running = False

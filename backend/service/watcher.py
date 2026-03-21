@@ -6,16 +6,25 @@ from typing import Any
 import ccxt.pro as ccxtpro
 import helper
 import model
-from service.config import Config, resolve_history_lookback_days, resolve_timeframe
+from service.config import Config, resolve_history_lookback_days
+from service.config_views import ExchangeConnectionConfigView, WatcherRuntimeConfigView
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
 from service.trades import Trades
 from service.watcher_runtime import (
+    WatcherRuntimeState,
     compose_ticker_symbols,
+    get_active_runtime_state,
+)
+from service.watcher_runtime import (
+    get_live_candle_snapshot as get_runtime_live_candle_snapshot,
+)
+from service.watcher_runtime import (
     get_mandatory_symbols,
     normalize_symbols,
     prepare_ohlcv_write,
+    set_active_runtime_state,
 )
 from service.watcher_tasks import (
     ensure_worker_tasks,
@@ -43,15 +52,30 @@ class Watcher:
     BTC_HISTORY_MIN_ROWS = 120
     DCA_WORKER_TASK_NAME = "watcher:dca_worker"
     OHLCV_WORKER_TASK_NAME = "watcher:ohlcv_worker"
-    ticker_symbols = []
-    candles = {}
-    signal_symbols: set[str] = set()
-    mandatory_symbols: set[str] = set()
-    timeframe = "1m"
-    symbol_update_event: asyncio.Event | None = None
-    exchange_watcher_ohlcv: bool = True
+    _runtime_state: WatcherRuntimeState | None = None
+
+    @classmethod
+    def _get_runtime_state(cls) -> WatcherRuntimeState:
+        """Return the active watcher runtime state for this process."""
+        if cls._runtime_state is None:
+            cls._runtime_state = get_active_runtime_state()
+        else:
+            set_active_runtime_state(cls._runtime_state)
+        return cls._runtime_state
+
+    @classmethod
+    def get_live_candle_snapshot(cls, symbol: str) -> list[Any] | None:
+        """Return the latest in-memory candle snapshot for a symbol."""
+        return get_runtime_live_candle_snapshot(symbol)
+
+    @property
+    def runtime_state(self) -> WatcherRuntimeState:
+        """Return the active runtime state bound to this watcher instance."""
+        return self._get_runtime_state()
 
     def __init__(self) -> None:
+        Watcher._runtime_state = WatcherRuntimeState()
+        set_active_runtime_state(Watcher._runtime_state)
         self.trades = Trades()
         self.dca = Dca()
         self.config = None
@@ -66,39 +90,36 @@ class Watcher:
         self.last_price = {}
         self._pending_dca_payloads: dict[str, dict[str, Any]] = {}
         self._queued_dca_symbols: set[str] = set()
+        self._consumer_task: asyncio.Task | None = None
         self._worker_tasks: list[asyncio.Task] = []
         self._reload_lock = asyncio.Lock()
+        self._shutdown_lock = asyncio.Lock()
         self._reload_task: asyncio.Task | None = None
         self._pending_reload_config: dict[str, Any] | None = None
         self._btc_warmup_task: asyncio.Task | None = None
         self._btc_warmup_key: tuple[Any, ...] | None = None
 
-        # Used for cross-task signaling
-        Watcher.symbol_update_event = asyncio.Event()
-        Watcher.exchange_watcher_ohlcv = True
-
     async def init(self) -> None:
         """Initialize the watcher from current configuration."""
         config = await Config.instance()
         config.subscribe(self.on_config_change)
-        self.on_config_change(config._cache)
+        self.on_config_change(config.snapshot())
 
     def on_config_change(self, config: dict[str, Any]) -> None:
         """Reload watcher configuration and exchange client."""
         logging.info("Reload watcher")
+        runtime_state = self.runtime_state
+        watcher_config = WatcherRuntimeConfigView.from_config(config)
         self.config = config
         self._pending_reload_config = dict(config)
         if self._reload_task is None or self._reload_task.done():
             self._reload_task = asyncio.create_task(self._drain_exchange_reloads())
 
-        Watcher.exchange_watcher_ohlcv = config.get("watcher_ohlcv", True)
-        Watcher.timeframe = resolve_timeframe(config)
-        Watcher.mandatory_symbols = self.__get_mandatory_symbols(config)
-        current_symbols = self.__normalize_symbols(Watcher.ticker_symbols)
-        Watcher.ticker_symbols = self.__compose_ticker_symbols(current_symbols)
-        if Watcher.symbol_update_event:
-            Watcher.symbol_update_event.set()
-        self._schedule_btc_pulse_history_warmup(config)
+        runtime_state.exchange_watcher_ohlcv = watcher_config.watcher_ohlcv
+        runtime_state.timeframe = watcher_config.timeframe
+        runtime_state.mandatory_symbols = self.__get_mandatory_symbols(config)
+        self._refresh_symbol_targets_from_current_state()
+        self._schedule_btc_pulse_history_warmup(config, watcher_config)
 
     async def _drain_exchange_reloads(self) -> None:
         """Serialize watcher exchange reloads and coalesce rapid config bursts."""
@@ -129,23 +150,64 @@ class Watcher:
         """Return symbols that must always be watched regardless of plugin queues."""
         return get_mandatory_symbols(config)
 
-    @staticmethod
-    def __compose_ticker_symbols(base_symbols: list[str]) -> list[Any]:
+    @classmethod
+    def _compose_ticker_symbols(cls, base_symbols: list[str]) -> list[Any]:
         """Merge trades, signal symbols, and mandatory symbols into watch targets."""
+        runtime_state = cls._get_runtime_state()
         return compose_ticker_symbols(
             utils,
             base_symbols=base_symbols,
-            signal_symbols=Watcher.signal_symbols,
-            mandatory_symbols=Watcher.mandatory_symbols,
-            exchange_watcher_ohlcv=Watcher.exchange_watcher_ohlcv,
-            timeframe=Watcher.timeframe,
+            signal_symbols=runtime_state.signal_symbols,
+            mandatory_symbols=runtime_state.mandatory_symbols,
+            exchange_watcher_ohlcv=runtime_state.exchange_watcher_ohlcv,
+            timeframe=runtime_state.timeframe,
         )
+
+    @classmethod
+    def _apply_symbol_targets(
+        cls,
+        base_symbols: list[str],
+        *,
+        notify: bool = True,
+    ) -> list[Any]:
+        """Store recomputed watch targets and optionally wake the refresh loop."""
+        runtime_state = cls._get_runtime_state()
+        runtime_state.ticker_symbols = cls._compose_ticker_symbols(base_symbols)
+        if notify:
+            runtime_state.notify_symbol_update()
+        return list(runtime_state.ticker_symbols)
+
+    async def _refresh_symbol_targets_from_trades(
+        self,
+        *,
+        signal_symbols: list[Any] | None = None,
+        notify: bool = True,
+    ) -> list[Any]:
+        """Refresh watch targets from persisted trades and optional signal symbols."""
+        if signal_symbols is not None:
+            self.runtime_state.signal_symbols = set(
+                self.__normalize_symbols(signal_symbols)
+            )
+        trade_symbols = await self.trades.get_symbols()
+        return self._apply_symbol_targets(trade_symbols, notify=notify)
+
+    @classmethod
+    async def _refresh_symbol_targets_for_trade_change(cls) -> list[Any]:
+        """Refresh watch targets after trades changed in the database."""
+        trade_symbols = await Trades().get_symbols()
+        return cls._apply_symbol_targets(trade_symbols)
+
+    def _refresh_symbol_targets_from_current_state(self) -> list[Any]:
+        """Recompose current watch targets after config-only runtime changes."""
+        current_symbols = self.__normalize_symbols(self.runtime_state.ticker_symbols)
+        return self._apply_symbol_targets(current_symbols)
 
     async def _reload_exchange_client(self, config: dict[str, Any]) -> None:
         """Close any existing client and recreate it from latest config."""
         async with self._reload_lock:
             old_exchange = self.exchange
             self.exchange = None
+            exchange_config = ExchangeConnectionConfigView.from_config(config)
 
             if old_exchange:
                 try:
@@ -153,19 +215,19 @@ class Watcher:
                 except (ccxtpro.BaseError, OSError, RuntimeError) as exc:
                     logging.warning("Error closing previous CCXT Pro client: %s", exc)
 
-            if not config.get("exchange", None):
+            if not exchange_config.exchange:
                 return
 
-            options: dict[str, Any] = {"defaultType": config.get("market", "spot")}
-            hostname = config.get("exchange_hostname")
+            options: dict[str, Any] = {"defaultType": exchange_config.market}
+            hostname = exchange_config.exchange_hostname
             if hostname:
-                options["hostname"] = str(hostname).strip()
+                options["hostname"] = hostname
 
-            exchange_class = getattr(ccxtpro, config.get("exchange"))
+            exchange_class = getattr(ccxtpro, exchange_config.exchange)
             new_exchange = exchange_class(
                 {
-                    "apiKey": config.get("key"),
-                    "secret": config.get("secret"),
+                    "apiKey": exchange_config.key,
+                    "secret": exchange_config.secret,
                     "options": options,
                 }
             )
@@ -173,27 +235,32 @@ class Watcher:
                 logging.info(
                     "Using custom exchange hostname '%s' for watcher exchange '%s'.",
                     options["hostname"],
-                    config.get("exchange"),
+                    exchange_config.exchange,
                 )
-            if config.get("dry_run", True):
+            if exchange_config.dry_run:
                 try:
                     new_exchange.enableDemoTrading(True)
                     logging.info(
                         "Enabled CCXT Pro demo trading for exchange '%s'.",
-                        config.get("exchange"),
+                        exchange_config.exchange,
                     )
                 except (AttributeError, NotImplementedError, ccxtpro.BaseError) as exc:
                     raise ValueError(
                         "Dry run requires CCXT Pro enableDemoTrading support, but "
-                        f"'{config.get('exchange')}' could not enable demo trading."
+                        f"'{exchange_config.exchange}' could not enable demo trading."
                     ) from exc
-            elif config.get("sandbox", False):
+            elif exchange_config.sandbox:
                 new_exchange.set_sandbox_mode(True)
             self.exchange = new_exchange
 
-    def _schedule_btc_pulse_history_warmup(self, config: dict[str, Any]) -> None:
+    def _schedule_btc_pulse_history_warmup(
+        self,
+        config: dict[str, Any],
+        watcher_config: WatcherRuntimeConfigView | None = None,
+    ) -> None:
         """Schedule BTC history prefill to stabilize BTC pulse calculations."""
-        if not config.get("btc_pulse", False):
+        watcher_config = watcher_config or WatcherRuntimeConfigView.from_config(config)
+        if not watcher_config.btc_pulse_enabled:
             return
 
         mandatory_symbols = self.__get_mandatory_symbols(config)
@@ -203,7 +270,7 @@ class Watcher:
 
         try:
             history_days = resolve_history_lookback_days(
-                config, timeframe=Watcher.timeframe
+                config, timeframe=self.runtime_state.timeframe
             )
         except (TypeError, ValueError):
             history_days = 90
@@ -211,10 +278,10 @@ class Watcher:
         warmup_key = (
             btc_symbol,
             history_days,
-            config.get("exchange"),
-            config.get("market"),
-            config.get("exchange_hostname"),
-            bool(config.get("dry_run", True)),
+            watcher_config.exchange_connection.exchange,
+            watcher_config.exchange_connection.market,
+            watcher_config.exchange_connection.exchange_hostname,
+            watcher_config.exchange_connection.dry_run,
         )
         if warmup_key == self._btc_warmup_key and self._btc_warmup_task:
             if not self._btc_warmup_task.done():
@@ -264,7 +331,9 @@ class Watcher:
 
     async def _await_btc_warmup_if_needed(self) -> None:
         """Await warmup briefly so startup has BTC history before pulse checks."""
-        if not self.config.get("btc_pulse", False):
+        if not WatcherRuntimeConfigView.from_config(
+            self.config or {}
+        ).btc_pulse_enabled:
             return
         if not self._btc_warmup_task:
             return
@@ -285,14 +354,10 @@ class Watcher:
         while self.status:
             try:
                 new_symbol_list = await watcher_queue.get()
-                Watcher.signal_symbols = set(self.__normalize_symbols(new_symbol_list))
-                trade_symbols = await self.trades.get_symbols()
-                Watcher.ticker_symbols = self.__compose_ticker_symbols(trade_symbols)
-                logging.info(
-                    "Updated symbol list via queue: %s", Watcher.ticker_symbols
+                ticker_symbols = await self._refresh_symbol_targets_from_trades(
+                    signal_symbols=new_symbol_list
                 )
-                if Watcher.symbol_update_event:
-                    Watcher.symbol_update_event.set()
+                logging.info("Updated symbol list via queue: %s", ticker_symbols)
                 watcher_queue.task_done()
             except asyncio.CancelledError:
                 break
@@ -316,11 +381,10 @@ class Watcher:
         """Refresh watched symbols when a new open trade is created."""
         if created:
             try:
-                trade_symbols = await Trades().get_symbols()
-                Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(trade_symbols)
-                if Watcher.symbol_update_event:
-                    Watcher.symbol_update_event.set()
-                logging.debug("Added symbols. New list: %s", Watcher.ticker_symbols)
+                ticker_symbols = (
+                    await Watcher._refresh_symbol_targets_for_trade_change()
+                )
+                logging.debug("Added symbols. New list: %s", ticker_symbols)
             except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps post-save hooks from crashing the process.
                 logging.error("Error adding trade symbols: %s", e, exc_info=True)
@@ -336,11 +400,10 @@ class Watcher:
         """Refresh watched symbols when a trade is moved to closed trades."""
         if created:
             try:
-                trade_symbols = await Trades().get_symbols()
-                Watcher.ticker_symbols = Watcher.__compose_ticker_symbols(trade_symbols)
-                if Watcher.symbol_update_event:
-                    Watcher.symbol_update_event.set()
-                logging.debug("Removed symbols. New list: %s", Watcher.ticker_symbols)
+                ticker_symbols = (
+                    await Watcher._refresh_symbol_targets_for_trade_change()
+                )
+                logging.debug("Removed symbols. New list: %s", ticker_symbols)
             except (RuntimeError, TypeError, ValueError) as e:
                 # Broad catch keeps post-save hooks from crashing the process.
                 logging.error("Error removing trade symbols: %s", e, exc_info=True)
@@ -350,19 +413,78 @@ class Watcher:
     # ------------------------------------------------------------------- #
 
     async def __wait_for_updates(self) -> None:
+        runtime_state = self.runtime_state
         await asyncio.wait_for(
-            self.symbol_update_event.wait(), timeout=self.REFRESH_TIMEOUT
+            runtime_state.symbol_update_event.wait(), timeout=self.REFRESH_TIMEOUT
         )
-        Watcher.symbol_update_event.clear()
+        runtime_state.clear_symbol_update()
 
-    async def __cleanup_tasks(self, consumer_task: asyncio.Task) -> None:
-        for task in self.symbol_tasks.values():
+    async def _cancel_optional_task(self, task: asyncio.Task | None) -> None:
+        """Cancel an optional task and wait for it to finish."""
+        if task is None:
+            return
+        if not task.done():
             task.cancel()
-        await self.exchange.close()
-        for task in self._worker_tasks:
-            task.cancel()
-        await consumer_task
-        await asyncio.gather(*self._worker_tasks, return_exceptions=True)
+        await asyncio.gather(task, return_exceptions=True)
+
+    async def _cancel_symbol_tasks(self) -> None:
+        """Cancel active per-symbol watcher tasks."""
+        tasks = list(self.symbol_tasks.values())
+        self.symbol_tasks.clear()
+        if not tasks:
+            return
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _cancel_worker_tasks(self) -> None:
+        """Cancel active worker tasks and clear the registry."""
+        tasks = list(self._worker_tasks)
+        self._worker_tasks = []
+        if not tasks:
+            return
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+    async def _close_exchange(self) -> None:
+        """Close the active exchange client once and clear the reference."""
+        exchange = self.exchange
+        self.exchange = None
+        if exchange is None:
+            return
+        try:
+            await exchange.close()
+        except (
+            AttributeError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            ccxtpro.BaseError,
+            OSError,
+        ) as exc:
+            logging.warning("Error closing watcher exchange client: %s", exc)
+
+    async def _shutdown_runtime_tasks(self) -> None:
+        """Idempotently stop internal watcher tasks and close the exchange."""
+        async with self._shutdown_lock:
+            reload_task = self._reload_task
+            self._reload_task = None
+            await self._cancel_optional_task(reload_task)
+
+            btc_warmup_task = self._btc_warmup_task
+            self._btc_warmup_task = None
+            await self._cancel_optional_task(btc_warmup_task)
+
+            consumer_task = self._consumer_task
+            self._consumer_task = None
+            await self._cancel_optional_task(consumer_task)
+
+            await self._cancel_symbol_tasks()
+            await self._cancel_worker_tasks()
+            await self._close_exchange()
 
     def _create_worker_task(self, task_name: str) -> asyncio.Task | None:
         if task_name == self.DCA_WORKER_TASK_NAME:
@@ -389,30 +511,32 @@ class Watcher:
         logging.info("Starting Watcher...")
         await self._await_btc_warmup_if_needed()
 
-        trade_symbols = await self.trades.get_symbols()
-        Watcher.ticker_symbols = self.__compose_ticker_symbols(trade_symbols)
+        await self._refresh_symbol_targets_from_trades(notify=False)
 
-        consumer_task = asyncio.create_task(self.process_events())
+        self._consumer_task = asyncio.create_task(
+            self.process_events(), name="watcher:event_consumer"
+        )
         self._start_worker_tasks()
 
-        while self.status:
-            try:
-                await self.__sync_symbol_tasks()
-                self._ensure_worker_tasks()
+        try:
+            while self.status:
+                try:
+                    await self.__sync_symbol_tasks()
+                    self._ensure_worker_tasks()
 
-                # Wait for event or periodically refresh
-                await self.__wait_for_updates()
+                    # Wait for event or periodically refresh
+                    await self.__wait_for_updates()
 
-            except asyncio.TimeoutError:
-                # Regular refresh to detect crashed tasks
-                await self.__sync_symbol_tasks()
-                self._ensure_worker_tasks()
-            except (RuntimeError, TypeError, ValueError) as e:
-                # Broad catch ensures the watcher loop continues.
-                logging.error("Error in watch_tickers: %s", e, exc_info=True)
-                await asyncio.sleep(5)
-
-        await self.__cleanup_tasks(consumer_task)
+                except asyncio.TimeoutError:
+                    # Regular refresh to detect crashed tasks
+                    await self.__sync_symbol_tasks()
+                    self._ensure_worker_tasks()
+                except (RuntimeError, TypeError, ValueError) as e:
+                    # Broad catch ensures the watcher loop continues.
+                    logging.error("Error in watch_tickers: %s", e, exc_info=True)
+                    await asyncio.sleep(5)
+        finally:
+            await asyncio.shield(self._shutdown_runtime_tasks())
 
     @staticmethod
     def __normalize_symbols(symbols: list[Any] | None) -> list[str]:
@@ -424,8 +548,9 @@ class Watcher:
 
     async def __sync_symbol_tasks(self) -> None:
         # Normalize and sanitize ticker symbols
-        flat_symbols = self.__normalize_symbols(Watcher.ticker_symbols)
-        Watcher.ticker_symbols = flat_symbols  # keep class-level in sync
+        runtime_state = self.runtime_state
+        flat_symbols = self.__normalize_symbols(runtime_state.ticker_symbols)
+        runtime_state.ticker_symbols = flat_symbols
         await sync_symbol_tasks(
             self.symbol_tasks,
             set(flat_symbols),
@@ -439,8 +564,36 @@ class Watcher:
     #                    Symbol watcher with reconnection                 #
     # ------------------------------------------------------------------- #
 
+    def _next_reconnect_delay(self, delay: int) -> int:
+        """Return the next reconnect delay with the configured ceiling."""
+        return min(delay * 2, self.MAX_RECONNECT_DELAY)
+
+    async def _wait_for_symbol_retry(
+        self,
+        symbol: str,
+        category: str,
+        error: Exception,
+        delay: int,
+        *,
+        log_level: str = "warning",
+        exc_info: bool = False,
+    ) -> int:
+        """Log a stream failure, wait, and return the next reconnect delay."""
+        log_method = logging.error if log_level == "error" else logging.warning
+        log_method(
+            "%s %s: %s — reconnecting in %ss",
+            symbol,
+            category,
+            error,
+            delay,
+            exc_info=exc_info,
+        )
+        await asyncio.sleep(delay)
+        return self._next_reconnect_delay(delay)
+
     async def watch_symbol_with_reconnect(self, symbol: str) -> None:
         """Wrapper that restarts the watcher on connection failures."""
+        logging.info("Started websocket stream for %s", symbol)
         delay = self.RECONNECT_DELAY
         while self.status:
             try:
@@ -452,85 +605,70 @@ class Watcher:
                 logging.info("Watcher cancelled for %s", symbol)
                 break
             except ccxtpro.NetworkError as e:
-                logging.warning(
-                    "%s network error: %s — reconnecting in %ss", symbol, e, delay
-                )
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, self.MAX_RECONNECT_DELAY)
-            except ccxtpro.ExchangeError as e:
-                logging.warning(
-                    "%s exchange error: %s — reconnecting in %ss", symbol, e, delay
-                )
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, self.MAX_RECONNECT_DELAY)
-            except asyncio.TimeoutError as e:
-                logging.warning(
-                    "%s timeout error: %s — reconnecting in %ss", symbol, e, delay
-                )
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, self.MAX_RECONNECT_DELAY)
-            except (RuntimeError, TypeError, ValueError, OSError) as e:
-                # Broad catch to keep reconnection loop alive.
-                logging.error(
-                    "%s unexpected error: %s — reconnecting in %ss",
+                delay = await self._wait_for_symbol_retry(
                     symbol,
+                    "network error",
+                    e,
+                    delay,
+                )
+            except ccxtpro.ExchangeError as e:
+                delay = await self._wait_for_symbol_retry(
+                    symbol,
+                    "exchange error",
+                    e,
+                    delay,
+                )
+            except asyncio.TimeoutError as e:
+                delay = await self._wait_for_symbol_retry(
+                    symbol,
+                    "timeout error",
+                    e,
+                    delay,
+                )
+            except (
+                IndexError,
+                KeyError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+                OSError,
+            ) as e:
+                # Broad catch to keep reconnection loop alive.
+                delay = await self._wait_for_symbol_retry(
+                    symbol,
+                    "unexpected error",
                     e,
                     delay,
                     exc_info=True,
+                    log_level="error",
                 )
-                await asyncio.sleep(delay)
-                delay = min(delay * 2, self.MAX_RECONNECT_DELAY)
 
     async def __process_ohlcv_data(self, symbol: str, ohlcv) -> None:
         price = float(ohlcv[-1][4])
         await self.push_event(symbol, price, ohlcv)
 
-    async def __process_trade_data(self, symbol: str, trades) -> None:
+    async def __process_trade_data(self, symbol: str, trades, exchange: Any) -> None:
         trade = trades[-1]
         price = float(trade["price"])
-        ohlcvc = self.exchange.build_ohlcvc([trade], Watcher.timeframe)
+        ohlcvc = exchange.build_ohlcvc([trade], self.runtime_state.timeframe)
         await self.push_event(symbol, price, ohlcvc)
 
     async def watch_symbol(self, symbol: str) -> None:
-        """Actual exchange streaming for one symbol."""
-        logging.info("Started websocket stream for %s", symbol)
-        while self.status:
-            if self.exchange:
-                try:
-                    if Watcher.exchange_watcher_ohlcv:
-                        ohlcv = await self.exchange.watch_ohlcv(
-                            symbol, Watcher.timeframe
-                        )
-                        await self.__process_ohlcv_data(symbol, ohlcv)
-                    else:
-                        trades = await self.exchange.watch_trades(symbol)
-                        if trades:
-                            await self.__process_trade_data(symbol, trades)
-                except ccxtpro.NetworkError as e:
-                    logging.warning("%s: network error %s, reconnecting...", symbol, e)
-                    await asyncio.sleep(5)
-                except ccxtpro.ExchangeError as e:
-                    logging.warning("%s: exchange error %s, reconnecting...", symbol, e)
-                    await asyncio.sleep(10)
-                except asyncio.CancelledError:
-                    raise
-                except asyncio.TimeoutError as e:
-                    logging.warning("%s: timeout error %s, reconnecting...", symbol, e)
-                    await asyncio.sleep(5)
-                except ValueError as e:
-                    logging.error("%s: value error %s", symbol, e)
-                    await asyncio.sleep(5)
-                except (IndexError, KeyError, RuntimeError, TypeError, OSError) as e:
-                    # Broad catch avoids dropping the websocket loop on unknown errors.
-                    logging.error(
-                        "Unexpected error for %s: %s", symbol, e, exc_info=True
-                    )
-                    await asyncio.sleep(5)
-            else:
-                logging.error(
-                    "No exchange has been configured yet. Please finalize your configuration."
-                )
-                await asyncio.sleep(5)
+        """Process exactly one websocket read cycle for a symbol."""
+        exchange = self.exchange
+        if exchange is None:
+            raise RuntimeError(
+                "No exchange has been configured yet. Please finalize your configuration."
+            )
+
+        if self.runtime_state.exchange_watcher_ohlcv:
+            ohlcv = await exchange.watch_ohlcv(symbol, self.runtime_state.timeframe)
+            await self.__process_ohlcv_data(symbol, ohlcv)
+            return
+
+        trades = await exchange.watch_trades(symbol)
+        if trades:
+            await self.__process_trade_data(symbol, trades, exchange)
 
     # ------------------------------------------------------------------- #
     #                         Event processing                            #
@@ -620,7 +758,8 @@ class Watcher:
                 await self.dca.process_ticker_data(ticker_price, self.config)
             except asyncio.CancelledError:
                 break
-            except Exception as e:  # noqa: BLE001 - Keep worker alive on any failure.
+            except (RuntimeError, TypeError, ValueError, OSError) as e:
+                # Known runtime failures are logged and the worker keeps going.
                 logging.error("Error processing DCA queue: %s", e, exc_info=True)
             finally:
                 if symbol is not None:
@@ -664,7 +803,7 @@ class Watcher:
             logging.error("Error writing OHLCV batch: %s", e, exc_info=True)
 
     def __prepare_ohlcv_write(self, symbol: str, ticker) -> dict | None:
-        return prepare_ohlcv_write(Watcher.candles, symbol, ticker)
+        return prepare_ohlcv_write(self.runtime_state.candles, symbol, ticker)
 
     # ------------------------------------------------------------------- #
     #                              Shutdown                               #
@@ -674,15 +813,6 @@ class Watcher:
         """Stop watchers and close exchange resources."""
         self.status = False
         self._pending_reload_config = None
-        if self._reload_task is not None and not self._reload_task.done():
-            await asyncio.gather(self._reload_task, return_exceptions=True)
-            self._reload_task = None
-        if self._btc_warmup_task and not self._btc_warmup_task.done():
-            self._btc_warmup_task.cancel()
-        for task in self.symbol_tasks.values():
-            task.cancel()
-        for task in self._worker_tasks:
-            task.cancel()
-        if self.exchange:
-            await self.exchange.close()
+        self.runtime_state.notify_symbol_update()
+        await self._shutdown_runtime_tasks()
         logging.info("Watcher shutdown complete.")

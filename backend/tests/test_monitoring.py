@@ -148,7 +148,7 @@ async def test_orders_buy_triggers_monitoring_notification(monkeypatch) -> None:
             return None
 
         monkeypatch.setattr(
-            "service.orders.run_sqlite_write_with_retry", fake_run_sqlite
+            "service.order_persistence.run_sqlite_write_with_retry", fake_run_sqlite
         )
 
         async def fake_create_spot_market_buy(_order, _config) -> None:
@@ -224,7 +224,7 @@ async def test_orders_sell_triggers_monitoring_notification(monkeypatch) -> None
             return None
 
         monkeypatch.setattr(
-            "service.orders.run_sqlite_write_with_retry", fake_run_sqlite
+            "service.order_persistence.run_sqlite_write_with_retry", fake_run_sqlite
         )
 
         async def fake_create_spot_sell(_order, _config) -> None:

@@ -68,6 +68,15 @@ async def serve_vue(path: str) -> File:
     return await _serve_vue_path(path)
 
 
+@get(
+    path=["/control-center", "/monitoring", "/config", "/settings"],
+    include_in_schema=False,
+)
+async def serve_spa_top_level_routes() -> File:
+    """Serve top-level SPA routes that would otherwise collide with API prefixes."""
+    return await _serve_vue_path("")
+
+
 async def _serve_vue_path(path: str) -> File:
     """Serve a SPA route by path with static-file fallback."""
     candidate = None
@@ -86,4 +95,4 @@ async def serve_root() -> File:
     return await _serve_vue_path("")
 
 
-route_handlers = [serve_static, serve_vue, serve_root]
+route_handlers = [serve_static, serve_spa_top_level_routes, serve_vue, serve_root]

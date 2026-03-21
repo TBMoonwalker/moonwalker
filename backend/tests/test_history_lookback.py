@@ -11,18 +11,17 @@ def test_parse_history_lookback_to_days_supports_units() -> None:
 def test_resolve_history_lookback_days_prefers_new_key() -> None:
     config = {
         "history_lookback_time": "180d",
-        "history_from_data": 30,
         "timeframe": "1m",
     }
     assert resolve_history_lookback_days(config) == 180
 
 
-def test_resolve_history_lookback_days_falls_back_to_legacy() -> None:
+def test_resolve_history_lookback_days_ignores_removed_legacy_key() -> None:
     config = {
         "history_from_data": 45,
         "timeframe": "4h",
     }
-    assert resolve_history_lookback_days(config) == 45
+    assert resolve_history_lookback_days(config) == 365
 
 
 def test_resolve_history_lookback_days_uses_timeframe_defaults() -> None:

@@ -1,6 +1,6 @@
-black
+black==26.3.1
 isort==8.0.1
 mypy
 pytest
 pytest-asyncio
-ruff
+ruff==0.15.6

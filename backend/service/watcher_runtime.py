@@ -1,6 +1,58 @@
-"""Pure helpers for watcher symbol and OHLCV state handling."""
+"""Helpers and shared state for watcher symbol and OHLCV handling."""
 
+import asyncio
+from dataclasses import dataclass, field
 from typing import Any
+
+
+@dataclass
+class WatcherRuntimeState:
+    """Shared in-process watcher state for the active Moonwalker runtime."""
+
+    ticker_symbols: list[Any] = field(default_factory=list)
+    candles: dict[str, list[Any]] = field(default_factory=dict)
+    signal_symbols: set[str] = field(default_factory=set)
+    mandatory_symbols: set[str] = field(default_factory=set)
+    timeframe: str = "1m"
+    symbol_update_event: asyncio.Event = field(default_factory=asyncio.Event)
+    exchange_watcher_ohlcv: bool = True
+
+    def get_live_candle(self, symbol: str) -> list[Any] | None:
+        """Return a copy of the current in-memory candle for a symbol."""
+        candle = self.candles.get(symbol)
+        if candle is None:
+            return None
+        return list(candle)
+
+    def notify_symbol_update(self) -> None:
+        """Wake the watcher refresh loop after symbol inputs changed."""
+        self.symbol_update_event.set()
+
+    def clear_symbol_update(self) -> None:
+        """Clear the symbol update event after the refresh loop handled it."""
+        self.symbol_update_event.clear()
+
+
+_active_runtime_state: WatcherRuntimeState | None = None
+
+
+def set_active_runtime_state(state: WatcherRuntimeState) -> None:
+    """Register the active watcher runtime state for this process."""
+    global _active_runtime_state
+    _active_runtime_state = state
+
+
+def get_active_runtime_state() -> WatcherRuntimeState:
+    """Return the active watcher runtime state for this process."""
+    global _active_runtime_state
+    if _active_runtime_state is None:
+        _active_runtime_state = WatcherRuntimeState()
+    return _active_runtime_state
+
+
+def get_live_candle_snapshot(symbol: str) -> list[Any] | None:
+    """Return the latest in-memory candle snapshot for a symbol."""
+    return get_active_runtime_state().get_live_candle(symbol)
 
 
 def get_mandatory_symbols(config: dict[str, Any]) -> set[str]:

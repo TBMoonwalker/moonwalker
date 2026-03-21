@@ -1,8 +1,21 @@
 # Configuration
 
 1. Start the app with `./run.sh start`.
-2. Open the UI at `http://<host>:<port>`
+2. Open the Control Center at `http://<host>:<port>/control-center`.
 3. Save your settings (they are persisted in the DB).
+
+Runtime configuration is stored in the `AppConfig` table and served to the UI
+through `/config/all`. Dashboard clients can also poll `/config/freshness` to
+detect whether another browser or tab has changed the saved configuration.
+Most settings are updated via `PUT /config/single/{key}` or
+`POST /config/multiple`, but switching `dry_run` from `true` to `false` must go
+through `POST /config/live/activate` so the backend can enforce readiness
+checks.
+
+Legacy `/config` and `/settings` links now redirect into the Control Center.
+
+For signal-plugin-specific payloads and examples, see [signals.md](signals.md).
+For backup/restore and related config endpoints, see [api.md](api.md).
 
 ## Configuration Reference
 All supported configuration keys are listed below. Keys marked "(advanced)"
@@ -18,7 +31,6 @@ are not exposed in the UI and must be set via the API.
 | `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema_cross` |
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
 | `pair_denylist` | `string` | Comma-separated denied symbols. | `SCAM,XYZ` |
-| `filter` | `string (json)` | UI filter payload (compat). | `{"rsi_max":70,"marketcap_cmc_api_key":"cmc_..."}` |
 | `volume` | `string (json)` | Minimum 24h volume filter. | `{"size":5,"range":"M"}` |
 | `topcoin_limit` | `int` | Max CoinMarketCap rank allowed. | `200` |
 | `marketcap_cmc_api_key` | `string` | CoinMarketCap API key for market cap filtering. | `cmc_...` |
@@ -66,12 +78,10 @@ are not exposed in the UI and must be set via the API.
 | `dynamic_so_min_scale` | `float` | Lower bound for dynamic SO multiplier. | `0.5` |
 | `dynamic_so_max_scale` | `float` | Upper bound for dynamic SO multiplier. | `3.0` |
 | `dynamic_so_loss_max_scale_threshold` | `float` | Absolute loss percentage at which dynamic SO uses `dynamic_so_max_scale` directly. | `30.0` |
-| `dynamic_so_ath_window` | `string` | Legacy compatibility key (`1d`/`1w`/`1m`) used only when lookback value/unit are not set. | `1m` |
 | `tp` | `float` | Take profit (percent). | `1.0` |
 | `sl` | `float` | Stop loss (percent). | `2.0` |
 | `ordersize` | `float` | ASAP base order size (advanced). | `12` |
 | `housekeeping_interval` | `int` | Ticker cache cleanup interval (days). | `2` |
-| `history_from_data` | `int` | History lookback for indicator seed (days). | `30` |
 | `history_lookback_time` | `string` | Canonical indicator history lookback using `d/w/m/y` suffixes such as `30d`, `12w`, `6m`, or `1y`. | `90d` |
 | `upnl_housekeeping_interval` | `int` | uPNL history retention in days; `0` keeps all history forever. | `0` |
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |
@@ -107,6 +117,10 @@ are not exposed in the UI and must be set via the API.
 | `monitoring_retry_count` | `int` | Number of retries after a failed Telegram send. | `1` |
 | `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","bbands_cross"]` |
 | `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals"]` |
+
+Read-only metadata keys such as `strategies` and `signal_plugins` are returned
+in config snapshots for the dashboard and should not be treated as persisted
+user-entered values.
 
 ## Autopilot Green Phase
 

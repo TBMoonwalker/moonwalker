@@ -66,11 +66,14 @@ class Strategy:
                 "creating_order": result,
             }
             if self._last_log_by_symbol.get(symbol) != logging_json:
-                logging.debug(f"{logging_json}")
+                logging.debug("%s", logging_json)
                 self._last_log_by_symbol[symbol] = logging_json.copy()
         except Exception as e:
             logging.error(
-                f"Cannot run strategy for {symbol}, check indicators.log: {e}"
+                "Cannot run strategy for %s, check indicators.log: %s",
+                symbol,
+                e,
+                exc_info=True,
             )
             return False
         return result

@@ -1,9 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import Statistics from '@/components/Statistics.vue'
-import WebSocketStatusBar from '@/components/WebSocketStatusBar.vue'
-import { AlertCircleOutline, ConstructOutline } from '@vicons/ionicons5'
-import { useRouter } from 'vue-router'
+import { AlertCircleOutline } from '@vicons/ionicons5'
 import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
 
@@ -13,7 +11,6 @@ const UnsellableTrades = defineAsyncComponent(() => import('../components/Unsell
 const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
 const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'))
 
-const router = useRouter()
 const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
 const unsellableTradesState = storeToRefs(unsellableTradesStore)
 const viewportWidth = ref(window.innerWidth)
@@ -27,10 +24,6 @@ const unsellableTradesCount = computed(() =>
 
 function handleResize() {
   viewportWidth.value = window.innerWidth
-}
-
-function configureButtonClicked() {
-  router.push('/config')
 }
 
 onMounted(() => {
@@ -47,45 +40,6 @@ onUnmounted(() => {
     <n-flex class="page-section" vertical>
       <n-card class="dashboard-header-card" content-style="padding: 14px 16px;">
         <n-flex class="page-header trades-header" vertical :size="12">
-          <n-flex class="header-controls" justify="space-between" align="center" :wrap="true" :size="[12, 12]">
-            <n-button
-              v-if="!isMobile"
-              strong
-              secondary
-              type="primary"
-              size="large"
-              aria-label="Open configuration"
-              title="Open configuration"
-              @click="configureButtonClicked"
-            >
-              <template #icon>
-                <n-icon>
-                  <ConstructOutline />
-                </n-icon>
-              </template>
-              Configure Bot
-            </n-button>
-            <n-button
-              v-else
-              strong
-              secondary
-              circle
-              type="primary"
-              size="medium"
-              aria-label="Open configuration"
-              title="Open configuration"
-              @click="configureButtonClicked"
-            >
-              <template #icon>
-                <n-icon>
-                  <ConstructOutline />
-                </n-icon>
-              </template>
-            </n-button>
-            <div class="stream-status-wrap">
-              <WebSocketStatusBar compact />
-            </div>
-          </n-flex>
           <div class="header-statistics">
             <Statistics />
           </div>
@@ -170,17 +124,6 @@ onUnmounted(() => {
   width: 100%;
 }
 
-.header-controls {
-  width: 100%;
-}
-
-.stream-status-wrap {
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
-  flex: 1;
-}
-
 .header-statistics {
   width: 100%;
 }
@@ -207,15 +150,6 @@ onUnmounted(() => {
 
   .trades-header {
     align-items: flex-start;
-  }
-
-  .header-controls {
-    align-items: flex-start;
-  }
-
-  .stream-status-wrap {
-    width: 100%;
-    justify-content: flex-start;
   }
 }
 </style>

@@ -1,7 +1,6 @@
 """Data access helpers for OHLCV and listings."""
 
 import asyncio
-import re
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -11,8 +10,27 @@ import model
 import pandas as pd
 from cachetools import TTLCache
 from service.config import resolve_timeframe
+from service.data_history_sync import (
+    HistorySyncState,
+    HistorySyncWindow,
+    plan_boundary_fetch_starts,
+)
+from service.data_ohlcv import (
+    append_live_candle,
+    build_live_candle_payload,
+    resample_ohlcv_data,
+    rows_to_dataframe,
+    serialize_ohlcv_dataframe,
+)
+from service.data_timeframes import (
+    calculate_min_candle_date,
+    resolve_required_history_window,
+    timeframe_to_milliseconds,
+    timeframe_to_seconds,
+)
 from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
+from service.watcher_runtime import get_live_candle_snapshot
 from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
@@ -145,37 +163,19 @@ class Data:
         Supported examples: 1m, 5m, 15min, 1h, 4h, 1d, 1w.
         Falls back to 60 seconds if parsing fails.
         """
-        normalized = str(timerange or "").strip().lower()
-        if not normalized:
-            return 60
-
-        normalized = normalized.replace("min", "m")
-        match = re.fullmatch(r"(\d+)\s*([mhdw])", normalized)
-        if not match:
-            return 60
-
-        value = int(match.group(1))
-        unit = match.group(2)
-        multipliers = {
-            "m": 60,
-            "h": 60 * 60,
-            "d": 24 * 60 * 60,
-            "w": 7 * 24 * 60 * 60,
-        }
-        return max(1, value) * multipliers[unit]
+        return timeframe_to_seconds(timerange)
 
     def __calculate_min_candle_date(self, timerange: str, length: int) -> int:
         """Calculate earliest timestamp in milliseconds for candle history."""
-        timeframe_seconds = self.__timeframe_to_seconds(timerange)
-        candles = max(1, int(length))
-        lookback_seconds = timeframe_seconds * candles * self.LOOKBACK_BUFFER_MULTIPLIER
-        end_time = datetime.now(timezone.utc)
-        min_date = end_time - timedelta(seconds=lookback_seconds)
-        return int(min_date.timestamp() * 1000)
+        return calculate_min_candle_date(
+            timerange=timerange,
+            length=length,
+            lookback_buffer_multiplier=self.LOOKBACK_BUFFER_MULTIPLIER,
+        )
 
     def __timeframe_to_milliseconds(self, timerange: str) -> int:
         """Convert timeframe notation to milliseconds."""
-        return self.__timeframe_to_seconds(timerange) * 1000
+        return timeframe_to_milliseconds(timerange)
 
     def __resolve_required_history_window(
         self,
@@ -184,57 +184,10 @@ class Data:
         since_ms: int | None = None,
     ) -> tuple[int, int, int]:
         """Return normalized required history window and timeframe size."""
-        timeframe = resolve_timeframe(config)
-        timeframe_ms = max(1, self.__timeframe_to_milliseconds(timeframe))
-        now_ms = int(datetime.now(timezone.utc).timestamp() * 1000)
-        current_candle_start = now_ms - (now_ms % timeframe_ms)
-        required_until = max(0, current_candle_start - timeframe_ms)
-        requested_since = (
-            int(since_ms)
-            if since_ms is not None
-            else int(
-                (datetime.now(timezone.utc) - timedelta(days=history_data)).timestamp()
-                * 1000
-            )
-        )
-        required_since = max(
-            0,
-            ((requested_since + timeframe_ms - 1) // timeframe_ms) * timeframe_ms,
-        )
-        if required_since > required_until:
-            required_since = required_until
-        return required_since, required_until, timeframe_ms
-
-    @staticmethod
-    def _build_required_timestamps(
-        required_since: int, required_until: int, timeframe_ms: int
-    ) -> set[int]:
-        """Build the exact timestamp set required for a history window."""
-        if timeframe_ms <= 0 or required_until < required_since:
-            return set()
-        return set(range(required_since, required_until + 1, timeframe_ms))
-
-    @staticmethod
-    def _is_complete_since_first_available_candle(
-        stored_timestamps: set[int],
-        available_since: int | None,
-        required_until: int,
-        timeframe_ms: int,
-    ) -> bool:
-        """Return True when history is complete from the first available candle onward."""
-        if (
-            available_since is None
-            or timeframe_ms <= 0
-            or required_until < available_since
-        ):
-            return False
-        effective_required = Data._build_required_timestamps(
-            available_since,
-            required_until,
-            timeframe_ms,
-        )
-        return bool(effective_required) and effective_required.issubset(
-            stored_timestamps
+        return resolve_required_history_window(
+            history_data=history_data,
+            timeframe=resolve_timeframe(config),
+            since_ms=since_ms,
         )
 
     async def __get_stored_timestamps(
@@ -316,45 +269,6 @@ class Data:
 
         return fetched_timestamps, inserted_timestamps
 
-    @staticmethod
-    def _rows_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
-        """Create and sanitize a DataFrame from DB rows."""
-        df = pd.DataFrame(rows)
-        df.dropna(inplace=True)
-        return df
-
-    @staticmethod
-    def _append_live_candle(
-        df_source: pd.DataFrame, live_candle: dict[str, float | str]
-    ) -> pd.DataFrame:
-        """Append in-memory live candle data to DB candles."""
-        return pd.concat([df_source, pd.DataFrame([live_candle])], ignore_index=True)
-
-    @staticmethod
-    def _timestamp_to_unix_seconds(timestamp: Any) -> float | None:
-        """Convert arbitrary timestamp-like values to UTC unix seconds."""
-        if pd.isna(timestamp):
-            return None
-        try:
-            return pd.Timestamp(timestamp).timestamp()
-        except (TypeError, ValueError):
-            return None
-
-    @staticmethod
-    def _serialize_ohlcv_dataframe(df_source: pd.DataFrame, offset: float) -> str:
-        """Convert OHLCV DataFrame into frontend payload JSON."""
-        df = df_source.copy()
-        offset_minutes = int(offset)
-        offset_seconds = offset_minutes * 60
-        timestamp_series = pd.to_datetime(df["timestamp"], utc=True, errors="coerce")
-        df["time"] = timestamp_series.map(Data._timestamp_to_unix_seconds)
-        df.dropna(subset=["time"], inplace=True)
-        df["time"] = df["time"].astype(float) + float(offset_seconds)
-        df.drop_duplicates(subset=["time"], inplace=True)
-        df.drop("volume", axis=1, inplace=True)
-        df.drop("timestamp", axis=1, inplace=True)
-        return df.to_json(orient="records")
-
     async def count_history_data_for_symbol(self, symbol: str) -> int | bool:
         """Count history data rows for a symbol."""
         try:
@@ -420,76 +334,58 @@ class Data:
     ) -> bool:
         """Ensure required history exists for a symbol without deleting stored data."""
         try:
-            (
-                required_since,
-                required_until,
-                timeframe_ms,
-            ) = self.__resolve_required_history_window(history_data, config, since_ms)
-            required_timestamps = self._build_required_timestamps(
-                required_since, required_until, timeframe_ms
+            required_since, required_until, timeframe_ms = (
+                self.__resolve_required_history_window(history_data, config, since_ms)
             )
-            if not required_timestamps:
+            window = HistorySyncWindow.build(
+                required_since=required_since,
+                required_until=required_until,
+                timeframe_ms=timeframe_ms,
+            )
+            if not window.required_timestamps:
                 logging.warning("No closed candle window available yet for %s.", symbol)
                 return False
 
-            stored_timestamps = await self.__get_stored_timestamps(
-                symbol, required_since, required_until
+            sync_state = HistorySyncState(
+                stored_timestamps=await self.__get_stored_timestamps(
+                    symbol,
+                    window.required_since,
+                    window.required_until,
+                )
             )
-            if required_timestamps.issubset(stored_timestamps):
+            if sync_state.is_required_complete(window):
                 logging.info("History already complete for %s", symbol)
                 return True
 
-            fetch_starts: list[int] = []
-            if not stored_timestamps:
-                fetch_starts.append(required_since)
-            else:
-                earliest_stored = min(stored_timestamps)
-                latest_stored = max(stored_timestamps)
-                if earliest_stored > required_since:
-                    fetch_starts.append(required_since)
-                if latest_stored < required_until:
-                    fetch_starts.append(latest_stored + timeframe_ms)
-
-            if not fetch_starts:
-                fetch_starts.append(required_since)
-
-            earliest_available_timestamp: int | None = None
-            for fetch_since in dict.fromkeys(fetch_starts):
+            for fetch_since in plan_boundary_fetch_starts(
+                window=window,
+                stored_timestamps=sync_state.stored_timestamps,
+            ):
                 fetched_timestamps, inserted_timestamps = (
                     await self.__fetch_and_store_history_range(
                         symbol=symbol,
                         config=config,
                         fetch_since_ms=fetch_since,
-                        required_since=required_since,
-                        required_until=required_until,
-                        required_timestamps=required_timestamps,
-                        existing_timestamps=stored_timestamps,
+                        required_since=window.required_since,
+                        required_until=window.required_until,
+                        required_timestamps=window.required_timestamps,
+                        existing_timestamps=sync_state.stored_timestamps,
                     )
                 )
-                if fetched_timestamps:
-                    fetched_earliest = min(fetched_timestamps)
-                    if earliest_available_timestamp is None:
-                        earliest_available_timestamp = fetched_earliest
-                    else:
-                        earliest_available_timestamp = min(
-                            earliest_available_timestamp, fetched_earliest
-                        )
-                stored_timestamps.update(inserted_timestamps)
+                sync_state.record_fetch(
+                    fetched_timestamps=fetched_timestamps,
+                    inserted_timestamps=inserted_timestamps,
+                )
 
-            if required_timestamps.issubset(stored_timestamps):
+            if sync_state.is_required_complete(window):
                 logging.info("Added missing history boundaries for %s", symbol)
                 return True
 
-            if self._is_complete_since_first_available_candle(
-                stored_timestamps=stored_timestamps,
-                available_since=earliest_available_timestamp,
-                required_until=required_until,
-                timeframe_ms=timeframe_ms,
-            ):
+            if sync_state.is_complete_from_first_available(window):
                 logging.info(
                     "Added history for %s from first available exchange candle at %s",
                     symbol,
-                    earliest_available_timestamp,
+                    sync_state.earliest_available_timestamp,
                 )
                 return True
 
@@ -502,42 +398,31 @@ class Data:
                 await self.__fetch_and_store_history_range(
                     symbol=symbol,
                     config=config,
-                    fetch_since_ms=required_since,
-                    required_since=required_since,
-                    required_until=required_until,
-                    required_timestamps=required_timestamps,
-                    existing_timestamps=stored_timestamps,
+                    fetch_since_ms=window.required_since,
+                    required_since=window.required_since,
+                    required_until=window.required_until,
+                    required_timestamps=window.required_timestamps,
+                    existing_timestamps=sync_state.stored_timestamps,
                 )
             )
-            stored_timestamps.update(refill_inserted_timestamps)
+            sync_state.record_fetch(
+                fetched_timestamps=refill_fetched_timestamps,
+                inserted_timestamps=refill_inserted_timestamps,
+            )
 
-            if refill_fetched_timestamps:
-                refill_earliest = min(refill_fetched_timestamps)
-                if earliest_available_timestamp is None:
-                    earliest_available_timestamp = refill_earliest
-                else:
-                    earliest_available_timestamp = min(
-                        earliest_available_timestamp, refill_earliest
-                    )
-
-            if required_timestamps.issubset(stored_timestamps):
+            if sync_state.is_required_complete(window):
                 logging.info("Added history for %s", symbol)
                 return True
 
-            if self._is_complete_since_first_available_candle(
-                stored_timestamps=stored_timestamps,
-                available_since=earliest_available_timestamp,
-                required_until=required_until,
-                timeframe_ms=timeframe_ms,
-            ):
+            if sync_state.is_complete_from_first_available(window):
                 logging.info(
                     "Added history for %s from first available exchange candle at %s",
                     symbol,
-                    earliest_available_timestamp,
+                    sync_state.earliest_available_timestamp,
                 )
                 return True
 
-            missing_count = len(required_timestamps - stored_timestamps)
+            missing_count = sync_state.missing_count(window)
             logging.error(
                 "History for %s remains incomplete after refill attempt. "
                 "missing_candles=%s",
@@ -576,7 +461,7 @@ class Data:
         )
         if not rows:
             return None
-        return await asyncio.to_thread(self._rows_to_dataframe, rows)
+        return await asyncio.to_thread(rows_to_dataframe, rows)
 
     async def get_ohlcv_for_pair(
         self, pair: str, timerange: str, timestamp_start: float, offset: float
@@ -596,15 +481,13 @@ class Data:
         live_candle = self.__get_live_candle_for_symbol(symbol, start_timestamp)
         if live_candle:
             df_source = await asyncio.to_thread(
-                self._append_live_candle, df_source, live_candle
+                append_live_candle, df_source, live_candle
             )
 
         if not df_source.empty:
             df = await asyncio.to_thread(self.resample_data, df_source, timerange)
             if df is not None and not df.empty:
-                return await asyncio.to_thread(
-                    self._serialize_ohlcv_dataframe, df, offset
-                )
+                return await asyncio.to_thread(serialize_ohlcv_dataframe, df, offset)
         return {}
 
     def __get_live_candle_for_symbol(
@@ -612,25 +495,9 @@ class Data:
     ) -> dict[str, float | str] | None:
         """Return current in-memory watcher candle for symbol if it is in range."""
         try:
-            from service.watcher import Watcher
-
-            live = Watcher.candles.get(symbol)
-            if not live or len(live) < 6:
-                return None
-            if float(live[0]) <= float(start_timestamp):
-                return None
-            return {
-                "timestamp": float(live[0]),
-                "symbol": symbol,
-                "open": float(live[1]),
-                "high": float(live[2]),
-                "low": float(live[3]),
-                "close": float(live[4]),
-                "volume": float(live[5]),
-            }
+            live = get_live_candle_snapshot(symbol)
+            return build_live_candle_payload(live, symbol, start_timestamp)
         except (
-            ImportError,
-            AttributeError,
             KeyError,
             IndexError,
             TypeError,
@@ -661,40 +528,8 @@ class Data:
 
     def resample_data(self, ohlcv: pd.DataFrame, timerange: str) -> pd.DataFrame | None:
         """Resample OHLCV data to the requested timerange."""
-        df = pd.DataFrame(ohlcv)
-        if not df.empty:
-            # Convert unix timestamp to datetime object
-            df["timestamp"] = pd.to_datetime(
-                df["timestamp"].astype(float), utc=True, origin="unix", unit="ms"
-            )
-            # Set datetime index
-            df = df.set_index("timestamp")
-            # Resample to the configured timerange
-            if "m" in timerange:
-                interval, range = timerange.split("m")
-                timerange = f"{interval}Min"
-
-            df_resample = df.resample(timerange).agg(
-                {
-                    "open": "first",
-                    "high": "max",
-                    "close": "last",
-                    "low": "min",
-                    "volume": "sum",
-                }
-            )
-
-            # Reset index after resample
-            df_resample.reset_index(inplace=True)
-
-            # Convert datetime object back to a unix timestamp
-            # df_resample["timestamp"] = df_resample["timestamp"].astype(int)
-            # df_resample["timestamp"] = df_resample["timestamp"].div(10**9)
-
-            # Clear empty values
-            df_resample.dropna(inplace=True)
-            return df_resample
-        else:
+        df_resample = resample_ohlcv_data(ohlcv, timerange)
+        if df_resample is None:
             logging.error("No historic data available yet for symbol")
-
             return None
+        return df_resample

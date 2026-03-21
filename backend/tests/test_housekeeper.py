@@ -1,4 +1,5 @@
 import os
+from asyncio import CancelledError
 from datetime import datetime, timedelta
 
 import pytest
@@ -85,3 +86,58 @@ async def test_housekeeper_deletes_only_old_inactive_symbol_rows(
     ]
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_housekeeper_shutdown_is_instance_local() -> None:
+    first = Housekeeper()
+    second = Housekeeper()
+
+    await first.shutdown()
+
+    assert first._running is False
+    assert second._running is True
+
+
+@pytest.mark.asyncio
+async def test_housekeeper_cleanup_cycle_propagates_unexpected_errors(
+    monkeypatch,
+) -> None:
+    housekeeper = Housekeeper()
+
+    async def fail_unexpected(*_args, **_kwargs) -> int:
+        raise TypeError("unexpected")
+
+    monkeypatch.setattr(
+        housekeeper,
+        "_cleanup_inactive_ticker_history",
+        fail_unexpected,
+    )
+
+    with pytest.raises(TypeError, match="unexpected"):
+        await housekeeper._run_cleanup_cycle(datetime.now(), retention_days=10)
+
+
+@pytest.mark.asyncio
+async def test_housekeeper_cleanup_loop_keeps_running_on_recoverable_errors(
+    monkeypatch,
+) -> None:
+    housekeeper = Housekeeper()
+    housekeeper.config = {"timeframe": "1m"}
+    calls = {"cleanup": 0, "sleep": 0}
+
+    async def fail_recoverable(*_args, **_kwargs) -> None:
+        calls["cleanup"] += 1
+        raise RuntimeError("db busy")
+
+    async def stop_after_first_sleep(_seconds: float) -> None:
+        calls["sleep"] += 1
+        raise CancelledError()
+
+    monkeypatch.setattr(housekeeper, "_run_cleanup_cycle", fail_recoverable)
+    monkeypatch.setattr("service.housekeeper.asyncio.sleep", stop_after_first_sleep)
+
+    with pytest.raises(CancelledError):
+        await housekeeper.cleanup_ticker_database()
+
+    assert calls == {"cleanup": 1, "sleep": 1}

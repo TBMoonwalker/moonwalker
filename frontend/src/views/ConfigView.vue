@@ -1,35 +1,18 @@
 <script setup lang="ts">
 import Config from '../components/Config.vue'
-import { ArrowBackCircleOutline } from '@vicons/ionicons5'
-import { useRouter } from 'vue-router'
-
-const router = useRouter()
-
-function backButtonClicked() {
-    router.push('/')
-}
 </script>
 
 <template>
-    <div class="page-shell config-page">
-        <n-flex class="page-header config-header" justify="space-between" align="center">
-            <n-button
-                strong
-                secondary
-                circle
-                type="primary"
-                size="large"
-                aria-label="Back to dashboard"
-                title="Back to dashboard"
-                @click="backButtonClicked"
-            >
-                <template #icon>
-                    <n-icon>
-                        <ArrowBackCircleOutline />
-                    </n-icon>
-                </template>
-            </n-button>
-            <n-text depth="3" class="config-title">Configuration</n-text>
+    <div class="page-shell settings-page">
+        <n-flex class="page-section" vertical>
+            <n-card class="settings-intro-card" content-style="padding: 18px 20px;">
+                <n-flex vertical :size="6">
+                    <n-text depth="3" class="settings-kicker">Settings</n-text>
+                    <n-text>
+                        Configure the shared Moonwalker runtime for this installation.
+                    </n-text>
+                </n-flex>
+            </n-card>
         </n-flex>
         <n-flex class="page-section" vertical>
             <Config />
@@ -38,12 +21,29 @@ function backButtonClicked() {
 </template>
 
 <style scoped>
-.config-page {
-    gap: 16px;
+.settings-page {
+    gap: 0;
 }
 
-.config-title {
-    font-size: 0.95rem;
-    letter-spacing: 0.02em;
+.page-section {
+    margin-inline: 10px;
+    margin-bottom: 10px;
 }
+
+.page-section:last-child {
+    margin-bottom: 0;
+}
+
+.settings-kicker {
+    font-size: 0.82rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+@media (max-width: 768px) {
+    .page-section {
+        margin-inline: 6px;
+    }
+}
+
 </style>

@@ -157,7 +157,9 @@ class SignalPlugin:
         except (BaseORMException, RuntimeError, TypeError, ValueError) as e:
             # Broad catch to avoid stopping the signal loop.
             logging.error(
-                f"Couldn't get actual list of bots - not starting new deals! Cause: {e}"
+                "Couldn't get actual list of bots - not starting new deals! "
+                "Cause: %s",
+                e,
             )
             return True
 
@@ -270,7 +272,10 @@ class SignalPlugin:
                         SocketConnectionError,
                     ) as e:
                         # Broad catch to keep reconnect loop alive.
-                        logging.error(f"Failed to connect to sym signal websocket: {e}")
+                        logging.error(
+                            "Failed to connect to sym signal websocket: %s",
+                            e,
+                        )
 
                     if not connection_success:
                         logging.info(
@@ -372,7 +377,10 @@ class SignalPlugin:
                     SocketConnectionError,
                 ) as e:
                     # Broad catch to keep signal loop alive.
-                    logging.error(f"Error receiving signal - reconnecting. Cause: {e}")
+                    logging.error(
+                        "Error receiving signal - reconnecting. Cause: %s",
+                        e,
+                    )
                     await asyncio.sleep(self.RECONNECT_DELAY_SECONDS)
                     await sio.disconnect()
                     continue

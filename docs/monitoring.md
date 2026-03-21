@@ -8,7 +8,8 @@ Moonwalker monitoring sends Telegram messages for executed trades:
 The implementation uses [Telethon](https://docs.telethon.dev/en/stable/).
 
 ## Configuration Keys
-Configure these keys in the Config UI (Monitoring settings) or via API:
+Configure these keys in the Control Center's `Operator alerts` section or via
+API:
 
 | Key | Type | Required | Description |
 | --- | --- | --- | --- |
@@ -43,7 +44,7 @@ Messages are sent in HTML parse mode for readability and include:
 All dynamic values are escaped before sending.
 
 ## Test Telegram From UI
-Use **Config -> Monitoring settings -> Test Telegram**.
+Use **Control Center -> Setup or Advanced -> Operator alerts -> Test Telegram**.
 
 Behavior:
 - Endpoint: `POST /monitoring/test`
@@ -61,6 +62,30 @@ Moonwalker normalizes several Telethon-compatible target formats:
 - Missing required Telegram credentials causes the send attempt to fail.
 - On send errors, Moonwalker retries based on `monitoring_retry_count`.
 - Monitoring errors are logged to `logs/monitoring.log`.
+
+## Monitoring Page Logs
+The Monitoring page also exposes a read-only live log viewer for selected
+allowlisted backend log files.
+
+Behavior:
+- Endpoint list: `GET /monitoring/logs`
+- Endpoint batches: `GET /monitoring/logs/{source}`
+- Transport: polling over HTTP, not WebSocket
+- The UI polls for newer complete lines and can request older lines when you
+  scroll to the top of the log panel.
+
+Supported query parameters for `GET /monitoring/logs/{source}`:
+- `limit`: max lines to return per request, capped server-side
+- `cursor`: fetch newer complete lines after the previous cursor
+- `before`: fetch older lines before the current oldest cursor
+
+Notes:
+- Only allowlisted sources are exposed to the frontend.
+- Missing log files return an empty payload with `available: false`.
+- If a log file rotates or truncates while the page is open, the response sets
+  `rotated: true` so the UI can reset to the latest available lines.
+- The selected current log file can be downloaded from the Monitoring page
+  through `GET /monitoring/logs/{source}/download`.
 
 ## Example API Payload (Test)
 ```json

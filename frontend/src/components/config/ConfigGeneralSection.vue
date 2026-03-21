@@ -18,10 +18,19 @@
                     filterable
                 />
             </n-form-item>
-            <n-form-item label="Debug mode" path="debug" label-placement="left">
+            <n-form-item
+                v-if="showDebug"
+                label="Debug mode"
+                path="debug"
+                label-placement="left"
+            >
                 <n-checkbox v-model:checked="general.debug" />
             </n-form-item>
-            <n-form-item label="Advanced configuration" label-placement="left">
+            <n-form-item
+                v-if="showAdvancedToggle"
+                label="Advanced configuration"
+                label-placement="left"
+            >
                 <n-switch
                     :value="showAdvancedGeneral"
                     @update:value="emit('update:showAdvancedGeneral', $event)"
@@ -85,12 +94,20 @@ interface GeneralModel {
     ws_reconnect_debounce_ms: number
 }
 
-defineProps<{
-    general: GeneralModel
-    rules: FormRules
-    showAdvancedGeneral: boolean
-    timezone: SelectOption[]
-}>()
+withDefaults(
+    defineProps<{
+        general: GeneralModel
+        rules: FormRules
+        showDebug?: boolean
+        showAdvancedGeneral: boolean
+        showAdvancedToggle?: boolean
+        timezone: SelectOption[]
+    }>(),
+    {
+        showDebug: true,
+        showAdvancedToggle: true,
+    },
+)
 
 const emit = defineEmits<{
     'update:showAdvancedGeneral': [value: boolean]

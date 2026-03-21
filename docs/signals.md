@@ -1,4 +1,12 @@
-# Signal Setup
+# Signal Plugins
+
+Moonwalker currently supports three signal plugins selected via the `signal`
+config key:
+- `sym_signals`
+- `asap`
+- `csv_signal`
+
+Plugin-specific settings are passed through `signal_settings`.
 
 ## SymSignals Setup
 Example value for `signal_settings`:
@@ -10,6 +18,13 @@ Example value for `signal_settings`:
 Select `asap` in the signal field and provide `symbol_list` as:
 - A comma-separated list, or
 - A URL returning `{"pairs":[...]}`
+
+Notes:
+- `ASAP` can optionally use `signal_strategy` as an extra entry filter.
+- When the strategy or dynamic DCA needs history warmup, Moonwalker will prefill
+  missing history before watching a symbol.
+- The symbol-list URL is fetched through async HTTP and should return a plain
+  JSON object with a `pairs` array.
 
 ## CSV Signal Setup
 Select `csv_signal` in the signal field and set `signal_settings` like:
@@ -36,3 +51,7 @@ Rules:
 - Oldest row per symbol is imported as base order.
 - Following rows are imported as safety orders.
 - Import is blocked when open trades already exist.
+- Switching an already-running instance from another signal plugin to
+  `csv_signal` is also blocked while open trades still exist.
+- The plugin prefills missing history for imported symbols before it creates the
+  restored trade rows.

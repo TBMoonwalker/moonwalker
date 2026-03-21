@@ -14,6 +14,15 @@ test*.py
 !backend/tests/
 !backend/tests/**/*
 !backend/tests/**/*.py
+!frontend/tests/
+frontend/tests/*
+!frontend/tests/helpers/
+frontend/tests/helpers/*
+!frontend/tests/helpers/loadFrontendModule.cjs
+!frontend/tests/controlCenterSaveWorkflow.test.cjs
+!frontend/tests/useConfigValidationFlow.test.cjs
+!frontend/tests/controlCenterTemplateBindings.test.cjs
+!frontend/tests/controlCenterRouterGuard.test.cjs
 debugdb.py
 backend/strategies/btc.py
 moonwalker.lock
@@ -219,4 +228,5 @@ backend/templates/index.html
 package-lock.json
 
 # AI
-Claude.md
+!CLAUDE.md
+.gstack/

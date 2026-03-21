@@ -1,8 +1,10 @@
 import os
+import types
 from datetime import datetime, timedelta
 
 import model
 import pytest
+from service.config import Config
 from service.statistic import Statistic
 from tortoise import Tortoise
 
@@ -247,6 +249,53 @@ async def test_update_statistic_data_updates_open_trade_during_tp_sell() -> None
     assert payload["profit"] == 25.0
     assert payload["profit_percent"] == 25.0
     assert float(payload["open_date"]) == 1_700_000_000_000.0
+
+
+@pytest.mark.asyncio
+async def test_get_profit_for_dashboard_uses_available_quote_override(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+    statistic = Statistic()
+
+    async def fake_profit_base() -> dict[str, object]:
+        return {
+            "upnl": 12.5,
+            "profit_overall": 14.0,
+            "funds_locked": 42.0,
+            "profit_week": {},
+            "profit_overall_timestamp": "2026-03-18 12:00:00",
+        }
+
+    async def fake_resolve_runtime_state(*_args, **kwargs) -> dict[str, object]:
+        captured["available_quote"] = kwargs.get("available_quote")
+        return {
+            "mode": "low",
+            "effective_max_bots": 5,
+            "green_phase_detected": True,
+            "green_phase_active": True,
+            "green_phase_extra_deals": 1,
+            "green_phase_strength": 1.7,
+            "green_phase_block_reason": None,
+            "green_phase_ramp_ready": True,
+        }
+
+    async def fake_config_instance():
+        return types.SimpleNamespace(snapshot=lambda: {"autopilot": True})
+
+    monkeypatch.setattr(statistic, "_get_profit_base_cached", fake_profit_base)
+    monkeypatch.setattr(
+        statistic.autopilot,
+        "resolve_runtime_state",
+        fake_resolve_runtime_state,
+    )
+    monkeypatch.setattr(Config, "instance", staticmethod(fake_config_instance))
+
+    data = await statistic.get_profit_for_dashboard(321.5)
+
+    assert data["funds_available"] == 321.5
+    assert data["autopilot_effective_max_bots"] == 5
+    assert captured["available_quote"] == 321.5
 
 
 def _async_autopilot_state(value):

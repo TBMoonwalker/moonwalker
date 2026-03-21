@@ -32,7 +32,7 @@ class Strategy:
                 return False
 
             if ema["ema_20"] < ema["ema_50"]:
-                logging.debug(f"EMA down for {symbol}")
+                logging.debug("EMA down for %s", symbol)
                 result = True
 
             logging_json = {
@@ -41,9 +41,14 @@ class Strategy:
                 "creating_order": result,
             }
             if self._last_log_by_symbol.get(symbol) != logging_json:
-                logging.debug(f"{logging_json}")
+                logging.debug("%s", logging_json)
                 self._last_log_by_symbol[symbol] = logging_json.copy()
         except Exception as exc:
-            logging.error(f"Cannot run strategy for {symbol}: {exc}", exc_info=True)
+            logging.error(
+                "Cannot run strategy for %s: %s",
+                symbol,
+                exc,
+                exc_info=True,
+            )
             return False
         return result

@@ -5,14 +5,22 @@ import json
 import os
 import re
 import uuid
+from pathlib import Path
 from typing import Any, Callable
 
 import helper
 from model import AppConfig
+from service.config_persistence import should_persist_config_value
+from service.config_runtime_store import (
+    ConfigEntry,
+    ConfigRuntimeStore,
+    ConfigUpdateAction,
+)
 from service.redis import CONFIG_CHANNEL, redis_client
 from service.strategy_capability import filter_supported_strategies
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
 HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
     "1m": "30d",
@@ -84,20 +92,15 @@ def resolve_history_lookback_days(
     config: dict[str, Any],
     timeframe: str | None = None,
 ) -> int:
-    """Resolve unified history lookback days with legacy fallback.
+    """Resolve unified history lookback days.
 
     Precedence:
     1) `history_lookback_time` (new canonical key)
-    2) `history_from_data` (legacy numeric days)
-    3) best-practice defaults by resolved timeframe
+    2) best-practice defaults by resolved timeframe
     """
     parsed = parse_history_lookback_to_days(config.get("history_lookback_time"))
     if parsed:
         return parsed
-
-    legacy_days = parse_history_lookback_to_days(config.get("history_from_data"))
-    if legacy_days:
-        return legacy_days
 
     effective_timeframe = timeframe or resolve_timeframe(config)
     default_window = HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME.get(
@@ -121,10 +124,10 @@ class Config:
     def __init__(self) -> None:
         """Initialize the Config instance.
 
-        Creates empty cache and subscriber set. The listener task is created during instance
-        initialization via the instance() classmethod.
+        Creates an empty typed runtime store and subscriber set. The listener task
+        is created during instance initialization via the instance() classmethod.
         """
-        self._cache: dict[str, Any] = {}
+        self._store = ConfigRuntimeStore()
         self._subscribers: set[Callable[[dict[str, Any]], None]] = set()
         self._listener_task: asyncio.Task | None = None
         self._instance_id = uuid.uuid4().hex
@@ -154,11 +157,11 @@ class Config:
         Retrieves all AppConfig entries and converts their values to the appropriate types
         based on the value_type field. Also loads strategies and signal plugins.
         """
-        self._cache = {}
+        entries: list[ConfigEntry] = []
         rows = await AppConfig.all()
         for row in rows:
-            value = self.__set_type(row.value, row.value_type)
-            self._cache[row.key] = value
+            entries.append(self.__build_entry(row.key, row.value, row.value_type))
+        self._store.replace_entries(entries)
         self.__refresh_runtime_metadata()
 
     async def __load_keys(self, keys: list[str]) -> None:
@@ -170,21 +173,25 @@ class Config:
         rows = await AppConfig.filter(key__in=normalized_keys)
         loaded_keys = set()
         for row in rows:
-            self._cache[row.key] = self.__set_type(row.value, row.value_type)
+            self._store.upsert_entry(
+                self.__build_entry(row.key, row.value, row.value_type)
+            )
             loaded_keys.add(row.key)
 
         for key in normalized_keys:
             if key not in loaded_keys:
-                self._cache.pop(key, None)
+                self._store.remove_entry(key)
 
         self.__refresh_runtime_metadata()
 
     def __refresh_runtime_metadata(self) -> None:
         """Refresh derived config metadata that is not stored in AppConfig."""
-        for key, value in DEFAULT_CONFIG_VALUES.items():
-            self._cache.setdefault(key, value)
-        self._cache["strategies"] = self.__get_strategies()
-        self._cache["signal_plugins"] = self.__get_signal_plugins()
+        self._store.set_metadata(
+            {
+                "strategies": self.__get_strategies(),
+                "signal_plugins": self.__get_signal_plugins(),
+            }
+        )
 
     def __set_type(self, value: str, type: str) -> Any:
         """Convert a string value to its appropriate Python type based on the type specification.
@@ -239,16 +246,19 @@ class Config:
             return json.dumps(value)
         return value
 
+    def snapshot(self) -> dict[str, Any]:
+        """Return a defensive copy of the current config state."""
+        return self._store.snapshot(defaults=DEFAULT_CONFIG_VALUES)
+
     def __notify_subscribers(self) -> None:
         """Notify local subscribers that cache values changed."""
         for subscriber in self._subscribers:
-            subscriber(self._cache)
+            subscriber(self.snapshot())
 
     async def __clear_key(self, key: str) -> bool:
         """Remove a config key from persistent storage and the in-memory cache."""
         deleted_count = await AppConfig.filter(key=key).delete()
-        existed_in_cache = key in self._cache
-        self._cache.pop(key, None)
+        existed_in_cache = self._store.remove_entry(key)
         return bool(deleted_count or existed_in_cache)
 
     async def __publish_change(self, keys: list[str]) -> None:
@@ -271,16 +281,53 @@ class Config:
             logging.warning("Failed to publish config change for '%s': %s", keys, exc)
 
     def __parse_update_payload(self, payload: Any) -> dict[str, Any]:
-        """Normalize update payloads from API clients.
-
-        Supports both legacy stringified JSON values and direct dict payloads.
-        """
-        parsed = json.loads(payload) if isinstance(payload, str) else payload
-        if not isinstance(parsed, dict):
+        """Normalize update payloads from API clients."""
+        if not isinstance(payload, dict):
             raise TypeError("Config payload must be a JSON object")
-        if "type" not in parsed or "value" not in parsed:
+        if "type" not in payload or "value" not in payload:
             raise KeyError("Config payload must include 'type' and 'value'")
-        return parsed
+        return payload
+
+    def __build_entry(
+        self,
+        key: str,
+        serialized_value: Any,
+        value_type: str,
+    ) -> ConfigEntry:
+        """Build one typed runtime cache entry from stored config data."""
+        return ConfigEntry(
+            key=key,
+            value_type=value_type,
+            value=self.__set_type(serialized_value, value_type),
+        )
+
+    def __build_update_action(
+        self,
+        key: str,
+        raw_value: Any,
+    ) -> ConfigUpdateAction:
+        """Normalize one incoming config mutation into a typed action."""
+        update = self.__parse_update_payload(raw_value)
+        value_type = str(update["type"]).strip()
+        value_data = update["value"]
+        should_persist = should_persist_config_value(value_type, value_data)
+        if not should_persist:
+            return ConfigUpdateAction(
+                key=key,
+                value_type=value_type,
+                persist=False,
+                serialized_value=None,
+                runtime_value=None,
+            )
+
+        serialized_value = self.__serialize_value_for_storage(value_data, value_type)
+        return ConfigUpdateAction(
+            key=key,
+            value_type=value_type,
+            persist=True,
+            serialized_value=serialized_value,
+            runtime_value=self.__set_type(serialized_value, value_type),
+        )
 
     def __get_strategies(self) -> list[str]:
         """Get a list of available strategy filenames from the strategies directory.
@@ -310,47 +357,36 @@ class Config:
         Returns:
             The configuration value or default if key not found
         """
-        if key in self._cache:
-            return self._cache[key]
-        if key in DEFAULT_CONFIG_VALUES:
-            return DEFAULT_CONFIG_VALUES[key]
-        return default
+        return self._store.get(key, defaults=DEFAULT_CONFIG_VALUES, default=default)
 
-    async def set(self, key: str, value: dict[str, Any]) -> bool:
+    async def set(self, key: str, value: Any) -> bool:
         """Set a configuration value in the database and notify subscribers.
 
         Args:
             key: The configuration key to set
-            value: Dictionary containing "value" and "type" keys
+            value: Update payload containing "value" and "type" keys
 
         Returns:
             True if the operation succeeded
         """
-        update = self.__parse_update_payload(value)
-        value_type = update["type"]
-        value_data = update["value"]
-        is_numeric_value = isinstance(value_data, (int, float)) and not isinstance(
-            value_data, bool
-        )
-        should_persist = (
-            bool(value_data)
-            or (value_type == "bool" and value_data is False)
-            or (value_type in {"int", "float"} and is_numeric_value and value_data == 0)
-        )
-        if not should_persist:
+        action = self.__build_update_action(key, value)
+        if not action.persist:
             changed = await self.__clear_key(key)
             if changed:
-                self.__refresh_runtime_metadata()
                 self.__notify_subscribers()
                 await self.__publish_change([key])
             return True
 
-        serialized_value = self.__serialize_value_for_storage(value_data, value_type)
         await AppConfig.update_or_create(
             key=key,
-            defaults={"value": serialized_value, "value_type": value_type},
+            defaults={
+                "value": action.serialized_value,
+                "value_type": action.value_type,
+            },
         )
-        self._cache[key] = self.__set_type(serialized_value, value_type)
+        entry = action.to_entry()
+        if entry is not None:
+            self._store.upsert_entry(entry)
         self.__notify_subscribers()
         # Notify all subscribers across processes (best effort)
         await self.__publish_change([key])
@@ -361,7 +397,7 @@ class Config:
         """Update multiple configuration keys in the database at once.
 
         Args:
-            updates: Dictionary of key-value pairs where values are JSON strings
+            updates: Dictionary of key-value pairs with typed update payloads.
 
         Returns:
             True if the operation succeeded
@@ -369,39 +405,26 @@ class Config:
         changed_keys: list[str] = []
         for key, raw_value in updates.items():
             try:
-                value = self.__parse_update_payload(raw_value)
-            except (TypeError, ValueError, KeyError, json.JSONDecodeError) as exc:
+                action = self.__build_update_action(key, raw_value)
+            except (TypeError, ValueError, KeyError) as exc:
                 logging.warning(
                     "Skipping invalid config payload for '%s': %s", key, exc
                 )
                 continue
 
-            value_type = value["type"]
-            value_data = value["value"]
-            is_numeric_value = isinstance(value_data, (int, float)) and not isinstance(
-                value_data, bool
-            )
-            should_persist = (
-                bool(value["value"])
-                or (value_type == "bool" and value_data is False)
-                or (
-                    value_type in {"int", "float"}
-                    and is_numeric_value
-                    and value_data == 0
-                )
-            )
-            if should_persist:
-                serialized_value = self.__serialize_value_for_storage(
-                    value_data, value_type
-                )
+            if action.persist:
                 await AppConfig.update_or_create(
                     key=key,
-                    defaults={"value": serialized_value, "value_type": value_type},
+                    defaults={
+                        "value": action.serialized_value,
+                        "value_type": action.value_type,
+                    },
                 )
-                self._cache[key] = self.__set_type(serialized_value, value_type)
+                entry = action.to_entry()
+                if entry is not None:
+                    self._store.upsert_entry(entry)
                 changed_keys.append(key)
             elif await self.__clear_key(key):
-                self.__refresh_runtime_metadata()
                 changed_keys.append(key)
 
         if changed_keys:
@@ -413,8 +436,8 @@ class Config:
     def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Subscribe a callback function to configuration changes.
 
-        The callback will be called with the full configuration cache whenever
-        a configuration change is detected.
+        The callback will be called with a defensive copy of the configuration
+        state whenever a configuration change is detected.
 
         Args:
             callback: A callable that takes a dictionary of configuration values
@@ -431,8 +454,7 @@ class Config:
             await self.__load_keys(keys)
         else:
             await self.load_all()
-        for subscriber in self._subscribers:
-            subscriber(self._cache)
+        self.__notify_subscribers()
 
     async def _handle_change_message(self, payload: Any) -> None:
         """Apply a Redis change payload, skipping self-originated updates."""
@@ -484,7 +506,7 @@ class Config:
         """Get a list of filenames in the specified directory.
 
         Args:
-            directory: The path to the directory (relative to current working directory)
+            directory: The path to the directory relative to the backend root.
             sort: Whether to sort the filenames alphabetically. Default is True.
 
         Returns:
@@ -494,16 +516,16 @@ class Config:
             ValueError: If the specified path is not a valid directory
             IOError: If an error occurs while reading the directory
         """
-        directory = os.getcwd() + "/" + directory
-        if not os.path.isdir(directory):
+        directory_path = BACKEND_ROOT / directory
+        if not directory_path.is_dir():
             raise ValueError(
-                f"The specified path '{directory}' is not a valid directory."
+                f"The specified path '{directory_path}' is not a valid directory."
             )
 
         # Get all file paths matching the pattern
         try:
             all_files = []
-            for root, dirs, files in os.walk(directory):
+            for root, dirs, files in os.walk(directory_path):
                 # Exclude certain directories
                 dirs[:] = [
                     d for d in dirs if not d.startswith(".") and d != "__pycache__"
@@ -514,7 +536,7 @@ class Config:
                     full_path = os.path.join(root, file)
                     if os.path.isfile(full_path):
                         all_files.append(full_path)
-        except Exception as e:
+        except OSError as e:
             raise IOError(f"An error occurred while reading the directory: {str(e)}")
 
         # Extract just the filenames

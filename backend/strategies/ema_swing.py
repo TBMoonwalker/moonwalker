@@ -80,6 +80,7 @@ class Strategy:
                 "Cannot run strategy for %s, check indicators.log: %s",
                 symbol,
                 e,
+                exc_info=True,
             )
             return False
         return result
