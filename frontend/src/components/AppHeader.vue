@@ -184,17 +184,18 @@ function handleMenuSelect(key: string | number): void {
 }
 
 :deep(.header-menu .n-menu-item-content--selected) {
-  background: rgba(29, 92, 73, 0.12);
-  box-shadow: inset 0 0 0 1px rgba(29, 92, 73, 0.12);
+  background: rgba(29, 92, 73, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(29, 92, 73, 0.22);
 }
 
 :deep(.header-menu .n-menu-item-content--selected .n-menu-item-content-header) {
-  color: #18413a;
+  color: var(--mw-color-text-primary);
   font-weight: 700;
+  letter-spacing: 0.01em;
 }
 
 :deep(.header-menu .n-menu-item-content--selected .n-menu-item-content__icon) {
-  color: #18413a;
+  color: var(--mw-color-text-primary);
 }
 
 @media (max-width: 768px) {

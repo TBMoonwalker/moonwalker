@@ -1779,7 +1779,7 @@ onUnmounted(() => {
                                 <n-button
                                     class="utility-action-button"
                                     type="primary"
-                                    secondary
+                                    strong
                                     :loading="backupDownloadLoading"
                                     @click="handleBackupDownloadAction"
                                 >
