@@ -516,6 +516,13 @@ const showRestoreSetupFlow = computed(
 const showSetupStyleSelector = computed(
     () => isPreReadiness.value && !showSetupEntryGate.value && !showRestoreSetupFlow.value,
 )
+const showMissionPanel = computed(
+    () =>
+        !(
+            routeState.value.mode === 'setup' &&
+            (showSetupEntryGate.value || showRestoreSetupFlow.value)
+        ),
+)
 const setupTasks = computed(() => getTasksForMode('setup'))
 const activeSetupTarget = computed<ControlCenterTarget>(() => {
     const requestedTarget = routeState.value.target
@@ -1023,7 +1030,7 @@ onUnmounted(() => {
             {{ liveRegionMessage }}
         </div>
 
-        <n-flex class="page-section" vertical>
+        <n-flex v-if="showMissionPanel" class="page-section" vertical>
             <n-card class="mission-panel" content-style="padding: 22px 24px;">
                 <n-flex vertical :size="18">
                     <n-flex justify="space-between" align="center" :wrap="true">
@@ -1282,8 +1289,11 @@ onUnmounted(() => {
                     content-style="padding: 20px 22px;"
                 >
                     <n-flex vertical :size="18">
-                        <div>
-                            <h2 class="workspace-title">How do you want to begin?</h2>
+                        <div class="setup-entry-intro">
+                            <n-text depth="3" class="workspace-kicker">
+                                Control Center
+                            </n-text>
+                            <h1 class="workspace-title">How do you want to begin?</h1>
                             <n-text depth="3" class="workspace-summary">
                                 Start with your intent, not with a wall of options. Operators
                                 migrating an existing instance should restore first. New
@@ -1947,6 +1957,22 @@ onUnmounted(() => {
     display: block;
     margin-top: 6px;
     max-width: 68ch;
+}
+
+.workspace-kicker {
+    color: var(--mw-color-text-muted);
+    display: inline-block;
+    font-family: var(--mw-font-body);
+    font-size: 0.82rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+
+.setup-entry-intro {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
 }
 
 .setup-progress-grid {
