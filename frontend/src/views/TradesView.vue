@@ -75,6 +75,7 @@ onUnmounted(() => {
       <n-card content-style="padding: 0;">
         <n-tabs
           v-model:value="activeTradesTab"
+          type="line"
           size="large"
           :tabs-padding="tabPadding"
         >
