@@ -91,10 +91,8 @@ function handleMenuSelect(key: string | number): void {
 .app-header-card {
   width: 100%;
   border: 1px solid var(--mw-color-border);
-  background:
-    radial-gradient(circle at top left, rgba(29, 92, 73, 0.14), transparent 32%),
-    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(236, 239, 234, 0.96));
-  box-shadow: 0 12px 28px rgba(24, 33, 29, 0.08);
+  background: var(--mw-surface-header);
+  box-shadow: var(--mw-shadow-soft);
 }
 
 .header-shell {
@@ -180,7 +178,7 @@ function handleMenuSelect(key: string | number): void {
 }
 
 :deep(.header-menu .n-menu-item-content--selected) {
-  background: rgba(29, 92, 73, 0.1);
+  background: var(--mw-color-primary-soft);
 }
 
 :deep(.header-menu .n-menu-item-content--selected .n-menu-item-content-header) {

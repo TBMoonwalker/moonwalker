@@ -1989,7 +1989,7 @@ onUnmounted(() => {
     padding: 14px 16px;
     border: 1px solid rgba(29, 92, 73, 0.12);
     border-radius: 12px;
-    background: rgba(247, 248, 246, 0.92);
+    background: var(--mw-surface-card-muted);
     color: inherit;
     text-align: left;
     cursor: pointer;
@@ -2013,7 +2013,7 @@ onUnmounted(() => {
 
 .setup-progress-card span:last-child {
     font-size: 0.88rem;
-    color: rgba(51, 64, 58, 0.82);
+    color: var(--mw-color-text-secondary);
 }
 
 .setup-progress-status {
@@ -2026,12 +2026,12 @@ onUnmounted(() => {
 
 .setup-progress-card-active {
     border-color: rgba(29, 92, 73, 0.35);
-    background: rgba(227, 243, 236, 0.9);
+    background: var(--mw-surface-card-success);
 }
 
 .setup-progress-card-blocked {
     border-color: rgba(183, 121, 31, 0.26);
-    background: rgba(255, 248, 236, 0.94);
+    background: var(--mw-surface-card-warning);
 }
 
 .setup-progress-card-ready {
@@ -2048,11 +2048,11 @@ onUnmounted(() => {
     border: 1px solid rgba(29, 92, 73, 0.12);
     border-radius: var(--mw-radius-lg);
     padding: 16px 18px;
-    background: rgba(255, 255, 255, 0.92);
+    background: var(--mw-surface-card);
 }
 
 .task-section-collapsed {
-    background: rgba(247, 248, 246, 0.86);
+    background: var(--mw-surface-card-subtle);
 }
 
 .task-section-heading-row {
@@ -2074,8 +2074,8 @@ onUnmounted(() => {
     min-width: min(320px, 100%);
     flex: 1 1 320px;
     border: 1px solid rgba(29, 92, 73, 0.16);
-    background: rgba(255, 255, 255, 0.94);
-    box-shadow: 0 10px 24px rgba(24, 33, 29, 0.05);
+    background: var(--mw-surface-card);
+    box-shadow: var(--mw-shadow-card);
 }
 
 .entry-choice-title {
@@ -2091,11 +2091,7 @@ onUnmounted(() => {
 .setup-style-card,
 .advanced-intro-card {
     border: 1px solid rgba(29, 92, 73, 0.14);
-    background: linear-gradient(
-        180deg,
-        rgba(247, 248, 246, 0.96),
-        rgba(236, 239, 234, 0.88)
-    );
+    background: var(--mw-surface-shell);
 }
 
 .task-section-header {
