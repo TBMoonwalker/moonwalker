@@ -62,6 +62,13 @@ const themeOverrides = computed(() => {
         tabFontWeight: '600',
         tabFontWeightActive: '700',
       },
+      Button: {
+        textColorPrimary: '#f7f8f6',
+        textColorHoverPrimary: '#f7f8f6',
+        textColorPressedPrimary: '#f7f8f6',
+        textColorFocusPrimary: '#f7f8f6',
+        fontWeightStrong: '700',
+      },
     }
   }
 
@@ -100,6 +107,13 @@ const themeOverrides = computed(() => {
       barColor: '#1d5c49',
       tabFontWeight: '600',
       tabFontWeightActive: '700',
+    },
+    Button: {
+      textColorPrimary: '#f7f8f6',
+      textColorHoverPrimary: '#f7f8f6',
+      textColorPressedPrimary: '#f7f8f6',
+      textColorFocusPrimary: '#f7f8f6',
+      fontWeightStrong: '700',
     },
   }
 })

@@ -1082,6 +1082,7 @@ onUnmounted(() => {
                             </n-button>
                             <n-button
                                 type="primary"
+                                strong
                                 :loading="activationLoading"
                                 :disabled="
                                     viewState.kind === 'rescue' ||
@@ -1150,6 +1151,7 @@ onUnmounted(() => {
                             <n-button
                                 :type="routeState.mode === 'overview' ? 'primary' : 'default'"
                                 :secondary="routeState.mode !== 'overview'"
+                                :strong="routeState.mode === 'overview'"
                                 @click="handleModeSelect('overview')"
                             >
                                 Overview
@@ -1157,6 +1159,7 @@ onUnmounted(() => {
                             <n-button
                                 :type="routeState.mode === 'setup' ? 'primary' : 'default'"
                                 :secondary="routeState.mode !== 'setup'"
+                                :strong="routeState.mode === 'setup'"
                                 @click="handleModeSelect('setup')"
                             >
                                 Setup
@@ -1170,6 +1173,7 @@ onUnmounted(() => {
                             <n-button
                                 :type="routeState.mode === 'advanced' ? 'primary' : 'default'"
                                 :secondary="routeState.mode !== 'advanced'"
+                                :strong="routeState.mode === 'advanced'"
                                 @click="handleModeSelect('advanced')"
                             >
                                 Advanced
@@ -1177,6 +1181,7 @@ onUnmounted(() => {
                             <n-button
                                 :type="routeState.mode === 'utilities' ? 'primary' : 'default'"
                                 :secondary="routeState.mode !== 'utilities'"
+                                :strong="routeState.mode === 'utilities'"
                                 @click="handleModeSelect('utilities')"
                             >
                                 Utilities
@@ -1278,6 +1283,7 @@ onUnmounted(() => {
                                             <n-button
                                                 v-if="readiness.dryRun"
                                                 type="primary"
+                                                strong
                                                 :loading="activationLoading"
                                                 @click="handleActivateLiveTrading"
                                             >
@@ -1959,6 +1965,14 @@ onUnmounted(() => {
 
 .mode-strip {
     align-items: center;
+}
+
+.mode-strip :deep(.n-button--primary-type .n-button__content),
+.mission-panel :deep(.n-button--primary-type .n-button__content),
+.status-card :deep(.n-button--primary-type .n-button__content) {
+    color: #f7f8f6;
+    font-weight: 700;
+    letter-spacing: 0.01em;
 }
 
 .workspace-card,
