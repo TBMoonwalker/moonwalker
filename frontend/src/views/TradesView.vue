@@ -51,6 +51,7 @@ onUnmounted(() => {
       <n-card content-style="padding: 0;">
         <n-tabs
           v-model:value="activeProfitTab"
+          class="trades-surface-tabs"
           type="line"
           size="large"
           :tabs-padding="tabPadding"
@@ -75,6 +76,7 @@ onUnmounted(() => {
       <n-card content-style="padding: 0;">
         <n-tabs
           v-model:value="activeTradesTab"
+          class="trades-surface-tabs"
           size="large"
           :tabs-padding="tabPadding"
         >
@@ -126,6 +128,32 @@ onUnmounted(() => {
 
 .header-statistics {
   width: 100%;
+}
+
+.trades-surface-tabs :deep(.n-tabs-nav) {
+  padding: 10px 12px 0;
+}
+
+.trades-surface-tabs :deep(.n-tabs-tab) {
+  border-radius: 999px;
+  color: var(--mw-color-text-secondary);
+  font-weight: 600;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.trades-surface-tabs :deep(.n-tabs-tab:hover) {
+  color: var(--mw-color-primary-strong);
+}
+
+.trades-surface-tabs :deep(.n-tabs-tab--active) {
+  background: var(--mw-color-primary-soft);
+  color: var(--mw-color-primary-strong);
+}
+
+.trades-surface-tabs :deep(.n-tabs-bar) {
+  display: none;
 }
 
 .trade-tab-label {

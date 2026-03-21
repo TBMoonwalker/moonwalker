@@ -1149,14 +1149,14 @@ onUnmounted(() => {
                         <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                             <n-button
                                 :type="routeState.mode === 'overview' ? 'primary' : 'default'"
-                                secondary
+                                :secondary="routeState.mode !== 'overview'"
                                 @click="handleModeSelect('overview')"
                             >
                                 Overview
                             </n-button>
                             <n-button
                                 :type="routeState.mode === 'setup' ? 'primary' : 'default'"
-                                secondary
+                                :secondary="routeState.mode !== 'setup'"
                                 @click="handleModeSelect('setup')"
                             >
                                 Setup
@@ -1169,14 +1169,14 @@ onUnmounted(() => {
                         <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                             <n-button
                                 :type="routeState.mode === 'advanced' ? 'primary' : 'default'"
-                                secondary
+                                :secondary="routeState.mode !== 'advanced'"
                                 @click="handleModeSelect('advanced')"
                             >
                                 Advanced
                             </n-button>
                             <n-button
                                 :type="routeState.mode === 'utilities' ? 'primary' : 'default'"
-                                secondary
+                                :secondary="routeState.mode !== 'utilities'"
                                 @click="handleModeSelect('utilities')"
                             >
                                 Utilities
@@ -1278,7 +1278,6 @@ onUnmounted(() => {
                                             <n-button
                                                 v-if="readiness.dryRun"
                                                 type="primary"
-                                                secondary
                                                 :loading="activationLoading"
                                                 @click="handleActivateLiveTrading"
                                             >

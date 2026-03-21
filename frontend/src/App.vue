@@ -53,6 +53,15 @@ const themeOverrides = computed(() => {
         borderRadius: '10px',
         borderRadiusSmall: '6px',
       },
+      Tabs: {
+        tabTextColorLine: 'rgba(247, 248, 246, 0.82)',
+        tabTextColorActiveLine: '#8fd9bb',
+        tabTextColorHoverLine: '#b7ead8',
+        tabTextColorDisabledLine: 'rgba(213, 219, 213, 0.5)',
+        barColor: '#8fd9bb',
+        tabFontWeight: '600',
+        tabFontWeightActive: '700',
+      },
     }
   }
 
@@ -82,6 +91,15 @@ const themeOverrides = computed(() => {
       textColor3: '#8a948d',
       borderRadius: '10px',
       borderRadiusSmall: '6px',
+    },
+    Tabs: {
+      tabTextColorLine: '#33403a',
+      tabTextColorActiveLine: '#1d5c49',
+      tabTextColorHoverLine: '#18413a',
+      tabTextColorDisabledLine: '#8a948d',
+      barColor: '#1d5c49',
+      tabFontWeight: '600',
+      tabFontWeightActive: '700',
     },
   }
 })
