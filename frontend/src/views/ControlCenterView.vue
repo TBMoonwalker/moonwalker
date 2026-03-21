@@ -1082,6 +1082,7 @@ onUnmounted(() => {
                             </n-button>
                             <n-button
                                 type="primary"
+                                strong
                                 :loading="activationLoading"
                                 :disabled="
                                     viewState.kind === 'rescue' ||
@@ -1149,14 +1150,16 @@ onUnmounted(() => {
                         <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                             <n-button
                                 :type="routeState.mode === 'overview' ? 'primary' : 'default'"
-                                secondary
+                                :secondary="routeState.mode !== 'overview'"
+                                :strong="routeState.mode === 'overview'"
                                 @click="handleModeSelect('overview')"
                             >
                                 Overview
                             </n-button>
                             <n-button
                                 :type="routeState.mode === 'setup' ? 'primary' : 'default'"
-                                secondary
+                                :secondary="routeState.mode !== 'setup'"
+                                :strong="routeState.mode === 'setup'"
                                 @click="handleModeSelect('setup')"
                             >
                                 Setup
@@ -1169,14 +1172,16 @@ onUnmounted(() => {
                         <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                             <n-button
                                 :type="routeState.mode === 'advanced' ? 'primary' : 'default'"
-                                secondary
+                                :secondary="routeState.mode !== 'advanced'"
+                                :strong="routeState.mode === 'advanced'"
                                 @click="handleModeSelect('advanced')"
                             >
                                 Advanced
                             </n-button>
                             <n-button
                                 :type="routeState.mode === 'utilities' ? 'primary' : 'default'"
-                                secondary
+                                :secondary="routeState.mode !== 'utilities'"
+                                :strong="routeState.mode === 'utilities'"
                                 @click="handleModeSelect('utilities')"
                             >
                                 Utilities
@@ -1278,7 +1283,7 @@ onUnmounted(() => {
                                             <n-button
                                                 v-if="readiness.dryRun"
                                                 type="primary"
-                                                secondary
+                                                strong
                                                 :loading="activationLoading"
                                                 @click="handleActivateLiveTrading"
                                             >
@@ -1772,8 +1777,9 @@ onUnmounted(() => {
                                     Include trade data in backup
                                 </n-checkbox>
                                 <n-button
+                                    class="utility-action-button"
                                     type="primary"
-                                    secondary
+                                    strong
                                     :loading="backupDownloadLoading"
                                     @click="handleBackupDownloadAction"
                                 >
@@ -1792,7 +1798,11 @@ onUnmounted(() => {
                             >
 
                             <n-flex align="center" :wrap="true" :size="[12, 12]">
-                                <n-button secondary @click="openBackupFilePicker">
+                                <n-button
+                                    class="utility-action-button"
+                                    secondary
+                                    @click="openBackupFilePicker"
+                                >
                                     Select backup file
                                 </n-button>
                                 <span v-if="selectedBackupFileName" class="backup-file-name">
@@ -1813,6 +1823,7 @@ onUnmounted(() => {
 
                             <n-flex align="center" :wrap="true" :size="[12, 12]">
                                 <n-button
+                                    class="utility-action-button"
                                     type="warning"
                                     :loading="restoreLoading"
                                     :disabled="!selectedBackupPayload"
@@ -1821,6 +1832,7 @@ onUnmounted(() => {
                                     Restore config only
                                 </n-button>
                                 <n-button
+                                    class="utility-action-button"
                                     type="error"
                                     ghost
                                     :loading="restoreLoading"
@@ -1848,6 +1860,7 @@ onUnmounted(() => {
                             </n-text>
                             <n-flex align="center" :wrap="true" :size="[12, 12]">
                                 <n-button
+                                    class="utility-action-button"
                                     secondary
                                     type="primary"
                                     :loading="monitoringTestLoading"
@@ -1960,6 +1973,28 @@ onUnmounted(() => {
 
 .mode-strip {
     align-items: center;
+}
+
+.mode-strip :deep(.n-button--primary-type .n-button__content),
+.mission-panel :deep(.n-button--primary-type .n-button__content),
+.status-card :deep(.n-button--primary-type .n-button__content) {
+    color: #f7f8f6;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+:deep(.utility-action-button:not(.n-button--disabled) .n-button__content) {
+    font-weight: 700;
+    letter-spacing: 0.01em;
+}
+
+:deep(.utility-action-button.n-button--primary-type.n-button--secondary:not(.n-button--disabled) .n-button__content),
+:deep(.utility-action-button.n-button--primary-type.n-button--secondary:not(.n-button--disabled) .n-button__icon) {
+    color: #18413a;
+}
+
+:deep(.utility-action-button.n-button--default-type.n-button--secondary:not(.n-button--disabled) .n-button__content) {
+    color: var(--mw-color-text-primary);
 }
 
 .workspace-card,

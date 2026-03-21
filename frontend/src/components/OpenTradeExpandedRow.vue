@@ -28,8 +28,10 @@
                 </n-button>
             </div>
         </n-card>
-        <n-card>
-            <div ref="chartRef" class="expand-chart" />
+        <n-card class="expand-chart-card" content-style="padding: 0;">
+            <div class="expand-chart-frame">
+                <div ref="chartRef" class="expand-chart" />
+            </div>
         </n-card>
     </n-flex>
 </template>
@@ -304,8 +306,18 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
+.expand-chart-card {
+    overflow: hidden;
+}
+
+.expand-chart-frame {
+    overflow: hidden;
+    border-radius: inherit;
+}
+
 .expand-chart {
     height: 400px;
+    width: 100%;
 }
 
 .manual-order-actions {
