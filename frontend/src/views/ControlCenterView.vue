@@ -113,9 +113,12 @@ function createAnnouncement(message: string | null): string {
 type SetupEntryChoice = 'restore' | 'new'
 type SetupStyle = 'guided' | 'full'
 
+function parseSetupEntryChoice(value: unknown): SetupEntryChoice | null {
+    return value === 'restore' || value === 'new' ? value : null
+}
+
 function getStoredSetupEntryChoice(preferenceKey: string): SetupEntryChoice | null {
-    const rawValue = window.localStorage.getItem(preferenceKey)
-    return rawValue === 'restore' || rawValue === 'new' ? rawValue : null
+    return parseSetupEntryChoice(window.localStorage.getItem(preferenceKey))
 }
 
 function storeSetupEntryChoice(
@@ -137,6 +140,29 @@ function getStoredSetupStyle(preferenceKey: string): SetupStyle {
 
 function storeSetupStyle(preferenceKey: string, style: SetupStyle): void {
     window.localStorage.setItem(preferenceKey, style)
+}
+
+function getSetupEntryChoiceFromHistoryState(value: unknown): SetupEntryChoice | null {
+    if (!value || typeof value !== 'object') {
+        return null
+    }
+    return parseSetupEntryChoice(
+        (value as Record<string, unknown>)[CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY],
+    )
+}
+
+function buildSetupEntryChoiceHistoryState(
+    value: unknown,
+    choice: SetupEntryChoice | null,
+): Record<string, unknown> {
+    const currentState =
+        value && typeof value === 'object' ? { ...(value as Record<string, unknown>) } : {}
+    if (choice === null) {
+        delete currentState[CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY]
+        return currentState
+    }
+    currentState[CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY] = choice
+    return currentState
 }
 
 const route = useRoute()
@@ -161,6 +187,7 @@ let staleCheckIntervalId: number | null = null
 
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
 const CONTROL_CENTER_ENTRY_CHOICE_KEY = 'moonwalker.controlCenter.entryChoice'
+const CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY = 'controlCenterSetupEntryChoice'
 const CONTROL_CENTER_SETUP_STYLE_KEY = 'moonwalker.controlCenter.setupStyle'
 const STALE_CHECK_INTERVAL_MS = 15000
 const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
@@ -610,6 +637,18 @@ function rememberSetupEntryChoice(choice: SetupEntryChoice | null): void {
     storeSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY, choice)
 }
 
+function syncSetupEntryChoiceHistory(
+    choice: SetupEntryChoice | null,
+    replace = false,
+): void {
+    const nextState = buildSetupEntryChoiceHistoryState(window.history.state, choice)
+    if (replace) {
+        window.history.replaceState(nextState, '', window.location.href)
+        return
+    }
+    window.history.pushState(nextState, '', window.location.href)
+}
+
 function rememberSetupStyle(style: SetupStyle): void {
     setupStyle.value = style
     storeSetupStyle(CONTROL_CENTER_SETUP_STYLE_KEY, style)
@@ -750,11 +789,20 @@ async function handleModeSelect(mode: ControlCenterMode): Promise<void> {
 }
 
 async function handleSetupEntryChoice(choice: SetupEntryChoice): Promise<void> {
+    if (setupEntryChoice.value === choice) {
+        return
+    }
     rememberSetupEntryChoice(choice)
+    syncSetupEntryChoiceHistory(choice)
     trackUiEvent('control_center_setup_entry_selected', { choice })
-    await navigateToControlCenter(
-        'setup',
-        choice === 'new' ? readiness.value.nextTarget ?? 'exchange' : null,
+    if (choice === 'new') {
+        await focusTarget(activeSetupTarget.value)
+    }
+}
+
+function handleSetupEntryChoicePopState(): void {
+    rememberSetupEntryChoice(
+        getSetupEntryChoiceFromHistoryState(window.history.state),
     )
 }
 
@@ -1004,6 +1052,7 @@ watch(
     (firstRun) => {
         if (!firstRun && setupEntryChoice.value === 'restore') {
             rememberSetupEntryChoice('new')
+            syncSetupEntryChoiceHistory('new', true)
         }
     },
 )
@@ -1012,13 +1061,19 @@ onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
 
 onMounted(async () => {
     initializeTimezoneOptions(getClientTimezone())
-    rememberSetupEntryChoice(
-        getStoredSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY),
+    const historySetupEntryChoice = getSetupEntryChoiceFromHistoryState(
+        window.history.state,
     )
+    rememberSetupEntryChoice(
+        historySetupEntryChoice ??
+            getStoredSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY),
+    )
+    syncSetupEntryChoiceHistory(setupEntryChoice.value, true)
     rememberSetupStyle(getStoredSetupStyle(CONTROL_CENTER_SETUP_STYLE_KEY))
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('keydown', handleGlobalKeydown)
     window.addEventListener('focus', checkForExternalConfigChanges)
+    window.addEventListener('popstate', handleSetupEntryChoicePopState)
     staleCheckIntervalId = window.setInterval(
         checkForExternalConfigChanges,
         STALE_CHECK_INTERVAL_MS,
@@ -1033,6 +1088,7 @@ onUnmounted(() => {
     window.removeEventListener('beforeunload', handleBeforeUnload)
     window.removeEventListener('keydown', handleGlobalKeydown)
     window.removeEventListener('focus', checkForExternalConfigChanges)
+    window.removeEventListener('popstate', handleSetupEntryChoicePopState)
     if (transitionTimeoutId !== null) {
         window.clearTimeout(transitionTimeoutId)
     }
