@@ -72,6 +72,22 @@ def test_ema_swing_history_scan_returns_latest_qualified_swing_low() -> None:
     assert latest_swing_low == 9.2
 
 
+def test_ema_swing_candidate_rejects_missing_numbers() -> None:
+    trend_ok, swing_up, swing_low = Strategy._evaluate_swing_candidate(
+        close_now=10.2,
+        close_prev=float("nan"),
+        close_prev2=9.0,
+        ema20=10.0,
+        ema50=11.0,
+        ema100=12.0,
+        ema200=20.0,
+    )
+
+    assert trend_ok is False
+    assert swing_up is False
+    assert swing_low is None
+
+
 @pytest.mark.asyncio
 async def test_ema_swing_first_swing_only_primes_state(monkeypatch) -> None:
     monkeypatch.setattr(Strategy, "_load_persisted_swing_low", _no_op_load)
@@ -122,6 +138,37 @@ async def test_ema_swing_bootstraps_missing_state_without_trading(monkeypatch) -
     assert result is False
     assert strategy._previous_swing_low_by_symbol["ERA/USDC"] == 9.2
     assert persisted_store[("ERA/USDC", "4h")] == 9.2
+
+
+@pytest.mark.asyncio
+async def test_ema_swing_load_persisted_state_returns_none_on_orm_error(
+    monkeypatch,
+) -> None:
+    async def fake_get_or_none(*_args, **_kwargs):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr("strategies.ema_swing.model.EmaSwingState.get_or_none", fake_get_or_none)
+
+    strategy = Strategy("4h")
+
+    assert await strategy._load_persisted_swing_low("ERA/USDC") is None
+
+
+@pytest.mark.asyncio
+async def test_ema_swing_persist_previous_swing_low_swallows_write_errors(
+    monkeypatch,
+) -> None:
+    async def fake_write_with_retry(*_args, **_kwargs):
+        raise RuntimeError("sqlite busy")
+
+    monkeypatch.setattr(
+        "strategies.ema_swing.run_sqlite_write_with_retry",
+        fake_write_with_retry,
+    )
+
+    strategy = Strategy("4h")
+
+    await strategy._persist_previous_swing_low("ERA/USDC", 9.2)
 
 
 @pytest.mark.asyncio
