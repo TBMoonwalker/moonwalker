@@ -147,7 +147,10 @@ async def test_ema_swing_load_persisted_state_returns_none_on_orm_error(
     async def fake_get_or_none(*_args, **_kwargs):
         raise RuntimeError("db unavailable")
 
-    monkeypatch.setattr("strategies.ema_swing.model.EmaSwingState.get_or_none", fake_get_or_none)
+    monkeypatch.setattr(
+        "strategies.ema_swing.model.EmaSwingState.get_or_none",
+        fake_get_or_none,
+    )
 
     strategy = Strategy("4h")
 
