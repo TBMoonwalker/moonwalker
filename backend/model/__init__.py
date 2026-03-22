@@ -4,6 +4,7 @@ from .appconfig import AppConfig as AppConfig
 from .athcache import AthCache as AthCache
 from .autopilot import Autopilot as Autopilot
 from .closedtrades import ClosedTrades as ClosedTrades
+from .emaswingstate import EmaSwingState as EmaSwingState
 from .listings import Listings as Listings
 from .opentrades import OpenTrades as OpenTrades
 from .tickers import Tickers as Tickers
@@ -16,6 +17,7 @@ __all__ = [
     "AthCache",
     "Autopilot",
     "ClosedTrades",
+    "EmaSwingState",
     "Listings",
     "OpenTrades",
     "Tickers",
@@ -32,6 +34,7 @@ if __name__ == "__main__":
         "Trades",
         "OpenTrades",
         "ClosedTrades",
+        "EmaSwingState",
         "UnsellableTrades",
         "Listings",
         "UpnlHistory",
