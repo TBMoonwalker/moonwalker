@@ -21,6 +21,12 @@ import { deriveGuidedFocusTarget } from '../control-center/focusFlow'
 import type { OperationResult } from '../control-center/operationResults'
 import { deriveControlCenterReadiness } from '../control-center/readiness'
 import {
+    buildSetupEntryChoiceHistoryState,
+    getSetupEntryChoiceFromHistoryState,
+    parseSetupEntryChoice,
+    type SetupEntryChoice,
+} from '../control-center/setupEntryHistory'
+import {
     buildControlCenterQuery,
     normalizeControlCenterRouteState,
 } from '../control-center/routeState'
@@ -110,12 +116,7 @@ function createAnnouncement(message: string | null): string {
     return message ? message.trim() : ''
 }
 
-type SetupEntryChoice = 'restore' | 'new'
 type SetupStyle = 'guided' | 'full'
-
-function parseSetupEntryChoice(value: unknown): SetupEntryChoice | null {
-    return value === 'restore' || value === 'new' ? value : null
-}
 
 function getStoredSetupEntryChoice(preferenceKey: string): SetupEntryChoice | null {
     return parseSetupEntryChoice(window.localStorage.getItem(preferenceKey))
@@ -142,29 +143,6 @@ function storeSetupStyle(preferenceKey: string, style: SetupStyle): void {
     window.localStorage.setItem(preferenceKey, style)
 }
 
-function getSetupEntryChoiceFromHistoryState(value: unknown): SetupEntryChoice | null {
-    if (!value || typeof value !== 'object') {
-        return null
-    }
-    return parseSetupEntryChoice(
-        (value as Record<string, unknown>)[CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY],
-    )
-}
-
-function buildSetupEntryChoiceHistoryState(
-    value: unknown,
-    choice: SetupEntryChoice | null,
-): Record<string, unknown> {
-    const currentState =
-        value && typeof value === 'object' ? { ...(value as Record<string, unknown>) } : {}
-    if (choice === null) {
-        delete currentState[CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY]
-        return currentState
-    }
-    currentState[CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY] = choice
-    return currentState
-}
-
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
@@ -187,7 +165,6 @@ let staleCheckIntervalId: number | null = null
 
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
 const CONTROL_CENTER_ENTRY_CHOICE_KEY = 'moonwalker.controlCenter.entryChoice'
-const CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY = 'controlCenterSetupEntryChoice'
 const CONTROL_CENTER_SETUP_STYLE_KEY = 'moonwalker.controlCenter.setupStyle'
 const STALE_CHECK_INTERVAL_MS = 15000
 const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
