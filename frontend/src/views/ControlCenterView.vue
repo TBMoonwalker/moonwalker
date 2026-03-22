@@ -21,6 +21,12 @@ import { deriveGuidedFocusTarget } from '../control-center/focusFlow'
 import type { OperationResult } from '../control-center/operationResults'
 import { deriveControlCenterReadiness } from '../control-center/readiness'
 import {
+    buildSetupEntryChoiceHistoryState,
+    getSetupEntryChoiceFromHistoryState,
+    parseSetupEntryChoice,
+    type SetupEntryChoice,
+} from '../control-center/setupEntryHistory'
+import {
     buildControlCenterQuery,
     normalizeControlCenterRouteState,
 } from '../control-center/routeState'
@@ -110,12 +116,10 @@ function createAnnouncement(message: string | null): string {
     return message ? message.trim() : ''
 }
 
-type SetupEntryChoice = 'restore' | 'new'
 type SetupStyle = 'guided' | 'full'
 
 function getStoredSetupEntryChoice(preferenceKey: string): SetupEntryChoice | null {
-    const rawValue = window.localStorage.getItem(preferenceKey)
-    return rawValue === 'restore' || rawValue === 'new' ? rawValue : null
+    return parseSetupEntryChoice(window.localStorage.getItem(preferenceKey))
 }
 
 function storeSetupEntryChoice(
@@ -610,6 +614,18 @@ function rememberSetupEntryChoice(choice: SetupEntryChoice | null): void {
     storeSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY, choice)
 }
 
+function syncSetupEntryChoiceHistory(
+    choice: SetupEntryChoice | null,
+    replace = false,
+): void {
+    const nextState = buildSetupEntryChoiceHistoryState(window.history.state, choice)
+    if (replace) {
+        window.history.replaceState(nextState, '', window.location.href)
+        return
+    }
+    window.history.pushState(nextState, '', window.location.href)
+}
+
 function rememberSetupStyle(style: SetupStyle): void {
     setupStyle.value = style
     storeSetupStyle(CONTROL_CENTER_SETUP_STYLE_KEY, style)
@@ -750,11 +766,20 @@ async function handleModeSelect(mode: ControlCenterMode): Promise<void> {
 }
 
 async function handleSetupEntryChoice(choice: SetupEntryChoice): Promise<void> {
+    if (setupEntryChoice.value === choice) {
+        return
+    }
     rememberSetupEntryChoice(choice)
+    syncSetupEntryChoiceHistory(choice)
     trackUiEvent('control_center_setup_entry_selected', { choice })
-    await navigateToControlCenter(
-        'setup',
-        choice === 'new' ? readiness.value.nextTarget ?? 'exchange' : null,
+    if (choice === 'new') {
+        await focusTarget(activeSetupTarget.value)
+    }
+}
+
+function handleSetupEntryChoicePopState(): void {
+    rememberSetupEntryChoice(
+        getSetupEntryChoiceFromHistoryState(window.history.state),
     )
 }
 
@@ -1004,6 +1029,7 @@ watch(
     (firstRun) => {
         if (!firstRun && setupEntryChoice.value === 'restore') {
             rememberSetupEntryChoice('new')
+            syncSetupEntryChoiceHistory('new', true)
         }
     },
 )
@@ -1012,13 +1038,19 @@ onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
 
 onMounted(async () => {
     initializeTimezoneOptions(getClientTimezone())
-    rememberSetupEntryChoice(
-        getStoredSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY),
+    const historySetupEntryChoice = getSetupEntryChoiceFromHistoryState(
+        window.history.state,
     )
+    rememberSetupEntryChoice(
+        historySetupEntryChoice ??
+            getStoredSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY),
+    )
+    syncSetupEntryChoiceHistory(setupEntryChoice.value, true)
     rememberSetupStyle(getStoredSetupStyle(CONTROL_CENTER_SETUP_STYLE_KEY))
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('keydown', handleGlobalKeydown)
     window.addEventListener('focus', checkForExternalConfigChanges)
+    window.addEventListener('popstate', handleSetupEntryChoicePopState)
     staleCheckIntervalId = window.setInterval(
         checkForExternalConfigChanges,
         STALE_CHECK_INTERVAL_MS,
@@ -1033,6 +1065,7 @@ onUnmounted(() => {
     window.removeEventListener('beforeunload', handleBeforeUnload)
     window.removeEventListener('keydown', handleGlobalKeydown)
     window.removeEventListener('focus', checkForExternalConfigChanges)
+    window.removeEventListener('popstate', handleSetupEntryChoicePopState)
     if (transitionTimeoutId !== null) {
         window.clearTimeout(transitionTimeoutId)
     }

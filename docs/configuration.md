@@ -50,7 +50,7 @@ are not exposed in the UI and must be set via the API.
 | `order_check_range` | `int` | Seconds for post-order trade lookup (advanced). | `5` |
 | `dca` | `bool` | Enable DCA. | `true` |
 | `dynamic_dca` | `bool` | Enable dynamic DCA. | `false` |
-| `dca_strategy` | `string` | Strategy for dynamic DCA. | `bbands_cross` |
+| `dca_strategy` | `string` | Strategy for dynamic DCA. | `ema_swing` |
 | `tp_strategy` | `string` | Strategy for take-profit checks (advanced). | `ema_cross` |
 | `trailing_tp` | `float` | Trailing TP deviation (percent). | `0.5` |
 | `max_bots` | `int` | Max concurrent bots. | `3` |
@@ -115,7 +115,7 @@ are not exposed in the UI and must be set via the API.
 | `monitoring_telegram_chat_id` | `string` | Telegram chat ID (user/group/channel) receiving notifications. | `-1001234567890` |
 | `monitoring_timeout_sec` | `int` | Telegram send timeout in seconds. | `5` |
 | `monitoring_retry_count` | `int` | Number of retries after a failed Telegram send. | `1` |
-| `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","bbands_cross"]` |
+| `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","ema_down","ema_low","ema_swing"]` |
 | `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals"]` |
 
 Read-only metadata keys such as `strategies` and `signal_plugins` are returned
