@@ -12,13 +12,14 @@ runtime and multiple concurrent dashboard clients.
 | --- | --- | --- |
 | `GET` | `/` | Serve the Vue SPA entrypoint. |
 | `GET` | `/{path}` | Serve SPA routes with static-file fallback. |
+| `GET` | `/assets/{file_path}` | Serve hashed Vite frontend bundles from the built assets directory. |
 | `GET` | `/static/{file_path}` | Serve built frontend assets. |
 
 ## Configuration
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/config/all` | Return the full config snapshot used by the dashboard. |
+| `GET` | `/config/all` | Return the full config snapshot used by the dashboard, including snapshot-native `config_updated_at` metadata for stale-snapshot detection. |
 | `GET` | `/config/freshness` | Return the latest persisted config `updated_at` timestamp so dashboard clients can detect stale local snapshots. |
 | `GET` | `/config/single/{key}` | Return a single config key. |
 | `PUT` | `/config/single/{key}` | Update one config key with a JSON body like `{"value":{"value":"binance","type":"str"}}`. |
@@ -31,6 +32,9 @@ runtime and multiple concurrent dashboard clients.
 Notes:
 - Config update payloads use nested typed objects such as
   `{"dry_run":{"value":false,"type":"bool"}}`.
+- Dashboard clients can compare `/config/all`'s `config_updated_at` against
+  `/config/freshness` so a stale snapshot is not mistaken for a freshly loaded
+  one when another tab or client saves between requests.
 - Generic config saves cannot switch `dry_run` from `true` to `false`; that
   transition is rejected unless it goes through `POST /config/live/activate`.
 - `POST /config/live/activate` expects `{"confirm": true}` and returns `409`
