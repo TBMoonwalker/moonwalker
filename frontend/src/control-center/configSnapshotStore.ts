@@ -2,18 +2,61 @@ import { computed, ref, shallowRef } from 'vue'
 
 import { fetchJson } from '../api/client'
 import { trackUiEvent } from '../utils/uiTelemetry'
-import type { ConfigFreshnessPayload, SharedConfigPayload } from './types'
+import type {
+    ConfigFreshnessPayload,
+    ControlCenterConfigChangeOrigin,
+    SharedConfigPayload,
+} from './types'
 
 type SnapshotLoadState = 'idle' | 'loading' | 'ready' | 'error'
 type FreshnessStatus = 'unchanged' | 'stale' | 'unknown'
+type LocalConfigChangeOrigin = Exclude<
+    ControlCenterConfigChangeOrigin,
+    'external_invalidation'
+>
+
+interface ConfigInvalidationEvent {
+    at: number
+    id: string
+    origin: LocalConfigChangeOrigin
+    senderId: string
+    updatedAt: string | null
+}
+
+const CONFIG_INVALIDATION_CHANNEL = 'moonwalker.controlCenter.configInvalidation'
+const CONFIG_INVALIDATION_STORAGE_KEY =
+    'moonwalker.controlCenter.configInvalidation'
+const CONFIG_UPDATED_AT_KEY = 'config_updated_at'
+const LOCAL_CONFIG_CHANGE_ORIGINS = [
+    'save',
+    'restore',
+    'live_activation',
+] as const
 
 const snapshot = shallowRef<SharedConfigPayload | null>(null)
 const loadState = ref<SnapshotLoadState>('idle')
 const loadError = ref<string | null>(null)
-const lastKnownUpdatedAt = ref<string | null>(null)
+const latestKnownUpdatedAt = ref<string | null>(null)
+const snapshotUpdatedAt = ref<string | null>(null)
+const lastExternalInvalidationAt = ref<number | null>(null)
+const lastExternalInvalidationOrigin = ref<LocalConfigChangeOrigin | null>(null)
+const lastExternalInvalidationUpdatedAt = ref<string | null>(null)
+const externalInvalidationToken = ref(0)
 const isHydrated = computed(() => snapshot.value !== null)
+const hasKnownNewerSnapshot = computed(
+    () =>
+        compareTimestamps(
+            latestKnownUpdatedAt.value,
+            snapshotUpdatedAt.value,
+        ) > 0,
+)
 
 let pendingLoad: Promise<SharedConfigPayload | null> | null = null
+let invalidationListenersInitialized = false
+let invalidationChannel: BroadcastChannel | null = null
+let storageEventHandler: ((event: StorageEvent) => void) | null = null
+const invalidationSenderId = Math.random().toString(36).slice(2)
+const processedInvalidationIds = new Set<string>()
 
 function toTimestamp(value: string | null): number | null {
     if (!value) {
@@ -23,18 +66,158 @@ function toTimestamp(value: string | null): number | null {
     return Number.isFinite(parsed) ? parsed : null
 }
 
+function compareTimestamps(a: string | null, b: string | null): number {
+    const left = toTimestamp(a)
+    const right = toTimestamp(b)
+    if (left === null && right === null) {
+        return 0
+    }
+    if (left === null) {
+        return -1
+    }
+    if (right === null) {
+        return 1
+    }
+    if (left === right) {
+        return 0
+    }
+    return left > right ? 1 : -1
+}
+
+function rememberProcessedInvalidationId(id: string): void {
+    processedInvalidationIds.add(id)
+    if (processedInvalidationIds.size <= 16) {
+        return
+    }
+    const oldestId = processedInvalidationIds.values().next().value
+    if (oldestId) {
+        processedInvalidationIds.delete(oldestId)
+    }
+}
+
+function setLatestKnownUpdatedAt(updatedAt: string | null): string | null {
+    if (
+        updatedAt &&
+        compareTimestamps(updatedAt, latestKnownUpdatedAt.value) > 0
+    ) {
+        latestKnownUpdatedAt.value = updatedAt
+    }
+    return latestKnownUpdatedAt.value
+}
+
+function setSnapshotState(
+    nextSnapshot: SharedConfigPayload,
+    updatedAt: string | null,
+): void {
+    const resolvedUpdatedAt = updatedAt ?? latestKnownUpdatedAt.value
+    snapshot.value = nextSnapshot
+    snapshotUpdatedAt.value = resolvedUpdatedAt
+    setLatestKnownUpdatedAt(resolvedUpdatedAt)
+    loadError.value = null
+    loadState.value = 'ready'
+}
+
+function getSnapshotUpdatedAt(snapshotPayload: SharedConfigPayload): string | null {
+    const rawUpdatedAt = snapshotPayload[CONFIG_UPDATED_AT_KEY]
+    return typeof rawUpdatedAt === 'string' ? rawUpdatedAt : null
+}
+
+function isLocalConfigChangeOrigin(
+    value: unknown,
+): value is LocalConfigChangeOrigin {
+    return (
+        typeof value === 'string' &&
+        (LOCAL_CONFIG_CHANGE_ORIGINS as readonly string[]).includes(value)
+    )
+}
+
+function parseInvalidationEvent(value: unknown): ConfigInvalidationEvent | null {
+    if (!value || typeof value !== 'object') {
+        return null
+    }
+
+    const candidate = value as Partial<ConfigInvalidationEvent>
+    if (
+        typeof candidate.id !== 'string' ||
+        typeof candidate.senderId !== 'string' ||
+        typeof candidate.at !== 'number' ||
+        !isLocalConfigChangeOrigin(candidate.origin)
+    ) {
+        return null
+    }
+
+    return {
+        at: candidate.at,
+        id: candidate.id,
+        origin: candidate.origin,
+        senderId: candidate.senderId,
+        updatedAt:
+            candidate.updatedAt === null || typeof candidate.updatedAt === 'string'
+                ? candidate.updatedAt
+                : null,
+    }
+}
+
+function applyExternalInvalidation(value: unknown): void {
+    const event = parseInvalidationEvent(value)
+    if (!event || event.senderId === invalidationSenderId) {
+        return
+    }
+    if (processedInvalidationIds.has(event.id)) {
+        return
+    }
+
+    rememberProcessedInvalidationId(event.id)
+    setLatestKnownUpdatedAt(event.updatedAt)
+    lastExternalInvalidationAt.value = event.at
+    lastExternalInvalidationOrigin.value = event.origin
+    lastExternalInvalidationUpdatedAt.value = event.updatedAt
+    externalInvalidationToken.value += 1
+}
+
+function ensureInvalidationListeners(): void {
+    if (invalidationListenersInitialized || typeof window === 'undefined') {
+        return
+    }
+
+    invalidationListenersInitialized = true
+
+    if (typeof BroadcastChannel !== 'undefined') {
+        try {
+            invalidationChannel = new BroadcastChannel(CONFIG_INVALIDATION_CHANNEL)
+            invalidationChannel.onmessage = (event) => {
+                applyExternalInvalidation(event.data)
+            }
+        } catch {
+            invalidationChannel = null
+        }
+    }
+
+    storageEventHandler = (event: StorageEvent) => {
+        if (event.key !== CONFIG_INVALIDATION_STORAGE_KEY || !event.newValue) {
+            return
+        }
+        try {
+            applyExternalInvalidation(JSON.parse(event.newValue) as unknown)
+        } catch {
+            return
+        }
+    }
+
+    window.addEventListener('storage', storageEventHandler)
+}
+
 async function refreshFreshnessMarker(): Promise<string | null> {
     try {
         const freshness = await fetchJson<ConfigFreshnessPayload>('/config/freshness')
-        lastKnownUpdatedAt.value = freshness.updated_at
-        return freshness.updated_at
+        return setLatestKnownUpdatedAt(freshness.updated_at)
     } catch {
-        return lastKnownUpdatedAt.value
+        return latestKnownUpdatedAt.value
     }
 }
 
 async function loadSnapshot(force = false): Promise<SharedConfigPayload | null> {
-    if (pendingLoad && !force) {
+    if (pendingLoad) {
         return pendingLoad
     }
     pendingLoad = (async () => {
@@ -42,9 +225,8 @@ async function loadSnapshot(force = false): Promise<SharedConfigPayload | null> 
         loadError.value = null
         try {
             const nextSnapshot = await fetchJson<SharedConfigPayload>('/config/all')
-            snapshot.value = nextSnapshot
+            setSnapshotState(nextSnapshot, getSnapshotUpdatedAt(nextSnapshot))
             await refreshFreshnessMarker()
-            loadState.value = 'ready'
             trackUiEvent('control_center_snapshot_loaded')
             return nextSnapshot
         } catch (error) {
@@ -69,63 +251,118 @@ async function checkFreshness(): Promise<{
 }> {
     try {
         const freshness = await fetchJson<ConfigFreshnessPayload>('/config/freshness')
-        const currentTimestamp = toTimestamp(lastKnownUpdatedAt.value)
-        const incomingTimestamp = toTimestamp(freshness.updated_at)
-        const isStale =
-            currentTimestamp !== null &&
-            incomingTimestamp !== null &&
-            incomingTimestamp > currentTimestamp
-        if (freshness.updated_at) {
-            lastKnownUpdatedAt.value = freshness.updated_at
-        }
+        const updatedAt = setLatestKnownUpdatedAt(freshness.updated_at)
+        const isStale = compareTimestamps(updatedAt, snapshotUpdatedAt.value) > 0
         if (isStale) {
             trackUiEvent('control_center_snapshot_stale')
             return {
                 status: 'stale',
-                updatedAt: freshness.updated_at,
+                updatedAt,
             }
         }
         return {
             status: 'unchanged',
-            updatedAt: freshness.updated_at,
+            updatedAt,
         }
     } catch {
         return {
             status: 'unknown',
-            updatedAt: lastKnownUpdatedAt.value,
+            updatedAt: latestKnownUpdatedAt.value,
         }
     }
 }
 
 function applySnapshot(
     nextSnapshot: SharedConfigPayload,
-    updatedAt: string | null = lastKnownUpdatedAt.value,
+    updatedAt: string | null = getSnapshotUpdatedAt(nextSnapshot)
+        ?? snapshotUpdatedAt.value
+        ?? latestKnownUpdatedAt.value,
 ): void {
-    snapshot.value = nextSnapshot
-    lastKnownUpdatedAt.value = updatedAt
-    loadError.value = null
-    loadState.value = 'ready'
+    setSnapshotState(nextSnapshot, updatedAt)
+}
+
+function emitLocalInvalidation(origin: LocalConfigChangeOrigin): void {
+    ensureInvalidationListeners()
+
+    const event: ConfigInvalidationEvent = {
+        at: Date.now(),
+        id: `${invalidationSenderId}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        origin,
+        senderId: invalidationSenderId,
+        updatedAt: latestKnownUpdatedAt.value ?? snapshotUpdatedAt.value,
+    }
+
+    rememberProcessedInvalidationId(event.id)
+
+    if (invalidationChannel) {
+        try {
+            invalidationChannel.postMessage(event)
+            return
+        } catch {
+            invalidationChannel = null
+        }
+    }
+
+    if (typeof window === 'undefined') {
+        return
+    }
+
+    try {
+        window.localStorage.setItem(
+            CONFIG_INVALIDATION_STORAGE_KEY,
+            JSON.stringify(event),
+        )
+        window.localStorage.removeItem(CONFIG_INVALIDATION_STORAGE_KEY)
+    } catch {
+        return
+    }
 }
 
 export function resetSharedConfigSnapshotState(): void {
     snapshot.value = null
     loadState.value = 'idle'
     loadError.value = null
-    lastKnownUpdatedAt.value = null
+    latestKnownUpdatedAt.value = null
+    snapshotUpdatedAt.value = null
+    lastExternalInvalidationAt.value = null
+    lastExternalInvalidationOrigin.value = null
+    lastExternalInvalidationUpdatedAt.value = null
+    externalInvalidationToken.value = 0
     pendingLoad = null
+    processedInvalidationIds.clear()
+
+    if (invalidationChannel) {
+        invalidationChannel.close()
+        invalidationChannel = null
+    }
+    if (storageEventHandler && typeof window !== 'undefined') {
+        window.removeEventListener('storage', storageEventHandler)
+    }
+    storageEventHandler = null
+    invalidationListenersInitialized = false
 }
 
 export function useSharedConfigSnapshot() {
+    ensureInvalidationListeners()
+
     return {
         snapshot,
         loadState,
         loadError,
-        lastKnownUpdatedAt,
+        snapshotUpdatedAt,
+        latestKnownUpdatedAt,
+        lastKnownUpdatedAt: latestKnownUpdatedAt,
+        lastExternalInvalidationAt,
+        lastExternalInvalidationOrigin,
+        lastExternalInvalidationUpdatedAt,
+        externalInvalidationToken,
         isHydrated,
+        hasKnownNewerSnapshot,
         applySnapshot,
         checkFreshness,
         ensureLoaded: loadSnapshot,
         refresh: () => loadSnapshot(true),
+        emitLocalInvalidation,
         refreshFreshnessMarker,
     }
 }

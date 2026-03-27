@@ -525,14 +525,21 @@ def test_config_route_handlers_expose_freshness_and_live_activation(
         config_controller.Config, "instance", classmethod(_fake_instance)
     )
     monkeypatch.setattr(config_controller, "AppConfig", _DummyAppConfigModel)
+    expected_config_snapshot = {
+        **service.snapshot(),
+        "config_updated_at": freshness_timestamp.isoformat(),
+    }
 
     app = Litestar(route_handlers=config_controller.route_handlers)
     with TestClient(app=app) as client:
+        config_response = client.get("/config/all")
         freshness_response = client.get("/config/freshness")
         activation_response = client.post(
             "/config/live/activate", json={"confirm": True}
         )
 
+    assert config_response.status_code == 200
+    assert config_response.json() == expected_config_snapshot
     assert freshness_response.status_code == 200
     assert freshness_response.json() == {"updated_at": freshness_timestamp.isoformat()}
     assert activation_response.status_code == 201

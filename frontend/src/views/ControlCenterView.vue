@@ -16,7 +16,9 @@ import ConfigIndicatorSection from '../components/config/ConfigIndicatorSection.
 import ConfigMonitoringSection from '../components/config/ConfigMonitoringSection.vue'
 import ConfigSignalSection from '../components/config/ConfigSignalSection.vue'
 import { MOONWALKER_API_ORIGIN } from '../config'
+import { createControlCenterConfigChangeSynchronizer } from '../control-center/configChangeSync'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
+import { deriveControlCenterConfigTrustState } from '../control-center/configTrust'
 import { deriveGuidedFocusTarget } from '../control-center/focusFlow'
 import type { OperationResult } from '../control-center/operationResults'
 import { deriveControlCenterReadiness } from '../control-center/readiness'
@@ -155,8 +157,6 @@ const showAdvancedGeneral = ref(false)
 const setupEntryChoice = ref<SetupEntryChoice | null>(null)
 const setupStyle = ref<SetupStyle>('guided')
 const loadRescueMessage = ref<string | null>(null)
-const staleDetected = ref(false)
-const staleUpdatedAt = ref<string | null>(null)
 const liveRegionMessage = ref('')
 const transitionIntent = ref<ControlCenterTransitionIntent | null>(null)
 
@@ -283,8 +283,6 @@ async function refreshWorkspaceFromSnapshot(force = false): Promise<OperationRes
         }
         const result = await fetchDefaultValues()
         loadRescueMessage.value = result.status === 'error' ? result.message : null
-        staleDetected.value = false
-        staleUpdatedAt.value = null
         if (result.status === 'success') {
             const normalizedState = normalizeControlCenterRouteState({
                 requestedMode: routeState.value.mode,
@@ -342,10 +340,10 @@ const {
     isLoading,
     message,
     onSaved: async () => {
-        await configSnapshotStore.refresh()
-        const loadResult = await fetchDefaultValues()
-        loadRescueMessage.value =
-            loadResult.status === 'error' ? loadResult.message : null
+        const result = await syncControlCenterConfigChange('save')
+        if (result.status === 'error') {
+            throw new Error(result.message)
+        }
     },
     surfaceMessages: false,
     syncBaselineState,
@@ -418,8 +416,10 @@ const {
         isLoading.value = true
     },
     reloadConfig: async () => {
-        await configSnapshotStore.refresh()
-        await fetchDefaultValues()
+        const result = await syncControlCenterConfigChange('restore')
+        if (result.status === 'error') {
+            throw new Error(result.message)
+        }
     },
     surfaceMessages: false,
 })
@@ -464,6 +464,13 @@ const { fetchDefaultValues } = useConfigLoadFlow({
     syncBaselineState,
 })
 
+const syncControlCenterConfigChange = createControlCenterConfigChangeSynchronizer({
+    emitInvalidation: (origin) => {
+        configSnapshotStore.emitLocalInvalidation(origin)
+    },
+    refreshWorkspace: refreshWorkspaceFromSnapshot,
+})
+
 const {
     canTestMonitoringTelegram,
     monitoringTestLoading,
@@ -504,6 +511,32 @@ const routeState = computed(() =>
         requestedTarget: route.query.target,
         fallbackMode: viewState.value.defaultMode,
     }),
+)
+const configTrustState = computed(() =>
+    deriveControlCenterConfigTrustState({
+        hasKnownNewerSnapshot: configSnapshotStore.hasKnownNewerSnapshot.value,
+        hasUnsavedChanges: hasUnsavedChanges(),
+        isHydrated: configSnapshotStore.isHydrated.value,
+        latestKnownUpdatedAt: configSnapshotStore.latestKnownUpdatedAt.value,
+        loadState: configSnapshotStore.loadState.value,
+    }),
+)
+const missionAlertTone = computed(() => {
+    if (transitionIntent.value) {
+        return missionSummaryTone.value
+    }
+    if (isStaleConfigTrustState(configTrustState.value.kind)) {
+        return configTrustState.value.tone
+    }
+    if (configTrustState.value.kind === 'checking') {
+        return configTrustState.value.tone
+    }
+    return missionSummaryTone.value
+})
+const formattedTrustTimestamp = computed(() =>
+    configTrustState.value.updatedAt
+        ? new Date(configTrustState.value.updatedAt).toLocaleTimeString()
+        : null,
 )
 
 const isPreReadiness = computed(() => !readiness.value.complete)
@@ -672,6 +705,12 @@ function getSetupTaskSummary(target: ControlCenterTarget): string {
         return 'Current setup step.'
     }
     return 'Saved and ready to review.'
+}
+
+function isStaleConfigTrustState(
+    kind: ReturnType<typeof deriveControlCenterConfigTrustState>['kind'],
+): boolean {
+    return kind === 'stale_but_safe' || kind === 'stale_with_draft_conflict'
 }
 
 function announce(messageText: string | null): void {
@@ -935,8 +974,10 @@ async function handleActivateLiveTrading(): Promise<void> {
         const response = await axios.post(apiUrl('/config/live/activate'), {
             confirm: true,
         })
-        await configSnapshotStore.refresh()
-        await fetchDefaultValues()
+        const syncResult = await syncControlCenterConfigChange('live_activation')
+        if (syncResult.status === 'error') {
+            throw new Error(syncResult.message)
+        }
         await navigateToControlCenter('overview', 'live-activation')
         setTransitionIntent({
             kind: 'activate_live',
@@ -982,7 +1023,7 @@ async function handleReloadAfterStalePrompt(): Promise<void> {
     ) {
         return
     }
-    const result = await refreshWorkspaceFromSnapshot(true)
+    const result = await syncControlCenterConfigChange('external_invalidation')
     if (result.status === 'success') {
         setTransitionIntent({
             kind: 'retry',
@@ -996,6 +1037,26 @@ async function handleReloadAfterStalePrompt(): Promise<void> {
     }
 }
 
+async function handleDetectedExternalConfigChange(
+    shouldAnnounce = !document.hidden,
+): Promise<void> {
+    if (!hasUnsavedChanges()) {
+        const result = await syncControlCenterConfigChange('external_invalidation')
+        if (shouldAnnounce) {
+            announce(
+                result.status === 'success'
+                    ? 'Configuration refreshed after external changes.'
+                    : result.message,
+            )
+        }
+        return
+    }
+
+    if (shouldAnnounce) {
+        announce('A newer configuration is available from another client.')
+    }
+}
+
 async function checkForExternalConfigChanges(): Promise<void> {
     if (document.hidden) {
         return
@@ -1004,14 +1065,7 @@ async function checkForExternalConfigChanges(): Promise<void> {
     if (freshness.status !== 'stale') {
         return
     }
-    staleDetected.value = true
-    staleUpdatedAt.value = freshness.updatedAt
-    if (!hasUnsavedChanges()) {
-        await refreshWorkspaceFromSnapshot(true)
-        announce('Configuration refreshed after external changes.')
-        return
-    }
-    announce('A newer configuration is available from another client.')
+    await handleDetectedExternalConfigChange(true)
 }
 
 watch(
@@ -1031,6 +1085,16 @@ watch(
             rememberSetupEntryChoice('new')
             syncSetupEntryChoiceHistory('new', true)
         }
+    },
+)
+
+watch(
+    () => configSnapshotStore.externalInvalidationToken.value,
+    async (nextToken, previousToken) => {
+        if (nextToken === 0 || nextToken === previousToken) {
+            return
+        }
+        await handleDetectedExternalConfigChange(!document.hidden)
     },
 )
 
@@ -1131,7 +1195,7 @@ onUnmounted(() => {
                     </n-flex>
 
                     <n-alert
-                        :type="missionSummaryTone"
+                        :type="missionAlertTone"
                         :title="dirtySummary"
                         role="status"
                         aria-live="polite"
@@ -1139,12 +1203,14 @@ onUnmounted(() => {
                         <template v-if="transitionIntent">
                             {{ transitionIntent.message }}
                         </template>
-                        <template v-else-if="staleDetected">
-                            Another client changed this configuration
-                            <span v-if="staleUpdatedAt">
-                                at {{ new Date(staleUpdatedAt).toLocaleTimeString() }}.
+                        <template v-else-if="configTrustState.kind === 'checking'">
+                            {{ configTrustState.summary }}
+                        </template>
+                        <template v-else-if="isStaleConfigTrustState(configTrustState.kind)">
+                            {{ configTrustState.summary }}
+                            <span v-if="formattedTrustTimestamp">
+                                Latest change detected at {{ formattedTrustTimestamp }}.
                             </span>
-                            Reload the latest snapshot before trusting this draft.
                         </template>
                         <template v-else>
                             {{
@@ -1158,7 +1224,7 @@ onUnmounted(() => {
                     </n-alert>
 
                     <n-flex
-                        v-if="staleDetected"
+                        v-if="isStaleConfigTrustState(configTrustState.kind)"
                         class="stale-actions"
                         align="center"
                         :wrap="true"

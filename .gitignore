@@ -16,13 +16,11 @@ test*.py
 !backend/tests/**/*.py
 !frontend/tests/
 frontend/tests/*
+!frontend/tests/*.test.cjs
+!frontend/tests/*.regression-1.test.cjs
 !frontend/tests/helpers/
 frontend/tests/helpers/*
 !frontend/tests/helpers/loadFrontendModule.cjs
-!frontend/tests/controlCenterSaveWorkflow.test.cjs
-!frontend/tests/useConfigValidationFlow.test.cjs
-!frontend/tests/controlCenterTemplateBindings.test.cjs
-!frontend/tests/controlCenterRouterGuard.test.cjs
 debugdb.py
 backend/strategies/btc.py
 moonwalker.lock

@@ -20,6 +20,10 @@ process.env.NODE_PATH = Array.from(new Set(nodePathEntries)).join(
 )
 Module._initPaths()
 
+if (!globalThis.__moonwalkerImportMetaEnv) {
+    globalThis.__moonwalkerImportMetaEnv = Object.create(null)
+}
+
 function normalizeModulePath(relativePath) {
     return relativePath.startsWith('/') ? relativePath.slice(1) : relativePath
 }
@@ -61,7 +65,9 @@ function compileModule(sourcePath) {
         return cached
     }
 
-    const sourceText = fs.readFileSync(sourcePath, 'utf8')
+    const sourceText = fs
+        .readFileSync(sourcePath, 'utf8')
+        .replaceAll('import.meta.env', 'globalThis.__moonwalkerImportMetaEnv')
     const compiledPath = resolveCompiledPath(sourcePath)
 
     COMPILED_MODULES.set(sourcePath, compiledPath)

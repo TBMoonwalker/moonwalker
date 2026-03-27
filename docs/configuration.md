@@ -7,10 +7,18 @@
 Runtime configuration is stored in the `AppConfig` table and served to the UI
 through `/config/all`. Dashboard clients can also poll `/config/freshness` to
 detect whether another browser or tab has changed the saved configuration.
+`/config/all` now includes a snapshot-native `config_updated_at` field so the
+Control Center can tell whether the snapshot it just loaded is older than the
+latest persisted config timestamp.
 Most settings are updated via `PUT /config/single/{key}` or
 `POST /config/multiple`, but switching `dry_run` from `true` to `false` must go
 through `POST /config/live/activate` so the backend can enforce readiness
 checks.
+
+The Control Center also fans out browser-local invalidation after save, restore,
+and live activation. Clean tabs can refresh quietly, while tabs with unsaved
+drafts keep the draft and show an explicit stale-config warning instead of
+silently trusting outdated state.
 
 Legacy `/config` and `/settings` links now redirect into the Control Center.
 
