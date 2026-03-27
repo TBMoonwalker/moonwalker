@@ -239,3 +239,26 @@ test('shared config snapshot store coalesces overlapping forced refreshes', asyn
         1,
     )
 })
+
+test('shared config snapshot store keeps the snapshot timestamp when freshness advances mid-load', async () => {
+    const snapshotStore = useSharedConfigSnapshot()
+
+    global.fetch = async (url) => {
+        if (String(url).endsWith('/config/all')) {
+            return createJsonResponse({
+                dry_run: true,
+                config_updated_at: '2026-03-27T09:00:00Z',
+            })
+        }
+        return createJsonResponse({ updated_at: '2026-03-27T09:05:00Z' })
+    }
+
+    await snapshotStore.refresh()
+
+    assert.equal(snapshotStore.snapshotUpdatedAt.value, '2026-03-27T09:00:00Z')
+    assert.equal(
+        snapshotStore.latestKnownUpdatedAt.value,
+        '2026-03-27T09:05:00Z',
+    )
+    assert.equal(snapshotStore.hasKnownNewerSnapshot.value, true)
+})

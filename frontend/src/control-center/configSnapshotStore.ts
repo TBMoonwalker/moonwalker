@@ -26,6 +26,7 @@ interface ConfigInvalidationEvent {
 const CONFIG_INVALIDATION_CHANNEL = 'moonwalker.controlCenter.configInvalidation'
 const CONFIG_INVALIDATION_STORAGE_KEY =
     'moonwalker.controlCenter.configInvalidation'
+const CONFIG_UPDATED_AT_KEY = 'config_updated_at'
 const LOCAL_CONFIG_CHANGE_ORIGINS = [
     'save',
     'restore',
@@ -114,6 +115,11 @@ function setSnapshotState(
     setLatestKnownUpdatedAt(resolvedUpdatedAt)
     loadError.value = null
     loadState.value = 'ready'
+}
+
+function getSnapshotUpdatedAt(snapshotPayload: SharedConfigPayload): string | null {
+    const rawUpdatedAt = snapshotPayload[CONFIG_UPDATED_AT_KEY]
+    return typeof rawUpdatedAt === 'string' ? rawUpdatedAt : null
 }
 
 function isLocalConfigChangeOrigin(
@@ -219,8 +225,8 @@ async function loadSnapshot(force = false): Promise<SharedConfigPayload | null> 
         loadError.value = null
         try {
             const nextSnapshot = await fetchJson<SharedConfigPayload>('/config/all')
-            const updatedAt = await refreshFreshnessMarker()
-            setSnapshotState(nextSnapshot, updatedAt)
+            setSnapshotState(nextSnapshot, getSnapshotUpdatedAt(nextSnapshot))
+            await refreshFreshnessMarker()
             trackUiEvent('control_center_snapshot_loaded')
             return nextSnapshot
         } catch (error) {
@@ -268,7 +274,9 @@ async function checkFreshness(): Promise<{
 
 function applySnapshot(
     nextSnapshot: SharedConfigPayload,
-    updatedAt: string | null = snapshotUpdatedAt.value ?? latestKnownUpdatedAt.value,
+    updatedAt: string | null = getSnapshotUpdatedAt(nextSnapshot)
+        ?? snapshotUpdatedAt.value
+        ?? latestKnownUpdatedAt.value,
 ): void {
     setSnapshotState(nextSnapshot, updatedAt)
 }

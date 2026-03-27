@@ -195,15 +195,22 @@ async def get_config() -> Any:
         JSON response containing the full configuration cache.
     """
     config = await Config.instance()
-    return config.snapshot()
+    snapshot = config.snapshot()
+    snapshot["config_updated_at"] = await _get_latest_config_updated_at()
+    return snapshot
+
+
+async def _get_latest_config_updated_at() -> str | None:
+    """Return the latest persisted config update timestamp as ISO text."""
+    latest_row = await AppConfig.all().order_by("-updated_at").first()
+    return latest_row.updated_at.isoformat() if latest_row else None
 
 
 @get(path="/config/freshness")
 async def get_config_freshness() -> Any:
     """Return the latest config update timestamp for stale-client detection."""
-    latest_row = await AppConfig.all().order_by("-updated_at").first()
     return {
-        "updated_at": latest_row.updated_at.isoformat() if latest_row else None,
+        "updated_at": await _get_latest_config_updated_at(),
     }
 
 
