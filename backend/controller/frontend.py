@@ -62,6 +62,15 @@ async def serve_static(file_path: str) -> File:
     return _file_response(static_file)
 
 
+@get(path="/assets/{file_path:path}", include_in_schema=False)
+async def serve_assets(file_path: str) -> File:
+    """Serve hashed frontend bundles at the Vite-generated /assets path."""
+    asset_file = _resolve_relative_file(STATIC_DIR / "assets", file_path)
+    if asset_file is None or not await asyncio.to_thread(asset_file.is_file):
+        raise NotFoundException("Asset file not found")
+    return _file_response(asset_file)
+
+
 @get(path="/{path:path}", include_in_schema=False)
 async def serve_vue(path: str) -> File:
     """Serve the Vue.js SPA entrypoint with static-file fallback."""
@@ -95,4 +104,10 @@ async def serve_root() -> File:
     return await _serve_vue_path("")
 
 
-route_handlers = [serve_static, serve_spa_top_level_routes, serve_vue, serve_root]
+route_handlers = [
+    serve_static,
+    serve_assets,
+    serve_spa_top_level_routes,
+    serve_vue,
+    serve_root,
+]

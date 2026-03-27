@@ -41,3 +41,13 @@ def test_top_level_spa_routes_bypass_api_prefix_404s(
             assert "/assets/app-abc12345.js" in response.text
             assert "text/html" in response.headers.get("content-type", "")
             assert response.headers.get("cache-control") == "no-cache"
+
+        asset_response = client.get("/assets/app-abc12345.js")
+        assert asset_response.status_code == 200
+        assert "console.log('ok');" in asset_response.text
+        assert "html" not in asset_response.text.lower()
+        assert "javascript" in asset_response.headers.get("content-type", "")
+        assert (
+            asset_response.headers.get("cache-control")
+            == "public, max-age=31536000, immutable"
+        )
