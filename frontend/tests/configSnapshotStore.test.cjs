@@ -48,6 +48,7 @@ class FakeBroadcastChannel {
 function createWindowHarness() {
     const listeners = new Map()
     const storage = new Map()
+    const storageOps = []
 
     return {
         hidden: false,
@@ -57,9 +58,18 @@ function createWindowHarness() {
             },
             removeItem(key) {
                 storage.delete(key)
+                storageOps.push({
+                    type: 'remove',
+                    key,
+                })
             },
             setItem(key, value) {
                 storage.set(key, String(value))
+                storageOps.push({
+                    type: 'set',
+                    key,
+                    value: String(value),
+                })
             },
         },
         addEventListener(type, listener) {
@@ -79,6 +89,7 @@ function createWindowHarness() {
         listenerCount(type) {
             return listeners.has(type) ? 1 : 0
         },
+        storageOps,
     }
 }
 
@@ -261,4 +272,48 @@ test('shared config snapshot store keeps the snapshot timestamp when freshness a
         '2026-03-27T09:05:00Z',
     )
     assert.equal(snapshotStore.hasKnownNewerSnapshot.value, true)
+})
+
+test('shared config snapshot store emits local invalidation over BroadcastChannel', () => {
+    const snapshotStore = useSharedConfigSnapshot()
+    snapshotStore.applySnapshot(
+        { dry_run: true, config_updated_at: '2026-03-27T09:00:00Z' },
+        '2026-03-27T09:00:00Z',
+    )
+
+    snapshotStore.emitLocalInvalidation('save')
+
+    assert.equal(FakeBroadcastChannel.instances.length, 1)
+    assert.equal(FakeBroadcastChannel.instances[0].messages.length, 1)
+
+    const message = FakeBroadcastChannel.instances[0].messages[0]
+    assert.equal(message.origin, 'save')
+    assert.equal(message.updatedAt, '2026-03-27T09:00:00Z')
+    assert.equal(typeof message.id, 'string')
+    assert.equal(typeof message.senderId, 'string')
+})
+
+test('shared config snapshot store falls back to storage writes for local invalidation', () => {
+    delete global.BroadcastChannel
+    resetSharedConfigSnapshotState()
+
+    const snapshotStore = useSharedConfigSnapshot()
+    snapshotStore.applySnapshot(
+        { dry_run: true, config_updated_at: '2026-03-27T09:00:00Z' },
+        '2026-03-27T09:00:00Z',
+    )
+
+    snapshotStore.emitLocalInvalidation('restore')
+
+    assert.deepEqual(
+        global.window.storageOps.map((entry) => entry.type),
+        ['set', 'remove'],
+    )
+    assert.equal(global.window.storageOps[0].key, CONFIG_INVALIDATION_STORAGE_KEY)
+
+    const payload = JSON.parse(global.window.storageOps[0].value)
+    assert.equal(payload.origin, 'restore')
+    assert.equal(payload.updatedAt, '2026-03-27T09:00:00Z')
+    assert.equal(typeof payload.id, 'string')
+    assert.equal(typeof payload.senderId, 'string')
 })
