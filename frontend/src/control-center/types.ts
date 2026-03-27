@@ -31,6 +31,25 @@ export type ControlCenterViewKind =
 
 export type SharedConfigPayload = Record<string, unknown>
 
+export type ControlCenterConfigChangeOrigin =
+    | 'save'
+    | 'restore'
+    | 'live_activation'
+    | 'external_invalidation'
+
+export type ControlCenterConfigTrustKind =
+    | 'trusted'
+    | 'checking'
+    | 'stale_but_safe'
+    | 'stale_with_draft_conflict'
+
+export interface ControlCenterConfigTrustState {
+    kind: ControlCenterConfigTrustKind
+    summary: string
+    tone: 'info' | 'success' | 'warning'
+    updatedAt: string | null
+}
+
 export interface ControlCenterRouteState {
     mode: ControlCenterMode
     target: ControlCenterTarget | null

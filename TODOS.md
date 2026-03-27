@@ -2,29 +2,46 @@
 
 ## Control Center
 
-### Extend capability model into runtime operator health
+### Add owner-confidence summary to Control Center overview
 
-**What:** Extend the reusable capability/status model beyond setup into ongoing operator-health domains such as exchange health, autopilot health, and signal/plugin health.
+**What:** Add a later compact owner-confidence summary to the Control Center
+overview so a bot owner can get a fast answer about whether the current setup
+still looks okay without turning Control Center into a second Monitoring page.
 
-**Why:** This turns the Control Center from a one-time setup surface into a true operational home over time.
+**Why:** This preserves the good product idea behind the old runtime-health TODO
+while keeping the current trust-first implementation focused.
 
-**Context:** The first implementation should focus on setup readiness, safety state, inline fixing, rescue flows, and rollout compatibility. The new capability model should be designed so future concerns can plug in cleanly, but those additional domains do not need to ship in the first pass unless scope expands intentionally.
-
-**Effort:** L
-**Priority:** P2
-**Depends on:** Initial Control Center capability model shipping cleanly first
-
-### Upgrade config freshness to realtime cross-client invalidation
-
-**What:** Upgrade config freshness from focus/interval stale detection to realtime cross-client invalidation for Control Center state.
-
-**Why:** This removes stale-state windows between multiple connected dashboards if lightweight freshness checks prove insufficient in practice.
-
-**Context:** The first implementation should ship with one shared hydrated config snapshot plus lightweight stale detection and safe refresh behavior. This follow-up only becomes necessary if real multi-client usage shows that polling or focus-based refresh still causes operator confusion.
+**Context:** This follow-up should stay compact and evidence-based. It may
+eventually reuse safe signals such as current mode, readiness state, or a
+proven lightweight activity signal, but it should not duplicate Monitoring
+logs, reconnect counters, or stream-by-stream diagnostics. Revisit it only
+after config trust and invalidation hardening feel stable.
 
 **Effort:** M
 **Priority:** P3
-**Depends on:** Shared hydrated config store and lightweight stale detection shipping first
+**Depends on:** Config trust and invalidation hardening shipping cleanly first
+
+### Harden config trust and invalidation in Control Center
+
+**What:** Add explicit config trust states and harden invalidation handling in
+the Control Center so owners can tell whether this page is using the latest
+saved config and react safely when another tab or client changes it.
+
+**Why:** The immediate product problem is trust, not just transport. Owners need
+quiet auto-refresh when a clean tab falls behind, a clear conflict decision when
+local drafts are at risk, and faster same-browser invalidation feedback without
+turning Control Center into a second Monitoring page.
+
+**Context:** The first pass should ship explicit trust states, quiet
+auto-refresh for clean tabs, explicit stale-draft conflict handling, and
+browser-local invalidation fanout after save, restore, and live activation,
+while keeping the existing focus/interval freshness path for other clients.
+Full backend push invalidation across all devices remains a later option only if
+real usage shows that this hybrid model is still not trustworthy enough.
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** Shared hydrated config store and current freshness detection already in the app
 
 ## Completed
 
