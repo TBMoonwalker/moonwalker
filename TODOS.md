@@ -21,29 +21,17 @@ after config trust and invalidation hardening feel stable.
 **Priority:** P3
 **Depends on:** Config trust and invalidation hardening shipping cleanly first
 
+## Completed
+
 ### Harden config trust and invalidation in Control Center
 
-**What:** Add explicit config trust states and harden invalidation handling in
-the Control Center so owners can tell whether this page is using the latest
-saved config and react safely when another tab or client changes it.
+**Completed:** v1.0.3.0 (2026-03-27)
 
-**Why:** The immediate product problem is trust, not just transport. Owners need
-quiet auto-refresh when a clean tab falls behind, a clear conflict decision when
-local drafts are at risk, and faster same-browser invalidation feedback without
-turning Control Center into a second Monitoring page.
-
-**Context:** The first pass should ship explicit trust states, quiet
-auto-refresh for clean tabs, explicit stale-draft conflict handling, and
-browser-local invalidation fanout after save, restore, and live activation,
-while keeping the existing focus/interval freshness path for other clients.
-Full backend push invalidation across all devices remains a later option only if
-real usage shows that this hybrid model is still not trustworthy enough.
-
-**Effort:** M
-**Priority:** P2
-**Depends on:** Shared hydrated config store and current freshness detection already in the app
-
-## Completed
+**What shipped:** Added explicit Control Center config-trust states, quiet
+auto-refresh for clean tabs, stale-draft conflict handling, browser-local
+invalidation fanout after save, restore, and live activation, the `/config/all`
+`config_updated_at` contract, and regression coverage for stale snapshot
+timestamp handling.
 
 ### Create a repo-level DESIGN.md after the Control Center ships
 
