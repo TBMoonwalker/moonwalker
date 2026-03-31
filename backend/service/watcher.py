@@ -414,10 +414,15 @@ class Watcher:
 
     async def __wait_for_updates(self) -> None:
         runtime_state = self.runtime_state
-        await asyncio.wait_for(
-            runtime_state.symbol_update_event.wait(), timeout=self.REFRESH_TIMEOUT
-        )
-        runtime_state.clear_symbol_update()
+        try:
+            await asyncio.wait_for(
+                runtime_state.symbol_update_event.wait(), timeout=self.REFRESH_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            # Timeout reached, continue loop
+            pass
+        finally:
+            runtime_state.clear_symbol_update()
 
     async def _cancel_optional_task(self, task: asyncio.Task | None) -> None:
         """Cancel an optional task and wait for it to finish."""
