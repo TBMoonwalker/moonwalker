@@ -14,7 +14,9 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 - If updates are found, record them in the task summary and explicitly classify each as:
   - patch/minor (safe candidate)
   - major (needs compatibility review)
-- Apply dependency updates only in dedicated dependency PRs/changesets unless the task explicitly asks for version upgrades.
+- check updates against online services to check if they are safe or have been compromised or are vulnerable
+- if they are not safe do not classify them as updateable
+- Apply dependency updates (only if safe) only in dedicated dependency PRs/changesets unless the task explicitly asks for version upgrades.
 
 ### Backend (Python)
 - **Run application:** `cd backend && python app.py` or use the `./run.sh` script
