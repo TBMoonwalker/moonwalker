@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from service.exchange_types import PartialSellStatus
+from service.exchange_types import PartialSellStatus, TradeExecutionPayload
 from service.order_payloads import calculate_trade_duration
 
 
@@ -21,6 +21,7 @@ class UnsellableStatusSnapshot:
     reason: str
     min_notional: float | None
     estimated_notional: float | None
+    partial_executions: tuple[TradeExecutionPayload, ...]
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,11 @@ def build_unsellable_status_snapshot(
             if estimated_notional_raw is not None
             else None
         ),
+        partial_executions=tuple(
+            execution
+            for execution in order_status.get("executions", [])
+            if isinstance(execution, dict)
+        ),
     )
 
 
@@ -89,6 +95,10 @@ def build_unsellable_remainder_context(
     sold_cost = avg_buy_price * snapshot.partial_amount
     remaining_cost = max(0.0, total_cost - sold_cost)
     current_price = float(open_trade.get("current_price") or 0.0) if open_trade else 0.0
+    deal_id = str(open_trade.get("deal_id") or "") if open_trade else ""
+    execution_history_complete = bool(
+        open_trade.get("execution_history_complete", True) if open_trade else True
+    )
     remaining_profit = current_price * snapshot.remaining_amount - remaining_cost
     remaining_profit_percent = (
         ((current_price - avg_buy_price) / avg_buy_price) * 100
@@ -112,6 +122,8 @@ def build_unsellable_remainder_context(
         )
         closed_trade_payload = {
             "symbol": snapshot.symbol,
+            "deal_id": deal_id or None,
+            "execution_history_complete": execution_history_complete,
             "so_count": so_count,
             "profit": partial_profit,
             "profit_percent": partial_profit_percent,
@@ -126,6 +138,8 @@ def build_unsellable_remainder_context(
 
     unsellable_payload = {
         "symbol": snapshot.symbol,
+        "deal_id": deal_id or None,
+        "execution_history_complete": execution_history_complete,
         "so_count": so_count,
         "profit": remaining_profit,
         "profit_percent": remaining_profit_percent,

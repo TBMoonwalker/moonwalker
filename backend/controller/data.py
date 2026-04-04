@@ -34,6 +34,28 @@ async def get_ohlcv_data(
     return response
 
 
+@get(
+    path="/data/ohlcv/"
+    "{symbol:str}/{timerange:str}/{timestamp_start:str}/{timestamp_end:str}/{offset:str}"
+)
+async def get_ohlcv_data_until(
+    symbol: str,
+    timerange: str,
+    timestamp_start: str,
+    timestamp_end: str,
+    offset: str,
+) -> Any:
+    """Get OHLCV data for a bounded start/end replay window."""
+    response = await data.get_ohlcv_for_pair(
+        symbol,
+        timerange,
+        timestamp_start,
+        offset,
+        timestamp_end=float(timestamp_end),
+    )
+    return response
+
+
 @get(path="/data/exchange/symbols/{currency:str}")
 async def get_exchange_symbols(currency: str) -> Any:
     """Get exchange symbols for a configured quote currency."""
@@ -75,6 +97,7 @@ async def get_exchange_symbols_from_draft(request: Request[Any, Any, Any]) -> An
 
 route_handlers = [
     get_ohlcv_data,
+    get_ohlcv_data_until,
     get_exchange_symbols,
     get_exchange_symbols_from_draft,
 ]

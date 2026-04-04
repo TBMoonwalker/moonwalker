@@ -26,6 +26,9 @@ class _DummyOpenTradesFilter:
         self.model_cls.updated_payload = kwargs
         return 1
 
+    async def first(self) -> Any:
+        return _DummyOpenTradeRow()
+
 
 class _DummyOpenTradesModel:
     updated_symbol: str | None = None
@@ -34,6 +37,19 @@ class _DummyOpenTradesModel:
     @classmethod
     def filter(cls, **kwargs: Any) -> _DummyOpenTradesFilter:
         return _DummyOpenTradesFilter(cls, str(kwargs.get("symbol", "")))
+
+
+class _DummyTradeExecutionsModel:
+    created_payload: dict[str, Any] | None = None
+
+    @classmethod
+    async def create(cls, using_db: Any = None, **kwargs: Any) -> None:
+        cls.created_payload = kwargs
+
+
+class _DummyOpenTradeRow:
+    deal_id = "618a4d43-8e8b-48bf-81cd-c56a31af9388"
+    execution_history_complete = True
 
 
 class _DummyTx:
@@ -49,6 +65,7 @@ async def test_receive_manual_buy_add_appends_safety_order(monkeypatch) -> None:
     _DummyTradesModel.created_payload = None
     _DummyOpenTradesModel.updated_symbol = None
     _DummyOpenTradesModel.updated_payload = None
+    _DummyTradeExecutionsModel.created_payload = None
 
     orders = Orders()
 
@@ -61,6 +78,11 @@ async def test_receive_manual_buy_add_appends_safety_order(monkeypatch) -> None:
     monkeypatch.setattr(persistence_module, "in_transaction", lambda: _DummyTx())
     monkeypatch.setattr(persistence_module.model, "Trades", _DummyTradesModel)
     monkeypatch.setattr(persistence_module.model, "OpenTrades", _DummyOpenTradesModel)
+    monkeypatch.setattr(
+        persistence_module.model,
+        "TradeExecutions",
+        _DummyTradeExecutionsModel,
+    )
 
     async def fake_get_open_trades_by_symbol(_symbol: str) -> list[dict[str, Any]]:
         return [
@@ -123,11 +145,15 @@ async def test_receive_manual_buy_add_appends_safety_order(monkeypatch) -> None:
     assert _DummyOpenTradesModel.updated_symbol == "BTC/USDC"
     assert _DummyOpenTradesModel.updated_payload is not None
     updated = _DummyOpenTradesModel.updated_payload
+    assert updated["deal_id"] == "618a4d43-8e8b-48bf-81cd-c56a31af9388"
+    assert updated["execution_history_complete"] is True
     assert updated["so_count"] == 2
     assert updated["amount"] == pytest.approx(1.5)
     assert updated["cost"] == pytest.approx(140.0)
     assert updated["avg_price"] == pytest.approx(140.0 / 1.5)
     assert updated["tp_price"] == pytest.approx((140.0 / 1.5) * 1.01)
+    assert _DummyTradeExecutionsModel.created_payload is not None
+    assert _DummyTradeExecutionsModel.created_payload["role"] == "manual_buy"
 
 
 @pytest.mark.asyncio

@@ -130,6 +130,7 @@ class Orders:
                 order_status["symbol"],
                 partial_amount,
                 partial_proceeds,
+                order_status.get("executions"),
             )
             logging.info(
                 "Persisted partial sell execution for %s: amount=%s proceeds=%s remaining=%s",
@@ -161,6 +162,14 @@ class Orders:
             so_count=so_count,
             open_timestamp_ms=open_timestamp,
         )
+
+        if context.partial_amount > 0:
+            await self.trades.add_partial_sell_execution(
+                snapshot.symbol,
+                context.partial_amount,
+                context.partial_proceeds,
+                snapshot.partial_executions,
+            )
 
         if context.closed_trade_payload is not None:
             await self.trades.create_closed_trades(context.closed_trade_payload)
@@ -213,7 +222,7 @@ class Orders:
             logging.debug(
                 "Did not found a timestamp - taking default value. Cause %s", e
             )
-            return datetime.timestamp(datetime.now())
+            return datetime.now().timestamp() * 1000
 
     async def __resolve_so_count(self, symbol: str) -> int:
         """Resolve safety-order count from open trade row."""

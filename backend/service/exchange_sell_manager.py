@@ -89,12 +89,14 @@ class ExchangeSellManager:
                     symbol=str(order_status.get("symbol", order.get("symbol"))),
                     first_partial_amount=partial_amount,
                     first_partial_price=partial_price,
+                    first_partial_executions=list(order_status.get("executions") or []),
                     second_status=market_status,
                 )
             return merge_partial_fill_with_market_sell(
                 market_status,
                 partial_amount=partial_amount,
                 partial_price=partial_price,
+                partial_executions=list(order_status.get("executions") or []),
                 total_cost=float(order.get("total_cost") or 0.0),
             )
 

@@ -2,7 +2,11 @@
 
 from typing import Any
 
-from service.exchange_types import PartialSellStatus, SoldCheckStatus
+from service.exchange_types import (
+    PartialSellStatus,
+    SoldCheckStatus,
+    TradeExecutionPayload,
+)
 
 
 def _optional_float(value: Any) -> float | None:
@@ -12,12 +16,53 @@ def _optional_float(value: Any) -> float | None:
     return float(value)
 
 
+def _build_sell_execution_from_status(
+    order_status: dict[str, Any],
+    *,
+    symbol: str,
+    role: str,
+    amount_field: str,
+    fallback_price: float = 0.0,
+) -> TradeExecutionPayload | None:
+    """Build one execution row from a normalized sell status payload."""
+    amount = float(order_status.get(amount_field) or 0.0)
+    if amount <= 0:
+        return None
+
+    fee = _optional_float(order_status.get("base_fee"))
+    if fee is None:
+        fee = _optional_float(order_status.get("fee"))
+
+    timestamp = order_status.get("timestamp")
+    return {
+        "symbol": str(order_status.get("symbol") or symbol),
+        "side": str(order_status.get("side") or "sell"),
+        "role": role,
+        "timestamp": str(int(timestamp)) if timestamp is not None else "",
+        "price": float(order_status.get("price") or fallback_price or 0.0),
+        "amount": amount,
+        "ordersize": float(order_status.get("ordersize") or amount * fallback_price),
+        "fee": float(fee or 0.0),
+        "order_id": (
+            str(order_status.get("orderid"))
+            if order_status.get("orderid") is not None
+            else None
+        ),
+        "order_type": (
+            str(order_status.get("ordertype"))
+            if order_status.get("ordertype") is not None
+            else None
+        ),
+    }
+
+
 def build_partial_sell_status(
     *,
     symbol: str,
     partial_amount: float,
     partial_avg_price: float,
     remaining_amount: float,
+    executions: list[TradeExecutionPayload] | None = None,
     unsellable: bool = False,
     unsellable_reason: str | None = None,
     unsellable_min_notional: float | None = None,
@@ -35,6 +80,7 @@ def build_partial_sell_status(
         "unsellable_reason": unsellable_reason,
         "unsellable_min_notional": _optional_float(unsellable_min_notional),
         "unsellable_estimated_notional": _optional_float(unsellable_estimated_notional),
+        **({"executions": list(executions)} if executions else {}),
     }
 
 
@@ -61,6 +107,15 @@ def finalize_sell_order_status(
     normalized["tp_price"] = price
     normalized["profit"] = profit
     normalized["profit_percent"] = profit_percent
+    if not normalized.get("executions"):
+        execution = _build_sell_execution_from_status(
+            normalized,
+            symbol=str(normalized["symbol"]),
+            role="final_sell",
+            amount_field="total_amount",
+            fallback_price=price,
+        )
+        normalized["executions"] = [execution] if execution else []
     return normalized
 
 
@@ -70,6 +125,7 @@ def combine_partial_sell_statuses(
     first_partial_amount: float,
     first_partial_price: float,
     second_status: PartialSellStatus,
+    first_partial_executions: list[TradeExecutionPayload] | None = None,
 ) -> PartialSellStatus:
     """Combine two partial sell execution results into one partial status."""
     second_partial_amount = float(second_status.get("partial_filled_amount") or 0.0)
@@ -89,6 +145,10 @@ def combine_partial_sell_statuses(
         partial_amount=combined_partial_amount,
         partial_avg_price=combined_partial_price,
         remaining_amount=float(second_status.get("remaining_amount") or 0.0),
+        executions=[
+            *(first_partial_executions or []),
+            *list(second_status.get("executions") or []),
+        ],
         unsellable=bool(second_status.get("unsellable", False)),
         unsellable_reason=(
             str(second_status.get("unsellable_reason"))
@@ -110,6 +170,7 @@ def merge_partial_fill_with_market_sell(
     partial_amount: float,
     partial_price: float,
     total_cost: float,
+    partial_executions: list[TradeExecutionPayload] | None = None,
 ) -> SoldCheckStatus:
     """Merge a partial limit fill with a completed market fallback sell."""
     merged: SoldCheckStatus = dict(market_status)
@@ -135,4 +196,8 @@ def merge_partial_fill_with_market_sell(
     merged["avg_price"] = avg_buy_price
     merged["profit"] = profit
     merged["profit_percent"] = profit_percent
+    merged["executions"] = [
+        *(partial_executions or []),
+        *list(merged.get("executions") or []),
+    ]
     return merged

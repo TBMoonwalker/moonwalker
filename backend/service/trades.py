@@ -1,15 +1,18 @@
 """Trade persistence and retrieval helpers."""
 
 import os
-from collections.abc import Awaitable
+from collections.abc import Awaitable, Iterable
 from typing import Any, TypedDict, TypeVar
+from uuid import UUID, uuid4
 
 import helper
 import model
+from service.database import run_sqlite_write_with_retry
 from tortoise.exceptions import BaseORMException
 from tortoise.expressions import F
 from tortoise.functions import Sum
 from tortoise.models import Q
+from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/trades.log", "trades")
 T = TypeVar("T")
@@ -251,6 +254,21 @@ class Trades:
             logging.error("Error getting closed orders. Cause: %s", e)
             return []
 
+    async def get_trade_executions(self, deal_id: str) -> list[dict[str, Any]]:
+        """Return execution rows for one deal in chronological order."""
+        try:
+            normalized_deal_id = str(UUID(str(deal_id)))
+        except (TypeError, ValueError):
+            return []
+
+        return await self._execute_db(
+            model.TradeExecutions.filter(deal_id=normalized_deal_id)
+            .order_by("timestamp", "id")
+            .values(),
+            f"Error getting trade executions for {normalized_deal_id}.",
+            [],
+        )
+
     async def get_closed_trades_length(self) -> int:
         """Return the total number of closed trades."""
         return await self._execute_db(
@@ -261,10 +279,10 @@ class Trades:
 
     async def delete_unsellable_trade(self, trade_id: int) -> bool:
         """Delete an unsellable trade by its identifier."""
-        deleted_count = await self._execute_db(
-            model.UnsellableTrades.filter(id=trade_id).delete(),
+        deleted_count = await self._delete_summary_and_detached_executions(
+            model.UnsellableTrades,
+            trade_id,
             f"Error deleting unsellable trade {trade_id}.",
-            0,
         )
         return deleted_count > 0
 
@@ -280,15 +298,109 @@ class Trades:
             )
 
     async def add_partial_sell_execution(
-        self, symbol: str, sold_amount: float, sold_proceeds: float
+        self,
+        symbol: str,
+        sold_amount: float,
+        sold_proceeds: float,
+        sell_executions: Iterable[dict[str, Any]] | None = None,
     ) -> None:
-        """Accumulate partial sell execution totals on the open trade row."""
-        await self._write_db(
-            model.OpenTrades.filter(symbol=symbol).update(
-                sold_amount=F("sold_amount") + float(sold_amount),
-                sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
-            ),
-            f"Error updating partial sell execution for {symbol}.",
+        """Accumulate partial sell totals and append partial sell execution rows."""
+        execution_rows = [
+            execution
+            for execution in (sell_executions or [])
+            if isinstance(execution, dict)
+        ]
+
+        async def _update_partial_sell_execution() -> None:
+            async with in_transaction() as conn:
+                open_trade = (
+                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
+                )
+                if open_trade is None:
+                    return
+
+                deal_id = open_trade.deal_id or str(uuid4())
+                history_complete = bool(open_trade.execution_history_complete) and bool(
+                    execution_rows
+                )
+                await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
+                    deal_id=deal_id,
+                    execution_history_complete=history_complete,
+                    sold_amount=F("sold_amount") + float(sold_amount),
+                    sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
+                )
+
+                ledger_rows = execution_rows or [
+                    {
+                        "symbol": symbol,
+                        "side": "sell",
+                        "role": "partial_sell",
+                        "timestamp": "",
+                        "price": (
+                            float(sold_proceeds) / float(sold_amount)
+                            if float(sold_amount) > 0
+                            else 0.0
+                        ),
+                        "amount": float(sold_amount),
+                        "ordersize": float(sold_proceeds),
+                        "fee": 0.0,
+                    }
+                ]
+                for execution in ledger_rows:
+                    if float(execution.get("amount") or 0.0) <= 0:
+                        continue
+                    await model.TradeExecutions.create(
+                        deal_id=deal_id,
+                        symbol=str(execution.get("symbol") or symbol),
+                        side=str(execution.get("side") or "sell"),
+                        role=str(execution.get("role") or "partial_sell"),
+                        timestamp=str(execution.get("timestamp") or ""),
+                        price=float(execution.get("price") or 0.0),
+                        amount=float(execution.get("amount") or 0.0),
+                        ordersize=float(execution.get("ordersize") or 0.0),
+                        fee=float(execution.get("fee") or 0.0),
+                        order_id=(
+                            str(execution.get("order_id"))
+                            if execution.get("order_id") is not None
+                            else None
+                        ),
+                        order_type=(
+                            str(execution.get("order_type"))
+                            if execution.get("order_type") is not None
+                            else None
+                        ),
+                        order_count=execution.get("order_count"),
+                        so_percentage=(
+                            float(execution["so_percentage"])
+                            if execution.get("so_percentage") is not None
+                            else None
+                        ),
+                        signal_name=(
+                            str(execution.get("signal_name"))
+                            if execution.get("signal_name") is not None
+                            else None
+                        ),
+                        strategy_name=(
+                            str(execution.get("strategy_name"))
+                            if execution.get("strategy_name") is not None
+                            else None
+                        ),
+                        timeframe=(
+                            str(execution.get("timeframe"))
+                            if execution.get("timeframe") is not None
+                            else None
+                        ),
+                        metadata_json=(
+                            str(execution.get("metadata_json"))
+                            if execution.get("metadata_json") is not None
+                            else None
+                        ),
+                        using_db=conn,
+                    )
+
+        await run_sqlite_write_with_retry(
+            _update_partial_sell_execution,
+            f"updating partial sell execution for {symbol}",
         )
 
     async def get_partial_sell_execution(self, symbol: str) -> tuple[float, float]:
@@ -306,11 +418,26 @@ class Trades:
 
     async def delete_open_trades(self, symbol: str) -> None:
         """Delete open trades for a symbol."""
-        await self._write_db(
-            model.OpenTrades.filter(symbol=symbol).delete(),
-            f"Error deleting open trades for {symbol}.",
-            f"Deleted open trade for {symbol}.",
-        )
+
+        async def _delete_open_trade() -> None:
+            async with in_transaction() as conn:
+                open_trade = (
+                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
+                )
+                await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
+                if open_trade and open_trade.deal_id:
+                    await model.TradeExecutions.filter(
+                        deal_id=open_trade.deal_id,
+                    ).using_db(conn).delete()
+
+        try:
+            await run_sqlite_write_with_retry(
+                _delete_open_trade,
+                f"deleting open trades for {symbol}",
+            )
+            logging.debug("Deleted open trade for %s.", symbol)
+        except BaseORMException as exc:
+            self._log_db_error(f"Error deleting open trades for {symbol}.", exc)
 
     async def create_closed_trades(self, payload: dict[str, Any]) -> None:
         """Create a closed trade entry."""
@@ -328,12 +455,56 @@ class Trades:
 
     async def delete_closed_trade(self, trade_id: int) -> bool:
         """Delete a closed trade by its identifier."""
-        deleted_count = await self._execute_db(
-            model.ClosedTrades.filter(id=trade_id).delete(),
+        deleted_count = await self._delete_summary_and_detached_executions(
+            model.ClosedTrades,
+            trade_id,
             f"Error deleting closed trade {trade_id}.",
-            0,
         )
         return deleted_count > 0
+
+    async def _delete_summary_and_detached_executions(
+        self,
+        summary_model: type[model.ClosedTrades] | type[model.UnsellableTrades],
+        trade_id: int,
+        error_message: str,
+    ) -> int:
+        """Delete one summary row and orphaned deal executions in one transaction."""
+
+        async def _delete_summary() -> int:
+            async with in_transaction() as conn:
+                summary = await summary_model.filter(id=trade_id).using_db(conn).first()
+                if summary is None:
+                    return 0
+
+                deal_id = summary.deal_id
+                deleted_count = (
+                    await summary_model.filter(id=trade_id).using_db(conn).delete()
+                )
+                if deal_id:
+                    linked_rows = (
+                        await model.ClosedTrades.filter(deal_id=deal_id)
+                        .using_db(conn)
+                        .count()
+                    )
+                    linked_rows += (
+                        await model.UnsellableTrades.filter(deal_id=deal_id)
+                        .using_db(conn)
+                        .count()
+                    )
+                    if linked_rows == 0:
+                        await model.TradeExecutions.filter(
+                            deal_id=deal_id,
+                        ).using_db(conn).delete()
+                return deleted_count
+
+        try:
+            return await run_sqlite_write_with_retry(
+                _delete_summary,
+                f"deleting summary trade {trade_id}",
+            )
+        except BaseORMException as exc:
+            self._log_db_error(error_message, exc)
+            return 0
 
     async def get_token_amount_from_trades(self, symbol: str) -> float:
         """Return total token amount for a symbol."""

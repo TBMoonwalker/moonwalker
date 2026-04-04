@@ -448,12 +448,15 @@ class Data:
         self,
         symbol: str,
         start_timestamp: int | float,
+        end_timestamp: int | float | None = None,
         fields: tuple[str, ...] | None = None,
     ) -> pd.DataFrame | None:
         """Return ticker rows for a symbol since a timestamp as a DataFrame."""
         query = model.Tickers.filter(symbol=symbol).filter(
             timestamp__gt=start_timestamp
         )
+        if end_timestamp is not None:
+            query = query.filter(timestamp__lte=float(end_timestamp))
         rows = (
             await query.order_by("timestamp").values(*fields)
             if fields
@@ -464,7 +467,12 @@ class Data:
         return await asyncio.to_thread(rows_to_dataframe, rows)
 
     async def get_ohlcv_for_pair(
-        self, pair: str, timerange: str, timestamp_start: float, offset: float
+        self,
+        pair: str,
+        timerange: str,
+        timestamp_start: float,
+        offset: float,
+        timestamp_end: float | None = None,
     ) -> str | dict[str, Any]:
         """Return OHLCV data for a pair and timerange."""
         # 600000 --> 60 minutes in milliseconds before
@@ -474,11 +482,16 @@ class Data:
         df_source = await self.__get_dataframe_for_symbol_since(
             symbol,
             start_timestamp,
+            end_timestamp=timestamp_end,
             fields=("timestamp", "open", "high", "low", "close", "volume"),
         )
         if df_source is None:
             df_source = pd.DataFrame()
-        live_candle = self.__get_live_candle_for_symbol(symbol, start_timestamp)
+        live_candle = self.__get_live_candle_for_symbol(
+            symbol,
+            start_timestamp,
+            end_timestamp=timestamp_end,
+        )
         if live_candle:
             df_source = await asyncio.to_thread(
                 append_live_candle, df_source, live_candle
@@ -491,9 +504,14 @@ class Data:
         return {}
 
     def __get_live_candle_for_symbol(
-        self, symbol: str, start_timestamp: float
+        self,
+        symbol: str,
+        start_timestamp: float,
+        end_timestamp: float | None = None,
     ) -> dict[str, float | str] | None:
         """Return current in-memory watcher candle for symbol if it is in range."""
+        if end_timestamp is not None:
+            return None
         try:
             live = get_live_candle_snapshot(symbol)
             return build_live_candle_payload(live, symbol, start_timestamp)
