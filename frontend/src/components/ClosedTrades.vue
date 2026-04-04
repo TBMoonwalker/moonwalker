@@ -118,7 +118,7 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
     const columns: DataTableColumns<ClosedTradeRow> = [
         {
             type: 'expand',
-            expandable: (rowData) => Boolean(rowData.deal_id),
+            expandable: () => true,
             renderExpand: (rowData) =>
                 h(ClosedTradeExpandedRow, {
                     rowData,
