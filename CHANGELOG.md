@@ -2,6 +2,24 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.1.0.0] - 2026-04-05
+
+### Added
+
+- Review closed trades with the same expandable replay chart language as Open Trades, including buy markers, a final sell marker, and an execution timeline.
+- Persist per-deal execution rows and archived replay candles so newly closed deals keep their replay history through housekeeping, backup, restore, and safe history deletion.
+
+### Changed
+
+- Bound closed-trade replay reads to the actual trade lifecycle window so old deals stop showing candles far beyond the entry and exit.
+- Keep legacy closed rows expandable so they explain when replay history is unavailable instead of failing silently.
+- Relax the frontend `npm-run-all` pin to accept compatible `4.1.5` installs.
+
+### Fixed
+
+- Normalize closed-trade replay fallback payloads before rendering so legacy rows do not break when OHLCV endpoints return an empty object.
+- Normalize ticker-housekeeping timestamp handling so second-based and millisecond-based candle rows follow the same retention rules.
+
 ## [1.0.3.0] - 2026-03-27
 
 ### Added
