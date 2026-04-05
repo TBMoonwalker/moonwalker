@@ -39,6 +39,7 @@
             :precision="chartPrecision"
             :start-timestamp="startTimestamp"
             :end-timestamp="endTimestamp"
+            :archive-deal-id="props.rowData.deal_id"
             :min-timeframe="props.minTimeframe"
             :markers="chartMarkers"
             :price-lines="chartPriceLines"

@@ -68,6 +68,7 @@ async def test_restore_backup_full_restores_trade_tables_and_clears_tickers(
     )
     await model.ClosedTrades.create(
         symbol="XYZ/USDT",
+        deal_id="44444444-4444-4444-4444-444444444444",
         so_count=0,
         profit=1.0,
         profit_percent=10.0,
@@ -101,6 +102,16 @@ async def test_restore_backup_full_restores_trade_tables_and_clears_tickers(
     await model.Tickers.create(
         timestamp="1",
         symbol="ABC/USDT",
+        open=10.0,
+        high=11.0,
+        low=9.0,
+        close=10.5,
+        volume=100.0,
+    )
+    await model.TradeReplayCandles.create(
+        deal_id="44444444-4444-4444-4444-444444444444",
+        symbol="XYZ/USDT",
+        timestamp="2",
         open=10.0,
         high=11.0,
         low=9.0,
@@ -163,6 +174,7 @@ async def test_restore_backup_full_restores_trade_tables_and_clears_tickers(
     assert await model.Trades.all().count() == 1
     assert await model.OpenTrades.all().count() == 1
     assert await model.ClosedTrades.all().count() == 1
+    assert await model.TradeReplayCandles.all().count() == 1
     assert await model.UnsellableTrades.all().count() == 1
     assert await model.Autopilot.all().count() == 1
     assert await model.UpnlHistory.all().count() == 1

@@ -7,6 +7,7 @@ from uuid import uuid4
 
 import model
 from service.database import run_sqlite_write_with_retry
+from service.replay_candles import archive_replay_candles_for_deal
 from tortoise.transactions import in_transaction
 
 SUMMARY_TRADE_KEYS = {
@@ -180,6 +181,13 @@ async def persist_closed_trade(symbol: str, payload: dict[str, Any]) -> None:
                     ),
                     using_db=conn,
                 )
+            await archive_replay_candles_for_deal(
+                deal_id,
+                symbol,
+                open_date=summary_payload.get("open_date"),
+                close_date=summary_payload.get("close_date"),
+                conn=conn,
+            )
             await model.Trades.filter(symbol=symbol).using_db(conn).delete()
             await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
 

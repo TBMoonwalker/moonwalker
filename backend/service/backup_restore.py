@@ -21,6 +21,7 @@ BACKUP_SCHEMA_VERSION = 1
 TRADE_TABLE_MODELS: dict[str, type] = {
     "trades": model.Trades,
     "trade_executions": model.TradeExecutions,
+    "trade_replay_candles": model.TradeReplayCandles,
     "open_trades": model.OpenTrades,
     "closed_trades": model.ClosedTrades,
     "unsellable_trades": model.UnsellableTrades,
@@ -97,6 +98,7 @@ class BackupService:
                 await model.UnsellableTrades.all().using_db(conn).delete()
                 await model.OpenTrades.all().using_db(conn).delete()
                 await model.ClosedTrades.all().using_db(conn).delete()
+                await model.TradeReplayCandles.all().using_db(conn).delete()
                 await model.TradeExecutions.all().using_db(conn).delete()
                 await model.Trades.all().using_db(conn).delete()
 

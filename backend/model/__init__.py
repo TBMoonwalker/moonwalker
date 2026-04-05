@@ -9,6 +9,7 @@ from .listings import Listings as Listings
 from .opentrades import OpenTrades as OpenTrades
 from .tickers import Tickers as Tickers
 from .tradeexecutions import TradeExecutions as TradeExecutions
+from .tradereplaycandles import TradeReplayCandles as TradeReplayCandles
 from .trades import Trades as Trades
 from .unsellabletrades import UnsellableTrades as UnsellableTrades
 from .upnlhistory import UpnlHistory as UpnlHistory
@@ -22,6 +23,7 @@ __all__ = [
     "Listings",
     "OpenTrades",
     "Tickers",
+    "TradeReplayCandles",
     "TradeExecutions",
     "Trades",
     "UnsellableTrades",
@@ -36,6 +38,7 @@ if __name__ == "__main__":
         "Trades",
         "OpenTrades",
         "ClosedTrades",
+        "TradeReplayCandles",
         "TradeExecutions",
         "EmaSwingState",
         "UnsellableTrades",

@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import UUID
 
 import ccxt.async_support as ccxt
 import helper
@@ -466,6 +467,22 @@ class Data:
             return None
         return await asyncio.to_thread(rows_to_dataframe, rows)
 
+    async def __get_dataframe_for_replay_deal(
+        self,
+        deal_id: str,
+        fields: tuple[str, ...] | None = None,
+    ) -> pd.DataFrame | None:
+        """Return archived replay candles for a deal as a DataFrame."""
+        query = model.TradeReplayCandles.filter(deal_id=deal_id)
+        rows = (
+            await query.order_by("timestamp").values(*fields)
+            if fields
+            else await query.order_by("timestamp").values()
+        )
+        if not rows:
+            return None
+        return await asyncio.to_thread(rows_to_dataframe, rows)
+
     async def get_ohlcv_for_pair(
         self,
         pair: str,
@@ -502,6 +519,30 @@ class Data:
             if df is not None and not df.empty:
                 return await asyncio.to_thread(serialize_ohlcv_dataframe, df, offset)
         return {}
+
+    async def get_archived_ohlcv_for_deal(
+        self,
+        deal_id: str,
+        timerange: str,
+        offset: float,
+    ) -> str | dict[str, Any]:
+        """Return archived replay OHLCV data for one closed deal."""
+        try:
+            normalized_deal_id = str(UUID(str(deal_id)))
+        except (TypeError, ValueError):
+            return {}
+
+        df_source = await self.__get_dataframe_for_replay_deal(
+            normalized_deal_id,
+            fields=("timestamp", "open", "high", "low", "close", "volume"),
+        )
+        if df_source is None or df_source.empty:
+            return {}
+
+        df = await asyncio.to_thread(self.resample_data, df_source, timerange)
+        if df is None or df.empty:
+            return {}
+        return await asyncio.to_thread(serialize_ohlcv_dataframe, df, offset)
 
     def __get_live_candle_for_symbol(
         self,

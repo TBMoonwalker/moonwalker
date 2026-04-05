@@ -43,6 +43,7 @@ const props = defineProps<{
     precision: number
     startTimestamp: number | string
     endTimestamp?: number | string | null
+    archiveDealId?: string | null
     minTimeframe: TimeframeChoice
     markers: TradeReplayMarker[]
     priceLines: TradeReplayPriceLine[]
@@ -154,23 +155,44 @@ async function initChart(): Promise<void> {
     })
 
     const pairSymbol = `${symbol}-${currency.toUpperCase()}`
-    const cacheKey = [
+    const fallbackCacheKey = [
         pairSymbol,
         timeframe.timerange,
         historyStart,
         historyEnd ?? 'live',
     ].join('-')
+    const archiveCacheKey = props.archiveDealId
+        ? ['replay', props.archiveDealId, timeframe.timerange].join('-')
+        : null
     const historyUrl =
         historyEnd === null
             ? `/data/ohlcv/${pairSymbol}/${timeframe.timerange}/${historyStart}/0`
             : `/data/ohlcv/${pairSymbol}/${timeframe.timerange}/${historyStart}/${historyEnd}/0`
+    const archiveUrl = props.archiveDealId
+        ? `/data/ohlcv/replay/${props.archiveDealId}/${timeframe.timerange}/0`
+        : null
 
     let tickerData: Array<Record<string, number>> = []
-    try {
-        tickerData = await fetchJson<Array<Record<string, number>>>(historyUrl)
-        ohlcvStore.set(cacheKey, tickerData)
-    } catch (_error) {
-        tickerData = ohlcvStore.get(cacheKey) ?? []
+    if (archiveUrl && archiveCacheKey) {
+        try {
+            tickerData = await fetchJson<Array<Record<string, number>>>(archiveUrl)
+            if (Array.isArray(tickerData) && tickerData.length > 0) {
+                ohlcvStore.set(archiveCacheKey, tickerData)
+            } else {
+                tickerData = []
+            }
+        } catch (_error) {
+            tickerData = ohlcvStore.get(archiveCacheKey) ?? []
+        }
+    }
+
+    if (tickerData.length === 0) {
+        try {
+            tickerData = await fetchJson<Array<Record<string, number>>>(historyUrl)
+            ohlcvStore.set(fallbackCacheKey, tickerData)
+        } catch (_error) {
+            tickerData = ohlcvStore.get(fallbackCacheKey) ?? []
+        }
     }
 
     const localOffsetSeconds = getLocalOffsetSeconds()

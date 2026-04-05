@@ -492,6 +492,9 @@ class Trades:
                         .count()
                     )
                     if linked_rows == 0:
+                        await model.TradeReplayCandles.filter(
+                            deal_id=deal_id,
+                        ).using_db(conn).delete()
                         await model.TradeExecutions.filter(
                             deal_id=deal_id,
                         ).using_db(conn).delete()

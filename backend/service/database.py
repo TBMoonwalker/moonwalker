@@ -10,6 +10,7 @@ from uuid import uuid4
 
 import helper
 import model
+from service.replay_candles import archive_replay_candles_for_deal
 from tortoise import Tortoise
 from tortoise.context import TortoiseContext
 
@@ -139,6 +140,16 @@ class Database:
                 ("symbol", "timestamp"),
             ),
             ("tradeexecutions", "idx_tradeexecutions_side_role", ("side", "role")),
+            (
+                "tradereplaycandles",
+                "idx_tradereplaycandles_deal_time",
+                ("deal_id", "timestamp"),
+            ),
+            (
+                "tradereplaycandles",
+                "idx_tradereplaycandles_symbol_time",
+                ("symbol", "timestamp"),
+            ),
             (
                 "unsellabletrades",
                 "idx_unsellabletrades_symbol",
@@ -337,6 +348,29 @@ class Database:
                 )
                 existing_signatures.add(signature)
 
+    async def _backfill_trade_replay_candles(self) -> None:
+        """Backfill per-deal replay candles for existing closed trades."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        closed_rows = await model.ClosedTrades.exclude(deal_id=None).values(
+            "deal_id",
+            "symbol",
+            "open_date",
+            "close_date",
+        )
+        for closed_row in closed_rows:
+            deal_id = str(closed_row.get("deal_id") or "").strip()
+            symbol = str(closed_row.get("symbol") or "").strip()
+            if not deal_id or not symbol:
+                continue
+            await archive_replay_candles_for_deal(
+                deal_id,
+                symbol,
+                open_date=closed_row.get("open_date"),
+                close_date=closed_row.get("close_date"),
+            )
+
     async def _ensure_open_trades_columns(self) -> None:
         """Ensure additive OpenTrades columns exist on existing SQLite databases."""
         if not self.db_url.startswith("sqlite://"):
@@ -439,8 +473,9 @@ class Database:
             await self._ensure_open_trades_columns()
             await self._ensure_trade_ledger_columns()
             await self._ensure_upnl_history_columns()
-            await self._backfill_trade_ledger_rows()
             await self._ensure_indexes()
+            await self._backfill_trade_ledger_rows()
+            await self._backfill_trade_replay_candles()
             logging.info("Database initialized successfully")
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during init
             logging.error("Failed to initialize database: %s", exc, exc_info=True)
