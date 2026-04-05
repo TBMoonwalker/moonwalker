@@ -1,11 +1,103 @@
 import sqlite3
 
 import pytest
-from service.database import Database
+from service.database import Database, _extract_corrupted_index_name
 
 
 async def _noop(*_args, **_kwargs) -> None:
     return None
+
+
+class _FakeConnection:
+    def __init__(
+        self,
+        rows: list[tuple[str]] | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self._rows = rows or []
+        self._error = error
+
+    async def execute_query(self, query: str) -> tuple[int, list[tuple[str]]]:
+        assert query == "PRAGMA integrity_check"
+        if self._error is not None:
+            raise self._error
+        return len(self._rows), self._rows
+
+
+@pytest.mark.parametrize(
+    ("messages", "expected"),
+    [
+        (
+            [
+                "row 1 missing from index idx_trades_deal_id_88bd51",
+                "row 2 missing from index idx_trades_deal_id_88bd51",
+            ],
+            "idx_trades_deal_id_88bd51",
+        ),
+        (
+            [
+                "row 1 missing from index idx_trades_deal_id_88bd51",
+                "row 2 missing from index idx_other",
+            ],
+            None,
+        ),
+        (["*** in database main ***\nPage 5 is never used"], None),
+    ],
+)
+def test_extract_corrupted_index_name_detects_index_only_corruption(
+    messages: list[str],
+    expected: str | None,
+) -> None:
+    assert _extract_corrupted_index_name(messages) == expected
+
+
+@pytest.mark.asyncio
+async def test_run_sqlite_integrity_check_returns_empty_for_non_sqlite_db() -> None:
+    database = Database()
+    database.db_url = "postgres://moonwalker"
+
+    assert await database._run_sqlite_integrity_check() == []
+
+
+@pytest.mark.asyncio
+async def test_run_sqlite_integrity_check_returns_trimmed_messages(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    database.db_url = "sqlite:///tmp/broken.sqlite"
+
+    monkeypatch.setattr(
+        "service.database.Tortoise.get_connection",
+        lambda *_args, **_kwargs: _FakeConnection(
+            rows=[
+                (" row 1 missing from index idx_trades_deal_id_88bd51 ",),
+                ("",),
+                ("row 2 missing from index idx_trades_deal_id_88bd51",),
+            ]
+        ),
+    )
+
+    assert await database._run_sqlite_integrity_check() == [
+        "row 1 missing from index idx_trades_deal_id_88bd51",
+        "row 2 missing from index idx_trades_deal_id_88bd51",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_sqlite_integrity_check_returns_empty_when_query_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    database.db_url = "sqlite:///tmp/broken.sqlite"
+
+    monkeypatch.setattr(
+        "service.database.Tortoise.get_connection",
+        lambda *_args, **_kwargs: _FakeConnection(
+            error=RuntimeError("integrity check unavailable")
+        ),
+    )
+
+    assert await database._run_sqlite_integrity_check() == []
 
 
 @pytest.mark.asyncio
