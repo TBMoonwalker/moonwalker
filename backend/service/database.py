@@ -2,6 +2,7 @@
 
 import os
 import random
+import re
 import sqlite3
 from asyncio import sleep
 from collections.abc import Awaitable, Callable
@@ -19,6 +20,11 @@ logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
 SQLITE_LOCK_RETRIES = 5
 SQLITE_RETRY_BASE_DELAY_SECONDS = 0.02
 SQLITE_RETRY_MAX_DELAY_SECONDS = 0.2
+_SQLITE_INDEX_CORRUPTION_PATTERNS = (
+    re.compile(r"row \d+ missing from index (?P<index>\S+)"),
+    re.compile(r"rowid \d+ missing from index (?P<index>\S+)"),
+    re.compile(r"wrong # of entries in index (?P<index>\S+)"),
+)
 
 
 def _is_sqlite_lock_error(exc: Exception) -> bool:
@@ -41,6 +47,30 @@ def _resolve_sqlite_db_path(db_url: str) -> str:
     return (
         db_url.removeprefix("sqlite://") if db_url.startswith("sqlite://") else db_url
     )
+
+
+def _extract_corrupted_index_name(messages: list[str]) -> str | None:
+    """Return the damaged SQLite index name when integrity_check is index-only."""
+    if not messages:
+        return None
+
+    index_names: set[str] = set()
+    for message in messages:
+        normalized = str(message).strip()
+        if not normalized or normalized.lower() == "ok":
+            return None
+
+        matched = False
+        for pattern in _SQLITE_INDEX_CORRUPTION_PATTERNS:
+            result = pattern.fullmatch(normalized)
+            if result:
+                index_names.add(result.group("index"))
+                matched = True
+                break
+        if not matched:
+            return None
+
+    return next(iter(index_names)) if len(index_names) == 1 else None
 
 
 async def run_sqlite_write_with_retry(
@@ -464,6 +494,24 @@ class Database:
         """Run SQLite planner/index maintenance."""
         await optimize_sqlite_connection(self.db_url)
 
+    async def _run_sqlite_integrity_check(self) -> list[str]:
+        """Return SQLite integrity_check messages for the active database."""
+        if not self.db_url.startswith("sqlite://"):
+            return []
+
+        try:
+            connection = Tortoise.get_connection("default")
+            _, rows = await connection.execute_query("PRAGMA integrity_check")
+        except Exception as exc:  # noqa: BLE001 - diagnostic only
+            logging.warning(
+                "Failed to run SQLite integrity_check during corruption diagnosis: %s",
+                exc,
+                exc_info=True,
+            )
+            return []
+
+        return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+
     async def init(self) -> None:
         """Initialize the database connection and generate schemas.
 
@@ -494,13 +542,29 @@ class Database:
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during init
             if _is_sqlite_malformed_error(exc):
                 db_path = _resolve_sqlite_db_path(self.db_url or db_url)
-                message = (
-                    f"SQLite corruption detected in {db_path}. "
-                    "Moonwalker cannot safely continue. "
-                    f"Run `sqlite3 {db_path} 'PRAGMA integrity_check;'` and "
-                    "restore from a known-good backup or recover the database "
-                    "before restarting."
+                integrity_messages = await self._run_sqlite_integrity_check()
+                corrupted_index_name = _extract_corrupted_index_name(
+                    integrity_messages,
                 )
+                if corrupted_index_name:
+                    message = (
+                        f"SQLite index corruption detected in {db_path} "
+                        f"({corrupted_index_name}). Moonwalker cannot safely "
+                        "continue. "
+                        f"First try `sqlite3 {db_path} 'REINDEX "
+                        f"{corrupted_index_name}; PRAGMA integrity_check;'`. "
+                        "If integrity_check still reports errors, restore from "
+                        "a known-good backup or recover the database before "
+                        "restarting."
+                    )
+                else:
+                    message = (
+                        f"SQLite corruption detected in {db_path}. "
+                        "Moonwalker cannot safely continue. "
+                        f"Run `sqlite3 {db_path} 'PRAGMA integrity_check;'` "
+                        "and restore from a known-good backup or recover the "
+                        "database before restarting."
+                    )
                 logging.error(message, exc_info=True)
                 raise RuntimeError(message) from exc
             logging.error("Failed to initialize database: %s", exc, exc_info=True)
