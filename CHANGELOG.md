@@ -2,6 +2,13 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.1.1.0] - 2026-04-05
+
+### Fixed
+
+- Detect SQLite corruption during startup and fail with an actionable message that points operators to `PRAGMA integrity_check` and backup or recovery steps.
+- Add regression coverage for malformed SQLite startup failures so the corruption path stays explicit.
+
 ## [1.1.0.0] - 2026-04-05
 
 ### Added
