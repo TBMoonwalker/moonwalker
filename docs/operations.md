@@ -103,12 +103,16 @@ Full backups include:
 - closed trades
 - unsellable trades
 - trade/order history required by Moonwalker state
+- per-deal execution replay history
+- archived replay candles for closed-trade charts
 - autopilot history
 - uPNL history
 
-Full backups do not include ticker candle history. On full restore, Moonwalker
-clears current ticker history and fetches the required history again for
-restored active trades.
+Full backups do not include the shared ticker candle history table. On full
+restore, Moonwalker clears current ticker history and fetches the required
+history again for restored active trades. Closed-trade replay archives are
+preserved separately, so replay charts for newly archived deals do not depend on
+that shared ticker retention window.
 
 Two restore modes are available:
 

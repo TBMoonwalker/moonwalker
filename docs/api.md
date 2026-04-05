@@ -85,6 +85,7 @@ These streams are fan-out based: one producer loop refreshes shared data every
 | --- | --- | --- |
 | `GET` | `/trades/closed/length` | Return the total number of closed trades. |
 | `GET` | `/trades/closed/{page}` | Return one closed-trades page. |
+| `GET` | `/trades/executions/{deal_id}` | Return chronological execution rows for one deal replay. |
 | `POST` | `/trades/closed/delete/{trade_id}` | Delete a closed trade. |
 | `POST` | `/trades/unsellable/delete/{trade_id}` | Delete an unsellable trade after manual cleanup. |
 
@@ -105,11 +106,18 @@ Phase status.
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET` | `/data/ohlcv/{symbol}/{timerange}/{timestamp_start}/{offset}` | Return OHLCV data for charts. |
+| `GET` | `/data/ohlcv/{symbol}/{timerange}/{timestamp_start}/{timestamp_end}/{offset}` | Return bounded OHLCV data for replay windows. |
+| `GET` | `/data/ohlcv/replay/{deal_id}/{timerange}/{offset}` | Return archived replay OHLCV data for a closed deal. |
+| `GET` | `/data/ohlcv/replay/{deal_id}/{timerange}/{timestamp_start}/{timestamp_end}/{offset}` | Return archived replay OHLCV data for a closed deal within a bounded window. |
 | `GET` | `/data/exchange/symbols/{currency}` | Return available exchange symbols for the configured exchange and quote currency. |
 | `POST` | `/data/exchange/symbols` | Return exchange symbols using draft exchange settings from the request payload. |
 
 Draft exchange-symbol lookup accepts a JSON body with optional `currency` and
 `exchange_config` fields.
+
+Replay OHLCV endpoints are used by the shared trade replay chart. Closed Trades
+prefers archived replay candles when a deal archive exists and falls back to
+bounded shared ticker history only for older legacy rows.
 
 ## Monitoring
 
