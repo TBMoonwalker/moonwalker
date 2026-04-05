@@ -24,6 +24,30 @@ async def get_archived_replay_ohlcv_data(
     response = await data.get_archived_ohlcv_for_deal(
         deal_id,
         timerange,
+        None,
+        None,
+        float(offset),
+    )
+    return response
+
+
+@get(
+    path="/data/ohlcv/replay/"
+    "{deal_id:str}/{timerange:str}/{timestamp_start:str}/{timestamp_end:str}/{offset:str}"
+)
+async def get_archived_replay_ohlcv_data_bounded(
+    deal_id: str,
+    timerange: str,
+    timestamp_start: str,
+    timestamp_end: str,
+    offset: str,
+) -> Any:
+    """Get archived OHLCV replay data for one closed deal within a bounded window."""
+    response = await data.get_archived_ohlcv_for_deal(
+        deal_id,
+        timerange,
+        float(timestamp_start),
+        float(timestamp_end),
         float(offset),
     )
     return response
@@ -111,6 +135,7 @@ async def get_exchange_symbols_from_draft(request: Request[Any, Any, Any]) -> An
 
 
 route_handlers = [
+    get_archived_replay_ohlcv_data_bounded,
     get_archived_replay_ohlcv_data,
     get_ohlcv_data,
     get_ohlcv_data_until,

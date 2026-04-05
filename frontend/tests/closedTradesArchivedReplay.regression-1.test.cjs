@@ -29,7 +29,8 @@ test('closed trades prefer archived replay candles before shared ticker fallback
         'expected closed trades to pass the replay deal id into the chart',
     )
     assert.ok(
-        tradeReplayChartSource.includes('/data/ohlcv/replay/'),
+        tradeReplayChartSource.includes('/data/ohlcv/replay/') &&
+            tradeReplayChartSource.includes('${historyStart}/${historyEnd}/0'),
         'expected the chart to request archived replay candles first',
     )
 })

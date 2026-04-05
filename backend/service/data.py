@@ -470,10 +470,16 @@ class Data:
     async def __get_dataframe_for_replay_deal(
         self,
         deal_id: str,
+        start_timestamp: int | float | None = None,
+        end_timestamp: int | float | None = None,
         fields: tuple[str, ...] | None = None,
     ) -> pd.DataFrame | None:
         """Return archived replay candles for a deal as a DataFrame."""
         query = model.TradeReplayCandles.filter(deal_id=deal_id)
+        if start_timestamp is not None:
+            query = query.filter(timestamp__gte=float(start_timestamp))
+        if end_timestamp is not None:
+            query = query.filter(timestamp__lte=float(end_timestamp))
         rows = (
             await query.order_by("timestamp").values(*fields)
             if fields
@@ -524,6 +530,8 @@ class Data:
         self,
         deal_id: str,
         timerange: str,
+        timestamp_start: float | None,
+        timestamp_end: float | None,
         offset: float,
     ) -> str | dict[str, Any]:
         """Return archived replay OHLCV data for one closed deal."""
@@ -534,6 +542,8 @@ class Data:
 
         df_source = await self.__get_dataframe_for_replay_deal(
             normalized_deal_id,
+            start_timestamp=timestamp_start,
+            end_timestamp=timestamp_end,
             fields=("timestamp", "open", "high", "low", "close", "volume"),
         )
         if df_source is None or df_source.empty:

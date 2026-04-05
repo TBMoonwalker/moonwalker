@@ -162,14 +162,22 @@ async function initChart(): Promise<void> {
         historyEnd ?? 'live',
     ].join('-')
     const archiveCacheKey = props.archiveDealId
-        ? ['replay', props.archiveDealId, timeframe.timerange].join('-')
+        ? [
+            'replay',
+            props.archiveDealId,
+            timeframe.timerange,
+            historyStart,
+            historyEnd ?? 'live',
+        ].join('-')
         : null
     const historyUrl =
         historyEnd === null
             ? `/data/ohlcv/${pairSymbol}/${timeframe.timerange}/${historyStart}/0`
             : `/data/ohlcv/${pairSymbol}/${timeframe.timerange}/${historyStart}/${historyEnd}/0`
     const archiveUrl = props.archiveDealId
-        ? `/data/ohlcv/replay/${props.archiveDealId}/${timeframe.timerange}/0`
+        ? historyEnd === null
+            ? `/data/ohlcv/replay/${props.archiveDealId}/${timeframe.timerange}/0`
+            : `/data/ohlcv/replay/${props.archiveDealId}/${timeframe.timerange}/${historyStart}/${historyEnd}/0`
         : null
 
     let tickerData: Array<Record<string, number>> = []

@@ -97,9 +97,11 @@ async def test_data_service_reads_archived_replay_candles(
     deal_id = "22222222-2222-2222-2222-222222222222"
 
     for timestamp, open_price, close_price in (
+        (0, 9.0, 9.5),
         (60_000, 10.0, 10.5),
         (120_000, 10.5, 11.0),
         (180_000, 11.0, 11.5),
+        (240_000, 11.5, 12.0),
     ):
         await model.TradeReplayCandles.create(
             deal_id=deal_id,
@@ -113,7 +115,13 @@ async def test_data_service_reads_archived_replay_candles(
         )
 
     data = Data()
-    payload = await data.get_archived_ohlcv_for_deal(deal_id, "1m", 0)
+    payload = await data.get_archived_ohlcv_for_deal(
+        deal_id,
+        "1m",
+        60_000,
+        180_000,
+        0,
+    )
     records = json.loads(payload)
 
     assert [record["time"] for record in records] == [60.0, 120.0, 180.0]
