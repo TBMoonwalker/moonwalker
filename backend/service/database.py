@@ -29,6 +29,20 @@ def _is_sqlite_lock_error(exc: Exception) -> bool:
     return "database is locked" in text or "database table is locked" in text
 
 
+def _is_sqlite_malformed_error(exc: Exception) -> bool:
+    """Return True if exception indicates SQLite file or index corruption."""
+    if not isinstance(exc, sqlite3.DatabaseError):
+        return False
+    return "database disk image is malformed" in str(exc).lower()
+
+
+def _resolve_sqlite_db_path(db_url: str) -> str:
+    """Return a readable filesystem path for a SQLite connection URL."""
+    return (
+        db_url.removeprefix("sqlite://") if db_url.startswith("sqlite://") else db_url
+    )
+
+
 async def run_sqlite_write_with_retry(
     operation: Callable[[], Awaitable[Any]],
     operation_name: str,
@@ -478,6 +492,17 @@ class Database:
             await self._backfill_trade_replay_candles()
             logging.info("Database initialized successfully")
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during init
+            if _is_sqlite_malformed_error(exc):
+                db_path = _resolve_sqlite_db_path(self.db_url or db_url)
+                message = (
+                    f"SQLite corruption detected in {db_path}. "
+                    "Moonwalker cannot safely continue. "
+                    f"Run `sqlite3 {db_path} 'PRAGMA integrity_check;'` and "
+                    "restore from a known-good backup or recover the database "
+                    "before restarting."
+                )
+                logging.error(message, exc_info=True)
+                raise RuntimeError(message) from exc
             logging.error("Failed to initialize database: %s", exc, exc_info=True)
             raise
 
