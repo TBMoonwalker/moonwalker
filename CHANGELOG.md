@@ -2,6 +2,17 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.1.2.0] - 2026-04-05
+
+### Changed
+
+- Turn index-only SQLite startup corruption into a concrete recovery path by naming the damaged index and pointing operators to `REINDEX` before a full restore.
+- Document the same `REINDEX`-first recovery flow in operations guidance so the startup error and manual runbook stay aligned.
+
+### Fixed
+
+- Add regression coverage for index-only SQLite corruption so startup diagnosis keeps distinguishing between rebuildable index damage and broader database corruption.
+
 ## [1.1.1.0] - 2026-04-05
 
 ### Fixed
