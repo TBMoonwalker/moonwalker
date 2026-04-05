@@ -120,6 +120,23 @@ Two restore modes are available:
   place.
 - Restore full backup: replaces both configuration and the included trade data.
 
+## Startup Recovery
+
+If Moonwalker fails during startup with a message like `SQLite corruption
+detected in ...`, the local SQLite database is damaged and Moonwalker will stop
+instead of continuing with unsafe state.
+
+Recommended recovery flow:
+
+1. Run `sqlite3 <path-to-db> 'PRAGMA integrity_check;'`
+2. If integrity check reports errors, restore a known-good full backup or use
+   SQLite recovery tooling before restarting Moonwalker
+3. Start Moonwalker again only after the database file passes integrity checks
+
+This corruption path is about the main Moonwalker database file, not the shared
+ticker cache. Full backups already preserve replay archives and trade history
+needed for recovery.
+
 ## Unsellable Trades
 
 When a sell succeeds only partially and the leftover amount falls below the
