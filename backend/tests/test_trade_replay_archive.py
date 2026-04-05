@@ -75,9 +75,7 @@ async def test_archive_replay_candles_for_closed_deal_persists_bounded_window(
     archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).order_by(
         "timestamp"
     )
-    archived_timestamps = [
-        int(value) for value in await archived_rows.values_list("timestamp", flat=True)
-    ]
+    archived_timestamps = [int(row.timestamp) for row in archived_rows]
 
     assert archived == 5
     assert archived_timestamps == [60_000, 120_000, 180_000, 240_000, 300_000]
@@ -122,7 +120,7 @@ async def test_data_service_reads_archived_replay_candles(
         180_000,
         0,
     )
-    records = json.loads(payload)
+    records = [payload] if isinstance(payload, dict) else json.loads(payload)
 
     assert [record["time"] for record in records] == [60.0, 120.0, 180.0]
     assert [record["open"] for record in records] == [10.0, 10.5, 11.0]

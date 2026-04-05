@@ -62,6 +62,10 @@ function toFiniteNumber(value: number | string | null | undefined): number | nul
     return Number.isFinite(parsed) ? parsed : null
 }
 
+function normalizeCandleRows(payload: unknown): Array<Record<string, number>> {
+    return Array.isArray(payload) ? payload : []
+}
+
 function selectTimeframe(): TimeframeChoice {
     const beginMs = toFiniteNumber(props.startTimestamp) ?? Date.now()
     const endMs = toFiniteNumber(props.endTimestamp) ?? Date.now()
@@ -183,23 +187,23 @@ async function initChart(): Promise<void> {
     let tickerData: Array<Record<string, number>> = []
     if (archiveUrl && archiveCacheKey) {
         try {
-            tickerData = await fetchJson<Array<Record<string, number>>>(archiveUrl)
-            if (Array.isArray(tickerData) && tickerData.length > 0) {
+            tickerData = normalizeCandleRows(await fetchJson<unknown>(archiveUrl))
+            if (tickerData.length > 0) {
                 ohlcvStore.set(archiveCacheKey, tickerData)
-            } else {
-                tickerData = []
             }
         } catch (_error) {
-            tickerData = ohlcvStore.get(archiveCacheKey) ?? []
+            tickerData = normalizeCandleRows(ohlcvStore.get(archiveCacheKey) ?? [])
         }
     }
 
     if (tickerData.length === 0) {
         try {
-            tickerData = await fetchJson<Array<Record<string, number>>>(historyUrl)
-            ohlcvStore.set(fallbackCacheKey, tickerData)
+            tickerData = normalizeCandleRows(await fetchJson<unknown>(historyUrl))
+            if (tickerData.length > 0) {
+                ohlcvStore.set(fallbackCacheKey, tickerData)
+            }
         } catch (_error) {
-            tickerData = ohlcvStore.get(fallbackCacheKey) ?? []
+            tickerData = normalizeCandleRows(ohlcvStore.get(fallbackCacheKey) ?? [])
         }
     }
 

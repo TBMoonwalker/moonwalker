@@ -17,6 +17,10 @@ const closedTradeExpandedRowSource = fs.readFileSync(
     ),
     'utf8',
 )
+const tradeReplayChartSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'components', 'TradeReplayChart.vue'),
+    'utf8',
+)
 
 test('legacy closed trades remain expandable with replay fallback copy', () => {
     // Regression: ISSUE-001 — legacy closed rows without deal_id had no expander,
@@ -32,5 +36,9 @@ test('legacy closed trades remain expandable with replay fallback copy', () => {
             'Legacy closed trade without execution history.',
         ),
         'expected legacy replay fallback copy in expanded closed trade rows',
+    )
+    assert.ok(
+        tradeReplayChartSource.includes('return Array.isArray(payload) ? payload : []'),
+        'expected replay chart to normalize empty OHLCV payloads before mapping',
     )
 })
