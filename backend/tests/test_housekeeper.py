@@ -19,8 +19,9 @@ async def test_housekeeper_deletes_only_old_inactive_symbol_rows(
     import model
 
     now = datetime.now()
-    old_timestamp = str((now - timedelta(days=20)).timestamp())
-    recent_timestamp = str((now - timedelta(days=1)).timestamp())
+    old_timestamp_seconds = str(int((now - timedelta(days=20)).timestamp()))
+    old_timestamp_ms = str(int((now - timedelta(days=20)).timestamp() * 1000))
+    recent_timestamp_ms = str(int((now - timedelta(days=1)).timestamp() * 1000))
 
     await model.Trades.create(
         timestamp="1",
@@ -43,7 +44,7 @@ async def test_housekeeper_deletes_only_old_inactive_symbol_rows(
     )
 
     await model.Tickers.create(
-        timestamp=old_timestamp,
+        timestamp=old_timestamp_ms,
         symbol="ACTIVE/USDT",
         open=1.0,
         high=2.0,
@@ -52,7 +53,7 @@ async def test_housekeeper_deletes_only_old_inactive_symbol_rows(
         volume=10.0,
     )
     await model.Tickers.create(
-        timestamp=old_timestamp,
+        timestamp=old_timestamp_ms,
         symbol="INACTIVE/USDT",
         open=1.0,
         high=2.0,
@@ -61,7 +62,16 @@ async def test_housekeeper_deletes_only_old_inactive_symbol_rows(
         volume=10.0,
     )
     await model.Tickers.create(
-        timestamp=recent_timestamp,
+        timestamp=old_timestamp_seconds,
+        symbol="INACTIVE/USDT",
+        open=1.1,
+        high=2.1,
+        low=0.6,
+        close=1.6,
+        volume=11.0,
+    )
+    await model.Tickers.create(
+        timestamp=recent_timestamp_ms,
         symbol="INACTIVE/USDT",
         open=2.0,
         high=3.0,
@@ -79,10 +89,10 @@ async def test_housekeeper_deletes_only_old_inactive_symbol_rows(
         .values_list("symbol", "timestamp")
     )
 
-    assert deleted == 1
+    assert deleted == 2
     assert remaining == [
-        ("ACTIVE/USDT", old_timestamp),
-        ("INACTIVE/USDT", recent_timestamp),
+        ("ACTIVE/USDT", old_timestamp_ms),
+        ("INACTIVE/USDT", recent_timestamp_ms),
     ]
 
     await Tortoise.close_connections()

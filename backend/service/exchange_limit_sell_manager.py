@@ -189,18 +189,50 @@ class ExchangeLimitSellManager:
                         return None
 
                     partial_fill_status = await context.parse_order_status(sell_order)
+                    partial_price = float(
+                        partial_fill_status.get("price")
+                        or latest_order_status.get("average")
+                        or latest_order_status.get("price")
+                        or 0.0
+                    )
+                    partial_amount = float(
+                        partial_fill_status.get("total_amount") or filled_amount
+                    )
                     return build_market_fallback_status(
                         symbol=resolved_symbol,
                         remaining_amount=remaining_amount,
-                        partial_filled_amount=float(
-                            partial_fill_status.get("total_amount") or filled_amount
-                        ),
-                        partial_avg_price=float(
-                            partial_fill_status.get("price")
-                            or latest_order_status.get("average")
-                            or latest_order_status.get("price")
-                            or 0.0
-                        ),
+                        partial_filled_amount=partial_amount,
+                        partial_avg_price=partial_price,
+                        executions=[
+                            {
+                                "symbol": resolved_symbol,
+                                "side": str(partial_fill_status.get("side") or "sell"),
+                                "role": "partial_sell",
+                                "timestamp": str(
+                                    partial_fill_status.get("timestamp")
+                                    or sell_order.get("timestamp")
+                                    or ""
+                                ),
+                                "price": partial_price,
+                                "amount": partial_amount,
+                                "ordersize": float(
+                                    partial_fill_status.get("ordersize")
+                                    or partial_amount * partial_price
+                                ),
+                                "fee": float(
+                                    partial_fill_status.get("base_fee")
+                                    or partial_fill_status.get("amount_fee")
+                                    or 0.0
+                                ),
+                                "order_id": str(
+                                    partial_fill_status.get("orderid")
+                                    or sell_order["id"]
+                                ),
+                                "order_type": str(
+                                    sell_order.get("ordertype") or "limit"
+                                ),
+                            }
+                        ],
                         fallback_reason="limit_order_partial_timeout",
                     )
 

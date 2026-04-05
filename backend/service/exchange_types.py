@@ -57,6 +57,27 @@ class ParsedOrderStatus(TypedDict, total=False):
     ordersize: float
 
 
+class TradeExecutionPayload(TypedDict, total=False):
+    """Serializable execution metadata attached to sell status payloads."""
+
+    symbol: str
+    side: str
+    role: str
+    timestamp: str | int
+    price: float
+    amount: float
+    ordersize: float
+    fee: float
+    order_id: str | None
+    order_type: str | None
+    order_count: int | None
+    so_percentage: float | None
+    signal_name: str | None
+    strategy_name: str | None
+    timeframe: str | None
+    metadata_json: str | None
+
+
 class PartialSellStatus(TypedDict, total=False):
     """Partial or unsellable sell status result."""
 
@@ -70,6 +91,7 @@ class PartialSellStatus(TypedDict, total=False):
     unsellable_reason: str | None
     unsellable_min_notional: float | None
     unsellable_estimated_notional: float | None
+    executions: list[TradeExecutionPayload]
 
 
 class MarketFallbackStatus(TypedDict, total=False):
@@ -82,6 +104,7 @@ class MarketFallbackStatus(TypedDict, total=False):
     remaining_amount: float
     partial_filled_amount: float
     partial_avg_price: float
+    executions: list[TradeExecutionPayload]
 
 
 class SoldCheckStatus(TypedDict, total=False):
@@ -104,3 +127,4 @@ class SoldCheckStatus(TypedDict, total=False):
     amount_fee: Any
     base_fee: float
     ordersize: float
+    executions: list[TradeExecutionPayload]

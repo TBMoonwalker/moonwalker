@@ -168,7 +168,8 @@ async def test_get_profits_overall_accepts_second_precision_timestamps(
     )
 
     statistic = Statistic()
-    daily = await statistic.get_profits_overall(None, "daily")
+    reference_timestamp = int(datetime(2026, 3, 31, 23, 59, 59).timestamp())
+    daily = await statistic.get_profits_overall(reference_timestamp, "daily")
 
     assert daily is not None
     assert daily["2026-03-10"] == 12.0

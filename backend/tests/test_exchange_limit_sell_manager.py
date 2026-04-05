@@ -140,6 +140,20 @@ async def test_handle_limit_sell_fill_returns_partial_fallback_status(
         "remaining_amount": 0.5,
         "partial_filled_amount": 1.25,
         "partial_avg_price": 101.0,
+        "executions": [
+            {
+                "symbol": "BTC/USDT",
+                "side": "sell",
+                "role": "partial_sell",
+                "timestamp": "",
+                "price": 101.0,
+                "amount": 1.25,
+                "ordersize": 126.25,
+                "fee": 0.0,
+                "order_id": "123",
+                "order_type": "limit",
+            }
+        ],
     }
 
 

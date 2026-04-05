@@ -14,6 +14,45 @@ data = Data()
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_data")
 
 
+@get(path="/data/ohlcv/replay/{deal_id:str}/{timerange:str}/{offset:str}")
+async def get_archived_replay_ohlcv_data(
+    deal_id: str,
+    timerange: str,
+    offset: str,
+) -> Any:
+    """Get archived OHLCV replay data for one closed deal."""
+    response = await data.get_archived_ohlcv_for_deal(
+        deal_id,
+        timerange,
+        None,
+        None,
+        float(offset),
+    )
+    return response
+
+
+@get(
+    path="/data/ohlcv/replay/"
+    "{deal_id:str}/{timerange:str}/{timestamp_start:str}/{timestamp_end:str}/{offset:str}"
+)
+async def get_archived_replay_ohlcv_data_bounded(
+    deal_id: str,
+    timerange: str,
+    timestamp_start: str,
+    timestamp_end: str,
+    offset: str,
+) -> Any:
+    """Get archived OHLCV replay data for one closed deal within a bounded window."""
+    response = await data.get_archived_ohlcv_for_deal(
+        deal_id,
+        timerange,
+        float(timestamp_start),
+        float(timestamp_end),
+        float(offset),
+    )
+    return response
+
+
 @get(path="/data/ohlcv/{symbol:str}/{timerange:str}/{timestamp_start:str}/{offset:str}")
 async def get_ohlcv_data(
     symbol: str, timerange: str, timestamp_start: str, offset: str
@@ -31,6 +70,28 @@ async def get_ohlcv_data(
     """
     response = await data.get_ohlcv_for_pair(symbol, timerange, timestamp_start, offset)
 
+    return response
+
+
+@get(
+    path="/data/ohlcv/"
+    "{symbol:str}/{timerange:str}/{timestamp_start:str}/{timestamp_end:str}/{offset:str}"
+)
+async def get_ohlcv_data_until(
+    symbol: str,
+    timerange: str,
+    timestamp_start: str,
+    timestamp_end: str,
+    offset: str,
+) -> Any:
+    """Get OHLCV data for a bounded start/end replay window."""
+    response = await data.get_ohlcv_for_pair(
+        symbol,
+        timerange,
+        timestamp_start,
+        offset,
+        timestamp_end=float(timestamp_end),
+    )
     return response
 
 
@@ -74,7 +135,10 @@ async def get_exchange_symbols_from_draft(request: Request[Any, Any, Any]) -> An
 
 
 route_handlers = [
+    get_archived_replay_ohlcv_data_bounded,
+    get_archived_replay_ohlcv_data,
     get_ohlcv_data,
+    get_ohlcv_data_until,
     get_exchange_symbols,
     get_exchange_symbols_from_draft,
 ]

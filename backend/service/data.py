@@ -3,6 +3,7 @@
 import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from uuid import UUID
 
 import ccxt.async_support as ccxt
 import helper
@@ -448,12 +449,37 @@ class Data:
         self,
         symbol: str,
         start_timestamp: int | float,
+        end_timestamp: int | float | None = None,
         fields: tuple[str, ...] | None = None,
     ) -> pd.DataFrame | None:
         """Return ticker rows for a symbol since a timestamp as a DataFrame."""
         query = model.Tickers.filter(symbol=symbol).filter(
             timestamp__gt=start_timestamp
         )
+        if end_timestamp is not None:
+            query = query.filter(timestamp__lte=float(end_timestamp))
+        rows = (
+            await query.order_by("timestamp").values(*fields)
+            if fields
+            else await query.order_by("timestamp").values()
+        )
+        if not rows:
+            return None
+        return await asyncio.to_thread(rows_to_dataframe, rows)
+
+    async def __get_dataframe_for_replay_deal(
+        self,
+        deal_id: str,
+        start_timestamp: int | float | None = None,
+        end_timestamp: int | float | None = None,
+        fields: tuple[str, ...] | None = None,
+    ) -> pd.DataFrame | None:
+        """Return archived replay candles for a deal as a DataFrame."""
+        query = model.TradeReplayCandles.filter(deal_id=deal_id)
+        if start_timestamp is not None:
+            query = query.filter(timestamp__gte=float(start_timestamp))
+        if end_timestamp is not None:
+            query = query.filter(timestamp__lte=float(end_timestamp))
         rows = (
             await query.order_by("timestamp").values(*fields)
             if fields
@@ -464,7 +490,12 @@ class Data:
         return await asyncio.to_thread(rows_to_dataframe, rows)
 
     async def get_ohlcv_for_pair(
-        self, pair: str, timerange: str, timestamp_start: float, offset: float
+        self,
+        pair: str,
+        timerange: str,
+        timestamp_start: float,
+        offset: float,
+        timestamp_end: float | None = None,
     ) -> str | dict[str, Any]:
         """Return OHLCV data for a pair and timerange."""
         # 600000 --> 60 minutes in milliseconds before
@@ -474,11 +505,16 @@ class Data:
         df_source = await self.__get_dataframe_for_symbol_since(
             symbol,
             start_timestamp,
+            end_timestamp=timestamp_end,
             fields=("timestamp", "open", "high", "low", "close", "volume"),
         )
         if df_source is None:
             df_source = pd.DataFrame()
-        live_candle = self.__get_live_candle_for_symbol(symbol, start_timestamp)
+        live_candle = self.__get_live_candle_for_symbol(
+            symbol,
+            start_timestamp,
+            end_timestamp=timestamp_end,
+        )
         if live_candle:
             df_source = await asyncio.to_thread(
                 append_live_candle, df_source, live_candle
@@ -490,10 +526,43 @@ class Data:
                 return await asyncio.to_thread(serialize_ohlcv_dataframe, df, offset)
         return {}
 
+    async def get_archived_ohlcv_for_deal(
+        self,
+        deal_id: str,
+        timerange: str,
+        timestamp_start: float | None,
+        timestamp_end: float | None,
+        offset: float,
+    ) -> str | dict[str, Any]:
+        """Return archived replay OHLCV data for one closed deal."""
+        try:
+            normalized_deal_id = str(UUID(str(deal_id)))
+        except (TypeError, ValueError):
+            return {}
+
+        df_source = await self.__get_dataframe_for_replay_deal(
+            normalized_deal_id,
+            start_timestamp=timestamp_start,
+            end_timestamp=timestamp_end,
+            fields=("timestamp", "open", "high", "low", "close", "volume"),
+        )
+        if df_source is None or df_source.empty:
+            return {}
+
+        df = await asyncio.to_thread(self.resample_data, df_source, timerange)
+        if df is None or df.empty:
+            return {}
+        return await asyncio.to_thread(serialize_ohlcv_dataframe, df, offset)
+
     def __get_live_candle_for_symbol(
-        self, symbol: str, start_timestamp: float
+        self,
+        symbol: str,
+        start_timestamp: float,
+        end_timestamp: float | None = None,
     ) -> dict[str, float | str] | None:
         """Return current in-memory watcher candle for symbol if it is in range."""
+        if end_timestamp is not None:
+            return None
         try:
             live = get_live_candle_snapshot(symbol)
             return build_live_candle_payload(live, symbol, start_timestamp)

@@ -6,8 +6,11 @@ import sqlite3
 from asyncio import sleep
 from collections.abc import Awaitable, Callable
 from typing import Any
+from uuid import uuid4
 
 import helper
+import model
+from service.replay_candles import archive_replay_candles_for_deal
 from tortoise import Tortoise
 from tortoise.context import TortoiseContext
 
@@ -118,6 +121,7 @@ class Database:
             ("tickers", "idx_tickers_symbol_timestamp", ("symbol", "timestamp")),
             ("tickers", "idx_tickers_timestamp", ("timestamp",)),
             ("trades", "idx_trades_symbol", ("symbol",)),
+            ("trades", "idx_trades_deal_id_timestamp", ("deal_id", "timestamp")),
             ("trades", "idx_trades_symbol_baseorder", ("symbol", "baseorder")),
             (
                 "trades",
@@ -125,6 +129,27 @@ class Database:
                 ("symbol", "safetyorder", "baseorder"),
             ),
             ("closedtrades", "idx_closedtrades_close_date", ("close_date",)),
+            (
+                "tradeexecutions",
+                "idx_tradeexecutions_deal_time",
+                ("deal_id", "timestamp"),
+            ),
+            (
+                "tradeexecutions",
+                "idx_tradeexecutions_symbol_time",
+                ("symbol", "timestamp"),
+            ),
+            ("tradeexecutions", "idx_tradeexecutions_side_role", ("side", "role")),
+            (
+                "tradereplaycandles",
+                "idx_tradereplaycandles_deal_time",
+                ("deal_id", "timestamp"),
+            ),
+            (
+                "tradereplaycandles",
+                "idx_tradereplaycandles_symbol_time",
+                ("symbol", "timestamp"),
+            ),
             (
                 "unsellabletrades",
                 "idx_unsellabletrades_symbol",
@@ -138,8 +163,14 @@ class Database:
             ("upnl_history", "idx_upnl_history_timestamp", ("timestamp",)),
             ("token_listings", "idx_token_listings_symbol", ("symbol",)),
         )
+        desired_unique_indexes: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+            ("opentrades", "uidx_opentrades_deal_id", ("deal_id",)),
+            ("closedtrades", "uidx_closedtrades_deal_id", ("deal_id",)),
+            ("unsellabletrades", "uidx_unsellabletrades_deal_id", ("deal_id",)),
+        )
         existing_signatures: set[tuple[str, tuple[str, ...]]] = set()
-        tables = {table for table, _, _ in desired_indexes}
+        existing_unique_signatures: set[tuple[str, tuple[str, ...]]] = set()
+        tables = {table for table, _, _ in [*desired_indexes, *desired_unique_indexes]}
 
         for table in tables:
             _, indexes = await connection.execute_query(f"PRAGMA index_list('{table}')")
@@ -154,6 +185,8 @@ class Database:
                 )
                 if columns:
                     existing_signatures.add((table, columns))
+                if columns and bool(index["unique"]):
+                    existing_unique_signatures.add((table, columns))
 
         create_statements = [
             (
@@ -165,6 +198,178 @@ class Database:
         ]
         if create_statements:
             await connection.execute_script("\n".join(create_statements))
+
+        unique_statements = [
+            (
+                f"CREATE UNIQUE INDEX IF NOT EXISTS {index_name} "
+                f"ON {table} ({', '.join(columns)});"
+            )
+            for table, index_name, columns in desired_unique_indexes
+            if (table, columns) not in existing_unique_signatures
+        ]
+        if unique_statements:
+            await connection.execute_script("\n".join(unique_statements))
+
+    async def _ensure_trade_ledger_columns(self) -> None:
+        """Ensure additive deal-ledger columns exist on existing SQLite databases."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        table_columns = {
+            "trades": (("deal_id", "TEXT NULL"),),
+            "opentrades": (
+                ("deal_id", "TEXT NULL"),
+                ("execution_history_complete", "INTEGER NOT NULL DEFAULT 1"),
+            ),
+            "closedtrades": (
+                ("deal_id", "TEXT NULL"),
+                ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
+            ),
+            "unsellabletrades": (
+                ("deal_id", "TEXT NULL"),
+                ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
+            ),
+        }
+
+        alter_statements: list[str] = []
+        for table_name, column_specs in table_columns.items():
+            _, columns = await connection.execute_query(
+                f"PRAGMA table_info('{table_name}')"
+            )
+            existing = {row["name"] for row in columns}
+            for column_name, column_definition in column_specs:
+                if column_name in existing:
+                    continue
+                alter_statements.append(
+                    f"ALTER TABLE {table_name} "
+                    f"ADD COLUMN {column_name} {column_definition};"
+                )
+
+        if alter_statements:
+            await connection.execute_script("\n".join(alter_statements))
+            logging.info("Added missing deal-ledger columns.")
+
+    @staticmethod
+    def _resolve_trade_execution_role(trade_row: dict[str, Any]) -> str:
+        """Return the replay role for a historical trade row."""
+        if bool(trade_row.get("baseorder")):
+            return "base_order"
+        if str(trade_row.get("orderid") or "").startswith("manual-add-"):
+            return "manual_buy"
+        if bool(trade_row.get("safetyorder")):
+            return "safety_order"
+        return "buy"
+
+    async def _backfill_trade_ledger_rows(self) -> None:
+        """Backfill deal ids and execution rows for currently open deals."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        open_rows = await model.OpenTrades.all().values(
+            "symbol",
+            "deal_id",
+            "sold_amount",
+            "execution_history_complete",
+        )
+        for open_row in open_rows:
+            symbol = str(open_row.get("symbol") or "").strip()
+            if not symbol:
+                continue
+
+            deal_id = str(open_row.get("deal_id") or uuid4())
+            has_legacy_partial = float(open_row.get("sold_amount") or 0.0) > 0
+            execution_history_complete = (
+                bool(open_row.get("execution_history_complete", True))
+                and not has_legacy_partial
+            )
+
+            await model.OpenTrades.filter(symbol=symbol).update(
+                deal_id=deal_id,
+                execution_history_complete=execution_history_complete,
+            )
+            await model.Trades.filter(symbol=symbol).update(deal_id=deal_id)
+
+            existing_executions = await model.TradeExecutions.filter(
+                deal_id=deal_id,
+            ).values("timestamp", "order_id", "role")
+            existing_signatures = {
+                (
+                    str(execution.get("timestamp") or ""),
+                    str(execution.get("order_id") or ""),
+                    str(execution.get("role") or ""),
+                )
+                for execution in existing_executions
+            }
+            trade_rows = (
+                await model.Trades.filter(symbol=symbol)
+                .order_by(
+                    "timestamp",
+                    "id",
+                )
+                .values()
+            )
+            for trade_row in trade_rows:
+                role = self._resolve_trade_execution_role(trade_row)
+                signature = (
+                    str(trade_row.get("timestamp") or ""),
+                    str(trade_row.get("orderid") or ""),
+                    role,
+                )
+                if signature in existing_signatures:
+                    continue
+
+                await model.TradeExecutions.create(
+                    deal_id=deal_id,
+                    symbol=str(trade_row.get("symbol") or symbol),
+                    side=str(trade_row.get("side") or "buy"),
+                    role=role,
+                    timestamp=str(trade_row.get("timestamp") or ""),
+                    price=float(trade_row.get("price") or 0.0),
+                    amount=float(trade_row.get("amount") or 0.0),
+                    ordersize=float(trade_row.get("ordersize") or 0.0),
+                    fee=float(trade_row.get("fee") or 0.0),
+                    order_id=(
+                        str(trade_row.get("orderid"))
+                        if trade_row.get("orderid") is not None
+                        else None
+                    ),
+                    order_type=(
+                        str(trade_row.get("ordertype"))
+                        if trade_row.get("ordertype") is not None
+                        else None
+                    ),
+                    order_count=trade_row.get("order_count"),
+                    so_percentage=(
+                        float(trade_row["so_percentage"])
+                        if trade_row.get("so_percentage") is not None
+                        else None
+                    ),
+                )
+                existing_signatures.add(signature)
+
+    async def _backfill_trade_replay_candles(self) -> None:
+        """Backfill per-deal replay candles for existing closed trades."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        closed_rows = await model.ClosedTrades.exclude(deal_id=None).values(
+            "deal_id",
+            "symbol",
+            "open_date",
+            "close_date",
+        )
+        for closed_row in closed_rows:
+            deal_id = str(closed_row.get("deal_id") or "").strip()
+            symbol = str(closed_row.get("symbol") or "").strip()
+            if not deal_id or not symbol:
+                continue
+            await archive_replay_candles_for_deal(
+                deal_id,
+                symbol,
+                open_date=closed_row.get("open_date"),
+                close_date=closed_row.get("close_date"),
+            )
 
     async def _ensure_open_trades_columns(self) -> None:
         """Ensure additive OpenTrades columns exist on existing SQLite databases."""
@@ -266,8 +471,11 @@ class Database:
             # Generate the schema
             await Tortoise.generate_schemas()
             await self._ensure_open_trades_columns()
+            await self._ensure_trade_ledger_columns()
             await self._ensure_upnl_history_columns()
             await self._ensure_indexes()
+            await self._backfill_trade_ledger_rows()
+            await self._backfill_trade_replay_candles()
             logging.info("Database initialized successfully")
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during init
             logging.error("Failed to initialize database: %s", exc, exc_info=True)

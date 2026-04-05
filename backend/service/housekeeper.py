@@ -11,9 +11,18 @@ from service.config import Config, resolve_history_lookback_days, resolve_timefr
 from service.data import Data
 from service.database import optimize_sqlite_connection, run_sqlite_write_with_retry
 from service.trades import Trades
+from tortoise import Tortoise
 from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/housekeeper.log", "housekeeper")
+
+NORMALIZED_TICKER_TIMESTAMP_SQL = (
+    "CASE "
+    "WHEN CAST(timestamp AS INTEGER) >= 100000000000 THEN CAST(timestamp AS INTEGER) "
+    "WHEN CAST(timestamp AS INTEGER) >= 1000000000 THEN CAST(timestamp AS INTEGER) * 1000 "
+    "ELSE CAST(timestamp AS INTEGER) "
+    "END"
+)
 
 RECOVERABLE_HOUSEKEEPER_EXCEPTIONS = (
     BaseORMException,
@@ -94,6 +103,7 @@ class Housekeeper:
     ) -> int:
         """Delete expired ticker rows only for symbols without active trades."""
         cleanup_timestamp = actual_timestamp - timedelta(days=retention_days)
+        cleanup_timestamp_ms = int(cleanup_timestamp.timestamp() * 1000)
         active_symbols = set(await Trades().get_symbols())
         ticker_symbols = set(await Data().get_ticker_symbol_list())
         inactive_symbols = sorted(ticker_symbols - active_symbols)
@@ -101,22 +111,31 @@ class Housekeeper:
         if not inactive_symbols:
             return 0
 
+        placeholders = ", ".join("?" for _ in inactive_symbols)
+        delete_query = (
+            "DELETE FROM tickers "
+            f"WHERE symbol IN ({placeholders}) "
+            f"AND {NORMALIZED_TICKER_TIMESTAMP_SQL} < ?"
+        )
+        delete_values = [*inactive_symbols, cleanup_timestamp_ms]
+
         deleted = await run_sqlite_write_with_retry(
-            lambda: model.Tickers.filter(
-                symbol__in=inactive_symbols,
-                timestamp__lt=cleanup_timestamp.timestamp(),
-            ).delete(),
+            lambda: Tortoise.get_connection("default").execute_query(
+                delete_query,
+                delete_values,
+            ),
             "housekeeping ticker cleanup",
         )
+        deleted_count = int(deleted[0] if isinstance(deleted, tuple) else deleted or 0)
         logging.info(
             "Housekeeping deleted %s ticker entries older than %s for %s inactive symbols "
             "(retention_days=%s)",
-            deleted,
+            deleted_count,
             cleanup_timestamp,
             len(inactive_symbols),
             retention_days,
         )
-        return int(deleted or 0)
+        return deleted_count
 
     async def _cleanup_upnl_history(self, actual_timestamp: datetime) -> None:
         """Remove old uPNL snapshots based on retention policy."""

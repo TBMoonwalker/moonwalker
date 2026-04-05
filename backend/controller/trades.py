@@ -134,6 +134,13 @@ async def closed_trades_pagination(page: str) -> dict[str, Any]:
     return {"result": response}
 
 
+@get(path="/trades/executions/{deal_id:str}")
+async def trade_executions(deal_id: str) -> dict[str, Any]:
+    """Get execution rows for one trade deal."""
+    response = await trades.get_trade_executions(deal_id)
+    return {"result": response}
+
+
 @post(path="/trades/closed/delete/{trade_id:str}")
 async def closed_trade_delete(trade_id: str) -> Any:
     """Delete a closed trade by ID."""
@@ -168,6 +175,7 @@ route_handlers = [
     unsellable_trades,
     closed_trades_length,
     closed_trades_pagination,
+    trade_executions,
     closed_trade_delete,
     unsellable_trade_delete,
 ]

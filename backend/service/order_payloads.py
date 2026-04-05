@@ -4,7 +4,11 @@ import json
 from datetime import datetime
 from typing import Any
 
-from service.exchange_types import ExchangeOrderPayload, SoldCheckStatus
+from service.exchange_types import (
+    ExchangeOrderPayload,
+    SoldCheckStatus,
+    TradeExecutionPayload,
+)
 
 
 def calculate_trade_duration(start_date_ms: float, end_date_ms: float) -> str:
@@ -61,7 +65,13 @@ def build_closed_trade_payloads(
             else 0.0
         )
 
-    sell_date = closed_at or datetime.now()
+    sell_timestamp_raw = order_status.get("timestamp")
+    if closed_at is not None:
+        sell_date = closed_at
+    elif sell_timestamp_raw is not None:
+        sell_date = datetime.fromtimestamp(float(sell_timestamp_raw) / 1000.0)
+    else:
+        sell_date = datetime.now()
     sell_timestamp_ms = sell_date.timestamp() * 1000
     open_date = datetime.fromtimestamp(open_timestamp_ms / 1000.0)
     duration_data = calculate_trade_duration(open_timestamp_ms, sell_timestamp_ms)
@@ -78,6 +88,10 @@ def build_closed_trade_payloads(
         "open_date": open_date,
         "close_date": sell_date,
         "duration": duration_data,
+        "sell_executions": build_final_sell_executions(
+            order_status,
+            closed_at=sell_date,
+        ),
     }
     monitor_payload = {
         "symbol": symbol,
@@ -94,6 +108,52 @@ def build_closed_trade_payloads(
         "duration": duration_data,
     }
     return {"payload": payload, "monitor_payload": monitor_payload}
+
+
+def build_final_sell_executions(
+    order_status: SoldCheckStatus,
+    *,
+    closed_at: datetime,
+) -> list[TradeExecutionPayload]:
+    """Return execution rows for the final sell status payload."""
+    executions = list(order_status.get("executions") or [])
+    if executions:
+        return executions
+
+    amount = float(order_status.get("total_amount") or 0.0)
+    if amount <= 0:
+        return []
+
+    timestamp = int(
+        float(order_status.get("timestamp") or closed_at.timestamp() * 1000)
+    )
+    return [
+        {
+            "symbol": str(order_status["symbol"]),
+            "side": str(order_status.get("side") or "sell"),
+            "role": "final_sell",
+            "timestamp": str(timestamp),
+            "price": float(order_status.get("price") or 0.0),
+            "amount": amount,
+            "ordersize": float(
+                order_status.get("ordersize")
+                or amount * float(order_status.get("price") or 0.0)
+            ),
+            "fee": float(
+                order_status.get("base_fee") or order_status.get("amount_fee") or 0.0
+            ),
+            "order_id": (
+                str(order_status.get("orderid"))
+                if order_status.get("orderid") is not None
+                else None
+            ),
+            "order_type": (
+                str(order_status.get("ordertype"))
+                if order_status.get("ordertype") is not None
+                else None
+            ),
+        }
+    ]
 
 
 def build_buy_trade_payload(order_status: ExchangeOrderPayload) -> dict[str, Any]:

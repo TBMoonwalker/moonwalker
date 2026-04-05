@@ -20,6 +20,7 @@ def build_market_fallback_status(
     remaining_amount: float,
     partial_filled_amount: float = 0.0,
     partial_avg_price: float = 0.0,
+    executions: list[dict[str, Any]] | None = None,
     limit_cancel_confirmed: bool = True,
     fallback_reason: str = "limit_order_timeout",
 ) -> MarketFallbackStatus:
@@ -32,6 +33,7 @@ def build_market_fallback_status(
         "remaining_amount": float(remaining_amount),
         "partial_filled_amount": float(partial_filled_amount),
         "partial_avg_price": float(partial_avg_price),
+        **({"executions": list(executions)} if executions else {}),
     }
 
 
@@ -46,4 +48,5 @@ def build_partial_status_from_fallback(
         partial_amount=float(fallback_status.get("partial_filled_amount") or 0.0),
         partial_avg_price=float(fallback_status.get("partial_avg_price") or 0.0),
         remaining_amount=float(fallback_status.get("remaining_amount") or 0.0),
+        executions=list(fallback_status.get("executions") or []),
     )

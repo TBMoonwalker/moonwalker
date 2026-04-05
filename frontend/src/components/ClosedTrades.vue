@@ -6,6 +6,7 @@
         :data="paged_closed_trades || []"
         :loading="isTableLoading"
         :row-class-name="row_classes"
+        :render-expand-icon="renderExpandIcon"
         :pagination="pageReactive"
         :locale="{ emptyText: tableEmptyText }"
         aria-label="Closed trades table"
@@ -14,13 +15,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed, h, onMounted } from 'vue'
+import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
 import { NButton } from 'naive-ui/es/button'
 import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
 import { useDialog } from 'naive-ui/es/dialog'
+import { NIcon } from 'naive-ui/es/icon'
 import { useMessage } from 'naive-ui/es/message'
-import { useTradesStore } from '../stores/trades'
+import ClosedTradeExpandedRow from './ClosedTradeExpandedRow.vue'
 import { fetchJson } from '../api/client'
+import { useConfiguredMinTimeframe } from '../composables/useConfiguredMinTimeframe'
 import { usePagedTradeFeed } from '../composables/usePagedTradeFeed'
 import { useTradeTableFeed } from '../composables/useTradeTableFeed'
 import { useViewport } from '../composables/useViewport'
@@ -29,35 +33,26 @@ import {
     formatFixed,
     resolveTradeDateTime,
 } from '../helpers/tradeTable'
+import { useTradesStore, type ClosedTradeRow } from '../stores/trades'
 
 const trades_store = useTradesStore()
 const { isMobile, isTablet } = useViewport()
+const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
+    useConfiguredMinTimeframe()
 const dialog = useDialog()
 const message = useMessage()
-
-type RowData = {
-    id: number
-    symbol: string
-    amount: number
-    cost: number
-    profit: number
-    profit_percent: number
-    so_count: number
-    duration: string
-    close_date: string
-}
 
 const {
     rows: closed_trades,
     isTableLoading,
     tableEmptyText,
-} = useTradeTableFeed<RowData>({
+} = useTradeTableFeed<ClosedTradeRow>({
     websocketId: 'closedTrades',
     waitingText: 'Waiting for live closed trades...',
     emptyText: 'No closed trades',
     normalizeRows: (rawRows) => {
         trades_store.setClosedTrades(rawRows as any[])
-        return trades_store.closedTrades as RowData[]
+        return trades_store.closedTrades as ClosedTradeRow[]
     },
 })
 
@@ -66,18 +61,18 @@ const {
     pagination: pageReactive,
     handlePageChange,
     refreshPageAfterDelete,
-} = usePagedTradeFeed<RowData>({
+} = usePagedTradeFeed<ClosedTradeRow>({
     liveRows: closed_trades,
     normalizeRows: (rawRows) => {
         trades_store.setClosedTrades(rawRows as any[])
-        return trades_store.closedTrades as RowData[]
+        return trades_store.closedTrades as ClosedTradeRow[]
     },
     lengthEndpoint: '/trades/closed/length',
     pageEndpoint: (offset) => `/trades/closed/${offset}`,
     itemLabel: 'trades',
 })
 
-function row_classes(row: RowData) {
+function row_classes(row: ClosedTradeRow) {
     if (Math.sign(row.profit_percent) >= 0) {
         return 'green'
     } else {
@@ -85,7 +80,7 @@ function row_classes(row: RowData) {
     }
 }
 
-async function handleDeleteClosedTrade(rowData: RowData): Promise<void> {
+async function handleDeleteClosedTrade(rowData: ClosedTradeRow): Promise<void> {
     const d = dialog.warning({
         title: 'Delete closed trade',
         content: `Delete ${rowData.symbol} from closed trades history? This cannot be undone.`,
@@ -111,8 +106,25 @@ async function handleDeleteClosedTrade(rowData: RowData): Promise<void> {
     })
 }
 
-const columns_trades = (): DataTableColumns<RowData> => {
-    const columns: DataTableColumns<RowData> = [
+function renderExpandIcon() {
+    return h(
+        NIcon,
+        { size: 24, color: '#63e2b7' },
+        { default: () => h(ArrowForwardCircleOutline) },
+    )
+}
+
+const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
+    const columns: DataTableColumns<ClosedTradeRow> = [
+        {
+            type: 'expand',
+            expandable: () => true,
+            renderExpand: (rowData) =>
+                h(ClosedTradeExpandedRow, {
+                    rowData,
+                    minTimeframe: configuredMinTimeframe.value,
+                }),
+        },
         {
             title: '#',
             key: 'key',
@@ -221,6 +233,10 @@ const columns_trades = (): DataTableColumns<RowData> => {
 
 const columns_closed_trades = computed(() => columns_trades())
 
+onMounted(async () => {
+    await loadConfiguredMinTimeframe()
+})
+
 </script>
 
 <style scoped>
@@ -230,5 +246,9 @@ const columns_closed_trades = computed(() => columns_trades())
 
 :deep(.green .profit) {
     color: rgb(99, 226, 183) !important;
+}
+
+:deep(.n-data-table-expand-trigger) {
+    height: 16px;
 }
 </style>

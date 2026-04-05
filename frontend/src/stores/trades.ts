@@ -3,6 +3,8 @@ import { defineStore } from 'pinia'
 export type OpenTradeRow = {
   id: number
   symbol: string
+  deal_id?: string | null
+  execution_history_complete?: boolean
   amount: number | string
   cost: number | string
   profit: number | string
@@ -26,19 +28,27 @@ export type OpenTradeRow = {
 export type ClosedTradeRow = {
   id: number
   symbol: string
+  deal_id?: string | null
+  execution_history_complete: boolean
   amount: number | string
   cost: number | string
+  tp_price: number | string
+  avg_price: number | string
   profit: number | string
   profit_percent: number | string
   so_count: number
+  open_date: string
   duration: string
   close_date: string
+  precision: number
   key: number
 }
 
 export type UnsellableTradeRow = {
   id: number
   symbol: string
+  deal_id?: string | null
+  execution_history_complete?: boolean
   amount: number | string
   cost: number | string
   profit: number | string
@@ -62,6 +72,23 @@ export type OrderData = {
   symbol: string
   price: number
   so_percentage?: number
+}
+
+export type TradeExecutionRow = {
+  id: number
+  deal_id: string
+  symbol: string
+  side: 'buy' | 'sell'
+  role: string
+  timestamp: string
+  price: number
+  amount: number
+  ordersize: number
+  fee: number
+  order_id?: string | null
+  order_type?: string | null
+  order_count?: number | null
+  so_percentage?: number | null
 }
 
 function isFloat(val: any): boolean {
@@ -140,6 +167,8 @@ export const useTradesStore = defineStore('trades', {
           so_count: Array.isArray(val.safetyorders) ? val.safetyorders.length : val.so_count,
           key: val.id,
           open_date: String(val.open_date ?? ''),
+          deal_id: val.deal_id ?? null,
+          execution_history_complete: Boolean(val.execution_history_complete ?? true),
           safetyorder: val.safetyorders,
           precision: currentPrecision,
           unsellable_amount: Number(val.unsellable_amount ?? 0),
@@ -161,15 +190,27 @@ export const useTradesStore = defineStore('trades', {
         const amountPrecision = isFloat(val.amount)
           ? val.amount.toString().split('.')[1].length
           : 0
+        const tpPrecision = isFloat(val.tp_price)
+          ? val.tp_price.toString().split('.')[1].length
+          : 2
+        const avgPrecision = isFloat(val.avg_price)
+          ? val.avg_price.toString().split('.')[1].length
+          : 2
         return {
           ...val,
           cost: formatDecimal(val.cost, 2),
+          tp_price: formatDecimal(Number(val.tp_price ?? 0), 2, 8),
+          avg_price: formatDecimal(Number(val.avg_price ?? 0), 2, 8),
           profit: formatDecimal(val.profit, 2),
           profit_percent: formatDecimal(val.profit_percent, 2),
           amount: val.amount.toFixed(amountPrecision),
           key: val.id,
+          open_date: String(val.open_date ?? ''),
           close_date: String(val.close_date ?? ''),
-          duration: formatDuration(val.duration)
+          duration: formatDuration(val.duration),
+          deal_id: val.deal_id ?? null,
+          execution_history_complete: Boolean(val.execution_history_complete ?? false),
+          precision: Math.max(tpPrecision, avgPrecision)
         }
       })
     },
@@ -188,6 +229,8 @@ export const useTradesStore = defineStore('trades', {
           avg_price: formatDecimal(Number(val.avg_price), 2, 8),
           key: val.id,
           open_date: String(val.open_date ?? ''),
+          deal_id: val.deal_id ?? null,
+          execution_history_complete: Boolean(val.execution_history_complete ?? false),
           unsellable_reason: val.unsellable_reason ?? null,
           unsellable_min_notional:
             val.unsellable_min_notional === null || val.unsellable_min_notional === undefined
