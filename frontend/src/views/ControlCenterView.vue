@@ -18,7 +18,6 @@ import { MOONWALKER_API_ORIGIN } from '../config'
 import { createControlCenterConfigChangeSynchronizer } from '../control-center/configChangeSync'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 import { deriveControlCenterConfigTrustState } from '../control-center/configTrust'
-import { deriveGuidedFocusTarget } from '../control-center/focusFlow'
 import type { OperationResult } from '../control-center/operationResults'
 import { deriveControlCenterReadiness } from '../control-center/readiness'
 import {
@@ -38,13 +37,13 @@ import type {
     ControlCenterTransitionIntent,
 } from '../control-center/types'
 import { deriveControlCenterViewState } from '../control-center/viewState'
-import { waitForTargetElement } from '../control-center/focusFlow'
 import { useConfigAdvancedGeneral } from '../composables/useConfigAdvancedGeneral'
 import { useConfigBackupRestore } from '../composables/useConfigBackupRestore'
 import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
 import { useConfigMonitoringTest } from '../composables/useConfigMonitoringTest'
 import { useConfigPageState } from '../composables/useConfigPageState'
 import { useConfigPersistableState } from '../composables/useConfigPersistableState'
+import { useControlCenterNavigation } from '../composables/useControlCenterNavigation'
 import { useControlCenterRuntimeActions } from '../composables/useControlCenterRuntimeActions'
 import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupFlow'
 import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
@@ -56,7 +55,6 @@ import {
     type ConfigSubmitPayloadDefaults,
 } from '../helpers/configSubmitPayload'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
-import { trackUiEvent } from '../utils/uiTelemetry'
 
 function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
@@ -459,6 +457,18 @@ const routeState = computed(() =>
     }),
 )
 const {
+    focusTarget,
+    guideToTarget,
+    handleModeSelect,
+    navigateToControlCenter,
+} = useControlCenterNavigation({
+    announce,
+    nextTick,
+    readTargetElement: (target) => targetElements[target].value,
+    routeState,
+    router,
+})
+const {
     activationLoading,
     checkForExternalConfigChanges,
     handleActivateLiveTrading,
@@ -636,72 +646,6 @@ function setTransitionIntent(nextIntent: ControlCenterTransitionIntent): void {
             transitionTimeoutId = null
         }, 8000)
     }
-}
-
-async function navigateToControlCenter(
-    mode: ControlCenterMode,
-    target: ControlCenterTarget | null = null,
-    replace = false,
-): Promise<void> {
-    const normalizedState = normalizeControlCenterRouteState({
-        requestedMode: mode,
-        requestedTarget: target,
-        fallbackMode: mode,
-    })
-    const location = {
-        name: 'controlCenter',
-        query: buildControlCenterQuery(normalizedState),
-    }
-    if (replace) {
-        await router.replace(location)
-        return
-    }
-    await router.push(location)
-}
-
-async function focusTarget(target: ControlCenterTarget): Promise<boolean> {
-    const element = await waitForTargetElement({
-        nextTick,
-        read: () => targetElements[target].value,
-    })
-    if (!element) {
-        return false
-    }
-    element.scrollIntoView({
-        behavior: 'auto',
-        block: 'start',
-    })
-    const focusAnchor =
-        element.querySelector<HTMLElement>('[data-control-center-anchor]') ??
-        element
-    focusAnchor.focus({ preventScroll: true })
-    announce(deriveGuidedFocusTarget(target).announcement)
-    return true
-}
-
-async function guideToTarget(target: ControlCenterTarget): Promise<void> {
-    const task = getTaskPresentation(target)
-    const requiresRouteTransition =
-        routeState.value.mode !== task.defaultMode ||
-        routeState.value.target !== target
-    trackUiEvent('control_center_fix_this_requested', {
-        target,
-        mode: task.defaultMode,
-    })
-    await navigateToControlCenter(task.defaultMode, target)
-    if (!requiresRouteTransition) {
-        await focusTarget(target)
-    }
-}
-
-async function handleModeSelect(mode: ControlCenterMode): Promise<void> {
-    const currentTarget = routeState.value.target
-    const nextTarget =
-        currentTarget &&
-        getTaskPresentation(currentTarget).modes.includes(mode)
-            ? currentTarget
-            : null
-    await navigateToControlCenter(mode, nextTarget)
 }
 
 function isInteractiveTarget(target: EventTarget | null): boolean {

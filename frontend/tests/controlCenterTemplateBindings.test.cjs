@@ -218,3 +218,46 @@ test('control center delegates setup flow handling to a dedicated composable', (
         false,
     )
 })
+
+test('control center delegates navigation and guided focus handling to a dedicated composable', () => {
+    const requiredSnippets = [
+        "import { useControlCenterNavigation } from '../composables/useControlCenterNavigation'",
+        '} = useControlCenterNavigation({',
+        'focusTarget,',
+        'guideToTarget,',
+        'handleModeSelect,',
+        'navigateToControlCenter,',
+    ]
+
+    for (const snippet of requiredSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function navigateToControlCenter(',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function focusTarget(',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function guideToTarget(',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function handleModeSelect(',
+        ),
+        false,
+    )
+})
