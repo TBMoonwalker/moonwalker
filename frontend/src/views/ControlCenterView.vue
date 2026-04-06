@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
-import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
+import { nextTick, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
 
 import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'
@@ -39,6 +39,7 @@ import { useConfigPageState } from '../composables/useConfigPageState'
 import { useConfigPersistableState } from '../composables/useConfigPersistableState'
 import { useControlCenterDerivedState } from '../composables/useControlCenterDerivedState'
 import { useControlCenterFeedback } from '../composables/useControlCenterFeedback'
+import { useControlCenterLifecycle } from '../composables/useControlCenterLifecycle'
 import { useControlCenterMissionState } from '../composables/useControlCenterMissionState'
 import { useControlCenterNavigation } from '../composables/useControlCenterNavigation'
 import { useControlCenterRuntimeActions } from '../composables/useControlCenterRuntimeActions'
@@ -97,8 +98,6 @@ const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).to
 const isLoading = ref(true)
 const showAdvancedGeneral = ref(false)
 const loadRescueMessage = ref<string | null>(null)
-
-let staleCheckIntervalId: number | null = null
 
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
 const STALE_CHECK_INTERVAL_MS = 15000
@@ -530,61 +529,25 @@ async function handleSetupSectionShellClick(
     await handleSetupTaskSelect(target)
 }
 
-watch(
-    () => `${routeState.value.mode}:${routeState.value.target ?? ''}`,
-    async () => {
-        if (routeState.value.target) {
-            await focusTarget(routeState.value.target)
-        }
-    },
-    { flush: 'post' },
-)
-
-watch(
-    () => readiness.value.firstRun,
-    (firstRun) => {
-        syncSetupChoiceForReadiness(firstRun)
-    },
-)
-
-watch(
-    () => configSnapshotStore.externalInvalidationToken.value,
-    async (nextToken, previousToken) => {
-        if (nextToken === 0 || nextToken === previousToken) {
-            return
-        }
-        await handleDetectedExternalConfigChange(!document.hidden)
-    },
-)
-
-onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
-
-onMounted(async () => {
-    initializeTimezoneOptions(getClientTimezone())
-    initializeSetupFlow()
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    window.addEventListener('keydown', handleGlobalKeydown)
-    window.addEventListener('focus', checkForExternalConfigChanges)
-    window.addEventListener('popstate', handleSetupEntryChoicePopState)
-    staleCheckIntervalId = window.setInterval(
-        checkForExternalConfigChanges,
-        STALE_CHECK_INTERVAL_MS,
-    )
-    await refreshWorkspaceFromSnapshot(false)
-    if (routeState.value.target) {
-        await focusTarget(routeState.value.target)
-    }
-})
-
-onUnmounted(() => {
-    window.removeEventListener('beforeunload', handleBeforeUnload)
-    window.removeEventListener('keydown', handleGlobalKeydown)
-    window.removeEventListener('focus', checkForExternalConfigChanges)
-    window.removeEventListener('popstate', handleSetupEntryChoicePopState)
-    disposeFeedback()
-    if (staleCheckIntervalId !== null) {
-        window.clearInterval(staleCheckIntervalId)
-    }
+useControlCenterLifecycle({
+    checkForExternalConfigChanges,
+    confirmDiscardUnsavedChanges,
+    disposeFeedback,
+    focusTarget,
+    getClientTimezone,
+    handleBeforeUnload: handleBeforeUnload as EventListener,
+    handleDetectedExternalConfigChange,
+    handleGlobalKeydown: handleGlobalKeydown as EventListener,
+    handleSetupEntryChoicePopState:
+        handleSetupEntryChoicePopState as EventListener,
+    initializeSetupFlow,
+    initializeTimezoneOptions,
+    readiness,
+    refreshWorkspaceFromSnapshot,
+    routeState,
+    snapshotStore: configSnapshotStore,
+    staleCheckIntervalMs: STALE_CHECK_INTERVAL_MS,
+    syncSetupChoiceForReadiness,
 })
 </script>
 

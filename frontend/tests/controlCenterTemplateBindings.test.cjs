@@ -123,6 +123,16 @@ const derivedStateSource = fs.readFileSync(
     ),
     'utf8',
 )
+const lifecycleSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterLifecycle.ts',
+    ),
+    'utf8',
+)
 const workspaceRefreshSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -300,6 +310,51 @@ test('collapsed setup shells route clicks to their section', () => {
             `expected setup workspace to include ${snippet}`,
         )
     }
+})
+
+test('control center delegates lifecycle and window wiring to a dedicated composable', () => {
+    const requiredViewSnippets = [
+        "import { useControlCenterLifecycle } from '../composables/useControlCenterLifecycle'",
+        'useControlCenterLifecycle({',
+        'confirmDiscardUnsavedChanges,',
+        'handleDetectedExternalConfigChange,',
+        'refreshWorkspaceFromSnapshot,',
+        'syncSetupChoiceForReadiness,',
+    ]
+    const requiredLifecycleSnippets = [
+        'export function createControlCenterLifecycleHandlers(',
+        'export function useControlCenterLifecycle(',
+        "windowObject.addEventListener(",
+        "windowObject.removeEventListener(",
+        'hooks.watch(',
+        'hooks.onMounted(handlers.handleMounted)',
+    ]
+
+    for (const snippet of requiredViewSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredLifecycleSnippets) {
+        assert.ok(
+            lifecycleSource.includes(snippet),
+            `expected lifecycle composable to include ${snippet}`,
+        )
+    }
+
+    assert.equal(controlCenterViewSource.includes('watch('), false)
+    assert.equal(controlCenterViewSource.includes('onMounted('), false)
+    assert.equal(controlCenterViewSource.includes('onUnmounted('), false)
+    assert.equal(controlCenterViewSource.includes('onBeforeRouteLeave('), false)
+    assert.equal(
+        controlCenterViewSource.includes("window.addEventListener('beforeunload'"),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes("window.removeEventListener('beforeunload'"),
+        false,
+    )
 })
 
 test('control center delegates runtime activation handling to a dedicated composable', () => {
