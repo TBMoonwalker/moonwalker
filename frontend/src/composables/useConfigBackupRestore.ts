@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 
 import type { OperationResult } from '../control-center/operationResults'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
@@ -64,7 +64,7 @@ export function useConfigBackupRestore(
     const backupIncludeTradeData = ref(false)
     const backupDownloadLoading = ref(false)
     const restoreLoading = ref(false)
-    const backupFileInputRef = ref<HTMLInputElement | null>(null)
+    const backupFileInputRef = shallowRef<HTMLInputElement | null>(null)
     const selectedBackupFileName = ref<string | null>(null)
     const selectedBackupPayload = ref<BackupPayload | null>(null)
 
@@ -81,6 +81,14 @@ export function useConfigBackupRestore(
 
     function openBackupFilePicker(): void {
         backupFileInputRef.value?.click()
+    }
+
+    function bindBackupFileInput(element: Element | null): void {
+        backupFileInputRef.value =
+            typeof HTMLInputElement !== 'undefined' &&
+            element instanceof HTMLInputElement
+                ? element
+                : null
     }
 
     function clearSelectedBackup(): void {
@@ -272,6 +280,7 @@ export function useConfigBackupRestore(
         backupDownloadLoading,
         backupFileInputRef,
         backupIncludeTradeData,
+        bindBackupFileInput,
         clearSelectedBackup,
         handleBackupDownload,
         handleBackupFileSelected,

@@ -99,7 +99,7 @@
                 <n-divider />
 
                 <input
-                    ref="backupFileInputRef"
+                    :ref="bindBackupFileInput"
                     type="file"
                     accept="application/json,.json"
                     class="backup-file-input"
@@ -332,8 +332,8 @@ const {
 
 const {
     backupDownloadLoading,
-    backupFileInputRef,
     backupIncludeTradeData,
+    bindBackupFileInput,
     clearSelectedBackup,
     handleBackupDownload,
     handleBackupFileSelected,

@@ -204,8 +204,8 @@ const {
 
 const {
     backupDownloadLoading,
-    backupFileInputRef,
     backupIncludeTradeData,
+    bindBackupFileInput,
     clearSelectedBackup,
     handleBackupDownload,
     handleBackupFileSelected,
@@ -231,11 +231,6 @@ const {
     },
     surfaceMessages: false,
 })
-
-function bindBackupFileInput(element: Element | null): void {
-    backupFileInputRef.value =
-        element instanceof HTMLInputElement ? element : null
-}
 
 const rules = buildConfigRules({
     dca,
