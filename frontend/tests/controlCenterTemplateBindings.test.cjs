@@ -17,6 +17,36 @@ const setupFlowSource = fs.readFileSync(
     ),
     'utf8',
 )
+const feedbackSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterFeedback.ts',
+    ),
+    'utf8',
+)
+const missionStateSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterMissionState.ts',
+    ),
+    'utf8',
+)
+const workspaceActionsSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterWorkspaceActions.ts',
+    ),
+    'utf8',
+)
 
 test('control center target sections use dynamic element refs', () => {
     // Regression: ISSUE-003 — "Fix this" could not jump because setup targets
@@ -257,6 +287,118 @@ test('control center delegates navigation and guided focus handling to a dedicat
     assert.equal(
         controlCenterViewSource.includes(
             'async function handleModeSelect(',
+        ),
+        false,
+    )
+})
+
+test('control center delegates feedback and mission-state handling to dedicated composables', () => {
+    const requiredViewSnippets = [
+        "import { useControlCenterFeedback } from '../composables/useControlCenterFeedback'",
+        "import { useControlCenterMissionState } from '../composables/useControlCenterMissionState'",
+        '} = useControlCenterFeedback()',
+        '} = useControlCenterMissionState({',
+        'liveRegionMessage,',
+        'transitionIntent,',
+        'missionAlertTone,',
+        'missionSummaryTone,',
+        'showMissionPanel,',
+    ]
+    const requiredFeedbackSnippets = [
+        'function announce(messageText: string | null): void {',
+        'function setTransitionIntent(nextIntent: ControlCenterTransitionIntent): void {',
+        'function disposeFeedback(): void {',
+    ]
+    const requiredMissionSnippets = [
+        'const showMissionPanel = computed(',
+        'const missionSummaryTone = computed(',
+        'const missionAlertTone = computed(',
+        'const dirtySummary = computed(',
+    ]
+
+    for (const snippet of requiredViewSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredFeedbackSnippets) {
+        assert.ok(
+            feedbackSource.includes(snippet),
+            `expected feedback state to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredMissionSnippets) {
+        assert.ok(
+            missionStateSource.includes(snippet),
+            `expected mission state to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes(
+            'function announce(messageText: string | null): void {',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'function setTransitionIntent(nextIntent:',
+        ),
+        false,
+    )
+})
+
+test('control center delegates workspace action wrappers to a dedicated composable', () => {
+    const requiredViewSnippets = [
+        "import { useControlCenterWorkspaceActions } from '../composables/useControlCenterWorkspaceActions'",
+        '} = useControlCenterWorkspaceActions({',
+        'handleSubmitWorkspace,',
+        'handleBackupDownloadAction,',
+        'handleRestoreBackupAction,',
+        'handleMonitoringTestAction,',
+    ]
+    const requiredWorkspaceActionSnippets = [
+        'async function handleSubmitWorkspace(): Promise<void> {',
+        'async function handleBackupDownloadAction(): Promise<void> {',
+        'async function handleRestoreBackupAction(',
+        'async function handleMonitoringTestAction(): Promise<void> {',
+    ]
+
+    for (const snippet of requiredViewSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredWorkspaceActionSnippets) {
+        assert.ok(
+            workspaceActionsSource.includes(snippet),
+            `expected workspace actions to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function handleSubmitWorkspace(): Promise<void> {',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function handleBackupDownloadAction(): Promise<void> {',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function handleRestoreBackupAction(',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function handleMonitoringTestAction(): Promise<void> {',
         ),
         false,
     )

@@ -24,17 +24,13 @@ import {
     buildControlCenterQuery,
     normalizeControlCenterRouteState,
 } from '../control-center/routeState'
-import { submitControlCenterWorkspace } from '../control-center/saveWorkflow'
 import {
     getTaskPresentation,
-    getTasksForMode,
     resolveTargetForConfigKey,
 } from '../control-center/taskRegistry'
 import type {
     ControlCenterBlocker,
-    ControlCenterMode,
     ControlCenterTarget,
-    ControlCenterTransitionIntent,
 } from '../control-center/types'
 import { deriveControlCenterViewState } from '../control-center/viewState'
 import { useConfigAdvancedGeneral } from '../composables/useConfigAdvancedGeneral'
@@ -43,9 +39,12 @@ import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
 import { useConfigMonitoringTest } from '../composables/useConfigMonitoringTest'
 import { useConfigPageState } from '../composables/useConfigPageState'
 import { useConfigPersistableState } from '../composables/useConfigPersistableState'
+import { useControlCenterFeedback } from '../composables/useControlCenterFeedback'
+import { useControlCenterMissionState } from '../composables/useControlCenterMissionState'
 import { useControlCenterNavigation } from '../composables/useControlCenterNavigation'
 import { useControlCenterRuntimeActions } from '../composables/useControlCenterRuntimeActions'
 import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupFlow'
+import { useControlCenterWorkspaceActions } from '../composables/useControlCenterWorkspaceActions'
 import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
 import { useConfigSignalFlow } from '../composables/useConfigSignalFlow'
 import { useConfigValidationFlow } from '../composables/useConfigValidationFlow'
@@ -90,10 +89,6 @@ function normalizeBackendBlockers(rawBlockers: unknown): ControlCenterBlocker[] 
         .filter((blocker): blocker is ControlCenterBlocker => blocker !== null)
 }
 
-function createAnnouncement(message: string | null): string {
-    return message ? message.trim() : ''
-}
-
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
@@ -103,10 +98,7 @@ const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).to
 const isLoading = ref(true)
 const showAdvancedGeneral = ref(false)
 const loadRescueMessage = ref<string | null>(null)
-const liveRegionMessage = ref('')
-const transitionIntent = ref<ControlCenterTransitionIntent | null>(null)
 
-let transitionTimeoutId: number | null = null
 let staleCheckIntervalId: number | null = null
 
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
@@ -432,6 +424,13 @@ const effectiveLoadError = computed(
 const readiness = computed(() =>
     deriveControlCenterReadiness(configSnapshotStore.snapshot.value),
 )
+const {
+    announce,
+    disposeFeedback,
+    liveRegionMessage,
+    setTransitionIntent,
+    transitionIntent,
+} = useControlCenterFeedback()
 const visibleBlockers = computed(() => {
     if (
         transitionIntent.value?.status === 'blocked' &&
@@ -524,129 +523,42 @@ const configTrustState = computed(() =>
         loadState: configSnapshotStore.loadState.value,
     }),
 )
-const missionAlertTone = computed(() => {
-    if (transitionIntent.value) {
-        return missionSummaryTone.value
-    }
-    if (isStaleConfigTrustState(configTrustState.value.kind)) {
-        return configTrustState.value.tone
-    }
-    if (configTrustState.value.kind === 'checking') {
-        return configTrustState.value.tone
-    }
-    return missionSummaryTone.value
+const {
+    advancedSections,
+    dirtySummary,
+    formattedTrustTimestamp,
+    isStaleConfigTrustState,
+    missionAlertTone,
+    missionPrimaryLabel,
+    missionSummaryTone,
+    showMissionPanel,
+    showModeStrip,
+} = useControlCenterMissionState({
+    changedSectionLabels,
+    configTrustState,
+    isDirty,
+    readiness,
+    routeState,
+    showRestoreSetupFlow,
+    showSetupEntryGate,
+    transitionIntent,
+    viewState,
 })
-const formattedTrustTimestamp = computed(() =>
-    configTrustState.value.updatedAt
-        ? new Date(configTrustState.value.updatedAt).toLocaleTimeString()
-        : null,
-)
-
-const showModeStrip = computed(() => readiness.value.complete)
-const showMissionPanel = computed(
-    () =>
-        !(
-            routeState.value.mode === 'setup' &&
-            (showSetupEntryGate.value || showRestoreSetupFlow.value)
-        ),
-)
-const advancedSections = computed(() => {
-    const expertDomains = getTasksForMode('advanced').filter((task) =>
-        ['filter', 'autopilot', 'indicator'].includes(task.target),
-    )
-
-    return [
-        {
-            target: 'general',
-            title: 'Runtime diagnostics',
-            summary:
-                'Debug logging and WebSocket watchdog tuning for experienced operators.',
-            sectionId: 'control-center-general',
-        },
-        {
-            target: 'exchange',
-            title: 'Exchange overrides',
-            summary:
-                'Rare hostname overrides for custom exchange domains and edge deployments.',
-            sectionId: 'control-center-exchange',
-        },
-        {
-            target: 'dca',
-            title: 'Expert safeguards',
-            summary:
-                'Advanced take-profit confirmation controls for noisy or thin markets.',
-            sectionId: 'control-center-dca',
-        },
-        ...expertDomains,
-    ]
+const {
+    handleBackupDownloadAction,
+    handleMonitoringTestAction,
+    handleRestoreBackupAction,
+    handleSubmitWorkspace,
+} = useControlCenterWorkspaceActions({
+    announce,
+    handleBackupDownload,
+    handleRestoreBackup,
+    navigateToControlCenter,
+    normalizeBlockers: normalizeBackendBlockers,
+    setTransitionIntent,
+    submitForm,
+    testMonitoringTelegram,
 })
-
-const missionPrimaryLabel = computed(() => {
-    if (!readiness.value.complete) {
-        const nextTarget = readiness.value.nextTarget
-        return nextTarget
-            ? `Fix ${getTaskPresentation(nextTarget).title}`
-            : 'Continue setup'
-    }
-    if (readiness.value.dryRun) {
-        return 'Activate live trading'
-    }
-    return 'Review overview'
-})
-
-const missionSummaryTone = computed(() => {
-    if (viewState.value.kind === 'rescue') {
-        return 'error'
-    }
-    if (viewState.value.kind === 'attention_needed') {
-        return 'warning'
-    }
-    if (viewState.value.kind === 'post_action_success') {
-        return 'success'
-    }
-    if (viewState.value.kind === 'healthy') {
-        return 'success'
-    }
-    return 'info'
-})
-
-const dirtySummary = computed(() => {
-    if (!isDirty.value) {
-        return 'No pending draft changes.'
-    }
-    return `Draft changes: ${changedSectionLabels.value.join(', ')}`
-})
-
-function isStaleConfigTrustState(
-    kind: ReturnType<typeof deriveControlCenterConfigTrustState>['kind'],
-): boolean {
-    return kind === 'stale_but_safe' || kind === 'stale_with_draft_conflict'
-}
-
-function announce(messageText: string | null): void {
-    liveRegionMessage.value = ''
-    const nextMessage = createAnnouncement(messageText)
-    if (!nextMessage) {
-        return
-    }
-    window.setTimeout(() => {
-        liveRegionMessage.value = nextMessage
-    }, 10)
-}
-
-function setTransitionIntent(nextIntent: ControlCenterTransitionIntent): void {
-    transitionIntent.value = nextIntent
-    if (transitionTimeoutId !== null) {
-        window.clearTimeout(transitionTimeoutId)
-        transitionTimeoutId = null
-    }
-    if (nextIntent.status === 'success') {
-        transitionTimeoutId = window.setTimeout(() => {
-            transitionIntent.value = null
-            transitionTimeoutId = null
-        }, 8000)
-    }
-}
 
 function isInteractiveTarget(target: EventTarget | null): boolean {
     return (
@@ -664,75 +576,6 @@ async function handleSetupSectionShellClick(
         return
     }
     await handleSetupTaskSelect(target)
-}
-
-async function handleSubmitWorkspace(): Promise<void> {
-    await submitControlCenterWorkspace({
-        announce,
-        navigateToMode: async (mode) => navigateToControlCenter(mode),
-        normalizeBlockers: normalizeBackendBlockers,
-        setTransitionIntent,
-        submitForm,
-    })
-}
-
-async function handleBackupDownloadAction(): Promise<void> {
-    const result = await handleBackupDownload()
-    if (result.status === 'success') {
-        announce(result.message)
-    } else if (result.status === 'error') {
-        setTransitionIntent({
-            kind: 'save',
-            status: 'error',
-            message: result.message,
-            at: Date.now(),
-        })
-        announce(result.message)
-    }
-}
-
-async function handleRestoreBackupAction(
-    mode: 'config' | 'full',
-): Promise<void> {
-    const result = await handleRestoreBackup(mode)
-    if (result.status === 'success') {
-        await navigateToControlCenter('overview')
-        setTransitionIntent({
-            kind: 'restore',
-            status: 'success',
-            message: result.message,
-            at: Date.now(),
-            mode: 'overview',
-        })
-        announce(result.message)
-        return
-    }
-    if (result.status === 'error') {
-        setTransitionIntent({
-            kind: 'restore',
-            status: 'error',
-            message: result.message,
-            at: Date.now(),
-        })
-        announce(result.message)
-    }
-}
-
-async function handleMonitoringTestAction(): Promise<void> {
-    const result = await testMonitoringTelegram()
-    if (result.status === 'success') {
-        announce(result.message)
-        return
-    }
-    if (result.status === 'error') {
-        setTransitionIntent({
-            kind: 'save',
-            status: 'error',
-            message: result.message,
-            at: Date.now(),
-        })
-        announce(result.message)
-    }
 }
 
 watch(
@@ -786,9 +629,7 @@ onUnmounted(() => {
     window.removeEventListener('keydown', handleGlobalKeydown)
     window.removeEventListener('focus', checkForExternalConfigChanges)
     window.removeEventListener('popstate', handleSetupEntryChoicePopState)
-    if (transitionTimeoutId !== null) {
-        window.clearTimeout(transitionTimeoutId)
-    }
+    disposeFeedback()
     if (staleCheckIntervalId !== null) {
         window.clearInterval(staleCheckIntervalId)
     }
