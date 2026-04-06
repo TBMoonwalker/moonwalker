@@ -7,6 +7,16 @@ const controlCenterViewSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'views', 'ControlCenterView.vue'),
     'utf8',
 )
+const setupFlowSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterSetupFlow.ts',
+    ),
+    'utf8',
+)
 const setupEntryHistorySource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'control-center', 'setupEntryHistory.ts'),
     'utf8',
@@ -19,13 +29,17 @@ test('first-run setup entry choices create browser history state', () => {
     // Found by /qa on 2026-03-22
     // Report: .gstack/qa-reports/qa-report-127-0-0-1-2026-03-22.md
     const requiredViewSnippets = [
-        'buildSetupEntryChoiceHistoryState,',
-        'getSetupEntryChoiceFromHistoryState,',
-        'window.history.pushState(',
-        'window.history.replaceState(',
-        'function handleSetupEntryChoicePopState(): void {',
+        "import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupFlow'",
         "window.addEventListener('popstate', handleSetupEntryChoicePopState)",
         "window.removeEventListener('popstate', handleSetupEntryChoicePopState)",
+    ]
+    const requiredSetupFlowSnippets = [
+        'buildSetupEntryChoiceHistoryState,',
+        'getSetupEntryChoiceFromHistoryState,',
+        'windowRef.history.pushState(',
+        'windowRef.history.replaceState(',
+        'function handleSetupEntryChoicePopState(): void {',
+        'function initializeSetupFlow(): void {',
     ]
     const requiredHelperSnippets = [
         "export const CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY =",
@@ -37,6 +51,12 @@ test('first-run setup entry choices create browser history state', () => {
         assert.ok(
             controlCenterViewSource.includes(snippet),
             `expected control center entry history wiring to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupFlowSnippets) {
+        assert.ok(
+            setupFlowSource.includes(snippet),
+            `expected setup flow wiring to include ${snippet}`,
         )
     }
     for (const snippet of requiredHelperSnippets) {

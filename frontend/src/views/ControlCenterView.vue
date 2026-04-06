@@ -22,12 +22,6 @@ import { deriveGuidedFocusTarget } from '../control-center/focusFlow'
 import type { OperationResult } from '../control-center/operationResults'
 import { deriveControlCenterReadiness } from '../control-center/readiness'
 import {
-    buildSetupEntryChoiceHistoryState,
-    getSetupEntryChoiceFromHistoryState,
-    parseSetupEntryChoice,
-    type SetupEntryChoice,
-} from '../control-center/setupEntryHistory'
-import {
     buildControlCenterQuery,
     normalizeControlCenterRouteState,
 } from '../control-center/routeState'
@@ -52,6 +46,7 @@ import { useConfigMonitoringTest } from '../composables/useConfigMonitoringTest'
 import { useConfigPageState } from '../composables/useConfigPageState'
 import { useConfigPersistableState } from '../composables/useConfigPersistableState'
 import { useControlCenterRuntimeActions } from '../composables/useControlCenterRuntimeActions'
+import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupFlow'
 import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
 import { useConfigSignalFlow } from '../composables/useConfigSignalFlow'
 import { useConfigValidationFlow } from '../composables/useConfigValidationFlow'
@@ -101,33 +96,6 @@ function createAnnouncement(message: string | null): string {
     return message ? message.trim() : ''
 }
 
-type SetupStyle = 'guided' | 'full'
-
-function getStoredSetupEntryChoice(preferenceKey: string): SetupEntryChoice | null {
-    return parseSetupEntryChoice(window.localStorage.getItem(preferenceKey))
-}
-
-function storeSetupEntryChoice(
-    preferenceKey: string,
-    choice: SetupEntryChoice | null,
-): void {
-    if (!choice) {
-        window.localStorage.removeItem(preferenceKey)
-        return
-    }
-    window.localStorage.setItem(preferenceKey, choice)
-}
-
-function getStoredSetupStyle(preferenceKey: string): SetupStyle {
-    return window.localStorage.getItem(preferenceKey) === 'full'
-        ? 'full'
-        : 'guided'
-}
-
-function storeSetupStyle(preferenceKey: string, style: SetupStyle): void {
-    window.localStorage.setItem(preferenceKey, style)
-}
-
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
@@ -136,8 +104,6 @@ const configSnapshotStore = useSharedConfigSnapshot()
 const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).toString()
 const isLoading = ref(true)
 const showAdvancedGeneral = ref(false)
-const setupEntryChoice = ref<SetupEntryChoice | null>(null)
-const setupStyle = ref<SetupStyle>('guided')
 const loadRescueMessage = ref<string | null>(null)
 const liveRegionMessage = ref('')
 const transitionIntent = ref<ControlCenterTransitionIntent | null>(null)
@@ -146,8 +112,6 @@ let transitionTimeoutId: number | null = null
 let staleCheckIntervalId: number | null = null
 
 const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
-const CONTROL_CENTER_ENTRY_CHOICE_KEY = 'moonwalker.controlCenter.entryChoice'
-const CONTROL_CENTER_SETUP_STYLE_KEY = 'moonwalker.controlCenter.setupStyle'
 const STALE_CHECK_INTERVAL_MS = 15000
 const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
 const ADVANCED_WS_STALE_TIMEOUT_MS = 20000
@@ -513,6 +477,34 @@ const {
     snapshotStore: configSnapshotStore,
     syncControlCenterConfigChange,
 })
+const {
+    activeSetupTarget,
+    findSetupBlocker,
+    getSetupTaskStatus,
+    getSetupTaskSummary,
+    handleMissionPrimaryAction,
+    handleSetupEntryChoice,
+    handleSetupEntryChoicePopState,
+    handleSetupStyleChange,
+    handleSetupTaskSelect,
+    initializeSetupFlow,
+    isSetupTaskExpanded,
+    setupShowsAdvancedFields,
+    setupStyle,
+    setupTasks,
+    showRestoreSetupFlow,
+    showSetupEntryGate,
+    showSetupStyleSelector,
+    syncSetupChoiceForReadiness,
+} = useControlCenterSetupFlow({
+    focusTarget,
+    guideToTarget,
+    handleActivateLiveTrading,
+    navigateToControlCenter,
+    readiness,
+    routeState,
+    visibleBlockers,
+})
 const configTrustState = computed(() =>
     deriveControlCenterConfigTrustState({
         hasKnownNewerSnapshot: configSnapshotStore.hasKnownNewerSnapshot.value,
@@ -540,20 +532,7 @@ const formattedTrustTimestamp = computed(() =>
         : null,
 )
 
-const isPreReadiness = computed(() => !readiness.value.complete)
 const showModeStrip = computed(() => readiness.value.complete)
-const setupShowsAdvancedFields = computed(
-    () => isPreReadiness.value && setupStyle.value === 'full',
-)
-const showSetupEntryGate = computed(
-    () => readiness.value.firstRun && setupEntryChoice.value === null,
-)
-const showRestoreSetupFlow = computed(
-    () => readiness.value.firstRun && setupEntryChoice.value === 'restore',
-)
-const showSetupStyleSelector = computed(
-    () => isPreReadiness.value && !showSetupEntryGate.value && !showRestoreSetupFlow.value,
-)
 const showMissionPanel = computed(
     () =>
         !(
@@ -561,21 +540,6 @@ const showMissionPanel = computed(
             (showSetupEntryGate.value || showRestoreSetupFlow.value)
         ),
 )
-const setupTasks = computed(() => getTasksForMode('setup'))
-const activeSetupTarget = computed<ControlCenterTarget>(() => {
-    const requestedTarget = routeState.value.target
-    if (
-        requestedTarget &&
-        getTaskPresentation(requestedTarget).modes.includes('setup')
-    ) {
-        return requestedTarget
-    }
-    const nextTarget = readiness.value.nextTarget
-    if (nextTarget && getTaskPresentation(nextTarget).modes.includes('setup')) {
-        return nextTarget
-    }
-    return 'general'
-})
 const advancedSections = computed(() => {
     const expertDomains = getTasksForMode('advanced').filter((task) =>
         ['filter', 'autopilot', 'indicator'].includes(task.target),
@@ -642,71 +606,6 @@ const dirtySummary = computed(() => {
     }
     return `Draft changes: ${changedSectionLabels.value.join(', ')}`
 })
-
-function rememberSetupEntryChoice(choice: SetupEntryChoice | null): void {
-    setupEntryChoice.value = choice
-    storeSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY, choice)
-}
-
-function syncSetupEntryChoiceHistory(
-    choice: SetupEntryChoice | null,
-    replace = false,
-): void {
-    const nextState = buildSetupEntryChoiceHistoryState(window.history.state, choice)
-    if (replace) {
-        window.history.replaceState(nextState, '', window.location.href)
-        return
-    }
-    window.history.pushState(nextState, '', window.location.href)
-}
-
-function rememberSetupStyle(style: SetupStyle): void {
-    setupStyle.value = style
-    storeSetupStyle(CONTROL_CENTER_SETUP_STYLE_KEY, style)
-}
-
-function findSetupBlocker(target: ControlCenterTarget): ControlCenterBlocker | undefined {
-    return visibleBlockers.value.find((blocker) => blocker.target === target)
-}
-
-function isSetupTaskExpanded(target: ControlCenterTarget): boolean {
-    return setupStyle.value === 'full' || activeSetupTarget.value === target
-}
-
-function getSetupTaskStatus(target: ControlCenterTarget): {
-    label: string
-    type: 'default' | 'info' | 'warning' | 'success'
-} {
-    if (activeSetupTarget.value === target) {
-        return {
-            label: 'Current',
-            type: 'info',
-        }
-    }
-
-    if (findSetupBlocker(target)) {
-        return {
-            label: 'Needs attention',
-            type: 'warning',
-        }
-    }
-
-    return {
-        label: 'Ready',
-        type: 'success',
-    }
-}
-
-function getSetupTaskSummary(target: ControlCenterTarget): string {
-    const blocker = findSetupBlocker(target)
-    if (blocker) {
-        return blocker.description
-    }
-    if (activeSetupTarget.value === target) {
-        return 'Current setup step.'
-    }
-    return 'Saved and ready to review.'
-}
 
 function isStaleConfigTrustState(
     kind: ReturnType<typeof deriveControlCenterConfigTrustState>['kind'],
@@ -805,39 +704,12 @@ async function handleModeSelect(mode: ControlCenterMode): Promise<void> {
     await navigateToControlCenter(mode, nextTarget)
 }
 
-async function handleSetupEntryChoice(choice: SetupEntryChoice): Promise<void> {
-    if (setupEntryChoice.value === choice) {
-        return
-    }
-    rememberSetupEntryChoice(choice)
-    syncSetupEntryChoiceHistory(choice)
-    trackUiEvent('control_center_setup_entry_selected', { choice })
-    if (choice === 'new') {
-        await focusTarget(activeSetupTarget.value)
-    }
-}
-
-function handleSetupEntryChoicePopState(): void {
-    rememberSetupEntryChoice(
-        getSetupEntryChoiceFromHistoryState(window.history.state),
-    )
-}
-
-function handleSetupStyleChange(style: SetupStyle): void {
-    rememberSetupStyle(style)
-    trackUiEvent('control_center_setup_style_selected', { style })
-}
-
 function isInteractiveTarget(target: EventTarget | null): boolean {
     return (
         target instanceof Element &&
         target.closest('button, a, input, select, textarea, label, [role="button"]') !==
             null
     )
-}
-
-async function handleSetupTaskSelect(target: ControlCenterTarget): Promise<void> {
-    await navigateToControlCenter('setup', target)
 }
 
 async function handleSetupSectionShellClick(
@@ -848,18 +720,6 @@ async function handleSetupSectionShellClick(
         return
     }
     await handleSetupTaskSelect(target)
-}
-
-async function handleMissionPrimaryAction(): Promise<void> {
-    if (!readiness.value.complete) {
-        await guideToTarget(readiness.value.nextTarget ?? 'exchange')
-        return
-    }
-    if (readiness.value.dryRun) {
-        await handleActivateLiveTrading()
-        return
-    }
-    await navigateToControlCenter('overview')
 }
 
 async function handleSubmitWorkspace(): Promise<void> {
@@ -944,10 +804,7 @@ watch(
 watch(
     () => readiness.value.firstRun,
     (firstRun) => {
-        if (!firstRun && setupEntryChoice.value === 'restore') {
-            rememberSetupEntryChoice('new')
-            syncSetupEntryChoiceHistory('new', true)
-        }
+        syncSetupChoiceForReadiness(firstRun)
     },
 )
 
@@ -965,15 +822,7 @@ onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
 
 onMounted(async () => {
     initializeTimezoneOptions(getClientTimezone())
-    const historySetupEntryChoice = getSetupEntryChoiceFromHistoryState(
-        window.history.state,
-    )
-    rememberSetupEntryChoice(
-        historySetupEntryChoice ??
-            getStoredSetupEntryChoice(CONTROL_CENTER_ENTRY_CHOICE_KEY),
-    )
-    syncSetupEntryChoiceHistory(setupEntryChoice.value, true)
-    rememberSetupStyle(getStoredSetupStyle(CONTROL_CENTER_SETUP_STYLE_KEY))
+    initializeSetupFlow()
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('keydown', handleGlobalKeydown)
     window.addEventListener('focus', checkForExternalConfigChanges)
