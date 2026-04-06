@@ -4,9 +4,11 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
 
 import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'
+import ControlCenterAdvancedWorkspace from '../components/control-center/ControlCenterAdvancedWorkspace.vue'
 import ControlCenterModeStrip from '../components/control-center/ControlCenterModeStrip.vue'
 import ControlCenterOverviewWorkspace from '../components/control-center/ControlCenterOverviewWorkspace.vue'
 import ControlCenterSetupWorkspace from '../components/control-center/ControlCenterSetupWorkspace.vue'
+import ControlCenterUtilitiesWorkspace from '../components/control-center/ControlCenterUtilitiesWorkspace.vue'
 import ConfigAutopilotSection from '../components/config/ConfigAutopilotSection.vue'
 import ConfigDcaAdvancedSection from '../components/config/ConfigDcaAdvancedSection.vue'
 import ConfigDcaSection from '../components/config/ConfigDcaSection.vue'
@@ -729,188 +731,89 @@ onUnmounted(() => {
             </template>
 
             <template v-else-if="routeState.mode === 'advanced'">
-                <div
-                    v-for="section in advancedSections"
-                    :id="section.sectionId"
-                    :key="section.target"
-                    :ref="bindTargetElement(section.target)"
-                    class="task-section"
+                <ControlCenterAdvancedWorkspace
+                    :advanced-sections="advancedSections"
+                    :bind-target-element="bindTargetElement"
                 >
-                    <div class="task-section-header" tabindex="-1" data-control-center-anchor>
-                        <h2>{{ section.title }}</h2>
-                        <n-text depth="3">{{ section.summary }}</n-text>
-                    </div>
+                    <template #general>
+                        <ConfigGeneralAdvancedSection
+                            ref="generalFormRef"
+                            :general="general"
+                            :rules="rules"
+                        />
+                    </template>
 
-                    <ConfigGeneralAdvancedSection
-                        v-if="section.target === 'general'"
-                        ref="generalFormRef"
-                        :general="general"
-                        :rules="rules"
-                    />
-                    <ConfigExchangeAdvancedSection
-                        v-else-if="section.target === 'exchange'"
-                        ref="exchangeFormRef"
-                        :exchange="exchange"
-                        :rules="rules"
-                    />
-                    <ConfigDcaAdvancedSection
-                        v-else-if="section.target === 'dca'"
-                        ref="dcaFormRef"
-                        :dca="dca"
-                        :rules="rules"
-                    />
-                    <ConfigFilterSection
-                        v-else-if="section.target === 'filter'"
-                        ref="filterFormRef"
-                        :card-title="null"
-                        :filter="filter"
-                        :rules="rules"
-                        :show-asap-fields="signal.signal === 'asap'"
-                    />
-                    <ConfigAutopilotSection
-                        v-else-if="section.target === 'autopilot'"
-                        ref="autopilotFormRef"
-                        :autopilot="autopilot"
-                        :card-title="null"
-                        :rules="rules"
-                        :show-fields="autopilot.enabled"
-                    />
-                    <ConfigIndicatorSection
-                        v-else-if="section.target === 'indicator'"
-                        :card-title="null"
-                        ref="indicatorFormRef"
-                        :history-lookback-options="historyLookbackOptions"
-                        :indicator="indicator"
-                        :rules="rules"
-                    />
-                </div>
+                    <template #exchange>
+                        <ConfigExchangeAdvancedSection
+                            ref="exchangeFormRef"
+                            :exchange="exchange"
+                            :rules="rules"
+                        />
+                    </template>
+
+                    <template #dca>
+                        <ConfigDcaAdvancedSection
+                            ref="dcaFormRef"
+                            :dca="dca"
+                            :rules="rules"
+                        />
+                    </template>
+
+                    <template #filter>
+                        <ConfigFilterSection
+                            ref="filterFormRef"
+                            :card-title="null"
+                            :filter="filter"
+                            :rules="rules"
+                            :show-asap-fields="signal.signal === 'asap'"
+                        />
+                    </template>
+
+                    <template #autopilot>
+                        <ConfigAutopilotSection
+                            ref="autopilotFormRef"
+                            :autopilot="autopilot"
+                            :card-title="null"
+                            :rules="rules"
+                            :show-fields="autopilot.enabled"
+                        />
+                    </template>
+
+                    <template #indicator>
+                        <ConfigIndicatorSection
+                            ref="indicatorFormRef"
+                            :card-title="null"
+                            :history-lookback-options="historyLookbackOptions"
+                            :indicator="indicator"
+                            :rules="rules"
+                        />
+                    </template>
+                </ControlCenterAdvancedWorkspace>
             </template>
 
             <template v-else>
-                <div
-                    :ref="bindTargetElement('backup-restore')"
-                    class="task-section"
-                    id="control-center-backup-restore"
-                >
-                    <div class="task-section-header" tabindex="-1" data-control-center-anchor>
-                        <h2>{{ getTaskPresentation('backup-restore').title }}</h2>
-                        <n-text depth="3">{{ getTaskPresentation('backup-restore').summary }}</n-text>
-                    </div>
-                    <n-card title="Backup & Restore" size="small">
-                        <n-flex vertical :size="12">
-                            <n-alert type="info" title="Portable backup">
-                                Download configuration alone or include all trade data. Full restores
-                                will repopulate the shared workspace after the backend finishes.
-                            </n-alert>
-
-                            <n-flex align="center" :wrap="true" :size="[12, 12]">
-                                <n-checkbox v-model:checked="backupIncludeTradeData">
-                                    Include trade data in backup
-                                </n-checkbox>
-                                <n-button
-                                    class="utility-action-button"
-                                    type="primary"
-                                    strong
-                                    :loading="backupDownloadLoading"
-                                    @click="handleBackupDownloadAction"
-                                >
-                                    Download backup
-                                </n-button>
-                            </n-flex>
-
-                            <n-divider />
-
-                            <input
-                                ref="backupFileInputRef"
-                                type="file"
-                                accept="application/json,.json"
-                                class="backup-file-input"
-                                @change="handleBackupFileSelected"
-                            >
-
-                            <n-flex align="center" :wrap="true" :size="[12, 12]">
-                                <n-button
-                                    class="utility-action-button"
-                                    secondary
-                                    @click="openBackupFilePicker"
-                                >
-                                    Select backup file
-                                </n-button>
-                                <span v-if="selectedBackupFileName" class="backup-file-name">
-                                    {{ selectedBackupFileName }}
-                                </span>
-                                <n-button
-                                    v-if="selectedBackupFileName"
-                                    quaternary
-                                    @click="clearSelectedBackup"
-                                >
-                                    Clear
-                                </n-button>
-                            </n-flex>
-
-                            <n-text v-if="selectedBackupPayload" depth="3">
-                                Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
-                            </n-text>
-
-                            <n-flex align="center" :wrap="true" :size="[12, 12]">
-                                <n-button
-                                    class="utility-action-button"
-                                    type="warning"
-                                    :loading="restoreLoading"
-                                    :disabled="!selectedBackupPayload"
-                                    @click="handleRestoreBackupAction('config')"
-                                >
-                                    Restore config only
-                                </n-button>
-                                <n-button
-                                    class="utility-action-button"
-                                    type="error"
-                                    ghost
-                                    :loading="restoreLoading"
-                                    :disabled="!selectedBackupHasTradeData"
-                                    @click="handleRestoreBackupAction('full')"
-                                >
-                                    Restore full backup
-                                </n-button>
-                            </n-flex>
-                        </n-flex>
-                    </n-card>
-                </div>
-
-                <div class="task-section">
-                    <div class="task-section-header">
-                        <h2>Connectivity test</h2>
-                        <n-text depth="3">
-                            Run operational utility checks without mixing them into the config draft.
-                        </n-text>
-                    </div>
-                    <n-card size="small">
-                        <n-flex vertical :size="12">
-                            <n-text depth="3">
-                                Send a Telegram test using the currently saved monitoring configuration.
-                            </n-text>
-                            <n-flex align="center" :wrap="true" :size="[12, 12]">
-                                <n-button
-                                    class="utility-action-button"
-                                    secondary
-                                    type="primary"
-                                    :loading="monitoringTestLoading"
-                                    :disabled="!canTestMonitoringTelegram()"
-                                    @click="handleMonitoringTestAction"
-                                >
-                                    Test Telegram
-                                </n-button>
-                                <n-text depth="3">
-                                    {{
-                                        canTestMonitoringTelegram()
-                                            ? 'Saved monitoring credentials are ready for a test message.'
-                                            : 'Complete Telegram credentials in Setup first.'
-                                    }}
-                                </n-text>
-                            </n-flex>
-                        </n-flex>
-                    </n-card>
-                </div>
+                <ControlCenterUtilitiesWorkspace
+                    :backup-download-loading="backupDownloadLoading"
+                    :backup-include-trade-data="backupIncludeTradeData"
+                    :backup-restore-summary="getTaskPresentation('backup-restore').summary"
+                    :backup-restore-title="getTaskPresentation('backup-restore').title"
+                    :bind-backup-file-input="bindBackupFileInput"
+                    :bind-backup-restore-target-ref="bindTargetElement('backup-restore')"
+                    :can-test-monitoring-telegram="canTestMonitoringTelegram()"
+                    :has-selected-backup-payload="!!selectedBackupPayload"
+                    :monitoring-test-loading="monitoringTestLoading"
+                    :restore-loading="restoreLoading"
+                    :selected-backup-config-count="selectedBackupConfigCount"
+                    :selected-backup-file-name="selectedBackupFileName"
+                    :selected-backup-has-trade-data="selectedBackupHasTradeData"
+                    @backup-file-selected="handleBackupFileSelected"
+                    @clear-selected-backup="clearSelectedBackup"
+                    @download-backup="handleBackupDownloadAction"
+                    @monitoring-test="handleMonitoringTestAction"
+                    @open-backup-file-picker="openBackupFilePicker"
+                    @restore-backup="handleRestoreBackupAction"
+                    @update:backup-include-trade-data="backupIncludeTradeData = $event"
+                />
             </template>
         </n-flex>
     </div>
@@ -945,44 +848,6 @@ onUnmounted(() => {
 
 :deep(.utility-action-button.n-button--default-type.n-button--secondary:not(.n-button--disabled) .n-button__content) {
     color: var(--mw-color-text-primary);
-}
-
-.task-section {
-    width: 100%;
-}
-
-.task-section {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-}
-
-.task-section-header {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-}
-
-.task-section-header:focus,
-.task-section-header:focus-visible {
-    outline: none;
-    box-shadow: none;
-}
-
-.task-section-header h2 {
-    color: var(--mw-color-text-primary);
-    font-family: var(--mw-font-display);
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-}
-
-.backup-file-input {
-    display: none;
-}
-
-.backup-file-name {
-    font-size: 14px;
 }
 
 .sr-only {

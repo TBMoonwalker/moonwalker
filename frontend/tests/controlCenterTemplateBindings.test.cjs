@@ -28,6 +28,17 @@ const missionPanelSource = fs.readFileSync(
     ),
     'utf8',
 )
+const advancedWorkspaceSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterAdvancedWorkspace.vue',
+    ),
+    'utf8',
+)
 const modeStripSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -58,6 +69,17 @@ const setupWorkspaceSource = fs.readFileSync(
         'components',
         'control-center',
         'ControlCenterSetupWorkspace.vue',
+    ),
+    'utf8',
+)
+const utilitiesWorkspaceSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterUtilitiesWorkspace.vue',
     ),
     'utf8',
 )
@@ -129,13 +151,17 @@ test('control center target sections use dynamic element refs', () => {
     )
     assert.ok(
         controlCenterViewSource.includes(
-            ":ref=\"bindTargetElement('backup-restore')\"",
+            ":bind-backup-restore-target-ref=\"bindTargetElement('backup-restore')\"",
         ),
-        'expected the utilities backup section to keep its direct target ref binding',
+        'expected the utilities workspace to receive the backup target ref binder',
     )
     assert.ok(
         setupWorkspaceSource.includes(':ref="bindTargetElement(task.target)"'),
         'expected setup task sections to use dynamic target ref bindings',
+    )
+    assert.ok(
+        utilitiesWorkspaceSource.includes(':ref="bindBackupRestoreTargetRef"'),
+        'expected the utilities workspace to expose the backup target ref binding',
     )
 
     assert.equal(
@@ -205,16 +231,17 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
     const requiredViewSnippets = [
         '<ControlCenterSetupWorkspace',
         ':show-debug="setupShowsAdvancedFields"',
-        'ConfigGeneralAdvancedSection',
-        'ConfigExchangeAdvancedSection',
-        'ConfigDcaAdvancedSection',
-        ':card-title="null"',
-        'Complete Telegram credentials in Setup first.',
     ]
     const requiredSetupWorkspaceSnippets = [
         'class="setup-progress-grid"',
         'slot :name="task.target"',
         'Choose your setup pace',
+    ]
+    const requiredAdvancedWorkspaceSnippets = [
+        'slot :name="section.target"',
+    ]
+    const requiredUtilitiesWorkspaceSnippets = [
+        'Complete Telegram credentials in Setup first.',
     ]
 
     for (const snippet of requiredViewSnippets) {
@@ -227,6 +254,18 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         assert.ok(
             setupWorkspaceSource.includes(snippet),
             `expected setup workspace to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredAdvancedWorkspaceSnippets) {
+        assert.ok(
+            advancedWorkspaceSource.includes(snippet),
+            `expected advanced workspace to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredUtilitiesWorkspaceSnippets) {
+        assert.ok(
+            utilitiesWorkspaceSource.includes(snippet),
+            `expected utilities workspace to include ${snippet}`,
         )
     }
 
@@ -554,6 +593,54 @@ test('control center delegates setup workspace presentation to a dedicated compo
     )
     assert.equal(
         controlCenterViewSource.includes('Choose your setup pace'),
+        false,
+    )
+})
+
+test('control center delegates advanced and utilities presentation to dedicated components', () => {
+    const requiredViewSnippets = [
+        "import ControlCenterAdvancedWorkspace from '../components/control-center/ControlCenterAdvancedWorkspace.vue'",
+        "import ControlCenterUtilitiesWorkspace from '../components/control-center/ControlCenterUtilitiesWorkspace.vue'",
+        '<ControlCenterAdvancedWorkspace',
+        '<ControlCenterUtilitiesWorkspace',
+        '@update:backup-include-trade-data="backupIncludeTradeData = $event"',
+    ]
+    const requiredAdvancedWorkspaceSnippets = [
+        'slot :name="section.target"',
+        'task-section-header',
+    ]
+    const requiredUtilitiesWorkspaceSnippets = [
+        'Backup & Restore',
+        'Connectivity test',
+        "@click=\"emit('monitoring-test')\"",
+        "@update:checked=\"emit('update:backup-include-trade-data', $event)\"",
+    ]
+
+    for (const snippet of requiredViewSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredAdvancedWorkspaceSnippets) {
+        assert.ok(
+            advancedWorkspaceSource.includes(snippet),
+            `expected advanced workspace to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredUtilitiesWorkspaceSnippets) {
+        assert.ok(
+            utilitiesWorkspaceSource.includes(snippet),
+            `expected utilities workspace to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes('Backup & Restore'),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes('Connectivity test'),
         false,
     )
 })
