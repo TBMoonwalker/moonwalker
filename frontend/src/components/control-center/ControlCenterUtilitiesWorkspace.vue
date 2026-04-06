@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import ConfigBackupDownloadControls from '../config/ConfigBackupDownloadControls.vue'
+import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'
+
 type BackupRestoreMode = 'config' | 'full'
 
 defineProps<{
@@ -40,84 +43,33 @@ const emit = defineEmits<{
         </div>
         <n-card title="Backup & Restore" size="small">
             <n-flex vertical :size="12">
-                <n-alert type="info" title="Portable backup">
-                    Download configuration alone or include all trade data. Full restores
-                    will repopulate the shared workspace after the backend finishes.
-                </n-alert>
-
-                <n-flex align="center" :wrap="true" :size="[12, 12]">
-                    <n-checkbox
-                        :checked="backupIncludeTradeData"
-                        @update:checked="emit('update:backup-include-trade-data', $event)"
-                    >
-                        Include trade data in backup
-                    </n-checkbox>
-                    <n-button
-                        class="utility-action-button"
-                        type="primary"
-                        strong
-                        :loading="backupDownloadLoading"
-                        @click="emit('download-backup')"
-                    >
-                        Download backup
-                    </n-button>
-                </n-flex>
+                <ConfigBackupDownloadControls
+                    action-button-class="utility-action-button"
+                    :backup-download-loading="backupDownloadLoading"
+                    :backup-include-trade-data="backupIncludeTradeData"
+                    :download-button-secondary="false"
+                    :download-button-strong="true"
+                    info-title="Portable backup"
+                    info-message="Download configuration alone or include all trade data. Full restores will repopulate the shared workspace after the backend finishes."
+                    @download-backup="emit('download-backup')"
+                    @update:backup-include-trade-data="emit('update:backup-include-trade-data', $event)"
+                />
 
                 <n-divider />
 
-                <input
-                    :ref="bindBackupFileInput"
-                    type="file"
-                    accept="application/json,.json"
-                    class="backup-file-input"
-                    @change="emit('backup-file-selected', $event)"
-                >
-
-                <n-flex align="center" :wrap="true" :size="[12, 12]">
-                    <n-button
-                        class="utility-action-button"
-                        secondary
-                        @click="emit('open-backup-file-picker')"
-                    >
-                        Select backup file
-                    </n-button>
-                    <span v-if="selectedBackupFileName" class="backup-file-name">
-                        {{ selectedBackupFileName }}
-                    </span>
-                    <n-button
-                        v-if="selectedBackupFileName"
-                        quaternary
-                        @click="emit('clear-selected-backup')"
-                    >
-                        Clear
-                    </n-button>
-                </n-flex>
-
-                <n-text v-if="hasSelectedBackupPayload" depth="3">
-                    Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
-                </n-text>
-
-                <n-flex align="center" :wrap="true" :size="[12, 12]">
-                    <n-button
-                        class="utility-action-button"
-                        type="warning"
-                        :loading="restoreLoading"
-                        :disabled="!hasSelectedBackupPayload"
-                        @click="emit('restore-backup', 'config')"
-                    >
-                        Restore config only
-                    </n-button>
-                    <n-button
-                        class="utility-action-button"
-                        type="error"
-                        ghost
-                        :loading="restoreLoading"
-                        :disabled="!selectedBackupHasTradeData"
-                        @click="emit('restore-backup', 'full')"
-                    >
-                        Restore full backup
-                    </n-button>
-                </n-flex>
+                <ConfigBackupRestoreControls
+                    action-button-class="utility-action-button"
+                    :bind-backup-file-input="bindBackupFileInput"
+                    :has-selected-backup-payload="hasSelectedBackupPayload"
+                    :restore-loading="restoreLoading"
+                    :selected-backup-config-count="selectedBackupConfigCount"
+                    :selected-backup-file-name="selectedBackupFileName"
+                    :selected-backup-has-trade-data="selectedBackupHasTradeData"
+                    @backup-file-selected="emit('backup-file-selected', $event)"
+                    @clear-selected-backup="emit('clear-selected-backup')"
+                    @open-backup-file-picker="emit('open-backup-file-picker')"
+                    @restore-backup="emit('restore-backup', $event)"
+                />
             </n-flex>
         </n-card>
     </div>
@@ -186,11 +138,4 @@ const emit = defineEmits<{
     letter-spacing: -0.01em;
 }
 
-.backup-file-input {
-    display: none;
-}
-
-.backup-file-name {
-    font-size: 14px;
-}
 </style>

@@ -78,73 +78,29 @@
 
         <n-card title="Backup & Restore" size="small" class="backup-restore-card">
             <n-flex vertical :size="12">
-                <n-alert type="info" title="Portable backup">
-                    Download your configuration alone or include all trade data. Full restores do not import ticker candles and will fetch the required history again for restored active trades.
-                </n-alert>
-
-                <n-flex align="center" :wrap="true" :size="[12, 12]">
-                    <n-checkbox v-model:checked="backupIncludeTradeData">
-                        Include trade data in backup
-                    </n-checkbox>
-                    <n-button
-                        type="primary"
-                        secondary
-                        :loading="backupDownloadLoading"
-                        @click="handleBackupDownload"
-                    >
-                        Download backup
-                    </n-button>
-                </n-flex>
+                <ConfigBackupDownloadControls
+                    :backup-download-loading="backupDownloadLoading"
+                    :backup-include-trade-data="backupIncludeTradeData"
+                    info-title="Portable backup"
+                    info-message="Download your configuration alone or include all trade data. Full restores do not import ticker candles and will fetch the required history again for restored active trades."
+                    @download-backup="handleBackupDownload"
+                    @update:backup-include-trade-data="backupIncludeTradeData = $event"
+                />
 
                 <n-divider />
 
-                <input
-                    :ref="bindBackupFileInput"
-                    type="file"
-                    accept="application/json,.json"
-                    class="backup-file-input"
-                    @change="handleBackupFileSelected"
-                >
-
-                <n-flex align="center" :wrap="true" :size="[12, 12]">
-                    <n-button secondary @click="openBackupFilePicker">
-                        Select backup file
-                    </n-button>
-                    <span v-if="selectedBackupFileName" class="backup-file-name">
-                        {{ selectedBackupFileName }}
-                    </span>
-                    <n-button
-                        v-if="selectedBackupFileName"
-                        quaternary
-                        @click="clearSelectedBackup"
-                    >
-                        Clear
-                    </n-button>
-                </n-flex>
-
-                <n-text v-if="selectedBackupPayload" depth="3">
-                    Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
-                </n-text>
-
-                <n-flex align="center" :wrap="true" :size="[12, 12]">
-                    <n-button
-                        type="warning"
-                        :loading="restoreLoading"
-                        :disabled="!selectedBackupPayload"
-                        @click="handleRestoreBackup('config')"
-                    >
-                        Restore config only
-                    </n-button>
-                    <n-button
-                        type="error"
-                        ghost
-                        :loading="restoreLoading"
-                        :disabled="!selectedBackupHasTradeData"
-                        @click="handleRestoreBackup('full')"
-                    >
-                        Restore full backup
-                    </n-button>
-                </n-flex>
+                <ConfigBackupRestoreControls
+                    :bind-backup-file-input="bindBackupFileInput"
+                    :has-selected-backup-payload="!!selectedBackupPayload"
+                    :restore-loading="restoreLoading"
+                    :selected-backup-config-count="selectedBackupConfigCount"
+                    :selected-backup-file-name="selectedBackupFileName"
+                    :selected-backup-has-trade-data="selectedBackupHasTradeData"
+                    @backup-file-selected="handleBackupFileSelected"
+                    @clear-selected-backup="clearSelectedBackup"
+                    @open-backup-file-picker="openBackupFilePicker"
+                    @restore-backup="handleRestoreBackup"
+                />
             </n-flex>
         </n-card>
 
@@ -175,6 +131,8 @@
 
 <script setup lang="ts">
 import ConfigAutopilotSection from './config/ConfigAutopilotSection.vue'
+import ConfigBackupDownloadControls from './config/ConfigBackupDownloadControls.vue'
+import ConfigBackupRestoreControls from './config/ConfigBackupRestoreControls.vue'
 import ConfigDcaSection from './config/ConfigDcaSection.vue'
 import ConfigExchangeSection from './config/ConfigExchangeSection.vue'
 import ConfigFilterSection from './config/ConfigFilterSection.vue'
@@ -287,14 +245,6 @@ onUnmounted(() => {
 
 .backup-restore-card {
     width: 100%;
-}
-
-.backup-file-input {
-    display: none;
-}
-
-.backup-file-name {
-    font-size: 14px;
 }
 
 @media (max-width: 768px) {

@@ -835,8 +835,9 @@ test('control center delegates setup workspace presentation to a dedicated compo
         '<ControlCenterSetupTaskSection',
     ]
     const requiredSetupRestoreFlowSnippets = [
+        "import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'",
         'Restore and review',
-        "@click=\"emit('restore-backup', 'config')\"",
+        '<ConfigBackupRestoreControls',
     ]
     const requiredSetupStyleSnippets = [
         'Choose your setup pace',
@@ -900,10 +901,14 @@ test('control center delegates advanced and utilities presentation to dedicated 
         'task-section-header',
     ]
     const requiredUtilitiesWorkspaceSnippets = [
+        "import ConfigBackupDownloadControls from '../config/ConfigBackupDownloadControls.vue'",
+        "import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'",
         'Backup & Restore',
         'Connectivity test',
+        '<ConfigBackupDownloadControls',
+        '<ConfigBackupRestoreControls',
         "@click=\"emit('monitoring-test')\"",
-        "@update:checked=\"emit('update:backup-include-trade-data', $event)\"",
+        "@update:backup-include-trade-data=\"emit('update:backup-include-trade-data', $event)\"",
     ]
 
     for (const snippet of requiredViewSnippets) {
