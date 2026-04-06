@@ -103,6 +103,26 @@ const missionStateSource = fs.readFileSync(
     ),
     'utf8',
 )
+const setupShellInteractionsSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterSetupShellInteractions.ts',
+    ),
+    'utf8',
+)
+const targetRegistrySource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterTargetRegistry.ts',
+    ),
+    'utf8',
+)
 const workspaceActionsSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -155,6 +175,12 @@ test('control center target sections use dynamic element refs', () => {
     )
     assert.ok(
         controlCenterViewSource.includes(
+            "import { useControlCenterTargetRegistry } from '../composables/useControlCenterTargetRegistry'",
+        ),
+        'expected target bindings to come from the target registry composable',
+    )
+    assert.ok(
+        controlCenterViewSource.includes(
             ':bind-target-element="bindTargetElement"',
         ),
         'expected the setup workspace to receive the target ref binder',
@@ -189,6 +215,22 @@ test('control center target sections use dynamic element refs', () => {
     assert.ok(
         overviewWorkspaceSource.includes(':ref="liveActivationRef"'),
         'expected overview workspace to expose the live activation anchor ref',
+    )
+    assert.ok(
+        targetRegistrySource.includes(
+            'export function useControlCenterTargetRegistry()',
+        ),
+        'expected target registry composable to expose the binding seam',
+    )
+    assert.equal(
+        controlCenterViewSource.includes('const targetElements: Record<'),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'function bindTargetElement(target: ControlCenterTarget)',
+        ),
+        false,
     )
 })
 
@@ -288,10 +330,15 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
 
 test('collapsed setup shells route clicks to their section', () => {
     const requiredViewSnippets = [
-        'function isInteractiveTarget(',
-        'function handleSetupSectionShellClick(',
-        "target.closest('button, a, input, select, textarea, label, [role=\"button\"]')",
+        "import { useControlCenterSetupShellInteractions } from '../composables/useControlCenterSetupShellInteractions'",
+        'useControlCenterSetupShellInteractions({',
+        'handleSetupSectionShellClick',
         '@setup-shell-click="handleSetupSectionShellClick"',
+    ]
+    const requiredSetupShellSnippets = [
+        'function defaultIsInteractiveTarget(',
+        'async function handleSetupSectionShellClick(',
+        "target.closest('button, a, input, select, textarea, label, [role=\"button\"]')",
     ]
     const requiredSetupWorkspaceSnippets = [
         "@click=\"emit('setup-shell-click', task.target, $event)\"",
@@ -304,12 +351,29 @@ test('collapsed setup shells route clicks to their section', () => {
             `expected control center to include ${snippet}`,
         )
     }
+    for (const snippet of requiredSetupShellSnippets) {
+        assert.ok(
+            setupShellInteractionsSource.includes(snippet),
+            `expected setup shell interactions to include ${snippet}`,
+        )
+    }
     for (const snippet of requiredSetupWorkspaceSnippets) {
         assert.ok(
             setupWorkspaceSource.includes(snippet),
             `expected setup workspace to include ${snippet}`,
         )
     }
+
+    assert.equal(
+        controlCenterViewSource.includes('function isInteractiveTarget('),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function handleSetupSectionShellClick(',
+        ),
+        false,
+    )
 })
 
 test('control center delegates lifecycle and window wiring to a dedicated composable', () => {

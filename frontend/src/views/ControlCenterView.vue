@@ -43,7 +43,9 @@ import { useControlCenterLifecycle } from '../composables/useControlCenterLifecy
 import { useControlCenterMissionState } from '../composables/useControlCenterMissionState'
 import { useControlCenterNavigation } from '../composables/useControlCenterNavigation'
 import { useControlCenterRuntimeActions } from '../composables/useControlCenterRuntimeActions'
+import { useControlCenterSetupShellInteractions } from '../composables/useControlCenterSetupShellInteractions'
 import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupFlow'
+import { useControlCenterTargetRegistry } from '../composables/useControlCenterTargetRegistry'
 import { useControlCenterWorkspaceRefresh } from '../composables/useControlCenterWorkspaceRefresh'
 import { useControlCenterWorkspaceActions } from '../composables/useControlCenterWorkspaceActions'
 import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
@@ -139,28 +141,8 @@ const configSubmitPayloadDefaults: ConfigSubmitPayloadDefaults = {
         DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT,
 }
 
-const targetElements: Record<
-    ControlCenterTarget,
-    ReturnType<typeof ref<HTMLElement | null>>
-> = {
-    general: ref<HTMLElement | null>(null),
-    exchange: ref<HTMLElement | null>(null),
-    signal: ref<HTMLElement | null>(null),
-    filter: ref<HTMLElement | null>(null),
-    dca: ref<HTMLElement | null>(null),
-    autopilot: ref<HTMLElement | null>(null),
-    monitoring: ref<HTMLElement | null>(null),
-    indicator: ref<HTMLElement | null>(null),
-    'backup-restore': ref<HTMLElement | null>(null),
-    'live-activation': ref<HTMLElement | null>(null),
-}
-
-function bindTargetElement(target: ControlCenterTarget) {
-    return (element: Element | null) => {
-        targetElements[target].value =
-            element instanceof HTMLElement ? element : null
-    }
-}
+const { bindTargetElement, readTargetElement } =
+    useControlCenterTargetRegistry()
 
 const {
     autopilot,
@@ -425,7 +407,7 @@ const {
 } = useControlCenterNavigation({
     announce,
     nextTick,
-    readTargetElement: (target) => targetElements[target].value,
+    readTargetElement,
     routeState,
     router,
 })
@@ -510,24 +492,11 @@ const {
     submitForm,
     testMonitoringTelegram,
 })
-
-function isInteractiveTarget(target: EventTarget | null): boolean {
-    return (
-        target instanceof Element &&
-        target.closest('button, a, input, select, textarea, label, [role="button"]') !==
-            null
-    )
-}
-
-async function handleSetupSectionShellClick(
-    target: ControlCenterTarget,
-    event: MouseEvent,
-): Promise<void> {
-    if (isSetupTaskExpanded(target) || isInteractiveTarget(event.target)) {
-        return
-    }
-    await handleSetupTaskSelect(target)
-}
+const { handleSetupSectionShellClick } =
+    useControlCenterSetupShellInteractions({
+        handleSetupTaskSelect,
+        isSetupTaskExpanded,
+    })
 
 useControlCenterLifecycle({
     checkForExternalConfigChanges,
