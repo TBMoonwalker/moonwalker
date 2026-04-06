@@ -76,6 +76,61 @@ const setupWorkspaceSource = fs.readFileSync(
     ),
     'utf8',
 )
+const setupEntryGateSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterSetupEntryGate.vue',
+    ),
+    'utf8',
+)
+const setupProgressGridSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterSetupProgressGrid.vue',
+    ),
+    'utf8',
+)
+const setupRestoreFlowSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterSetupRestoreFlow.vue',
+    ),
+    'utf8',
+)
+const setupStyleSelectorSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterSetupStyleSelector.vue',
+    ),
+    'utf8',
+)
+const setupTaskSectionSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterSetupTaskSection.vue',
+    ),
+    'utf8',
+)
 const utilitiesWorkspaceSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -196,7 +251,7 @@ test('control center target sections use dynamic element refs', () => {
         'expected the utilities workspace to receive the backup target ref binder',
     )
     assert.ok(
-        setupWorkspaceSource.includes(':ref="bindTargetElement(task.target)"'),
+        setupTaskSectionSource.includes(':ref="bindTargetElement(task.target)"'),
         'expected setup task sections to use dynamic target ref bindings',
     )
     assert.ok(
@@ -252,6 +307,10 @@ test('control center gates first-run setup behind explicit onboarding choices', 
         '<ControlCenterSetupWorkspace',
     ]
     const requiredSetupWorkspaceSnippets = [
+        "import ControlCenterSetupEntryGate from './ControlCenterSetupEntryGate.vue'",
+        '<ControlCenterSetupEntryGate',
+    ]
+    const requiredSetupEntryGateSnippets = [
         'How do you want to begin?',
         'Restore existing installation',
         'Start a new setup',
@@ -275,6 +334,12 @@ test('control center gates first-run setup behind explicit onboarding choices', 
             `expected setup workspace to include ${snippet}`,
         )
     }
+    for (const snippet of requiredSetupEntryGateSnippets) {
+        assert.ok(
+            setupEntryGateSource.includes(snippet),
+            `expected setup entry gate to include ${snippet}`,
+        )
+    }
     for (const snippet of requiredSetupFlowSnippets) {
         assert.ok(
             setupFlowSource.includes(snippet),
@@ -289,9 +354,21 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         ':show-debug="setupShowsAdvancedFields"',
     ]
     const requiredSetupWorkspaceSnippets = [
+        "import ControlCenterSetupProgressGrid from './ControlCenterSetupProgressGrid.vue'",
+        "import ControlCenterSetupStyleSelector from './ControlCenterSetupStyleSelector.vue'",
+        "import ControlCenterSetupTaskSection from './ControlCenterSetupTaskSection.vue'",
+        '<ControlCenterSetupProgressGrid',
+        '<ControlCenterSetupStyleSelector',
+        '<ControlCenterSetupTaskSection',
+    ]
+    const requiredSetupProgressSnippets = [
         'class="setup-progress-grid"',
-        'slot :name="task.target"',
+    ]
+    const requiredSetupStyleSnippets = [
         'Choose your setup pace',
+    ]
+    const requiredSetupTaskSectionSnippets = [
+        '<slot />',
     ]
     const requiredAdvancedWorkspaceSnippets = [
         'slot :name="section.target"',
@@ -310,6 +387,24 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         assert.ok(
             setupWorkspaceSource.includes(snippet),
             `expected setup workspace to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupProgressSnippets) {
+        assert.ok(
+            setupProgressGridSource.includes(snippet),
+            `expected setup progress grid to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupStyleSnippets) {
+        assert.ok(
+            setupStyleSelectorSource.includes(snippet),
+            `expected setup style selector to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupTaskSectionSnippets) {
+        assert.ok(
+            setupTaskSectionSource.includes(snippet),
+            `expected setup task section to include ${snippet}`,
         )
     }
     for (const snippet of requiredAdvancedWorkspaceSnippets) {
@@ -345,6 +440,10 @@ test('collapsed setup shells route clicks to their section', () => {
         "target.closest('button, a, input, select, textarea, label, [role=\"button\"]')",
     ]
     const requiredSetupWorkspaceSnippets = [
+        '<ControlCenterSetupTaskSection',
+        '@setup-shell-click="(target, event) => emit(\'setup-shell-click\', target, event)"',
+    ]
+    const requiredSetupTaskSectionSnippets = [
         "@click=\"emit('setup-shell-click', task.target, $event)\"",
         "@click=\"emit('select-setup-target', task.target)\"",
     ]
@@ -365,6 +464,12 @@ test('collapsed setup shells route clicks to their section', () => {
         assert.ok(
             setupWorkspaceSource.includes(snippet),
             `expected setup workspace to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupTaskSectionSnippets) {
+        assert.ok(
+            setupTaskSectionSource.includes(snippet),
+            `expected setup task section to include ${snippet}`,
         )
     }
 
@@ -722,11 +827,23 @@ test('control center delegates setup workspace presentation to a dedicated compo
         '<template #monitoring>',
     ]
     const requiredSetupWorkspaceSnippets = [
+        "import ControlCenterSetupRestoreFlow from './ControlCenterSetupRestoreFlow.vue'",
+        "import ControlCenterSetupStyleSelector from './ControlCenterSetupStyleSelector.vue'",
+        "import ControlCenterSetupTaskSection from './ControlCenterSetupTaskSection.vue'",
+        '<ControlCenterSetupRestoreFlow',
+        '<ControlCenterSetupStyleSelector',
+        '<ControlCenterSetupTaskSection',
+    ]
+    const requiredSetupRestoreFlowSnippets = [
         'Restore and review',
-        'Choose your setup pace',
-        'slot :name="task.target"',
         "@click=\"emit('restore-backup', 'config')\"",
+    ]
+    const requiredSetupStyleSnippets = [
+        'Choose your setup pace',
         "@click=\"emit('select-entry-choice', 'restore')\"",
+    ]
+    const requiredSetupTaskSectionSnippets = [
+        '<slot />',
     ]
 
     for (const snippet of requiredViewSnippets) {
@@ -739,6 +856,24 @@ test('control center delegates setup workspace presentation to a dedicated compo
         assert.ok(
             setupWorkspaceSource.includes(snippet),
             `expected setup workspace to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupRestoreFlowSnippets) {
+        assert.ok(
+            setupRestoreFlowSource.includes(snippet),
+            `expected setup restore flow to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupStyleSnippets) {
+        assert.ok(
+            setupStyleSelectorSource.includes(snippet),
+            `expected setup style selector to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupTaskSectionSnippets) {
+        assert.ok(
+            setupTaskSectionSource.includes(snippet),
+            `expected setup task section to include ${snippet}`,
         )
     }
 

@@ -28,6 +28,17 @@ const setupWorkspaceSource = fs.readFileSync(
     ),
     'utf8',
 )
+const setupEntryGateSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterSetupEntryGate.vue',
+    ),
+    'utf8',
+)
 
 test('first-run control center shows the intent gate before the mission panel', () => {
     // Regression: ISSUE-006 — first-run setup showed a status-heavy mission panel
@@ -43,6 +54,10 @@ test('first-run control center shows the intent gate before the mission panel', 
         '<ControlCenterSetupWorkspace',
     ]
     const requiredSetupWorkspaceSnippets = [
+        "import ControlCenterSetupEntryGate from './ControlCenterSetupEntryGate.vue'",
+        '<ControlCenterSetupEntryGate',
+    ]
+    const requiredSetupEntryGateSnippets = [
         'class="setup-entry-intro"',
         'class="workspace-kicker"',
         '<h1 class="workspace-title">How do you want to begin?</h1>',
@@ -64,6 +79,12 @@ test('first-run control center shows the intent gate before the mission panel', 
         assert.ok(
             setupWorkspaceSource.includes(snippet),
             `expected setup workspace to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupEntryGateSnippets) {
+        assert.ok(
+            setupEntryGateSource.includes(snippet),
+            `expected setup entry gate to include ${snippet}`,
         )
     }
     for (const snippet of requiredMissionStateSnippets) {
