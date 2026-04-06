@@ -6,6 +6,7 @@ import { useMessage } from 'naive-ui/es/message'
 import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'
 import ControlCenterModeStrip from '../components/control-center/ControlCenterModeStrip.vue'
 import ControlCenterOverviewWorkspace from '../components/control-center/ControlCenterOverviewWorkspace.vue'
+import ControlCenterSetupWorkspace from '../components/control-center/ControlCenterSetupWorkspace.vue'
 import ConfigAutopilotSection from '../components/config/ConfigAutopilotSection.vue'
 import ConfigDcaAdvancedSection from '../components/config/ConfigDcaAdvancedSection.vue'
 import ConfigDcaSection from '../components/config/ConfigDcaSection.vue'
@@ -322,6 +323,11 @@ const {
     surfaceMessages: false,
 })
 
+function bindBackupFileInput(element: Element | null): void {
+    backupFileInputRef.value =
+        element instanceof HTMLInputElement ? element : null
+}
+
 const rules = buildConfigRules({
     dca,
     getAsapMissingFieldsLabel,
@@ -442,8 +448,6 @@ const {
     syncControlCenterConfigChange,
 })
 const {
-    activeSetupTarget,
-    findSetupBlocker,
     getSetupTaskStatus,
     getSetupTaskSummary,
     handleMissionPrimaryAction,
@@ -633,395 +637,95 @@ onUnmounted(() => {
             </template>
 
             <template v-else-if="routeState.mode === 'setup'">
-                <n-card
-                    v-if="showSetupEntryGate"
-                    class="workspace-card setup-entry-card"
-                    content-style="padding: 20px 22px;"
+                <ControlCenterSetupWorkspace
+                    :bind-backup-file-input="bindBackupFileInput"
+                    :bind-target-element="bindTargetElement"
+                    :get-setup-task-status="getSetupTaskStatus"
+                    :get-setup-task-summary="getSetupTaskSummary"
+                    :has-selected-backup-payload="!!selectedBackupPayload"
+                    :is-setup-task-expanded="isSetupTaskExpanded"
+                    :readiness-first-run="readiness.firstRun"
+                    :restore-loading="restoreLoading"
+                    :selected-backup-config-count="selectedBackupConfigCount"
+                    :selected-backup-file-name="selectedBackupFileName"
+                    :selected-backup-has-trade-data="selectedBackupHasTradeData"
+                    :setup-style="setupStyle"
+                    :setup-tasks="setupTasks"
+                    :show-restore-setup-flow="showRestoreSetupFlow"
+                    :show-setup-entry-gate="showSetupEntryGate"
+                    :show-setup-style-selector="showSetupStyleSelector"
+                    @backup-file-selected="handleBackupFileSelected"
+                    @clear-selected-backup="clearSelectedBackup"
+                    @open-backup-file-picker="openBackupFilePicker"
+                    @restore-backup="handleRestoreBackupAction"
+                    @select-entry-choice="handleSetupEntryChoice"
+                    @select-setup-style="handleSetupStyleChange"
+                    @select-setup-target="handleSetupTaskSelect"
+                    @setup-shell-click="handleSetupSectionShellClick"
                 >
-                    <n-flex vertical :size="18">
-                        <div class="setup-entry-intro">
-                            <n-text depth="3" class="workspace-kicker">
-                                Control Center
-                            </n-text>
-                            <h1 class="workspace-title">How do you want to begin?</h1>
-                            <n-text depth="3" class="workspace-summary">
-                                Start with your intent, not with a wall of options. Operators
-                                migrating an existing instance should restore first. New
-                                installations should begin with a safe dry-run setup.
-                            </n-text>
-                        </div>
+                    <template #general>
+                        <ConfigGeneralSection
+                            ref="generalFormRef"
+                            :general="general"
+                            :rules="rules"
+                            :show-advanced-general="setupShowsAdvancedFields"
+                            :show-advanced-toggle="false"
+                            :show-debug="setupShowsAdvancedFields"
+                            :timezone="timezone"
+                        />
+                    </template>
 
-                        <n-flex class="entry-choice-grid" :wrap="true" :size="[16, 16]">
-                            <n-card size="small" class="entry-choice-card">
-                                <n-flex vertical :size="12">
-                                    <div>
-                                        <h3 class="entry-choice-title">
-                                            Restore existing installation
-                                        </h3>
-                                        <n-text depth="3">
-                                            Import a config-only or full backup, then review
-                                            readiness before anything goes live.
-                                        </n-text>
-                                    </div>
-                                    <n-button
-                                        type="primary"
-                                        secondary
-                                        @click="handleSetupEntryChoice('restore')"
-                                    >
-                                        Restore existing installation
-                                    </n-button>
-                                </n-flex>
-                            </n-card>
+                    <template #exchange>
+                        <ConfigExchangeSection
+                            ref="exchangeFormRef"
+                            :currency="currency"
+                            :exchange="exchange"
+                            :exchanges="exchanges"
+                            :market="market"
+                            :rules="rules"
+                            :show-advanced-general="setupShowsAdvancedFields"
+                            :timerange="timerange"
+                        />
+                    </template>
 
-                            <n-card size="small" class="entry-choice-card">
-                                <n-flex vertical :size="12">
-                                    <div>
-                                        <h3 class="entry-choice-title">Start a new setup</h3>
-                                        <n-text depth="3">
-                                            Configure the essentials needed for a safe dry run
-                                            before expert tuning or utilities appear.
-                                        </n-text>
-                                    </div>
-                                    <n-button
-                                        type="primary"
-                                        @click="handleSetupEntryChoice('new')"
-                                    >
-                                        Start a new setup
-                                    </n-button>
-                                </n-flex>
-                            </n-card>
-                        </n-flex>
-                    </n-flex>
-                </n-card>
+                    <template #signal>
+                        <ConfigSignalSection
+                            ref="signalFormRef"
+                            :asap-missing-fields-label="getAsapMissingFieldsLabel()"
+                            :is-asap-exchange-ready="isAsapExchangeReady()"
+                            :on-asap-url-input="handleAsapUrlInput"
+                            :on-csv-file-selected="handleCsvSignalFileSelected"
+                            :on-fetch-asap-symbols="fetchAsapSymbolsForCurrency"
+                            :on-signal-settings-select="handleSignalSettingsSelect"
+                            :rules="rules"
+                            :signal="signal"
+                            :symsignals="symsignals"
+                        />
+                    </template>
 
-                <template v-else-if="showRestoreSetupFlow">
-                    <n-card
-                        class="workspace-card setup-flow-card"
-                        content-style="padding: 20px 22px;"
-                    >
-                        <n-flex vertical :size="18">
-                            <n-flex justify="space-between" align="center" :wrap="true">
-                                <div>
-                                    <h2 class="workspace-title">Restore and review</h2>
-                                    <n-text depth="3" class="workspace-summary">
-                                        Bring an existing Moonwalker installation forward first,
-                                        then land in a readiness review before making changes.
-                                    </n-text>
-                                </div>
-                                <n-button quaternary @click="handleSetupEntryChoice('new')">
-                                    Start a new setup instead
-                                </n-button>
-                            </n-flex>
+                    <template #dca>
+                        <ConfigDcaSection
+                            ref="dcaFormRef"
+                            :dca="dca"
+                            :rules="rules"
+                            :sell-order-type-options="sellOrderTypeOptions"
+                            :show-advanced-general="setupShowsAdvancedFields"
+                            :strategy-options="signal.strategy_plugins"
+                        />
+                    </template>
 
-                            <n-alert type="info" title="Import first, review second">
-                                Restoring does not skip safety review. Moonwalker will reload the
-                                imported configuration and send you to a readiness check after the
-                                backend completes the restore.
-                            </n-alert>
-
-                            <input
-                                ref="backupFileInputRef"
-                                type="file"
-                                accept="application/json,.json"
-                                class="backup-file-input"
-                                @change="handleBackupFileSelected"
-                            >
-
-                            <n-flex align="center" :wrap="true" :size="[12, 12]">
-                                <n-button secondary @click="openBackupFilePicker">
-                                    Select backup file
-                                </n-button>
-                                <span v-if="selectedBackupFileName" class="backup-file-name">
-                                    {{ selectedBackupFileName }}
-                                </span>
-                                <n-button
-                                    v-if="selectedBackupFileName"
-                                    quaternary
-                                    @click="clearSelectedBackup"
-                                >
-                                    Clear
-                                </n-button>
-                            </n-flex>
-
-                            <n-text v-if="selectedBackupPayload" depth="3">
-                                Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
-                            </n-text>
-
-                            <n-flex align="center" :wrap="true" :size="[12, 12]">
-                                <n-button
-                                    type="warning"
-                                    :loading="restoreLoading"
-                                    :disabled="!selectedBackupPayload"
-                                    @click="handleRestoreBackupAction('config')"
-                                >
-                                    Restore config only
-                                </n-button>
-                                <n-button
-                                    type="error"
-                                    ghost
-                                    :loading="restoreLoading"
-                                    :disabled="!selectedBackupHasTradeData"
-                                    @click="handleRestoreBackupAction('full')"
-                                >
-                                    Restore full backup
-                                </n-button>
-                            </n-flex>
-                        </n-flex>
-                    </n-card>
-                </template>
-
-                <template v-else>
-                    <n-card
-                        v-if="showSetupStyleSelector"
-                        class="workspace-card setup-style-card"
-                        content-style="padding: 18px 20px;"
-                    >
-                        <n-flex vertical :size="12">
-                            <n-flex justify="space-between" align="center" :wrap="true">
-                                <div>
-                                    <h2 class="workspace-title">Choose your setup pace</h2>
-                                    <n-text depth="3" class="workspace-summary">
-                                        Guided setup keeps the operator focused on the essentials.
-                                        Full control reveals expert controls inline while you work.
-                                    </n-text>
-                                </div>
-                                <n-button
-                                    v-if="readiness.firstRun"
-                                    class="setup-style-restore-action"
-                                    type="warning"
-                                    secondary
-                                    @click="handleSetupEntryChoice('restore')"
-                                >
-                                    Restore instead
-                                </n-button>
-                            </n-flex>
-
-                            <n-flex :wrap="true" :size="[10, 10]">
-                                <n-button
-                                    :type="setupStyle === 'guided' ? 'primary' : 'default'"
-                                    secondary
-                                    @click="handleSetupStyleChange('guided')"
-                                >
-                                    Guided setup
-                                </n-button>
-                                <n-button
-                                    :type="setupStyle === 'full' ? 'primary' : 'default'"
-                                    secondary
-                                    @click="handleSetupStyleChange('full')"
-                                >
-                                    Full control
-                                </n-button>
-                            </n-flex>
-                        </n-flex>
-                    </n-card>
-
-                    <div class="setup-progress-grid">
-                        <button
-                            v-for="task in setupTasks"
-                            :key="task.target"
-                            class="setup-progress-card"
-                            :class="{
-                                'setup-progress-card-active':
-                                    activeSetupTarget === task.target,
-                                'setup-progress-card-blocked': !!findSetupBlocker(task.target),
-                                'setup-progress-card-ready':
-                                    !findSetupBlocker(task.target) &&
-                                    activeSetupTarget !== task.target,
-                            }"
-                            type="button"
-                            @click="handleSetupTaskSelect(task.target)"
-                        >
-                            <span class="setup-progress-status">
-                                {{ getSetupTaskStatus(task.target).label }}
-                            </span>
-                            <strong>{{ task.title }}</strong>
-                            <span>{{ getSetupTaskSummary(task.target) }}</span>
-                        </button>
-                    </div>
-
-                    <div
-                        :ref="bindTargetElement('general')"
-                        class="task-section task-section-shell"
-                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('general') }"
-                        id="control-center-general"
-                        @click="handleSetupSectionShellClick('general', $event)"
-                    >
-                        <div class="task-section-heading-row">
-                            <div
-                                class="task-section-header"
-                                tabindex="-1"
-                                data-control-center-anchor
-                            >
-                                <h2>{{ getTaskPresentation('general').title }}</h2>
-                                <n-text depth="3">{{ getTaskPresentation('general').summary }}</n-text>
-                            </div>
-                            <n-button
-                                quaternary
-                                @click="handleSetupTaskSelect('general')"
-                            >
-                                {{ isSetupTaskExpanded('general') ? 'Current step' : 'Open' }}
-                            </n-button>
-                        </div>
-                        <div v-show="isSetupTaskExpanded('general')" class="task-section-body">
-                            <ConfigGeneralSection
-                                ref="generalFormRef"
-                                :general="general"
-                                :rules="rules"
-                                :show-advanced-general="setupShowsAdvancedFields"
-                                :show-advanced-toggle="false"
-                                :show-debug="setupShowsAdvancedFields"
-                                :timezone="timezone"
-                            />
-                        </div>
-                    </div>
-
-                    <div
-                        :ref="bindTargetElement('exchange')"
-                        class="task-section task-section-shell"
-                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('exchange') }"
-                        id="control-center-exchange"
-                        @click="handleSetupSectionShellClick('exchange', $event)"
-                    >
-                        <div class="task-section-heading-row">
-                            <div
-                                class="task-section-header"
-                                tabindex="-1"
-                                data-control-center-anchor
-                            >
-                                <h2>{{ getTaskPresentation('exchange').title }}</h2>
-                                <n-text depth="3">{{ getTaskPresentation('exchange').summary }}</n-text>
-                            </div>
-                            <n-button
-                                quaternary
-                                @click="handleSetupTaskSelect('exchange')"
-                            >
-                                {{ isSetupTaskExpanded('exchange') ? 'Current step' : 'Open' }}
-                            </n-button>
-                        </div>
-                        <div v-show="isSetupTaskExpanded('exchange')" class="task-section-body">
-                            <ConfigExchangeSection
-                                ref="exchangeFormRef"
-                                :currency="currency"
-                                :exchange="exchange"
-                                :exchanges="exchanges"
-                                :market="market"
-                                :rules="rules"
-                                :show-advanced-general="setupShowsAdvancedFields"
-                                :timerange="timerange"
-                            />
-                        </div>
-                    </div>
-
-                    <div
-                        :ref="bindTargetElement('signal')"
-                        class="task-section task-section-shell"
-                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('signal') }"
-                        id="control-center-signal"
-                        @click="handleSetupSectionShellClick('signal', $event)"
-                    >
-                        <div class="task-section-heading-row">
-                            <div
-                                class="task-section-header"
-                                tabindex="-1"
-                                data-control-center-anchor
-                            >
-                                <h2>{{ getTaskPresentation('signal').title }}</h2>
-                                <n-text depth="3">{{ getTaskPresentation('signal').summary }}</n-text>
-                            </div>
-                            <n-button
-                                quaternary
-                                @click="handleSetupTaskSelect('signal')"
-                            >
-                                {{ isSetupTaskExpanded('signal') ? 'Current step' : 'Open' }}
-                            </n-button>
-                        </div>
-                        <div v-show="isSetupTaskExpanded('signal')" class="task-section-body">
-                            <ConfigSignalSection
-                                ref="signalFormRef"
-                                :asap-missing-fields-label="getAsapMissingFieldsLabel()"
-                                :is-asap-exchange-ready="isAsapExchangeReady()"
-                                :on-asap-url-input="handleAsapUrlInput"
-                                :on-csv-file-selected="handleCsvSignalFileSelected"
-                                :on-fetch-asap-symbols="fetchAsapSymbolsForCurrency"
-                                :on-signal-settings-select="handleSignalSettingsSelect"
-                                :rules="rules"
-                                :signal="signal"
-                                :symsignals="symsignals"
-                            />
-                        </div>
-                    </div>
-
-                    <div
-                        :ref="bindTargetElement('dca')"
-                        class="task-section task-section-shell"
-                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('dca') }"
-                        id="control-center-dca"
-                        @click="handleSetupSectionShellClick('dca', $event)"
-                    >
-                        <div class="task-section-heading-row">
-                            <div
-                                class="task-section-header"
-                                tabindex="-1"
-                                data-control-center-anchor
-                            >
-                                <h2>{{ getTaskPresentation('dca').title }}</h2>
-                                <n-text depth="3">{{ getTaskPresentation('dca').summary }}</n-text>
-                            </div>
-                            <n-button
-                                quaternary
-                                @click="handleSetupTaskSelect('dca')"
-                            >
-                                {{ isSetupTaskExpanded('dca') ? 'Current step' : 'Open' }}
-                            </n-button>
-                        </div>
-                        <div v-show="isSetupTaskExpanded('dca')" class="task-section-body">
-                            <ConfigDcaSection
-                                ref="dcaFormRef"
-                                :dca="dca"
-                                :rules="rules"
-                                :sell-order-type-options="sellOrderTypeOptions"
-                                :show-advanced-general="setupShowsAdvancedFields"
-                                :strategy-options="signal.strategy_plugins"
-                            />
-                        </div>
-                    </div>
-
-                    <div
-                        :ref="bindTargetElement('monitoring')"
-                        class="task-section task-section-shell"
-                        :class="{ 'task-section-collapsed': !isSetupTaskExpanded('monitoring') }"
-                        id="control-center-monitoring"
-                        @click="handleSetupSectionShellClick('monitoring', $event)"
-                    >
-                        <div class="task-section-heading-row">
-                            <div
-                                class="task-section-header"
-                                tabindex="-1"
-                                data-control-center-anchor
-                            >
-                                <h2>{{ getTaskPresentation('monitoring').title }}</h2>
-                                <n-text depth="3">{{ getTaskPresentation('monitoring').summary }}</n-text>
-                            </div>
-                            <n-button
-                                quaternary
-                                @click="handleSetupTaskSelect('monitoring')"
-                            >
-                                {{ isSetupTaskExpanded('monitoring') ? 'Current step' : 'Open' }}
-                            </n-button>
-                        </div>
-                        <div v-show="isSetupTaskExpanded('monitoring')" class="task-section-body">
-                            <ConfigMonitoringSection
-                                ref="monitoringFormRef"
-                                :can-test="canTestMonitoringTelegram()"
-                                :monitoring="monitoring"
-                                :on-test="handleMonitoringTestAction"
-                                :rules="rules"
-                                :show-test-action="false"
-                                :test-loading="monitoringTestLoading"
-                            />
-                        </div>
-                    </div>
-                </template>
+                    <template #monitoring>
+                        <ConfigMonitoringSection
+                            ref="monitoringFormRef"
+                            :can-test="canTestMonitoringTelegram()"
+                            :monitoring="monitoring"
+                            :on-test="handleMonitoringTestAction"
+                            :rules="rules"
+                            :show-test-action="false"
+                            :test-loading="monitoringTestLoading"
+                        />
+                    </template>
+                </ControlCenterSetupWorkspace>
             </template>
 
             <template v-else-if="routeState.mode === 'advanced'">
@@ -1243,163 +947,14 @@ onUnmounted(() => {
     color: var(--mw-color-text-primary);
 }
 
-.workspace-card,
 .task-section {
     width: 100%;
-}
-
-.workspace-title {
-    color: var(--mw-color-text-primary);
-    font-family: var(--mw-font-display);
-    font-size: clamp(1.35rem, 2.4vw, 1.8rem);
-    line-height: 1.2;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-}
-
-.workspace-summary {
-    display: block;
-    margin-top: 6px;
-    max-width: 68ch;
-}
-
-.workspace-kicker {
-    color: var(--mw-color-text-muted);
-    display: inline-block;
-    font-family: var(--mw-font-body);
-    font-size: 0.82rem;
-    font-weight: 600;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-}
-
-.setup-entry-intro {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.setup-progress-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-    gap: 16px;
-}
-
-.setup-progress-card {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 6px;
-    padding: 14px 16px;
-    border: 1px solid rgba(29, 92, 73, 0.12);
-    border-radius: 12px;
-    background: var(--mw-surface-card-muted);
-    color: inherit;
-    text-align: left;
-    cursor: pointer;
-    transition:
-        border-color 120ms ease,
-        box-shadow 120ms ease,
-        transform 120ms ease;
-}
-
-.setup-progress-card:hover {
-    border-color: rgba(29, 92, 73, 0.28);
-    box-shadow: 0 8px 18px rgba(24, 33, 29, 0.06);
-    transform: translateY(-1px);
-}
-
-.setup-progress-card strong {
-    color: var(--mw-color-text-primary);
-    font-family: var(--mw-font-display);
-    font-size: 0.96rem;
-}
-
-.setup-progress-card span:last-child {
-    font-size: 0.88rem;
-    color: var(--mw-color-text-secondary);
-}
-
-.setup-progress-status {
-    font-size: 0.72rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: rgba(29, 92, 73, 0.78);
-    font-family: var(--mw-font-mono);
-}
-
-.setup-progress-card-active {
-    border-color: rgba(29, 92, 73, 0.35);
-    background: var(--mw-surface-card-success);
-}
-
-.setup-progress-card-blocked {
-    border-color: rgba(183, 121, 31, 0.26);
-    background: var(--mw-surface-card-warning);
-}
-
-.setup-progress-card-ready {
-    border-color: rgba(46, 125, 91, 0.2);
 }
 
 .task-section {
     display: flex;
     flex-direction: column;
     gap: 10px;
-}
-
-.task-section-shell {
-    border: 1px solid rgba(29, 92, 73, 0.12);
-    border-radius: var(--mw-radius-lg);
-    padding: 16px 18px;
-    background: var(--mw-surface-card);
-}
-
-.task-section-collapsed {
-    background: var(--mw-surface-card-subtle);
-    cursor: pointer;
-}
-
-.task-section-heading-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 12px;
-}
-
-.task-section-body {
-    margin-top: 6px;
-}
-
-.entry-choice-grid {
-    align-items: stretch;
-}
-
-.entry-choice-card {
-    min-width: min(320px, 100%);
-    flex: 1 1 320px;
-    border: 1px solid rgba(29, 92, 73, 0.16);
-    background: var(--mw-surface-card);
-    box-shadow: var(--mw-shadow-card);
-}
-
-.entry-choice-title {
-    color: var(--mw-color-text-primary);
-    font-family: var(--mw-font-display);
-    font-size: 1.12rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-}
-
-.setup-entry-card,
-.setup-flow-card,
-.setup-style-card {
-    border: 1px solid rgba(29, 92, 73, 0.14);
-    background: var(--mw-surface-shell);
-}
-
-.setup-style-restore-action {
-    font-weight: 600;
 }
 
 .task-section-header {
@@ -1414,7 +969,14 @@ onUnmounted(() => {
     box-shadow: none;
 }
 
-.task-section-header h2,
+.task-section-header h2 {
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+}
+
 .backup-file-input {
     display: none;
 }
@@ -1439,14 +1001,5 @@ onUnmounted(() => {
     .page-section {
         margin-inline: 6px;
     }
-
-    .setup-progress-grid {
-        grid-template-columns: 1fr;
-    }
-
-    .task-section-heading-row {
-        flex-direction: column;
-    }
-
 }
 </style>

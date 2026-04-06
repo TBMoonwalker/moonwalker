@@ -50,6 +50,17 @@ const overviewWorkspaceSource = fs.readFileSync(
     ),
     'utf8',
 )
+const setupWorkspaceSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterSetupWorkspace.vue',
+    ),
+    'utf8',
+)
 const feedbackSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -106,23 +117,26 @@ test('control center target sections use dynamic element refs', () => {
     // were bound as literal ref strings instead of dynamic ref callbacks.
     // Found by /qa on 2026-03-20
     // Report: .gstack/qa-reports/qa-report-127-0-0-1-2026-03-20.md
-    const targets = [
-        'general',
-        'exchange',
-        'signal',
-        'dca',
-        'monitoring',
-        'backup-restore',
-    ]
-
-    for (const target of targets) {
-        assert.ok(
-            controlCenterViewSource.includes(
-                `:ref="bindTargetElement('${target}')"`
-            ),
-            `expected ${target} section to use a dynamic ref binding`,
-        )
-    }
+    assert.ok(
+        controlCenterViewSource.includes('<ControlCenterSetupWorkspace'),
+        'expected setup targets to be routed through the setup workspace component',
+    )
+    assert.ok(
+        controlCenterViewSource.includes(
+            ':bind-target-element="bindTargetElement"',
+        ),
+        'expected the setup workspace to receive the target ref binder',
+    )
+    assert.ok(
+        controlCenterViewSource.includes(
+            ":ref=\"bindTargetElement('backup-restore')\"",
+        ),
+        'expected the utilities backup section to keep its direct target ref binding',
+    )
+    assert.ok(
+        setupWorkspaceSource.includes(':ref="bindTargetElement(task.target)"'),
+        'expected setup task sections to use dynamic target ref bindings',
+    )
 
     assert.equal(
         /(?:^|[\s<])ref="bindTargetElement\('[^']+'\)"/m.test(
@@ -148,10 +162,14 @@ test('control center gates first-run setup behind explicit onboarding choices', 
     // operator's intent up front.
     const requiredViewSnippets = [
         "import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupFlow'",
+        "import ControlCenterSetupWorkspace from '../components/control-center/ControlCenterSetupWorkspace.vue'",
         '} = useControlCenterSetupFlow({',
         'showSetupEntryGate,',
         'showRestoreSetupFlow,',
         'setupShowsAdvancedFields,',
+        '<ControlCenterSetupWorkspace',
+    ]
+    const requiredSetupWorkspaceSnippets = [
         'How do you want to begin?',
         'Restore existing installation',
         'Start a new setup',
@@ -169,6 +187,12 @@ test('control center gates first-run setup behind explicit onboarding choices', 
             `expected control center to include ${snippet}`,
         )
     }
+    for (const snippet of requiredSetupWorkspaceSnippets) {
+        assert.ok(
+            setupWorkspaceSource.includes(snippet),
+            `expected setup workspace to include ${snippet}`,
+        )
+    }
     for (const snippet of requiredSetupFlowSnippets) {
         assert.ok(
             setupFlowSource.includes(snippet),
@@ -178,9 +202,8 @@ test('control center gates first-run setup behind explicit onboarding choices', 
 })
 
 test('control center keeps guided setup focused and avoids duplicate advanced headings', () => {
-    const requiredSnippets = [
-        'class="setup-progress-grid"',
-        "v-show=\"isSetupTaskExpanded('general')\"",
+    const requiredViewSnippets = [
+        '<ControlCenterSetupWorkspace',
         ':show-debug="setupShowsAdvancedFields"',
         'ConfigGeneralAdvancedSection',
         'ConfigExchangeAdvancedSection',
@@ -188,11 +211,22 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         ':card-title="null"',
         'Complete Telegram credentials in Setup first.',
     ]
+    const requiredSetupWorkspaceSnippets = [
+        'class="setup-progress-grid"',
+        'slot :name="task.target"',
+        'Choose your setup pace',
+    ]
 
-    for (const snippet of requiredSnippets) {
+    for (const snippet of requiredViewSnippets) {
         assert.ok(
             controlCenterViewSource.includes(snippet),
             `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupWorkspaceSnippets) {
+        assert.ok(
+            setupWorkspaceSource.includes(snippet),
+            `expected setup workspace to include ${snippet}`,
         )
     }
 
@@ -204,21 +238,27 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
 })
 
 test('collapsed setup shells route clicks to their section', () => {
-    const requiredSnippets = [
+    const requiredViewSnippets = [
         'function isInteractiveTarget(',
         'function handleSetupSectionShellClick(',
         "target.closest('button, a, input, select, textarea, label, [role=\"button\"]')",
-        `@click="handleSetupSectionShellClick('general', $event)"`,
-        `@click="handleSetupSectionShellClick('exchange', $event)"`,
-        `@click="handleSetupSectionShellClick('signal', $event)"`,
-        `@click="handleSetupSectionShellClick('dca', $event)"`,
-        `@click="handleSetupSectionShellClick('monitoring', $event)"`,
+        '@setup-shell-click="handleSetupSectionShellClick"',
+    ]
+    const requiredSetupWorkspaceSnippets = [
+        "@click=\"emit('setup-shell-click', task.target, $event)\"",
+        "@click=\"emit('select-setup-target', task.target)\"",
     ]
 
-    for (const snippet of requiredSnippets) {
+    for (const snippet of requiredViewSnippets) {
         assert.ok(
             controlCenterViewSource.includes(snippet),
             `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupWorkspaceSnippets) {
+        assert.ok(
+            setupWorkspaceSource.includes(snippet),
+            `expected setup workspace to include ${snippet}`,
         )
     }
 })
@@ -469,6 +509,51 @@ test('control center delegates mission, mode, and overview presentation to dedic
     )
     assert.equal(
         controlCenterViewSource.includes('Reload latest config'),
+        false,
+    )
+})
+
+test('control center delegates setup workspace presentation to a dedicated component', () => {
+    const requiredViewSnippets = [
+        "import ControlCenterSetupWorkspace from '../components/control-center/ControlCenterSetupWorkspace.vue'",
+        '<ControlCenterSetupWorkspace',
+        '@select-entry-choice="handleSetupEntryChoice"',
+        '@select-setup-style="handleSetupStyleChange"',
+        '@select-setup-target="handleSetupTaskSelect"',
+        '@setup-shell-click="handleSetupSectionShellClick"',
+        '<template #general>',
+        '<template #exchange>',
+        '<template #signal>',
+        '<template #dca>',
+        '<template #monitoring>',
+    ]
+    const requiredSetupWorkspaceSnippets = [
+        'Restore and review',
+        'Choose your setup pace',
+        'slot :name="task.target"',
+        "@click=\"emit('restore-backup', 'config')\"",
+        "@click=\"emit('select-entry-choice', 'restore')\"",
+    ]
+
+    for (const snippet of requiredViewSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupWorkspaceSnippets) {
+        assert.ok(
+            setupWorkspaceSource.includes(snippet),
+            `expected setup workspace to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes('Restore and review'),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes('Choose your setup pace'),
         false,
     )
 })
