@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
 
@@ -17,13 +17,6 @@ import ConfigSignalSection from '../components/config/ConfigSignalSection.vue'
 import { MOONWALKER_API_ORIGIN } from '../config'
 import { createControlCenterConfigChangeSynchronizer } from '../control-center/configChangeSync'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
-import { deriveControlCenterConfigTrustState } from '../control-center/configTrust'
-import type { OperationResult } from '../control-center/operationResults'
-import { deriveControlCenterReadiness } from '../control-center/readiness'
-import {
-    buildControlCenterQuery,
-    normalizeControlCenterRouteState,
-} from '../control-center/routeState'
 import {
     getTaskPresentation,
     resolveTargetForConfigKey,
@@ -32,18 +25,19 @@ import type {
     ControlCenterBlocker,
     ControlCenterTarget,
 } from '../control-center/types'
-import { deriveControlCenterViewState } from '../control-center/viewState'
 import { useConfigAdvancedGeneral } from '../composables/useConfigAdvancedGeneral'
 import { useConfigBackupRestore } from '../composables/useConfigBackupRestore'
 import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
 import { useConfigMonitoringTest } from '../composables/useConfigMonitoringTest'
 import { useConfigPageState } from '../composables/useConfigPageState'
 import { useConfigPersistableState } from '../composables/useConfigPersistableState'
+import { useControlCenterDerivedState } from '../composables/useControlCenterDerivedState'
 import { useControlCenterFeedback } from '../composables/useControlCenterFeedback'
 import { useControlCenterMissionState } from '../composables/useControlCenterMissionState'
 import { useControlCenterNavigation } from '../composables/useControlCenterNavigation'
 import { useControlCenterRuntimeActions } from '../composables/useControlCenterRuntimeActions'
 import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupFlow'
+import { useControlCenterWorkspaceRefresh } from '../composables/useControlCenterWorkspaceRefresh'
 import { useControlCenterWorkspaceActions } from '../composables/useControlCenterWorkspaceActions'
 import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
 import { useConfigSignalFlow } from '../composables/useConfigSignalFlow'
@@ -53,7 +47,6 @@ import {
     buildConfigSubmitPayload,
     type ConfigSubmitPayloadDefaults,
 } from '../helpers/configSubmitPayload'
-import { extractApiErrorMessage } from '../helpers/apiErrors'
 
 function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
@@ -209,40 +202,6 @@ const { buildConfigLoadDefaults } = useConfigAdvancedGeneral({
     isLoading,
     showAdvancedGeneral,
 })
-
-async function refreshWorkspaceFromSnapshot(force = false): Promise<OperationResult> {
-    try {
-        if (force) {
-            await configSnapshotStore.refresh()
-        } else {
-            await configSnapshotStore.ensureLoaded(false)
-        }
-        const result = await fetchDefaultValues()
-        loadRescueMessage.value = result.status === 'error' ? result.message : null
-        if (result.status === 'success') {
-            const normalizedState = normalizeControlCenterRouteState({
-                requestedMode: routeState.value.mode,
-                requestedTarget: routeState.value.target,
-                fallbackMode: viewState.value.defaultMode,
-            })
-            await router.replace({
-                name: 'controlCenter',
-                query: buildControlCenterQuery(normalizedState),
-            })
-        }
-        return result
-    } catch (error) {
-        const message = extractApiErrorMessage(
-            error,
-            'Failed to load configuration.',
-        )
-        loadRescueMessage.value = message
-        return {
-            status: 'error',
-            message,
-        }
-    }
-}
 
 const {
     confirmDiscardUnsavedChanges,
@@ -404,7 +363,7 @@ const syncControlCenterConfigChange = createControlCenterConfigChangeSynchronize
     emitInvalidation: (origin) => {
         configSnapshotStore.emitLocalInvalidation(origin)
     },
-    refreshWorkspace: refreshWorkspaceFromSnapshot,
+    refreshWorkspace: (force) => refreshWorkspaceFromSnapshot(force),
 })
 
 const {
@@ -418,12 +377,6 @@ const {
     surfaceMessages: false,
 })
 
-const effectiveLoadError = computed(
-    () => loadRescueMessage.value ?? configSnapshotStore.loadError.value,
-)
-const readiness = computed(() =>
-    deriveControlCenterReadiness(configSnapshotStore.snapshot.value),
-)
 const {
     announce,
     disposeFeedback,
@@ -431,30 +384,29 @@ const {
     setTransitionIntent,
     transitionIntent,
 } = useControlCenterFeedback()
-const visibleBlockers = computed(() => {
-    if (
-        transitionIntent.value?.status === 'blocked' &&
-        transitionIntent.value.blockers &&
-        transitionIntent.value.blockers.length > 0
-    ) {
-        return transitionIntent.value.blockers
-    }
-    return readiness.value.blockers
+const {
+    configTrustState,
+    effectiveLoadError,
+    readiness,
+    routeState,
+    viewState,
+    visibleBlockers,
+} = useControlCenterDerivedState({
+    hasUnsavedChanges,
+    loadRescueMessage,
+    requestedMode: () => route.query.mode,
+    requestedTarget: () => route.query.target,
+    snapshotStore: configSnapshotStore,
+    transitionIntent,
 })
-const viewState = computed(() =>
-    deriveControlCenterViewState({
-        loadError: effectiveLoadError.value,
-        readiness: readiness.value,
-        transition: transitionIntent.value,
-    }),
-)
-const routeState = computed(() =>
-    normalizeControlCenterRouteState({
-        requestedMode: route.query.mode,
-        requestedTarget: route.query.target,
-        fallbackMode: viewState.value.defaultMode,
-    }),
-)
+const { refreshWorkspaceFromSnapshot } = useControlCenterWorkspaceRefresh({
+    fetchDefaultValues,
+    loadRescueMessage,
+    readRouteState: () => routeState.value,
+    readViewState: () => viewState.value,
+    router,
+    snapshotStore: configSnapshotStore,
+})
 const {
     focusTarget,
     guideToTarget,
@@ -514,15 +466,6 @@ const {
     routeState,
     visibleBlockers,
 })
-const configTrustState = computed(() =>
-    deriveControlCenterConfigTrustState({
-        hasKnownNewerSnapshot: configSnapshotStore.hasKnownNewerSnapshot.value,
-        hasUnsavedChanges: hasUnsavedChanges(),
-        isHydrated: configSnapshotStore.isHydrated.value,
-        latestKnownUpdatedAt: configSnapshotStore.latestKnownUpdatedAt.value,
-        loadState: configSnapshotStore.loadState.value,
-    }),
-)
 const {
     advancedSections,
     dirtySummary,

@@ -47,6 +47,26 @@ const workspaceActionsSource = fs.readFileSync(
     ),
     'utf8',
 )
+const derivedStateSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterDerivedState.ts',
+    ),
+    'utf8',
+)
+const workspaceRefreshSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterWorkspaceRefresh.ts',
+    ),
+    'utf8',
+)
 
 test('control center target sections use dynamic element refs', () => {
     // Regression: ISSUE-003 — "Fix this" could not jump because setup targets
@@ -349,6 +369,65 @@ test('control center delegates feedback and mission-state handling to dedicated 
     )
 })
 
+test('control center delegates derived readiness and route state to a dedicated composable', () => {
+    const requiredViewSnippets = [
+        "import { useControlCenterDerivedState } from '../composables/useControlCenterDerivedState'",
+        '} = useControlCenterDerivedState({',
+        'configTrustState,',
+        'effectiveLoadError,',
+        'readiness,',
+        'routeState,',
+        'viewState,',
+        'visibleBlockers,',
+    ]
+    const requiredDerivedStateSnippets = [
+        'const effectiveLoadError = computed(',
+        'const readiness = computed(',
+        'const visibleBlockers = computed(() => {',
+        'const viewState = computed(() =>',
+        'const routeState = computed(() =>',
+        'const configTrustState = computed(() =>',
+    ]
+
+    for (const snippet of requiredViewSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredDerivedStateSnippets) {
+        assert.ok(
+            derivedStateSource.includes(snippet),
+            `expected derived state composable to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes('const effectiveLoadError = computed('),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes('const readiness = computed('),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes('const visibleBlockers = computed(() => {'),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes('const viewState = computed(() =>'),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes('const routeState = computed(() =>'),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes('const configTrustState = computed(() =>'),
+        false,
+    )
+})
+
 test('control center delegates workspace action wrappers to a dedicated composable', () => {
     const requiredViewSnippets = [
         "import { useControlCenterWorkspaceActions } from '../composables/useControlCenterWorkspaceActions'",
@@ -399,6 +478,42 @@ test('control center delegates workspace action wrappers to a dedicated composab
     assert.equal(
         controlCenterViewSource.includes(
             'async function handleMonitoringTestAction(): Promise<void> {',
+        ),
+        false,
+    )
+})
+
+test('control center delegates shared snapshot refresh handling to a dedicated composable', () => {
+    const requiredViewSnippets = [
+        "import { useControlCenterWorkspaceRefresh } from '../composables/useControlCenterWorkspaceRefresh'",
+        'const { refreshWorkspaceFromSnapshot } = useControlCenterWorkspaceRefresh({',
+        'readRouteState: () => routeState.value,',
+        'readViewState: () => viewState.value,',
+    ]
+    const requiredRefreshSnippets = [
+        'async function refreshWorkspaceFromSnapshot(',
+        'await options.snapshotStore.refresh()',
+        'await options.snapshotStore.ensureLoaded(false)',
+        'await options.router.replace({',
+        'buildControlCenterQuery(normalizedState)',
+    ]
+
+    for (const snippet of requiredViewSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredRefreshSnippets) {
+        assert.ok(
+            workspaceRefreshSource.includes(snippet),
+            `expected workspace refresh composable to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function refreshWorkspaceFromSnapshot(',
         ),
         false,
     )
