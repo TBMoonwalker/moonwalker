@@ -322,6 +322,30 @@ def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
     assert service.last_batch == payload
 
 
+def test_config_single_accepts_success_contract(monkeypatch) -> None:
+    """Ensure single-key config updates keep the established success contract."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_config_key])
+    payload = {"value": {"value": "binance", "type": "str"}}
+    with TestClient(app=app) as client:
+        response = client.put("/config/single/exchange", json=payload)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "message": "Config 'exchange' updated",
+        "value": payload["value"],
+    }
+    assert service.last_single == ("exchange", payload["value"])
+
+
 def test_config_multiple_rejects_generic_live_activation(monkeypatch) -> None:
     """Generic config batch saves must not switch the instance live."""
     service = _DummyConfigService()

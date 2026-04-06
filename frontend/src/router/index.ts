@@ -7,7 +7,6 @@ import {
 
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 import { deriveControlCenterReadiness } from '../control-center/readiness'
-import { buildLegacyControlCenterRedirect } from '../control-center/routeState'
 import { resolveControlCenterNavigation } from '../control-center/routerGuard'
 
 export function createAppRouter(
@@ -28,22 +27,6 @@ export function createAppRouter(
                 path: '/control-center',
                 name: 'controlCenter',
                 component: () => import('../views/ControlCenterView.vue'),
-            },
-            {
-                path: '/settings',
-                name: 'legacySettings',
-                redirect: (to) =>
-                    buildLegacyControlCenterRedirect(
-                        to.query as Record<string, unknown>,
-                    ),
-            },
-            {
-                path: '/config',
-                name: 'legacyConfig',
-                redirect: (to) =>
-                    buildLegacyControlCenterRedirect(
-                        to.query as Record<string, unknown>,
-                    ),
             },
             {
                 path: '/monitoring',

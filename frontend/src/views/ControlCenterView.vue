@@ -60,28 +60,11 @@ import {
     buildConfigSubmitPayload,
     type ConfigSubmitPayloadDefaults,
 } from '../helpers/configSubmitPayload'
+import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { trackUiEvent } from '../utils/uiTelemetry'
 
 function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-}
-
-function extractAxiosErrorMessage(error: unknown, fallback: string): string {
-    if (axios.isAxiosError(error)) {
-        if (error.response?.data?.message) {
-            return String(error.response.data.message)
-        }
-        if (error.response?.data?.error) {
-            return String(error.response.data.error)
-        }
-        if (error.message) {
-            return error.message
-        }
-    }
-    if (error instanceof Error && error.message) {
-        return error.message
-    }
-    return fallback
 }
 
 function normalizeBackendBlockers(rawBlockers: unknown): ControlCenterBlocker[] {
@@ -296,7 +279,7 @@ async function refreshWorkspaceFromSnapshot(force = false): Promise<OperationRes
         }
         return result
     } catch (error) {
-        const message = extractAxiosErrorMessage(
+        const message = extractApiErrorMessage(
             error,
             'Failed to load configuration.',
         )
@@ -995,7 +978,7 @@ async function handleActivateLiveTrading(): Promise<void> {
         const status = axios.isAxiosError(error) && error.response?.status === 409
             ? 'blocked'
             : 'error'
-        const messageText = extractAxiosErrorMessage(
+        const messageText = extractApiErrorMessage(
             error,
             'Live activation failed.',
         )

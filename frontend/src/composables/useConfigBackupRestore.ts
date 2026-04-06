@@ -2,6 +2,7 @@ import axios from 'axios'
 import { computed, ref } from 'vue'
 
 import type { OperationResult } from '../control-center/operationResults'
+import { extractApiErrorMessage } from '../helpers/apiErrors'
 
 type BackupRestoreMode = 'config' | 'full'
 
@@ -55,24 +56,6 @@ function downloadTextFile(filename: string, content: string): void {
     anchor.download = filename
     anchor.click()
     window.URL.revokeObjectURL(url)
-}
-
-function extractAxiosErrorMessage(error: unknown, fallback: string): string {
-    if (axios.isAxiosError(error)) {
-        if (error.response?.data?.error) {
-            return String(error.response.data.error)
-        }
-        if (error.response?.data?.message) {
-            return String(error.response.data.message)
-        }
-        if (error.message) {
-            return error.message
-        }
-    }
-    if (error instanceof Error && error.message) {
-        return error.message
-    }
-    return fallback
 }
 
 export function useConfigBackupRestore(
@@ -138,7 +121,7 @@ export function useConfigBackupRestore(
                 message: 'Backup downloaded successfully.',
             }
         } catch (error) {
-            const message = extractAxiosErrorMessage(
+            const message = extractApiErrorMessage(
                 error,
                 'Backup download failed.',
             )
@@ -269,7 +252,7 @@ export function useConfigBackupRestore(
                 }
             }
         } catch (error) {
-            const message = extractAxiosErrorMessage(
+            const message = extractApiErrorMessage(
                 error,
                 'Backup restore failed.',
             )

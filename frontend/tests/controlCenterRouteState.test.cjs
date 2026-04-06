@@ -5,7 +5,6 @@ const { loadFrontendModule } = require('./helpers/loadFrontendModule.cjs')
 
 const {
     buildControlCenterQuery,
-    buildLegacyControlCenterRedirect,
     normalizeControlCenterRouteState,
 } = loadFrontendModule('src/control-center/routeState.ts')
 
@@ -39,18 +38,14 @@ test('normalizeControlCenterRouteState uses the task default mode when needed', 
     })
 })
 
-test('buildLegacyControlCenterRedirect preserves setup intent and normalizes targets', () => {
-    const redirect = buildLegacyControlCenterRedirect({
-        setup: 'required',
-        target: 'signal',
-        mode: 'advanced',
-    })
-
-    assert.deepEqual(redirect, {
-        name: 'controlCenter',
-        query: {
-            mode: 'setup',
-            target: 'signal',
+test('buildControlCenterQuery omits target when route state has no target', () => {
+    assert.deepEqual(
+        buildControlCenterQuery({
+            mode: 'overview',
+            target: null,
+        }),
+        {
+            mode: 'overview',
         },
-    })
+    )
 })

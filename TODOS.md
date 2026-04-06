@@ -21,6 +21,31 @@ after config trust and invalidation hardening feel stable.
 **Priority:** P3
 **Depends on:** Config trust and invalidation hardening shipping cleanly first
 
+## Stabilization
+
+### Split trade/data backend cleanup into its own delete-first slice
+
+**What:** Run a follow-up backend stabilization pass on
+`backend/service/database.py` and `backend/service/data.py` after the
+Control Center/config-surface cleanup lands.
+
+**Why:** Phase 1 was deliberately narrowed so cleanup stays coherent. Without a
+separate TODO, the backend half of the stabilization goal can disappear after
+the first PR ships.
+
+**Context:** The 2026-04-06 office-hours plan and follow-up engineering review
+approved a reduced first pass: remove legacy Control Center entry seams, keep
+the public `/config/*` API contract stable, and clean up the config
+controller/view path first. `database.py` and `data.py` were explicitly
+deferred because they belong to a different domain: SQLite recovery, migration
+safety, replay/history behavior, and broader data-read semantics. Pick this up
+only after the Phase 1 cleanup merges, using the same keep/delete/justify
+inventory and delete-before-refactor rule.
+
+**Effort:** M
+**Priority:** P2
+**Depends on:** Phase 1 Control Center/config stabilization landing cleanly
+
 ## Completed
 
 ### Harden config trust and invalidation in Control Center
