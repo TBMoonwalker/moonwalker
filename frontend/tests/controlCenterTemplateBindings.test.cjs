@@ -107,3 +107,46 @@ test('collapsed setup shells route clicks to their section', () => {
         )
     }
 })
+
+test('control center delegates runtime activation handling to a dedicated composable', () => {
+    const requiredSnippets = [
+        "import { useControlCenterRuntimeActions } from '../composables/useControlCenterRuntimeActions'",
+        '} = useControlCenterRuntimeActions({',
+        'handleActivateLiveTrading,',
+        'handleReloadAfterStalePrompt,',
+        'handleDetectedExternalConfigChange,',
+        'checkForExternalConfigChanges,',
+    ]
+
+    for (const snippet of requiredSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function handleActivateLiveTrading(): Promise<void> {',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function handleReloadAfterStalePrompt(): Promise<void> {',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function handleDetectedExternalConfigChange(',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes(
+            'async function checkForExternalConfigChanges(): Promise<void> {',
+        ),
+        false,
+    )
+})

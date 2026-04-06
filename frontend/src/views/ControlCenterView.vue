@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import axios from 'axios'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
@@ -52,6 +51,7 @@ import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
 import { useConfigMonitoringTest } from '../composables/useConfigMonitoringTest'
 import { useConfigPageState } from '../composables/useConfigPageState'
 import { useConfigPersistableState } from '../composables/useConfigPersistableState'
+import { useControlCenterRuntimeActions } from '../composables/useControlCenterRuntimeActions'
 import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
 import { useConfigSignalFlow } from '../composables/useConfigSignalFlow'
 import { useConfigValidationFlow } from '../composables/useConfigValidationFlow'
@@ -135,7 +135,6 @@ const configSnapshotStore = useSharedConfigSnapshot()
 
 const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).toString()
 const isLoading = ref(true)
-const activationLoading = ref(false)
 const showAdvancedGeneral = ref(false)
 const setupEntryChoice = ref<SetupEntryChoice | null>(null)
 const setupStyle = ref<SetupStyle>('guided')
@@ -495,6 +494,25 @@ const routeState = computed(() =>
         fallbackMode: viewState.value.defaultMode,
     }),
 )
+const {
+    activationLoading,
+    checkForExternalConfigChanges,
+    handleActivateLiveTrading,
+    handleDetectedExternalConfigChange,
+    handleReloadAfterStalePrompt,
+} = useControlCenterRuntimeActions({
+    announce,
+    apiUrl,
+    hasUnsavedChanges,
+    isDirty,
+    navigateToControlCenter,
+    normalizeBlockers: normalizeBackendBlockers,
+    readiness,
+    routeState,
+    setTransitionIntent,
+    snapshotStore: configSnapshotStore,
+    syncControlCenterConfigChange,
+})
 const configTrustState = computed(() =>
     deriveControlCenterConfigTrustState({
         hasKnownNewerSnapshot: configSnapshotStore.hasKnownNewerSnapshot.value,
@@ -911,144 +929,6 @@ async function handleMonitoringTestAction(): Promise<void> {
         })
         announce(result.message)
     }
-}
-
-async function handleActivateLiveTrading(): Promise<void> {
-    if (activationLoading.value) {
-        return
-    }
-    if (isDirty.value) {
-        const blockedMessage =
-            'Save the current draft before activating live trading.'
-        setTransitionIntent({
-            kind: 'activate_live',
-            status: 'blocked',
-            message: blockedMessage,
-            at: Date.now(),
-        })
-        announce(blockedMessage)
-        return
-    }
-    if (!readiness.value.complete) {
-        const blockedMessage =
-            'Complete the required setup blockers before activating live trading.'
-        setTransitionIntent({
-            kind: 'activate_live',
-            status: 'blocked',
-            message: blockedMessage,
-            at: Date.now(),
-            blockers: readiness.value.blockers,
-        })
-        announce(blockedMessage)
-        return
-    }
-    if (
-        !window.confirm(
-            'Activate live trading now? Moonwalker will stop simulating orders and submit them to the configured exchange.',
-        )
-    ) {
-        return
-    }
-
-    activationLoading.value = true
-    trackUiEvent('control_center_live_activation_requested')
-
-    try {
-        const response = await axios.post(apiUrl('/config/live/activate'), {
-            confirm: true,
-        })
-        const syncResult = await syncControlCenterConfigChange('live_activation')
-        if (syncResult.status === 'error') {
-            throw new Error(syncResult.message)
-        }
-        await navigateToControlCenter('overview', 'live-activation')
-        setTransitionIntent({
-            kind: 'activate_live',
-            status: 'success',
-            message: response.data?.message || 'Live trading activated.',
-            at: Date.now(),
-            mode: 'overview',
-            target: 'live-activation',
-        })
-        announce(response.data?.message || 'Live trading activated.')
-    } catch (error) {
-        const normalizedBlockers = normalizeBackendBlockers(
-            axios.isAxiosError(error) ? error.response?.data?.blockers : undefined,
-        )
-        const status = axios.isAxiosError(error) && error.response?.status === 409
-            ? 'blocked'
-            : 'error'
-        const messageText = extractApiErrorMessage(
-            error,
-            'Live activation failed.',
-        )
-        setTransitionIntent({
-            kind: 'activate_live',
-            status,
-            message: messageText,
-            at: Date.now(),
-            blockers: normalizedBlockers,
-            mode: normalizedBlockers[0]?.mode,
-            target: normalizedBlockers[0]?.target,
-        })
-        announce(messageText)
-    } finally {
-        activationLoading.value = false
-    }
-}
-
-async function handleReloadAfterStalePrompt(): Promise<void> {
-    if (
-        hasUnsavedChanges() &&
-        !window.confirm(
-            'Reload the newer configuration now and discard local draft changes?',
-        )
-    ) {
-        return
-    }
-    const result = await syncControlCenterConfigChange('external_invalidation')
-    if (result.status === 'success') {
-        setTransitionIntent({
-            kind: 'retry',
-            status: 'success',
-            message: 'Loaded the latest configuration from another client.',
-            at: Date.now(),
-            mode: routeState.value.mode,
-            target: routeState.value.target,
-        })
-        announce('Loaded the latest configuration from another client.')
-    }
-}
-
-async function handleDetectedExternalConfigChange(
-    shouldAnnounce = !document.hidden,
-): Promise<void> {
-    if (!hasUnsavedChanges()) {
-        const result = await syncControlCenterConfigChange('external_invalidation')
-        if (shouldAnnounce) {
-            announce(
-                result.status === 'success'
-                    ? 'Configuration refreshed after external changes.'
-                    : result.message,
-            )
-        }
-        return
-    }
-
-    if (shouldAnnounce) {
-        announce('A newer configuration is available from another client.')
-    }
-}
-
-async function checkForExternalConfigChanges(): Promise<void> {
-    if (document.hidden) {
-        return
-    }
-    const freshness = await configSnapshotStore.checkFreshness()
-    if (freshness.status !== 'stale') {
-        return
-    }
-    await handleDetectedExternalConfigChange(true)
 }
 
 watch(
