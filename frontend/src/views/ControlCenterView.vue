@@ -21,16 +21,11 @@ import ConfigIndicatorSection from '../components/config/ConfigIndicatorSection.
 import ConfigMonitoringSection from '../components/config/ConfigMonitoringSection.vue'
 import ConfigSignalSection from '../components/config/ConfigSignalSection.vue'
 import { MOONWALKER_API_ORIGIN } from '../config'
+import { normalizeControlCenterBlockers } from '../control-center/blockers'
 import { createControlCenterConfigChangeSynchronizer } from '../control-center/configChangeSync'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
-import {
-    getTaskPresentation,
-    resolveTargetForConfigKey,
-} from '../control-center/taskRegistry'
-import type {
-    ControlCenterBlocker,
-    ControlCenterTarget,
-} from '../control-center/types'
+import { getTaskPresentation } from '../control-center/taskRegistry'
+import type { ControlCenterTarget } from '../control-center/types'
 import { useConfigAdvancedGeneral } from '../composables/useConfigAdvancedGeneral'
 import { useConfigBackupRestore } from '../composables/useConfigBackupRestore'
 import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
@@ -59,36 +54,6 @@ import {
 
 function getClientTimezone(): string {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-}
-
-function normalizeBackendBlockers(rawBlockers: unknown): ControlCenterBlocker[] {
-    if (!Array.isArray(rawBlockers)) {
-        return []
-    }
-
-    return rawBlockers
-        .map((blocker) => {
-            if (!blocker || typeof blocker !== 'object') {
-                return null
-            }
-            const key = String((blocker as { key?: unknown }).key ?? '').trim()
-            const message = String(
-                (blocker as { message?: unknown }).message ??
-                    'Resolve this blocker before continuing.',
-            ).trim()
-            if (!key) {
-                return null
-            }
-            const task = getTaskPresentation(resolveTargetForConfigKey(key))
-            return {
-                key,
-                title: task.title,
-                description: message,
-                mode: task.defaultMode,
-                target: task.target,
-            } satisfies ControlCenterBlocker
-        })
-        .filter((blocker): blocker is ControlCenterBlocker => blocker !== null)
 }
 
 const route = useRoute()
@@ -423,7 +388,7 @@ const {
     hasUnsavedChanges,
     isDirty,
     navigateToControlCenter,
-    normalizeBlockers: normalizeBackendBlockers,
+    normalizeBlockers: normalizeControlCenterBlockers,
     readiness,
     routeState,
     setTransitionIntent,
@@ -487,7 +452,7 @@ const {
     handleBackupDownload,
     handleRestoreBackup,
     navigateToControlCenter,
-    normalizeBlockers: normalizeBackendBlockers,
+    normalizeBlockers: normalizeControlCenterBlockers,
     setTransitionIntent,
     submitForm,
     testMonitoringTelegram,

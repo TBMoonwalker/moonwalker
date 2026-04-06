@@ -7,6 +7,10 @@ const controlCenterViewSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'views', 'ControlCenterView.vue'),
     'utf8',
 )
+const blockersSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'control-center', 'blockers.ts'),
+    'utf8',
+)
 const setupFlowSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -417,6 +421,38 @@ test('control center delegates lifecycle and window wiring to a dedicated compos
     )
     assert.equal(
         controlCenterViewSource.includes("window.removeEventListener('beforeunload'"),
+        false,
+    )
+})
+
+test('control center delegates blocker normalization to the shared blocker helper', () => {
+    const requiredViewSnippets = [
+        "import { normalizeControlCenterBlockers } from '../control-center/blockers'",
+        'normalizeBlockers: normalizeControlCenterBlockers,',
+    ]
+    const requiredBlockerSnippets = [
+        'export function resolveControlCenterBlocker(',
+        'export function normalizeControlCenterBlockers(',
+        'resolveTargetForConfigKey(key)',
+    ]
+
+    for (const snippet of requiredViewSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredBlockerSnippets) {
+        assert.ok(
+            blockersSource.includes(snippet),
+            `expected blocker helper to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes(
+            'function normalizeBackendBlockers(rawBlockers: unknown): ControlCenterBlocker[] {',
+        ),
         false,
     )
 })

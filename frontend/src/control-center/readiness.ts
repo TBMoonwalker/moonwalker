@@ -1,8 +1,6 @@
+import { resolveControlCenterBlocker } from './blockers'
 import { deriveSignalModeBlockers } from './signalMode'
-import {
-    getTaskPresentation,
-    resolveTargetForConfigKey,
-} from './taskRegistry'
+import { getTaskPresentation } from './taskRegistry'
 import type {
     ControlCenterBlocker,
     ControlCenterMode,
@@ -30,21 +28,6 @@ function hasRequiredValue(value: unknown): boolean {
     return true
 }
 
-function buildBlocker(
-    key: string,
-    title: string,
-    description: string,
-): ControlCenterBlocker {
-    const task = getTaskPresentation(resolveTargetForConfigKey(key))
-    return {
-        key,
-        title,
-        description,
-        mode: task.defaultMode,
-        target: task.target,
-    }
-}
-
 function collectAlwaysRequiredBlockers(
     config: SharedConfigPayload,
 ): ControlCenterBlocker[] {
@@ -67,7 +50,9 @@ function collectAlwaysRequiredBlockers(
     ]
 
     return requiredKeys.flatMap(([key, title, description]) =>
-        hasRequiredValue(config[key]) ? [] : [buildBlocker(key, title, description)],
+        hasRequiredValue(config[key])
+            ? []
+            : [resolveControlCenterBlocker(key, description, title)],
     )
 }
 
@@ -118,7 +103,9 @@ function collectDcaBlockers(config: SharedConfigPayload): ControlCenterBlocker[]
           ]
 
     return requiredKeys.flatMap(([key, title, description]) =>
-        hasRequiredValue(config[key]) ? [] : [buildBlocker(key, title, description)],
+        hasRequiredValue(config[key])
+            ? []
+            : [resolveControlCenterBlocker(key, description, title)],
     )
 }
 
