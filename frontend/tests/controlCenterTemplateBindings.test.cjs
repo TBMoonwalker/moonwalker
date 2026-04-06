@@ -43,6 +43,17 @@ const advancedWorkspaceSource = fs.readFileSync(
     ),
     'utf8',
 )
+const advancedModeSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterAdvancedMode.vue',
+    ),
+    'utf8',
+)
 const modeStripSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -73,6 +84,17 @@ const setupWorkspaceSource = fs.readFileSync(
         'components',
         'control-center',
         'ControlCenterSetupWorkspace.vue',
+    ),
+    'utf8',
+)
+const setupModeSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterSetupMode.vue',
     ),
     'utf8',
 )
@@ -229,20 +251,18 @@ test('control center target sections use dynamic element refs', () => {
     // Found by /qa on 2026-03-20
     // Report: .gstack/qa-reports/qa-report-127-0-0-1-2026-03-20.md
     assert.ok(
-        controlCenterViewSource.includes('<ControlCenterSetupWorkspace'),
-        'expected setup targets to be routed through the setup workspace component',
+        controlCenterViewSource.includes('<ControlCenterSetupMode'),
+        'expected setup targets to be routed through the setup mode component',
+    )
+    assert.ok(
+        setupModeSource.includes(':bind-target-element="bindTargetElement"'),
+        'expected the setup mode to forward target bindings into the setup workspace',
     )
     assert.ok(
         controlCenterViewSource.includes(
             "import { useControlCenterTargetRegistry } from '../composables/useControlCenterTargetRegistry'",
         ),
         'expected target bindings to come from the target registry composable',
-    )
-    assert.ok(
-        controlCenterViewSource.includes(
-            ':bind-target-element="bindTargetElement"',
-        ),
-        'expected the setup workspace to receive the target ref binder',
     )
     assert.ok(
         controlCenterViewSource.includes(
@@ -299,11 +319,15 @@ test('control center gates first-run setup behind explicit onboarding choices', 
     // operator's intent up front.
     const requiredViewSnippets = [
         "import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupFlow'",
-        "import ControlCenterSetupWorkspace from '../components/control-center/ControlCenterSetupWorkspace.vue'",
+        "import ControlCenterSetupMode from '../components/control-center/ControlCenterSetupMode.vue'",
         '} = useControlCenterSetupFlow({',
         'showSetupEntryGate,',
         'showRestoreSetupFlow,',
         'setupShowsAdvancedFields,',
+        '<ControlCenterSetupMode',
+    ]
+    const requiredSetupModeSnippets = [
+        "import ControlCenterSetupWorkspace from './ControlCenterSetupWorkspace.vue'",
         '<ControlCenterSetupWorkspace',
     ]
     const requiredSetupWorkspaceSnippets = [
@@ -328,6 +352,12 @@ test('control center gates first-run setup behind explicit onboarding choices', 
             `expected control center to include ${snippet}`,
         )
     }
+    for (const snippet of requiredSetupModeSnippets) {
+        assert.ok(
+            setupModeSource.includes(snippet),
+            `expected setup mode to include ${snippet}`,
+        )
+    }
     for (const snippet of requiredSetupWorkspaceSnippets) {
         assert.ok(
             setupWorkspaceSource.includes(snippet),
@@ -350,7 +380,9 @@ test('control center gates first-run setup behind explicit onboarding choices', 
 
 test('control center keeps guided setup focused and avoids duplicate advanced headings', () => {
     const requiredViewSnippets = [
-        '<ControlCenterSetupWorkspace',
+        '<ControlCenterSetupMode',
+    ]
+    const requiredSetupModeSnippets = [
         ':show-debug="setupShowsAdvancedFields"',
     ]
     const requiredSetupWorkspaceSnippets = [
@@ -381,6 +413,12 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         assert.ok(
             controlCenterViewSource.includes(snippet),
             `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupModeSnippets) {
+        assert.ok(
+            setupModeSource.includes(snippet),
+            `expected setup mode to include ${snippet}`,
         )
     }
     for (const snippet of requiredSetupWorkspaceSnippets) {
@@ -434,15 +472,16 @@ test('collapsed setup shells route clicks to their section', () => {
         'handleSetupSectionShellClick',
         '@setup-shell-click="handleSetupSectionShellClick"',
     ]
+    const requiredSetupModeSnippets = [
+        '<ControlCenterSetupWorkspace',
+        '@setup-shell-click="(target, event) => emit(\'setup-shell-click\', target, event)"',
+    ]
     const requiredSetupShellSnippets = [
         'function defaultIsInteractiveTarget(',
         'async function handleSetupSectionShellClick(',
         "target.closest('button, a, input, select, textarea, label, [role=\"button\"]')",
     ]
-    const requiredSetupWorkspaceSnippets = [
-        '<ControlCenterSetupTaskSection',
-        '@setup-shell-click="(target, event) => emit(\'setup-shell-click\', target, event)"',
-    ]
+    const requiredSetupWorkspaceSnippets = ['<ControlCenterSetupTaskSection']
     const requiredSetupTaskSectionSnippets = [
         "@click=\"emit('setup-shell-click', task.target, $event)\"",
         "@click=\"emit('select-setup-target', task.target)\"",
@@ -452,6 +491,12 @@ test('collapsed setup shells route clicks to their section', () => {
         assert.ok(
             controlCenterViewSource.includes(snippet),
             `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupModeSnippets) {
+        assert.ok(
+            setupModeSource.includes(snippet),
+            `expected setup mode to include ${snippet}`,
         )
     }
     for (const snippet of requiredSetupShellSnippets) {
@@ -812,14 +857,23 @@ test('control center delegates mission, mode, and overview presentation to dedic
     )
 })
 
-test('control center delegates setup workspace presentation to a dedicated component', () => {
+test('control center delegates setup mode presentation to dedicated components', () => {
     const requiredViewSnippets = [
-        "import ControlCenterSetupWorkspace from '../components/control-center/ControlCenterSetupWorkspace.vue'",
-        '<ControlCenterSetupWorkspace',
+        "import ControlCenterSetupMode from '../components/control-center/ControlCenterSetupMode.vue'",
+        '<ControlCenterSetupMode',
         '@select-entry-choice="handleSetupEntryChoice"',
         '@select-setup-style="handleSetupStyleChange"',
         '@select-setup-target="handleSetupTaskSelect"',
         '@setup-shell-click="handleSetupSectionShellClick"',
+    ]
+    const requiredSetupModeSnippets = [
+        "import ControlCenterSetupWorkspace from './ControlCenterSetupWorkspace.vue'",
+        "import ConfigGeneralSection from '../config/ConfigGeneralSection.vue'",
+        "import ConfigExchangeSection from '../config/ConfigExchangeSection.vue'",
+        "import ConfigSignalSection from '../config/ConfigSignalSection.vue'",
+        "import ConfigDcaSection from '../config/ConfigDcaSection.vue'",
+        "import ConfigMonitoringSection from '../config/ConfigMonitoringSection.vue'",
+        '<ControlCenterSetupWorkspace',
         '<template #general>',
         '<template #exchange>',
         '<template #signal>',
@@ -851,6 +905,12 @@ test('control center delegates setup workspace presentation to a dedicated compo
         assert.ok(
             controlCenterViewSource.includes(snippet),
             `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupModeSnippets) {
+        assert.ok(
+            setupModeSource.includes(snippet),
+            `expected setup mode to include ${snippet}`,
         )
     }
     for (const snippet of requiredSetupWorkspaceSnippets) {
@@ -886,15 +946,32 @@ test('control center delegates setup workspace presentation to a dedicated compo
         controlCenterViewSource.includes('Choose your setup pace'),
         false,
     )
+    assert.equal(
+        controlCenterViewSource.includes('<template #general>'),
+        false,
+    )
 })
 
 test('control center delegates advanced and utilities presentation to dedicated components', () => {
     const requiredViewSnippets = [
-        "import ControlCenterAdvancedWorkspace from '../components/control-center/ControlCenterAdvancedWorkspace.vue'",
+        "import ControlCenterAdvancedMode from '../components/control-center/ControlCenterAdvancedMode.vue'",
         "import ControlCenterUtilitiesWorkspace from '../components/control-center/ControlCenterUtilitiesWorkspace.vue'",
-        '<ControlCenterAdvancedWorkspace',
+        '<ControlCenterAdvancedMode',
         '<ControlCenterUtilitiesWorkspace',
         '@update:backup-include-trade-data="backupIncludeTradeData = $event"',
+    ]
+    const requiredAdvancedModeSnippets = [
+        "import ControlCenterAdvancedWorkspace from './ControlCenterAdvancedWorkspace.vue'",
+        "import ConfigGeneralAdvancedSection from '../config/ConfigGeneralAdvancedSection.vue'",
+        "import ConfigExchangeAdvancedSection from '../config/ConfigExchangeAdvancedSection.vue'",
+        "import ConfigDcaAdvancedSection from '../config/ConfigDcaAdvancedSection.vue'",
+        "import ConfigFilterSection from '../config/ConfigFilterSection.vue'",
+        "import ConfigAutopilotSection from '../config/ConfigAutopilotSection.vue'",
+        "import ConfigIndicatorSection from '../config/ConfigIndicatorSection.vue'",
+        '<ControlCenterAdvancedWorkspace',
+        '<template #general>',
+        '<template #filter>',
+        '<template #indicator>',
     ]
     const requiredAdvancedWorkspaceSnippets = [
         'slot :name="section.target"',
@@ -915,6 +992,12 @@ test('control center delegates advanced and utilities presentation to dedicated 
         assert.ok(
             controlCenterViewSource.includes(snippet),
             `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredAdvancedModeSnippets) {
+        assert.ok(
+            advancedModeSource.includes(snippet),
+            `expected advanced mode to include ${snippet}`,
         )
     }
     for (const snippet of requiredAdvancedWorkspaceSnippets) {
@@ -938,6 +1021,10 @@ test('control center delegates advanced and utilities presentation to dedicated 
         controlCenterViewSource.includes('Connectivity test'),
         false,
     )
+    assert.equal(
+        controlCenterViewSource.includes('<template #indicator>'),
+        false,
+    )
 })
 
 test('control center delegates derived readiness and route state to a dedicated composable', () => {
@@ -945,7 +1032,6 @@ test('control center delegates derived readiness and route state to a dedicated 
         "import { useControlCenterDerivedState } from '../composables/useControlCenterDerivedState'",
         '} = useControlCenterDerivedState({',
         'configTrustState,',
-        'effectiveLoadError,',
         'readiness,',
         'routeState,',
         'viewState,',

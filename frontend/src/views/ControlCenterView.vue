@@ -3,23 +3,12 @@ import { nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
 
+import ControlCenterAdvancedMode from '../components/control-center/ControlCenterAdvancedMode.vue'
 import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'
-import ControlCenterAdvancedWorkspace from '../components/control-center/ControlCenterAdvancedWorkspace.vue'
 import ControlCenterModeStrip from '../components/control-center/ControlCenterModeStrip.vue'
 import ControlCenterOverviewWorkspace from '../components/control-center/ControlCenterOverviewWorkspace.vue'
-import ControlCenterSetupWorkspace from '../components/control-center/ControlCenterSetupWorkspace.vue'
+import ControlCenterSetupMode from '../components/control-center/ControlCenterSetupMode.vue'
 import ControlCenterUtilitiesWorkspace from '../components/control-center/ControlCenterUtilitiesWorkspace.vue'
-import ConfigAutopilotSection from '../components/config/ConfigAutopilotSection.vue'
-import ConfigDcaAdvancedSection from '../components/config/ConfigDcaAdvancedSection.vue'
-import ConfigDcaSection from '../components/config/ConfigDcaSection.vue'
-import ConfigExchangeAdvancedSection from '../components/config/ConfigExchangeAdvancedSection.vue'
-import ConfigExchangeSection from '../components/config/ConfigExchangeSection.vue'
-import ConfigFilterSection from '../components/config/ConfigFilterSection.vue'
-import ConfigGeneralAdvancedSection from '../components/config/ConfigGeneralAdvancedSection.vue'
-import ConfigGeneralSection from '../components/config/ConfigGeneralSection.vue'
-import ConfigIndicatorSection from '../components/config/ConfigIndicatorSection.vue'
-import ConfigMonitoringSection from '../components/config/ConfigMonitoringSection.vue'
-import ConfigSignalSection from '../components/config/ConfigSignalSection.vue'
 import { normalizeControlCenterBlockers } from '../control-center/blockers'
 import { createControlCenterConfigChangeSynchronizer } from '../control-center/configChangeSync'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
@@ -88,7 +77,6 @@ const {
     initializeClientTimezoneOptions,
     isAsapExchangeReady,
     isDirty,
-    isLoading,
     isSubmitDisabled,
     hasUnsavedChanges,
     market,
@@ -104,7 +92,6 @@ const {
     selectedBackupFileName,
     selectedBackupHasTradeData,
     selectedBackupPayload,
-    showAdvancedGeneral,
     signal,
     signalFormRef,
     submitForm,
@@ -173,7 +160,6 @@ const {
 } = useControlCenterFeedback()
 const {
     configTrustState,
-    effectiveLoadError,
     readiness,
     routeState,
     viewState,
@@ -365,23 +351,51 @@ useControlCenterLifecycle({
             </template>
 
             <template v-else-if="routeState.mode === 'setup'">
-                <ControlCenterSetupWorkspace
+                <ControlCenterSetupMode
                     :bind-backup-file-input="bindBackupFileInput"
                     :bind-target-element="bindTargetElement"
+                    :can-test-monitoring-telegram="canTestMonitoringTelegram()"
+                    :currency="currency"
+                    :dca="dca"
+                    :dca-form-ref="dcaFormRef"
+                    :exchange="exchange"
+                    :exchange-form-ref="exchangeFormRef"
+                    :exchanges="exchanges"
+                    :fetch-asap-symbols-for-currency="fetchAsapSymbolsForCurrency"
+                    :general="general"
+                    :general-form-ref="generalFormRef"
+                    :get-asap-missing-fields-label="getAsapMissingFieldsLabel"
                     :get-setup-task-status="getSetupTaskStatus"
                     :get-setup-task-summary="getSetupTaskSummary"
+                    :handle-asap-url-input="handleAsapUrlInput"
+                    :handle-csv-signal-file-selected="handleCsvSignalFileSelected"
+                    :handle-monitoring-test-action="handleMonitoringTestAction"
+                    :handle-signal-settings-select="handleSignalSettingsSelect"
                     :has-selected-backup-payload="!!selectedBackupPayload"
+                    :is-asap-exchange-ready="isAsapExchangeReady()"
                     :is-setup-task-expanded="isSetupTaskExpanded"
+                    :market="market"
+                    :monitoring="monitoring"
+                    :monitoring-form-ref="monitoringFormRef"
+                    :monitoring-test-loading="monitoringTestLoading"
                     :readiness-first-run="readiness.firstRun"
                     :restore-loading="restoreLoading"
+                    :rules="rules"
                     :selected-backup-config-count="selectedBackupConfigCount"
                     :selected-backup-file-name="selectedBackupFileName"
                     :selected-backup-has-trade-data="selectedBackupHasTradeData"
+                    :sell-order-type-options="sellOrderTypeOptions"
                     :setup-style="setupStyle"
+                    :setup-shows-advanced-fields="setupShowsAdvancedFields"
                     :setup-tasks="setupTasks"
                     :show-restore-setup-flow="showRestoreSetupFlow"
                     :show-setup-entry-gate="showSetupEntryGate"
                     :show-setup-style-selector="showSetupStyleSelector"
+                    :signal="signal"
+                    :signal-form-ref="signalFormRef"
+                    :symsignals="symsignals"
+                    :timerange="timerange"
+                    :timezone="timezone"
                     @backup-file-selected="handleBackupFileSelected"
                     @clear-selected-backup="clearSelectedBackup"
                     @open-backup-file-picker="openBackupFilePicker"
@@ -390,131 +404,29 @@ useControlCenterLifecycle({
                     @select-setup-style="handleSetupStyleChange"
                     @select-setup-target="handleSetupTaskSelect"
                     @setup-shell-click="handleSetupSectionShellClick"
-                >
-                    <template #general>
-                        <ConfigGeneralSection
-                            ref="generalFormRef"
-                            :general="general"
-                            :rules="rules"
-                            :show-advanced-general="setupShowsAdvancedFields"
-                            :show-advanced-toggle="false"
-                            :show-debug="setupShowsAdvancedFields"
-                            :timezone="timezone"
-                        />
-                    </template>
-
-                    <template #exchange>
-                        <ConfigExchangeSection
-                            ref="exchangeFormRef"
-                            :currency="currency"
-                            :exchange="exchange"
-                            :exchanges="exchanges"
-                            :market="market"
-                            :rules="rules"
-                            :show-advanced-general="setupShowsAdvancedFields"
-                            :timerange="timerange"
-                        />
-                    </template>
-
-                    <template #signal>
-                        <ConfigSignalSection
-                            ref="signalFormRef"
-                            :asap-missing-fields-label="getAsapMissingFieldsLabel()"
-                            :is-asap-exchange-ready="isAsapExchangeReady()"
-                            :on-asap-url-input="handleAsapUrlInput"
-                            :on-csv-file-selected="handleCsvSignalFileSelected"
-                            :on-fetch-asap-symbols="fetchAsapSymbolsForCurrency"
-                            :on-signal-settings-select="handleSignalSettingsSelect"
-                            :rules="rules"
-                            :signal="signal"
-                            :symsignals="symsignals"
-                        />
-                    </template>
-
-                    <template #dca>
-                        <ConfigDcaSection
-                            ref="dcaFormRef"
-                            :dca="dca"
-                            :rules="rules"
-                            :sell-order-type-options="sellOrderTypeOptions"
-                            :show-advanced-general="setupShowsAdvancedFields"
-                            :strategy-options="signal.strategy_plugins"
-                        />
-                    </template>
-
-                    <template #monitoring>
-                        <ConfigMonitoringSection
-                            ref="monitoringFormRef"
-                            :can-test="canTestMonitoringTelegram()"
-                            :monitoring="monitoring"
-                            :on-test="handleMonitoringTestAction"
-                            :rules="rules"
-                            :show-test-action="false"
-                            :test-loading="monitoringTestLoading"
-                        />
-                    </template>
-                </ControlCenterSetupWorkspace>
+                />
             </template>
 
             <template v-else-if="routeState.mode === 'advanced'">
-                <ControlCenterAdvancedWorkspace
+                <ControlCenterAdvancedMode
                     :advanced-sections="advancedSections"
+                    :autopilot="autopilot"
+                    :autopilot-form-ref="autopilotFormRef"
                     :bind-target-element="bindTargetElement"
-                >
-                    <template #general>
-                        <ConfigGeneralAdvancedSection
-                            ref="generalFormRef"
-                            :general="general"
-                            :rules="rules"
-                        />
-                    </template>
-
-                    <template #exchange>
-                        <ConfigExchangeAdvancedSection
-                            ref="exchangeFormRef"
-                            :exchange="exchange"
-                            :rules="rules"
-                        />
-                    </template>
-
-                    <template #dca>
-                        <ConfigDcaAdvancedSection
-                            ref="dcaFormRef"
-                            :dca="dca"
-                            :rules="rules"
-                        />
-                    </template>
-
-                    <template #filter>
-                        <ConfigFilterSection
-                            ref="filterFormRef"
-                            :card-title="null"
-                            :filter="filter"
-                            :rules="rules"
-                            :show-asap-fields="signal.signal === 'asap'"
-                        />
-                    </template>
-
-                    <template #autopilot>
-                        <ConfigAutopilotSection
-                            ref="autopilotFormRef"
-                            :autopilot="autopilot"
-                            :card-title="null"
-                            :rules="rules"
-                            :show-fields="autopilot.enabled"
-                        />
-                    </template>
-
-                    <template #indicator>
-                        <ConfigIndicatorSection
-                            ref="indicatorFormRef"
-                            :card-title="null"
-                            :history-lookback-options="historyLookbackOptions"
-                            :indicator="indicator"
-                            :rules="rules"
-                        />
-                    </template>
-                </ControlCenterAdvancedWorkspace>
+                    :dca="dca"
+                    :dca-form-ref="dcaFormRef"
+                    :exchange="exchange"
+                    :exchange-form-ref="exchangeFormRef"
+                    :filter="filter"
+                    :filter-form-ref="filterFormRef"
+                    :general="general"
+                    :general-form-ref="generalFormRef"
+                    :history-lookback-options="historyLookbackOptions"
+                    :indicator="indicator"
+                    :indicator-form-ref="indicatorFormRef"
+                    :rules="rules"
+                    :signal="signal"
+                />
             </template>
 
             <template v-else>

@@ -17,6 +17,17 @@ const missionStateSource = fs.readFileSync(
     ),
     'utf8',
 )
+const setupModeSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterSetupMode.vue',
+    ),
+    'utf8',
+)
 const setupWorkspaceSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -48,9 +59,13 @@ test('first-run control center shows the intent gate before the mission panel', 
     const requiredViewSnippets = [
         "import { useControlCenterMissionState } from '../composables/useControlCenterMissionState'",
         "import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'",
-        "import ControlCenterSetupWorkspace from '../components/control-center/ControlCenterSetupWorkspace.vue'",
+        "import ControlCenterSetupMode from '../components/control-center/ControlCenterSetupMode.vue'",
         '} = useControlCenterMissionState({',
         '<ControlCenterMissionPanel',
+        '<ControlCenterSetupMode',
+    ]
+    const requiredSetupModeSnippets = [
+        "import ControlCenterSetupWorkspace from './ControlCenterSetupWorkspace.vue'",
         '<ControlCenterSetupWorkspace',
     ]
     const requiredSetupWorkspaceSnippets = [
@@ -73,6 +88,12 @@ test('first-run control center shows the intent gate before the mission panel', 
         assert.ok(
             controlCenterViewSource.includes(snippet),
             `expected control center first-run hierarchy to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupModeSnippets) {
+        assert.ok(
+            setupModeSource.includes(snippet),
+            `expected setup mode to include ${snippet}`,
         )
     }
     for (const snippet of requiredSetupWorkspaceSnippets) {
