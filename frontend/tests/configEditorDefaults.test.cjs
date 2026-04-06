@@ -9,12 +9,14 @@ const configEditorDefaultsSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'helpers', 'configEditorDefaults.ts'),
     'utf8',
 )
-const configViewSource = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'components', 'Config.vue'),
-    'utf8',
-)
-const controlCenterViewSource = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'views', 'ControlCenterView.vue'),
+const configEditorAssemblySource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useConfigEditorAssembly.ts',
+    ),
     'utf8',
 )
 
@@ -63,11 +65,13 @@ test('config editor defaults centralize shared config-editor scaffolding', () =>
         'export function getClientTimezone(): string {',
         'export function buildMoonwalkerApiUrl(path: string): string {',
     ]
-    const requiredImportSnippets = [
+    const requiredAssemblySnippets = [
         "from '../helpers/configEditorDefaults'",
         'buildMoonwalkerApiUrl,',
         'CONFIG_ADVANCED_GENERAL_PREFERENCE_KEY,',
         'CONFIG_SUBMIT_PAYLOAD_DEFAULTS,',
+        'getClientTimezone,',
+        'export function useConfigEditorAssembly(',
     ]
 
     for (const snippet of requiredHelperSnippets) {
@@ -76,33 +80,20 @@ test('config editor defaults centralize shared config-editor scaffolding', () =>
             `expected config editor defaults helper to include ${snippet}`,
         )
     }
-    for (const snippet of requiredImportSnippets) {
+    for (const snippet of requiredAssemblySnippets) {
         assert.ok(
-            configViewSource.includes(snippet),
-            `expected Config.vue to include ${snippet}`,
-        )
-        assert.ok(
-            controlCenterViewSource.includes(snippet),
-            `expected ControlCenterView.vue to include ${snippet}`,
+            configEditorAssemblySource.includes(snippet),
+            `expected useConfigEditorAssembly.ts to include ${snippet}`,
         )
     }
 
     assert.equal(
-        configViewSource.includes('function getClientTimezone(): string {'),
+        configEditorAssemblySource.includes('function getClientTimezone(): string {'),
         false,
     )
     assert.equal(
-        controlCenterViewSource.includes('function getClientTimezone(): string {'),
+        configEditorAssemblySource.includes('const configSubmitPayloadDefaults:'),
         false,
     )
-    assert.equal(
-        configViewSource.includes('const configSubmitPayloadDefaults:'),
-        false,
-    )
-    assert.equal(
-        controlCenterViewSource.includes('const configSubmitPayloadDefaults:'),
-        false,
-    )
-    assert.equal(configViewSource.includes('const apiUrl ='), false)
-    assert.equal(controlCenterViewSource.includes('const apiUrl ='), false)
+    assert.equal(configEditorAssemblySource.includes('const apiUrl ='), false)
 })

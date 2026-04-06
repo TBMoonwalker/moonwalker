@@ -25,12 +25,7 @@ import { createControlCenterConfigChangeSynchronizer } from '../control-center/c
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 import { getTaskPresentation } from '../control-center/taskRegistry'
 import type { ControlCenterTarget } from '../control-center/types'
-import { useConfigAdvancedGeneral } from '../composables/useConfigAdvancedGeneral'
-import { useConfigBackupRestore } from '../composables/useConfigBackupRestore'
-import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
-import { useConfigMonitoringTest } from '../composables/useConfigMonitoringTest'
-import { useConfigPageState } from '../composables/useConfigPageState'
-import { useConfigPersistableState } from '../composables/useConfigPersistableState'
+import { useConfigEditorAssembly } from '../composables/useConfigEditorAssembly'
 import { useControlCenterDerivedState } from '../composables/useControlCenterDerivedState'
 import { useControlCenterFeedback } from '../composables/useControlCenterFeedback'
 import { useControlCenterLifecycle } from '../composables/useControlCenterLifecycle'
@@ -42,27 +37,13 @@ import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupF
 import { useControlCenterTargetRegistry } from '../composables/useControlCenterTargetRegistry'
 import { useControlCenterWorkspaceRefresh } from '../composables/useControlCenterWorkspaceRefresh'
 import { useControlCenterWorkspaceActions } from '../composables/useControlCenterWorkspaceActions'
-import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
-import { useConfigSignalFlow } from '../composables/useConfigSignalFlow'
-import { useConfigValidationFlow } from '../composables/useConfigValidationFlow'
-import {
-    buildMoonwalkerApiUrl,
-    CONFIG_ADVANCED_GENERAL_PREFERENCE_KEY,
-    CONFIG_DEFAULT_SYMSIGNAL_URL,
-    CONFIG_DEFAULT_SYMSIGNAL_VERSION,
-    CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
-    getClientTimezone,
-} from '../helpers/configEditorDefaults'
-import { buildConfigRules } from '../helpers/configRules'
-import { buildConfigSubmitPayload } from '../helpers/configSubmitPayload'
+import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const configSnapshotStore = useSharedConfigSnapshot()
 
-const isLoading = ref(true)
-const showAdvancedGeneral = ref(false)
 const loadRescueMessage = ref<string | null>(null)
 
 const STALE_CHECK_INTERVAL_MS = 15000
@@ -72,222 +53,115 @@ const { bindTargetElement, readTargetElement } =
 
 const {
     autopilot,
-    currency,
-    dca,
-    exchange,
-    exchanges,
-    filter,
-    general,
-    historyLookbackOptions,
-    indicator,
-    initializeTimezoneOptions,
-    market,
-    monitoring,
-    resetSignalStrategySelection,
-    sellOrderTypeOptions,
-    signal,
-    symsignals,
-    timerange,
-    timezone,
-} = useConfigPageState({
-    defaults: CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
-})
-
-const { changedSectionLabels, changedSections, isDirty, syncBaselineState } =
-    useConfigPersistableState({
-        autopilot,
-        dca,
-        exchange,
-        filter,
-        general,
-        indicator,
-        monitoring,
-        signal,
-    })
-
-const { buildConfigLoadDefaults } = useConfigAdvancedGeneral({
-    advancedPreferenceKey: CONFIG_ADVANCED_GENERAL_PREFERENCE_KEY,
-    defaultSymSignalUrl: CONFIG_DEFAULT_SYMSIGNAL_URL,
-    defaultSymSignalVersion: CONFIG_DEFAULT_SYMSIGNAL_VERSION,
-    defaults: CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
-    general,
-    getClientTimezone,
-    isLoading,
-    showAdvancedGeneral,
-})
-
-const {
-    confirmDiscardUnsavedChanges,
-    handleBeforeUnload,
-    hasUnsavedChanges,
-    isSubmitDisabled,
-    resetSaveState,
-    saveState,
-    setSaveError,
-    submitForm,
-} = useConfigSaveFlow({
-    apiUrl: buildMoonwalkerApiUrl,
-    buildPayload: () =>
-        buildConfigSubmitPayload({
-            general: general.value,
-            signal: signal.value,
-            filter: filter.value,
-            exchange: exchange.value,
-            dca: dca.value,
-            autopilot: autopilot.value,
-            monitoring: monitoring.value,
-            indicator: indicator.value,
-            showAdvancedGeneral:
-                routeState.value.mode === 'advanced' ||
-                setupShowsAdvancedFields.value,
-            defaults: CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
-        }),
-    changedSectionLabels,
-    changedSections,
-    isDirty,
-    isLoading,
-    message,
-    onSaved: async () => {
-        const result = await syncControlCenterConfigChange('save')
-        if (result.status === 'error') {
-            throw new Error(result.message)
-        }
-    },
-    surfaceMessages: false,
-    syncBaselineState,
-})
-
-const {
     autopilotFormRef,
-    dcaFormRef,
-    exchangeFormRef,
-    filterFormRef,
-    generalFormRef,
-    handleGlobalKeydown,
-    indicatorFormRef,
-    monitoringFormRef,
-    signalFormRef,
-    submitAttempted,
-} = useConfigValidationFlow({
-    message,
-    onInvalid: async (sectionKey) => {
-        const invalidTarget = sectionKey as ControlCenterTarget
-        if (invalidTarget) {
-            await guideToTarget(invalidTarget)
-        }
-    },
-    onSubmitShortcut: handleSubmitWorkspace,
-    onValidSubmit: handleSubmitWorkspace,
-    setSaveError,
-})
-
-const {
-    applySignalSettingsSelection,
-    fetchAsapSymbolsForCurrency,
-    getAsapMissingFieldsLabel,
-    handleAsapUrlInput,
-    handleCsvSignalFileSelected,
-    handleSignalSettingsSelect,
-    isAsapExchangeReady,
-    isCurrencyConfigured,
-    isUrlInput,
-} = useConfigSignalFlow({
-    apiUrl: buildMoonwalkerApiUrl,
-    defaultSymSignalUrl: CONFIG_DEFAULT_SYMSIGNAL_URL,
-    defaultSymSignalVersion: CONFIG_DEFAULT_SYMSIGNAL_VERSION,
-    exchange,
-    isLoading,
-    message,
-    resetSignalStrategySelection,
-    signal,
-})
-
-const {
     backupDownloadLoading,
     backupIncludeTradeData,
     bindBackupFileInput,
+    canTestMonitoringTelegram,
+    changedSectionLabels,
     clearSelectedBackup,
+    confirmDiscardUnsavedChanges,
+    currency,
+    dca,
+    dcaFormRef,
+    exchange,
+    exchangeFormRef,
+    exchanges,
+    fetchAsapSymbolsForCurrency,
+    fetchDefaultValues,
+    filter,
+    filterFormRef,
+    general,
+    generalFormRef,
+    getAsapMissingFieldsLabel,
+    handleAsapUrlInput,
     handleBackupDownload,
     handleBackupFileSelected,
+    handleBeforeUnload,
+    handleCsvSignalFileSelected,
+    handleGlobalKeydown,
     handleRestoreBackup,
+    handleSignalSettingsSelect,
+    historyLookbackOptions,
+    indicator,
+    indicatorFormRef,
+    initializeClientTimezoneOptions,
+    isAsapExchangeReady,
+    isDirty,
+    isLoading,
+    isSubmitDisabled,
+    hasUnsavedChanges,
+    market,
+    monitoring,
+    monitoringFormRef,
+    monitoringTestLoading,
     openBackupFilePicker,
     restoreLoading,
+    rules,
+    saveState,
+    sellOrderTypeOptions,
     selectedBackupConfigCount,
     selectedBackupFileName,
     selectedBackupHasTradeData,
     selectedBackupPayload,
-} = useConfigBackupRestore({
-    apiUrl: buildMoonwalkerApiUrl,
-    hasUnsavedChanges,
-    message,
-    onBeforeReload: () => {
-        isLoading.value = true
-    },
-    reloadConfig: async () => {
-        const result = await syncControlCenterConfigChange('restore')
-        if (result.status === 'error') {
-            throw new Error(result.message)
-        }
-    },
-    surfaceMessages: false,
-})
-
-const rules = buildConfigRules({
-    dca,
-    getAsapMissingFieldsLabel,
-    isAsapExchangeReady,
-    isCurrencyConfigured,
-    isUrlInput,
-    signal,
-    submitAttempted,
-})
-
-const { fetchDefaultValues } = useConfigLoadFlow({
-    apiUrl: buildMoonwalkerApiUrl,
-    buildDefaults: buildConfigLoadDefaults,
-    loadConfig: async () => {
-        const loadedConfig = await configSnapshotStore.ensureLoaded(false)
-        return loadedConfig ?? configSnapshotStore.snapshot.value
-    },
-    general,
-    signal,
-    filter,
-    exchange,
-    dca,
-    autopilot,
-    monitoring,
-    indicator,
     showAdvancedGeneral,
-    isLoading,
-    message,
-    onAfterLoad: async () => {
-        if (signal.value.strategy) {
-            signal.value.strategy_enabled = true
-        }
-        await applySignalSettingsSelection({ awaitAsapFetch: true })
+    signal,
+    signalFormRef,
+    submitForm,
+    symsignals,
+    testMonitoringTelegram,
+    timerange,
+    timezone,
+} = useConfigEditorAssembly({
+    backupRestore: {
+        reloadConfig: async () => {
+            const result = await syncControlCenterConfigChange('restore')
+            if (result.status === 'error') {
+                throw new Error(result.message)
+            }
+        },
     },
-    resetSaveState,
-    setSaveError,
-    surfaceMessages: false,
-    syncBaselineState,
+    load: {
+        loadConfig: async () => {
+            const loadedConfig = await configSnapshotStore.ensureLoaded(false)
+            return loadedConfig ?? configSnapshotStore.snapshot.value
+        },
+    },
+    message,
+    readSubmitShowAdvancedGeneral: () =>
+        routeState.value.mode === 'advanced' || setupShowsAdvancedFields.value,
+    save: {
+        onSaved: async () => {
+            const result = await syncControlCenterConfigChange('save')
+            if (result.status === 'error') {
+                throw new Error(result.message)
+            }
+        },
+    },
+    surfaceMessages: {
+        backupRestore: false,
+        load: false,
+        monitoring: false,
+        save: false,
+    },
+    validation: {
+        onInvalid: async (sectionKey) => {
+            const invalidTarget = sectionKey as ControlCenterTarget
+            if (invalidTarget) {
+                await guideToTarget(invalidTarget)
+            }
+        },
+        onSubmitShortcut: handleSubmitWorkspace,
+        onValidSubmit: handleSubmitWorkspace,
+    },
 })
 
-const syncControlCenterConfigChange = createControlCenterConfigChangeSynchronizer({
+const syncControlCenterConfigChange =
+    createControlCenterConfigChangeSynchronizer({
     emitInvalidation: (origin) => {
         configSnapshotStore.emitLocalInvalidation(origin)
     },
     refreshWorkspace: (force) => refreshWorkspaceFromSnapshot(force),
-})
-
-const {
-    canTestMonitoringTelegram,
-    monitoringTestLoading,
-    testMonitoringTelegram,
-} = useConfigMonitoringTest({
-    apiUrl: buildMoonwalkerApiUrl,
-    message,
-    monitoring,
-    surfaceMessages: false,
 })
 
 const {
@@ -424,14 +298,13 @@ useControlCenterLifecycle({
     confirmDiscardUnsavedChanges,
     disposeFeedback,
     focusTarget,
-    getClientTimezone,
     handleBeforeUnload: handleBeforeUnload as EventListener,
     handleDetectedExternalConfigChange,
     handleGlobalKeydown: handleGlobalKeydown as EventListener,
     handleSetupEntryChoicePopState:
         handleSetupEntryChoicePopState as EventListener,
+    initializeClientTimezoneOptions,
     initializeSetupFlow,
-    initializeTimezoneOptions,
     readiness,
     refreshWorkspaceFromSnapshot,
     routeState,

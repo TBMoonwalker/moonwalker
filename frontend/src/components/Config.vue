@@ -182,225 +182,89 @@ import ConfigGeneralSection from './config/ConfigGeneralSection.vue'
 import ConfigIndicatorSection from './config/ConfigIndicatorSection.vue'
 import ConfigMonitoringSection from './config/ConfigMonitoringSection.vue'
 import ConfigSignalSection from './config/ConfigSignalSection.vue'
-import { useConfigAdvancedGeneral } from '../composables/useConfigAdvancedGeneral'
-import { useConfigBackupRestore } from '../composables/useConfigBackupRestore'
-import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
-import { useConfigMonitoringTest } from '../composables/useConfigMonitoringTest'
-import { useConfigPageState } from '../composables/useConfigPageState'
-import { useConfigPersistableState } from '../composables/useConfigPersistableState'
-import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
-import { useConfigSignalFlow } from '../composables/useConfigSignalFlow'
-import { useConfigValidationFlow } from '../composables/useConfigValidationFlow'
-import {
-    buildMoonwalkerApiUrl,
-    CONFIG_ADVANCED_GENERAL_PREFERENCE_KEY,
-    CONFIG_DEFAULT_SYMSIGNAL_URL,
-    CONFIG_DEFAULT_SYMSIGNAL_VERSION,
-    CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
-    getClientTimezone,
-} from '../helpers/configEditorDefaults'
-import { buildConfigRules } from '../helpers/configRules'
-import { buildConfigSubmitPayload } from '../helpers/configSubmitPayload'
+import { useConfigEditorAssembly } from '../composables/useConfigEditorAssembly'
 import { useMessage } from 'naive-ui/es/message'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
 
 const message = useMessage()
 const router = useRouter()
-const isLoading = ref(true)
-const showAdvancedGeneral = ref(false)
 const {
     autopilot,
+    autopilotFormRef,
+    backupDownloadLoading,
+    backupIncludeTradeData,
+    bindBackupFileInput,
+    canTestMonitoringTelegram,
+    clearSelectedBackup,
+    confirmDiscardUnsavedChanges,
     currency,
     dca,
+    dcaFormRef,
     exchange,
+    exchangeFormRef,
     exchanges,
+    fetchAsapSymbolsForCurrency,
+    fetchDefaultValues,
     filter,
+    filterFormRef,
     general,
+    generalFormRef,
+    getAsapMissingFieldsLabel,
+    handleAsapUrlInput,
+    handleBackupDownload,
+    handleBackupFileSelected,
+    handleBeforeUnload,
+    handleCsvSignalFileSelected,
+    handleGlobalKeydown,
+    handleRestoreBackup,
+    handleSignalSettingsSelect,
+    handleValidateButtonClick,
     historyLookbackOptions,
     indicator,
-    initializeTimezoneOptions,
+    indicatorFormRef,
+    initializeClientTimezoneOptions,
+    isAsapExchangeReady,
+    isSubmitDisabled,
     market,
     monitoring,
-    resetSignalStrategySelection,
-    sellOrderTypeOptions,
-    signal,
-    symsignals,
-    timerange,
-    timezone,
-} = useConfigPageState({
-    defaults: CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
-})
-const { changedSectionLabels, changedSections, isDirty, syncBaselineState } =
-    useConfigPersistableState({
-        autopilot,
-        dca,
-        exchange,
-        filter,
-        general,
-        indicator,
-        monitoring,
-        signal,
-    })
-const { buildConfigLoadDefaults } = useConfigAdvancedGeneral({
-    advancedPreferenceKey: CONFIG_ADVANCED_GENERAL_PREFERENCE_KEY,
-    defaultSymSignalUrl: CONFIG_DEFAULT_SYMSIGNAL_URL,
-    defaultSymSignalVersion: CONFIG_DEFAULT_SYMSIGNAL_VERSION,
-    defaults: CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
-    general,
-    getClientTimezone,
-    isLoading,
-    showAdvancedGeneral,
-})
-const {
-    confirmDiscardUnsavedChanges,
-    handleBeforeUnload,
-    hasUnsavedChanges,
-    isSubmitDisabled,
-    resetSaveState,
+    monitoringFormRef,
+    monitoringTestLoading,
+    openBackupFilePicker,
+    restoreLoading,
+    rules,
     saveBannerMessage,
     saveBannerTitle,
     saveBannerType,
     saveState,
-    setSaveError,
-    submitButtonLabel,
-    submitForm,
-} = useConfigSaveFlow({
-    apiUrl: buildMoonwalkerApiUrl,
-    buildPayload: () =>
-        buildConfigSubmitPayload({
-            general: general.value,
-            signal: signal.value,
-            filter: filter.value,
-            exchange: exchange.value,
-            dca: dca.value,
-            autopilot: autopilot.value,
-            monitoring: monitoring.value,
-            indicator: indicator.value,
-            showAdvancedGeneral: showAdvancedGeneral.value,
-            defaults: CONFIG_SUBMIT_PAYLOAD_DEFAULTS,
-        }),
-    changedSectionLabels,
-    changedSections,
-    isDirty,
-    isLoading,
-    message,
-    onSaved: () => {
-        setTimeout(() => {
-            router.push('/')
-        }, 250)
-    },
-    syncBaselineState,
-})
-const {
-    autopilotFormRef,
-    dcaFormRef,
-    exchangeFormRef,
-    filterFormRef,
-    generalFormRef,
-    handleGlobalKeydown,
-    handleValidateButtonClick,
-    indicatorFormRef,
-    monitoringFormRef,
-    signalFormRef,
-    submitAttempted,
-} = useConfigValidationFlow({
-    message,
-    onValidSubmit: submitForm,
-    setSaveError,
-})
-const {
-    applySignalSettingsSelection,
-    fetchAsapSymbolsForCurrency,
-    getAsapMissingFieldsLabel,
-    handleAsapUrlInput,
-    handleCsvSignalFileSelected,
-    handleSignalSettingsSelect,
-    isAsapExchangeReady,
-    isCurrencyConfigured,
-    isUrlInput,
-} = useConfigSignalFlow({
-    apiUrl: buildMoonwalkerApiUrl,
-    defaultSymSignalUrl: CONFIG_DEFAULT_SYMSIGNAL_URL,
-    defaultSymSignalVersion: CONFIG_DEFAULT_SYMSIGNAL_VERSION,
-    exchange,
-    isLoading,
-    message,
-    resetSignalStrategySelection,
-    signal,
-})
-
-const {
-    backupDownloadLoading,
-    backupIncludeTradeData,
-    bindBackupFileInput,
-    clearSelectedBackup,
-    handleBackupDownload,
-    handleBackupFileSelected,
-    handleRestoreBackup,
-    openBackupFilePicker,
-    restoreLoading,
+    sellOrderTypeOptions,
     selectedBackupConfigCount,
     selectedBackupFileName,
     selectedBackupHasTradeData,
     selectedBackupPayload,
-} = useConfigBackupRestore({
-    apiUrl: buildMoonwalkerApiUrl,
-    hasUnsavedChanges,
-    message,
-    onBeforeReload: () => {
-        isLoading.value = true
-    },
-    reloadConfig: () => fetchDefaultValues(),
-})
-const rules = buildConfigRules({
-    dca,
-    getAsapMissingFieldsLabel,
-    isAsapExchangeReady,
-    isCurrencyConfigured,
-    isUrlInput,
-    signal,
-    submitAttempted,
-})
-
-const { fetchDefaultValues } = useConfigLoadFlow({
-    apiUrl: buildMoonwalkerApiUrl,
-    buildDefaults: buildConfigLoadDefaults,
-    general,
-    signal,
-    filter,
-    exchange,
-    dca,
-    autopilot,
-    monitoring,
-    indicator,
     showAdvancedGeneral,
-    isLoading,
-    message,
-    onAfterLoad: async () => {
-        if (signal.value.strategy) {
-            signal.value.strategy_enabled = true
-        }
-        await applySignalSettingsSelection({ awaitAsapFetch: true })
-    },
-    resetSaveState,
-    setSaveError,
-    syncBaselineState,
-})
-const {
-    canTestMonitoringTelegram,
-    monitoringTestLoading,
+    signal,
+    signalFormRef,
+    submitButtonLabel,
+    symsignals,
     testMonitoringTelegram,
-} = useConfigMonitoringTest({
-    apiUrl: buildMoonwalkerApiUrl,
+    timerange,
+    timezone,
+} = useConfigEditorAssembly({
     message,
-    monitoring,
+    save: {
+        onSaved: () => {
+            setTimeout(() => {
+                router.push('/')
+            }, 250)
+        },
+    },
 })
 
 onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
 
 onMounted(() => {
-    initializeTimezoneOptions(getClientTimezone())
+    initializeClientTimezoneOptions()
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('keydown', handleGlobalKeydown)
     void fetchDefaultValues()

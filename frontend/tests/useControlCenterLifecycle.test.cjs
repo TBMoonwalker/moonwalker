@@ -52,20 +52,17 @@ function createLifecycleHarness(overrides = {}) {
             focusCalls.push(target)
             return true
         },
-        getClientTimezone() {
-            return 'Europe/Vienna'
-        },
         handleBeforeUnload() {},
         async handleDetectedExternalConfigChange(shouldAnnounce) {
             detectedExternalChanges.push(shouldAnnounce)
         },
         handleGlobalKeydown() {},
         handleSetupEntryChoicePopState() {},
+        initializeClientTimezoneOptions() {
+            initCalls.push(['timezone'])
+        },
         initializeSetupFlow() {
             initCalls.push(['setup'])
-        },
-        initializeTimezoneOptions(timezone) {
-            initCalls.push(['timezone', timezone])
         },
         readiness: computed(() => readiness.value),
         async refreshWorkspaceFromSnapshot(force = false) {
@@ -127,10 +124,7 @@ test('control center lifecycle mounts listeners, refreshes, and focuses the acti
 
     await harness.handlers.handleMounted()
 
-    assert.deepEqual(harness.initCalls, [
-        ['timezone', 'Europe/Vienna'],
-        ['setup'],
-    ])
+    assert.deepEqual(harness.initCalls, [['timezone'], ['setup']])
     assert.deepEqual(
         harness.windowAdditions.map(([name]) => name),
         ['beforeunload', 'keydown', 'focus', 'popstate'],

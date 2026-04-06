@@ -51,13 +51,12 @@ interface UseControlCenterLifecycleOptions {
     confirmDiscardUnsavedChanges: (reason: DiscardReason) => boolean
     disposeFeedback: () => void
     focusTarget: (target: ControlCenterTarget) => Promise<boolean>
-    getClientTimezone: () => string
     handleBeforeUnload: EventListener
     handleDetectedExternalConfigChange: (shouldAnnounce: boolean) => Promise<void>
     handleGlobalKeydown: EventListener
     handleSetupEntryChoicePopState: EventListener
+    initializeClientTimezoneOptions: () => void
     initializeSetupFlow: () => void
-    initializeTimezoneOptions: (timezone: string) => void
     readiness: ComputedRef<ControlCenterReadiness>
     refreshWorkspaceFromSnapshot: (force?: boolean) => Promise<OperationResult>
     routeState: ComputedRef<ControlCenterRouteState>
@@ -144,7 +143,7 @@ export function createControlCenterLifecycleHandlers(
     }
 
     async function handleMounted(): Promise<void> {
-        options.initializeTimezoneOptions(options.getClientTimezone())
+        options.initializeClientTimezoneOptions()
         options.initializeSetupFlow()
 
         if (windowObject) {
