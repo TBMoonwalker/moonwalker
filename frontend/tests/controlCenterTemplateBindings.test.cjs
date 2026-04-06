@@ -17,6 +17,39 @@ const setupFlowSource = fs.readFileSync(
     ),
     'utf8',
 )
+const missionPanelSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterMissionPanel.vue',
+    ),
+    'utf8',
+)
+const modeStripSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterModeStrip.vue',
+    ),
+    'utf8',
+)
+const overviewWorkspaceSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterOverviewWorkspace.vue',
+    ),
+    'utf8',
+)
 const feedbackSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -74,7 +107,6 @@ test('control center target sections use dynamic element refs', () => {
     // Found by /qa on 2026-03-20
     // Report: .gstack/qa-reports/qa-report-127-0-0-1-2026-03-20.md
     const targets = [
-        'live-activation',
         'general',
         'exchange',
         'signal',
@@ -97,6 +129,16 @@ test('control center target sections use dynamic element refs', () => {
             controlCenterViewSource,
         ),
         false,
+    )
+    assert.ok(
+        controlCenterViewSource.includes(
+            ":live-activation-ref=\"bindTargetElement('live-activation')\"",
+        ),
+        'expected live activation anchor to stay wired through the overview component',
+    )
+    assert.ok(
+        overviewWorkspaceSource.includes(':ref="liveActivationRef"'),
+        'expected overview workspace to expose the live activation anchor ref',
     )
 })
 
@@ -365,6 +407,68 @@ test('control center delegates feedback and mission-state handling to dedicated 
         controlCenterViewSource.includes(
             'function setTransitionIntent(nextIntent:',
         ),
+        false,
+    )
+})
+
+test('control center delegates mission, mode, and overview presentation to dedicated components', () => {
+    const requiredViewSnippets = [
+        "import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'",
+        "import ControlCenterModeStrip from '../components/control-center/ControlCenterModeStrip.vue'",
+        "import ControlCenterOverviewWorkspace from '../components/control-center/ControlCenterOverviewWorkspace.vue'",
+        '<ControlCenterMissionPanel',
+        '<ControlCenterModeStrip',
+        '<ControlCenterOverviewWorkspace',
+    ]
+    const requiredMissionPanelSnippets = [
+        'Save changes',
+        'Reload latest config',
+        'The shared snapshot changed in another browser or tab.',
+    ]
+    const requiredModeStripSnippets = [
+        'Primary',
+        'Expert and utility',
+        "emit('select-mode', 'overview')",
+        "emit('select-mode', 'utilities')",
+    ]
+    const requiredOverviewSnippets = [
+        'Targeted recovery cards',
+        'Calm operator overview',
+        'Activate live trading',
+        ':ref="liveActivationRef"',
+    ]
+
+    for (const snippet of requiredViewSnippets) {
+        assert.ok(
+            controlCenterViewSource.includes(snippet),
+            `expected control center to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredMissionPanelSnippets) {
+        assert.ok(
+            missionPanelSource.includes(snippet),
+            `expected mission panel component to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredModeStripSnippets) {
+        assert.ok(
+            modeStripSource.includes(snippet),
+            `expected mode strip component to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredOverviewSnippets) {
+        assert.ok(
+            overviewWorkspaceSource.includes(snippet),
+            `expected overview workspace component to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        controlCenterViewSource.includes('Calm operator overview'),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes('Reload latest config'),
         false,
     )
 })

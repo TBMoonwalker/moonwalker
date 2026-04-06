@@ -3,6 +3,9 @@ import { nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
 
+import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'
+import ControlCenterModeStrip from '../components/control-center/ControlCenterModeStrip.vue'
+import ControlCenterOverviewWorkspace from '../components/control-center/ControlCenterOverviewWorkspace.vue'
 import ConfigAutopilotSection from '../components/config/ConfigAutopilotSection.vue'
 import ConfigDcaAdvancedSection from '../components/config/ConfigDcaAdvancedSection.vue'
 import ConfigDcaSection from '../components/config/ConfigDcaSection.vue'
@@ -586,262 +589,47 @@ onUnmounted(() => {
         </div>
 
         <n-flex v-if="showMissionPanel" class="page-section" vertical>
-            <n-card class="mission-panel" content-style="padding: 22px 24px;">
-                <n-flex vertical :size="18">
-                    <n-flex justify="space-between" align="center" :wrap="true">
-                        <n-flex vertical :size="6">
-                            <n-text depth="3" class="control-center-kicker">
-                                Control Center
-                            </n-text>
-                            <div class="mission-heading-group">
-                                <n-tag class="mission-status-tag" :type="missionSummaryTone">
-                                    {{ viewState.badge }}
-                                </n-tag>
-                                <h1 class="mission-title">
-                                    {{ viewState.title }}
-                                </h1>
-                            </div>
-                            <n-text depth="3" class="mission-summary">
-                                {{ viewState.summary }}
-                            </n-text>
-                        </n-flex>
-
-                        <n-flex align="center" :wrap="true" :size="[10, 10]">
-                            <n-button
-                                v-if="isDirty"
-                                type="primary"
-                                secondary
-                                :loading="saveState === 'saving'"
-                                :disabled="isSubmitDisabled"
-                                @click="handleSubmitWorkspace"
-                            >
-                                Save changes
-                            </n-button>
-                            <n-button
-                                type="primary"
-                                strong
-                                :loading="activationLoading"
-                                :disabled="
-                                    viewState.kind === 'rescue' ||
-                                    (readiness.complete && readiness.dryRun
-                                        ? activationLoading
-                                        : false)
-                                "
-                                @click="handleMissionPrimaryAction"
-                            >
-                                {{ missionPrimaryLabel }}
-                            </n-button>
-                        </n-flex>
-                    </n-flex>
-
-                    <n-alert
-                        :type="missionAlertTone"
-                        :title="dirtySummary"
-                        role="status"
-                        aria-live="polite"
-                    >
-                        <template v-if="transitionIntent">
-                            {{ transitionIntent.message }}
-                        </template>
-                        <template v-else-if="configTrustState.kind === 'checking'">
-                            {{ configTrustState.summary }}
-                        </template>
-                        <template v-else-if="isStaleConfigTrustState(configTrustState.kind)">
-                            {{ configTrustState.summary }}
-                            <span v-if="formattedTrustTimestamp">
-                                Latest change detected at {{ formattedTrustTimestamp }}.
-                            </span>
-                        </template>
-                        <template v-else>
-                            {{
-                                readiness.complete
-                                    ? readiness.dryRun
-                                        ? 'Moonwalker is configured for safe dry-run operation.'
-                                        : 'Moonwalker is operating live on the configured exchange.'
-                                    : `${visibleBlockers.length} setup item(s) still need attention.`
-                            }}
-                        </template>
-                    </n-alert>
-
-                    <n-flex
-                        v-if="isStaleConfigTrustState(configTrustState.kind)"
-                        class="stale-actions"
-                        align="center"
-                        :wrap="true"
-                        :size="[10, 10]"
-                    >
-                        <n-button secondary type="warning" @click="handleReloadAfterStalePrompt">
-                            Reload latest config
-                        </n-button>
-                        <n-text depth="3">
-                            The shared snapshot changed in another browser or tab.
-                        </n-text>
-                    </n-flex>
-                </n-flex>
-            </n-card>
+            <ControlCenterMissionPanel
+                :activation-loading="activationLoading"
+                :config-trust-state="configTrustState"
+                :dirty-summary="dirtySummary"
+                :formatted-trust-timestamp="formattedTrustTimestamp"
+                :is-dirty="isDirty"
+                :is-stale-config-trust-state="isStaleConfigTrustState"
+                :is-submit-disabled="isSubmitDisabled"
+                :mission-alert-tone="missionAlertTone"
+                :mission-primary-label="missionPrimaryLabel"
+                :mission-summary-tone="missionSummaryTone"
+                :readiness="readiness"
+                :save-state="saveState"
+                :transition-intent="transitionIntent"
+                :view-state="viewState"
+                @mission-primary="handleMissionPrimaryAction"
+                @reload-latest="handleReloadAfterStalePrompt"
+                @save="handleSubmitWorkspace"
+            />
         </n-flex>
 
         <n-flex v-if="showModeStrip" class="page-section" vertical>
-            <n-card class="mode-strip-card" content-style="padding: 12px 14px;">
-                <div class="mode-strip-shell">
-                    <div class="mode-group">
-                        <n-text depth="3" class="mode-group-label">Primary</n-text>
-                        <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
-                            <n-button
-                                :type="routeState.mode === 'overview' ? 'primary' : 'default'"
-                                :secondary="routeState.mode !== 'overview'"
-                                :strong="routeState.mode === 'overview'"
-                                @click="handleModeSelect('overview')"
-                            >
-                                Overview
-                            </n-button>
-                            <n-button
-                                :type="routeState.mode === 'setup' ? 'primary' : 'default'"
-                                :secondary="routeState.mode !== 'setup'"
-                                :strong="routeState.mode === 'setup'"
-                                @click="handleModeSelect('setup')"
-                            >
-                                Setup
-                            </n-button>
-                        </n-flex>
-                    </div>
-
-                    <div class="mode-group">
-                        <n-text depth="3" class="mode-group-label">Expert and utility</n-text>
-                        <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
-                            <n-button
-                                :type="routeState.mode === 'advanced' ? 'primary' : 'default'"
-                                :secondary="routeState.mode !== 'advanced'"
-                                :strong="routeState.mode === 'advanced'"
-                                @click="handleModeSelect('advanced')"
-                            >
-                                Advanced
-                            </n-button>
-                            <n-button
-                                :type="routeState.mode === 'utilities' ? 'primary' : 'default'"
-                                :secondary="routeState.mode !== 'utilities'"
-                                :strong="routeState.mode === 'utilities'"
-                                @click="handleModeSelect('utilities')"
-                            >
-                                Utilities
-                            </n-button>
-                        </n-flex>
-                    </div>
-                </div>
-            </n-card>
+            <ControlCenterModeStrip
+                :route-mode="routeState.mode"
+                @select-mode="handleModeSelect"
+            />
         </n-flex>
 
         <n-flex class="page-section workspace-section" vertical>
             <template v-if="routeState.mode === 'overview'">
-                <n-card class="workspace-card" content-style="padding: 18px 20px;">
-                    <n-flex vertical :size="14">
-                        <n-text depth="3">
-                            {{
-                                visibleBlockers.length > 0
-                                    ? 'Targeted recovery cards'
-                                    : 'Calm operator overview'
-                            }}
-                        </n-text>
-                        <n-flex :wrap="true" :size="[14, 14]">
-                            <n-card
-                                v-for="blocker in visibleBlockers"
-                                :key="blocker.key"
-                                size="small"
-                                class="status-card"
-                            >
-                                <n-flex vertical :size="10">
-                                    <div>
-                                        <h2 class="status-card-title">
-                                            {{ blocker.title }}
-                                        </h2>
-                                        <n-text depth="3">
-                                            {{ blocker.description }}
-                                        </n-text>
-                                    </div>
-                                    <n-button
-                                        type="primary"
-                                        secondary
-                                        @click="guideToTarget(blocker.target)"
-                                    >
-                                        Fix this
-                                    </n-button>
-                                </n-flex>
-                            </n-card>
-
-                            <template v-if="visibleBlockers.length === 0">
-                                <n-card size="small" class="status-card">
-                                    <n-flex vertical :size="10">
-                                        <h2 class="status-card-title">Exchange connection</h2>
-                                        <n-text depth="3">
-                                            {{ exchange.name || 'Not configured' }} /
-                                            {{ exchange.currency || 'No quote currency' }}
-                                        </n-text>
-                                        <n-button
-                                            secondary
-                                            @click="guideToTarget('exchange')"
-                                        >
-                                            Review exchange
-                                        </n-button>
-                                    </n-flex>
-                                </n-card>
-
-                                <n-card size="small" class="status-card">
-                                    <n-flex vertical :size="10">
-                                        <h2 class="status-card-title">Signal source</h2>
-                                        <n-text depth="3">
-                                            {{ signal.signal || 'Not configured' }}
-                                        </n-text>
-                                        <n-button
-                                            secondary
-                                            @click="guideToTarget('signal')"
-                                        >
-                                            Review signal source
-                                        </n-button>
-                                    </n-flex>
-                                </n-card>
-
-                                <div
-                                    :ref="bindTargetElement('live-activation')"
-                                    class="status-card"
-                                    id="control-center-live-activation"
-                                >
-                                    <n-card size="small">
-                                        <n-flex vertical :size="10">
-                                            <div tabindex="-1" data-control-center-anchor>
-                                                <h2 class="status-card-title">
-                                                    {{ readiness.dryRun ? 'Trading mode: Dry run' : 'Trading mode: Live' }}
-                                                </h2>
-                                                <n-text depth="3">
-                                                    {{
-                                                        readiness.dryRun
-                                                            ? 'Moonwalker is simulating orders. Use the guarded activation action to go live.'
-                                                            : 'Moonwalker is submitting live orders to the configured exchange.'
-                                                    }}
-                                                </n-text>
-                                            </div>
-                                            <n-button
-                                                v-if="readiness.dryRun"
-                                                type="primary"
-                                                strong
-                                                :loading="activationLoading"
-                                                @click="handleActivateLiveTrading"
-                                            >
-                                                Activate live trading
-                                            </n-button>
-                                            <n-button
-                                                v-else
-                                                secondary
-                                                @click="guideToTarget('exchange')"
-                                            >
-                                                Review safeguards
-                                            </n-button>
-                                        </n-flex>
-                                    </n-card>
-                                </div>
-                            </template>
-                        </n-flex>
-                    </n-flex>
-                </n-card>
+                <ControlCenterOverviewWorkspace
+                    :activation-loading="activationLoading"
+                    :exchange-currency="exchange.currency"
+                    :exchange-name="exchange.name"
+                    :live-activation-ref="bindTargetElement('live-activation')"
+                    :readiness="readiness"
+                    :signal-source="signal.signal"
+                    :visible-blockers="visibleBlockers"
+                    @activate-live="handleActivateLiveTrading"
+                    @select-target="guideToTarget"
+                />
             </template>
 
             <template v-else-if="routeState.mode === 'setup'">
@@ -1441,87 +1229,6 @@ onUnmounted(() => {
     gap: 16px;
 }
 
-.control-center-kicker {
-    font-size: 0.82rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--mw-color-text-muted);
-    font-family: var(--mw-font-body);
-    font-weight: 600;
-}
-
-.mission-panel {
-    border: 1px solid rgba(29, 92, 73, 0.26);
-    background: var(--mw-surface-mission);
-    box-shadow: var(--mw-shadow-card);
-    color: var(--mw-color-text-primary);
-}
-
-.mission-heading-group {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-}
-
-.mission-heading-group :deep(.mission-status-tag) {
-    border-radius: 999px;
-    padding: 6px 12px;
-}
-
-.mission-heading-group :deep(.mission-status-tag .n-tag__content) {
-    font-size: 0.95rem;
-    font-weight: 600;
-    line-height: 1;
-}
-
-.mission-title {
-    font-family: var(--mw-font-display);
-    font-size: clamp(1.5rem, 3vw, 2.25rem);
-    line-height: 1.1;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-}
-
-.mission-summary {
-    max-width: 72ch;
-}
-
-.mode-strip-card {
-    border: 1px solid var(--color-border-hover);
-}
-
-.mode-strip-shell {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 18px;
-    justify-content: space-between;
-}
-
-.mode-group {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-}
-
-.mode-group-label {
-    font-size: 0.78rem;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-}
-
-.mode-strip {
-    align-items: center;
-}
-
-.mode-strip :deep(.n-button--primary-type .n-button__content),
-.mission-panel :deep(.n-button--primary-type .n-button__content),
-.status-card :deep(.n-button--primary-type .n-button__content) {
-    color: #f7f8f6;
-    font-weight: 700;
-    letter-spacing: 0.01em;
-}
-
 :deep(.utility-action-button:not(.n-button--disabled) .n-button__content) {
     font-weight: 700;
     letter-spacing: 0.01em;
@@ -1708,19 +1415,6 @@ onUnmounted(() => {
 }
 
 .task-section-header h2,
-.status-card-title {
-    color: var(--mw-color-text-primary);
-    font-family: var(--mw-font-display);
-    font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-}
-
-.status-card {
-    min-width: min(320px, 100%);
-    flex: 1 1 280px;
-}
-
 .backup-file-input {
     display: none;
 }
@@ -1746,10 +1440,6 @@ onUnmounted(() => {
         margin-inline: 6px;
     }
 
-    .mode-strip-shell {
-        gap: 12px;
-    }
-
     .setup-progress-grid {
         grid-template-columns: 1fr;
     }
@@ -1758,8 +1448,5 @@ onUnmounted(() => {
         flex-direction: column;
     }
 
-    .mission-panel :deep(.n-alert) {
-        padding-right: 0;
-    }
 }
 </style>

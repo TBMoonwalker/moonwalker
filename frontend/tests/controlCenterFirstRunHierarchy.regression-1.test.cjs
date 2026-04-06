@@ -25,8 +25,9 @@ test('first-run control center shows the intent gate before the mission panel', 
     // Report: .gstack/qa-reports/qa-report-127-0-0-1-2026-03-21.md
     const requiredViewSnippets = [
         "import { useControlCenterMissionState } from '../composables/useControlCenterMissionState'",
+        "import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'",
         '} = useControlCenterMissionState({',
-        '<n-flex v-if="showMissionPanel" class="page-section" vertical>',
+        '<ControlCenterMissionPanel',
         'class="setup-entry-intro"',
         'class="workspace-kicker"',
         '<h1 class="workspace-title">How do you want to begin?</h1>',
