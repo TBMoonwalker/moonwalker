@@ -12,6 +12,11 @@ from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
 from service.trades import Trades
+from service.watcher_queue import (
+    pop_pending_dca_payload,
+    queue_bounded_payload,
+    queue_dca_payload,
+)
 from service.watcher_runtime import (
     WatcherRuntimeState,
     compose_ticker_symbols,
@@ -710,54 +715,34 @@ class Watcher:
 
     def _queue_dca_payload(self, payload: dict[str, Any]) -> None:
         """Keep at most one queued DCA job per symbol and overwrite stale payloads."""
-        ticker = payload.get("ticker")
-        symbol = ticker.get("symbol") if isinstance(ticker, dict) else None
-        if not isinstance(symbol, str) or not symbol:
-            logging.warning("Skipping invalid DCA payload without symbol: %s", payload)
-            return
-
-        self._pending_dca_payloads[symbol] = payload
-        if symbol in self._queued_dca_symbols:
-            return
-
-        try:
-            self.dca_queue.put_nowait(symbol)
-            self._queued_dca_symbols.add(symbol)
-        except asyncio.QueueFull:
-            self._pending_dca_payloads.pop(symbol, None)
-            worker_summary = ", ".join(
-                f"{task.get_name()}={'done' if task.done() else 'alive'}"
-                for task in self._worker_tasks
-            )
-            logging.warning(
-                "dca queue full; dropping event for %s. qsize=%s workers=[%s]",
-                symbol,
-                self.dca_queue.qsize(),
-                worker_summary or "none",
-            )
+        queue_dca_payload(
+            payload,
+            queue=self.dca_queue,
+            pending_payloads=self._pending_dca_payloads,
+            queued_symbols=self._queued_dca_symbols,
+            worker_tasks=self._worker_tasks,
+            logger=logging,
+        )
 
     def _queue_put(self, queue: asyncio.Queue, payload: Any, name: str) -> None:
-        try:
-            queue.put_nowait(payload)
-        except asyncio.QueueFull:
-            worker_summary = ", ".join(
-                f"{task.get_name()}={'done' if task.done() else 'alive'}"
-                for task in self._worker_tasks
-            )
-            logging.warning(
-                "%s queue full; dropping event. qsize=%s workers=[%s]",
-                name,
-                queue.qsize(),
-                worker_summary or "none",
-            )
+        queue_bounded_payload(
+            queue,
+            payload,
+            name=name,
+            worker_tasks=self._worker_tasks,
+            logger=logging,
+        )
 
     async def _process_dca_queue(self) -> None:
         while self.status:
             symbol = None
             try:
                 symbol = await self.dca_queue.get()
-                self._queued_dca_symbols.discard(symbol)
-                ticker_price = self._pending_dca_payloads.pop(symbol, None)
+                ticker_price = pop_pending_dca_payload(
+                    symbol,
+                    pending_payloads=self._pending_dca_payloads,
+                    queued_symbols=self._queued_dca_symbols,
+                )
                 if ticker_price is None:
                     continue
                 await self.dca.process_ticker_data(ticker_price, self.config)

@@ -167,6 +167,74 @@ async def test_dca_queue_coalesces_pending_updates_per_symbol() -> None:
 
 
 @pytest.mark.asyncio
+async def test_dca_queue_handoff_delivers_latest_payload_and_config() -> None:
+    watcher = Watcher()
+    watcher.config = {"timezone": "Europe/Vienna", "dry_run": True}
+    delivered: list[tuple[dict[str, object], dict[str, object] | None]] = []
+
+    async def fake_process_ticker_data(
+        ticker_price: dict[str, object],
+        config: dict[str, object] | None,
+    ) -> None:
+        delivered.append((ticker_price, config))
+        watcher.status = False
+
+    watcher.dca.process_ticker_data = fake_process_ticker_data
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 1.0}}
+    )
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 2.0}}
+    )
+
+    worker = asyncio.create_task(watcher._process_dca_queue())
+    await asyncio.wait_for(worker, timeout=2)
+
+    assert delivered == [
+        (
+            {
+                "type": "ticker_price",
+                "ticker": {"symbol": "BTC/USDC", "price": 2.0},
+            },
+            watcher.config,
+        )
+    ]
+    assert watcher.dca_queue.qsize() == 0
+
+
+@pytest.mark.asyncio
+async def test_dca_queue_overflow_drops_new_payload_with_warning(monkeypatch) -> None:
+    watcher = Watcher()
+    watcher.dca_queue = asyncio.Queue(maxsize=1)
+    warnings: list[tuple[object, ...]] = []
+
+    monkeypatch.setattr(
+        watcher_module.logging,
+        "warning",
+        lambda *args, **_kwargs: warnings.append(args),
+    )
+
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDC", "price": 1.0}}
+    )
+    watcher._queue_dca_payload(
+        {"type": "ticker_price", "ticker": {"symbol": "ETH/USDC", "price": 2.0}}
+    )
+
+    assert watcher.dca_queue.qsize() == 1
+    assert "BTC/USDC" in watcher._pending_dca_payloads
+    assert "ETH/USDC" not in watcher._pending_dca_payloads
+    assert warnings == [
+        (
+            "dca queue full; dropping event for %s. qsize=%s workers=[%s]",
+            "ETH/USDC",
+            1,
+            "none",
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_ensure_worker_tasks_restarts_crashed_dca_worker() -> None:
     watcher = Watcher()
 
