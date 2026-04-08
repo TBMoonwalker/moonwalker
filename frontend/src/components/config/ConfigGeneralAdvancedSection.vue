@@ -54,14 +54,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface GeneralAdvancedModel {
-    debug: boolean
-    ws_watchdog_enabled: boolean
-    ws_healthcheck_interval_ms: number
-    ws_stale_timeout_ms: number
-    ws_reconnect_debounce_ms: number
-}
+import type { GeneralAdvancedModel } from '../../config-editor/types'
 
 defineProps<{
     general: GeneralAdvancedModel

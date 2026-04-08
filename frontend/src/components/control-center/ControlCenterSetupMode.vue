@@ -4,6 +4,15 @@ import type { VNodeRef } from 'vue'
 
 import type { SetupEntryChoice } from '../../control-center/setupEntryHistory'
 import type {
+    DcaModel,
+    ExchangeModel,
+    GeneralModel,
+    MixedSelectOption,
+    MonitoringModel,
+    SignalEditorModel,
+    StringSelectOption,
+} from '../../config-editor/types'
+import type {
     ControlCenterTarget,
     ControlCenterTaskPresentation,
 } from '../../control-center/types'
@@ -16,17 +25,6 @@ import ConfigMonitoringSection from '../config/ConfigMonitoringSection.vue'
 import ConfigSignalSection from '../config/ConfigSignalSection.vue'
 
 type BackupRestoreMode = 'config' | 'full'
-
-interface StringSelectOption {
-    label: string
-    value: string
-}
-
-interface MixedSelectOption {
-    label: string
-    value: string | number
-}
-
 interface SetupTaskStatus {
     label: string
     type: 'default' | 'info' | 'warning' | 'success'
@@ -39,13 +37,13 @@ defineProps<{
     ) => (element: Element | null) => void
     canTestMonitoringTelegram: boolean
     currency: StringSelectOption[]
-    dca: any
+    dca: DcaModel
     dcaFormRef?: VNodeRef
-    exchange: any
+    exchange: ExchangeModel
     exchangeFormRef?: VNodeRef
     exchanges: StringSelectOption[]
     fetchAsapSymbolsForCurrency: () => void | Promise<void>
-    general: any
+    general: GeneralModel
     generalFormRef?: VNodeRef
     getAsapMissingFieldsLabel: () => string
     getSetupTaskStatus: (target: ControlCenterTarget) => SetupTaskStatus
@@ -58,7 +56,7 @@ defineProps<{
     isAsapExchangeReady: boolean
     isSetupTaskExpanded: (target: ControlCenterTarget) => boolean
     market: StringSelectOption[]
-    monitoring: any
+    monitoring: MonitoringModel
     monitoringFormRef?: VNodeRef
     monitoringTestLoading: boolean
     readinessFirstRun: boolean
@@ -74,7 +72,7 @@ defineProps<{
     showRestoreSetupFlow: boolean
     showSetupEntryGate: boolean
     showSetupStyleSelector: boolean
-    signal: any
+    signal: SignalEditorModel
     signalFormRef?: VNodeRef
     symsignals: MixedSelectOption[]
     timerange: StringSelectOption[]

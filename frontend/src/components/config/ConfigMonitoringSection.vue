@@ -71,16 +71,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface MonitoringModel {
-    enabled: boolean
-    telegram_bot_token: string | null
-    telegram_api_id: number | null
-    telegram_api_hash: string | null
-    telegram_chat_id: string | null
-    timeout_sec: number
-    retry_count: number
-}
+import type { MonitoringModel } from '../../config-editor/types'
 
 withDefaults(defineProps<{
     canTest: boolean

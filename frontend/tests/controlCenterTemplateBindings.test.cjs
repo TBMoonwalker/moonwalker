@@ -327,6 +327,7 @@ test('control center gates first-run setup behind explicit onboarding choices', 
         '<ControlCenterSetupMode',
     ]
     const requiredSetupModeSnippets = [
+        "from '../../config-editor/types'",
         "import ControlCenterSetupWorkspace from './ControlCenterSetupWorkspace.vue'",
         '<ControlCenterSetupWorkspace',
     ]
@@ -950,6 +951,7 @@ test('control center delegates setup mode presentation to dedicated components',
         controlCenterViewSource.includes('<template #general>'),
         false,
     )
+    assert.equal(setupModeSource.includes(': any'), false)
 })
 
 test('control center delegates advanced and utilities presentation to dedicated components', () => {
@@ -961,6 +963,7 @@ test('control center delegates advanced and utilities presentation to dedicated 
         '@update:backup-include-trade-data="backupIncludeTradeData = $event"',
     ]
     const requiredAdvancedModeSnippets = [
+        "from '../../config-editor/types'",
         "import ControlCenterAdvancedWorkspace from './ControlCenterAdvancedWorkspace.vue'",
         "import ConfigGeneralAdvancedSection from '../config/ConfigGeneralAdvancedSection.vue'",
         "import ConfigExchangeAdvancedSection from '../config/ConfigExchangeAdvancedSection.vue'",
@@ -1025,6 +1028,7 @@ test('control center delegates advanced and utilities presentation to dedicated 
         controlCenterViewSource.includes('<template #indicator>'),
         false,
     )
+    assert.equal(advancedModeSource.includes(': any'), false)
 })
 
 test('control center delegates derived readiness and route state to a dedicated composable', () => {

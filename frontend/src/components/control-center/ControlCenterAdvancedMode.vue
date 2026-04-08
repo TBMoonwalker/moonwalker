@@ -2,6 +2,16 @@
 import type { FormRules } from 'naive-ui/es/form'
 import type { VNodeRef } from 'vue'
 
+import type {
+    AutopilotModel,
+    DcaAdvancedModel,
+    ExchangeAdvancedModel,
+    FilterModel,
+    GeneralAdvancedModel,
+    IndicatorModel,
+    SignalEditorModel,
+    StringSelectOption,
+} from '../../config-editor/types'
 import type { ControlCenterTarget } from '../../control-center/types'
 import ControlCenterAdvancedWorkspace from './ControlCenterAdvancedWorkspace.vue'
 import ConfigAutopilotSection from '../config/ConfigAutopilotSection.vue'
@@ -18,31 +28,26 @@ interface AdvancedSection {
     title: string
 }
 
-interface StringSelectOption {
-    label: string
-    value: string
-}
-
 defineProps<{
     advancedSections: AdvancedSection[]
-    autopilot: any
+    autopilot: AutopilotModel
     autopilotFormRef?: VNodeRef
     bindTargetElement: (
         target: ControlCenterTarget,
     ) => (element: Element | null) => void
-    dca: any
+    dca: DcaAdvancedModel
     dcaFormRef?: VNodeRef
-    exchange: any
+    exchange: ExchangeAdvancedModel
     exchangeFormRef?: VNodeRef
-    filter: any
+    filter: FilterModel
     filterFormRef?: VNodeRef
-    general: any
+    general: GeneralAdvancedModel
     generalFormRef?: VNodeRef
     historyLookbackOptions: StringSelectOption[]
-    indicator: any
+    indicator: IndicatorModel
     indicatorFormRef?: VNodeRef
     rules: FormRules
-    signal: any
+    signal: SignalEditorModel
 }>()
 </script>
 

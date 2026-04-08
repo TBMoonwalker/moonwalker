@@ -1,5 +1,10 @@
 import { ref } from 'vue'
 
+import type {
+    MixedSelectOption,
+    SignalEditorModel,
+    StringSelectOption,
+} from '../config-editor/types'
 import { getAllTimeZones } from '../helpers/timezone'
 import type {
     AutopilotConfigSection,
@@ -13,31 +18,11 @@ import type {
     SignalConfigSection,
 } from '../helpers/configSubmitPayload'
 
-type StringOption = {
-    label: string
-    value: string
-}
-
-type NumberOption = {
-    label: string
-    value: number
-}
-
-interface SignalPageState extends SignalConfigSection {
-    asap_symbol_fetch_error: string | null
-    asap_symbol_options: StringOption[]
-    asap_symbols_loading: boolean
-    csvsignal_file_name: string | null
-    plugins: StringOption[]
-    strategy_plugins: StringOption[]
-    timeframe: string | null
-}
-
 interface UseConfigPageStateOptions {
     defaults: ConfigSubmitPayloadDefaults
 }
 
-const TIMERANGE_OPTIONS: StringOption[] = [
+const TIMERANGE_OPTIONS: StringSelectOption[] = [
     { label: '1m', value: '1m' },
     { label: '15m', value: '15m' },
     { label: '30m', value: '30m' },
@@ -46,7 +31,7 @@ const TIMERANGE_OPTIONS: StringOption[] = [
     { label: '1d', value: '1d' },
 ]
 
-const HISTORY_LOOKBACK_OPTIONS: StringOption[] = [
+const HISTORY_LOOKBACK_OPTIONS: StringSelectOption[] = [
     { label: '30 days (1m default)', value: '30d' },
     { label: '90 days (15m default)', value: '90d' },
     { label: '180 days (1h default)', value: '180d' },
@@ -54,24 +39,24 @@ const HISTORY_LOOKBACK_OPTIONS: StringOption[] = [
     { label: '3 years (1d default)', value: '3y' },
 ]
 
-const EXCHANGE_OPTIONS: StringOption[] = [
+const EXCHANGE_OPTIONS: StringSelectOption[] = [
     { label: 'Binance', value: 'binance' },
     { label: 'Bybit', value: 'bybit' },
 ]
 
-const CURRENCY_OPTIONS: StringOption[] = [
+const CURRENCY_OPTIONS: StringSelectOption[] = [
     { label: 'USDC', value: 'usdc' },
     { label: 'USDT', value: 'usdt' },
 ]
 
-const MARKET_OPTIONS: StringOption[] = [{ label: 'Spot', value: 'spot' }]
+const MARKET_OPTIONS: StringSelectOption[] = [{ label: 'Spot', value: 'spot' }]
 
-const SELL_ORDER_TYPE_OPTIONS: StringOption[] = [
+const SELL_ORDER_TYPE_OPTIONS: StringSelectOption[] = [
     { label: 'Market', value: 'market' },
     { label: 'Limit', value: 'limit' },
 ]
 
-const SYM_SIGNAL_OPTIONS: NumberOption[] = [
+const SYM_SIGNAL_OPTIONS: MixedSelectOption[] = [
     { label: '12 - SymRank Top 10', value: 12 },
     { label: '2 - SymRank Top 30', value: 2 },
     { label: '11 - SymRank Top 50', value: 11 },
@@ -141,7 +126,7 @@ const SYM_SIGNAL_OPTIONS: NumberOption[] = [
 ]
 
 export function useConfigPageState(options: UseConfigPageStateOptions) {
-    const timezone = ref<StringOption[]>([])
+    const timezone = ref<StringSelectOption[]>([])
 
     const general = ref<GeneralConfigSection>({
         timezone: null,
@@ -153,7 +138,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
             options.defaults.advancedWsReconnectDebounceMs,
     })
 
-    const signal = ref<SignalPageState>({
+    const signal = ref<SignalEditorModel>({
         symbol_list: null,
         asap_use_url: true,
         asap_symbol_select: [],

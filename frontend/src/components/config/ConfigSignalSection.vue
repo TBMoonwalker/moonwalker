@@ -174,34 +174,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface SelectOption {
-    label: string
-    value: string | number
-}
-
-interface SignalModel {
-    symbol_list: string | null
-    asap_use_url: boolean
-    asap_symbol_select: string[]
-    asap_symbol_options: SelectOption[]
-    asap_symbols_loading: boolean
-    asap_symbol_fetch_error: string | null
-    signal: string | null
-    plugins: SelectOption[]
-    strategy: string | null
-    strategy_enabled: boolean
-    strategy_plugins: SelectOption[]
-    timeframe: string | null
-    symsignal_url: string | null
-    symsignal_key: string | null
-    symsignal_version: string | null
-    symsignal_allowedsignals: Array<string | number>
-    csvsignal_mode: string
-    csvsignal_source: string | null
-    csvsignal_inline: string | null
-    csvsignal_file_name: string | null
-}
+import type {
+    MixedSelectOption,
+    SignalEditorModel,
+} from '../../config-editor/types'
 
 defineProps<{
     asapMissingFieldsLabel: string
@@ -211,8 +187,8 @@ defineProps<{
     onFetchAsapSymbols: () => void | Promise<void>
     onSignalSettingsSelect: () => void
     rules: FormRules
-    signal: SignalModel
-    symsignals: SelectOption[]
+    signal: SignalEditorModel
+    symsignals: MixedSelectOption[]
 }>()
 
 const formRef = ref<FormInst | null>(null)

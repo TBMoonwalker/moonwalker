@@ -46,12 +46,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface DcaAdvancedModel {
-    tp_spike_confirm_enabled: boolean
-    tp_spike_confirm_seconds: number
-    tp_spike_confirm_ticks: number
-}
+import type { DcaAdvancedModel } from '../../config-editor/types'
 
 defineProps<{
     dca: DcaAdvancedModel

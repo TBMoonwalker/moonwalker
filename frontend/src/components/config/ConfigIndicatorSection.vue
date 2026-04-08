@@ -35,19 +35,10 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface SelectOption {
-    label: string
-    value: string
-}
-
-interface IndicatorModel {
-    upnl_housekeeping_interval: number
-    history_lookback_time: string | null
-}
+import type { IndicatorModel, StringSelectOption } from '../../config-editor/types'
 
 defineProps<{
-    historyLookbackOptions: SelectOption[]
+    historyLookbackOptions: StringSelectOption[]
     indicator: IndicatorModel
     rules: FormRules
     cardTitle?: string | null

@@ -79,20 +79,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface SelectOption {
-    label: string
-    value: string
-}
-
-interface GeneralModel {
-    timezone: string | null
-    debug: boolean
-    ws_watchdog_enabled: boolean
-    ws_healthcheck_interval_ms: number
-    ws_stale_timeout_ms: number
-    ws_reconnect_debounce_ms: number
-}
+import type { GeneralModel, StringSelectOption } from '../../config-editor/types'
 
 withDefaults(
     defineProps<{
@@ -101,7 +88,7 @@ withDefaults(
         showDebug?: boolean
         showAdvancedGeneral: boolean
         showAdvancedToggle?: boolean
-        timezone: SelectOption[]
+        timezone: StringSelectOption[]
     }>(),
     {
         showDebug: true,

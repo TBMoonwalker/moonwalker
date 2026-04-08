@@ -161,42 +161,14 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface SelectOption {
-    label: string
-    value: string
-}
-
-interface DcaModel {
-    enabled: boolean
-    dynamic: boolean
-    strategy: string | null
-    timeframe: string | null
-    trailing_tp: number | null
-    max_bots: number | null
-    bo: number | null
-    sell_order_type: string
-    limit_sell_timeout_sec: number
-    limit_sell_fallback_to_market: boolean
-    tp_spike_confirm_enabled: boolean
-    tp_spike_confirm_seconds: number
-    tp_spike_confirm_ticks: number
-    so: number | null
-    mstc: number | null
-    sos: number | null
-    ss: number | null
-    os: number | null
-    trade_safety_order_budget_ratio: number
-    tp: number | null
-    sl: number | null
-}
+import type { DcaModel, StringSelectOption } from '../../config-editor/types'
 
 defineProps<{
     dca: DcaModel
     rules: FormRules
-    sellOrderTypeOptions: SelectOption[]
+    sellOrderTypeOptions: StringSelectOption[]
     showAdvancedGeneral: boolean
-    strategyOptions: SelectOption[]
+    strategyOptions: StringSelectOption[]
 }>()
 
 const formRef = ref<FormInst | null>(null)
