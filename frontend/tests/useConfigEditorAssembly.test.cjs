@@ -84,3 +84,24 @@ test('config editor assembly owns the shared config-editor composable stack', ()
         )
     }
 })
+
+test('control center defers submit callbacks until workspace actions are initialized', () => {
+    assert.equal(
+        controlCenterViewSource.includes(
+            'onSubmitShortcut: handleSubmitWorkspace',
+        ),
+        false,
+    )
+    assert.equal(
+        controlCenterViewSource.includes('onValidSubmit: handleSubmitWorkspace'),
+        false,
+    )
+    assert.ok(
+        controlCenterViewSource.includes('onSubmitShortcut: async () => {'),
+        'expected ControlCenterView.vue to defer the submit shortcut handler',
+    )
+    assert.ok(
+        controlCenterViewSource.includes('onValidSubmit: async () => {'),
+        'expected ControlCenterView.vue to defer the valid submit handler',
+    )
+})

@@ -138,8 +138,12 @@ const {
                 await guideToTarget(invalidTarget)
             }
         },
-        onSubmitShortcut: handleSubmitWorkspace,
-        onValidSubmit: handleSubmitWorkspace,
+        onSubmitShortcut: async () => {
+            await handleSubmitWorkspace()
+        },
+        onValidSubmit: async () => {
+            await handleSubmitWorkspace()
+        },
     },
 })
 
