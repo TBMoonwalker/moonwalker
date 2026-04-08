@@ -2,6 +2,19 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.1.4.0] - 2026-04-08
+
+### Changed
+
+- Stabilize the backend cleanup program across config, data, watcher, DCA, and exchange paths so each runtime responsibility has a clearer home instead of living in one oversized service file.
+- Share config update request parsing and validation between the single-key and multi-key controller paths, and isolate OHLCV payload assembly, watcher queue behavior, DCA TP and safety-order state, and exchange order lookup into dedicated backend helpers.
+
+### Fixed
+
+- Lock config update conflicts, OHLCV payload assembly, and database init sequencing behind direct regressions so backend cleanup stops depending on “it probably still works.”
+- Preserve watcher backpressure and DCA handoff behavior under queue coalescing and overflow, so runtime refactors do not quietly change trading semantics.
+- Add direct regression coverage for exchange trade reconciliation fallback, DCA TP confirmation and trailing state, watcher queue delivery, and the extracted backend seam boundaries.
+
 ## [1.1.3.0] - 2026-04-08
 
 ### Changed
