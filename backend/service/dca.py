@@ -3,13 +3,26 @@
 import asyncio
 import importlib
 from datetime import datetime, timedelta
-from typing import Any, TypedDict
+from typing import Any
 
 import helper
 from service.ath import AthService
 from service.autopilot import Autopilot
 from service.config import resolve_timeframe
 from service.config_views import DcaRuntimeConfigView
+from service.dca_safety_orders import (
+    SafetyOrderContext,
+    calculate_static_deviations,
+    derive_safety_order_context,
+    evaluate_static_dca_trigger,
+)
+from service.dca_tp_state import (
+    TpConfirmationState,
+    apply_trailing_take_profit,
+    clear_tp_confirmation,
+    evaluate_tp_confirmation,
+    get_tp_confirmation_ticks,
+)
 from service.exchange import Exchange
 from service.indicators import Indicators
 from service.orders import Orders
@@ -18,16 +31,6 @@ from service.strategy_capability import ensure_strategy_supported
 from service.trades import Trades
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
-
-
-class TpConfirmationState(TypedDict):
-    """In-memory TP confirmation state for a single open trade."""
-
-    started_at: float
-    qualifying_ticks: int
-    peak_price: float
-    tp_price: float
-    trade_timestamp: int
 
 
 class Dca:
@@ -48,6 +51,10 @@ class Dca:
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
         self._pending_tp_confirmations: dict[str, TpConfirmationState] = {}
         self._trailing_tp_peaks: dict[str, float] = {}
+        self.tp = 0.0
+        self.sl = 0.0
+        self.sl_timeout = 0
+        self.autopilot_mode: str | None = None
 
     def __get_monotonic_time(self) -> float:
         """Return a monotonic timestamp for TP confirmation timing."""
@@ -78,19 +85,13 @@ class Dca:
         tp_price: float | None = None,
     ) -> None:
         """Clear pending TP confirmation state and log why it was removed."""
-        state = self._pending_tp_confirmations.pop(symbol, None)
-        if state is None:
-            return
-
-        logging.info(
-            "Cleared TP confirmation for %s: reason=%s current_price=%s tp_price=%s "
-            "peak_price=%s qualifying_ticks=%s",
-            symbol,
-            reason,
-            (round(float(current_price), 10) if current_price is not None else "n/a"),
-            round(float(tp_price or state["tp_price"]), 10),
-            round(float(state["peak_price"]), 10),
-            int(state["qualifying_ticks"]),
+        clear_tp_confirmation(
+            self._pending_tp_confirmations,
+            logger=logging,
+            symbol=symbol,
+            reason=reason,
+            current_price=current_price,
+            tp_price=tp_price,
         )
 
     def __evaluate_tp_confirmation(
@@ -102,82 +103,17 @@ class Dca:
         tp_price: float,
     ) -> bool:
         """Return whether TP remained above threshold long enough to sell."""
-        seconds_required = self.__get_tp_confirmation_seconds()
-        ticks_required = self.__get_tp_confirmation_ticks()
-        if seconds_required <= 0 and ticks_required <= 0:
-            return True
-
-        now = self.__get_monotonic_time()
-        state = self._pending_tp_confirmations.get(symbol)
-        if state and state["trade_timestamp"] != trade_timestamp:
-            self.__clear_tp_confirmation(
-                symbol,
-                reason="trade_changed",
-                current_price=current_price,
-                tp_price=tp_price,
-            )
-            state = None
-
-        if state and abs(state["tp_price"] - tp_price) > 1e-12:
-            self.__clear_tp_confirmation(
-                symbol,
-                reason="tp_price_changed",
-                current_price=current_price,
-                tp_price=tp_price,
-            )
-            state = None
-
-        if state is None:
-            self._pending_tp_confirmations[symbol] = {
-                "started_at": now,
-                "qualifying_ticks": 1,
-                "peak_price": current_price,
-                "tp_price": tp_price,
-                "trade_timestamp": trade_timestamp,
-            }
-            logging.info(
-                "Started TP confirmation for %s: current_price=%s tp_price=%s "
-                "seconds_required=%s ticks_required=%s",
-                symbol,
-                round(current_price, 10),
-                round(tp_price, 10),
-                round(seconds_required, 4),
-                ticks_required,
-            )
-            return False
-
-        state["qualifying_ticks"] += 1
-        state["peak_price"] = max(float(state["peak_price"]), current_price)
-
-        elapsed = now - float(state["started_at"])
-        seconds_met = seconds_required <= 0 or elapsed >= seconds_required
-        ticks_met = ticks_required <= 0 or state["qualifying_ticks"] >= ticks_required
-        if seconds_met and ticks_met:
-            self._pending_tp_confirmations.pop(symbol, None)
-            logging.info(
-                "TP confirmation passed for %s: current_price=%s tp_price=%s "
-                "elapsed=%.4f qualifying_ticks=%s peak_price=%s",
-                symbol,
-                round(current_price, 10),
-                round(tp_price, 10),
-                elapsed,
-                int(state["qualifying_ticks"]),
-                round(float(state["peak_price"]), 10),
-            )
-            return True
-
-        logging.debug(
-            "Waiting for TP confirmation on %s: current_price=%s tp_price=%s "
-            "elapsed=%.4f qualifying_ticks=%s seconds_required=%s ticks_required=%s",
-            symbol,
-            round(current_price, 10),
-            round(tp_price, 10),
-            elapsed,
-            int(state["qualifying_ticks"]),
-            round(seconds_required, 4),
-            ticks_required,
+        return evaluate_tp_confirmation(
+            self._pending_tp_confirmations,
+            logger=logging,
+            now=self.__get_monotonic_time(),
+            symbol=symbol,
+            trade_timestamp=trade_timestamp,
+            current_price=current_price,
+            tp_price=tp_price,
+            seconds_required=self.__get_tp_confirmation_seconds(),
+            ticks_required=self.__get_tp_confirmation_ticks(),
         )
-        return False
 
     async def __dynamic_dca_strategy(self, symbol: str) -> tuple[bool, bool]:
         result = False
@@ -443,43 +379,15 @@ class Dca:
 
         # Trailing TP
         if not is_unsellable and trailing_tp > 0:
-            if sell or trades["symbol"] in self._trailing_tp_peaks:
-                # Initialize new symbols
-                if trades["symbol"] not in self._trailing_tp_peaks:
-                    self._trailing_tp_peaks[trades["symbol"]] = 0.0
-
-                if (
-                    actual_pnl != self._trailing_tp_peaks[trades["symbol"]]
-                    and self._trailing_tp_peaks[trades["symbol"]] != 0.0
-                ):
-                    diff = actual_pnl - self._trailing_tp_peaks[trades["symbol"]]
-
-                    logging.debug(
-                        "TTP Check: %s - Actual PNL: %s, Top-PNL: %s, PNL Difference: %s",
-                        trades["symbol"],
-                        actual_pnl,
-                        self._trailing_tp_peaks[trades["symbol"]],
-                        diff,
-                    )
-
-                    # Sell if trailing deviation is reached or actual PNL is under minimum TP
-                    if (diff < 0 and abs(diff) > trailing_tp) or (
-                        actual_pnl < self.tp and actual_pnl > trailing_tp
-                    ):
-                        logging.debug(
-                            "TTP Sell: %s - Percentage decreased - Take profit with difference: %s",
-                            trades["symbol"],
-                            diff,
-                        )
-                        sell = True
-                        self._trailing_tp_peaks.pop(trades["symbol"])
-                    else:
-                        sell = False
-                        if actual_pnl > self._trailing_tp_peaks[trades["symbol"]]:
-                            self._trailing_tp_peaks[trades["symbol"]] = actual_pnl
-                else:
-                    self._trailing_tp_peaks[trades["symbol"]] = actual_pnl
-                    sell = False
+            sell = apply_trailing_take_profit(
+                self._trailing_tp_peaks,
+                logger=logging,
+                symbol=trades["symbol"],
+                actual_pnl=actual_pnl,
+                trailing_tp=trailing_tp,
+                take_profit=self.tp,
+                sell_signal=sell,
+            )
 
         # Sell if Autopilot is enabled and SL is set
         if not is_unsellable and self.sl_timeout > 0:
@@ -532,13 +440,10 @@ class Dca:
                 trades.get("unsellable_reason"),
             )
 
-        pending_state = self._pending_tp_confirmations.get(trades["symbol"])
-        if pending_state:
-            tp_confirmation_pending = True
-            tp_confirmation_ticks = int(pending_state["qualifying_ticks"])
-        else:
-            tp_confirmation_pending = False
-            tp_confirmation_ticks = 0
+        tp_confirmation_pending, tp_confirmation_ticks = get_tp_confirmation_ticks(
+            self._pending_tp_confirmations,
+            trades["symbol"],
+        )
 
         # Logging configuration
         logging_json = {
@@ -593,32 +498,24 @@ class Dca:
             step_scale, price_deviation, trades["safetyorders_count"]
         )
 
-        last_so_price, safety_order_size, next_so_percentage, trigger_threshold = (
-            self.__evaluate_existing_safety_orders(
-                trades["safetyorders"],
-                max_safety_orders,
-                volume_scale,
-                step_scale,
-                price_deviation,
-                safety_order_size,
-                next_so_percentage,
-                trigger_threshold,
-            )
+        so_context = self.__evaluate_existing_safety_orders(
+            trades["safetyorders"],
+            max_safety_orders,
+            volume_scale,
+            step_scale,
+            price_deviation,
+            safety_order_size,
+            next_so_percentage,
+            trigger_threshold,
         )
+        last_so_price = so_context.last_so_price
+        safety_order_size = so_context.safety_order_size
+        next_so_percentage = so_context.next_so_percentage
+        trigger_threshold = so_context.trigger_threshold
 
         # Dynamic DCA safety orders must progress deeper (more negative) than
         # the most recently persisted SO percentage to avoid rebound buys.
-        last_so_percentage: float | None = None
-        if trades["safetyorders"]:
-            so_values = [
-                float(so["so_percentage"])
-                for so in trades["safetyorders"]
-                if so.get("so_percentage") is not None
-            ]
-            if so_values:
-                # Enforce progression against the deepest persisted SO percentage.
-                # This is robust even when DB rows are not returned in timestamp order.
-                last_so_percentage = min(so_values)
+        last_so_percentage = so_context.last_so_percentage
 
         if max_safety_orders and (trades["safetyorders_count"] < max_safety_orders):
             new_so = False
@@ -694,19 +591,11 @@ class Dca:
         self, step_scale: float, price_deviation: float, safetyorders_count: int
     ) -> tuple[float, float]:
         """Calculate max/actual deviation for static DCA progression."""
-        if step_scale == 1:
-            max_deviation = price_deviation * (safetyorders_count + 1)
-            actual_deviation = price_deviation * safetyorders_count
-            return max_deviation, actual_deviation
-
-        max_deviation = (
-            price_deviation * (1 - step_scale ** (safetyorders_count + 1))
-        ) / (1 - step_scale)
-        max_deviation = round(max_deviation, 2)
-        actual_deviation = (
-            price_deviation * (1 - step_scale**safetyorders_count)
-        ) / (1 - step_scale)
-        return max_deviation, actual_deviation
+        return calculate_static_deviations(
+            step_scale,
+            price_deviation,
+            safetyorders_count,
+        )
 
     def __evaluate_existing_safety_orders(
         self,
@@ -718,31 +607,17 @@ class Dca:
         safety_order_size: float,
         next_so_percentage: float,
         trigger_threshold: float,
-    ) -> tuple[float, float, float, float]:
+    ) -> SafetyOrderContext:
         """Derive SO context from already placed safety orders."""
-        if safetyorders and max_safety_orders:
-            safety_order_size = safetyorders[-1]["ordersize"] * volume_scale
-            next_so_percentage = float(safetyorders[-1]["so_percentage"]) * step_scale
-            if len(safetyorders) >= 2:
-                next_so_percentage = -abs(next_so_percentage) + -abs(
-                    float(safetyorders[-2]["so_percentage"])
-                )
-            else:
-                next_so_percentage = -abs(next_so_percentage) + -abs(price_deviation)
-            trigger_threshold = -abs(next_so_percentage)
-            last_so_price = float(safetyorders[-1]["price"])
-            return (
-                last_so_price,
-                safety_order_size,
-                next_so_percentage,
-                trigger_threshold,
-            )
-
-        return (
-            0.0,
-            safety_order_size,
-            next_so_percentage,
-            trigger_threshold,
+        return derive_safety_order_context(
+            safetyorders=safetyorders,
+            max_safety_orders=max_safety_orders,
+            volume_scale=volume_scale,
+            step_scale=step_scale,
+            price_deviation=price_deviation,
+            safety_order_size=safety_order_size,
+            next_so_percentage=next_so_percentage,
+            trigger_threshold=trigger_threshold,
         )
 
     async def process_ticker_data(
@@ -833,15 +708,11 @@ class Dca:
     def __evaluate_static_dca_trigger(
         self, total_pnl: float, max_deviation: float, actual_deviation: float
     ) -> tuple[bool, float, float]:
-        new_so = False
-        trigger_threshold = -abs(max_deviation - actual_deviation)
-        next_so_percentage = 0.0
-        if total_pnl <= -abs(max_deviation):
-            next_so_percentage = max_deviation - actual_deviation
-            next_so_percentage = round(next_so_percentage, 2)
-            trigger_threshold = -abs(next_so_percentage)
-            new_so = True
-        return new_so, trigger_threshold, next_so_percentage
+        return evaluate_static_dca_trigger(
+            total_pnl,
+            max_deviation,
+            actual_deviation,
+        )
 
     async def __log_dca_check(
         self,
