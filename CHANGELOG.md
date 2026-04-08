@@ -2,6 +2,19 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.1.3.0] - 2026-04-08
+
+### Changed
+
+- Turn Control Center into a real composition surface by extracting setup, advanced, overview, mission, lifecycle, navigation, feedback, and workspace seams out of the old monolithic view.
+- Share config-editor defaults, assembly, and backup or restore presentation across Control Center and the standalone config surface so the same workflow stops living in multiple places.
+
+### Fixed
+
+- Remove the expired `/settings` and `/config` Control Center entry seams so `/control-center` is the single supported configuration route across the frontend router, backend SPA fallback, and operator docs.
+- Normalize text-backed SQLite timestamp handling across history reads, replay archives, housekeeping, and latest-ticker lookups so short numeric timestamps and millisecond timestamps behave consistently.
+- Add regression coverage for the extracted Control Center seams, canonical Control Center routing, replay archive bounds, and SQLite timestamp normalization helpers.
+
 ## [1.1.2.0] - 2026-04-05
 
 ### Changed
