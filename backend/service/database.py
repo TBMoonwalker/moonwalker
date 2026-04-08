@@ -25,6 +25,7 @@ _SQLITE_INDEX_CORRUPTION_PATTERNS = (
     re.compile(r"rowid \d+ missing from index (?P<index>\S+)"),
     re.compile(r"wrong # of entries in index (?P<index>\S+)"),
 )
+ColumnSpec = tuple[str, str]
 
 
 def _is_sqlite_lock_error(exc: Exception) -> bool:
@@ -71,6 +72,56 @@ def _extract_corrupted_index_name(messages: list[str]) -> str | None:
             return None
 
     return next(iter(index_names)) if len(index_names) == 1 else None
+
+
+def _plan_additive_column_statements(
+    table_name: str,
+    existing_columns: set[str],
+    column_specs: tuple[ColumnSpec, ...],
+) -> list[str]:
+    """Return ALTER TABLE statements for additive columns that are still missing."""
+    statements: list[str] = []
+    for column_name, column_definition in column_specs:
+        if column_name in existing_columns:
+            continue
+        statements.append(
+            f"ALTER TABLE {table_name} "
+            f"ADD COLUMN {column_name} {column_definition};"
+        )
+    return statements
+
+
+def _extract_added_column_names(statements: list[str]) -> list[str]:
+    """Return the added column names from ALTER TABLE ADD COLUMN statements."""
+    return [
+        statement.split("ADD COLUMN", 1)[1].split()[0].strip()
+        for statement in statements
+    ]
+
+
+def _build_sqlite_corruption_message(
+    db_path: str,
+    integrity_messages: list[str],
+) -> str:
+    """Return operator guidance for detected SQLite corruption."""
+    corrupted_index_name = _extract_corrupted_index_name(integrity_messages)
+    if corrupted_index_name:
+        return (
+            f"SQLite index corruption detected in {db_path} "
+            f"({corrupted_index_name}). Moonwalker cannot safely continue. "
+            f"First try `sqlite3 {db_path} 'REINDEX "
+            f"{corrupted_index_name}; PRAGMA integrity_check;'`. "
+            "If integrity_check still reports errors, restore from "
+            "a known-good backup or recover the database before restarting."
+        )
+
+    return (
+        f"SQLite corruption detected in {db_path}. "
+        "Moonwalker cannot safely continue. "
+        f"Run `sqlite3 {db_path} 'PRAGMA integrity_check;'` "
+        "and restore from a known-good backup or recover the "
+        "database before restarting."
+    )
 
 
 async def run_sqlite_write_with_retry(
@@ -282,13 +333,13 @@ class Database:
                 f"PRAGMA table_info('{table_name}')"
             )
             existing = {row["name"] for row in columns}
-            for column_name, column_definition in column_specs:
-                if column_name in existing:
-                    continue
-                alter_statements.append(
-                    f"ALTER TABLE {table_name} "
-                    f"ADD COLUMN {column_name} {column_definition};"
+            alter_statements.extend(
+                _plan_additive_column_statements(
+                    table_name,
+                    existing,
+                    column_specs,
                 )
+            )
 
         if alter_statements:
             await connection.execute_script("\n".join(alter_statements))
@@ -423,47 +474,25 @@ class Database:
         connection = Tortoise.get_connection("default")
         _, columns = await connection.execute_query("PRAGMA table_info('opentrades')")
         existing = {row["name"] for row in columns}
-        alter_statements = []
-        if "sold_amount" not in existing:
-            alter_statements.append(
-                "ALTER TABLE opentrades ADD COLUMN sold_amount REAL NOT NULL DEFAULT 0.0;"
-            )
-        if "sold_proceeds" not in existing:
-            alter_statements.append(
-                "ALTER TABLE opentrades ADD COLUMN sold_proceeds REAL NOT NULL DEFAULT 0.0;"
-            )
-        if "unsellable_amount" not in existing:
-            alter_statements.append(
-                "ALTER TABLE opentrades ADD COLUMN unsellable_amount REAL NOT NULL DEFAULT 0.0;"
-            )
-        if "unsellable_reason" not in existing:
-            alter_statements.append(
-                "ALTER TABLE opentrades ADD COLUMN unsellable_reason TEXT NULL;"
-            )
-        if "unsellable_min_notional" not in existing:
-            alter_statements.append(
-                "ALTER TABLE opentrades ADD COLUMN unsellable_min_notional REAL NULL;"
-            )
-        if "unsellable_estimated_notional" not in existing:
-            alter_statements.append(
-                "ALTER TABLE opentrades ADD COLUMN unsellable_estimated_notional REAL NULL;"
-            )
-        if "unsellable_since" not in existing:
-            alter_statements.append(
-                "ALTER TABLE opentrades ADD COLUMN unsellable_since TEXT NULL;"
-            )
-        if "unsellable_notice_sent" not in existing:
-            alter_statements.append(
-                "ALTER TABLE opentrades ADD COLUMN unsellable_notice_sent INTEGER NOT NULL DEFAULT 0;"
-            )
+        alter_statements = _plan_additive_column_statements(
+            "opentrades",
+            existing,
+            (
+                ("sold_amount", "REAL NOT NULL DEFAULT 0.0"),
+                ("sold_proceeds", "REAL NOT NULL DEFAULT 0.0"),
+                ("unsellable_amount", "REAL NOT NULL DEFAULT 0.0"),
+                ("unsellable_reason", "TEXT NULL"),
+                ("unsellable_min_notional", "REAL NULL"),
+                ("unsellable_estimated_notional", "REAL NULL"),
+                ("unsellable_since", "TEXT NULL"),
+                ("unsellable_notice_sent", "INTEGER NOT NULL DEFAULT 0"),
+            ),
+        )
         if alter_statements:
             await connection.execute_script("\n".join(alter_statements))
             logging.info(
                 "Added missing OpenTrades columns: %s",
-                ", ".join(
-                    statement.split("ADD COLUMN", 1)[1].split()[0].strip()
-                    for statement in alter_statements
-                ),
+                ", ".join(_extract_added_column_names(alter_statements)),
             )
 
     async def _ensure_upnl_history_columns(self) -> None:
@@ -474,20 +503,16 @@ class Database:
         connection = Tortoise.get_connection("default")
         _, columns = await connection.execute_query("PRAGMA table_info('upnl_history')")
         existing = {row["name"] for row in columns}
-        alter_statements = []
-        if "funds_locked" not in existing:
-            alter_statements.append(
-                "ALTER TABLE upnl_history "
-                "ADD COLUMN funds_locked REAL NOT NULL DEFAULT 0.0;"
-            )
+        alter_statements = _plan_additive_column_statements(
+            "upnl_history",
+            existing,
+            (("funds_locked", "REAL NOT NULL DEFAULT 0.0"),),
+        )
         if alter_statements:
             await connection.execute_script("\n".join(alter_statements))
             logging.info(
                 "Added missing UpnlHistory columns: %s",
-                ", ".join(
-                    statement.split("ADD COLUMN", 1)[1].split()[0].strip()
-                    for statement in alter_statements
-                ),
+                ", ".join(_extract_added_column_names(alter_statements)),
             )
 
     async def optimize_sqlite(self) -> None:
@@ -543,28 +568,10 @@ class Database:
             if _is_sqlite_malformed_error(exc):
                 db_path = _resolve_sqlite_db_path(self.db_url or db_url)
                 integrity_messages = await self._run_sqlite_integrity_check()
-                corrupted_index_name = _extract_corrupted_index_name(
+                message = _build_sqlite_corruption_message(
+                    db_path,
                     integrity_messages,
                 )
-                if corrupted_index_name:
-                    message = (
-                        f"SQLite index corruption detected in {db_path} "
-                        f"({corrupted_index_name}). Moonwalker cannot safely "
-                        "continue. "
-                        f"First try `sqlite3 {db_path} 'REINDEX "
-                        f"{corrupted_index_name}; PRAGMA integrity_check;'`. "
-                        "If integrity_check still reports errors, restore from "
-                        "a known-good backup or recover the database before "
-                        "restarting."
-                    )
-                else:
-                    message = (
-                        f"SQLite corruption detected in {db_path}. "
-                        "Moonwalker cannot safely continue. "
-                        f"Run `sqlite3 {db_path} 'PRAGMA integrity_check;'` "
-                        "and restore from a known-good backup or recover the "
-                        "database before restarting."
-                    )
                 logging.error(message, exc_info=True)
                 raise RuntimeError(message) from exc
             logging.error("Failed to initialize database: %s", exc, exc_info=True)

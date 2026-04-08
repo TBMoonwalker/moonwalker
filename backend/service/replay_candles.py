@@ -5,17 +5,20 @@ from __future__ import annotations
 from typing import Any
 
 import model
-from service.trade_math import parse_date_to_ms
+from service.sqlite_timestamps import (
+    build_normalized_text_timestamp_sql,
+    coerce_timestamp_like_to_ms,
+)
+from tortoise import Tortoise
 
 REPLAY_ARCHIVE_PRE_ROLL_MS = 2 * 24 * 60 * 60 * 1000
 REPLAY_ARCHIVE_POST_ROLL_MS = 4 * 24 * 60 * 60 * 1000
+NORMALIZED_TICKER_TIMESTAMP_SQL = build_normalized_text_timestamp_sql()
 
 
 def _parse_optional_ms(value: Any) -> int | None:
     """Convert an arbitrary timestamp-like value into Unix milliseconds."""
-    if value is None:
-        return None
-    return parse_date_to_ms(str(value))
+    return coerce_timestamp_like_to_ms(value)
 
 
 async def resolve_replay_archive_window_ms(
@@ -90,20 +93,15 @@ async def archive_replay_candles_for_deal(
     if start_ms is None or end_ms is None:
         return 0
 
-    ticker_query = model.Tickers.filter(
-        symbol=normalized_symbol,
-        timestamp__gte=start_ms,
-        timestamp__lte=end_ms,
-    ).order_by("timestamp")
-    if conn is not None:
-        ticker_query = ticker_query.using_db(conn)
-    ticker_rows = await ticker_query.values(
-        "timestamp",
-        "open",
-        "high",
-        "low",
-        "close",
-        "volume",
+    connection = conn or Tortoise.get_connection("default")
+    ticker_rows = await connection.execute_query_dict(
+        "SELECT timestamp, open, high, low, close, volume "
+        "FROM tickers "
+        "WHERE symbol = ? "
+        f"AND {NORMALIZED_TICKER_TIMESTAMP_SQL} >= ? "
+        f"AND {NORMALIZED_TICKER_TIMESTAMP_SQL} <= ? "
+        f"ORDER BY {NORMALIZED_TICKER_TIMESTAMP_SQL}, timestamp",
+        [normalized_symbol, start_ms, end_ms],
     )
     if not ticker_rows:
         return 0
