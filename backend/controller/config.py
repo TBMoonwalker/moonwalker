@@ -21,6 +21,7 @@ LIVE_ACTIVATION_DENIED_MESSAGE = (
     "Generic config saves cannot switch dry run off."
 )
 backup_service = BackupService()
+ConfigUpdateMap = dict[str, dict[str, Any]]
 
 
 def _extract_config_update_value(raw_value: Any) -> Any:
@@ -187,6 +188,103 @@ async def _validate_csv_signal_switch(
     return None
 
 
+def _config_update_conflict(message: str) -> Any:
+    """Return the shared conflict response shape for config update failures."""
+    return json_response({"error": message, "message": message}, 409)
+
+
+def _config_update_failed_response() -> Any:
+    """Return the shared persistence failure response for config updates."""
+    return json_response({"error": "Update failed - check config.log"}, 400)
+
+
+async def _read_request_json_object(
+    request: Request[Any, Any, Any],
+    *,
+    invalid_json_message: str,
+) -> tuple[dict[str, Any] | None, Any | None]:
+    """Read a request body and return a JSON object or a shaped error response."""
+    try:
+        data = await request.json()
+    except SerializationException:
+        return None, json_response({"error": invalid_json_message}, 400)
+
+    if not isinstance(data, dict):
+        return None, json_response({"error": invalid_json_message}, 400)
+    return data, None
+
+
+async def _parse_single_config_update_request(
+    key: str,
+    request: Request[Any, Any, Any],
+) -> tuple[ConfigUpdateMap | None, Any | None]:
+    """Normalize the single-key config update request into the shared shape."""
+    data, error_response = await _read_request_json_object(
+        request,
+        invalid_json_message="Payload must be a JSON object",
+    )
+    if error_response is not None or data is None:
+        return None, error_response
+
+    if "value" not in data:
+        return None, json_response({"error": "Missing 'value' in request"}, 400)
+
+    value = data["value"]
+    if not _is_config_update_payload(value):
+        return None, json_response(
+            {"error": "Config value must be an object with 'value' and 'type'."},
+            400,
+        )
+
+    return {key: value}, None
+
+
+async def _parse_batch_config_update_request(
+    request: Request[Any, Any, Any],
+) -> tuple[ConfigUpdateMap | None, Any | None]:
+    """Normalize the batch config update request into the shared shape."""
+    data, error_response = await _read_request_json_object(
+        request,
+        invalid_json_message="'data' must be a JSON object",
+    )
+    if error_response is not None or data is None:
+        return None, error_response
+
+    invalid_keys = [
+        key for key, value in data.items() if not _is_config_update_payload(value)
+    ]
+    if invalid_keys:
+        invalid_key_list = ", ".join(sorted(invalid_keys))
+        return None, json_response(
+            {
+                "error": (
+                    "Config updates must be objects with 'value' and 'type'. "
+                    f"Invalid keys: {invalid_key_list}"
+                )
+            },
+            400,
+        )
+
+    return data, None
+
+
+async def _validate_config_updates(
+    config: Config,
+    updates: ConfigUpdateMap,
+) -> Any | None:
+    """Validate shared config update invariants before persistence."""
+    if "signal" in updates:
+        error_message = await _validate_csv_signal_switch(config, updates["signal"])
+        if error_message:
+            return _config_update_conflict(error_message)
+
+    error_message = _validate_live_activation_boundary(updates)
+    if error_message:
+        return _config_update_conflict(error_message)
+
+    return None
+
+
 @get(path="/config/all")
 async def get_config() -> Any:
     """Return the current configuration as JSON.
@@ -250,43 +348,21 @@ async def update_config_key(key: str, request: Request[Any, Any, Any]) -> Any:
     Returns:
         JSON response with success/error status.
     """
-    try:
-        data = await request.json()
-    except SerializationException:
-        return json_response({"error": "Payload must be a JSON object"}, 400)
-    if not isinstance(data, dict):
-        return json_response({"error": "Payload must be a JSON object"}, 400)
-    if "value" not in data:
-        return json_response({"error": "Missing 'value' in request"}, 400)
-
-    value = data["value"]
-    if not _is_config_update_payload(value):
-        return json_response(
-            {"error": "Config value must be an object with 'value' and 'type'."},
-            400,
-        )
+    updates, error_response = await _parse_single_config_update_request(key, request)
+    if error_response is not None or updates is None:
+        return error_response
+    value = updates[key]
 
     config = await Config.instance()
-    if key == "signal":
-        error_message = await _validate_csv_signal_switch(config, value)
-        if error_message:
-            return json_response(
-                {"error": error_message, "message": error_message}, 409
-            )
-    if key == LIVE_ACTIVATION_KEY:
-        error_message = _validate_live_activation_boundary({key: value})
-        if error_message:
-            return json_response(
-                {"error": error_message, "message": error_message},
-                409,
-            )
+    validation_error = await _validate_config_updates(config, updates)
+    if validation_error is not None:
+        return validation_error
 
     # Save to DB and trigger Pub/Sub
     success = await config.set(key, value)
     if success:
         return {"message": f"Config '{key}' updated", "value": value}
-    else:
-        return json_response({"error": "Update failed - check config.log"}, 400)
+    return _config_update_failed_response()
 
 
 @post(path="/config/multiple")
@@ -303,45 +379,20 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
     Returns:
         JSON response with success/error status.
     """
-    try:
-        data = await request.json()
-    except SerializationException:
-        return json_response({"error": "'data' must be a JSON object"}, 400)
-
-    if not isinstance(data, dict):
-        return json_response({"error": "'data' must be a JSON object"}, 400)
-    invalid_keys = [
-        key for key, value in data.items() if not _is_config_update_payload(value)
-    ]
-    if invalid_keys:
-        invalid_key_list = ", ".join(sorted(invalid_keys))
-        return json_response(
-            {
-                "error": (
-                    "Config updates must be objects with 'value' and 'type'. "
-                    f"Invalid keys: {invalid_key_list}"
-                )
-            },
-            400,
-        )
+    updates, error_response = await _parse_batch_config_update_request(request)
+    if error_response is not None or updates is None:
+        return error_response
 
     config = await Config.instance()
-    if "signal" in data:
-        error_message = await _validate_csv_signal_switch(config, data["signal"])
-        if error_message:
-            return json_response(
-                {"error": error_message, "message": error_message}, 409
-            )
-    error_message = _validate_live_activation_boundary(data)
-    if error_message:
-        return json_response({"error": error_message, "message": error_message}, 409)
+    validation_error = await _validate_config_updates(config, updates)
+    if validation_error is not None:
+        return validation_error
 
-    success = await config.batch_set(data)
+    success = await config.batch_set(updates)
 
     if success:
         return {"message": "Config updated"}
-    else:
-        return json_response({"error": "Update failed - check config.log"}, 400)
+    return _config_update_failed_response()
 
 
 @post(path="/config/live/activate")

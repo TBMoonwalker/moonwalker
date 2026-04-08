@@ -266,3 +266,63 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
     assert "REINDEX idx_trades_deal_id_88bd51; PRAGMA integrity_check;" in str(
         exc_info.value
     )
+
+
+@pytest.mark.asyncio
+async def test_database_init_runs_schema_steps_before_backfills(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    calls: list[str] = []
+    monkeypatch.setenv("MOONWALKER_DB_URL", "sqlite:///tmp/healthy.sqlite")
+
+    async def fake_tortoise_init(*_args, **_kwargs) -> object:
+        calls.append("tortoise_init")
+        return object()
+
+    async def fake_generate_schemas(*_args, **_kwargs) -> None:
+        calls.append("generate_schemas")
+
+    def _record(name: str):
+        async def _step(*_args, **_kwargs) -> None:
+            calls.append(name)
+
+        return _step
+
+    monkeypatch.setattr("service.database.Tortoise.init", fake_tortoise_init)
+    monkeypatch.setattr(
+        "service.database.Tortoise.generate_schemas", fake_generate_schemas
+    )
+    monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _record("apply_pragmas"))
+    monkeypatch.setattr(
+        Database, "_ensure_open_trades_columns", _record("ensure_open_trades_columns")
+    )
+    monkeypatch.setattr(
+        Database, "_ensure_trade_ledger_columns", _record("ensure_trade_ledger_columns")
+    )
+    monkeypatch.setattr(
+        Database, "_ensure_upnl_history_columns", _record("ensure_upnl_history_columns")
+    )
+    monkeypatch.setattr(Database, "_ensure_indexes", _record("ensure_indexes"))
+    monkeypatch.setattr(
+        Database, "_backfill_trade_ledger_rows", _record("backfill_trade_ledger_rows")
+    )
+    monkeypatch.setattr(
+        Database,
+        "_backfill_trade_replay_candles",
+        _record("backfill_trade_replay_candles"),
+    )
+
+    await database.init()
+
+    assert calls == [
+        "tortoise_init",
+        "apply_pragmas",
+        "generate_schemas",
+        "ensure_open_trades_columns",
+        "ensure_trade_ledger_columns",
+        "ensure_upnl_history_columns",
+        "ensure_indexes",
+        "backfill_trade_ledger_rows",
+        "backfill_trade_replay_candles",
+    ]

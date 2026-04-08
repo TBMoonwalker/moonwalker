@@ -21,6 +21,45 @@ def append_live_candle(
     return pd.concat([df_source, pd.DataFrame([live_candle])], ignore_index=True)
 
 
+def build_resampled_ohlcv_payload(
+    df_source: pd.DataFrame,
+    timerange: str,
+    offset: float,
+) -> str | dict[str, Any]:
+    """Resample and serialize OHLCV rows into the frontend payload shape."""
+    if df_source.empty:
+        return {}
+
+    resampled = resample_ohlcv_data(df_source, timerange)
+    if resampled is None or resampled.empty:
+        return {}
+    return serialize_ohlcv_dataframe(resampled, offset)
+
+
+def build_pair_ohlcv_payload(
+    df_source: pd.DataFrame | None,
+    timerange: str,
+    offset: float,
+    *,
+    live_candle: dict[str, float | str] | None = None,
+) -> str | dict[str, Any]:
+    """Build the chart payload for live/stored pair OHLCV data."""
+    source = df_source.copy() if df_source is not None else pd.DataFrame()
+    if live_candle is not None:
+        source = append_live_candle(source, live_candle)
+    return build_resampled_ohlcv_payload(source, timerange, offset)
+
+
+def build_archived_ohlcv_payload(
+    df_source: pd.DataFrame | None,
+    timerange: str,
+    offset: float,
+) -> str | dict[str, Any]:
+    """Build the chart payload for archived replay OHLCV data."""
+    source = df_source.copy() if df_source is not None else pd.DataFrame()
+    return build_resampled_ohlcv_payload(source, timerange, offset)
+
+
 def timestamp_to_unix_seconds(timestamp: Any) -> float | None:
     """Convert arbitrary timestamp-like values to UTC unix seconds."""
     if pd.isna(timestamp):

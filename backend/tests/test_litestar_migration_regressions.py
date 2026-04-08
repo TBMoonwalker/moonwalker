@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import pytest
 from controller import config as config_controller
 from controller import frontend as frontend_controller
 from controller import monitoring as monitoring_controller
@@ -436,6 +437,89 @@ def test_config_single_rejects_generic_live_activation(monkeypatch) -> None:
     assert response.status_code == 409
     assert "live activation" in response.json().get("error", "").lower()
     assert service.last_single is None
+
+
+@pytest.mark.parametrize(
+    (
+        "route_handler",
+        "method_name",
+        "path",
+        "payload",
+        "open_trade_count",
+        "expected_message",
+    ),
+    [
+        (
+            config_controller.update_config_key,
+            "put",
+            "/config/single/dry_run",
+            {"value": {"value": False, "type": "bool"}},
+            None,
+            config_controller.LIVE_ACTIVATION_DENIED_MESSAGE,
+        ),
+        (
+            config_controller.update_multiple_config_keys,
+            "post",
+            "/config/multiple",
+            {"dry_run": {"value": False, "type": "bool"}},
+            None,
+            config_controller.LIVE_ACTIVATION_DENIED_MESSAGE,
+        ),
+        (
+            config_controller.update_config_key,
+            "put",
+            "/config/single/signal",
+            {"value": {"value": "csv_signal", "type": "str"}},
+            1,
+            (
+                "Cannot switch signal plugin to 'csv_signal' while open trades exist. "
+                "Close all open trades first."
+            ),
+        ),
+        (
+            config_controller.update_multiple_config_keys,
+            "post",
+            "/config/multiple",
+            {"signal": {"value": "csv_signal", "type": "str"}},
+            2,
+            (
+                "Cannot switch signal plugin to 'csv_signal' while open trades exist. "
+                "Close all open trades first."
+            ),
+        ),
+    ],
+)
+def test_config_update_routes_share_conflict_response_shape(
+    monkeypatch,
+    route_handler,
+    method_name: str,
+    path: str,
+    payload: dict[str, Any],
+    open_trade_count: int | None,
+    expected_message: str,
+) -> None:
+    """Single and batch config updates should share the same conflict contract."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+    if open_trade_count is not None:
+        _DummyOpenTradesCount.count_value = open_trade_count
+        monkeypatch.setattr(config_controller, "OpenTrades", _DummyOpenTradesCount)
+
+    app = Litestar(route_handlers=[route_handler])
+    with TestClient(app=app) as client:
+        response = getattr(client, method_name)(path, json=payload)
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": expected_message,
+        "message": expected_message,
+    }
 
 
 def test_live_activation_endpoint_blocks_when_setup_is_incomplete(monkeypatch) -> None:
