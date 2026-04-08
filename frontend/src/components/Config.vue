@@ -78,73 +78,29 @@
 
         <n-card title="Backup & Restore" size="small" class="backup-restore-card">
             <n-flex vertical :size="12">
-                <n-alert type="info" title="Portable backup">
-                    Download your configuration alone or include all trade data. Full restores do not import ticker candles and will fetch the required history again for restored active trades.
-                </n-alert>
-
-                <n-flex align="center" :wrap="true" :size="[12, 12]">
-                    <n-checkbox v-model:checked="backupIncludeTradeData">
-                        Include trade data in backup
-                    </n-checkbox>
-                    <n-button
-                        type="primary"
-                        secondary
-                        :loading="backupDownloadLoading"
-                        @click="handleBackupDownload"
-                    >
-                        Download backup
-                    </n-button>
-                </n-flex>
+                <ConfigBackupDownloadControls
+                    :backup-download-loading="backupDownloadLoading"
+                    :backup-include-trade-data="backupIncludeTradeData"
+                    info-title="Portable backup"
+                    info-message="Download your configuration alone or include all trade data. Full restores do not import ticker candles and will fetch the required history again for restored active trades."
+                    @download-backup="handleBackupDownload"
+                    @update:backup-include-trade-data="backupIncludeTradeData = $event"
+                />
 
                 <n-divider />
 
-                <input
-                    ref="backupFileInputRef"
-                    type="file"
-                    accept="application/json,.json"
-                    class="backup-file-input"
-                    @change="handleBackupFileSelected"
-                >
-
-                <n-flex align="center" :wrap="true" :size="[12, 12]">
-                    <n-button secondary @click="openBackupFilePicker">
-                        Select backup file
-                    </n-button>
-                    <span v-if="selectedBackupFileName" class="backup-file-name">
-                        {{ selectedBackupFileName }}
-                    </span>
-                    <n-button
-                        v-if="selectedBackupFileName"
-                        quaternary
-                        @click="clearSelectedBackup"
-                    >
-                        Clear
-                    </n-button>
-                </n-flex>
-
-                <n-text v-if="selectedBackupPayload" depth="3">
-                    Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
-                </n-text>
-
-                <n-flex align="center" :wrap="true" :size="[12, 12]">
-                    <n-button
-                        type="warning"
-                        :loading="restoreLoading"
-                        :disabled="!selectedBackupPayload"
-                        @click="handleRestoreBackup('config')"
-                    >
-                        Restore config only
-                    </n-button>
-                    <n-button
-                        type="error"
-                        ghost
-                        :loading="restoreLoading"
-                        :disabled="!selectedBackupHasTradeData"
-                        @click="handleRestoreBackup('full')"
-                    >
-                        Restore full backup
-                    </n-button>
-                </n-flex>
+                <ConfigBackupRestoreControls
+                    :bind-backup-file-input="bindBackupFileInput"
+                    :has-selected-backup-payload="!!selectedBackupPayload"
+                    :restore-loading="restoreLoading"
+                    :selected-backup-config-count="selectedBackupConfigCount"
+                    :selected-backup-file-name="selectedBackupFileName"
+                    :selected-backup-has-trade-data="selectedBackupHasTradeData"
+                    @backup-file-selected="handleBackupFileSelected"
+                    @clear-selected-backup="clearSelectedBackup"
+                    @open-backup-file-picker="openBackupFilePicker"
+                    @restore-backup="handleRestoreBackup"
+                />
             </n-flex>
         </n-card>
 
@@ -175,6 +131,8 @@
 
 <script setup lang="ts">
 import ConfigAutopilotSection from './config/ConfigAutopilotSection.vue'
+import ConfigBackupDownloadControls from './config/ConfigBackupDownloadControls.vue'
+import ConfigBackupRestoreControls from './config/ConfigBackupRestoreControls.vue'
 import ConfigDcaSection from './config/ConfigDcaSection.vue'
 import ConfigExchangeSection from './config/ConfigExchangeSection.vue'
 import ConfigFilterSection from './config/ConfigFilterSection.vue'
@@ -182,264 +140,89 @@ import ConfigGeneralSection from './config/ConfigGeneralSection.vue'
 import ConfigIndicatorSection from './config/ConfigIndicatorSection.vue'
 import ConfigMonitoringSection from './config/ConfigMonitoringSection.vue'
 import ConfigSignalSection from './config/ConfigSignalSection.vue'
-import { MOONWALKER_API_ORIGIN } from '../config'
-import { useConfigAdvancedGeneral } from '../composables/useConfigAdvancedGeneral'
-import { useConfigBackupRestore } from '../composables/useConfigBackupRestore'
-import { useConfigLoadFlow } from '../composables/useConfigLoadFlow'
-import { useConfigMonitoringTest } from '../composables/useConfigMonitoringTest'
-import { useConfigPageState } from '../composables/useConfigPageState'
-import { useConfigPersistableState } from '../composables/useConfigPersistableState'
-import { useConfigSaveFlow } from '../composables/useConfigSaveFlow'
-import { useConfigSignalFlow } from '../composables/useConfigSignalFlow'
-import { useConfigValidationFlow } from '../composables/useConfigValidationFlow'
-import { buildConfigRules } from '../helpers/configRules'
-import {
-    buildConfigSubmitPayload,
-    type ConfigSubmitPayloadDefaults,
-} from '../helpers/configSubmitPayload'
+import { useConfigEditorAssembly } from '../composables/useConfigEditorAssembly'
 import { useMessage } from 'naive-ui/es/message'
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted } from 'vue'
 import { onBeforeRouteLeave, useRouter } from 'vue-router'
-
-function getClientTimezone(): string {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"
-}
 
 const message = useMessage()
 const router = useRouter()
-const apiUrl = (path: string): string => new URL(path, MOONWALKER_API_ORIGIN).toString()
-const isLoading = ref(true)
-const showAdvancedGeneral = ref(false)
-const ADVANCED_GENERAL_PREFERENCE_KEY = 'moonwalker.config.showAdvancedGeneral'
-const ADVANCED_WS_HEALTHCHECK_INTERVAL_MS = 5000
-const ADVANCED_WS_STALE_TIMEOUT_MS = 20000
-const ADVANCED_WS_RECONNECT_DEBOUNCE_MS = 2000
-
-const DEFAULT_SYMSIGNAL_URL = "https://stream.3cqs.com"
-const DEFAULT_SYMSIGNAL_VERSION = "3.0.1"
-const DEFAULT_TP_SPIKE_CONFIRM_SECONDS = 3
-const DEFAULT_TP_SPIKE_CONFIRM_TICKS = 0
-const DEFAULT_GREEN_PHASE_RAMP_DAYS = 30
-const DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC = 60
-const DEFAULT_GREEN_PHASE_WINDOW_MINUTES = 60
-const DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO = 0.8
-const DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER = 1.5
-const DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER = 1.15
-const DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS = 2
-const DEFAULT_GREEN_PHASE_CONFIRM_CYCLES = 2
-const DEFAULT_GREEN_PHASE_RELEASE_CYCLES = 4
-const DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT = 85
-const configSubmitPayloadDefaults: ConfigSubmitPayloadDefaults = {
-    advancedWsHealthcheckIntervalMs: ADVANCED_WS_HEALTHCHECK_INTERVAL_MS,
-    advancedWsStaleTimeoutMs: ADVANCED_WS_STALE_TIMEOUT_MS,
-    advancedWsReconnectDebounceMs: ADVANCED_WS_RECONNECT_DEBOUNCE_MS,
-    defaultTpSpikeConfirmSeconds: DEFAULT_TP_SPIKE_CONFIRM_SECONDS,
-    defaultTpSpikeConfirmTicks: DEFAULT_TP_SPIKE_CONFIRM_TICKS,
-    defaultGreenPhaseRampDays: DEFAULT_GREEN_PHASE_RAMP_DAYS,
-    defaultGreenPhaseEvalIntervalSec: DEFAULT_GREEN_PHASE_EVAL_INTERVAL_SEC,
-    defaultGreenPhaseWindowMinutes: DEFAULT_GREEN_PHASE_WINDOW_MINUTES,
-    defaultGreenPhaseMinProfitableCloseRatio:
-        DEFAULT_GREEN_PHASE_MIN_PROFITABLE_CLOSE_RATIO,
-    defaultGreenPhaseSpeedMultiplier: DEFAULT_GREEN_PHASE_SPEED_MULTIPLIER,
-    defaultGreenPhaseExitMultiplier: DEFAULT_GREEN_PHASE_EXIT_MULTIPLIER,
-    defaultGreenPhaseMaxExtraDeals: DEFAULT_GREEN_PHASE_MAX_EXTRA_DEALS,
-    defaultGreenPhaseConfirmCycles: DEFAULT_GREEN_PHASE_CONFIRM_CYCLES,
-    defaultGreenPhaseReleaseCycles: DEFAULT_GREEN_PHASE_RELEASE_CYCLES,
-    defaultGreenPhaseMaxLockedFundPercent:
-        DEFAULT_GREEN_PHASE_MAX_LOCKED_FUND_PERCENT,
-}
 const {
     autopilot,
+    autopilotFormRef,
+    backupDownloadLoading,
+    backupIncludeTradeData,
+    bindBackupFileInput,
+    canTestMonitoringTelegram,
+    clearSelectedBackup,
+    confirmDiscardUnsavedChanges,
     currency,
     dca,
+    dcaFormRef,
     exchange,
+    exchangeFormRef,
     exchanges,
+    fetchAsapSymbolsForCurrency,
+    fetchDefaultValues,
     filter,
+    filterFormRef,
     general,
+    generalFormRef,
+    getAsapMissingFieldsLabel,
+    handleAsapUrlInput,
+    handleBackupDownload,
+    handleBackupFileSelected,
+    handleBeforeUnload,
+    handleCsvSignalFileSelected,
+    handleGlobalKeydown,
+    handleRestoreBackup,
+    handleSignalSettingsSelect,
+    handleValidateButtonClick,
     historyLookbackOptions,
     indicator,
-    initializeTimezoneOptions,
+    indicatorFormRef,
+    initializeClientTimezoneOptions,
+    isAsapExchangeReady,
+    isSubmitDisabled,
     market,
     monitoring,
-    resetSignalStrategySelection,
-    sellOrderTypeOptions,
-    signal,
-    symsignals,
-    timerange,
-    timezone,
-} = useConfigPageState({
-    defaults: configSubmitPayloadDefaults,
-})
-const { changedSectionLabels, changedSections, isDirty, syncBaselineState } =
-    useConfigPersistableState({
-        autopilot,
-        dca,
-        exchange,
-        filter,
-        general,
-        indicator,
-        monitoring,
-        signal,
-    })
-const { buildConfigLoadDefaults } = useConfigAdvancedGeneral({
-    advancedPreferenceKey: ADVANCED_GENERAL_PREFERENCE_KEY,
-    defaultSymSignalUrl: DEFAULT_SYMSIGNAL_URL,
-    defaultSymSignalVersion: DEFAULT_SYMSIGNAL_VERSION,
-    defaults: configSubmitPayloadDefaults,
-    general,
-    getClientTimezone,
-    isLoading,
-    showAdvancedGeneral,
-})
-const {
-    confirmDiscardUnsavedChanges,
-    handleBeforeUnload,
-    hasUnsavedChanges,
-    isSubmitDisabled,
-    resetSaveState,
+    monitoringFormRef,
+    monitoringTestLoading,
+    openBackupFilePicker,
+    restoreLoading,
+    rules,
     saveBannerMessage,
     saveBannerTitle,
     saveBannerType,
     saveState,
-    setSaveError,
-    submitButtonLabel,
-    submitForm,
-} = useConfigSaveFlow({
-    apiUrl,
-    buildPayload: () =>
-        buildConfigSubmitPayload({
-            general: general.value,
-            signal: signal.value,
-            filter: filter.value,
-            exchange: exchange.value,
-            dca: dca.value,
-            autopilot: autopilot.value,
-            monitoring: monitoring.value,
-            indicator: indicator.value,
-            showAdvancedGeneral: showAdvancedGeneral.value,
-            defaults: configSubmitPayloadDefaults,
-        }),
-    changedSectionLabels,
-    changedSections,
-    isDirty,
-    isLoading,
-    message,
-    onSaved: () => {
-        setTimeout(() => {
-            router.push('/')
-        }, 250)
-    },
-    syncBaselineState,
-})
-const {
-    autopilotFormRef,
-    dcaFormRef,
-    exchangeFormRef,
-    filterFormRef,
-    generalFormRef,
-    handleGlobalKeydown,
-    handleValidateButtonClick,
-    indicatorFormRef,
-    monitoringFormRef,
-    signalFormRef,
-    submitAttempted,
-} = useConfigValidationFlow({
-    message,
-    onValidSubmit: submitForm,
-    setSaveError,
-})
-const {
-    applySignalSettingsSelection,
-    fetchAsapSymbolsForCurrency,
-    getAsapMissingFieldsLabel,
-    handleAsapUrlInput,
-    handleCsvSignalFileSelected,
-    handleSignalSettingsSelect,
-    isAsapExchangeReady,
-    isCurrencyConfigured,
-    isUrlInput,
-} = useConfigSignalFlow({
-    apiUrl,
-    defaultSymSignalUrl: DEFAULT_SYMSIGNAL_URL,
-    defaultSymSignalVersion: DEFAULT_SYMSIGNAL_VERSION,
-    exchange,
-    isLoading,
-    message,
-    resetSignalStrategySelection,
-    signal,
-})
-
-const {
-    backupDownloadLoading,
-    backupFileInputRef,
-    backupIncludeTradeData,
-    clearSelectedBackup,
-    handleBackupDownload,
-    handleBackupFileSelected,
-    handleRestoreBackup,
-    openBackupFilePicker,
-    restoreLoading,
+    sellOrderTypeOptions,
     selectedBackupConfigCount,
     selectedBackupFileName,
     selectedBackupHasTradeData,
     selectedBackupPayload,
-} = useConfigBackupRestore({
-    apiUrl,
-    hasUnsavedChanges,
-    message,
-    onBeforeReload: () => {
-        isLoading.value = true
-    },
-    reloadConfig: () => fetchDefaultValues(),
-})
-const rules = buildConfigRules({
-    dca,
-    getAsapMissingFieldsLabel,
-    isAsapExchangeReady,
-    isCurrencyConfigured,
-    isUrlInput,
-    signal,
-    submitAttempted,
-})
-
-const { fetchDefaultValues } = useConfigLoadFlow({
-    apiUrl,
-    buildDefaults: buildConfigLoadDefaults,
-    general,
-    signal,
-    filter,
-    exchange,
-    dca,
-    autopilot,
-    monitoring,
-    indicator,
     showAdvancedGeneral,
-    isLoading,
-    message,
-    onAfterLoad: async () => {
-        if (signal.value.strategy) {
-            signal.value.strategy_enabled = true
-        }
-        await applySignalSettingsSelection({ awaitAsapFetch: true })
-    },
-    resetSaveState,
-    setSaveError,
-    syncBaselineState,
-})
-const {
-    canTestMonitoringTelegram,
-    monitoringTestLoading,
+    signal,
+    signalFormRef,
+    submitButtonLabel,
+    symsignals,
     testMonitoringTelegram,
-} = useConfigMonitoringTest({
-    apiUrl,
+    timerange,
+    timezone,
+} = useConfigEditorAssembly({
     message,
-    monitoring,
+    save: {
+        onSaved: () => {
+            setTimeout(() => {
+                router.push('/')
+            }, 250)
+        },
+    },
 })
 
 onBeforeRouteLeave(() => confirmDiscardUnsavedChanges('route_leave'))
 
 onMounted(() => {
-    initializeTimezoneOptions(getClientTimezone())
+    initializeClientTimezoneOptions()
     window.addEventListener('beforeunload', handleBeforeUnload)
     window.addEventListener('keydown', handleGlobalKeydown)
     void fetchDefaultValues()
@@ -462,14 +245,6 @@ onUnmounted(() => {
 
 .backup-restore-card {
     width: 100%;
-}
-
-.backup-file-input {
-    display: none;
-}
-
-.backup-file-name {
-    font-size: 14px;
 }
 
 @media (max-width: 768px) {

@@ -77,32 +77,16 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface SelectOption {
-    label: string
-    value: string
-}
-
-interface ExchangeModel {
-    name: string | null
-    timeframe: string | null
-    key: string | null
-    secret: string | null
-    exchange_hostname: string | null
-    dry_run: boolean
-    currency: string | null
-    market: string
-    watcher_ohlcv: boolean
-}
+import type { ExchangeModel, StringSelectOption } from '../../config-editor/types'
 
 defineProps<{
-    currency: SelectOption[]
+    currency: StringSelectOption[]
     exchange: ExchangeModel
-    exchanges: SelectOption[]
-    market: SelectOption[]
+    exchanges: StringSelectOption[]
+    market: StringSelectOption[]
     rules: FormRules
     showAdvancedGeneral: boolean
-    timerange: SelectOption[]
+    timerange: StringSelectOption[]
 }>()
 
 const formRef = ref<FormInst | null>(null)

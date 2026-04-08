@@ -11,6 +11,7 @@ from litestar.handlers import get
 from litestar.response import File
 
 _HASHED_ASSET_PATTERN = re.compile(r".+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
+_REMOVED_LEGACY_SPA_PATHS = frozenset({"config", "settings"})
 
 
 def _resolve_relative_file(root: Path, relative_path: str) -> Path | None:
@@ -78,7 +79,7 @@ async def serve_vue(path: str) -> File:
 
 
 @get(
-    path=["/control-center", "/monitoring", "/config", "/settings"],
+    path=["/control-center", "/monitoring"],
     include_in_schema=False,
 )
 async def serve_spa_top_level_routes() -> File:
@@ -93,6 +94,11 @@ async def _serve_vue_path(path: str) -> File:
         candidate = _resolve_relative_file(STATIC_DIR, path)
     if candidate is not None and await asyncio.to_thread(candidate.is_file):
         return _file_response(candidate)
+
+    normalized_path = path.lstrip("/\\") if path else ""
+    first_segment = normalized_path.split("/", 1)[0].strip().lower()
+    if first_segment in _REMOVED_LEGACY_SPA_PATHS:
+        raise NotFoundException("Route not found")
 
     index_file = TEMPLATE_DIR / "index.html"
     return _file_response(index_file)

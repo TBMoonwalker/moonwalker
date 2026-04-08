@@ -1,7 +1,8 @@
 import axios from 'axios'
-import { computed, ref } from 'vue'
+import { computed, ref, shallowRef } from 'vue'
 
 import type { OperationResult } from '../control-center/operationResults'
+import { extractApiErrorMessage } from '../helpers/apiErrors'
 
 type BackupRestoreMode = 'config' | 'full'
 
@@ -57,31 +58,13 @@ function downloadTextFile(filename: string, content: string): void {
     window.URL.revokeObjectURL(url)
 }
 
-function extractAxiosErrorMessage(error: unknown, fallback: string): string {
-    if (axios.isAxiosError(error)) {
-        if (error.response?.data?.error) {
-            return String(error.response.data.error)
-        }
-        if (error.response?.data?.message) {
-            return String(error.response.data.message)
-        }
-        if (error.message) {
-            return error.message
-        }
-    }
-    if (error instanceof Error && error.message) {
-        return error.message
-    }
-    return fallback
-}
-
 export function useConfigBackupRestore(
     options: UseConfigBackupRestoreOptions,
 ) {
     const backupIncludeTradeData = ref(false)
     const backupDownloadLoading = ref(false)
     const restoreLoading = ref(false)
-    const backupFileInputRef = ref<HTMLInputElement | null>(null)
+    const backupFileInputRef = shallowRef<HTMLInputElement | null>(null)
     const selectedBackupFileName = ref<string | null>(null)
     const selectedBackupPayload = ref<BackupPayload | null>(null)
 
@@ -98,6 +81,14 @@ export function useConfigBackupRestore(
 
     function openBackupFilePicker(): void {
         backupFileInputRef.value?.click()
+    }
+
+    function bindBackupFileInput(element: Element | null): void {
+        backupFileInputRef.value =
+            typeof HTMLInputElement !== 'undefined' &&
+            element instanceof HTMLInputElement
+                ? element
+                : null
     }
 
     function clearSelectedBackup(): void {
@@ -138,7 +129,7 @@ export function useConfigBackupRestore(
                 message: 'Backup downloaded successfully.',
             }
         } catch (error) {
-            const message = extractAxiosErrorMessage(
+            const message = extractApiErrorMessage(
                 error,
                 'Backup download failed.',
             )
@@ -269,7 +260,7 @@ export function useConfigBackupRestore(
                 }
             }
         } catch (error) {
-            const message = extractAxiosErrorMessage(
+            const message = extractApiErrorMessage(
                 error,
                 'Backup restore failed.',
             )
@@ -289,6 +280,7 @@ export function useConfigBackupRestore(
         backupDownloadLoading,
         backupFileInputRef,
         backupIncludeTradeData,
+        bindBackupFileInput,
         clearSelectedBackup,
         handleBackupDownload,
         handleBackupFileSelected,

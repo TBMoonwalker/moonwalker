@@ -72,10 +72,8 @@ async def test_archive_replay_candles_for_closed_deal_persists_bounded_window(
         close_date="240000",
     )
 
-    archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).order_by(
-        "timestamp"
-    )
-    archived_timestamps = [int(row.timestamp) for row in archived_rows]
+    archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id)
+    archived_timestamps = sorted(int(row.timestamp) for row in archived_rows)
 
     assert archived == 5
     assert archived_timestamps == [60_000, 120_000, 180_000, 240_000, 300_000]

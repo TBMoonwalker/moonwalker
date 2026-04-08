@@ -23,10 +23,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface ExchangeAdvancedModel {
-    exchange_hostname: string | null
-}
+import type { ExchangeAdvancedModel } from '../../config-editor/types'
 
 defineProps<{
     exchange: ExchangeAdvancedModel

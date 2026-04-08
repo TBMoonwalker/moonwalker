@@ -26,15 +26,37 @@ from service.data_ohlcv import (
 from service.data_timeframes import (
     calculate_min_candle_date,
     resolve_required_history_window,
-    timeframe_to_milliseconds,
-    timeframe_to_seconds,
 )
 from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
+from service.sqlite_timestamps import build_normalized_text_timestamp_sql
 from service.watcher_runtime import get_live_candle_snapshot
+from tortoise import Tortoise
 from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/data.log", "data")
+
+_TIME_SERIES_QUERY_SPECS: dict[str, tuple[str, tuple[str, ...]]] = {
+    "tickers": (
+        "symbol",
+        ("id", "timestamp", "symbol", "open", "high", "low", "close", "volume"),
+    ),
+    "tradereplaycandles": (
+        "deal_id",
+        (
+            "id",
+            "deal_id",
+            "symbol",
+            "timestamp",
+            "open",
+            "high",
+            "low",
+            "close",
+            "volume",
+        ),
+    ),
+}
+_NORMALIZED_ROW_TIMESTAMP_SQL = build_normalized_text_timestamp_sql()
 
 
 class Data:
@@ -120,10 +142,16 @@ class Data:
     async def get_latest_timestamp_for_pair(self, pair: str) -> float | None:
         """Return the latest stored ticker timestamp for a pair."""
         symbol = self.utils.split_symbol(pair)
-        row = await model.Tickers.filter(symbol=symbol).order_by("-timestamp").first()
-        if row is None:
+        rows = await Tortoise.get_connection("default").execute_query_dict(
+            "SELECT timestamp FROM tickers "
+            "WHERE symbol = ? "
+            f"ORDER BY {_NORMALIZED_ROW_TIMESTAMP_SQL} DESC, timestamp DESC "
+            "LIMIT 1",
+            [symbol],
+        )
+        if not rows:
             return None
-        return float(row.timestamp)
+        return float(rows[0]["timestamp"])
 
     async def get_exchange_symbols_for_currency(
         self, config: dict[str, Any], currency: str
@@ -158,55 +186,68 @@ class Data:
             if not self.persist_exchange:
                 await self.exchange.close()
 
-    def __timeframe_to_seconds(self, timerange: str) -> int:
-        """Convert timeframe notation to seconds.
-
-        Supported examples: 1m, 5m, 15min, 1h, 4h, 1d, 1w.
-        Falls back to 60 seconds if parsing fails.
-        """
-        return timeframe_to_seconds(timerange)
-
-    def __calculate_min_candle_date(self, timerange: str, length: int) -> int:
-        """Calculate earliest timestamp in milliseconds for candle history."""
-        return calculate_min_candle_date(
-            timerange=timerange,
-            length=length,
-            lookback_buffer_multiplier=self.LOOKBACK_BUFFER_MULTIPLIER,
-        )
-
-    def __timeframe_to_milliseconds(self, timerange: str) -> int:
-        """Convert timeframe notation to milliseconds."""
-        return timeframe_to_milliseconds(timerange)
-
-    def __resolve_required_history_window(
-        self,
-        history_data: int,
-        config: dict[str, Any],
-        since_ms: int | None = None,
-    ) -> tuple[int, int, int]:
-        """Return normalized required history window and timeframe size."""
-        return resolve_required_history_window(
-            history_data=history_data,
-            timeframe=resolve_timeframe(config),
-            since_ms=since_ms,
-        )
-
     async def __get_stored_timestamps(
         self, symbol: str, since_ms: int, until_ms: int
     ) -> set[int]:
         """Return stored timestamps for a symbol within the required window."""
-        rows = (
-            await model.Tickers.filter(symbol=symbol)
-            .filter(timestamp__gte=since_ms, timestamp__lte=until_ms)
-            .values_list("timestamp", flat=True)
+        rows = await self.__query_rows_with_numeric_timestamp(
+            table_name="tickers",
+            identity_value=symbol,
+            start_timestamp=since_ms,
+            end_timestamp=until_ms,
+            fields=("timestamp",),
+            start_operator=">=",
         )
         timestamps: set[int] = set()
         for row in rows:
             try:
-                timestamps.add(int(float(row)))
+                timestamps.add(int(float(row["timestamp"])))
             except (TypeError, ValueError):
                 continue
         return timestamps
+
+    async def __query_rows_with_numeric_timestamp(
+        self,
+        *,
+        table_name: str,
+        identity_value: str,
+        start_timestamp: int | float | None = None,
+        end_timestamp: int | float | None = None,
+        fields: tuple[str, ...] | None = None,
+        start_operator: str = ">=",
+    ) -> list[dict[str, Any]]:
+        """Query rows using numeric timestamp ordering against text-backed columns."""
+        if start_operator not in {">", ">="}:
+            raise ValueError(f"Unsupported start operator: {start_operator}")
+
+        identity_column, allowed_fields = _TIME_SERIES_QUERY_SPECS[table_name]
+        selected_fields = fields or allowed_fields
+        invalid_fields = [
+            field for field in selected_fields if field not in allowed_fields
+        ]
+        if invalid_fields:
+            raise ValueError(
+                f"Unsupported fields for {table_name}: {', '.join(invalid_fields)}"
+            )
+
+        where_clauses = [f"{identity_column} = ?"]
+        params: list[Any] = [identity_value]
+        if start_timestamp is not None:
+            where_clauses.append(f"{_NORMALIZED_ROW_TIMESTAMP_SQL} {start_operator} ?")
+            params.append(int(float(start_timestamp)))
+        if end_timestamp is not None:
+            where_clauses.append(f"{_NORMALIZED_ROW_TIMESTAMP_SQL} <= ?")
+            params.append(int(float(end_timestamp)))
+
+        query = (
+            f"SELECT {', '.join(selected_fields)} "
+            f"FROM {table_name} "
+            f"WHERE {' AND '.join(where_clauses)} "
+            f"ORDER BY {_NORMALIZED_ROW_TIMESTAMP_SQL}, timestamp"
+        )
+        return await Tortoise.get_connection("default").execute_query_dict(
+            query, params
+        )
 
     async def __fetch_and_store_history_range(
         self,
@@ -336,7 +377,11 @@ class Data:
         """Ensure required history exists for a symbol without deleting stored data."""
         try:
             required_since, required_until, timeframe_ms = (
-                self.__resolve_required_history_window(history_data, config, since_ms)
+                resolve_required_history_window(
+                    history_data=history_data,
+                    timeframe=resolve_timeframe(config),
+                    since_ms=since_ms,
+                )
             )
             window = HistorySyncWindow.build(
                 required_since=required_since,
@@ -453,15 +498,13 @@ class Data:
         fields: tuple[str, ...] | None = None,
     ) -> pd.DataFrame | None:
         """Return ticker rows for a symbol since a timestamp as a DataFrame."""
-        query = model.Tickers.filter(symbol=symbol).filter(
-            timestamp__gt=start_timestamp
-        )
-        if end_timestamp is not None:
-            query = query.filter(timestamp__lte=float(end_timestamp))
-        rows = (
-            await query.order_by("timestamp").values(*fields)
-            if fields
-            else await query.order_by("timestamp").values()
+        rows = await self.__query_rows_with_numeric_timestamp(
+            table_name="tickers",
+            identity_value=symbol,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
+            fields=fields,
+            start_operator=">",
         )
         if not rows:
             return None
@@ -475,15 +518,13 @@ class Data:
         fields: tuple[str, ...] | None = None,
     ) -> pd.DataFrame | None:
         """Return archived replay candles for a deal as a DataFrame."""
-        query = model.TradeReplayCandles.filter(deal_id=deal_id)
-        if start_timestamp is not None:
-            query = query.filter(timestamp__gte=float(start_timestamp))
-        if end_timestamp is not None:
-            query = query.filter(timestamp__lte=float(end_timestamp))
-        rows = (
-            await query.order_by("timestamp").values(*fields)
-            if fields
-            else await query.order_by("timestamp").values()
+        rows = await self.__query_rows_with_numeric_timestamp(
+            table_name="tradereplaycandles",
+            identity_value=deal_id,
+            start_timestamp=start_timestamp,
+            end_timestamp=end_timestamp,
+            fields=fields,
+            start_operator=">=",
         )
         if not rows:
             return None
@@ -579,7 +620,11 @@ class Data:
     ) -> pd.DataFrame | None:
         """Return raw OHLCV rows for a pair."""
         symbol = self.utils.split_symbol(pair)
-        start_date = self.__calculate_min_candle_date(timerange, length)
+        start_date = calculate_min_candle_date(
+            timerange=timerange,
+            length=length,
+            lookback_buffer_multiplier=self.LOOKBACK_BUFFER_MULTIPLIER,
+        )
         return await self.__get_dataframe_for_symbol_since(symbol, start_date)
 
     async def get_data_for_pair_by_days(

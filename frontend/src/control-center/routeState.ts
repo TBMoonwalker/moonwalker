@@ -73,20 +73,3 @@ export function buildControlCenterQuery(
     }
     return query
 }
-
-export function buildLegacyControlCenterRedirect(query: Record<string, unknown>): {
-    name: 'controlCenter'
-    query: Record<string, string>
-} {
-    const requestedTarget = normalizeQueryValue(query.target)
-    const routeState = normalizeControlCenterRouteState({
-        requestedMode: query.mode ?? (query.setup ? 'setup' : 'setup'),
-        requestedTarget,
-        fallbackMode: 'setup',
-    })
-
-    return {
-        name: 'controlCenter',
-        query: buildControlCenterQuery(routeState),
-    }
-}

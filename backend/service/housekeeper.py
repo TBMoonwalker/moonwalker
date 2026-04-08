@@ -10,19 +10,14 @@ import model
 from service.config import Config, resolve_history_lookback_days, resolve_timeframe
 from service.data import Data
 from service.database import optimize_sqlite_connection, run_sqlite_write_with_retry
+from service.sqlite_timestamps import build_normalized_text_timestamp_sql
 from service.trades import Trades
 from tortoise import Tortoise
 from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/housekeeper.log", "housekeeper")
 
-NORMALIZED_TICKER_TIMESTAMP_SQL = (
-    "CASE "
-    "WHEN CAST(timestamp AS INTEGER) >= 100000000000 THEN CAST(timestamp AS INTEGER) "
-    "WHEN CAST(timestamp AS INTEGER) >= 1000000000 THEN CAST(timestamp AS INTEGER) * 1000 "
-    "ELSE CAST(timestamp AS INTEGER) "
-    "END"
-)
+NORMALIZED_TICKER_TIMESTAMP_SQL = build_normalized_text_timestamp_sql()
 
 RECOVERABLE_HOUSEKEEPER_EXCEPTIONS = (
     BaseORMException,

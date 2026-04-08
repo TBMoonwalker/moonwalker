@@ -62,15 +62,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface FilterModel {
-    rsi: number | null
-    cmc_api_key: string | null
-    denylist: string | null
-    topcoin_limit: number | null
-    volume: number | null
-    btc_pulse: boolean
-}
+import type { FilterModel } from '../../config-editor/types'
 
 defineProps<{
     filter: FilterModel

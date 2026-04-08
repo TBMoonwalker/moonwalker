@@ -1,7 +1,14 @@
 import sqlite3
 
 import pytest
-from service.database import Database, _extract_corrupted_index_name
+from service.database import (
+    Database,
+    _build_sqlite_corruption_message,
+    _extract_added_column_names,
+    _extract_corrupted_index_name,
+    _plan_additive_column_statements,
+)
+from service.sqlite_timestamps import coerce_timestamp_like_to_ms
 
 
 async def _noop(*_args, **_kwargs) -> None:
@@ -49,6 +56,66 @@ def test_extract_corrupted_index_name_detects_index_only_corruption(
     expected: str | None,
 ) -> None:
     assert _extract_corrupted_index_name(messages) == expected
+
+
+def test_plan_additive_column_statements_skips_existing_columns() -> None:
+    statements = _plan_additive_column_statements(
+        "opentrades",
+        {"sold_amount", "unsellable_reason"},
+        (
+            ("sold_amount", "REAL NOT NULL DEFAULT 0.0"),
+            ("sold_proceeds", "REAL NOT NULL DEFAULT 0.0"),
+            ("unsellable_reason", "TEXT NULL"),
+        ),
+    )
+
+    assert statements == [
+        "ALTER TABLE opentrades ADD COLUMN sold_proceeds REAL NOT NULL DEFAULT 0.0;"
+    ]
+    assert _extract_added_column_names(statements) == ["sold_proceeds"]
+
+
+def test_build_sqlite_corruption_message_prefers_reindex_guidance() -> None:
+    message = _build_sqlite_corruption_message(
+        "/tmp/broken.sqlite",
+        [
+            "row 1 missing from index idx_trades_deal_id_88bd51",
+            "row 2 missing from index idx_trades_deal_id_88bd51",
+        ],
+    )
+
+    assert "SQLite index corruption detected in /tmp/broken.sqlite" in message
+    assert "REINDEX idx_trades_deal_id_88bd51; PRAGMA integrity_check;" in message
+
+
+def test_build_sqlite_corruption_message_falls_back_to_generic_guidance() -> None:
+    message = _build_sqlite_corruption_message(
+        "/tmp/broken.sqlite",
+        ["*** in database main ***\nPage 5 is never used"],
+    )
+
+    assert message == (
+        "SQLite corruption detected in /tmp/broken.sqlite. "
+        "Moonwalker cannot safely continue. "
+        "Run `sqlite3 /tmp/broken.sqlite 'PRAGMA integrity_check;'` "
+        "and restore from a known-good backup or recover the "
+        "database before restarting."
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("120000", 120_000),
+        ("1712345678", 1_712_345_678_000),
+        ("1712345678901", 1_712_345_678_901),
+    ],
+)
+def test_coerce_timestamp_like_to_ms_normalizes_numeric_string_ranges(
+    value: str,
+    expected: int,
+) -> None:
+    assert coerce_timestamp_like_to_ms(value) == expected
 
 
 @pytest.mark.asyncio

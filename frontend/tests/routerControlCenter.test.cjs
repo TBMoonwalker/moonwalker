@@ -3,12 +3,26 @@ const test = require('node:test')
 
 const { loadFrontendModule } = require('./helpers/loadFrontendModule.cjs')
 
+const { createAppRouter } = loadFrontendModule('src/router/index.ts')
 const { deriveControlCenterReadiness } = loadFrontendModule(
     'src/control-center/readiness.ts',
 )
 const { resolveControlCenterNavigation } = loadFrontendModule(
     'src/control-center/routerGuard.ts',
 )
+
+test('createAppRouter keeps only canonical Control Center entry routes', () => {
+    const router = createAppRouter()
+    const routePaths = router.getRoutes().map((route) => route.path)
+    const routeNames = router.getRoutes().map((route) => route.name)
+
+    assert.equal(routePaths.includes('/control-center'), true)
+    assert.equal(routePaths.includes('/monitoring'), true)
+    assert.equal(routePaths.includes('/settings'), false)
+    assert.equal(routePaths.includes('/config'), false)
+    assert.equal(routeNames.includes('legacySettings'), false)
+    assert.equal(routeNames.includes('legacyConfig'), false)
+})
 
 test('resolveControlCenterNavigation normalizes invalid control-center query state', () => {
     const result = resolveControlCenterNavigation(

@@ -7,6 +7,26 @@ const controlCenterViewSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'views', 'ControlCenterView.vue'),
     'utf8',
 )
+const setupFlowSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterSetupFlow.ts',
+    ),
+    'utf8',
+)
+const lifecycleSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useControlCenterLifecycle.ts',
+    ),
+    'utf8',
+)
 const setupEntryHistorySource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'control-center', 'setupEntryHistory.ts'),
     'utf8',
@@ -19,13 +39,25 @@ test('first-run setup entry choices create browser history state', () => {
     // Found by /qa on 2026-03-22
     // Report: .gstack/qa-reports/qa-report-127-0-0-1-2026-03-22.md
     const requiredViewSnippets = [
+        "import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupFlow'",
+        "import { useControlCenterLifecycle } from '../composables/useControlCenterLifecycle'",
+        'useControlCenterLifecycle({',
+        'handleSetupEntryChoicePopState:',
+        'handleSetupEntryChoicePopState as EventListener,',
+    ]
+    const requiredLifecycleSnippets = [
+        "windowObject.addEventListener(",
+        "'popstate',",
+        'options.handleSetupEntryChoicePopState,',
+        "windowObject.removeEventListener(",
+    ]
+    const requiredSetupFlowSnippets = [
         'buildSetupEntryChoiceHistoryState,',
         'getSetupEntryChoiceFromHistoryState,',
-        'window.history.pushState(',
-        'window.history.replaceState(',
+        'windowRef.history.pushState(',
+        'windowRef.history.replaceState(',
         'function handleSetupEntryChoicePopState(): void {',
-        "window.addEventListener('popstate', handleSetupEntryChoicePopState)",
-        "window.removeEventListener('popstate', handleSetupEntryChoicePopState)",
+        'function initializeSetupFlow(): void {',
     ]
     const requiredHelperSnippets = [
         "export const CONTROL_CENTER_HISTORY_ENTRY_CHOICE_KEY =",
@@ -37,6 +69,18 @@ test('first-run setup entry choices create browser history state', () => {
         assert.ok(
             controlCenterViewSource.includes(snippet),
             `expected control center entry history wiring to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredLifecycleSnippets) {
+        assert.ok(
+            lifecycleSource.includes(snippet),
+            `expected lifecycle wiring to include ${snippet}`,
+        )
+    }
+    for (const snippet of requiredSetupFlowSnippets) {
+        assert.ok(
+            setupFlowSource.includes(snippet),
+            `expected setup flow wiring to include ${snippet}`,
         )
     }
     for (const snippet of requiredHelperSnippets) {

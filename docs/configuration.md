@@ -20,7 +20,7 @@ and live activation. Clean tabs can refresh quietly, while tabs with unsaved
 drafts keep the draft and show an explicit stale-config warning instead of
 silently trusting outdated state.
 
-Legacy `/config` and `/settings` links now redirect into the Control Center.
+Use `/control-center` as the supported dashboard configuration entry path.
 
 For signal-plugin-specific payloads and examples, see [signals.md](signals.md).
 For backup/restore and related config endpoints, see [api.md](api.md).

@@ -23,6 +23,17 @@ after config trust and invalidation hardening feel stable.
 
 ## Completed
 
+### Finish the deferred backend stabilization slice for data/replay/database seams
+
+**Completed:** 2026-04-08
+
+**What shipped:** Removed redundant history-window wrappers from
+`backend/service/data.py`, centralized numeric SQLite text-timestamp handling,
+hardened replay archive reads/writes against short millisecond fixtures and
+mixed timestamp inputs, reused the same timestamp normalization seam in
+housekeeping, and extracted additive-column/corruption-message helpers from
+`backend/service/database.py` with regression coverage.
+
 ### Harden config trust and invalidation in Control Center
 
 **Completed:** v1.0.3.0 (2026-03-27)

@@ -2,6 +2,7 @@ import os
 import types
 
 import pytest
+import service.data as data_module
 from service.data import Data
 from service.data_history_sync import (
     HistorySyncState,
@@ -99,9 +100,9 @@ async def test_history_sync_backfills_only_missing_newer_boundary(
         return None
 
     monkeypatch.setattr(
-        data,
-        "_Data__resolve_required_history_window",
-        lambda history_data, config, since_ms=None: (1000, 3000, 1000),
+        data_module,
+        "resolve_required_history_window",
+        lambda history_data, timeframe, since_ms=None: (1000, 3000, 1000),
     )
     data.exchange = types.SimpleNamespace(
         get_history_for_symbol=fake_get_history_for_symbol,
@@ -174,9 +175,9 @@ async def test_history_sync_falls_back_to_full_refill_for_internal_gap(
         return None
 
     monkeypatch.setattr(
-        data,
-        "_Data__resolve_required_history_window",
-        lambda history_data, config, since_ms=None: (1000, 3000, 1000),
+        data_module,
+        "resolve_required_history_window",
+        lambda history_data, timeframe, since_ms=None: (1000, 3000, 1000),
     )
     data.exchange = types.SimpleNamespace(
         get_history_for_symbol=fake_get_history_for_symbol,
@@ -236,9 +237,9 @@ async def test_history_sync_preserves_existing_rows_when_exchange_fetch_fails(
         return None
 
     monkeypatch.setattr(
-        data,
-        "_Data__resolve_required_history_window",
-        lambda history_data, config, since_ms=None: (1000, 3000, 1000),
+        data_module,
+        "resolve_required_history_window",
+        lambda history_data, timeframe, since_ms=None: (1000, 3000, 1000),
     )
     data.exchange = types.SimpleNamespace(
         get_history_for_symbol=fake_get_history_for_symbol,
@@ -291,9 +292,9 @@ async def test_history_sync_accepts_complete_window_since_first_available_candle
         return None
 
     monkeypatch.setattr(
-        data,
-        "_Data__resolve_required_history_window",
-        lambda history_data, config, since_ms=None: (1000, 4000, 1000),
+        data_module,
+        "resolve_required_history_window",
+        lambda history_data, timeframe, since_ms=None: (1000, 4000, 1000),
     )
     data.exchange = types.SimpleNamespace(
         get_history_for_symbol=fake_get_history_for_symbol,

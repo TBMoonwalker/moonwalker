@@ -187,32 +187,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
-
-interface AutopilotModel {
-    enabled: boolean
-    max_fund: number | null
-    high_mad: number | null
-    high_tp: number | null
-    high_sl: number | null
-    high_sl_timeout: number | null
-    high_threshold: number | null
-    medium_mad: number | null
-    medium_tp: number | null
-    medium_sl: number | null
-    medium_sl_timeout: number | null
-    medium_threshold: number | null
-    green_phase_enabled: boolean
-    green_phase_ramp_days: number | null
-    green_phase_eval_interval_sec: number | null
-    green_phase_window_minutes: number | null
-    green_phase_min_profitable_close_ratio: number | null
-    green_phase_speed_multiplier: number | null
-    green_phase_exit_multiplier: number | null
-    green_phase_max_extra_deals: number | null
-    green_phase_confirm_cycles: number | null
-    green_phase_release_cycles: number | null
-    green_phase_max_locked_fund_percent: number | null
-}
+import type { AutopilotModel } from '../../config-editor/types'
 
 defineProps<{
     autopilot: AutopilotModel

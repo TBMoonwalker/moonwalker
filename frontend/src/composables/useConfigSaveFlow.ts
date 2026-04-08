@@ -2,6 +2,7 @@ import axios from 'axios'
 import { computed, ref, type ComputedRef, type Ref } from 'vue'
 
 import type { OperationResult } from '../control-center/operationResults'
+import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { trackUiEvent } from '../utils/uiTelemetry'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -25,28 +26,6 @@ interface UseConfigSaveFlowOptions<TPayload> {
     onSaved?: () => Promise<void> | void
     surfaceMessages?: boolean
     syncBaselineState: () => void
-}
-
-function extractAxiosErrorMessage(error: unknown, fallback: string): string {
-    if (axios.isAxiosError(error)) {
-        if (error.response?.data?.message) {
-            return String(error.response.data.message)
-        }
-        if (error.response?.data) {
-            try {
-                return JSON.stringify(error.response.data)
-            } catch {
-                return fallback
-            }
-        }
-        if (error.message) {
-            return error.message
-        }
-    }
-    if (error instanceof Error && error.message) {
-        return error.message
-    }
-    return fallback
 }
 
 export function useConfigSaveFlow<TPayload>(
@@ -207,7 +186,7 @@ export function useConfigSaveFlow<TPayload>(
                 }
             }
 
-            const errorMessage = extractAxiosErrorMessage(
+            const errorMessage = extractApiErrorMessage(
                 { response },
                 'An unexpected error occurred while submitting the configuration.',
             )
@@ -239,10 +218,10 @@ export function useConfigSaveFlow<TPayload>(
                     : null
             const errorMessage =
                 category === 'no_response'
-                    ? 'No response from server. Please try again later.'
-                    : category === 'request_setup'
-                      ? `Request failed: ${extractAxiosErrorMessage(error, 'Unknown error')}`
-                      : extractAxiosErrorMessage(
+                      ? 'No response from server. Please try again later.'
+                      : category === 'request_setup'
+                      ? `Request failed: ${extractApiErrorMessage(error, 'Unknown error')}`
+                      : extractApiErrorMessage(
                             error,
                             'An unexpected error occurred',
                         )
