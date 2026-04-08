@@ -41,8 +41,26 @@ class Statistic:
         if isinstance(timestamp, datetime):
             return timestamp.date().isoformat()
         if isinstance(timestamp, str):
-            date_part = timestamp.strip().split(" ", maxsplit=1)[0]
-            return date_part or None
+            normalized = timestamp.strip()
+            if not normalized:
+                return None
+            try:
+                return (
+                    datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+                    .date()
+                    .isoformat()
+                )
+            except ValueError:
+                pass
+            if len(normalized) >= 10:
+                try:
+                    return (
+                        datetime.strptime(normalized[:10], "%Y-%m-%d")
+                        .date()
+                        .isoformat()
+                    )
+                except ValueError:
+                    return None
         return None
 
     @classmethod

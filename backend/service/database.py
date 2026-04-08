@@ -537,6 +537,18 @@ class Database:
 
         return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
 
+    async def _run_schema_init_steps(self) -> None:
+        """Run additive schema and index maintenance for existing databases."""
+        await self._ensure_open_trades_columns()
+        await self._ensure_trade_ledger_columns()
+        await self._ensure_upnl_history_columns()
+        await self._ensure_indexes()
+
+    async def _run_backfill_init_steps(self) -> None:
+        """Run init-time backfills after the schema is ready."""
+        await self._backfill_trade_ledger_rows()
+        await self._backfill_trade_replay_candles()
+
     async def init(self) -> None:
         """Initialize the database connection and generate schemas.
 
@@ -557,12 +569,8 @@ class Database:
             await self._apply_sqlite_pragmas()
             # Generate the schema
             await Tortoise.generate_schemas()
-            await self._ensure_open_trades_columns()
-            await self._ensure_trade_ledger_columns()
-            await self._ensure_upnl_history_columns()
-            await self._ensure_indexes()
-            await self._backfill_trade_ledger_rows()
-            await self._backfill_trade_replay_candles()
+            await self._run_schema_init_steps()
+            await self._run_backfill_init_steps()
             logging.info("Database initialized successfully")
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during init
             if _is_sqlite_malformed_error(exc):

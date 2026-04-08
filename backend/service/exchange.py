@@ -16,13 +16,13 @@ from service.exchange_contexts import (
     MarketSellExecutionContext,
     SellRoutingContext,
 )
-from service.exchange_helpers import (
-    aggregate_matched_trades,
-    is_matching_order_id,
-    precision_step_for_amount,
-)
+from service.exchange_helpers import precision_step_for_amount
 from service.exchange_limit_order_manager import ExchangeLimitOrderManager
 from service.exchange_limit_sell_manager import ExchangeLimitSellManager
+from service.exchange_order_lookup import (
+    build_parsed_order_status,
+    lookup_aggregated_trade,
+)
 from service.exchange_risk import (
     build_buy_precheck_result,
     get_min_notional_for_market,
@@ -395,21 +395,6 @@ class Exchange:
             raise ValueError(f"No market taker fee available for symbol {symbol}")
         return float(taker_fee)
 
-    async def __fetch_my_trades_for_order(
-        self, symbol: str, orderid: str, since: int
-    ) -> list[dict[str, Any]]:
-        """Fetch account trades and filter to one order id."""
-        try:
-            orderlist = await self.exchange.fetch_my_trades(symbol, since, 1000)
-        except TypeError:
-            # Some CCXT adapters ignore limit argument.
-            orderlist = await self.exchange.fetch_my_trades(symbol, since)
-        return [
-            order
-            for order in (orderlist or [])
-            if is_matching_order_id(order.get("order"), orderid)
-        ]
-
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
     async def __get_trades_for_symbol(
         self,
@@ -418,45 +403,16 @@ class Exchange:
         order_check_range_seconds: int,
         order_timestamp: int | None = None,
     ) -> dict | None:
-        trade = None
         await asyncio.sleep(1)
-        since = self.exchange.milliseconds() - (order_check_range_seconds * 1000)
-        if order_timestamp:
-            # Ensure we include all partial fills from order placement onward.
-            since = min(int(order_timestamp) - 1000, since)
         try:
-            trade = {}
-            matched_orders: list[dict[str, Any]] = []
-
-            # Prefer direct per-order trade lookup where supported by exchange.
-            try:
-                fetched = await self.exchange.fetch_order_trades(orderid, symbol)
-                matched_orders = [
-                    order
-                    for order in (fetched or [])
-                    if is_matching_order_id(order.get("order"), orderid)
-                ]
-            except (ccxt.BaseError, TypeError, ValueError):
-                matched_orders = []
-
-            if not matched_orders:
-                matched_orders = await self.__fetch_my_trades_for_order(
-                    symbol, orderid, since
-                )
-            if not matched_orders and order_timestamp:
-                # Fallback for delayed split fills that exceed configured range.
-                matched_orders = await self.__fetch_my_trades_for_order(
-                    symbol, orderid, int(order_timestamp) - 86_400_000
-                )
-
-            if matched_orders:
-                logging.debug(
-                    "Orderlist for %s with orderid: %s: %s",
-                    symbol,
-                    orderid,
-                    matched_orders,
-                )
-                trade = aggregate_matched_trades(matched_orders, symbol)
+            return await lookup_aggregated_trade(
+                self.exchange,
+                logger=logging,
+                symbol=symbol,
+                orderid=orderid,
+                order_check_range_seconds=order_check_range_seconds,
+                order_timestamp=order_timestamp,
+            )
         except (
             ccxt.NetworkError,
             ccxt.ExchangeError,
@@ -467,8 +423,7 @@ class Exchange:
             KeyError,
         ) as exc:
             self.__raise_retryable_exchange_error("Fetch trade order", exc)
-
-        return trade
+        return None
 
     async def __parse_order_status(
         self,
@@ -476,53 +431,18 @@ class Exchange:
         *,
         order_check_range_seconds: int,
     ) -> ParsedOrderStatus:
-        data: ParsedOrderStatus = {
-            "timestamp": 0,
-            "amount": 0.0,
-            "total_amount": 0.0,
-            "price": 0.0,
-            "orderid": "",
-            "symbol": "",
-            "side": "",
-            "amount_fee": 0.0,
-            "base_fee": 0.0,
-            "ordersize": 0.0,
-        }
-
         trade = await self.__get_trades_for_symbol(
             order["symbol"],
             order["id"],
             order_check_range_seconds,
             int(order.get("timestamp") or 0),
         )
-        if trade:
-            data["timestamp"] = trade["timestamp"]
-            data["amount"] = float(trade["amount"])
-            data["total_amount"] = float(trade["amount"])
-            data["price"] = trade["price"]
-            data["orderid"] = trade["order"]
-            data["symbol"] = trade["symbol"]
-            data["side"] = trade["side"]
-            data["amount_fee"] = trade["fee_cost"]
-            data["base_fee"] = float(trade.get("base_fee") or 0.0)
-            data["ordersize"] = order["cost"]
-        else:
+        if not trade:
             logging.info(
                 "Getting trades for %s failed - using information of order.",
                 order["symbol"],
             )
-            data["timestamp"] = order["timestamp"]
-            data["amount"] = float(order["amount"])
-            data["total_amount"] = float(order["amount"])
-            data["price"] = order["price"]
-            data["orderid"] = order["id"]
-            data["symbol"] = order["symbol"]
-            data["side"] = order["side"]
-            data["amount_fee"] = order["fee"]
-            data["base_fee"] = 0.0
-            data["ordersize"] = order["cost"]
-
-        return data
+        return build_parsed_order_status(order, trade)
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
     async def __get_amount_from_symbol(self, ordersize: float, symbol: str) -> str:

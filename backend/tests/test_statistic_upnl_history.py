@@ -178,6 +178,49 @@ async def test_get_profits_overall_accepts_second_precision_timestamps(
 
 
 @pytest.mark.asyncio
+async def test_get_profits_overall_normalizes_mixed_close_date_formats(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.ClosedTrades.create(
+        symbol="BTC/USDT",
+        profit=5.0,
+        close_date="2026-04-04T11:00:00.000Z",
+    )
+    await model.ClosedTrades.create(
+        symbol="ETH/USDT",
+        profit=7.0,
+        close_date="2026-04-04 09:00:00.000000",
+    )
+    await model.ClosedTrades.create(
+        symbol="SOL/USDT",
+        profit=3.0,
+        close_date="2026-04-05 09:52:07.136000",
+    )
+
+    statistic = Statistic()
+    reference_timestamp = int(datetime(2026, 4, 30, 23, 59, 59).timestamp())
+
+    daily = await statistic.get_profits_overall(reference_timestamp, "daily")
+    monthly = await statistic.get_profits_overall(reference_timestamp, "monthly")
+    yearly = await statistic.get_profits_overall(reference_timestamp, "yearly")
+
+    assert daily is not None
+    assert monthly is not None
+    assert yearly is not None
+    assert daily["2026-04-04"] == 12.0
+    assert daily["2026-04-05"] == 3.0
+    assert monthly["2026-04"] == 15.0
+    assert yearly["2026"] == 15.0
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_update_statistic_data_uses_fallback_when_base_order_missing() -> None:
     statistic = Statistic()
     captured: dict[str, object] = {}

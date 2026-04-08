@@ -17,11 +17,11 @@ from service.data_history_sync import (
     plan_boundary_fetch_starts,
 )
 from service.data_ohlcv import (
-    append_live_candle,
+    build_archived_ohlcv_payload,
     build_live_candle_payload,
+    build_pair_ohlcv_payload,
     resample_ohlcv_data,
     rows_to_dataframe,
-    serialize_ohlcv_dataframe,
 )
 from service.data_timeframes import (
     calculate_min_candle_date,
@@ -539,8 +539,6 @@ class Data:
         timestamp_end: float | None = None,
     ) -> str | dict[str, Any]:
         """Return OHLCV data for a pair and timerange."""
-        # 600000 --> 60 minutes in milliseconds before
-        # start_date = datetime.fromtimestamp(((float(timestamp_start) - 600000) / 1000.0),UTC,)
         symbol = self.utils.split_symbol(pair)
         start_timestamp = float(timestamp_start) - 60000
         df_source = await self.__get_dataframe_for_symbol_since(
@@ -556,16 +554,13 @@ class Data:
             start_timestamp,
             end_timestamp=timestamp_end,
         )
-        if live_candle:
-            df_source = await asyncio.to_thread(
-                append_live_candle, df_source, live_candle
-            )
-
-        if not df_source.empty:
-            df = await asyncio.to_thread(self.resample_data, df_source, timerange)
-            if df is not None and not df.empty:
-                return await asyncio.to_thread(serialize_ohlcv_dataframe, df, offset)
-        return {}
+        return await asyncio.to_thread(
+            build_pair_ohlcv_payload,
+            df_source,
+            timerange,
+            offset,
+            live_candle=live_candle,
+        )
 
     async def get_archived_ohlcv_for_deal(
         self,
@@ -587,13 +582,12 @@ class Data:
             end_timestamp=timestamp_end,
             fields=("timestamp", "open", "high", "low", "close", "volume"),
         )
-        if df_source is None or df_source.empty:
-            return {}
-
-        df = await asyncio.to_thread(self.resample_data, df_source, timerange)
-        if df is None or df.empty:
-            return {}
-        return await asyncio.to_thread(serialize_ohlcv_dataframe, df, offset)
+        return await asyncio.to_thread(
+            build_archived_ohlcv_payload,
+            df_source,
+            timerange,
+            offset,
+        )
 
     def __get_live_candle_for_symbol(
         self,

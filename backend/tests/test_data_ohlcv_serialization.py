@@ -121,3 +121,104 @@ def test_resample_ohlcv_data_returns_expected_closed_candle_frame() -> None:
     assert list(resampled["open"]) == [1.0, 2.0]
     assert list(resampled["close"]) == [1.1, 3.1]
     assert list(resampled["volume"]) == [10.0, 50.0]
+
+
+@pytest.mark.asyncio
+async def test_get_ohlcv_for_pair_merges_stored_rows_with_live_candle(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = Data()
+
+    async def fake_get_dataframe_for_symbol_since(
+        _symbol: str,
+        _start_timestamp: float,
+        *,
+        end_timestamp: float | None = None,
+        fields: tuple[str, ...] | None = None,
+    ) -> pd.DataFrame:
+        assert end_timestamp is None
+        assert fields == ("timestamp", "open", "high", "low", "close", "volume")
+        return pd.DataFrame(
+            {
+                "timestamp": [1_700_000_000_000, 1_700_000_060_000],
+                "open": [1.0, 2.0],
+                "high": [1.2, 2.2],
+                "low": [0.8, 1.8],
+                "close": [1.1, 2.1],
+                "volume": [10.0, 20.0],
+            }
+        )
+
+    monkeypatch.setattr(
+        data,
+        "_Data__get_dataframe_for_symbol_since",
+        fake_get_dataframe_for_symbol_since,
+    )
+    monkeypatch.setattr(
+        data_module,
+        "get_live_candle_snapshot",
+        lambda _symbol: [1_700_000_120_000, 3.0, 3.2, 2.8, 3.1, 30.0],
+    )
+
+    payload = await data.get_ohlcv_for_pair("BTC/USDT", "1m", 1_700_000_000_000, 0)
+    records = json.loads(payload)
+
+    assert [record["time"] for record in records] == [
+        pytest.approx(1_700_000_000.0),
+        pytest.approx(1_700_000_060.0),
+        pytest.approx(1_700_000_120.0),
+    ]
+    assert records[-1]["open"] == pytest.approx(3.0)
+    assert records[-1]["close"] == pytest.approx(3.1)
+
+
+@pytest.mark.asyncio
+async def test_get_ohlcv_for_pair_skips_live_candle_for_bounded_request(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    data = Data()
+
+    async def fake_get_dataframe_for_symbol_since(
+        _symbol: str,
+        _start_timestamp: float,
+        *,
+        end_timestamp: float | None = None,
+        fields: tuple[str, ...] | None = None,
+    ) -> pd.DataFrame:
+        assert end_timestamp == 1_700_000_060_000
+        assert fields == ("timestamp", "open", "high", "low", "close", "volume")
+        return pd.DataFrame(
+            {
+                "timestamp": [1_700_000_000_000, 1_700_000_060_000],
+                "open": [1.0, 2.0],
+                "high": [1.2, 2.2],
+                "low": [0.8, 1.8],
+                "close": [1.1, 2.1],
+                "volume": [10.0, 20.0],
+            }
+        )
+
+    monkeypatch.setattr(
+        data,
+        "_Data__get_dataframe_for_symbol_since",
+        fake_get_dataframe_for_symbol_since,
+    )
+    monkeypatch.setattr(
+        data_module,
+        "get_live_candle_snapshot",
+        lambda _symbol: [1_700_000_120_000, 3.0, 3.2, 2.8, 3.1, 30.0],
+    )
+
+    payload = await data.get_ohlcv_for_pair(
+        "BTC/USDT",
+        "1m",
+        1_700_000_000_000,
+        0,
+        timestamp_end=1_700_000_060_000,
+    )
+    records = json.loads(payload)
+
+    assert [record["time"] for record in records] == [
+        pytest.approx(1_700_000_000.0),
+        pytest.approx(1_700_000_060.0),
+    ]
