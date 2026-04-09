@@ -2,6 +2,15 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.1.6.0] - 2026-04-09
+
+### Fixed
+
+- Repair sparse closed-trade replay archives by rebuilding the deal window from bounded exchange OHLCV when local replay data only contains boundary candles, so long-running trades stop collapsing down to just the start and end candle after restart.
+- Keep that sparse-archive repair path best-effort by falling back to the existing archive when the exchange history fetch is unavailable, so startup backfill does not fail just because repair data could not be fetched at that moment.
+- Tighten bounded exchange-history paging so replay archive repair stops exactly at the requested end timestamp instead of carrying extra candles past the deal window.
+- Add backend regression coverage for sparse replay archive repair and bounded exchange history fetches, so the replay backfill path keeps the full trade window instead of silently regressing to edge-only candles.
+
 ## [1.1.5.0] - 2026-04-09
 
 ### Changed

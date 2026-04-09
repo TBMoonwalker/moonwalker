@@ -225,6 +225,7 @@ class Exchange:
         timeframe: str,
         limit: int = 1,
         since: int = 0,
+        until: int | None = None,
     ) -> list[list[Any]]:
         """Fetch historical OHLCV data for a symbol."""
         await self.__ensure_exchange(config)
@@ -237,11 +238,12 @@ class Exchange:
 
         timeframe_ms = self.exchange.parse_timeframe(timeframe) * 1000
         now = self.exchange.milliseconds()
+        upper_bound = min(now, int(until)) if until is not None else now
 
         all_candles = []
         consecutive_errors = 0
 
-        while since < now:
+        while since < upper_bound:
             try:
                 candles = await self.exchange.fetch_ohlcv(
                     symbol=resolved_symbol,
@@ -253,9 +255,21 @@ class Exchange:
                 if not candles:
                     break
 
-                all_candles.extend(candles)
+                bounded_candles = [
+                    candle
+                    for candle in candles
+                    if len(candle) > 0 and int(candle[0]) <= upper_bound
+                ]
+                if not bounded_candles:
+                    break
 
-                next_since = candles[-1][0] + timeframe_ms
+                all_candles.extend(bounded_candles)
+                if len(bounded_candles) < len(candles):
+                    break
+                if bounded_candles[-1][0] >= upper_bound:
+                    break
+
+                next_since = bounded_candles[-1][0] + timeframe_ms
                 if next_since <= since:
                     logging.warning(
                         "No OHLCV cursor progress for %s on timeframe %s. "

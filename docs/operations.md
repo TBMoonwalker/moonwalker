@@ -112,7 +112,10 @@ Full backups do not include the shared ticker candle history table. On full
 restore, Moonwalker clears current ticker history and fetches the required
 history again for restored active trades. Closed-trade replay archives are
 preserved separately, so replay charts for newly archived deals do not depend on
-that shared ticker retention window.
+that shared ticker retention window. During startup backfill, Moonwalker also
+repairs sparse closed-trade replay archives from bounded exchange OHLCV when the
+exchange can supply the missing deal window, and otherwise keeps the existing
+archive without blocking startup.
 
 Two restore modes are available:
 
