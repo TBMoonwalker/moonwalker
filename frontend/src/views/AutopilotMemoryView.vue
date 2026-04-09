@@ -70,219 +70,223 @@ function openAutopilotAdvanced(): void {
 
 <template>
     <div class="page-shell autopilot-memory-page">
-        <n-flex class="page-header" justify="space-between" align="start" :wrap="true" :size="[12, 12]">
-            <div class="page-copy">
-                <n-text depth="3">Control Center / Autopilot</n-text>
-                <h1 class="page-title">{{ formatAutopilotStatusTitle(data) }}</h1>
-                <p class="page-summary">
-                    {{ formatAutopilotStatusBody(data) }}
-                </p>
-            </div>
-            <div class="page-actions">
-                <n-button secondary @click="openControlCenterOverview">
-                    Back to Control Center
-                </n-button>
-                <n-button type="primary" secondary @click="openAutopilotAdvanced">
-                    Tune Autopilot
-                </n-button>
-            </div>
-        </n-flex>
-
-        <n-alert
-            v-if="error"
-            type="warning"
-            title="Autopilot memory could not be loaded"
-            :bordered="false"
-        >
-            {{ error }}
-            <template #action>
-                <n-button text @click="refresh">Retry</n-button>
-            </template>
-        </n-alert>
-
-        <template v-else-if="loading && !data">
-            <n-card class="page-section-card" content-style="padding: 18px 20px;">
-                <n-skeleton text :repeat="6" />
-            </n-card>
-        </template>
-
-        <template v-else-if="data">
-            <n-alert
-                v-if="data.stale || data.status === 'warming_up' || !data.enabled"
-                :type="data.stale ? 'warning' : 'info'"
-                :bordered="false"
-                :title="
-                    data.stale
-                        ? 'Baseline behavior active'
-                        : data.status === 'warming_up'
-                          ? 'Autopilot is still learning'
-                          : 'Autopilot is disabled'
-                "
-            >
-                {{
-                    data.stale
-                        ? 'Moonwalker kept the last known ranking visible while adaptive TP falls back to baseline behavior.'
-                        : data.status === 'warming_up'
-                          ? `Learning from ${data.warmup.current_closes} of ${data.warmup.required_closes} closes before symbol trust becomes active.`
-                          : 'Moonwalker is still collecting symbol memory, but it is not applying it yet.'
-                }}
-            </n-alert>
-
-            <n-card
-                v-if="data.status === 'warming_up'"
-                class="page-section-card"
-                content-style="padding: 18px 20px;"
-            >
-                <n-flex vertical :size="10">
-                    <div>
-                        <h2 class="section-title">Warm-up progress</h2>
-                        <n-text depth="3">
-                            Learning from {{ data.warmup.current_closes }} of
-                            {{ data.warmup.required_closes }} closes.
-                        </n-text>
+        <n-card class="autopilot-shell mw-shell-card" content-style="padding: 18px 20px;">
+            <n-flex vertical :size="16">
+                <n-flex class="page-header" justify="space-between" align="start" :wrap="true" :size="[12, 12]">
+                    <div class="page-copy">
+                        <n-text depth="3">Control Center / Autopilot</n-text>
+                        <h1 class="page-title">{{ formatAutopilotStatusTitle(data) }}</h1>
+                        <p class="page-summary">
+                            {{ formatAutopilotStatusBody(data) }}
+                        </p>
                     </div>
-                    <n-progress
-                        type="line"
-                        :percentage="data.warmup.progress_percent ?? 0"
-                        :show-indicator="false"
-                        status="success"
-                    />
+                    <div class="page-actions">
+                        <n-button secondary @click="openControlCenterOverview">
+                            Back to Control Center
+                        </n-button>
+                        <n-button type="primary" secondary @click="openAutopilotAdvanced">
+                            Tune Autopilot
+                        </n-button>
+                    </div>
                 </n-flex>
-            </n-card>
 
-            <div class="grid-shell">
-                <n-card class="page-section-card" content-style="padding: 18px 20px;">
-                    <n-flex vertical :size="14">
-                        <div>
-                            <h2 class="section-title">Trust board</h2>
-                            <n-text depth="3">
-                                Current strongest trust moves, ranked from the latest persisted memory snapshot.
-                            </n-text>
-                        </div>
-                        <div class="board-columns">
-                            <section>
-                                <h3 class="column-title">Favored</h3>
-                                <button
-                                    v-for="row in data.trust_board.favored"
-                                    :key="row.symbol"
-                                    class="trust-row trust-row-positive"
-                                    type="button"
-                                    @click="selectedSymbol = row.symbol"
-                                >
-                                    <span>
-                                        <strong>{{ row.symbol }}</strong>
-                                        <small>{{ formatAutopilotReason(row.primary_reason_code, row.primary_reason_value) }}</small>
-                                    </span>
-                                    <span class="trust-row-meta">
-                                        {{ formatAutopilotConfidenceBadge(row.confidence_bucket) }}
-                                        · {{ row.trust_score.toFixed(1) }}
-                                    </span>
-                                </button>
-                            </section>
+                <n-alert
+                    v-if="error"
+                    type="warning"
+                    title="Autopilot memory could not be loaded"
+                    :bordered="false"
+                >
+                    {{ error }}
+                    <template #action>
+                        <n-button text @click="refresh">Retry</n-button>
+                    </template>
+                </n-alert>
 
-                            <section>
-                                <h3 class="column-title">Cooling</h3>
-                                <button
-                                    v-for="row in data.trust_board.cooling"
-                                    :key="row.symbol"
-                                    class="trust-row trust-row-warning"
-                                    type="button"
-                                    @click="selectedSymbol = row.symbol"
-                                >
-                                    <span>
-                                        <strong>{{ row.symbol }}</strong>
-                                        <small>{{ formatAutopilotReason(row.primary_reason_code, row.primary_reason_value) }}</small>
-                                    </span>
-                                    <span class="trust-row-meta">
-                                        {{ formatAutopilotConfidenceBadge(row.confidence_bucket) }}
-                                        · {{ row.trust_score.toFixed(1) }}
-                                    </span>
-                                </button>
-                            </section>
-                        </div>
-                    </n-flex>
-                </n-card>
+                <template v-else-if="loading && !data">
+                    <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                        <n-skeleton text :repeat="6" />
+                    </n-card>
+                </template>
 
-                <n-card class="page-section-card" content-style="padding: 18px 20px;">
-                    <n-flex vertical :size="14">
-                        <div>
-                            <h2 class="section-title">Selected symbol</h2>
-                            <n-text depth="3">
-                                {{
-                                    selectedSnapshot
-                                        ? formatAutopilotFeaturedInsight(selectedSnapshot)
-                                        : 'No symbol is selected yet.'
-                                }}
-                            </n-text>
-                        </div>
+                <template v-else-if="data">
+                    <n-alert
+                        v-if="data.stale || data.status === 'warming_up' || !data.enabled"
+                        :type="data.stale ? 'warning' : 'info'"
+                        :bordered="false"
+                        :title="
+                            data.stale
+                                ? 'Baseline behavior active'
+                                : data.status === 'warming_up'
+                                  ? 'Autopilot is still learning'
+                                  : 'Autopilot is disabled'
+                        "
+                    >
+                        {{
+                            data.stale
+                                ? 'Moonwalker kept the last known ranking visible while adaptive TP falls back to baseline behavior.'
+                                : data.status === 'warming_up'
+                                  ? `Learning from ${data.warmup.current_closes} of ${data.warmup.required_closes} closes before symbol trust becomes active.`
+                                  : 'Moonwalker is still collecting symbol memory, but it is not applying it yet.'
+                        }}
+                    </n-alert>
 
-                        <template v-if="selectedSnapshot">
-                            <div class="selected-grid">
-                                <div class="selected-metric">
-                                    <span class="metric-label">Confidence</span>
-                                    <strong>{{ formatAutopilotConfidenceBadge(selectedSnapshot.confidence_bucket) }}</strong>
-                                </div>
-                                <div class="selected-metric">
-                                    <span class="metric-label">Trust score</span>
-                                    <strong>{{ selectedSnapshot.trust_score.toFixed(1) }}</strong>
-                                </div>
-                                <div class="selected-metric">
-                                    <span class="metric-label">Suggested TP delta</span>
-                                    <strong>{{ (selectedSnapshot.tp_delta_ratio * 100).toFixed(0) }}%</strong>
-                                </div>
-                                <div class="selected-metric">
-                                    <span class="metric-label">Suggested BO</span>
-                                    <strong>{{ selectedSnapshot.suggested_base_order.toFixed(2) }}</strong>
-                                </div>
-                            </div>
-
-                            <div class="reason-list">
-                                <p>
-                                    <strong>Primary reason:</strong>
-                                    {{ formatAutopilotReason(selectedSnapshot.primary_reason_code, selectedSnapshot.primary_reason_value) }}
-                                </p>
-                                <p v-if="selectedSnapshot.secondary_reason_code">
-                                    <strong>Secondary note:</strong>
-                                    {{ formatAutopilotReason(selectedSnapshot.secondary_reason_code, selectedSnapshot.secondary_reason_value) }}
-                                </p>
-                                <p>
-                                    <strong>Last close:</strong>
-                                    {{ formatAutopilotTimestamp(selectedSnapshot.last_closed_at) }}
-                                </p>
-                            </div>
-                        </template>
-                    </n-flex>
-                </n-card>
-            </div>
-
-            <n-card class="page-section-card" content-style="padding: 18px 20px;">
-                <n-flex vertical :size="14">
-                    <div>
-                        <h2 class="section-title">Latest Autopilot moves</h2>
-                        <n-text depth="3">
-                            Recent evidence for what Moonwalker changed or noticed.
-                        </n-text>
-                    </div>
-
-                    <div v-if="data.events.length" class="event-list">
-                        <div
-                            v-for="event in data.events"
-                            :key="`${event.created_at}-${event.event_type}-${event.symbol}`"
-                            class="event-row"
-                        >
+                    <n-card
+                        v-if="data.status === 'warming_up'"
+                        class="page-section-card mw-muted-card"
+                        content-style="padding: 18px 20px;"
+                    >
+                        <n-flex vertical :size="10">
                             <div>
-                                <p class="event-copy">{{ formatAutopilotEvent(event) }}</p>
-                                <small>{{ formatAutopilotTimestamp(event.created_at) }}</small>
+                                <h2 class="section-title">Warm-up progress</h2>
+                                <n-text depth="3">
+                                    Learning from {{ data.warmup.current_closes }} of
+                                    {{ data.warmup.required_closes }} closes.
+                                </n-text>
                             </div>
-                        </div>
+                            <n-progress
+                                type="line"
+                                :percentage="data.warmup.progress_percent ?? 0"
+                                :show-indicator="false"
+                                status="success"
+                            />
+                        </n-flex>
+                    </n-card>
+
+                    <div class="grid-shell">
+                        <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                            <n-flex vertical :size="14">
+                                <div>
+                                    <h2 class="section-title">Trust board</h2>
+                                    <n-text depth="3">
+                                        Current strongest trust moves, ranked from the latest persisted memory snapshot.
+                                    </n-text>
+                                </div>
+                                <div class="board-columns">
+                                    <section>
+                                        <h3 class="column-title">Favored</h3>
+                                        <button
+                                            v-for="row in data.trust_board.favored"
+                                            :key="row.symbol"
+                                            class="trust-row trust-row-positive"
+                                            type="button"
+                                            @click="selectedSymbol = row.symbol"
+                                        >
+                                            <span>
+                                                <strong>{{ row.symbol }}</strong>
+                                                <small>{{ formatAutopilotReason(row.primary_reason_code, row.primary_reason_value) }}</small>
+                                            </span>
+                                            <span class="trust-row-meta">
+                                                {{ formatAutopilotConfidenceBadge(row.confidence_bucket) }}
+                                                · {{ row.trust_score.toFixed(1) }}
+                                            </span>
+                                        </button>
+                                    </section>
+
+                                    <section>
+                                        <h3 class="column-title">Cooling</h3>
+                                        <button
+                                            v-for="row in data.trust_board.cooling"
+                                            :key="row.symbol"
+                                            class="trust-row trust-row-warning"
+                                            type="button"
+                                            @click="selectedSymbol = row.symbol"
+                                        >
+                                            <span>
+                                                <strong>{{ row.symbol }}</strong>
+                                                <small>{{ formatAutopilotReason(row.primary_reason_code, row.primary_reason_value) }}</small>
+                                            </span>
+                                            <span class="trust-row-meta">
+                                                {{ formatAutopilotConfidenceBadge(row.confidence_bucket) }}
+                                                · {{ row.trust_score.toFixed(1) }}
+                                            </span>
+                                        </button>
+                                    </section>
+                                </div>
+                            </n-flex>
+                        </n-card>
+
+                        <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                            <n-flex vertical :size="14">
+                                <div>
+                                    <h2 class="section-title">Selected symbol</h2>
+                                    <n-text depth="3">
+                                        {{
+                                            selectedSnapshot
+                                                ? formatAutopilotFeaturedInsight(selectedSnapshot)
+                                                : 'No symbol is selected yet.'
+                                        }}
+                                    </n-text>
+                                </div>
+
+                                <template v-if="selectedSnapshot">
+                                    <div class="selected-grid">
+                                        <div class="selected-metric">
+                                            <span class="metric-label">Confidence</span>
+                                            <strong>{{ formatAutopilotConfidenceBadge(selectedSnapshot.confidence_bucket) }}</strong>
+                                        </div>
+                                        <div class="selected-metric">
+                                            <span class="metric-label">Trust score</span>
+                                            <strong>{{ selectedSnapshot.trust_score.toFixed(1) }}</strong>
+                                        </div>
+                                        <div class="selected-metric">
+                                            <span class="metric-label">Suggested TP delta</span>
+                                            <strong>{{ (selectedSnapshot.tp_delta_ratio * 100).toFixed(0) }}%</strong>
+                                        </div>
+                                        <div class="selected-metric">
+                                            <span class="metric-label">Suggested BO</span>
+                                            <strong>{{ selectedSnapshot.suggested_base_order.toFixed(2) }}</strong>
+                                        </div>
+                                    </div>
+
+                                    <div class="reason-list">
+                                        <p>
+                                            <strong>Primary reason:</strong>
+                                            {{ formatAutopilotReason(selectedSnapshot.primary_reason_code, selectedSnapshot.primary_reason_value) }}
+                                        </p>
+                                        <p v-if="selectedSnapshot.secondary_reason_code">
+                                            <strong>Secondary note:</strong>
+                                            {{ formatAutopilotReason(selectedSnapshot.secondary_reason_code, selectedSnapshot.secondary_reason_value) }}
+                                        </p>
+                                        <p>
+                                            <strong>Last close:</strong>
+                                            {{ formatAutopilotTimestamp(selectedSnapshot.last_closed_at) }}
+                                        </p>
+                                    </div>
+                                </template>
+                            </n-flex>
+                        </n-card>
                     </div>
-                    <n-empty
-                        v-else
-                        description="Moonwalker has not recorded any Autopilot memory events yet."
-                    />
-                </n-flex>
-            </n-card>
-        </template>
+
+                    <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                        <n-flex vertical :size="14">
+                            <div>
+                                <h2 class="section-title">Latest Autopilot moves</h2>
+                                <n-text depth="3">
+                                    Recent evidence for what Moonwalker changed or noticed.
+                                </n-text>
+                            </div>
+
+                            <div v-if="data.events.length" class="event-list">
+                                <div
+                                    v-for="event in data.events"
+                                    :key="`${event.created_at}-${event.event_type}-${event.symbol}`"
+                                    class="event-row"
+                                >
+                                    <div>
+                                        <p class="event-copy">{{ formatAutopilotEvent(event) }}</p>
+                                        <small>{{ formatAutopilotTimestamp(event.created_at) }}</small>
+                                    </div>
+                                </div>
+                            </div>
+                            <n-empty
+                                v-else
+                                description="Moonwalker has not recorded any Autopilot memory events yet."
+                            />
+                        </n-flex>
+                    </n-card>
+                </template>
+            </n-flex>
+        </n-card>
     </div>
 </template>
 
@@ -290,11 +294,15 @@ function openAutopilotAdvanced(): void {
 .autopilot-memory-page {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 0;
 }
 
 .page-header {
     margin-bottom: 4px;
+}
+
+.autopilot-shell {
+    width: 100%;
 }
 
 .page-copy {
@@ -322,13 +330,6 @@ function openAutopilotAdvanced(): void {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
-}
-
-.page-section-card {
-    border-color: rgba(29, 92, 73, 0.14);
-    background: var(--mw-surface-shell);
-    box-shadow: var(--mw-shadow-card);
-    color: var(--mw-color-text-primary);
 }
 
 .section-title,

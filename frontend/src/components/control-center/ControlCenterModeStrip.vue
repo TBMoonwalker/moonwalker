@@ -11,7 +11,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <n-card class="mode-strip-card" content-style="padding: 12px 14px;">
+    <n-card class="mode-strip-card mw-shell-card" content-style="padding: 12px 14px;">
         <div class="mode-strip-shell">
             <div class="mode-group">
                 <n-text depth="3" class="mode-group-label">Primary</n-text>

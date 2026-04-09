@@ -6,7 +6,10 @@ import WebSocketStatusBar from '../components/WebSocketStatusBar.vue'
 <template>
   <div class="page-shell monitoring-page">
     <n-flex class="page-section" vertical>
-      <n-card class="monitoring-intro-card" content-style="padding: 18px 20px;">
+      <n-card
+        class="monitoring-intro-card mw-shell-card"
+        content-style="padding: 18px 20px;"
+      >
         <n-flex vertical :size="6">
           <n-text depth="3" class="monitoring-kicker">Monitoring</n-text>
           <n-text>

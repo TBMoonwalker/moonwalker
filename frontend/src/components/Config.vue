@@ -76,7 +76,11 @@
             :rules="rules"
         />
 
-        <n-card title="Backup & Restore" size="small" class="backup-restore-card">
+        <n-card
+            title="Backup & Restore"
+            size="small"
+            class="backup-restore-card mw-shell-card"
+        >
             <n-flex vertical :size="12">
                 <ConfigBackupDownloadControls
                     :backup-download-loading="backupDownloadLoading"

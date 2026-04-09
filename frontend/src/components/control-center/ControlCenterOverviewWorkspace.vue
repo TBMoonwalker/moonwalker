@@ -29,7 +29,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <n-card class="workspace-card" content-style="padding: 18px 20px;">
+    <n-card class="workspace-card mw-shell-card" content-style="padding: 18px 20px;">
         <n-flex vertical :size="14">
             <n-text depth="3">
                 {{
@@ -43,7 +43,7 @@ const emit = defineEmits<{
                     v-for="blocker in visibleBlockers"
                     :key="blocker.key"
                     size="small"
-                    class="status-card"
+                    class="status-card mw-muted-card"
                 >
                     <n-flex vertical :size="10">
                         <div>
@@ -65,7 +65,7 @@ const emit = defineEmits<{
                 </n-card>
 
                 <template v-if="visibleBlockers.length === 0">
-                    <n-card size="small" class="status-card">
+                    <n-card size="small" class="status-card mw-muted-card">
                         <n-flex vertical :size="10">
                             <h2 class="status-card-title">Exchange connection</h2>
                             <n-text depth="3">
@@ -78,7 +78,7 @@ const emit = defineEmits<{
                         </n-flex>
                     </n-card>
 
-                    <n-card size="small" class="status-card">
+                    <n-card size="small" class="status-card mw-muted-card">
                         <n-flex vertical :size="10">
                             <h2 class="status-card-title">Signal source</h2>
                             <n-text depth="3">
@@ -95,7 +95,7 @@ const emit = defineEmits<{
                         class="status-card"
                         id="control-center-live-activation"
                     >
-                        <n-card size="small">
+                        <n-card size="small" class="mw-muted-card">
                             <n-flex vertical :size="10">
                                 <div tabindex="-1" data-control-center-anchor>
                                     <h2 class="status-card-title">

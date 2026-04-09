@@ -121,7 +121,7 @@ onUnmounted(() => {
       v-for="stream in streamCards"
       :key="stream.key"
       size="small"
-      class="stream-card"
+      class="stream-card mw-muted-card"
       content-style="padding: 16px;"
     >
       <n-flex vertical :size="16">
