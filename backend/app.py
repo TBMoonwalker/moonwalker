@@ -80,6 +80,11 @@ async def startup() -> None:
         asyncio.create_task(
             runtime_state.database.run_with_context(runtime_state.watcher.watch_tickers)
         ),
+        asyncio.create_task(
+            runtime_state.database.run_with_context(
+                runtime_state.database.backfill_trade_replay_candles_if_needed
+            )
+        ),
     ]
 
 

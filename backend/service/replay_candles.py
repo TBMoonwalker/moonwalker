@@ -336,9 +336,11 @@ async def archive_replay_candles_for_deal(
         timeframe_ms=timeframe_ms,
     )
 
-    should_try_exchange_repair = live_row is None and (
-        (bool(archived_timestamps) and archived_score[0] == 0)
-        or (not archived_timestamps and len(source_rows) <= 2)
+    # Exchange repair is reserved for existing sparse archives. Running a
+    # network-backed rebuild for every archive-missing legacy trade can turn
+    # startup backfill into a long per-deal replay crawl.
+    should_try_exchange_repair = (
+        live_row is None and bool(archived_timestamps) and archived_score[0] == 0
     )
     if should_try_exchange_repair:
         exchange_rows = await _fetch_exchange_archive_rows(
