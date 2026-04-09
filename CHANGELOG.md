@@ -2,6 +2,19 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.1.5.0] - 2026-04-09
+
+### Changed
+
+- Keep closed-trade replay markers and candles aligned with the real final sell by pairing exact-price sell markers with a dedicated chart overlay series and by letting replay archive backfill repair stale archived tails.
+- Restore the brighter bullish green on open and closed trade buy markers so replay arrows match the chart's existing bullish candle language again.
+
+### Fixed
+
+- Include the close-time in-memory candle when a trade archives into closed-trade replay, so new closes keep the candle where the sell actually happened.
+- Repair already-archived replay deals when startup backfill finds a newer persisted sell-time candle than the archived tail, so previously broken closed trades can self-heal on restart.
+- Add regression coverage for live close-time candle archiving, incomplete archive repair, exact sell marker placement, and replay buy-marker color consistency.
+
 ## [1.1.4.0] - 2026-04-08
 
 ### Changed
