@@ -72,7 +72,7 @@ const props = defineProps<{
     onAddOrderManually?: (rowData: RowData) => void
 }>()
 
-const BUY_MARKER_COLOR = '#1D5C49'
+const BUY_MARKER_COLOR = 'rgb(99, 226, 183)'
 const BUY_LINE_COLOR = '#1D5C49'
 const TP_LINE_COLOR = '#B78A2E'
 

@@ -10,6 +10,7 @@
 import { onMounted, onUnmounted, ref } from 'vue'
 import {
     CandlestickSeries,
+    LineSeries,
     createChart,
     createSeriesMarkers,
 } from 'lightweight-charts'
@@ -25,10 +26,29 @@ import { useOhlcvStore } from '../stores/ohlcv'
 
 type TradeReplayMarker = {
     timestamp: number | string
-    position: 'aboveBar' | 'belowBar'
+    position:
+        | 'aboveBar'
+        | 'belowBar'
+        | 'inBar'
+        | 'atPriceTop'
+        | 'atPriceBottom'
+        | 'atPriceMiddle'
     color: string
     shape: 'arrowUp' | 'arrowDown' | 'circle'
     text: string
+    price?: number | string | null
+}
+
+type NormalizedTradeReplayMarker = {
+    time: number
+    position: TradeReplayMarker['position']
+    color: string
+    shape: TradeReplayMarker['shape']
+    text: string
+}
+
+type ExactTradeReplayMarker = NormalizedTradeReplayMarker & {
+    price: number
 }
 
 type TradeReplayPriceLine = {
@@ -99,6 +119,17 @@ function normalizeMarkerTime(
     normalized -= normalized % seconds
     normalized += localOffsetSeconds
     return normalized
+}
+
+function normalizeExactMarkerTime(
+    timestamp: number | string,
+    localOffsetSeconds: number,
+): number | null {
+    const normalized = Math.trunc(Number(timestamp) / 1000)
+    if (!Number.isFinite(normalized)) {
+        return null
+    }
+    return normalized + localOffsetSeconds
 }
 
 async function initChart(): Promise<void> {
@@ -229,7 +260,7 @@ async function initChart(): Promise<void> {
         })
     }
 
-    const markerData = props.markers
+    const candleMarkerData = props.markers
         .map((marker) => {
             const markerTime = normalizeMarkerTime(
                 marker.timestamp,
@@ -237,6 +268,9 @@ async function initChart(): Promise<void> {
                 localOffsetSeconds,
             )
             if (markerTime === null) {
+                return null
+            }
+            if (toFiniteNumber(marker.price) !== null) {
                 return null
             }
             return {
@@ -247,9 +281,61 @@ async function initChart(): Promise<void> {
                 text: marker.text,
             }
         })
-        .filter((marker) => marker !== null)
+        .filter((marker): marker is NormalizedTradeReplayMarker => marker !== null)
 
-    createSeriesMarkers(candlestickSeries, markerData)
+    const exactMarkerData = props.markers
+        .map((marker) => {
+            const markerPrice = toFiniteNumber(marker.price)
+            const markerTime = normalizeExactMarkerTime(
+                marker.timestamp,
+                localOffsetSeconds,
+            )
+            if (markerTime === null || markerPrice === null) {
+                return null
+            }
+            return {
+                time: markerTime,
+                position: marker.position,
+                color: marker.color,
+                shape: marker.shape,
+                text: marker.text,
+                price: markerPrice,
+            }
+        })
+        .filter((marker): marker is ExactTradeReplayMarker => marker !== null)
+        .sort((left, right) => left.time - right.time)
+
+    if (candleMarkerData.length > 0) {
+        createSeriesMarkers(candlestickSeries, candleMarkerData)
+    }
+
+    if (exactMarkerData.length > 0) {
+        // Exact-price markers need backing series data. Lightweight Charts
+        // snaps markers to existing series points and does not autoscale around
+        // marker-only prices, so we attach these markers to a hidden line
+        // series with real time/value points.
+        const exactMarkerSeries = chart.addSeries(LineSeries, {
+            color: 'rgba(0, 0, 0, 0)',
+            lineVisible: false,
+            pointMarkersVisible: false,
+            crosshairMarkerVisible: false,
+            lastValueVisible: false,
+            priceLineVisible: false,
+            priceFormat: {
+                type: 'price',
+                minMove: precision,
+            },
+        })
+        exactMarkerSeries.setData(
+            exactMarkerData.map((marker) => ({
+                time: marker.time,
+                value: marker.price,
+                color: marker.color,
+            })),
+        )
+        createSeriesMarkers(exactMarkerSeries, exactMarkerData)
+    }
+
     chart.timeScale().fitContent()
 }
 

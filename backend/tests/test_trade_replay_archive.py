@@ -128,6 +128,185 @@ async def test_data_service_reads_archived_replay_candles(
 
 
 @pytest.mark.asyncio
+async def test_archive_replay_candles_persists_live_close_candle(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _init_test_db(tmp_path, monkeypatch)
+
+    import model
+    import service.replay_candles as replay_module
+
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_PRE_ROLL_MS", 60_000)
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_POST_ROLL_MS", 120_000)
+    monkeypatch.setattr(
+        replay_module,
+        "get_live_candle_snapshot",
+        lambda _symbol: [240_000, 10.8, 11.3, 10.7, 11.1, 15.0],
+    )
+
+    deal_id = "2a2a2a2a-2222-4444-8888-222222222222"
+    symbol = "ABC/USDT"
+
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="buy",
+        role="base_order",
+        timestamp="120000",
+        price=10.0,
+        amount=1.0,
+        ordersize=10.0,
+        fee=0.0,
+    )
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="sell",
+        role="final_sell",
+        timestamp="240000",
+        price=11.1,
+        amount=1.0,
+        ordersize=11.1,
+        fee=0.0,
+    )
+
+    for timestamp, close_price in (
+        (60_000, 9.8),
+        (120_000, 10.0),
+        (180_000, 10.6),
+    ):
+        await model.Tickers.create(
+            timestamp=str(timestamp),
+            symbol=symbol,
+            open=close_price - 0.2,
+            high=close_price + 0.2,
+            low=close_price - 0.4,
+            close=close_price,
+            volume=10.0,
+        )
+
+    archived = await archive_replay_candles_for_deal(
+        deal_id,
+        symbol,
+        open_date="120000",
+        close_date="240000",
+    )
+
+    archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).values(
+        "timestamp", "close"
+    )
+    archived_rows.sort(key=lambda row: int(row["timestamp"]))
+
+    assert archived == 4
+    assert [int(row["timestamp"]) for row in archived_rows] == [
+        60_000,
+        120_000,
+        180_000,
+        240_000,
+    ]
+    assert archived_rows[-1]["close"] == 11.1
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_archive_replay_candles_repairs_existing_incomplete_archive(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _init_test_db(tmp_path, monkeypatch)
+
+    import model
+    import service.replay_candles as replay_module
+
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_PRE_ROLL_MS", 60_000)
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_POST_ROLL_MS", 120_000)
+    monkeypatch.setattr(replay_module, "get_live_candle_snapshot", lambda _symbol: None)
+
+    deal_id = "3b3b3b3b-3333-4444-8888-333333333333"
+    symbol = "ABC/USDT"
+
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="buy",
+        role="base_order",
+        timestamp="120000",
+        price=10.0,
+        amount=1.0,
+        ordersize=10.0,
+        fee=0.0,
+    )
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="sell",
+        role="final_sell",
+        timestamp="240000",
+        price=11.1,
+        amount=1.0,
+        ordersize=11.1,
+        fee=0.0,
+    )
+
+    for timestamp, close_price in (
+        (60_000, 9.8),
+        (120_000, 10.0),
+        (180_000, 10.6),
+        (240_000, 11.1),
+    ):
+        await model.Tickers.create(
+            timestamp=str(timestamp),
+            symbol=symbol,
+            open=close_price - 0.2,
+            high=close_price + 0.2,
+            low=close_price - 0.4,
+            close=close_price,
+            volume=10.0,
+        )
+
+    for timestamp, close_price in (
+        (60_000, 9.8),
+        (120_000, 10.0),
+        (180_000, 10.6),
+    ):
+        await model.TradeReplayCandles.create(
+            deal_id=deal_id,
+            symbol=symbol,
+            timestamp=str(timestamp),
+            open=close_price - 0.2,
+            high=close_price + 0.2,
+            low=close_price - 0.4,
+            close=close_price,
+            volume=10.0,
+        )
+
+    archived = await archive_replay_candles_for_deal(
+        deal_id,
+        symbol,
+        open_date="120000",
+        close_date="240000",
+    )
+
+    archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).values(
+        "timestamp", "close"
+    )
+    archived_rows.sort(key=lambda row: int(row["timestamp"]))
+
+    assert archived == 4
+    assert [int(row["timestamp"]) for row in archived_rows] == [
+        60_000,
+        120_000,
+        180_000,
+        240_000,
+    ]
+    assert archived_rows[-1]["close"] == 11.1
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_delete_closed_trade_cascades_archived_replay_candles(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
