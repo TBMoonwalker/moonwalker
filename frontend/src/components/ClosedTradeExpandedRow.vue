@@ -56,7 +56,7 @@ import type { TimeframeChoice } from '../helpers/openTrades'
 import type { ClosedTradeRow, TradeExecutionRow } from '../stores/trades'
 import TradeReplayChart from './TradeReplayChart.vue'
 
-const BUY_MARKER_COLOR = '#1D5C49'
+const BUY_MARKER_COLOR = 'rgb(99, 226, 183)'
 const BUY_LINE_COLOR = '#1D5C49'
 const SELL_PROFIT_COLOR = 'rgb(99, 226, 183)'
 const SELL_LOSS_COLOR = 'rgb(224, 108, 117)'
@@ -170,9 +170,17 @@ const chartMarkers = computed(() => {
         text: 'Buy',
     }))
     if (finalSellExecution.value) {
+        const finalSellPrice = Number(finalSellExecution.value.price)
+        const hasExactFinalSellPrice =
+            Number.isFinite(finalSellPrice) && finalSellPrice > 0
         markers.push({
             timestamp: finalSellExecution.value.timestamp,
-            position: 'aboveBar' as const,
+            position: hasExactFinalSellPrice
+                ? ('atPriceMiddle' as const)
+                : ('aboveBar' as const),
+            ...(hasExactFinalSellPrice
+                ? { price: finalSellPrice }
+                : {}),
             color: sellColor.value,
             shape: 'arrowDown' as const,
             text: 'Sell',
@@ -181,14 +189,26 @@ const chartMarkers = computed(() => {
     return markers
 })
 
-const chartPriceLines = computed(() =>
-    buyExecutions.value.map((execution, index) => ({
+const chartPriceLines = computed(() => {
+    const lines = buyExecutions.value.map((execution, index) => ({
         price: Number(execution.price),
         color: BUY_LINE_COLOR,
         lineStyle: 2 as const,
         title: execution.role === 'base_order' ? 'BO' : `SO${index}`,
-    })),
-)
+    }))
+    if (finalSellExecution.value) {
+        const finalSellPrice = Number(finalSellExecution.value.price)
+        if (Number.isFinite(finalSellPrice) && finalSellPrice > 0) {
+            lines.push({
+                price: finalSellPrice,
+                color: sellColor.value,
+                lineStyle: 3 as const,
+                title: 'SELL',
+            })
+        }
+    }
+    return lines
+})
 
 function getBuyTitle(execution: TradeExecutionRow, index: number): string {
     if (execution.role === 'base_order' || index === 0) {
