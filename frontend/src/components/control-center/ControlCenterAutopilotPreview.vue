@@ -128,6 +128,9 @@ const trustSummary = computed(() => {
 .autopilot-preview {
     width: 100%;
     border-color: rgba(29, 92, 73, 0.14);
+    background: var(--mw-surface-shell);
+    box-shadow: var(--mw-shadow-card);
+    color: var(--mw-color-text-primary);
 }
 
 .preview-title {
@@ -152,7 +155,7 @@ const trustSummary = computed(() => {
 .hero-insight {
     padding: 14px 16px;
     border-radius: 10px;
-    background: #f3f6f2;
+    background: var(--mw-surface-card-subtle);
     border: 1px solid rgba(29, 92, 73, 0.1);
 }
 
@@ -181,7 +184,7 @@ const trustSummary = computed(() => {
 .metric-chip {
     padding: 12px 14px;
     border-radius: 10px;
-    background: #f7f8f6;
+    background: var(--mw-surface-card-muted);
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
 }
 

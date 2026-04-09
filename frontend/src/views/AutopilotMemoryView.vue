@@ -101,7 +101,7 @@ function openAutopilotAdvanced(): void {
         </n-alert>
 
         <template v-else-if="loading && !data">
-            <n-card>
+            <n-card class="page-section-card" content-style="padding: 18px 20px;">
                 <n-skeleton text :repeat="6" />
             </n-card>
         </template>
@@ -326,6 +326,9 @@ function openAutopilotAdvanced(): void {
 
 .page-section-card {
     border-color: rgba(29, 92, 73, 0.14);
+    background: var(--mw-surface-shell);
+    box-shadow: var(--mw-shadow-card);
+    color: var(--mw-color-text-primary);
 }
 
 .section-title,
@@ -353,7 +356,7 @@ function openAutopilotAdvanced(): void {
     padding: 12px 14px;
     border-radius: 10px;
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
-    background: #f7f8f6;
+    background: var(--mw-surface-card-muted);
     color: var(--mw-color-text-primary);
     display: flex;
     justify-content: space-between;
@@ -399,7 +402,7 @@ function openAutopilotAdvanced(): void {
 .selected-metric {
     padding: 12px 14px;
     border-radius: 10px;
-    background: #f7f8f6;
+    background: var(--mw-surface-card-muted);
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
 }
 
@@ -423,7 +426,7 @@ function openAutopilotAdvanced(): void {
 .event-row {
     padding: 12px 14px;
     border-radius: 10px;
-    background: #f7f8f6;
+    background: var(--mw-surface-card-muted);
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
 }
 
