@@ -1,4 +1,5 @@
 import pytest
+from service.autopilot import ResolvedTradingPolicy
 from service.dca import Dca
 
 
@@ -26,9 +27,27 @@ def _configure_dca(dca: Dca, **config_overrides: object) -> None:
         "tp_spike_confirm_ticks": 0,
         **config_overrides,
     }
-    dca.tp = 10.0
-    dca.sl = 5.0
-    dca.sl_timeout = 0
+
+
+def _build_policy(**overrides: object) -> ResolvedTradingPolicy:
+    payload = {
+        "symbol": "XPL/USDC",
+        "mode": "low",
+        "effective_max_bots": 2,
+        "take_profit": 10.0,
+        "baseline_take_profit": 10.0,
+        "stop_loss": 5.0,
+        "stop_loss_timeout": 0,
+        "green_phase_active": False,
+        "green_phase_extra_deals": 0,
+        "adaptive_tp_applied": False,
+        "adaptive_reason_code": None,
+        "adaptive_trust_score": None,
+        "memory_status": "fresh",
+        "suggested_base_order": 50.0,
+    }
+    payload.update(overrides)
+    return ResolvedTradingPolicy(**payload)
 
 
 @pytest.mark.asyncio
@@ -49,7 +68,7 @@ async def test_tp_spike_confirmation_skips_single_tick_wick(monkeypatch) -> None
     )
     monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: 100.0)
 
-    await dca._Dca__calculate_tp(111.0, _build_trades())
+    await dca._Dca__calculate_tp(111.0, _build_trades(), _build_policy())
 
     assert sell_calls == []
     assert "XPL/USDC" in dca._pending_tp_confirmations
@@ -77,9 +96,9 @@ async def test_tp_spike_confirmation_sells_after_duration_and_tick_filter(
     monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: clock["now"])
 
     trades = _build_trades()
-    await dca._Dca__calculate_tp(111.0, trades)
+    await dca._Dca__calculate_tp(111.0, trades, _build_policy())
     clock["now"] = 103.2
-    await dca._Dca__calculate_tp(111.4, trades)
+    await dca._Dca__calculate_tp(111.4, trades, _build_policy())
 
     assert len(sell_calls) == 1
     assert sell_calls[0]["symbol"] == "XPL/USDC"
@@ -107,13 +126,13 @@ async def test_tp_spike_confirmation_restarts_after_fade_below_tp(monkeypatch) -
     monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: clock["now"])
 
     trades = _build_trades()
-    await dca._Dca__calculate_tp(111.0, trades)
+    await dca._Dca__calculate_tp(111.0, trades, _build_policy())
     clock["now"] = 101.0
-    await dca._Dca__calculate_tp(109.0, trades)
+    await dca._Dca__calculate_tp(109.0, trades, _build_policy())
     clock["now"] = 103.5
-    await dca._Dca__calculate_tp(111.2, trades)
+    await dca._Dca__calculate_tp(111.2, trades, _build_policy())
     clock["now"] = 106.7
-    await dca._Dca__calculate_tp(111.3, trades)
+    await dca._Dca__calculate_tp(111.3, trades, _build_policy())
 
     assert len(sell_calls) == 1
     assert sell_calls[0]["fallback_min_price"] == pytest.approx(110.0)
@@ -139,7 +158,7 @@ async def test_tp_spike_confirmation_does_not_delay_stop_loss(monkeypatch) -> No
 
     trades = _build_trades()
     trades["safetyorders_count"] = 0
-    await dca._Dca__calculate_tp(94.0, trades)
+    await dca._Dca__calculate_tp(94.0, trades, _build_policy())
 
     assert len(sell_calls) == 1
     assert sell_calls[0]["symbol"] == "XPL/USDC"

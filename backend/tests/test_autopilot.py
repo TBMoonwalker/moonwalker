@@ -42,6 +42,7 @@ async def test_autopilot_high_threshold_triggers_db_write(monkeypatch) -> None:
             guardrail_block_reason=None,
         )
     )
+    autopilot.memory_service = _memory_summary()
     settings = await autopilot.calculate_trading_settings(90, config)
 
     assert settings["mode"] == "high"
@@ -85,6 +86,7 @@ async def test_autopilot_enabled_below_threshold_persists_low_mode(
             guardrail_block_reason=None,
         )
     )
+    autopilot.memory_service = _memory_summary()
     settings = await autopilot.calculate_trading_settings(10, config)
     runtime_state = await autopilot.resolve_runtime_state(10, config)
 
@@ -106,6 +108,7 @@ async def test_autopilot_disabled_persists_none_mode(monkeypatch) -> None:
     monkeypatch.setattr(model, "Autopilot", types.SimpleNamespace(create=fake_create))
 
     autopilot = Autopilot(runtime_state=AutopilotRuntimeState())
+    autopilot.memory_service = _memory_summary(status="empty", current_closes=0)
     settings = await autopilot.calculate_trading_settings(10, {"autopilot": False})
     runtime_state = await autopilot.resolve_runtime_state(10, {"autopilot": False})
 
@@ -142,6 +145,7 @@ async def test_autopilot_passes_available_quote_override_to_green_phase(
     autopilot.green_phase_service = types.SimpleNamespace(
         get_override=fake_get_override
     )
+    autopilot.memory_service = _memory_summary()
     config = {
         "autopilot": True,
         "autopilot_max_fund": 100,
@@ -175,6 +179,8 @@ async def test_autopilot_runtime_state_is_instance_injectable(monkeypatch) -> No
     second = Autopilot(runtime_state=shared_runtime_state)
     first.green_phase_service = types.SimpleNamespace(get_override=_green_override())
     second.green_phase_service = types.SimpleNamespace(get_override=_green_override())
+    first.memory_service = _memory_summary()
+    second.memory_service = _memory_summary()
     config = {
         "autopilot": True,
         "autopilot_max_fund": 100,
@@ -206,3 +212,29 @@ def _green_override(**values):
         return values
 
     return _inner
+
+
+def _memory_summary(**overrides):
+    payload = {
+        "status": "fresh",
+        "stale": False,
+        "stale_reason": None,
+        "current_closes": 24,
+        "required_closes": 20,
+        "featured_symbol": "BTC/USDT",
+        "featured_direction": "favored",
+        "last_updated_at": "2026-04-09T17:56:03Z",
+        "last_success_at": "2026-04-09T17:56:03Z",
+    }
+    payload.update(overrides)
+    return types.SimpleNamespace(
+        get_runtime_summary=lambda: payload,
+        resolve_symbol_policy=lambda *_args, **_kwargs: {
+            "apply_tp": False,
+            "take_profit": 1.2,
+            "suggested_base_order": 50.0,
+            "memory_status": payload["status"],
+            "reason_code": payload["stale_reason"],
+            "trust_score": None,
+        },
+    )

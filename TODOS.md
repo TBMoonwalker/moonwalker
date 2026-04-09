@@ -21,6 +21,46 @@ after config trust and invalidation hardening feel stable.
 **Priority:** P3
 **Depends on:** Config trust and invalidation hardening shipping cleanly first
 
+## Autopilot
+
+### Add ranked scarce-bot admission for trusted symbols
+
+**What:** Add a ranked admission seam so symbol trust can decide which
+candidate claims limited bot capacity when Moonwalker is full.
+
+**Why:** This is the missing allocation layer after v1 trust scoring and
+adaptive take profit. It is the clearest next step from "smarter exits" to
+"smarter allocation under pressure."
+
+**Context:** The symbol-memory v1 review explicitly deferred this because
+`backend/service/signal_runtime.py` only exposes a boolean max-bots gate today,
+and both signal plugins depend on that shape. Revisit after the v1 memory
+service, stale fallback, and cockpit read model ship cleanly so the new
+admission seam is solving one problem instead of three at once.
+
+**Effort:** L
+**Priority:** P2
+**Depends on:** Symbol-memory v1 shipping cleanly first
+
+### Promote suggested base order into guarded per-symbol sizing
+
+**What:** Turn the read-only suggested base-order insight into an optional
+guarded per-symbol sizing policy once the trust model proves reliable.
+
+**Why:** This is the long-range capital-allocation payoff of symbol memory after
+Moonwalker earns operator trust with safer v1 behavior.
+
+**Context:** The approved symbol-memory design intentionally keeps base-order
+sizing read-only in v1 because wrong sizing is more dangerous than wrong
+wording. Revisit only after operators can see, understand, and trust the
+symbol-memory recommendations in the cockpit, and after stale/corrupt snapshot
+fallback is proven in production-like testing.
+
+**Effort:** XL
+**Priority:** P3
+**Depends on:** Symbol-memory v1, cockpit trust visibility, and observed
+operator confidence in the recommendations
+
 ## Completed
 
 ### Finish the deferred backend stabilization slice for data/replay/database seams

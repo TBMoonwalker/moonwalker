@@ -214,6 +214,26 @@ class Database:
 
         connection = Tortoise.get_connection("default")
         desired_indexes: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+            (
+                "autopilot_memory_events",
+                "idx_autopilot_memory_events_created_at",
+                ("created_at",),
+            ),
+            (
+                "autopilot_memory_events",
+                "idx_autopilot_memory_events_symbol_created_at",
+                ("symbol", "created_at"),
+            ),
+            (
+                "autopilot_symbol_memory",
+                "idx_autopilot_symbol_memory_direction_score",
+                ("trust_direction", "trust_score"),
+            ),
+            (
+                "autopilot_symbol_memory",
+                "idx_autopilot_symbol_memory_updated_at",
+                ("updated_at",),
+            ),
             ("tickers", "idx_tickers_symbol_timestamp", ("symbol", "timestamp")),
             ("tickers", "idx_tickers_timestamp", ("timestamp",)),
             ("trades", "idx_trades_symbol", ("symbol",)),

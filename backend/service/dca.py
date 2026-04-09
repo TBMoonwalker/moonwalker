@@ -7,7 +7,7 @@ from typing import Any
 
 import helper
 from service.ath import AthService
-from service.autopilot import Autopilot
+from service.autopilot import Autopilot, ResolvedTradingPolicy
 from service.config import resolve_timeframe
 from service.config_views import DcaRuntimeConfigView
 from service.dca_safety_orders import (
@@ -51,10 +51,6 @@ class Dca:
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
         self._pending_tp_confirmations: dict[str, TpConfirmationState] = {}
         self._trailing_tp_peaks: dict[str, float] = {}
-        self.tp = 0.0
-        self.sl = 0.0
-        self.sl_timeout = 0
-        self.autopilot_mode: str | None = None
 
     def __get_monotonic_time(self) -> float:
         """Return a monotonic timestamp for TP confirmation timing."""
@@ -308,7 +304,10 @@ class Dca:
         return final_cost, details
 
     async def __calculate_tp(
-        self, current_price: float, trades: dict[str, Any]
+        self,
+        current_price: float,
+        trades: dict[str, Any],
+        trading_policy: ResolvedTradingPolicy,
     ) -> None:
         runtime_config = self.__runtime_config()
         trailing_tp = runtime_config.trailing_tp
@@ -323,8 +322,8 @@ class Dca:
         average_buy_price = total_cost / trades["total_amount"]
 
         # Calculate TP/SL
-        take_profit_price = average_buy_price * (1 + (self.tp / 100))
-        stop_loss_price = average_buy_price * (1 - (self.sl / 100))
+        take_profit_price = average_buy_price * (1 + (trading_policy.take_profit / 100))
+        stop_loss_price = average_buy_price * (1 - (trading_policy.stop_loss / 100))
         tp_reached = not is_unsellable and current_price >= take_profit_price
 
         if tp_reached and trailing_tp <= 0 and self.__tp_confirmation_enabled():
@@ -385,18 +384,20 @@ class Dca:
                 symbol=trades["symbol"],
                 actual_pnl=actual_pnl,
                 trailing_tp=trailing_tp,
-                take_profit=self.tp,
+                take_profit=trading_policy.take_profit,
                 sell_signal=sell,
             )
 
         # Sell if Autopilot is enabled and SL is set
-        if not is_unsellable and self.sl_timeout > 0:
+        if not is_unsellable and trading_policy.stop_loss_timeout > 0:
             last_trade_date = datetime.fromtimestamp(
                 int(float(trades["timestamp"]) / 1000)
             )
-            trade_duration_max_date = datetime.now() - timedelta(days=self.sl_timeout)
+            trade_duration_max_date = datetime.now() - timedelta(
+                days=trading_policy.stop_loss_timeout
+            )
             if last_trade_date < trade_duration_max_date and actual_pnl >= -abs(
-                self.sl
+                trading_policy.stop_loss
             ):
                 logging.debug(
                     "Selling %s because of autopilot settings.",
@@ -458,6 +459,11 @@ class Dca:
             "actual_pnl": actual_pnl,
             "sell": sell,
             "direction": trades["direction"],
+            "autopilot_mode": trading_policy.mode,
+            "adaptive_tp_applied": trading_policy.adaptive_tp_applied,
+            "adaptive_reason_code": trading_policy.adaptive_reason_code,
+            "adaptive_trust_score": trading_policy.adaptive_trust_score,
+            "baseline_take_profit": trading_policy.baseline_take_profit,
             "unsellable": is_unsellable,
             "unsellable_reason": trades.get("unsellable_reason"),
             "tp_confirmation_pending": tp_confirmation_pending,
@@ -636,24 +642,11 @@ class Dca:
 
                 # Check Autopilot
                 profit = await self.statistic.get_profit()
-                trading_settings = None
-
-                if profit["funds_locked"]:
-                    trading_settings = await self.autopilot.calculate_trading_settings(
-                        profit["funds_locked"], self.config
-                    )
-                # Use Autopilots settings
-                if trading_settings:
-                    self.tp = trading_settings["tp"]
-                    self.sl = trading_settings["sl"]
-                    self.sl_timeout = trading_settings["sl_timeout"]
-                    self.autopilot_mode = trading_settings["mode"]
-                # Use base settings
-                else:
-                    self.tp = runtime_config.take_profit
-                    self.sl = runtime_config.stop_loss
-                    self.sl_timeout = 0
-                    self.autopilot_mode = None
+                trading_policy = await self.autopilot.resolve_trading_policy(
+                    trades["symbol"],
+                    float(profit.get("funds_locked") or 0.0),
+                    self.config,
+                )
 
                 # Check DCA (only when DCA is enabled)
                 if runtime_config.dca_enabled and not trades.get(
@@ -662,7 +655,7 @@ class Dca:
                     await self.__calculate_dca(price, trades)
 
                 # Check TP
-                await self.__calculate_tp(price, trades)
+                await self.__calculate_tp(price, trades, trading_policy)
 
     async def __evaluate_dynamic_dca_trigger(
         self,

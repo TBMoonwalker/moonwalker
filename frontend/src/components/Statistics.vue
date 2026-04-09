@@ -59,6 +59,7 @@ import {
     PauseCircleOutline,
     WarningOutline,
 } from '@vicons/ionicons5'
+import { formatAutopilotMemoryHint } from '../autopilot/presentation'
 
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
@@ -76,6 +77,11 @@ const autopilot_green_phase_detected = ref(false)
 const autopilot_green_phase_active = ref(false)
 const autopilot_green_phase_extra_deals = ref(0)
 const autopilot_green_phase_block_reason = ref<string | null>(null)
+const autopilot_memory_status = ref<string | null>(null)
+const autopilot_memory_stale = ref(false)
+const autopilot_memory_stale_reason = ref<string | null>(null)
+const autopilot_memory_current_closes = ref(0)
+const autopilot_memory_required_closes = ref(0)
 
 const autopilot_summary = computed(() => {
     if (autopilot_state.value === 'none') {
@@ -87,6 +93,15 @@ const autopilot_summary = computed(() => {
 const green_phase_hint = computed(() => {
     if (autopilot_state.value === 'none') {
         return ''
+    }
+    if (autopilot_memory_stale.value || autopilot_memory_status.value === 'warming_up') {
+        return formatAutopilotMemoryHint({
+            currentCloses: autopilot_memory_current_closes.value,
+            requiredCloses: autopilot_memory_required_closes.value,
+            stale: autopilot_memory_stale.value,
+            staleReason: autopilot_memory_stale_reason.value,
+            status: autopilot_memory_status.value,
+        })
     }
     if (autopilot_green_phase_active.value) {
         return `Green phase active (+${autopilot_green_phase_extra_deals.value} deals)`
@@ -145,6 +160,23 @@ watch(statistics_data.data, (newData) => {
             typeof websocket_data.autopilot_green_phase_block_reason === 'string'
                 ? websocket_data.autopilot_green_phase_block_reason
                 : null
+        autopilot_memory_status.value =
+            typeof websocket_data.autopilot_memory_status === 'string'
+                ? websocket_data.autopilot_memory_status
+                : null
+        autopilot_memory_stale.value = Boolean(
+            websocket_data.autopilot_memory_stale,
+        )
+        autopilot_memory_stale_reason.value =
+            typeof websocket_data.autopilot_memory_stale_reason === 'string'
+                ? websocket_data.autopilot_memory_stale_reason
+                : null
+        autopilot_memory_current_closes.value = toNumberOrZero(
+            websocket_data.autopilot_memory_current_closes,
+        )
+        autopilot_memory_required_closes.value = toNumberOrZero(
+            websocket_data.autopilot_memory_required_closes,
+        )
         if (websocket_data.autopilot == "high") {
             autopilot_state.value = 'high'
             autopilot_class.value = "red"

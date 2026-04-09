@@ -26,12 +26,18 @@ import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupF
 import { useControlCenterTargetRegistry } from '../composables/useControlCenterTargetRegistry'
 import { useControlCenterWorkspaceRefresh } from '../composables/useControlCenterWorkspaceRefresh'
 import { useControlCenterWorkspaceActions } from '../composables/useControlCenterWorkspaceActions'
+import { useAutopilotMemoryFeed } from '../composables/useAutopilotMemoryFeed'
 import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
 const configSnapshotStore = useSharedConfigSnapshot()
+const {
+    data: autopilotMemory,
+    error: autopilotMemoryError,
+    loading: autopilotMemoryLoading,
+} = useAutopilotMemoryFeed()
 
 const loadRescueMessage = ref<string | null>(null)
 
@@ -302,6 +308,17 @@ useControlCenterLifecycle({
     staleCheckIntervalMs: STALE_CHECK_INTERVAL_MS,
     syncSetupChoiceForReadiness,
 })
+
+function openAutopilotMemoryPage(): void {
+    void router.push({ name: 'controlCenterAutopilot' })
+}
+
+function openAutopilotAdvanced(): void {
+    void router.push({
+        name: 'controlCenter',
+        query: { mode: 'advanced', target: 'autopilot' },
+    })
+}
 </script>
 
 <template>
@@ -343,6 +360,9 @@ useControlCenterLifecycle({
             <template v-if="routeState.mode === 'overview'">
                 <ControlCenterOverviewWorkspace
                     :activation-loading="activationLoading"
+                    :autopilot-memory="autopilotMemory"
+                    :autopilot-memory-error="autopilotMemoryError"
+                    :autopilot-memory-loading="autopilotMemoryLoading"
                     :exchange-currency="exchange.currency"
                     :exchange-name="exchange.name"
                     :live-activation-ref="bindTargetElement('live-activation')"
@@ -350,7 +370,9 @@ useControlCenterLifecycle({
                     :signal-source="signal.signal"
                     :visible-blockers="visibleBlockers"
                     @activate-live="handleActivateLiveTrading"
+                    @open-autopilot="openAutopilotMemoryPage"
                     @select-target="guideToTarget"
+                    @tune-autopilot="openAutopilotAdvanced"
                 />
             </template>
 

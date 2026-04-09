@@ -83,6 +83,20 @@ class _FakeGreenPhaseFactory:
         return _FakeGreenPhaseService()
 
 
+class _FakeAutopilotMemoryService:
+    async def start(self) -> None:
+        return None
+
+    async def shutdown(self) -> None:
+        return None
+
+
+class _FakeAutopilotMemoryFactory:
+    @staticmethod
+    async def instance() -> _FakeAutopilotMemoryService:
+        return _FakeAutopilotMemoryService()
+
+
 async def _noop_async(*_args, **_kwargs) -> None:
     return None
 
@@ -100,6 +114,11 @@ async def test_startup_schedules_replay_backfill_as_background_task(
     monkeypatch.setattr(app_module, "Watcher", _FakeWatcher)
     monkeypatch.setattr(app_module, "Housekeeper", _FakeHousekeeper)
     monkeypatch.setattr(app_module, "GreenPhaseService", _FakeGreenPhaseFactory)
+    monkeypatch.setattr(
+        app_module,
+        "AutopilotMemoryService",
+        _FakeAutopilotMemoryFactory,
+    )
     monkeypatch.setattr(app_module, "Signal", _FakeSignal)
     monkeypatch.setattr(
         app_module.trades_controller,

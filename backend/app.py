@@ -14,6 +14,7 @@ from controller import trades as trades_controller
 from litestar import Litestar
 from litestar.config.compression import CompressionConfig
 from litestar.config.cors import CORSConfig
+from service.autopilot_memory import AutopilotMemoryService
 from service.config import Config
 from service.database import Database
 from service.green_phase import GreenPhaseService
@@ -34,6 +35,7 @@ class RuntimeState:
     watcher: Watcher | None = None
     housekeeper: Housekeeper | None = None
     green_phase_service: GreenPhaseService | None = None
+    autopilot_memory_service: AutopilotMemoryService | None = None
     signal_plugin: Signal | None = None
     background_tasks: list[asyncio.Task[Any]] = field(default_factory=list)
 
@@ -59,6 +61,9 @@ async def startup() -> None:
 
     runtime_state.green_phase_service = await GreenPhaseService.instance()
     await runtime_state.green_phase_service.start()
+
+    runtime_state.autopilot_memory_service = await AutopilotMemoryService.instance()
+    await runtime_state.autopilot_memory_service.start()
 
     runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
     await runtime_state.database.run_with_context(runtime_state.signal_plugin.init)
@@ -107,6 +112,8 @@ async def shutdown() -> None:
         await runtime_state.housekeeper.shutdown()
     if runtime_state.green_phase_service is not None:
         await runtime_state.green_phase_service.shutdown()
+    if runtime_state.autopilot_memory_service is not None:
+        await runtime_state.autopilot_memory_service.shutdown()
     if runtime_state.database is not None:
         await runtime_state.database.shutdown()
 

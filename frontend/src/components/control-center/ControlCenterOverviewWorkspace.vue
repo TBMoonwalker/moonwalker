@@ -1,12 +1,17 @@
 <script setup lang="ts">
+import type { AutopilotMemoryPayload } from '../../autopilot/types'
 import type {
     ControlCenterBlocker,
     ControlCenterReadiness,
     ControlCenterTarget,
 } from '../../control-center/types'
+import ControlCenterAutopilotPreview from './ControlCenterAutopilotPreview.vue'
 
 defineProps<{
     activationLoading: boolean
+    autopilotMemory: AutopilotMemoryPayload | null
+    autopilotMemoryError: string | null
+    autopilotMemoryLoading: boolean
     exchangeCurrency: string | null | undefined
     exchangeName: string | null | undefined
     liveActivationRef?: (element: Element | null) => void
@@ -17,7 +22,9 @@ defineProps<{
 
 const emit = defineEmits<{
     'activate-live': []
+    'open-autopilot': []
     'select-target': [target: ControlCenterTarget]
+    'tune-autopilot': []
 }>()
 </script>
 
@@ -123,6 +130,15 @@ const emit = defineEmits<{
                     </div>
                 </template>
             </n-flex>
+
+            <ControlCenterAutopilotPreview
+                v-if="visibleBlockers.length === 0"
+                :error="autopilotMemoryError"
+                :loading="autopilotMemoryLoading"
+                :memory="autopilotMemory"
+                @open-autopilot="emit('open-autopilot')"
+                @tune-autopilot="emit('tune-autopilot')"
+            />
         </n-flex>
     </n-card>
 </template>
