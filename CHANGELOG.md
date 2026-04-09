@@ -2,6 +2,17 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.1.7.0] - 2026-04-09
+
+### Changed
+
+- Move closed-trade replay archive repair off the blocking startup path so Moonwalker can finish booting promptly even on older instances with lots of closed deals to inspect.
+
+### Fixed
+
+- Keep replay archive backfill limited to the background runtime path and reserve exchange-based repair for already-archived sparse deals, so legacy trades without archives no longer trigger a per-deal startup crawl.
+- Add backend regression coverage for the non-blocking replay backfill startup path, the background scheduling hook, and the archive-missing exchange-repair guard.
+
 ## [1.1.6.0] - 2026-04-09
 
 ### Fixed

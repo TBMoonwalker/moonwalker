@@ -269,7 +269,7 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
 
 
 @pytest.mark.asyncio
-async def test_database_init_runs_schema_steps_before_backfills(
+async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     database = Database()
@@ -307,11 +307,6 @@ async def test_database_init_runs_schema_steps_before_backfills(
     monkeypatch.setattr(
         Database, "_backfill_trade_ledger_rows", _record("backfill_trade_ledger_rows")
     )
-    monkeypatch.setattr(
-        Database,
-        "_backfill_trade_replay_candles",
-        _record("backfill_trade_replay_candles"),
-    )
 
     await database.init()
 
@@ -324,5 +319,37 @@ async def test_database_init_runs_schema_steps_before_backfills(
         "ensure_upnl_history_columns",
         "ensure_indexes",
         "backfill_trade_ledger_rows",
-        "backfill_trade_replay_candles",
     ]
+
+
+@pytest.mark.asyncio
+async def test_background_replay_backfill_runs_after_startup(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    database.db_url = "sqlite:///tmp/healthy.sqlite"
+    calls: list[str] = []
+
+    async def fake_backfill(*_args, **_kwargs) -> None:
+        calls.append("backfill_trade_replay_candles")
+
+    monkeypatch.setattr(Database, "_backfill_trade_replay_candles", fake_backfill)
+
+    await database.backfill_trade_replay_candles_if_needed()
+
+    assert calls == ["backfill_trade_replay_candles"]
+
+
+@pytest.mark.asyncio
+async def test_background_replay_backfill_does_not_raise_on_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    database.db_url = "sqlite:///tmp/healthy.sqlite"
+
+    async def raise_failure(*_args, **_kwargs) -> None:
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(Database, "_backfill_trade_replay_candles", raise_failure)
+
+    await database.backfill_trade_replay_candles_if_needed()

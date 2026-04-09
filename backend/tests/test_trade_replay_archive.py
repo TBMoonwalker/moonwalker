@@ -435,6 +435,94 @@ async def test_archive_replay_candles_repairs_sparse_archive_from_exchange_histo
 
 
 @pytest.mark.asyncio
+async def test_archive_replay_candles_skips_exchange_repair_for_missing_archive(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _init_test_db(tmp_path, monkeypatch)
+
+    import model
+    import service.replay_candles as replay_module
+
+    class _FailingExchange:
+        async def get_history_for_symbol(
+            self,
+            config: dict[str, str],
+            symbol: str,
+            timeframe: str,
+            limit: int = 1,
+            since: int = 0,
+            until: int | None = None,
+        ) -> list[list[float]]:
+            raise AssertionError("exchange repair should not run without an archive")
+
+        async def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_PRE_ROLL_MS", 0)
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_POST_ROLL_MS", 0)
+    monkeypatch.setattr(replay_module, "get_live_candle_snapshot", lambda _symbol: None)
+    monkeypatch.setattr(replay_module, "Exchange", _FailingExchange)
+
+    deal_id = "5c5c5c5c-5555-4444-8888-555555555555"
+    symbol = "ABC/USDT"
+
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="buy",
+        role="base_order",
+        timestamp="0",
+        price=10.0,
+        amount=1.0,
+        ordersize=10.0,
+        fee=0.0,
+    )
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="sell",
+        role="final_sell",
+        timestamp="43200000",
+        price=13.0,
+        amount=1.0,
+        ordersize=13.0,
+        fee=0.0,
+    )
+
+    for timestamp, close_price in (
+        (0, 10.0),
+        (43_200_000, 13.0),
+    ):
+        await model.Tickers.create(
+            timestamp=str(timestamp),
+            symbol=symbol,
+            open=close_price - 0.2,
+            high=close_price + 0.2,
+            low=close_price - 0.4,
+            close=close_price,
+            volume=10.0,
+        )
+
+    archived = await archive_replay_candles_for_deal(
+        deal_id,
+        symbol,
+        open_date="0",
+        close_date="43200000",
+    )
+
+    archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).values(
+        "timestamp"
+    )
+    archived_timestamps = sorted(int(row["timestamp"]) for row in archived_rows)
+
+    assert archived == 2
+    assert archived_timestamps == [0, 43_200_000]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_archive_replay_candles_keeps_sparse_archive_when_exchange_repair_fails(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,

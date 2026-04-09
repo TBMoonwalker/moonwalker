@@ -1,5 +1,6 @@
 """Database lifecycle and SQLite resilience helpers."""
 
+import asyncio
 import os
 import random
 import re
@@ -545,9 +546,8 @@ class Database:
         await self._ensure_indexes()
 
     async def _run_backfill_init_steps(self) -> None:
-        """Run init-time backfills after the schema is ready."""
+        """Run init-time backfills required before the runtime starts."""
         await self._backfill_trade_ledger_rows()
-        await self._backfill_trade_replay_candles()
 
     async def init(self) -> None:
         """Initialize the database connection and generate schemas.
@@ -584,6 +584,23 @@ class Database:
                 raise RuntimeError(message) from exc
             logging.error("Failed to initialize database: %s", exc, exc_info=True)
             raise
+
+    async def backfill_trade_replay_candles_if_needed(self) -> None:
+        """Backfill replay archives in the background after startup."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        try:
+            await self._backfill_trade_replay_candles()
+        except asyncio.CancelledError:
+            logging.info("Background replay archive backfill cancelled")
+            raise
+        except Exception as exc:  # noqa: BLE001 - keep startup background-safe.
+            logging.error(
+                "Background replay archive backfill failed: %s",
+                exc,
+                exc_info=True,
+            )
 
     async def run_with_context(
         self, func: Callable[..., Awaitable[Any]], *args: Any, **kwargs: Any
