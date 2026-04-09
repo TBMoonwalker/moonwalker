@@ -15,6 +15,17 @@ async def _init_test_db(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     await Tortoise.generate_schemas()
 
 
+def _make_candle(timestamp: int, close: float) -> list[float]:
+    return [
+        timestamp,
+        close - 1.0,
+        close + 1.0,
+        close - 2.0,
+        close,
+        10.0,
+    ]
+
+
 @pytest.mark.asyncio
 async def test_archive_replay_candles_for_closed_deal_persists_bounded_window(
     tmp_path,
@@ -302,6 +313,122 @@ async def test_archive_replay_candles_repairs_existing_incomplete_archive(
         240_000,
     ]
     assert archived_rows[-1]["close"] == 11.1
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_archive_replay_candles_repairs_sparse_archive_from_exchange_history(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _init_test_db(tmp_path, monkeypatch)
+
+    import model
+    import service.replay_candles as replay_module
+
+    class _FakeConfig:
+        def snapshot(self) -> dict[str, str]:
+            return {"exchange": "binance", "timeframe": "4h"}
+
+    class _FakeExchange:
+        async def get_history_for_symbol(
+            self,
+            config: dict[str, str],
+            symbol: str,
+            timeframe: str,
+            limit: int = 1,
+            since: int = 0,
+            until: int | None = None,
+        ) -> list[list[float]]:
+            assert config["exchange"] == "binance"
+            assert symbol == "ABC/USDT"
+            assert timeframe == "4h"
+            assert since == 0
+            assert until == 43_200_000
+            return [
+                _make_candle(0, 10.0),
+                _make_candle(14_400_000, 11.0),
+                _make_candle(28_800_000, 12.0),
+                _make_candle(43_200_000, 13.0),
+            ]
+
+        async def close(self) -> None:
+            return None
+
+    async def _fake_config_instance() -> _FakeConfig:
+        return _FakeConfig()
+
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_PRE_ROLL_MS", 0)
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_POST_ROLL_MS", 0)
+    monkeypatch.setattr(replay_module, "get_live_candle_snapshot", lambda _symbol: None)
+    monkeypatch.setattr(replay_module.Config, "instance", _fake_config_instance)
+    monkeypatch.setattr(replay_module, "Exchange", _FakeExchange)
+
+    deal_id = "4c4c4c4c-4444-4444-8888-444444444444"
+    symbol = "ABC/USDT"
+
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="buy",
+        role="base_order",
+        timestamp="0",
+        price=10.0,
+        amount=1.0,
+        ordersize=10.0,
+        fee=0.0,
+    )
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="sell",
+        role="final_sell",
+        timestamp="43200000",
+        price=13.0,
+        amount=1.0,
+        ordersize=13.0,
+        fee=0.0,
+    )
+
+    for timestamp, close_price in (
+        (0, 10.0),
+        (43_200_000, 13.0),
+    ):
+        await model.Tickers.create(
+            timestamp=str(timestamp),
+            symbol=symbol,
+            open=close_price - 0.2,
+            high=close_price + 0.2,
+            low=close_price - 0.4,
+            close=close_price,
+            volume=10.0,
+        )
+        await model.TradeReplayCandles.create(
+            deal_id=deal_id,
+            symbol=symbol,
+            timestamp=str(timestamp),
+            open=close_price - 0.2,
+            high=close_price + 0.2,
+            low=close_price - 0.4,
+            close=close_price,
+            volume=10.0,
+        )
+
+    archived = await archive_replay_candles_for_deal(
+        deal_id,
+        symbol,
+        open_date="0",
+        close_date="43200000",
+    )
+
+    archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).values(
+        "timestamp"
+    )
+    archived_timestamps = sorted(int(row["timestamp"]) for row in archived_rows)
+
+    assert archived == 4
+    assert archived_timestamps == [0, 14_400_000, 28_800_000, 43_200_000]
 
     await Tortoise.close_connections()
 

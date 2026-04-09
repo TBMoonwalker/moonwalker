@@ -4,13 +4,19 @@ from __future__ import annotations
 
 from typing import Any
 
+import helper
 import model
+from service.config import Config, resolve_timeframe
+from service.data_timeframes import timeframe_to_milliseconds
+from service.exchange import Exchange
 from service.sqlite_timestamps import (
     build_normalized_text_timestamp_sql,
     coerce_timestamp_like_to_ms,
 )
 from service.watcher_runtime import get_live_candle_snapshot
 from tortoise import Tortoise
+
+logging = helper.LoggerFactory.get_logger("logs/replay_candles.log", "replay_candles")
 
 REPLAY_ARCHIVE_PRE_ROLL_MS = 2 * 24 * 60 * 60 * 1000
 REPLAY_ARCHIVE_POST_ROLL_MS = 4 * 24 * 60 * 60 * 1000
@@ -105,45 +111,54 @@ def _merge_archive_source_rows(
     return [rows_by_timestamp[timestamp] for timestamp in sorted(rows_by_timestamp)]
 
 
-async def _get_latest_archived_timestamp_ms(
+def _extract_archive_timestamps_ms(
+    rows: list[dict[str, float | str]] | list[dict[str, Any]],
+) -> set[int]:
+    """Return normalized archive-row timestamps as Unix milliseconds."""
+    timestamps: set[int] = set()
+    for row in rows:
+        timestamp_ms = _parse_optional_ms(row.get("timestamp"))
+        if timestamp_ms is not None:
+            timestamps.add(timestamp_ms)
+    return timestamps
+
+
+def _score_archive_timestamps(
+    timestamps: set[int],
+    *,
+    start_ms: int,
+    end_ms: int,
+    timeframe_ms: int,
+) -> tuple[int, int, int]:
+    """Score archive coverage by completeness, density, and recency."""
+    if not timestamps:
+        return (0, 0, -1)
+
+    normalized_start = max(
+        0, ((start_ms + timeframe_ms - 1) // timeframe_ms) * timeframe_ms
+    )
+    normalized_end = (end_ms // timeframe_ms) * timeframe_ms
+    if normalized_end < normalized_start:
+        return (0, len(timestamps), max(timestamps))
+
+    expected_timestamps = set(
+        range(normalized_start, normalized_end + timeframe_ms, timeframe_ms)
+    )
+    is_complete = int(expected_timestamps.issubset(timestamps))
+    return (is_complete, len(timestamps), max(timestamps))
+
+
+async def _get_archived_timestamps_ms(
     deal_id: str,
     *,
     conn: Any | None = None,
-) -> int | None:
-    """Return the latest archived replay-candle timestamp for one deal."""
+) -> set[int]:
+    """Return archived replay-candle timestamps for one deal."""
     query = model.TradeReplayCandles.filter(deal_id=deal_id)
     if conn is not None:
         query = query.using_db(conn)
     rows = await query.values("timestamp")
-    timestamps = [
-        timestamp_ms
-        for timestamp_ms in (_parse_optional_ms(row.get("timestamp")) for row in rows)
-        if timestamp_ms is not None
-    ]
-    return max(timestamps) if timestamps else None
-
-
-async def _get_latest_persisted_ticker_timestamp_ms(
-    symbol: str,
-    *,
-    start_ms: int,
-    end_ms: int,
-    connection: Any,
-) -> int | None:
-    """Return the latest persisted ticker timestamp inside the archive window."""
-    rows = await connection.execute_query_dict(
-        "SELECT MAX("
-        f"{NORMALIZED_TICKER_TIMESTAMP_SQL}"
-        ") AS timestamp_ms "
-        "FROM tickers "
-        "WHERE symbol = ? "
-        f"AND {NORMALIZED_TICKER_TIMESTAMP_SQL} >= ? "
-        f"AND {NORMALIZED_TICKER_TIMESTAMP_SQL} <= ?",
-        [symbol, start_ms, end_ms],
-    )
-    if not rows:
-        return None
-    return _parse_optional_ms(rows[0].get("timestamp_ms"))
+    return _extract_archive_timestamps_ms(rows)
 
 
 async def resolve_replay_archive_window_ms(
@@ -189,6 +204,67 @@ async def resolve_replay_archive_window_ms(
     )
 
 
+async def _fetch_exchange_archive_rows(
+    symbol: str,
+    *,
+    start_ms: int,
+    end_ms: int,
+) -> list[dict[str, float | str]]:
+    """Fetch replay-archive candles directly from the exchange for repair."""
+    config = await Config.instance()
+    snapshot = config.snapshot()
+    exchange_name = str(snapshot.get("exchange") or "").strip()
+    if not exchange_name:
+        return []
+
+    timeframe = resolve_timeframe(snapshot)
+    exchange = Exchange()
+    try:
+        candles = await exchange.get_history_for_symbol(
+            snapshot,
+            symbol,
+            timeframe,
+            limit=1000,
+            since=start_ms,
+            until=end_ms,
+        )
+    except (
+        RuntimeError,
+        TypeError,
+        ValueError,
+    ) as exc:
+        logging.warning(
+            "Replay archive exchange repair failed for %s (%s-%s): %s",
+            symbol,
+            start_ms,
+            end_ms,
+            exc,
+        )
+        return []
+    finally:
+        await exchange.close()
+
+    exchange_rows: list[dict[str, float | str]] = []
+    for candle in candles:
+        if not isinstance(candle, (list, tuple)) or len(candle) < 6:
+            continue
+        timestamp_ms = _parse_optional_ms(candle[0])
+        if timestamp_ms is None or timestamp_ms < start_ms or timestamp_ms > end_ms:
+            continue
+        archive_row = _build_archive_row(
+            timestamp=timestamp_ms,
+            open_price=candle[1],
+            high_price=candle[2],
+            low_price=candle[3],
+            close_price=candle[4],
+            volume=candle[5],
+        )
+        if archive_row is not None:
+            exchange_rows.append(archive_row)
+
+    return _merge_archive_source_rows(exchange_rows, None)
+
+
 async def archive_replay_candles_for_deal(
     deal_id: str,
     symbol: str,
@@ -218,34 +294,10 @@ async def archive_replay_candles_for_deal(
         start_ms=start_ms,
         end_ms=end_ms,
     )
-    latest_archived_ms = await _get_latest_archived_timestamp_ms(
+    archived_timestamps = await _get_archived_timestamps_ms(
         normalized_deal_id,
         conn=conn,
     )
-    latest_persisted_ms = await _get_latest_persisted_ticker_timestamp_ms(
-        normalized_symbol,
-        start_ms=start_ms,
-        end_ms=end_ms,
-        connection=connection,
-    )
-    latest_live_ms = (
-        _parse_optional_ms(live_row["timestamp"]) if live_row is not None else None
-    )
-    latest_source_ms = (
-        max(
-            timestamp_ms
-            for timestamp_ms in (latest_persisted_ms, latest_live_ms)
-            if timestamp_ms is not None
-        )
-        if latest_persisted_ms is not None or latest_live_ms is not None
-        else None
-    )
-    if (
-        latest_archived_ms is not None
-        and latest_source_ms is not None
-        and latest_archived_ms >= latest_source_ms
-    ):
-        return 0
 
     ticker_rows = await connection.execute_query_dict(
         "SELECT timestamp, open, high, low, close, volume "
@@ -260,10 +312,59 @@ async def archive_replay_candles_for_deal(
         ticker_rows,
         live_row,
     )
-    if not source_rows:
+    timeframe_ms = max(
+        1,
+        timeframe_to_milliseconds(
+            resolve_timeframe((await Config.instance()).snapshot())
+        ),
+    )
+    source_timestamps = _extract_archive_timestamps_ms(source_rows)
+    best_source_rows = source_rows
+    best_score = _score_archive_timestamps(
+        source_timestamps,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        timeframe_ms=timeframe_ms,
+    )
+    archived_score = _score_archive_timestamps(
+        archived_timestamps,
+        start_ms=start_ms,
+        end_ms=end_ms,
+        timeframe_ms=timeframe_ms,
+    )
+
+    should_try_exchange_repair = live_row is None and (
+        (bool(archived_timestamps) and archived_score[0] == 0)
+        or (not archived_timestamps and len(source_rows) <= 2)
+    )
+    if should_try_exchange_repair:
+        exchange_rows = await _fetch_exchange_archive_rows(
+            normalized_symbol,
+            start_ms=start_ms,
+            end_ms=end_ms,
+        )
+        exchange_timestamps = _extract_archive_timestamps_ms(exchange_rows)
+        exchange_score = _score_archive_timestamps(
+            exchange_timestamps,
+            start_ms=start_ms,
+            end_ms=end_ms,
+            timeframe_ms=timeframe_ms,
+        )
+        if exchange_score > best_score:
+            best_source_rows = exchange_rows
+            best_score = exchange_score
+            source_timestamps = exchange_timestamps
+
+    if not best_source_rows:
         return 0
 
-    if latest_archived_ms is not None:
+    if live_row is None and archived_timestamps:
+        if best_score <= archived_score:
+            return 0
+        if source_timestamps == archived_timestamps:
+            return 0
+
+    if archived_timestamps:
         if conn is not None:
             await model.TradeReplayCandles.filter(deal_id=normalized_deal_id).using_db(
                 conn
@@ -282,7 +383,7 @@ async def archive_replay_candles_for_deal(
             close=float(row["close"]),
             volume=float(row["volume"]),
         )
-        for row in source_rows
+        for row in best_source_rows
     ]
     if conn is not None:
         await model.TradeReplayCandles.bulk_create(archive_rows, using_db=conn)
