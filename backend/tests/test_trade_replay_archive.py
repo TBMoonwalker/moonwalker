@@ -1,6 +1,7 @@
 import json
 import os
 
+import ccxt.async_support as ccxt
 import pytest
 from service.data import Data
 from service.replay_candles import archive_replay_candles_for_deal
@@ -429,6 +430,112 @@ async def test_archive_replay_candles_repairs_sparse_archive_from_exchange_histo
 
     assert archived == 4
     assert archived_timestamps == [0, 14_400_000, 28_800_000, 43_200_000]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_archive_replay_candles_keeps_sparse_archive_when_exchange_repair_fails(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _init_test_db(tmp_path, monkeypatch)
+
+    import model
+    import service.replay_candles as replay_module
+
+    class _FakeConfig:
+        def snapshot(self) -> dict[str, str]:
+            return {"exchange": "binance", "timeframe": "4h"}
+
+    class _FailingExchange:
+        async def get_history_for_symbol(
+            self,
+            config: dict[str, str],
+            symbol: str,
+            timeframe: str,
+            limit: int = 1,
+            since: int = 0,
+            until: int | None = None,
+        ) -> list[list[float]]:
+            raise ccxt.NetworkError("boom")
+
+        async def close(self) -> None:
+            return None
+
+    async def _fake_config_instance() -> _FakeConfig:
+        return _FakeConfig()
+
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_PRE_ROLL_MS", 0)
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_POST_ROLL_MS", 0)
+    monkeypatch.setattr(replay_module, "get_live_candle_snapshot", lambda _symbol: None)
+    monkeypatch.setattr(replay_module.Config, "instance", _fake_config_instance)
+    monkeypatch.setattr(replay_module, "Exchange", _FailingExchange)
+
+    deal_id = "5d5d5d5d-5555-4444-8888-555555555555"
+    symbol = "ABC/USDT"
+
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="buy",
+        role="base_order",
+        timestamp="0",
+        price=10.0,
+        amount=1.0,
+        ordersize=10.0,
+        fee=0.0,
+    )
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="sell",
+        role="final_sell",
+        timestamp="43200000",
+        price=13.0,
+        amount=1.0,
+        ordersize=13.0,
+        fee=0.0,
+    )
+
+    for timestamp, close_price in (
+        (0, 10.0),
+        (43_200_000, 13.0),
+    ):
+        await model.Tickers.create(
+            timestamp=str(timestamp),
+            symbol=symbol,
+            open=close_price - 0.2,
+            high=close_price + 0.2,
+            low=close_price - 0.4,
+            close=close_price,
+            volume=10.0,
+        )
+        await model.TradeReplayCandles.create(
+            deal_id=deal_id,
+            symbol=symbol,
+            timestamp=str(timestamp),
+            open=close_price - 0.2,
+            high=close_price + 0.2,
+            low=close_price - 0.4,
+            close=close_price,
+            volume=10.0,
+        )
+
+    archived = await archive_replay_candles_for_deal(
+        deal_id,
+        symbol,
+        open_date="0",
+        close_date="43200000",
+    )
+
+    archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).values(
+        "timestamp"
+    )
+    archived_timestamps = sorted(int(row["timestamp"]) for row in archived_rows)
+
+    assert archived == 0
+    assert archived_timestamps == [0, 43_200_000]
 
     await Tortoise.close_connections()
 

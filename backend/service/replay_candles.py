@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import ccxt.async_support as ccxt
 import helper
 import model
 from service.config import Config, resolve_timeframe
@@ -229,6 +230,8 @@ async def _fetch_exchange_archive_rows(
             until=end_ms,
         )
     except (
+        ccxt.BaseError,
+        OSError,
         RuntimeError,
         TypeError,
         ValueError,
