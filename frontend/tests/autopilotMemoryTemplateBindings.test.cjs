@@ -29,6 +29,10 @@ const pageSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'views', 'AutopilotMemoryView.vue'),
     'utf8',
 )
+const statisticsSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'components', 'Statistics.vue'),
+    'utf8',
+)
 
 test('overview workspace renders the Autopilot preview section', () => {
     assert.match(overviewSource, /ControlCenterAutopilotPreview/)
@@ -41,6 +45,15 @@ test('preview exposes the required Autopilot actions and state copy', () => {
     assert.match(previewSource, /Tune Autopilot/)
     assert.match(previewSource, /Learning from/)
     assert.match(previewSource, /Adaptive TP band/)
+})
+
+test('main dashboard Autopilot card opens the Autopilot page', () => {
+    assert.match(statisticsSource, /role="link"/)
+    assert.match(statisticsSource, /tabindex="0"/)
+    assert.match(statisticsSource, /aria-label="Open Autopilot page"/)
+    assert.match(statisticsSource, /@click="openAutopilotPage"/)
+    assert.match(statisticsSource, /@keydown\.enter\.prevent="openAutopilotPage"/)
+    assert.match(statisticsSource, /router\.push\(\{ name: 'controlCenterAutopilot' \}\)/)
 })
 
 test('full Autopilot page stays read-only and links tuning back to Advanced', () => {

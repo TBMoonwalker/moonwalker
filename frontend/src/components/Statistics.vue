@@ -22,7 +22,15 @@
                     :value="formatFixed2(upnl)"
                 />
             </div>
-            <div class="stat-cell autopilot-cell">
+            <div
+                class="stat-cell autopilot-cell"
+                role="link"
+                tabindex="0"
+                aria-label="Open Autopilot page"
+                @click="openAutopilotPage"
+                @keydown.enter.prevent="openAutopilotPage"
+                @keydown.space.prevent="openAutopilotPage"
+            >
                 <div class="autopilot-stat">
                     <span class="autopilot-label">Autopilot mode</span>
                     <span
@@ -51,6 +59,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
 import {
@@ -61,6 +70,7 @@ import {
 } from '@vicons/ionicons5'
 import { formatAutopilotMemoryHint } from '../autopilot/presentation'
 
+const router = useRouter()
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
 const hasStatisticsData = computed(() => statistics_data.hasReceivedData.value)
@@ -216,6 +226,10 @@ function formatBlockReason(value: string): string {
     return value.replaceAll('_', ' ')
 }
 
+function openAutopilotPage(): void {
+    void router.push({ name: 'controlCenterAutopilot' })
+}
+
 </script>
 
 <style scoped>
@@ -271,6 +285,21 @@ function formatBlockReason(value: string): string {
     gap: 6px;
     height: 100%;
     width: 100%;
+}
+
+.autopilot-cell {
+    cursor: pointer;
+    transition:
+        border-color 120ms ease,
+        box-shadow 120ms ease,
+        transform 120ms ease;
+}
+
+.autopilot-cell:hover,
+.autopilot-cell:focus-visible {
+    border-color: rgba(29, 92, 73, 0.26);
+    box-shadow: 0 10px 24px rgba(24, 33, 29, 0.08);
+    transform: translateY(-1px);
 }
 
 .autopilot-label {
