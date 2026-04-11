@@ -20,12 +20,21 @@ class DummyTrades:
         return self
 
 
+class DummyOpenTrades:
+    @classmethod
+    def all(cls):
+        return cls()
+
+    async def values(self, *args, **kwargs) -> list:
+        return []
+
+
 @pytest.mark.asyncio
 async def test_sym_signals_run_triggers_buy_order(monkeypatch) -> None:
     watcher_queue = asyncio.Queue()
     plugin = SignalPlugin(watcher_queue)
 
-    monkeypatch.setattr(model, "Trades", DummyTrades)
+    monkeypatch.setattr(model, "OpenTrades", DummyOpenTrades)
 
     class DummyAsyncClient:
         def __init__(self):
@@ -110,7 +119,7 @@ async def test_sym_signals_idle_timeout_does_not_force_immediate_reconnect(
     watcher_queue = asyncio.Queue()
     plugin = SignalPlugin(watcher_queue)
 
-    monkeypatch.setattr(model, "Trades", DummyTrades)
+    monkeypatch.setattr(model, "OpenTrades", DummyOpenTrades)
 
     class DummyAsyncClient:
         connect_calls = 0
@@ -205,7 +214,7 @@ async def test_sym_signals_idle_warning_mentions_no_events(monkeypatch) -> None:
     plugin.SOCKET_IDLE_TIMEOUT_SECONDS = 1
     plugin.MAX_IDLE_TIMEOUTS_BEFORE_RECONNECT = 2
 
-    monkeypatch.setattr(model, "Trades", DummyTrades)
+    monkeypatch.setattr(model, "OpenTrades", DummyOpenTrades)
 
     class DummyAsyncClient:
         def __init__(self):
@@ -262,7 +271,7 @@ async def test_sym_signals_error_event_logs_payload_and_uses_backoff(
     plugin.RECONNECT_DELAY_SECONDS = 3
     plugin.MAX_ERROR_RECONNECT_DELAY_SECONDS = 30
 
-    monkeypatch.setattr(model, "Trades", DummyTrades)
+    monkeypatch.setattr(model, "OpenTrades", DummyOpenTrades)
 
     class DummyAsyncClient:
         def __init__(self):
@@ -373,7 +382,7 @@ async def test_sym_signals_skips_buy_when_history_remains_insufficient(
     plugin._required_history_days = 30
     plugin._required_history_candles = 200
 
-    monkeypatch.setattr(model, "Trades", DummyTrades)
+    monkeypatch.setattr(model, "OpenTrades", DummyOpenTrades)
 
     async def fake_check_entry_point(*_args, **_kwargs) -> bool:
         return True

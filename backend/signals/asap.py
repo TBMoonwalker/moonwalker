@@ -7,7 +7,6 @@ from typing import Any, Optional
 
 import helper
 import httpx
-import model
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
 from service.data import Data
@@ -16,6 +15,7 @@ from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
     build_common_runtime_settings,
+    get_active_open_symbols,
     is_max_bots_reached,
     resolve_max_bots_log_interval,
     update_waiting_log_state,
@@ -196,14 +196,16 @@ class SignalPlugin:
         return pairs
 
     @helper.async_ttl_cache(maxsize=1024, ttl=900)
-    async def __get_new_symbol_list(self, running_list: tuple) -> Optional[list[str]]:
+    async def __get_new_symbol_list(
+        self, running_symbols: tuple[str, ...]
+    ) -> Optional[list[str]]:
         """Get the list of new symbols to trade.
 
         Retrieves the symbol list from configuration, ensures history data exists
         for each symbol, and pushes them to watcher queue for processing.
 
         Args:
-            running_list: Tuple of currently running trade bots
+            running_symbols: Tuple of currently running trade symbols
 
         Returns:
             List of symbols to trade, or None if no symbol list configured
@@ -215,12 +217,6 @@ class SignalPlugin:
                 symbol_list = await self.__fetch_symbol_list_from_url(symbol_list)
             else:
                 symbol_list = symbol_list.split(",")
-
-            # Running symbols
-            running_symbols = [
-                f"{symbol.upper()}"
-                for botsuffix, symbol in [item.split("_") for item in running_list]
-            ]
 
             logging.debug("Fetched symbol list: %s", symbol_list)
 
@@ -395,23 +391,16 @@ class SignalPlugin:
             max_bots = await self.__check_max_bots()
             if not max_bots:
                 self._max_bots_blocked = False
-                running_trades = (
-                    await model.Trades.all().distinct().values_list("bot", flat=True)
-                )
-                symbol_list = await self.__get_new_symbol_list(tuple(running_trades))
+                running_symbols = tuple(await get_active_open_symbols())
+                symbol_list = await self.__get_new_symbol_list(running_symbols)
                 if symbol_list:
                     # Randomize symbols for new deals
                     random.shuffle(symbol_list)
                     for symbol in symbol_list:
-                        current_symbol = f"asap_{symbol}"
                         signal = await self.__check_entry_point(symbol)
                         # Check max bots again
                         max_bots = await self.__check_max_bots()
-                        if (
-                            current_symbol not in running_trades
-                            and not max_bots
-                            and signal
-                        ):
+                        if symbol not in running_symbols and not max_bots and signal:
                             logging.info("Triggering new trade for %s", symbol)
                             order = {
                                 "ordersize": self.config.get("bo", 12),

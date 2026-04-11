@@ -54,23 +54,26 @@ def test_resolve_max_bots_log_interval_clamps_invalid_values() -> None:
     assert resolve_max_bots_log_interval({"max_bots_log_interval_sec": "bad"}) == 60.0
 
 
-class _DummyTradesModel:
+class _DummyOpenTradesModel:
+    rows = []
+
     @classmethod
     def all(cls):
         return cls()
 
-    def distinct(self):
-        return self
-
-    async def values_list(self, *_args, **_kwargs):
-        return ["bot-a", "bot-b"]
+    async def values(self, *_args, **_kwargs):
+        return list(self.rows)
 
 
 @pytest.mark.asyncio
 async def test_is_max_bots_reached_prefers_effective_autopilot_limit(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr(model, "Trades", _DummyTradesModel)
+    _DummyOpenTradesModel.rows = [
+        {"symbol": "BTC/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+        {"symbol": "ETH/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+    ]
+    monkeypatch.setattr(model, "OpenTrades", _DummyOpenTradesModel)
 
     statistic = types.SimpleNamespace(
         get_profit=_async_result(
@@ -89,6 +92,55 @@ async def test_is_max_bots_reached_prefers_effective_autopilot_limit(
     )
 
     assert blocked is True
+
+
+@pytest.mark.asyncio
+async def test_is_max_bots_reached_uses_active_open_trade_count(
+    monkeypatch,
+) -> None:
+    _DummyOpenTradesModel.rows = [
+        {"symbol": "BTC/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+        {"symbol": "ETH/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+        {"symbol": "SOL/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+    ]
+    monkeypatch.setattr(model, "OpenTrades", _DummyOpenTradesModel)
+
+    statistic = types.SimpleNamespace(get_profit=_async_result({}))
+    autopilot = types.SimpleNamespace(resolve_runtime_state=_async_result({}))
+
+    blocked = await is_max_bots_reached(
+        {"max_bots": 2},
+        statistic,
+        autopilot,
+    )
+
+    assert blocked is True
+
+
+@pytest.mark.asyncio
+async def test_is_max_bots_reached_ignores_unsellable_open_trade_rows(
+    monkeypatch,
+) -> None:
+    _DummyOpenTradesModel.rows = [
+        {"symbol": "BTC/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+        {
+            "symbol": "ETH/USDT",
+            "unsellable_amount": 0.42,
+            "unsellable_reason": "minimum_notional",
+        },
+    ]
+    monkeypatch.setattr(model, "OpenTrades", _DummyOpenTradesModel)
+
+    statistic = types.SimpleNamespace(get_profit=_async_result({}))
+    autopilot = types.SimpleNamespace(resolve_runtime_state=_async_result({}))
+
+    blocked = await is_max_bots_reached(
+        {"max_bots": 2},
+        statistic,
+        autopilot,
+    )
+
+    assert blocked is False
 
 
 def _async_result(value):

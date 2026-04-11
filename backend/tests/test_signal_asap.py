@@ -2,22 +2,9 @@ import asyncio
 import types
 from typing import Any
 
-import model
 import pytest
 import signals.asap as asap_module
 from signals.asap import SignalPlugin
-
-
-class DummyTrades:
-    @classmethod
-    def all(cls):
-        return cls()
-
-    async def values_list(self, *args, **kwargs) -> list:
-        return []
-
-    def distinct(self) -> Any:
-        return self
 
 
 @pytest.mark.asyncio
@@ -25,8 +12,7 @@ async def test_asap_run_triggers_buy_order(monkeypatch) -> None:
     watcher_queue = asyncio.Queue()
     plugin = SignalPlugin(watcher_queue)
 
-    # Patch model.Trades chain to return no running trades.
-    monkeypatch.setattr(model, "Trades", DummyTrades)
+    monkeypatch.setattr(asap_module, "get_active_open_symbols", _async_symbols([]))
 
     # Force one iteration by flipping status after first sleep.
     async def fake_sleep(_) -> None:
@@ -64,6 +50,13 @@ async def test_asap_run_triggers_buy_order(monkeypatch) -> None:
     assert len(orders) == 1
     assert orders[0]["symbol"] == "BTC/USDT"
     assert orders[0]["ordersize"] == 10
+
+
+def _async_symbols(symbols: list[str]):
+    async def _inner() -> list[str]:
+        return list(symbols)
+
+    return _inner
 
 
 @pytest.mark.asyncio

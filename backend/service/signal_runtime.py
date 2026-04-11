@@ -93,6 +93,25 @@ def update_waiting_log_state(
     return True, now, True
 
 
+async def get_active_open_symbols() -> list[str]:
+    """Return active open-trade symbols excluding unsellable remnants."""
+    open_trade_rows = await model.OpenTrades.all().values(
+        "symbol",
+        "unsellable_amount",
+        "unsellable_reason",
+    )
+    active_symbols: list[str] = []
+    for row in open_trade_rows:
+        if float(row.get("unsellable_amount") or 0.0) > 0 and row.get(
+            "unsellable_reason"
+        ):
+            continue
+        symbol = str(row.get("symbol") or "").strip().upper()
+        if symbol:
+            active_symbols.append(symbol)
+    return active_symbols
+
+
 async def is_max_bots_reached(
     config: dict[str, Any],
     statistic: Statistic,
@@ -100,7 +119,7 @@ async def is_max_bots_reached(
 ) -> bool:
     """Return whether the configured max-bot limit currently blocks new trades."""
     max_bots = int(config.get("max_bots", 0) or 0)
-    all_bots = await model.Trades.all().distinct().values_list("bot", flat=True)
+    active_symbols = await get_active_open_symbols()
     profit = await statistic.get_profit()
     effective_max_bots = profit.get("autopilot_effective_max_bots")
     if effective_max_bots is None and config.get("autopilot", False):
@@ -111,4 +130,4 @@ async def is_max_bots_reached(
         effective_max_bots = runtime_state["effective_max_bots"]
     max_bots = int(effective_max_bots or max_bots)
 
-    return bool(all_bots) and len(all_bots) >= int(max_bots)
+    return bool(active_symbols) and len(active_symbols) >= int(max_bots)

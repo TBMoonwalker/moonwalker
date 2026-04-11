@@ -4,7 +4,6 @@ import asyncio
 from typing import Any
 
 import helper
-import model
 import socketio
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
@@ -14,6 +13,7 @@ from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
     build_common_runtime_settings,
+    get_active_open_symbols,
     is_max_bots_reached,
     parse_signal_settings,
     resolve_max_bots_log_interval,
@@ -400,14 +400,11 @@ class SignalPlugin:
         if not (is_entry_signal and token_old_enough):
             return
 
-        running_trades = (
-            await model.Trades.all().distinct().values_list("bot", flat=True)
-        )
-        current_symbol = f"symsignal_{symbol}"
-        if current_symbol in running_trades:
+        running_symbols = await get_active_open_symbols()
+        if symbol_full.upper() in running_symbols:
             return
 
-        logging.debug("Running trades: %s", running_trades)
+        logging.debug("Running trades: %s", running_symbols)
         logging.info("Triggering new trade for %s", symbol)
 
         if self.config.get("dynamic_dca", False) or self._required_history_candles > 0:
