@@ -306,7 +306,9 @@ function openAutopilotAdvanced(): void {
 }
 
 .page-copy {
-    max-width: 62ch;
+    flex: 1 1 min(40rem, 100%);
+    min-width: min(40rem, 100%);
+    max-width: none;
 }
 
 .page-title {
@@ -316,6 +318,7 @@ function openAutopilotAdvanced(): void {
     font-size: 2rem;
     font-weight: 700;
     letter-spacing: -0.03em;
+    white-space: nowrap;
 }
 
 .page-summary {
@@ -350,6 +353,12 @@ function openAutopilotAdvanced(): void {
     display: grid;
     gap: 14px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.board-columns section {
+    display: grid;
+    gap: 10px;
+    align-content: start;
 }
 
 .trust-row {
@@ -436,6 +445,14 @@ function openAutopilotAdvanced(): void {
     .board-columns,
     .selected-grid {
         grid-template-columns: 1fr;
+    }
+
+    .page-copy {
+        min-width: 0;
+    }
+
+    .page-title {
+        white-space: normal;
     }
 
     .page-actions {
