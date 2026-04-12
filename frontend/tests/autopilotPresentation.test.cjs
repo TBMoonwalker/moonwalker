@@ -7,6 +7,7 @@ const {
     formatAutopilotEvent,
     formatAutopilotFeaturedInsight,
     formatAutopilotMemoryHint,
+    formatAutopilotStatusBody,
     formatAutopilotStatusTitle,
 } = loadFrontendModule('src/autopilot/presentation.ts')
 
@@ -49,6 +50,25 @@ test('formatAutopilotStatusTitle distinguishes stale and learning states', () =>
             status: 'warming_up',
         }),
         'Autopilot is still learning',
+    )
+    assert.equal(
+        formatAutopilotStatusTitle({
+            stale: false,
+            status: 'fresh',
+            enabled: false,
+        }),
+        'Autopilot is off',
+    )
+})
+
+test('formatAutopilotStatusBody explains disabled ready state plainly', () => {
+    assert.equal(
+        formatAutopilotStatusBody({
+            stale: false,
+            status: 'fresh',
+            enabled: false,
+        }),
+        'Moonwalker has enough history to rank symbols, but it is not applying symbol trust until Autopilot is enabled.',
     )
 })
 

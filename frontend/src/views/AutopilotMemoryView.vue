@@ -284,10 +284,10 @@ function openAutopilotAdvanced(): void {
                                     :key="`${event.created_at}-${event.event_type}-${event.symbol}`"
                                     class="event-row"
                                 >
-                                    <div>
-                                        <p class="event-copy">{{ formatAutopilotEvent(event) }}</p>
-                                        <small>{{ formatAutopilotTimestamp(event.created_at) }}</small>
-                                    </div>
+                                    <p class="event-copy">{{ formatAutopilotEvent(event) }}</p>
+                                    <small class="event-meta">
+                                        {{ formatAutopilotTimestamp(event.created_at) }}
+                                    </small>
                                 </div>
                             </div>
                             <n-empty
@@ -467,10 +467,27 @@ function openAutopilotAdvanced(): void {
 }
 
 .event-row {
-    padding: 12px 14px;
+    padding: 10px 12px;
     border-radius: 10px;
     background: var(--mw-surface-card-muted);
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+}
+
+.event-copy {
+    margin: 0;
+    flex: 1 1 auto;
+}
+
+.event-meta {
+    flex: 0 0 auto;
+    color: var(--mw-color-text-secondary);
+    font-family: var(--mw-font-mono);
+    font-size: 0.78rem;
+    white-space: nowrap;
 }
 
 @media (max-width: 900px) {
@@ -494,6 +511,16 @@ function openAutopilotAdvanced(): void {
 
     .page-actions :deep(.n-button) {
         flex: 1 1 auto;
+    }
+
+    .event-row {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+    }
+
+    .event-meta {
+        white-space: normal;
     }
 }
 </style>

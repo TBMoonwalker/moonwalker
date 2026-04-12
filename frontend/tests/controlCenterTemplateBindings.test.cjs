@@ -291,9 +291,15 @@ test('control center target sections use dynamic element refs', () => {
         ),
         'expected live activation anchor to stay wired through the overview component',
     )
-    assert.ok(
+    assert.equal(
         overviewWorkspaceSource.includes(':ref="liveActivationRef"'),
-        'expected overview workspace to expose the live activation anchor ref',
+        false,
+    )
+    assert.ok(
+        overviewWorkspaceSource.includes(
+            ':ref="visibleBlockers.length === 0 ? liveActivationRef : undefined"',
+        ),
+        'expected overview workspace to expose the live activation anchor ref on the overview shell',
     )
     assert.ok(
         targetRegistrySource.includes(
@@ -804,6 +810,10 @@ test('control center delegates mission, mode, and overview presentation to dedic
         '<ControlCenterMissionPanel',
         '<ControlCenterModeStrip',
         '<ControlCenterOverviewWorkspace',
+        'function openMonitoringPage(): void {',
+        '@activate-live="handleActivateLiveTrading"',
+        "@open-config=\"handleModeSelect('setup')\"",
+        "@open-monitoring=\"openMonitoringPage\"",
     ]
     const requiredMissionPanelSnippets = [
         'Save changes',
@@ -811,16 +821,19 @@ test('control center delegates mission, mode, and overview presentation to dedic
         'The shared snapshot changed in another browser or tab.',
     ]
     const requiredModeStripSnippets = [
-        'Primary',
-        'Expert and utility',
+        'Operate',
+        'Configure',
+        'Utilities',
         "emit('select-mode', 'overview')",
         "emit('select-mode', 'utilities')",
     ]
     const requiredOverviewSnippets = [
-        'Targeted recovery cards',
-        'Calm operator overview',
-        'Activate live trading',
-        ':ref="liveActivationRef"',
+        'Recovery priorities',
+        'Operator overview',
+        'Operator systems',
+        'ControlCenterConfigPreview',
+        'ControlCenterMonitoringPreview',
+        ':ref="visibleBlockers.length === 0 ? liveActivationRef : undefined"',
     ]
 
     for (const snippet of requiredViewSnippets) {
@@ -849,7 +862,11 @@ test('control center delegates mission, mode, and overview presentation to dedic
     }
 
     assert.equal(
-        controlCenterViewSource.includes('Calm operator overview'),
+        controlCenterViewSource.includes('Operator overview'),
+        false,
+    )
+    assert.equal(
+        overviewWorkspaceSource.includes('Current operating baseline'),
         false,
     )
     assert.equal(

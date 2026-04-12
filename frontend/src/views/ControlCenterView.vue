@@ -319,6 +319,10 @@ function openAutopilotAdvanced(): void {
         query: { mode: 'advanced', target: 'autopilot' },
     })
 }
+
+function openMonitoringPage(): void {
+    void router.push({ name: 'monitoring' })
+}
 </script>
 
 <template>
@@ -363,14 +367,15 @@ function openAutopilotAdvanced(): void {
                     :autopilot-memory="autopilotMemory"
                     :autopilot-memory-error="autopilotMemoryError"
                     :autopilot-memory-loading="autopilotMemoryLoading"
-                    :exchange-currency="exchange.currency"
-                    :exchange-name="exchange.name"
+                    :config-trust-state="configTrustState"
+                    :formatted-trust-timestamp="formattedTrustTimestamp"
                     :live-activation-ref="bindTargetElement('live-activation')"
                     :readiness="readiness"
-                    :signal-source="signal.signal"
                     :visible-blockers="visibleBlockers"
                     @activate-live="handleActivateLiveTrading"
+                    @open-config="handleModeSelect('setup')"
                     @open-autopilot="openAutopilotMemoryPage"
+                    @open-monitoring="openMonitoringPage"
                     @select-target="guideToTarget"
                     @tune-autopilot="openAutopilotAdvanced"
                 />

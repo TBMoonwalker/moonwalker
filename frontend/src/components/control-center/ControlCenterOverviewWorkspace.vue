@@ -1,44 +1,54 @@
 <script setup lang="ts">
 import type { AutopilotMemoryPayload } from '../../autopilot/types'
 import type {
+    ControlCenterConfigTrustState,
     ControlCenterBlocker,
-    ControlCenterReadiness,
     ControlCenterTarget,
+    ControlCenterReadiness,
 } from '../../control-center/types'
 import ControlCenterAutopilotPreview from './ControlCenterAutopilotPreview.vue'
+import ControlCenterConfigPreview from './ControlCenterConfigPreview.vue'
+import ControlCenterMonitoringPreview from './ControlCenterMonitoringPreview.vue'
 
 defineProps<{
     activationLoading: boolean
     autopilotMemory: AutopilotMemoryPayload | null
     autopilotMemoryError: string | null
     autopilotMemoryLoading: boolean
-    exchangeCurrency: string | null | undefined
-    exchangeName: string | null | undefined
+    configTrustState: ControlCenterConfigTrustState
+    formattedTrustTimestamp: string | null
     liveActivationRef?: (element: Element | null) => void
     readiness: ControlCenterReadiness
-    signalSource: string | null | undefined
     visibleBlockers: ControlCenterBlocker[]
 }>()
 
 const emit = defineEmits<{
     'activate-live': []
+    'open-config': []
     'open-autopilot': []
+    'open-monitoring': []
     'select-target': [target: ControlCenterTarget]
     'tune-autopilot': []
 }>()
 </script>
 
 <template>
-    <n-card class="workspace-card mw-shell-card" content-style="padding: 18px 20px;">
+    <n-card
+        :ref="visibleBlockers.length === 0 ? liveActivationRef : undefined"
+        class="workspace-card mw-shell-card"
+        content-style="padding: 18px 20px;"
+        id="control-center-live-activation"
+    >
         <n-flex vertical :size="14">
             <n-text depth="3">
                 {{
                     visibleBlockers.length > 0
-                        ? 'Targeted recovery cards'
-                        : 'Calm operator overview'
+                        ? 'Recovery priorities'
+                        : 'Operator overview'
                 }}
             </n-text>
-            <n-flex :wrap="true" :size="[14, 14]">
+
+            <n-flex v-if="visibleBlockers.length > 0" :wrap="true" :size="[14, 14]">
                 <n-card
                     v-for="blocker in visibleBlockers"
                     :key="blocker.key"
@@ -63,82 +73,39 @@ const emit = defineEmits<{
                         </n-button>
                     </n-flex>
                 </n-card>
-
-                <template v-if="visibleBlockers.length === 0">
-                    <n-card size="small" class="status-card mw-muted-card">
-                        <n-flex vertical :size="10">
-                            <h2 class="status-card-title">Exchange connection</h2>
-                            <n-text depth="3">
-                                {{ exchangeName || 'Not configured' }} /
-                                {{ exchangeCurrency || 'No quote currency' }}
-                            </n-text>
-                            <n-button secondary @click="emit('select-target', 'exchange')">
-                                Review exchange
-                            </n-button>
-                        </n-flex>
-                    </n-card>
-
-                    <n-card size="small" class="status-card mw-muted-card">
-                        <n-flex vertical :size="10">
-                            <h2 class="status-card-title">Signal source</h2>
-                            <n-text depth="3">
-                                {{ signalSource || 'Not configured' }}
-                            </n-text>
-                            <n-button secondary @click="emit('select-target', 'signal')">
-                                Review signal source
-                            </n-button>
-                        </n-flex>
-                    </n-card>
-
-                    <div
-                        :ref="liveActivationRef"
-                        class="status-card"
-                        id="control-center-live-activation"
-                    >
-                        <n-card size="small" class="mw-muted-card">
-                            <n-flex vertical :size="10">
-                                <div tabindex="-1" data-control-center-anchor>
-                                    <h2 class="status-card-title">
-                                        {{ readiness.dryRun ? 'Trading mode: Dry run' : 'Trading mode: Live' }}
-                                    </h2>
-                                    <n-text depth="3">
-                                        {{
-                                            readiness.dryRun
-                                                ? 'Moonwalker is simulating orders. Use the guarded activation action to go live.'
-                                                : 'Moonwalker is submitting live orders to the configured exchange.'
-                                        }}
-                                    </n-text>
-                                </div>
-                                <n-button
-                                    v-if="readiness.dryRun"
-                                    type="primary"
-                                    strong
-                                    :loading="activationLoading"
-                                    @click="emit('activate-live')"
-                                >
-                                    Activate live trading
-                                </n-button>
-                                <n-button
-                                    v-else
-                                    secondary
-                                    @click="emit('select-target', 'exchange')"
-                                >
-                                    Review safeguards
-                                </n-button>
-                            </n-flex>
-                        </n-card>
-                    </div>
-                </template>
             </n-flex>
 
-            <ControlCenterAutopilotPreview
-                v-if="visibleBlockers.length === 0"
-                :error="autopilotMemoryError"
-                :loading="autopilotMemoryLoading"
-                :memory="autopilotMemory"
-                @open-autopilot="emit('open-autopilot')"
-                @tune-autopilot="emit('tune-autopilot')"
-            />
+            <template v-else>
+                <div class="overview-section">
+                    <div class="section-copy">
+                        <h2 class="section-title">Operator systems</h2>
+                        <n-text depth="3">
+                            Configuration status, Autopilot, and Monitoring surfaces that explain what Moonwalker is doing right now.
+                        </n-text>
+                    </div>
+
+                    <div class="systems-grid">
+                        <ControlCenterConfigPreview
+                            :activation-loading="activationLoading"
+                            :config-trust-state="configTrustState"
+                            :formatted-trust-timestamp="formattedTrustTimestamp"
+                            :readiness="readiness"
+                            @activate-live="emit('activate-live')"
+                            @open-config="emit('open-config')"
+                        />
+                        <ControlCenterAutopilotPreview
+                            :error="autopilotMemoryError"
+                            :loading="autopilotMemoryLoading"
+                            :memory="autopilotMemory"
+                            @open-autopilot="emit('open-autopilot')"
+                            @tune-autopilot="emit('tune-autopilot')"
+                        />
+                        <ControlCenterMonitoringPreview
+                            @open-monitoring="emit('open-monitoring')"
+                        />
+                    </div>
+                </div>
+            </template>
         </n-flex>
     </n-card>
 </template>
@@ -148,12 +115,40 @@ const emit = defineEmits<{
     width: 100%;
 }
 
+.overview-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.section-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 60ch;
+}
+
+.section-title {
+    margin: 0;
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
+    font-size: 1.12rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+}
+.systems-grid {
+    display: grid;
+    gap: 14px;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    align-items: stretch;
+}
+
 .status-card {
-    min-width: min(320px, 100%);
-    flex: 1 1 280px;
+    min-width: 0;
 }
 
 .status-card-title {
+    margin: 0;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
@@ -165,5 +160,11 @@ const emit = defineEmits<{
     color: #f7f8f6;
     font-weight: 700;
     letter-spacing: 0.01em;
+}
+
+@media (max-width: 768px) {
+    .systems-grid {
+        grid-template-columns: 1fr;
+    }
 }
 </style>

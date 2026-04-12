@@ -98,7 +98,7 @@ export function formatAutopilotStatusTitle(
         return 'Autopilot is still learning'
     }
     if (payload.status === 'fresh' && !payload.enabled) {
-        return 'Autopilot memory is ready'
+        return 'Autopilot is off'
     }
     if (payload.status === 'fresh') {
         return 'Autopilot is making trust-based calls'
@@ -119,7 +119,7 @@ export function formatAutopilotStatusBody(
         return `Learning from ${payload.warmup.current_closes} of ${payload.warmup.required_closes} closes before adaptive TP turns on.`
     }
     if (payload.status === 'fresh' && !payload.enabled) {
-        return 'Moonwalker has enough history to rank symbols, but Autopilot is not applying it yet.'
+        return 'Moonwalker has enough history to rank symbols, but it is not applying symbol trust until Autopilot is enabled.'
     }
     if (payload.status === 'fresh') {
         return 'Moonwalker is using recent close quality and speed to adjust trust symbol by symbol.'

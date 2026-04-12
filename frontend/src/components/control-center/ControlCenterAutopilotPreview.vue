@@ -39,7 +39,6 @@ const trustSummary = computed(() => {
         <n-flex vertical :size="14">
             <n-flex justify="space-between" align="start" :wrap="true" :size="[12, 12]">
                 <div class="preview-copy">
-                    <n-text depth="3">Autopilot Memory</n-text>
                     <h2 class="preview-title">{{ statusTitle }}</h2>
                     <n-text depth="3">{{ statusBody }}</n-text>
                 </div>
@@ -127,6 +126,7 @@ const trustSummary = computed(() => {
 <style scoped>
 .autopilot-preview {
     width: 100%;
+    min-height: 100%;
     border-color: rgba(29, 92, 73, 0.14);
     background: var(--mw-surface-shell);
     box-shadow: var(--mw-shadow-card);

@@ -63,6 +63,7 @@ defineEmits<{
                         Save changes
                     </n-button>
                     <n-button
+                        v-if="!(readiness.complete && readiness.dryRun)"
                         type="primary"
                         strong
                         :loading="activationLoading"
