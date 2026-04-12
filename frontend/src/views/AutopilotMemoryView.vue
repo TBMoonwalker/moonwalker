@@ -180,6 +180,12 @@ function openAutopilotAdvanced(): void {
                                                 · {{ row.trust_score.toFixed(1) }}
                                             </span>
                                         </button>
+                                        <div
+                                            v-if="!data.trust_board.favored.length"
+                                            class="trust-empty"
+                                        >
+                                            No favored symbols in the latest snapshot.
+                                        </div>
                                     </section>
 
                                     <section>
@@ -200,6 +206,12 @@ function openAutopilotAdvanced(): void {
                                                 · {{ row.trust_score.toFixed(1) }}
                                             </span>
                                         </button>
+                                        <div
+                                            v-if="!data.trust_board.cooling.length"
+                                            class="trust-empty"
+                                        >
+                                            No cooling symbols in the latest snapshot.
+                                        </div>
                                     </section>
                                 </div>
                             </n-flex>
@@ -343,9 +355,15 @@ function openAutopilotAdvanced(): void {
     letter-spacing: -0.02em;
 }
 
+.page-section-card {
+    height: auto;
+    align-self: start;
+}
+
 .grid-shell {
     display: grid;
     gap: 16px;
+    align-items: start;
     grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
 }
 
@@ -359,11 +377,15 @@ function openAutopilotAdvanced(): void {
     display: grid;
     gap: 10px;
     align-content: start;
+    padding: 14px;
+    border-radius: 12px;
+    background: var(--mw-surface-card-subtle);
+    border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
 }
 
 .trust-row {
     width: 100%;
-    padding: 12px 14px;
+    padding: 11px 12px;
     border-radius: 10px;
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
     background: var(--mw-surface-card-muted);
@@ -401,6 +423,17 @@ function openAutopilotAdvanced(): void {
     font-family: var(--mw-font-mono);
     font-size: 0.82rem;
     white-space: nowrap;
+}
+
+.trust-empty {
+    min-height: 84px;
+    padding: 0 2px;
+    color: var(--mw-color-text-secondary);
+    font-family: var(--mw-font-body);
+    font-size: 0.9rem;
+    line-height: 1.5;
+    display: flex;
+    align-items: center;
 }
 
 .selected-grid {
