@@ -55,22 +55,28 @@ const statisticsSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'Statistics.vue'),
     'utf8',
 )
+const headerSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'components', 'AppHeader.vue'),
+    'utf8',
+)
 
 test('overview workspace renders the Autopilot preview section', () => {
     assert.match(overviewSource, /ControlCenterAutopilotPreview/)
     assert.match(overviewSource, /ControlCenterConfigPreview/)
     assert.match(overviewSource, /ControlCenterMonitoringPreview/)
     assert.match(overviewSource, /@open-config/)
-    assert.match(overviewSource, /@open-autopilot/)
     assert.match(overviewSource, /@open-monitoring/)
+    assert.match(overviewSource, /@toggle-autopilot/)
     assert.match(overviewSource, /@tune-autopilot/)
 })
 
 test('preview exposes the required Autopilot actions and state copy', () => {
-    assert.match(previewSource, /Open Autopilot/)
+    assert.match(previewSource, /Activate Autopilot/)
+    assert.match(previewSource, /Deactivate Autopilot/)
     assert.match(previewSource, /Tune Autopilot/)
     assert.match(previewSource, /Learning from/)
     assert.match(previewSource, /Adaptive TP band/)
+    assert.doesNotMatch(previewSource, /Autopilot is off'\s*"/)
     assert.doesNotMatch(previewSource, />Autopilot Memory</)
 })
 
@@ -109,4 +115,9 @@ test('config preview exposes the required config action and trust copy', () => {
     )
     assert.match(configPreviewSource, /Trading posture/)
     assert.doesNotMatch(configPreviewSource, />Configuration</)
+})
+
+test('header navigation keeps Control Center and removes duplicate Monitoring entry', () => {
+    assert.match(headerSource, /Control Center/)
+    assert.doesNotMatch(headerSource, /label:\s*'Monitoring'/)
 })

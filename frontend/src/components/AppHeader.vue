@@ -3,7 +3,7 @@ import { computed, h, type Component } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import type { MenuOption } from 'naive-ui/es/menu'
 import { NIcon } from 'naive-ui/es/icon'
-import { PulseOutline, SettingsOutline } from '@vicons/ionicons5'
+import { SettingsOutline } from '@vicons/ionicons5'
 import logoImage from '../assets/logo.png'
 
 function renderMenuIcon(icon: Component) {
@@ -18,11 +18,6 @@ const router = useRouter()
 
 const menuOptions: MenuOption[] = [
   {
-    label: 'Monitoring',
-    key: 'monitoring',
-    icon: renderMenuIcon(PulseOutline),
-  },
-  {
     label: 'Control Center',
     key: 'controlCenter',
     icon: renderMenuIcon(SettingsOutline),
@@ -34,21 +29,12 @@ const activeMenuKey = computed<string | null>(() => {
     return 'controlCenter'
   }
 
-  if (route.name === 'monitoring') {
-    return 'monitoring'
-  }
-
   return null
 })
 
 function handleMenuSelect(key: string | number): void {
   if (key === 'controlCenter') {
     void router.push({ name: 'controlCenter' })
-    return
-  }
-
-  if (key === 'monitoring') {
-    void router.push({ name: 'monitoring' })
   }
 }
 </script>

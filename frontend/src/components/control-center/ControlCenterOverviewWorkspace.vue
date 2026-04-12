@@ -12,9 +12,11 @@ import ControlCenterMonitoringPreview from './ControlCenterMonitoringPreview.vue
 
 defineProps<{
     activationLoading: boolean
+    autopilotEnabled: boolean
     autopilotMemory: AutopilotMemoryPayload | null
     autopilotMemoryError: string | null
     autopilotMemoryLoading: boolean
+    autopilotToggleLoading: boolean
     configTrustState: ControlCenterConfigTrustState
     formattedTrustTimestamp: string | null
     liveActivationRef?: (element: Element | null) => void
@@ -25,9 +27,9 @@ defineProps<{
 const emit = defineEmits<{
     'activate-live': []
     'open-config': []
-    'open-autopilot': []
     'open-monitoring': []
     'select-target': [target: ControlCenterTarget]
+    'toggle-autopilot': []
     'tune-autopilot': []
 }>()
 </script>
@@ -94,10 +96,12 @@ const emit = defineEmits<{
                             @open-config="emit('open-config')"
                         />
                         <ControlCenterAutopilotPreview
+                            :enabled="autopilotEnabled"
                             :error="autopilotMemoryError"
                             :loading="autopilotMemoryLoading"
                             :memory="autopilotMemory"
-                            @open-autopilot="emit('open-autopilot')"
+                            :toggle-loading="autopilotToggleLoading"
+                            @toggle-autopilot="emit('toggle-autopilot')"
                             @tune-autopilot="emit('tune-autopilot')"
                         />
                         <ControlCenterMonitoringPreview
@@ -140,7 +144,7 @@ const emit = defineEmits<{
     display: grid;
     gap: 14px;
     grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-    align-items: stretch;
+    align-items: start;
 }
 
 .status-card {

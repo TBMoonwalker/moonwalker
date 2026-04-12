@@ -99,12 +99,17 @@ const alertTitle = computed(() => {
 </script>
 
 <template>
-    <n-card class="config-preview" content-style="padding: 18px 20px;">
-        <n-flex vertical :size="14">
-            <n-flex justify="space-between" align="start" :wrap="true" :size="[12, 12]">
+    <n-card
+        class="config-preview"
+        content-style="padding: 18px 20px;"
+    >
+        <n-flex vertical :size="14" class="preview-stack">
+            <div class="preview-header">
                 <div class="preview-copy">
                     <h2 class="preview-title">{{ statusTitle }}</h2>
-                    <n-text depth="3">{{ statusBody }}</n-text>
+                    <n-text depth="3" class="preview-summary">
+                        {{ statusBody }}
+                    </n-text>
                 </div>
                 <div class="preview-actions">
                     <n-button
@@ -120,7 +125,7 @@ const alertTitle = computed(() => {
                         Open Setup
                     </n-button>
                 </div>
-            </n-flex>
+            </div>
 
             <n-alert
                 v-if="alertTitle"
@@ -159,7 +164,6 @@ const alertTitle = computed(() => {
 <style scoped>
 .config-preview {
     width: 100%;
-    min-height: 100%;
     border-color: rgba(29, 92, 73, 0.14);
     background: var(--mw-surface-shell);
     box-shadow: var(--mw-shadow-card);
@@ -176,14 +180,33 @@ const alertTitle = computed(() => {
 }
 
 .preview-copy {
-    max-width: 58ch;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .preview-actions {
     display: flex;
+    flex: 0 0 auto;
     gap: 8px;
     flex-wrap: wrap;
     justify-content: flex-end;
+}
+
+.preview-header {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: nowrap;
+}
+
+.preview-summary {
+    display: block;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .hero-insight {
@@ -236,8 +259,13 @@ const alertTitle = computed(() => {
 }
 
 @media (max-width: 768px) {
+    .preview-header {
+        flex-wrap: wrap;
+    }
+
     .preview-actions {
         width: 100%;
+        justify-content: flex-start;
     }
 
     .preview-actions :deep(.n-button) {
@@ -246,6 +274,10 @@ const alertTitle = computed(() => {
 
     .preview-metrics {
         grid-template-columns: 1fr;
+    }
+
+    .preview-summary {
+        white-space: normal;
     }
 }
 </style>

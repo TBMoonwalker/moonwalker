@@ -77,7 +77,7 @@ export function deriveControlCenterViewState(
             badge: 'Ready',
             title: 'Safe dry-run setup is ready',
             summary:
-                'The essential runtime is configured. Review the calm overview or activate live trading through the guarded action when you are ready.',
+                'The essential runtime is configured. Review the configuration or activate live trading when you are ready.',
             defaultMode: 'overview',
         }
     }

@@ -9,13 +9,15 @@ import {
 } from '../../autopilot/presentation'
 
 const props = defineProps<{
+    enabled: boolean
     error: string | null
     loading: boolean
+    toggleLoading: boolean
     memory: AutopilotMemoryPayload | null
 }>()
 
 const emit = defineEmits<{
-    'open-autopilot': []
+    'toggle-autopilot': []
     'tune-autopilot': []
 }>()
 
@@ -23,6 +25,9 @@ const statusTitle = computed(() => formatAutopilotStatusTitle(props.memory))
 const statusBody = computed(() => formatAutopilotStatusBody(props.memory))
 const featuredInsight = computed(() =>
     formatAutopilotFeaturedInsight(props.memory?.featured),
+)
+const primaryActionLabel = computed(() =>
+    props.enabled ? 'Deactivate Autopilot' : 'Activate Autopilot',
 )
 const trustSummary = computed(() => {
     if (!props.memory) {
@@ -35,22 +40,32 @@ const trustSummary = computed(() => {
 </script>
 
 <template>
-    <n-card class="autopilot-preview" content-style="padding: 18px 20px;">
-        <n-flex vertical :size="14">
-            <n-flex justify="space-between" align="start" :wrap="true" :size="[12, 12]">
+    <n-card
+        class="autopilot-preview"
+        content-style="padding: 18px 20px;"
+    >
+        <n-flex vertical :size="14" class="preview-stack">
+            <div class="preview-header">
                 <div class="preview-copy">
                     <h2 class="preview-title">{{ statusTitle }}</h2>
-                    <n-text depth="3">{{ statusBody }}</n-text>
+                    <n-text depth="3" class="preview-summary">
+                        {{ statusBody }}
+                    </n-text>
                 </div>
                 <div class="preview-actions">
-                    <n-button secondary @click="emit('open-autopilot')">
-                        Open Autopilot
+                    <n-button
+                        type="primary"
+                        strong
+                        :loading="toggleLoading"
+                        @click="emit('toggle-autopilot')"
+                    >
+                        {{ primaryActionLabel }}
                     </n-button>
-                    <n-button quaternary @click="emit('tune-autopilot')">
+                    <n-button secondary @click="emit('tune-autopilot')">
                         Tune Autopilot
                     </n-button>
                 </div>
-            </n-flex>
+            </div>
 
             <n-alert
                 v-if="error"
@@ -67,23 +82,19 @@ const trustSummary = computed(() => {
 
             <template v-else-if="memory">
                 <n-alert
-                    v-if="memory.stale || memory.status === 'warming_up' || !memory.enabled"
+                    v-if="memory.stale || memory.status === 'warming_up'"
                     :type="memory.stale ? 'warning' : 'info'"
                     :bordered="false"
                     :title="
                         memory.stale
                             ? 'Baseline Autopilot active'
-                            : memory.status === 'warming_up'
-                              ? 'Still learning'
-                              : 'Autopilot is off'
+                            : 'Still learning'
                     "
                 >
                     {{
                         memory.stale
                             ? 'Moonwalker kept the last known trust board visible while it falls back to baseline behavior.'
-                            : memory.status === 'warming_up'
-                              ? `Learning from ${memory.warmup.current_closes} of ${memory.warmup.required_closes} closes.`
-                              : 'Memory can keep learning even before you enable Autopilot.'
+                            : `Learning from ${memory.warmup.current_closes} of ${memory.warmup.required_closes} closes.`
                     }}
                 </n-alert>
 
@@ -126,7 +137,6 @@ const trustSummary = computed(() => {
 <style scoped>
 .autopilot-preview {
     width: 100%;
-    min-height: 100%;
     border-color: rgba(29, 92, 73, 0.14);
     background: var(--mw-surface-shell);
     box-shadow: var(--mw-shadow-card);
@@ -143,13 +153,32 @@ const trustSummary = computed(() => {
 }
 
 .preview-copy {
-    max-width: 58ch;
+    flex: 1 1 auto;
+    min-width: 0;
 }
 
 .preview-actions {
     display: flex;
+    flex: 0 0 auto;
     gap: 8px;
     flex-wrap: wrap;
+}
+
+.preview-header {
+    width: 100%;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: nowrap;
+}
+
+.preview-summary {
+    display: block;
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .hero-insight {
@@ -202,8 +231,13 @@ const trustSummary = computed(() => {
 }
 
 @media (max-width: 768px) {
+    .preview-header {
+        flex-wrap: wrap;
+    }
+
     .preview-actions {
         width: 100%;
+        justify-content: flex-start;
     }
 
     .preview-actions :deep(.n-button) {
@@ -212,6 +246,10 @@ const trustSummary = computed(() => {
 
     .preview-metrics {
         grid-template-columns: 1fr;
+    }
+
+    .preview-summary {
+        white-space: normal;
     }
 }
 </style>

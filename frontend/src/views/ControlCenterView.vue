@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import axios from 'axios'
 import { nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
@@ -27,7 +28,9 @@ import { useControlCenterTargetRegistry } from '../composables/useControlCenterT
 import { useControlCenterWorkspaceRefresh } from '../composables/useControlCenterWorkspaceRefresh'
 import { useControlCenterWorkspaceActions } from '../composables/useControlCenterWorkspaceActions'
 import { useAutopilotMemoryFeed } from '../composables/useAutopilotMemoryFeed'
+import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
+import { serializeConfigValue } from '../helpers/configForm'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,9 +40,11 @@ const {
     data: autopilotMemory,
     error: autopilotMemoryError,
     loading: autopilotMemoryLoading,
+    refresh: refreshAutopilotMemory,
 } = useAutopilotMemoryFeed()
 
 const loadRescueMessage = ref<string | null>(null)
+const autopilotToggleLoading = ref(false)
 
 const STALE_CHECK_INTERVAL_MS = 15000
 
@@ -309,10 +314,6 @@ useControlCenterLifecycle({
     syncSetupChoiceForReadiness,
 })
 
-function openAutopilotMemoryPage(): void {
-    void router.push({ name: 'controlCenterAutopilot' })
-}
-
 function openAutopilotAdvanced(): void {
     void router.push({
         name: 'controlCenter',
@@ -322,6 +323,73 @@ function openAutopilotAdvanced(): void {
 
 function openMonitoringPage(): void {
     void router.push({ name: 'monitoring' })
+}
+
+async function handleToggleAutopilot(): Promise<void> {
+    if (autopilotToggleLoading.value) {
+        return
+    }
+
+    if (isDirty.value) {
+        const blockedMessage =
+            'Save or discard the current draft before changing Autopilot from Overview.'
+        setTransitionIntent({
+            kind: 'save',
+            status: 'blocked',
+            message: blockedMessage,
+            at: Date.now(),
+            mode: 'advanced',
+            target: 'autopilot',
+        })
+        announce(blockedMessage)
+        return
+    }
+
+    const nextEnabled = !Boolean(autopilot.enabled)
+    autopilotToggleLoading.value = true
+
+    try {
+        await axios.post(buildMoonwalkerApiUrl('/config/multiple'), {
+            autopilot: serializeConfigValue(nextEnabled, 'bool'),
+        })
+
+        const syncResult = await syncControlCenterConfigChange('save')
+        if (syncResult.status === 'error') {
+            throw new Error(syncResult.message)
+        }
+
+        await refreshAutopilotMemory()
+
+        const successMessage = nextEnabled
+            ? 'Autopilot activated.'
+            : 'Autopilot disabled.'
+        setTransitionIntent({
+            kind: 'save',
+            status: 'success',
+            message: successMessage,
+            at: Date.now(),
+            mode: 'overview',
+        })
+        announce(successMessage)
+    } catch (error) {
+        const messageText = extractApiErrorMessage(
+            error,
+            'Autopilot update failed.',
+        )
+        setTransitionIntent({
+            kind: 'save',
+            status: axios.isAxiosError(error) && error.response?.status === 409
+                ? 'blocked'
+                : 'error',
+            message: messageText,
+            at: Date.now(),
+            mode: 'advanced',
+            target: 'autopilot',
+        })
+        announce(messageText)
+    } finally {
+        autopilotToggleLoading.value = false
+    }
 }
 </script>
 
@@ -364,9 +432,11 @@ function openMonitoringPage(): void {
             <template v-if="routeState.mode === 'overview'">
                 <ControlCenterOverviewWorkspace
                     :activation-loading="activationLoading"
+                    :autopilot-enabled="autopilot.enabled"
                     :autopilot-memory="autopilotMemory"
                     :autopilot-memory-error="autopilotMemoryError"
                     :autopilot-memory-loading="autopilotMemoryLoading"
+                    :autopilot-toggle-loading="autopilotToggleLoading"
                     :config-trust-state="configTrustState"
                     :formatted-trust-timestamp="formattedTrustTimestamp"
                     :live-activation-ref="bindTargetElement('live-activation')"
@@ -374,9 +444,9 @@ function openMonitoringPage(): void {
                     :visible-blockers="visibleBlockers"
                     @activate-live="handleActivateLiveTrading"
                     @open-config="handleModeSelect('setup')"
-                    @open-autopilot="openAutopilotMemoryPage"
                     @open-monitoring="openMonitoringPage"
                     @select-target="guideToTarget"
+                    @toggle-autopilot="handleToggleAutopilot"
                     @tune-autopilot="openAutopilotAdvanced"
                 />
             </template>
