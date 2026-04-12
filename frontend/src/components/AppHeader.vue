@@ -201,7 +201,7 @@ function handleMenuSelect(key: string | number): void {
 @media (max-width: 768px) {
   .header-shell {
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
   }
 
@@ -211,14 +211,35 @@ function handleMenuSelect(key: string | number): void {
   }
 
   .brand-title {
-    font-size: 1.05rem;
+    font-size: 0.98rem;
   }
 
   .brand-mark {
-    width: 54px;
-    height: 36px;
+    width: 48px;
+    height: 32px;
   }
 
+  .brand-caption {
+    display: none;
+  }
+
+  :deep(.header-menu .n-menu-item-content-header) {
+    display: block;
+    font-size: 0.72rem;
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  :deep(.header-menu .n-menu-item-content__icon) {
+    margin-right: 4px;
+  }
+
+  :deep(.header-menu .n-menu-item-content) {
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 480px) {
   :deep(.header-menu .n-menu-item-content-header) {
     display: none;
   }
