@@ -186,19 +186,17 @@ const alertTitle = computed(() => {
 
 .preview-actions {
     display: flex;
-    flex: 0 0 auto;
     gap: 8px;
     flex-wrap: wrap;
-    justify-content: flex-end;
+    justify-content: flex-start;
 }
 
 .preview-header {
     width: 100%;
     display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
+    flex-direction: column;
+    align-items: stretch;
     gap: 12px;
-    flex-wrap: nowrap;
 }
 
 .preview-summary {
