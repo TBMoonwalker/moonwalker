@@ -202,9 +202,9 @@ const alertTitle = computed(() => {
 .preview-summary {
     display: block;
     min-width: 0;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    color: var(--mw-color-text-secondary);
+    line-height: 1.55;
+    text-wrap: pretty;
 }
 
 .hero-insight {
