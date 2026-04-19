@@ -30,8 +30,13 @@ class ResolvedTradingPolicy:
     green_phase_extra_deals: int
     adaptive_tp_applied: bool
     adaptive_reason_code: str | None
+    adaptive_trust_direction: str | None
     adaptive_trust_score: float | None
+    adaptive_entry_size_applied: bool
+    adaptive_entry_reason_code: str | None
     memory_status: str | None
+    baseline_base_order: float
+    entry_order_size: float
     suggested_base_order: float | None
 
 
@@ -264,9 +269,10 @@ class Autopilot:
         config: dict[str, Any],
         *,
         available_quote: float | None | object = AVAILABLE_QUOTE_UNSET,
+        runtime_state: dict[str, Any] | None = None,
     ) -> ResolvedTradingPolicy:
         """Return the explicit per-symbol trading policy for one ticker cycle."""
-        runtime_state = await self.resolve_runtime_state(
+        runtime_state = runtime_state or await self.resolve_runtime_state(
             funds_locked,
             config,
             available_quote=available_quote,
@@ -286,17 +292,25 @@ class Autopilot:
             if runtime_state["uses_risk_overrides"]
             else 0
         )
-        suggested_base_order = float(config.get("bo", 0.0) or 0.0)
+        baseline_base_order = float(config.get("bo", 0.0) or 0.0)
+        suggested_base_order = baseline_base_order
+        entry_order_size = baseline_base_order
         adaptive_tp_applied = False
         adaptive_reason_code: str | None = None
+        adaptive_trust_direction: str | None = None
         adaptive_trust_score: float | None = None
+        adaptive_entry_size_applied = False
+        adaptive_entry_reason_code: str | None = None
 
         try:
             memory_policy = (await self._get_memory_service()).resolve_symbol_policy(
                 symbol,
                 enabled=bool(config.get("autopilot", False)),
                 baseline_take_profit=baseline_take_profit,
-                base_order_amount=suggested_base_order,
+                base_order_amount=baseline_base_order,
+                entry_sizing_enabled=bool(
+                    config.get("autopilot_symbol_entry_sizing_enabled", False)
+                ),
             )
         except Exception as exc:  # noqa: BLE001 - fail open to baseline policy.
             logging.warning(
@@ -307,16 +321,26 @@ class Autopilot:
             memory_policy = {
                 "apply_tp": False,
                 "take_profit": baseline_take_profit,
-                "suggested_base_order": suggested_base_order,
+                "suggested_base_order": baseline_base_order,
+                "apply_entry_size": False,
+                "entry_order_size": baseline_base_order,
+                "entry_reason_code": "memory_unavailable",
                 "memory_status": "stale",
                 "reason_code": "memory_unavailable",
                 "trust_score": None,
+                "trust_direction": "neutral",
             }
         take_profit = float(memory_policy["take_profit"])
         suggested_base_order = float(memory_policy["suggested_base_order"] or 0.0)
         adaptive_tp_applied = bool(memory_policy["apply_tp"])
         adaptive_reason_code = memory_policy.get("reason_code")
+        adaptive_trust_direction = memory_policy.get("trust_direction")
         adaptive_trust_score = memory_policy.get("trust_score")
+        adaptive_entry_size_applied = bool(memory_policy.get("apply_entry_size"))
+        adaptive_entry_reason_code = memory_policy.get("entry_reason_code")
+        entry_order_size = float(
+            memory_policy.get("entry_order_size") or baseline_base_order
+        )
 
         return ResolvedTradingPolicy(
             symbol=symbol,
@@ -330,7 +354,12 @@ class Autopilot:
             green_phase_extra_deals=int(runtime_state["green_phase_extra_deals"] or 0),
             adaptive_tp_applied=adaptive_tp_applied,
             adaptive_reason_code=adaptive_reason_code,
+            adaptive_trust_direction=adaptive_trust_direction,
             adaptive_trust_score=adaptive_trust_score,
-            memory_status=runtime_state.get("memory_status"),
+            adaptive_entry_size_applied=adaptive_entry_size_applied,
+            adaptive_entry_reason_code=adaptive_entry_reason_code,
+            memory_status=memory_policy.get("memory_status"),
+            baseline_base_order=baseline_base_order,
+            entry_order_size=entry_order_size,
             suggested_base_order=suggested_base_order,
         )

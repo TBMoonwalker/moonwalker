@@ -9,6 +9,7 @@ import type {
 import ControlCenterAutopilotPreview from './ControlCenterAutopilotPreview.vue'
 import ControlCenterConfigPreview from './ControlCenterConfigPreview.vue'
 import ControlCenterMonitoringPreview from './ControlCenterMonitoringPreview.vue'
+import ControlCenterOwnerConfidenceSummary from './ControlCenterOwnerConfidenceSummary.vue'
 
 defineProps<{
     activationLoading: boolean
@@ -85,6 +86,14 @@ const emit = defineEmits<{
                             Configuration status, Autopilot, and Monitoring surfaces that explain what Moonwalker is doing right now.
                         </n-text>
                     </div>
+
+                    <ControlCenterOwnerConfidenceSummary
+                        :autopilot-memory="autopilotMemory"
+                        :autopilot-memory-error="autopilotMemoryError"
+                        :config-trust-state="configTrustState"
+                        :formatted-trust-timestamp="formattedTrustTimestamp"
+                        :readiness="readiness"
+                    />
 
                     <div class="systems-grid">
                         <ControlCenterConfigPreview

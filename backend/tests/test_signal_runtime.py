@@ -10,6 +10,7 @@ from service.signal_runtime import (
     parse_signal_settings,
     resolve_max_bots_log_interval,
     resolve_signal_admission_batch,
+    resolve_signal_entry_orders,
 )
 
 
@@ -347,6 +348,57 @@ async def test_resolve_signal_admission_batch_respects_pending_reservations(
 
     assert third_batch.admitted_symbols == ["ETH/USDT"]
     await third_batch.release()
+
+
+@pytest.mark.asyncio
+async def test_resolve_signal_entry_orders_reuses_shared_autopilot_policy() -> None:
+    statistic = types.SimpleNamespace(
+        get_profit=_async_result({"funds_locked": 42.0}),
+    )
+    autopilot = types.SimpleNamespace(
+        resolve_runtime_state=_async_result(
+            {
+                "mode": "low",
+                "effective_max_bots": 2,
+                "green_phase_active": False,
+                "green_phase_extra_deals": 0,
+                "memory_status": "fresh",
+            }
+        ),
+        resolve_trading_policy=_async_result(
+            types.SimpleNamespace(
+                baseline_base_order=100.0,
+                suggested_base_order=115.0,
+                entry_order_size=115.0,
+                adaptive_entry_size_applied=True,
+                adaptive_entry_reason_code="quick_profitable_closes",
+                adaptive_trust_direction="favored",
+                adaptive_trust_score=72.0,
+                memory_status="fresh",
+            )
+        ),
+    )
+
+    decisions = await resolve_signal_entry_orders(
+        {
+            "autopilot": True,
+            "bo": 100.0,
+            "timeframe": "15m",
+        },
+        statistic,
+        autopilot,
+        ["BTC/USDT"],
+        signal_name="asap",
+        strategy_name="ema_cross",
+        timeframe="15m",
+    )
+
+    decision = decisions["BTC/USDT"]
+    assert decision.order_size == 115.0
+    assert decision.baseline_order_size == 100.0
+    assert decision.entry_size_applied is True
+    assert decision.reason_code == "quick_profitable_closes"
+    assert '"resolved_order_size": 115.0' in decision.metadata_json
 
 
 def _async_result(value):

@@ -42,8 +42,13 @@ def _build_policy(**overrides: object) -> ResolvedTradingPolicy:
         "green_phase_extra_deals": 0,
         "adaptive_tp_applied": False,
         "adaptive_reason_code": None,
+        "adaptive_trust_direction": None,
         "adaptive_trust_score": None,
+        "adaptive_entry_size_applied": False,
+        "adaptive_entry_reason_code": None,
         "memory_status": "fresh",
+        "baseline_base_order": 50.0,
+        "entry_order_size": 50.0,
         "suggested_base_order": 50.0,
     }
     payload.update(overrides)

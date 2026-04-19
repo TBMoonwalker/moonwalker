@@ -17,8 +17,10 @@ from service.signal_runtime import (
     get_active_open_symbols,
     is_max_bots_reached,
     log_signal_admission_decisions,
+    log_signal_entry_order_decisions,
     resolve_max_bots_log_interval,
     resolve_signal_admission_batch,
+    resolve_signal_entry_orders,
     update_waiting_log_state,
 )
 from service.statistic import Statistic
@@ -418,12 +420,25 @@ class SignalPlugin:
 
                     if admission_batch.admitted_symbols:
                         await self.watcher_queue.put(admission_batch.admitted_symbols)
+                        entry_orders = await resolve_signal_entry_orders(
+                            self.config,
+                            self.statistic,
+                            self.autopilot,
+                            admission_batch.admitted_symbols,
+                            signal_name="asap",
+                            strategy_name=(
+                                str(self.config.get("signal_strategy") or "") or None
+                            ),
+                            timeframe=self._strategy_timeframe,
+                        )
+                        log_signal_entry_order_decisions(entry_orders.values())
 
                     try:
                         for symbol in admission_batch.admitted_symbols:
+                            entry_order = entry_orders[symbol]
                             logging.info("Triggering new trade for %s", symbol)
                             order = {
-                                "ordersize": self.config.get("bo", 12),
+                                "ordersize": entry_order.order_size,
                                 "symbol": symbol,
                                 "direction": "long",
                                 "botname": f"asap_{symbol}",
@@ -433,6 +448,15 @@ class SignalPlugin:
                                 "ordertype": "market",
                                 "so_percentage": None,
                                 "side": "buy",
+                                "signal_name": entry_order.signal_name,
+                                "strategy_name": entry_order.strategy_name,
+                                "timeframe": entry_order.timeframe,
+                                "metadata_json": entry_order.metadata_json,
+                                "baseline_order_size": entry_order.baseline_order_size,
+                                "entry_size_applied": entry_order.entry_size_applied,
+                                "entry_size_reason_code": entry_order.reason_code,
+                                "entry_size_fallback_applied": False,
+                                "entry_size_fallback_reason": None,
                             }
                             try:
                                 await self.orders.receive_buy_order(order, self.config)

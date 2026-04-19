@@ -4,6 +4,8 @@ const test = require('node:test')
 const { loadFrontendModule } = require('./helpers/loadFrontendModule.cjs')
 
 const {
+    formatAutopilotEntrySizingBody,
+    formatAutopilotEntrySizingTitle,
     formatAutopilotEvent,
     formatAutopilotFeaturedInsight,
     formatAutopilotMemoryHint,
@@ -82,4 +84,28 @@ test('formatAutopilotMemoryHint summarizes warm-up progress', () => {
     })
 
     assert.equal(hint, 'Memory learning (14/20 closes)')
+})
+
+test('formatAutopilotEntrySizing copy distinguishes active and fallback states', () => {
+    assert.equal(
+        formatAutopilotEntrySizingTitle({
+            entry_sizing: {
+                configured: true,
+                active: true,
+                reason_code: null,
+            },
+        }),
+        'Entry sizing is active',
+    )
+
+    assert.equal(
+        formatAutopilotEntrySizingBody({
+            entry_sizing: {
+                configured: true,
+                active: false,
+                reason_code: 'memory_warming_up',
+            },
+        }),
+        'Moonwalker is falling back to the global base order because memory is still warming up.',
+    )
 })

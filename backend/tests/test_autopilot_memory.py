@@ -122,20 +122,73 @@ async def test_autopilot_memory_fresh_snapshot_applies_adaptive_tp(
         enabled=True,
         baseline_take_profit=1.5,
         base_order_amount=100.0,
+        entry_sizing_enabled=True,
     )
     baseline_policy = service.resolve_symbol_policy(
         "SOL/USDT",
         enabled=True,
         baseline_take_profit=1.5,
         base_order_amount=100.0,
+        entry_sizing_enabled=True,
     )
 
     assert payload["status"] == "fresh"
     assert adaptive_policy["apply_tp"] is True
     assert adaptive_policy["take_profit"] > 1.5
+    assert adaptive_policy["apply_entry_size"] is True
+    assert adaptive_policy["entry_order_size"] > 100.0
     assert baseline_policy["take_profit"] <= 1.5
+    assert baseline_policy["apply_entry_size"] is True
+    assert baseline_policy["entry_order_size"] < 100.0
 
     await Tortoise.close_connections()
+
+
+def test_autopilot_memory_entry_sizing_stays_on_baseline_when_disabled() -> None:
+    service = AutopilotMemoryService()
+    service._state = {
+        **service._build_default_state(),
+        "status": "fresh",
+        "enabled": True,
+        "last_success_at": datetime.now(timezone.utc),
+        "last_updated_at": datetime.now(timezone.utc),
+    }
+    service._snapshot_map = {
+        "BTC/USDT": SymbolMemorySnapshot(
+            symbol="BTC/USDT",
+            trust_score=72.0,
+            trust_direction="favored",
+            confidence_bucket="confident",
+            confidence_progress=1.0,
+            sample_size=12,
+            profitable_closes=10,
+            loss_count=2,
+            slow_close_count=0,
+            weighted_profit_percent=1.1,
+            weighted_close_hours=1.2,
+            tp_delta_ratio=0.9,
+            suggested_base_order=115.0,
+            primary_reason_code="quick_profitable_closes",
+            primary_reason_value=10,
+            secondary_reason_code=None,
+            secondary_reason_value=None,
+            last_closed_at=datetime.now(timezone.utc),
+        )
+    }
+
+    policy = service.resolve_symbol_policy(
+        "BTC/USDT",
+        enabled=True,
+        baseline_take_profit=1.5,
+        base_order_amount=100.0,
+        entry_sizing_enabled=False,
+    )
+
+    assert policy["apply_tp"] is True
+    assert policy["apply_entry_size"] is False
+    assert policy["entry_order_size"] == 100.0
+    assert policy["suggested_base_order"] == 115.0
+    assert policy["entry_reason_code"] == "entry_sizing_disabled"
 
 
 def test_autopilot_memory_fails_open_when_snapshot_is_stale() -> None:
@@ -175,11 +228,40 @@ def test_autopilot_memory_fails_open_when_snapshot_is_stale() -> None:
         enabled=True,
         baseline_take_profit=1.5,
         base_order_amount=100.0,
+        entry_sizing_enabled=True,
     )
 
     assert policy["apply_tp"] is False
     assert policy["take_profit"] == 1.5
     assert policy["memory_status"] == "stale"
+    assert policy["apply_entry_size"] is False
+    assert policy["entry_order_size"] == 100.0
+
+
+def test_autopilot_memory_marks_warming_entry_sizing_as_baseline() -> None:
+    service = AutopilotMemoryService()
+    service._state = {
+        **service._build_default_state(),
+        "status": "warming_up",
+        "enabled": True,
+        "current_closes": 5,
+        "required_closes": 20,
+        "last_updated_at": datetime.now(timezone.utc),
+        "last_success_at": datetime.now(timezone.utc),
+    }
+
+    policy = service.resolve_symbol_policy(
+        "BTC/USDT",
+        enabled=True,
+        baseline_take_profit=1.5,
+        base_order_amount=100.0,
+        entry_sizing_enabled=True,
+    )
+
+    assert policy["apply_tp"] is False
+    assert policy["apply_entry_size"] is False
+    assert policy["entry_order_size"] == 100.0
+    assert policy["entry_reason_code"] == "memory_warming_up"
 
 
 def test_autopilot_memory_builds_admission_profiles_from_public_view() -> None:

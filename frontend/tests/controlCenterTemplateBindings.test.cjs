@@ -76,6 +76,17 @@ const overviewWorkspaceSource = fs.readFileSync(
     ),
     'utf8',
 )
+const ownerConfidenceSummarySource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterOwnerConfidenceSummary.vue',
+    ),
+    'utf8',
+)
 const setupWorkspaceSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -831,6 +842,7 @@ test('control center delegates mission, mode, and overview presentation to dedic
         'Recovery priorities',
         'Operator overview',
         'Operator systems',
+        'ControlCenterOwnerConfidenceSummary',
         'ControlCenterConfigPreview',
         'ControlCenterMonitoringPreview',
         ':ref="visibleBlockers.length === 0 ? liveActivationRef : undefined"',
@@ -871,6 +883,31 @@ test('control center delegates mission, mode, and overview presentation to dedic
     )
     assert.equal(
         controlCenterViewSource.includes('Reload latest config'),
+        false,
+    )
+})
+
+test('owner confidence summary stays compact and evidence-based', () => {
+    const requiredSnippets = [
+        'Owner confidence',
+        'Operating mode',
+        'Configuration',
+        'Autopilot',
+        'Live data',
+        'High confidence',
+        'Guarded confidence',
+        'Low confidence',
+    ]
+
+    for (const snippet of requiredSnippets) {
+        assert.ok(
+            ownerConfidenceSummarySource.includes(snippet),
+            `expected owner confidence summary to include ${snippet}`,
+        )
+    }
+
+    assert.equal(
+        ownerConfidenceSummarySource.includes('Reconnects'),
         false,
     )
 })

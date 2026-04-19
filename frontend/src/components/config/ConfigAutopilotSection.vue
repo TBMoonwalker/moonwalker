@@ -15,6 +15,13 @@
             </n-form-item>
 
             <template v-if="showFields">
+                <n-form-item
+                    label="Per-symbol entry sizing"
+                    path="symbol_entry_sizing_enabled"
+                    label-placement="left"
+                >
+                    <n-checkbox v-model:checked="autopilot.symbol_entry_sizing_enabled" />
+                </n-form-item>
                 <n-form-item label="Max fund" path="maxfund">
                     <n-input-number
                         v-model:value="autopilot.max_fund"

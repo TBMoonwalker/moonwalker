@@ -230,6 +230,10 @@ export function buildLoadedConfigState(
         },
         autopilot: {
             enabled: parseBooleanString(response.autopilot) ?? false,
+            symbol_entry_sizing_enabled:
+                parseBooleanString(
+                    response.autopilot_symbol_entry_sizing_enabled,
+                ) ?? false,
             max_fund: toNumberOrNull(response.autopilot_max_fund),
             high_mad: toNumberOrNull(response.autopilot_high_mad),
             high_tp: toNumberOrNull(response.autopilot_high_tp),

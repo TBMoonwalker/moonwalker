@@ -208,6 +208,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
 
     const autopilot = ref<AutopilotConfigSection>({
         enabled: false,
+        symbol_entry_sizing_enabled: false,
         max_fund: null,
         high_mad: null,
         high_tp: null,

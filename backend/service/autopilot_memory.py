@@ -205,6 +205,20 @@ def _base_order_delta_limit(base_order_amount: float) -> float:
     return max(base_order_amount * 0.15, 5.0)
 
 
+def _memory_status_reason_code(state: dict[str, Any]) -> str | None:
+    """Return a stable reason code for non-fresh memory states."""
+    status = str(state.get("status") or "")
+    if status == "stale":
+        return str(state.get("stale_reason") or "snapshot_expired")
+    if status == "warming_up":
+        return "memory_warming_up"
+    if status == "empty":
+        return "memory_empty"
+    if status:
+        return f"memory_{status}"
+    return None
+
+
 @dataclass(frozen=True)
 class ClosedTradeMemoryRow:
     """Normalized closed-trade information used by the trust engine."""
@@ -429,25 +443,55 @@ class AutopilotMemoryService:
         enabled: bool,
         baseline_take_profit: float,
         base_order_amount: float,
+        entry_sizing_enabled: bool = False,
     ) -> dict[str, Any]:
         """Resolve adaptive TP/suggested sizing for one symbol from the cache."""
         state = self._state_with_staleness()
         snapshot = self._snapshot_map.get(_normalize_symbol_key(symbol))
         take_profit = float(baseline_take_profit)
+        baseline_base_order = round(base_order_amount, 8)
+        memory_status = str(state["status"])
+        trust_score = snapshot.trust_score if snapshot else None
+        trust_direction = snapshot.trust_direction if snapshot else "neutral"
+
+        if not enabled:
+            return {
+                "apply_tp": False,
+                "take_profit": take_profit,
+                "suggested_base_order": baseline_base_order,
+                "apply_entry_size": False,
+                "entry_order_size": baseline_base_order,
+                "entry_reason_code": "autopilot_disabled",
+                "memory_status": memory_status,
+                "reason_code": "autopilot_disabled",
+                "trust_score": trust_score,
+                "trust_direction": trust_direction,
+            }
 
         if (
-            not enabled
-            or state["status"] != "fresh"
+            state["status"] != "fresh"
             or snapshot is None
             or snapshot.trust_direction == "neutral"
         ):
             return {
                 "apply_tp": False,
                 "take_profit": take_profit,
-                "suggested_base_order": round(base_order_amount, 8),
-                "memory_status": state["status"],
-                "reason_code": state["stale_reason"],
-                "trust_score": snapshot.trust_score if snapshot else None,
+                "suggested_base_order": baseline_base_order,
+                "apply_entry_size": False,
+                "entry_order_size": baseline_base_order,
+                "entry_reason_code": (
+                    _memory_status_reason_code(state)
+                    if state["status"] != "fresh"
+                    else "snapshot_missing" if snapshot is None else "neutral_trust"
+                ),
+                "memory_status": memory_status,
+                "reason_code": (
+                    _memory_status_reason_code(state)
+                    if state["status"] != "fresh"
+                    else "snapshot_missing" if snapshot is None else "neutral_trust"
+                ),
+                "trust_score": trust_score,
+                "trust_direction": trust_direction,
             }
 
         delta_limit = _tp_delta_limit(take_profit)
@@ -456,13 +500,28 @@ class AutopilotMemoryService:
             base_order_amount,
             8,
         )
+        entry_reason_code = snapshot.primary_reason_code
+        apply_entry_size = bool(entry_sizing_enabled)
+        entry_order_size = round(float(suggested_base_order), 8)
+        if not entry_sizing_enabled:
+            apply_entry_size = False
+            entry_order_size = baseline_base_order
+            entry_reason_code = "entry_sizing_disabled"
+        elif entry_order_size <= 0:
+            apply_entry_size = False
+            entry_order_size = baseline_base_order
+            entry_reason_code = "invalid_suggested_base_order"
         return {
             "apply_tp": True,
             "take_profit": round(adjusted_tp, 8),
             "suggested_base_order": round(float(suggested_base_order), 8),
-            "memory_status": state["status"],
+            "apply_entry_size": apply_entry_size,
+            "entry_order_size": entry_order_size,
+            "entry_reason_code": entry_reason_code,
+            "memory_status": memory_status,
             "reason_code": snapshot.primary_reason_code,
             "trust_score": snapshot.trust_score,
+            "trust_direction": snapshot.trust_direction,
         }
 
     def build_admission_profiles(
@@ -527,6 +586,19 @@ class AutopilotMemoryService:
     def build_read_model(self) -> dict[str, Any]:
         """Return the cockpit read model for the latest persisted snapshot."""
         state = self._state_with_staleness()
+        entry_sizing_configured = bool(
+            self.config.get("autopilot_symbol_entry_sizing_enabled", False)
+        )
+        entry_sizing_active = bool(state["enabled"]) and (
+            state["status"] == "fresh" and entry_sizing_configured
+        )
+        entry_sizing_reason_code = None
+        if not entry_sizing_configured:
+            entry_sizing_reason_code = "entry_sizing_disabled"
+        elif state["status"] != "fresh":
+            entry_sizing_reason_code = _memory_status_reason_code(state)
+        elif not state["enabled"]:
+            entry_sizing_reason_code = "autopilot_disabled"
         favored = [
             snapshot.to_api_payload()
             for snapshot in sorted(
@@ -575,6 +647,11 @@ class AutopilotMemoryService:
                 ),
             },
             "featured": featured,
+            "entry_sizing": {
+                "configured": entry_sizing_configured,
+                "active": entry_sizing_active,
+                "reason_code": entry_sizing_reason_code,
+            },
             "portfolio_effect": {
                 "adaptive_tp_min": _round_float(state["adaptive_tp_min"], 4),
                 "adaptive_tp_max": _round_float(state["adaptive_tp_max"], 4),

@@ -109,6 +109,45 @@ class SignalAdmissionBatch:
         await self.lease.release()
 
 
+@dataclass(frozen=True)
+class SignalEntryOrderDecision:
+    """Resolved entry sizing decision for one admitted symbol."""
+
+    symbol: str
+    entry_sizing_configured: bool
+    order_size: float
+    baseline_order_size: float
+    suggested_order_size: float
+    entry_size_applied: bool
+    reason_code: str | None
+    memory_status: str | None
+    trust_direction: str | None
+    trust_score: float | None
+    signal_name: str | None
+    strategy_name: str | None
+    timeframe: str
+
+    @property
+    def metadata_json(self) -> str:
+        """Return persisted metadata for buy execution explanations."""
+        return json.dumps(
+            {
+                "entry_sizing": {
+                    "configured": self.entry_sizing_configured,
+                    "applied": self.entry_size_applied,
+                    "reason_code": self.reason_code,
+                    "memory_status": self.memory_status,
+                    "trust_direction": self.trust_direction,
+                    "trust_score": self.trust_score,
+                    "baseline_order_size": self.baseline_order_size,
+                    "suggested_order_size": self.suggested_order_size,
+                    "resolved_order_size": self.order_size,
+                }
+            },
+            sort_keys=True,
+        )
+
+
 def _normalize_symbol(value: Any) -> str:
     """Return a normalized symbol key for runtime comparisons."""
     return str(value or "").strip().upper()
@@ -257,6 +296,25 @@ def log_signal_admission_decisions(
             decision.trust_score,
             decision.available_slots,
             decision.competing_candidates,
+        )
+
+
+def log_signal_entry_order_decisions(
+    decisions: Sequence[SignalEntryOrderDecision],
+) -> None:
+    """Emit one shared log format for resolved entry sizing decisions."""
+    for decision in decisions:
+        logging.info(
+            "Signal entry sizing for %s resolved to %s (baseline=%s, suggested=%s, applied=%s, reason=%s, memory_status=%s, trust_direction=%s, trust_score=%s).",
+            decision.symbol,
+            decision.order_size,
+            decision.baseline_order_size,
+            decision.suggested_order_size,
+            decision.entry_size_applied,
+            decision.reason_code,
+            decision.memory_status,
+            decision.trust_direction,
+            decision.trust_score,
         )
 
 
@@ -414,3 +472,73 @@ async def resolve_signal_admission_batch(
             )
 
     return SignalAdmissionBatch(decisions=decisions, lease=lease)
+
+
+async def resolve_signal_entry_orders(
+    config: dict[str, Any],
+    statistic: Statistic,
+    autopilot: Autopilot,
+    admitted_symbols: Sequence[str],
+    *,
+    signal_name: str | None,
+    strategy_name: str | None,
+    timeframe: str | None = None,
+) -> dict[str, SignalEntryOrderDecision]:
+    """Resolve shared per-symbol entry sizes for admitted signal candidates."""
+    normalized_symbols = _dedupe_candidate_symbols(admitted_symbols)
+    if not normalized_symbols:
+        return {}
+
+    profit = await statistic.get_profit()
+    funds_locked = float(profit.get("funds_locked") or 0.0)
+    runtime_state = await autopilot.resolve_runtime_state(
+        funds_locked,
+        config,
+    )
+    resolved_timeframe = timeframe or resolve_timeframe(config)
+    entry_sizing_configured = bool(
+        config.get("autopilot_symbol_entry_sizing_enabled", False)
+    )
+    decisions: dict[str, SignalEntryOrderDecision] = {}
+
+    for symbol in normalized_symbols:
+        policy = await autopilot.resolve_trading_policy(
+            symbol,
+            funds_locked,
+            config,
+            runtime_state=runtime_state,
+        )
+        baseline_order_size = round(float(policy.baseline_base_order or 0.0), 8)
+        suggested_order_size = round(
+            float(policy.suggested_base_order or baseline_order_size),
+            8,
+        )
+        order_size = round(
+            float(policy.entry_order_size or baseline_order_size),
+            8,
+        )
+        entry_size_applied = bool(policy.adaptive_entry_size_applied)
+        reason_code = policy.adaptive_entry_reason_code
+
+        if order_size <= 0:
+            order_size = baseline_order_size
+            entry_size_applied = False
+            reason_code = "invalid_entry_order_size"
+
+        decisions[symbol] = SignalEntryOrderDecision(
+            symbol=symbol,
+            entry_sizing_configured=entry_sizing_configured,
+            order_size=order_size,
+            baseline_order_size=baseline_order_size,
+            suggested_order_size=suggested_order_size,
+            entry_size_applied=entry_size_applied,
+            reason_code=reason_code,
+            memory_status=policy.memory_status,
+            trust_direction=policy.adaptive_trust_direction,
+            trust_score=policy.adaptive_trust_score,
+            signal_name=signal_name,
+            strategy_name=strategy_name,
+            timeframe=resolved_timeframe,
+        )
+
+    return decisions

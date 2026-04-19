@@ -79,6 +79,44 @@ async def test_asap_run_uses_shared_admission_batch(monkeypatch) -> None:
         fake_resolve_signal_admission_batch,
     )
 
+    async def fake_resolve_signal_entry_orders(
+        _config,
+        _statistic,
+        _autopilot,
+        admitted_symbols,
+        *,
+        signal_name,
+        strategy_name,
+        timeframe,
+    ) -> dict[str, types.SimpleNamespace]:
+        assert admitted_symbols == ["BTC/USDT"]
+        assert signal_name == "asap"
+        assert strategy_name is None
+        assert timeframe == "1m"
+        return {
+            "BTC/USDT": types.SimpleNamespace(
+                symbol="BTC/USDT",
+                order_size=17.5,
+                baseline_order_size=10.0,
+                suggested_order_size=17.5,
+                entry_size_applied=True,
+                reason_code="quick_profitable_closes",
+                memory_status="fresh",
+                trust_direction="favored",
+                trust_score=75.0,
+                signal_name="asap",
+                strategy_name=None,
+                timeframe="1m",
+                metadata_json='{"entry_sizing":{"applied":true}}',
+            )
+        }
+
+    monkeypatch.setattr(
+        asap_module,
+        "resolve_signal_entry_orders",
+        fake_resolve_signal_entry_orders,
+    )
+
     orders = []
 
     async def fake_receive_buy_order(order, _config) -> None:
@@ -91,7 +129,10 @@ async def test_asap_run_uses_shared_admission_batch(monkeypatch) -> None:
     assert captured["candidate_symbols"] == ["ETH/USDT", "BTC/USDT"]
     assert len(orders) == 1
     assert orders[0]["symbol"] == "BTC/USDT"
-    assert orders[0]["ordersize"] == 10
+    assert orders[0]["ordersize"] == 17.5
+    assert orders[0]["baseline_order_size"] == 10.0
+    assert orders[0]["entry_size_applied"] is True
+    assert orders[0]["metadata_json"] == '{"entry_sizing":{"applied":true}}'
     queued_symbols = await watcher_queue.get()
     assert queued_symbols == ["BTC/USDT"]
 

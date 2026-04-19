@@ -32,6 +32,25 @@ export function formatAutopilotReason(
             return 'memory refresh is behind'
         case 'snapshot_expired':
             return 'memory snapshot is stale'
+        case 'memory_warming_up':
+            return 'memory is still warming up'
+        case 'memory_empty':
+            return 'memory needs recent closes'
+        case 'entry_sizing_disabled':
+            return 'entry sizing is off'
+        case 'autopilot_disabled':
+            return 'Autopilot is off'
+        case 'neutral_trust':
+            return 'trust is near neutral'
+        case 'snapshot_missing':
+            return 'memory has no symbol snapshot yet'
+        case 'invalid_suggested_base_order':
+        case 'invalid_entry_order_size':
+            return 'the suggested size was invalid'
+        case 'invalid_price_or_amount':
+            return 'exchange minimums or precision rejected the size'
+        case 'insufficient_quote_balance':
+            return 'available quote was too low for that size'
         default:
             return 'based on recent close history'
     }
@@ -125,6 +144,39 @@ export function formatAutopilotStatusBody(
         return 'Moonwalker is using recent close quality and speed to adjust trust symbol by symbol.'
     }
     return 'Moonwalker needs closed-trade history before it can rank symbols.'
+}
+
+export function formatAutopilotEntrySizingTitle(
+    payload: AutopilotMemoryPayload | null,
+): string {
+    if (!payload) {
+        return 'Entry sizing is loading'
+    }
+    if (!payload.entry_sizing.configured) {
+        return 'Suggested sizes only'
+    }
+    if (payload.entry_sizing.active) {
+        return 'Entry sizing is active'
+    }
+    return 'Baseline base order is active'
+}
+
+export function formatAutopilotEntrySizingBody(
+    payload: AutopilotMemoryPayload | null,
+): string {
+    if (!payload) {
+        return 'Moonwalker is loading the latest entry-sizing state.'
+    }
+    if (!payload.entry_sizing.configured) {
+        return 'Moonwalker keeps showing suggested base orders, but new buys still use the global base order until per-symbol entry sizing is enabled.'
+    }
+    if (payload.entry_sizing.active) {
+        return 'Fresh favored and cooling symbols can open with their suggested base orders, while neutral symbols stay on the baseline size.'
+    }
+    return `Moonwalker is falling back to the global base order because ${formatAutopilotReason(
+        payload.entry_sizing.reason_code,
+        null,
+    )}.`
 }
 
 export function formatAutopilotMemoryHint(options: {

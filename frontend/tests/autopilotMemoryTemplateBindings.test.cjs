@@ -47,6 +47,17 @@ const configPreviewSource = fs.readFileSync(
     ),
     'utf8',
 )
+const ownerConfidenceSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'ControlCenterOwnerConfidenceSummary.vue',
+    ),
+    'utf8',
+)
 const pageSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'views', 'AutopilotMemoryView.vue'),
     'utf8',
@@ -64,6 +75,7 @@ test('overview workspace renders the Autopilot preview section', () => {
     assert.match(overviewSource, /ControlCenterAutopilotPreview/)
     assert.match(overviewSource, /ControlCenterConfigPreview/)
     assert.match(overviewSource, /ControlCenterMonitoringPreview/)
+    assert.match(overviewSource, /ControlCenterOwnerConfidenceSummary/)
     assert.match(overviewSource, /@open-config/)
     assert.match(overviewSource, /@open-monitoring/)
     assert.match(overviewSource, /@toggle-autopilot/)
@@ -76,6 +88,7 @@ test('preview exposes the required Autopilot actions and state copy', () => {
     assert.match(previewSource, /Tune Autopilot/)
     assert.match(previewSource, /Learning from/)
     assert.match(previewSource, /Adaptive TP band/)
+    assert.match(previewSource, /Entry sizing/)
     assert.doesNotMatch(previewSource, /Autopilot is off'\s*"/)
     assert.doesNotMatch(previewSource, />Autopilot Memory</)
 })
@@ -98,10 +111,9 @@ test('full Autopilot page stays read-only and links tuning back to Advanced', ()
 
 test('monitoring preview exposes the required Monitoring action and health copy', () => {
     assert.match(monitoringPreviewSource, /Open Monitoring/)
-    assert.match(
-        monitoringPreviewSource,
-        /Monitoring needs attention|Monitoring is reconnecting|Monitoring is warming up|Monitoring is healthy/,
-    )
+    assert.match(monitoringPreviewSource, /useControlCenterMonitoringSummary/)
+    assert.match(monitoringPreviewSource, /monitoring\.statusTitle/)
+    assert.match(monitoringPreviewSource, /monitoring\.statusBody/)
     assert.match(monitoringPreviewSource, /Receiving payloads/)
     assert.doesNotMatch(monitoringPreviewSource, />Monitoring</)
 })
@@ -115,6 +127,13 @@ test('config preview exposes the required config action and trust copy', () => {
     )
     assert.match(configPreviewSource, /Trading posture/)
     assert.doesNotMatch(configPreviewSource, />Configuration</)
+})
+
+test('owner confidence summary reuses Autopilot and live-data signals', () => {
+    assert.match(ownerConfidenceSource, /Autopilot/)
+    assert.match(ownerConfidenceSource, /Live data/)
+    assert.match(ownerConfidenceSource, /Trust active|Ready but off|Baseline|Learning/)
+    assert.doesNotMatch(ownerConfidenceSource, /Receiving payloads/)
 })
 
 test('header navigation keeps Control Center and removes duplicate Monitoring entry', () => {

@@ -1,6 +1,7 @@
 """Order orchestration for exchange buy/sell actions."""
 
 import asyncio
+import json
 import sqlite3
 from datetime import datetime
 from typing import Any, TypeGuard
@@ -47,12 +48,115 @@ class Orders:
     """Handle incoming buy/sell signals and persist trades."""
 
     _sell_locks: dict[str, asyncio.Lock] = {}
+    _ENTRY_SIZING_RETRY_REASONS = {
+        "insufficient_quote_balance",
+        "invalid_required_quote",
+        "invalid_price_or_amount",
+    }
 
     def __init__(self):
         self.utils = helper.Utils()
         self.exchange = Exchange()
         self.monitoring = MonitoringService()
         self.trades = Trades()
+
+    @staticmethod
+    def _parse_metadata_json(raw_value: Any) -> dict[str, Any]:
+        """Return structured order metadata from a JSON payload when possible."""
+        if isinstance(raw_value, dict):
+            return dict(raw_value)
+        if not isinstance(raw_value, str) or not raw_value.strip():
+            return {}
+        try:
+            parsed = json.loads(raw_value)
+        except json.JSONDecodeError:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    def _build_entry_size_retry_order(
+        self,
+        order: dict[str, Any],
+        precheck: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Return a one-shot baseline retry order for entry-sizing failures."""
+        if not bool(order.get("baseorder")) or not bool(
+            order.get("entry_size_applied")
+        ):
+            return None
+
+        reason = str((precheck or {}).get("reason") or "")
+        if reason not in self._ENTRY_SIZING_RETRY_REASONS:
+            return None
+
+        baseline_order_size = float(order.get("baseline_order_size") or 0.0)
+        current_order_size = float(order.get("ordersize") or 0.0)
+        if (
+            baseline_order_size <= 0
+            or abs(current_order_size - baseline_order_size) < 1e-12
+        ):
+            return None
+
+        retry_order = dict(order)
+        retry_order["ordersize"] = baseline_order_size
+        retry_order["entry_size_applied"] = False
+        retry_order["entry_size_fallback_applied"] = True
+        retry_order["entry_size_fallback_reason"] = reason
+
+        metadata = self._parse_metadata_json(order.get("metadata_json"))
+        entry_sizing = metadata.get("entry_sizing")
+        if not isinstance(entry_sizing, dict):
+            entry_sizing = {}
+        entry_sizing["applied"] = False
+        entry_sizing["fallback_applied"] = True
+        entry_sizing["fallback_reason_code"] = reason
+        entry_sizing["resolved_order_size"] = baseline_order_size
+        metadata["entry_sizing"] = entry_sizing
+        retry_order["metadata_json"] = json.dumps(metadata, sort_keys=True)
+        return retry_order
+
+    async def _finalize_buy_order(
+        self,
+        order_status: ExchangeOrderPayload,
+        config: dict[str, Any],
+    ) -> bool:
+        """Persist a filled buy order and emit monitoring."""
+        logging.debug(order_status)
+        if not self._has_valid_buy_fill(order_status):
+            logging.error(
+                "Skipping trade creation for %s: invalid order status.",
+                order_status.get("symbol"),
+            )
+            return False
+        payload = build_buy_trade_payload(order_status)
+        await persist_buy_trade(
+            order_status["symbol"],
+            payload,
+            create_open_trade=not bool(order_status["safetyorder"]),
+        )
+        await self._reset_unsellable_state(order_status["symbol"])
+        await self.monitoring.notify_trade(
+            "trade.buy",
+            build_buy_monitor_payload(order_status),
+            config,
+        )
+        return True
+
+    @staticmethod
+    def _log_buy_failure(
+        symbol: str,
+        precheck: dict[str, Any] | None,
+    ) -> None:
+        """Emit the shared failure log for an unfilled buy order."""
+        if precheck and not bool(precheck.get("ok", False)):
+            logging.warning(
+                "Skipping buy order for %s: buy pre-check failed (%s). required=%s available=%s",
+                symbol,
+                precheck.get("reason", "unknown"),
+                precheck.get("required_quote"),
+                precheck.get("available_quote"),
+            )
+            return
+        logging.error("Failed creating buy order for %s", symbol)
 
     @classmethod
     def _get_sell_lock(cls, symbol: str) -> asyncio.Lock:
@@ -288,41 +392,31 @@ class Orders:
 
         try:
             # 1. Create exchange order
-            order_status = await self.exchange.create_spot_market_buy(order, config)
-            logging.debug(order_status)
+            order_status = await self.exchange.create_spot_market_buy(
+                dict(order), config
+            )
             if order_status:
-                if not self._has_valid_buy_fill(order_status):
-                    logging.error(
-                        "Skipping trade creation for %s: invalid order status.",
-                        order.get("symbol"),
-                    )
-                    return False
-                payload = build_buy_trade_payload(order_status)
-                await persist_buy_trade(
-                    order_status["symbol"],
-                    payload,
-                    create_open_trade=not bool(order["safetyorder"]),
+                return await self._finalize_buy_order(order_status, config)
+
+            precheck = self.exchange.get_last_buy_precheck_result()
+            retry_order = self._build_entry_size_retry_order(order, precheck)
+            if retry_order is not None:
+                logging.warning(
+                    "Retrying buy order for %s with baseline base order %s after entry sizing fallback (%s).",
+                    order["symbol"],
+                    retry_order["ordersize"],
+                    (precheck or {}).get("reason", "unknown"),
                 )
-                await self._reset_unsellable_state(order_status["symbol"])
-                await self.monitoring.notify_trade(
-                    "trade.buy",
-                    build_buy_monitor_payload(order_status),
+                retry_status = await self.exchange.create_spot_market_buy(
+                    retry_order,
                     config,
                 )
-                return True
-            else:
+                if retry_status:
+                    return await self._finalize_buy_order(retry_status, config)
                 precheck = self.exchange.get_last_buy_precheck_result()
-                if precheck and not bool(precheck.get("ok", False)):
-                    logging.warning(
-                        "Skipping buy order for %s: funds pre-check failed (%s). required=%s available=%s",
-                        order["symbol"],
-                        precheck.get("reason", "unknown"),
-                        precheck.get("required_quote"),
-                        precheck.get("available_quote"),
-                    )
-                else:
-                    logging.error("Failed creating buy order for %s", order["symbol"])
-                return False
+
+            self._log_buy_failure(order["symbol"], precheck)
+            return False
         finally:
             await self.exchange.close()
 

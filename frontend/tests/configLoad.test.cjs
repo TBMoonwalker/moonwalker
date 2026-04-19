@@ -74,6 +74,7 @@ test(
             state.autopilot.green_phase_ramp_days,
             defaults.defaultGreenPhaseRampDays,
         )
+        assert.equal(state.autopilot.symbol_entry_sizing_enabled, false)
     },
 )
 

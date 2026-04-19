@@ -3,6 +3,8 @@ import { computed } from 'vue'
 
 import type { AutopilotMemoryPayload } from '../../autopilot/types'
 import {
+    formatAutopilotEntrySizingBody,
+    formatAutopilotEntrySizingTitle,
     formatAutopilotFeaturedInsight,
     formatAutopilotStatusBody,
     formatAutopilotStatusTitle,
@@ -25,6 +27,12 @@ const statusTitle = computed(() => formatAutopilotStatusTitle(props.memory))
 const statusBody = computed(() => formatAutopilotStatusBody(props.memory))
 const featuredInsight = computed(() =>
     formatAutopilotFeaturedInsight(props.memory?.featured),
+)
+const entrySizingTitle = computed(() =>
+    formatAutopilotEntrySizingTitle(props.memory),
+)
+const entrySizingBody = computed(() =>
+    formatAutopilotEntrySizingBody(props.memory),
 )
 const primaryActionLabel = computed(() =>
     props.enabled ? 'Deactivate Autopilot' : 'Activate Autopilot',
@@ -105,6 +113,10 @@ const trustSummary = computed(() => {
                     </p>
                 </div>
 
+                <p class="entry-sizing-note">
+                    {{ entrySizingBody }}
+                </p>
+
                 <div class="preview-metrics">
                     <div class="metric-chip">
                         <span class="metric-label">Adaptive TP band</span>
@@ -118,14 +130,9 @@ const trustSummary = computed(() => {
                         </strong>
                     </div>
                     <div class="metric-chip">
-                        <span class="metric-label">Suggested base order</span>
+                        <span class="metric-label">Entry sizing</span>
                         <strong class="metric-value">
-                            {{
-                                memory.portfolio_effect.suggested_base_order_min !== null &&
-                                memory.portfolio_effect.suggested_base_order_max !== null
-                                    ? `${memory.portfolio_effect.suggested_base_order_min} - ${memory.portfolio_effect.suggested_base_order_max}`
-                                    : 'Pending'
-                            }}
+                            {{ entrySizingTitle }}
                         </strong>
                     </div>
                 </div>
@@ -201,6 +208,14 @@ const trustSummary = computed(() => {
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-body);
     font-size: 0.95rem;
+}
+
+.entry-sizing-note {
+    margin: -4px 0 0;
+    color: var(--mw-color-text-secondary);
+    font-family: var(--mw-font-body);
+    font-size: 0.95rem;
+    line-height: 1.55;
 }
 
 .preview-metrics {

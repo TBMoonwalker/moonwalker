@@ -31,6 +31,11 @@ export interface AutopilotMemoryEvent {
 
 export interface AutopilotMemoryPayload {
     baseline_mode_active: boolean
+    entry_sizing: {
+        active: boolean
+        configured: boolean
+        reason_code: string | null
+    }
     enabled: boolean
     events: AutopilotMemoryEvent[]
     featured: AutopilotMemorySnapshot | null

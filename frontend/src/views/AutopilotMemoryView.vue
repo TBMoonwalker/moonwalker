@@ -4,6 +4,8 @@ import { useRouter } from 'vue-router'
 
 import {
     formatAutopilotConfidenceBadge,
+    formatAutopilotEntrySizingBody,
+    formatAutopilotEntrySizingTitle,
     formatAutopilotEvent,
     formatAutopilotFeaturedInsight,
     formatAutopilotReason,
@@ -248,9 +250,17 @@ function openAutopilotAdvanced(): void {
                                             <span class="metric-label">Suggested BO</span>
                                             <strong>{{ selectedSnapshot.suggested_base_order.toFixed(2) }}</strong>
                                         </div>
+                                        <div class="selected-metric">
+                                            <span class="metric-label">Entry sizing</span>
+                                            <strong>{{ formatAutopilotEntrySizingTitle(data) }}</strong>
+                                        </div>
                                     </div>
 
                                     <div class="reason-list">
+                                        <p>
+                                            <strong>Entry sizing:</strong>
+                                            {{ formatAutopilotEntrySizingBody(data) }}
+                                        </p>
                                         <p>
                                             <strong>Primary reason:</strong>
                                             {{ formatAutopilotReason(selectedSnapshot.primary_reason_code, selectedSnapshot.primary_reason_value) }}

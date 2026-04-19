@@ -54,6 +54,36 @@ def _async_result(value):
     return _inner
 
 
+def _entry_order_decisions(
+    symbol: str = "BTC/USDT",
+    *,
+    order_size: float = 10.0,
+    baseline_order_size: float = 10.0,
+) -> dict[str, types.SimpleNamespace]:
+    entry_size_applied = order_size != baseline_order_size
+    return {
+        symbol: types.SimpleNamespace(
+            symbol=symbol,
+            order_size=order_size,
+            baseline_order_size=baseline_order_size,
+            suggested_order_size=order_size,
+            entry_size_applied=entry_size_applied,
+            reason_code="quick_profitable_closes",
+            memory_status="fresh",
+            trust_direction="favored" if entry_size_applied else "neutral",
+            trust_score=72.0 if entry_size_applied else 50.0,
+            signal_name="sym_signals:1",
+            strategy_name=None,
+            timeframe="1m",
+            metadata_json=(
+                '{"entry_sizing":{"applied":true}}'
+                if entry_size_applied
+                else '{"entry_sizing":{"applied":false}}'
+            ),
+        )
+    }
+
+
 @pytest.mark.asyncio
 async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
     watcher_queue = asyncio.Queue()
@@ -130,6 +160,31 @@ async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
         fake_resolve_signal_admission_batch,
     )
 
+    async def fake_resolve_signal_entry_orders(
+        _config,
+        _statistic,
+        _autopilot,
+        admitted_symbols,
+        *,
+        signal_name,
+        strategy_name,
+        timeframe,
+    ) -> dict[str, types.SimpleNamespace]:
+        assert admitted_symbols == ["BTC/USDT"]
+        assert signal_name == "sym_signals:1"
+        assert strategy_name is None
+        assert timeframe == "1m"
+        return _entry_order_decisions(
+            order_size=17.5,
+            baseline_order_size=10.0,
+        )
+
+    monkeypatch.setattr(
+        sym_module,
+        "resolve_signal_entry_orders",
+        fake_resolve_signal_entry_orders,
+    )
+
     async def fake_get_profit() -> None:
         return {
             "upnl": 0,
@@ -153,6 +208,9 @@ async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
     assert captured["candidate_symbols"] == ["BTC/USDT"]
     assert len(orders) == 1
     assert orders[0]["symbol"] == "BTC/USDT"
+    assert orders[0]["ordersize"] == 17.5
+    assert orders[0]["baseline_order_size"] == 10.0
+    assert orders[0]["entry_size_applied"] is True
     queued_symbols = await watcher_queue.get()
     assert queued_symbols == ["BTC/USDT"]
 
@@ -241,6 +299,11 @@ async def test_sym_signals_idle_timeout_does_not_force_immediate_reconnect(
         sym_module,
         "resolve_signal_admission_batch",
         _async_result(_admission_batch()),
+    )
+    monkeypatch.setattr(
+        sym_module,
+        "resolve_signal_entry_orders",
+        _async_result(_entry_order_decisions()),
     )
 
     orders = []
@@ -406,6 +469,11 @@ async def test_sym_signals_error_event_logs_payload_and_uses_backoff(
         "resolve_signal_admission_batch",
         _async_result(_admission_batch()),
     )
+    monkeypatch.setattr(
+        sym_module,
+        "resolve_signal_entry_orders",
+        _async_result(_entry_order_decisions()),
+    )
 
     orders = []
 
@@ -463,6 +531,11 @@ async def test_sym_signals_skips_buy_when_history_remains_insufficient(
         sym_module,
         "resolve_signal_admission_batch",
         _async_result(_admission_batch()),
+    )
+    monkeypatch.setattr(
+        sym_module,
+        "resolve_signal_entry_orders",
+        _async_result(_entry_order_decisions()),
     )
 
     orders = []
