@@ -2,11 +2,14 @@ import types
 
 import model
 import pytest
+import service.signal_runtime as signal_runtime_module
+from service.autopilot_memory import SymbolAdmissionProfile
 from service.signal_runtime import (
     build_common_runtime_settings,
     is_max_bots_reached,
     parse_signal_settings,
     resolve_max_bots_log_interval,
+    resolve_signal_admission_batch,
 )
 
 
@@ -63,6 +66,29 @@ class _DummyOpenTradesModel:
 
     async def values(self, *_args, **_kwargs):
         return list(self.rows)
+
+
+class _DummyMemoryService:
+    def __init__(self, profiles: dict[str, SymbolAdmissionProfile]) -> None:
+        self._profiles = profiles
+
+    def build_admission_profiles(
+        self,
+        symbols: list[str],
+        *,
+        enabled: bool,
+    ) -> dict[str, SymbolAdmissionProfile]:
+        assert enabled is True
+        return {
+            symbol: self._profiles[symbol]
+            for symbol in symbols
+            if symbol in self._profiles
+        }
+
+
+@pytest.fixture(autouse=True)
+def _clear_signal_runtime_reservations() -> None:
+    signal_runtime_module._PENDING_ADMISSION_SYMBOLS.clear()
 
 
 @pytest.mark.asyncio
@@ -141,6 +167,186 @@ async def test_is_max_bots_reached_ignores_unsellable_open_trade_rows(
     )
 
     assert blocked is False
+
+
+@pytest.mark.asyncio
+async def test_resolve_signal_admission_batch_prefers_favored_symbol(
+    monkeypatch,
+) -> None:
+    _DummyOpenTradesModel.rows = [
+        {"symbol": "ADA/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+    ]
+    monkeypatch.setattr(model, "OpenTrades", _DummyOpenTradesModel)
+
+    async def fake_memory_instance():
+        return _DummyMemoryService(
+            {
+                "BTC/USDT": SymbolAdmissionProfile(
+                    symbol="BTC/USDT",
+                    memory_status="fresh",
+                    trust_direction="favored",
+                    trust_score=82.0,
+                    reason_code="quick_profitable_closes",
+                    uses_trust_ranking=True,
+                ),
+                "ETH/USDT": SymbolAdmissionProfile(
+                    symbol="ETH/USDT",
+                    memory_status="fresh",
+                    trust_direction="neutral",
+                    trust_score=51.0,
+                    reason_code=None,
+                    uses_trust_ranking=True,
+                ),
+            }
+        )
+
+    monkeypatch.setattr(
+        signal_runtime_module.AutopilotMemoryService,
+        "instance",
+        staticmethod(fake_memory_instance),
+    )
+
+    batch = await resolve_signal_admission_batch(
+        {"max_bots": 2, "autopilot": True},
+        types.SimpleNamespace(
+            get_profit=_async_result({"autopilot_effective_max_bots": 2})
+        ),
+        types.SimpleNamespace(resolve_runtime_state=_async_result({})),
+        ["ETH/USDT", "BTC/USDT"],
+    )
+
+    assert batch.admitted_symbols == ["BTC/USDT"]
+    decisions = {decision.symbol: decision for decision in batch.decisions}
+    assert decisions["BTC/USDT"].reason_code == "admitted_trust_priority"
+    assert decisions["BTC/USDT"].trust_direction == "favored"
+    assert decisions["ETH/USDT"].reason_code == "skipped_ranked_out"
+    assert decisions["ETH/USDT"].memory_status == "fresh"
+    await batch.release()
+
+
+@pytest.mark.asyncio
+async def test_resolve_signal_admission_batch_falls_back_to_symbol_order_when_memory_is_not_fresh(
+    monkeypatch,
+) -> None:
+    _DummyOpenTradesModel.rows = [
+        {"symbol": "ADA/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+    ]
+    monkeypatch.setattr(model, "OpenTrades", _DummyOpenTradesModel)
+
+    async def fake_memory_instance():
+        return _DummyMemoryService(
+            {
+                "BTC/USDT": SymbolAdmissionProfile(
+                    symbol="BTC/USDT",
+                    memory_status="warming_up",
+                    trust_direction="neutral",
+                    trust_score=67.0,
+                    reason_code=None,
+                    uses_trust_ranking=False,
+                ),
+                "SOL/USDT": SymbolAdmissionProfile(
+                    symbol="SOL/USDT",
+                    memory_status="warming_up",
+                    trust_direction="neutral",
+                    trust_score=91.0,
+                    reason_code=None,
+                    uses_trust_ranking=False,
+                ),
+            }
+        )
+
+    monkeypatch.setattr(
+        signal_runtime_module.AutopilotMemoryService,
+        "instance",
+        staticmethod(fake_memory_instance),
+    )
+
+    batch = await resolve_signal_admission_batch(
+        {"max_bots": 2, "autopilot": True},
+        types.SimpleNamespace(
+            get_profit=_async_result({"autopilot_effective_max_bots": 2})
+        ),
+        types.SimpleNamespace(resolve_runtime_state=_async_result({})),
+        ["SOL/USDT", "BTC/USDT"],
+    )
+
+    assert batch.admitted_symbols == ["BTC/USDT"]
+    decisions = {decision.symbol: decision for decision in batch.decisions}
+    assert decisions["BTC/USDT"].reason_code == "admitted_fallback_order"
+    assert decisions["BTC/USDT"].memory_status == "warming_up"
+    assert decisions["SOL/USDT"].reason_code == "skipped_ranked_out"
+    await batch.release()
+
+
+@pytest.mark.asyncio
+async def test_resolve_signal_admission_batch_respects_pending_reservations(
+    monkeypatch,
+) -> None:
+    _DummyOpenTradesModel.rows = []
+    monkeypatch.setattr(model, "OpenTrades", _DummyOpenTradesModel)
+
+    async def fake_memory_instance():
+        return _DummyMemoryService(
+            {
+                "BTC/USDT": SymbolAdmissionProfile(
+                    symbol="BTC/USDT",
+                    memory_status="fresh",
+                    trust_direction="neutral",
+                    trust_score=50.0,
+                    reason_code=None,
+                    uses_trust_ranking=True,
+                ),
+                "ETH/USDT": SymbolAdmissionProfile(
+                    symbol="ETH/USDT",
+                    memory_status="fresh",
+                    trust_direction="neutral",
+                    trust_score=50.0,
+                    reason_code=None,
+                    uses_trust_ranking=True,
+                ),
+            }
+        )
+
+    monkeypatch.setattr(
+        signal_runtime_module.AutopilotMemoryService,
+        "instance",
+        staticmethod(fake_memory_instance),
+    )
+
+    first_batch = await resolve_signal_admission_batch(
+        {"max_bots": 1, "autopilot": True},
+        types.SimpleNamespace(
+            get_profit=_async_result({"autopilot_effective_max_bots": 1})
+        ),
+        types.SimpleNamespace(resolve_runtime_state=_async_result({})),
+        ["BTC/USDT"],
+    )
+    second_batch = await resolve_signal_admission_batch(
+        {"max_bots": 1, "autopilot": True},
+        types.SimpleNamespace(
+            get_profit=_async_result({"autopilot_effective_max_bots": 1})
+        ),
+        types.SimpleNamespace(resolve_runtime_state=_async_result({})),
+        ["ETH/USDT"],
+    )
+
+    assert first_batch.admitted_symbols == ["BTC/USDT"]
+    assert second_batch.admitted_symbols == []
+    assert second_batch.decisions[0].reason_code == "skipped_capacity_full"
+
+    await first_batch.release()
+
+    third_batch = await resolve_signal_admission_batch(
+        {"max_bots": 1, "autopilot": True},
+        types.SimpleNamespace(
+            get_profit=_async_result({"autopilot_effective_max_bots": 1})
+        ),
+        types.SimpleNamespace(resolve_runtime_state=_async_result({})),
+        ["ETH/USDT"],
+    )
+
+    assert third_batch.admitted_symbols == ["ETH/USDT"]
+    await third_batch.release()
 
 
 def _async_result(value):

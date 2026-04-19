@@ -5,6 +5,7 @@ from typing import Any
 import model
 import pytest
 import signals.sym_signals as sym_module
+from service.signal_runtime import SignalAdmissionBatch, SignalAdmissionDecision
 from signals.sym_signals import SignalPlugin
 
 
@@ -29,8 +30,32 @@ class DummyOpenTrades:
         return []
 
 
+def _admission_batch(symbol: str = "BTC/USDT") -> SignalAdmissionBatch:
+    return SignalAdmissionBatch(
+        decisions=[
+            SignalAdmissionDecision(
+                symbol=symbol,
+                admitted=True,
+                reason_code="admitted_capacity_available",
+                memory_status="fresh",
+                trust_direction="neutral",
+                trust_score=50.0,
+                available_slots=1,
+                competing_candidates=1,
+            )
+        ]
+    )
+
+
+def _async_result(value):
+    async def _inner(*_args, **_kwargs):
+        return value
+
+    return _inner
+
+
 @pytest.mark.asyncio
-async def test_sym_signals_run_triggers_buy_order(monkeypatch) -> None:
+async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
     watcher_queue = asyncio.Queue()
     plugin = SignalPlugin(watcher_queue)
 
@@ -88,6 +113,23 @@ async def test_sym_signals_run_triggers_buy_order(monkeypatch) -> None:
     )
     monkeypatch.setattr(plugin.data, "is_token_old_enough", fake_is_token_old_enough)
 
+    captured: dict[str, list[str]] = {}
+
+    async def fake_resolve_signal_admission_batch(
+        _config,
+        _statistic,
+        _autopilot,
+        candidate_symbols,
+    ) -> SignalAdmissionBatch:
+        captured["candidate_symbols"] = list(candidate_symbols)
+        return _admission_batch()
+
+    monkeypatch.setattr(
+        sym_module,
+        "resolve_signal_admission_batch",
+        fake_resolve_signal_admission_batch,
+    )
+
     async def fake_get_profit() -> None:
         return {
             "upnl": 0,
@@ -108,8 +150,11 @@ async def test_sym_signals_run_triggers_buy_order(monkeypatch) -> None:
 
     await plugin.run(config)
 
+    assert captured["candidate_symbols"] == ["BTC/USDT"]
     assert len(orders) == 1
     assert orders[0]["symbol"] == "BTC/USDT"
+    queued_symbols = await watcher_queue.get()
+    assert queued_symbols == ["BTC/USDT"]
 
 
 @pytest.mark.asyncio
@@ -192,6 +237,11 @@ async def test_sym_signals_idle_timeout_does_not_force_immediate_reconnect(
         }
 
     monkeypatch.setattr(plugin.statistic, "get_profit", fake_get_profit)
+    monkeypatch.setattr(
+        sym_module,
+        "resolve_signal_admission_batch",
+        _async_result(_admission_batch()),
+    )
 
     orders = []
 
@@ -351,6 +401,11 @@ async def test_sym_signals_error_event_logs_payload_and_uses_backoff(
         }
 
     monkeypatch.setattr(plugin.statistic, "get_profit", fake_get_profit)
+    monkeypatch.setattr(
+        sym_module,
+        "resolve_signal_admission_batch",
+        _async_result(_admission_batch()),
+    )
 
     orders = []
 
@@ -403,6 +458,11 @@ async def test_sym_signals_skips_buy_when_history_remains_insufficient(
         is_token_old_enough=fake_is_token_old_enough,
         add_history_data_for_symbol=fake_add_history_data_for_symbol,
         get_resampled_history_candle_count=fake_get_resampled_history_candle_count,
+    )
+    monkeypatch.setattr(
+        sym_module,
+        "resolve_signal_admission_batch",
+        _async_result(_admission_batch()),
     )
 
     orders = []

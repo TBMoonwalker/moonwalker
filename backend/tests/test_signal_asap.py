@@ -4,31 +4,67 @@ from typing import Any
 
 import pytest
 import signals.asap as asap_module
+from service.signal_runtime import SignalAdmissionBatch, SignalAdmissionDecision
 from signals.asap import SignalPlugin
 
 
 @pytest.mark.asyncio
-async def test_asap_run_triggers_buy_order(monkeypatch) -> None:
+async def test_asap_run_uses_shared_admission_batch(monkeypatch) -> None:
     watcher_queue = asyncio.Queue()
     plugin = SignalPlugin(watcher_queue)
 
     monkeypatch.setattr(asap_module, "get_active_open_symbols", _async_symbols([]))
 
     # Force one iteration by flipping status after first sleep.
-    async def fake_sleep(_) -> None:
-        plugin.status = False
+    async def fake_sleep(seconds: int) -> None:
+        if seconds == 5:
+            plugin.status = False
 
     monkeypatch.setattr(asap_module.asyncio, "sleep", fake_sleep)
 
-    # Bypass internal checks and provide a single symbol.
+    # Bypass internal checks and provide two passing symbols.
     async def fake_check_max_bots() -> None:
         return False
 
     async def fake_get_new_symbol_list(_) -> None:
-        return ["BTC/USDT"]
+        return ["ETH/USDT", "BTC/USDT"]
 
     async def fake_check_entry_point(_symbol) -> None:
         return True
+
+    captured: dict[str, list[str]] = {}
+
+    async def fake_resolve_signal_admission_batch(
+        _config,
+        _statistic,
+        _autopilot,
+        candidate_symbols,
+    ) -> SignalAdmissionBatch:
+        captured["candidate_symbols"] = list(candidate_symbols)
+        return SignalAdmissionBatch(
+            decisions=[
+                SignalAdmissionDecision(
+                    symbol="ETH/USDT",
+                    admitted=False,
+                    reason_code="skipped_ranked_out",
+                    memory_status="fresh",
+                    trust_direction="neutral",
+                    trust_score=50.0,
+                    available_slots=1,
+                    competing_candidates=2,
+                ),
+                SignalAdmissionDecision(
+                    symbol="BTC/USDT",
+                    admitted=True,
+                    reason_code="admitted_trust_priority",
+                    memory_status="fresh",
+                    trust_direction="favored",
+                    trust_score=75.0,
+                    available_slots=1,
+                    competing_candidates=2,
+                ),
+            ]
+        )
 
     monkeypatch.setattr(plugin, "_SignalPlugin__check_max_bots", fake_check_max_bots)
     monkeypatch.setattr(
@@ -36,6 +72,11 @@ async def test_asap_run_triggers_buy_order(monkeypatch) -> None:
     )
     monkeypatch.setattr(
         plugin, "_SignalPlugin__check_entry_point", fake_check_entry_point
+    )
+    monkeypatch.setattr(
+        asap_module,
+        "resolve_signal_admission_batch",
+        fake_resolve_signal_admission_batch,
     )
 
     orders = []
@@ -47,9 +88,12 @@ async def test_asap_run_triggers_buy_order(monkeypatch) -> None:
 
     await plugin.run({"bo": 10})
 
+    assert captured["candidate_symbols"] == ["ETH/USDT", "BTC/USDT"]
     assert len(orders) == 1
     assert orders[0]["symbol"] == "BTC/USDT"
     assert orders[0]["ordersize"] == 10
+    queued_symbols = await watcher_queue.get()
+    assert queued_symbols == ["BTC/USDT"]
 
 
 def _async_symbols(symbols: list[str]):
@@ -86,8 +130,7 @@ async def test_asap_skips_symbols_with_insufficient_history(monkeypatch) -> None
     symbols = await plugin._SignalPlugin__get_new_symbol_list(tuple())
 
     assert symbols == []
-    queued_symbols = await watcher_queue.get()
-    assert queued_symbols == []
+    assert watcher_queue.empty() is True
 
 
 @pytest.mark.asyncio

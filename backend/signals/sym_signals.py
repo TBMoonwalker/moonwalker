@@ -15,8 +15,10 @@ from service.signal_runtime import (
     build_common_runtime_settings,
     get_active_open_symbols,
     is_max_bots_reached,
+    log_signal_admission_decisions,
     parse_signal_settings,
     resolve_max_bots_log_interval,
+    resolve_signal_admission_batch,
     update_waiting_log_state,
 )
 from service.statistic import Statistic
@@ -404,38 +406,57 @@ class SignalPlugin:
         if symbol_full.upper() in running_symbols:
             return
 
+        admission_batch = await resolve_signal_admission_batch(
+            self.config,
+            self.statistic,
+            self.autopilot,
+            [symbol_full],
+        )
+        log_signal_admission_decisions(admission_batch.decisions)
+        if not admission_batch.admitted_symbols:
+            if admission_batch.has_capacity_block:
+                self.__log_max_bots_waiting()
+            return
+
         logging.debug("Running trades: %s", running_symbols)
         logging.info("Triggering new trade for %s", symbol)
 
-        if self.config.get("dynamic_dca", False) or self._required_history_candles > 0:
-            success = await self.data.add_history_data_for_symbol(
-                symbol_full,
-                history_data,
-                self.config,
-            )
-            if not success:
-                logging.error(
-                    "Not trading %s because history add failed. Please check data.log.",
-                    symbol,
+        try:
+            if (
+                self.config.get("dynamic_dca", False)
+                or self._required_history_candles > 0
+            ):
+                success = await self.data.add_history_data_for_symbol(
+                    symbol_full,
+                    history_data,
+                    self.config,
                 )
-                return
-            if not await self.__has_sufficient_strategy_history(symbol_full):
-                return
+                if not success:
+                    logging.error(
+                        "Not trading %s because history add failed. Please check data.log.",
+                        symbol,
+                    )
+                    return
+                if not await self.__has_sufficient_strategy_history(symbol_full):
+                    return
 
-        await self.watcher_queue.put([symbol_full])
-        order = {
-            "ordersize": self.config.get("bo"),
-            "symbol": symbol_full,
-            "direction": "long",
-            "botname": f"symsignal_{symbol}",
-            "baseorder": True,
-            "safetyorder": False,
-            "order_count": 0,
-            "ordertype": "market",
-            "so_percentage": None,
-            "side": "buy",
-        }
-        await self.orders.receive_buy_order(order, self.config)
+            await self.watcher_queue.put([symbol_full])
+            order = {
+                "ordersize": self.config.get("bo"),
+                "symbol": symbol_full,
+                "direction": "long",
+                "botname": f"symsignal_{symbol}",
+                "baseorder": True,
+                "safetyorder": False,
+                "order_count": 0,
+                "ordertype": "market",
+                "so_percentage": None,
+                "side": "buy",
+            }
+            await self.orders.receive_buy_order(order, self.config)
+        finally:
+            await admission_batch.release_symbol(symbol_full)
+            await admission_batch.release()
 
     async def shutdown(self) -> None:
         """Shutdown the signal plugin.

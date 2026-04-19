@@ -182,6 +182,47 @@ def test_autopilot_memory_fails_open_when_snapshot_is_stale() -> None:
     assert policy["memory_status"] == "stale"
 
 
+def test_autopilot_memory_builds_admission_profiles_from_public_view() -> None:
+    service = AutopilotMemoryService()
+    service._state = {
+        **service._build_default_state(),
+        "status": "fresh",
+        "enabled": True,
+        "last_success_at": datetime.now(timezone.utc),
+        "last_updated_at": datetime.now(timezone.utc),
+    }
+    service._snapshot_map = {
+        "BTC/USDT": SymbolMemorySnapshot(
+            symbol="BTC/USDT",
+            trust_score=72.0,
+            trust_direction="favored",
+            confidence_bucket="confident",
+            confidence_progress=1.0,
+            sample_size=12,
+            profitable_closes=10,
+            loss_count=2,
+            slow_close_count=0,
+            weighted_profit_percent=1.1,
+            weighted_close_hours=1.2,
+            tp_delta_ratio=0.9,
+            suggested_base_order=115.0,
+            primary_reason_code="quick_profitable_closes",
+            primary_reason_value=10,
+            secondary_reason_code=None,
+            secondary_reason_value=None,
+            last_closed_at=datetime.now(timezone.utc),
+        )
+    }
+
+    profiles = service.build_admission_profiles(["BTC/USDT", "ETH/USDT"], enabled=True)
+
+    assert profiles["BTC/USDT"].uses_trust_ranking is True
+    assert profiles["BTC/USDT"].reason_code == "quick_profitable_closes"
+    assert profiles["ETH/USDT"].memory_status == "fresh"
+    assert profiles["ETH/USDT"].uses_trust_ranking is False
+    assert profiles["ETH/USDT"].reason_code == "snapshot_missing"
+
+
 def test_autopilot_memory_http_endpoint_returns_persisted_read_model(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

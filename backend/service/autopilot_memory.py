@@ -179,6 +179,11 @@ def _round_float(value: float | None, digits: int = 4) -> float | None:
     return round(float(value), digits)
 
 
+def _normalize_symbol_key(value: Any) -> str:
+    """Return a stable uppercase symbol key for cache lookups."""
+    return str(value or "").strip().upper()
+
+
 def _confidence_bucket(sample_size: int) -> str:
     """Map sample size to the cockpit confidence language."""
     if sample_size >= 8:
@@ -265,6 +270,18 @@ class SymbolMemorySnapshot:
             "secondary_reason_value": self.secondary_reason_value,
             "last_closed_at": _isoformat_or_none(self.last_closed_at),
         }
+
+
+@dataclass(frozen=True)
+class SymbolAdmissionProfile:
+    """Admission-facing trust view for one symbol."""
+
+    symbol: str
+    memory_status: str
+    trust_direction: str
+    trust_score: float | None
+    reason_code: str | None
+    uses_trust_ranking: bool
 
 
 @dataclass(frozen=True)
@@ -415,7 +432,7 @@ class AutopilotMemoryService:
     ) -> dict[str, Any]:
         """Resolve adaptive TP/suggested sizing for one symbol from the cache."""
         state = self._state_with_staleness()
-        snapshot = self._snapshot_map.get(symbol)
+        snapshot = self._snapshot_map.get(_normalize_symbol_key(symbol))
         take_profit = float(baseline_take_profit)
 
         if (
@@ -448,6 +465,65 @@ class AutopilotMemoryService:
             "trust_score": snapshot.trust_score,
         }
 
+    def build_admission_profiles(
+        self,
+        symbols: list[str],
+        *,
+        enabled: bool,
+    ) -> dict[str, SymbolAdmissionProfile]:
+        """Return admission-ready trust metadata keyed by normalized symbol."""
+        state = self._state_with_staleness()
+        profiles: dict[str, SymbolAdmissionProfile] = {}
+        for symbol in symbols:
+            normalized_symbol = _normalize_symbol_key(symbol)
+            if not normalized_symbol:
+                continue
+            snapshot = self._snapshot_map.get(normalized_symbol)
+
+            if not enabled:
+                profiles[normalized_symbol] = SymbolAdmissionProfile(
+                    symbol=normalized_symbol,
+                    memory_status="disabled",
+                    trust_direction="neutral",
+                    trust_score=snapshot.trust_score if snapshot else None,
+                    reason_code="autopilot_disabled",
+                    uses_trust_ranking=False,
+                )
+                continue
+
+            if state["status"] != "fresh":
+                profiles[normalized_symbol] = SymbolAdmissionProfile(
+                    symbol=normalized_symbol,
+                    memory_status=str(state["status"]),
+                    trust_direction="neutral",
+                    trust_score=snapshot.trust_score if snapshot else None,
+                    reason_code=state.get("stale_reason"),
+                    uses_trust_ranking=False,
+                )
+                continue
+
+            if snapshot is None:
+                profiles[normalized_symbol] = SymbolAdmissionProfile(
+                    symbol=normalized_symbol,
+                    memory_status="fresh",
+                    trust_direction="neutral",
+                    trust_score=None,
+                    reason_code="snapshot_missing",
+                    uses_trust_ranking=False,
+                )
+                continue
+
+            profiles[normalized_symbol] = SymbolAdmissionProfile(
+                symbol=normalized_symbol,
+                memory_status="fresh",
+                trust_direction=snapshot.trust_direction,
+                trust_score=snapshot.trust_score,
+                reason_code=snapshot.primary_reason_code,
+                uses_trust_ranking=True,
+            )
+
+        return profiles
+
     def build_read_model(self) -> dict[str, Any]:
         """Return the cockpit read model for the latest persisted snapshot."""
         state = self._state_with_staleness()
@@ -469,7 +545,9 @@ class AutopilotMemoryService:
         ][: self.MAX_TRUST_ROWS]
         featured = None
         if state["featured_symbol"]:
-            featured_snapshot = self._snapshot_map.get(str(state["featured_symbol"]))
+            featured_snapshot = self._snapshot_map.get(
+                _normalize_symbol_key(state["featured_symbol"])
+            )
             if featured_snapshot is not None:
                 featured = featured_snapshot.to_api_payload()
 
@@ -547,7 +625,8 @@ class AutopilotMemoryService:
             self._state = computation["state"]
             self._snapshots = computation["snapshots"]
             self._snapshot_map = {
-                snapshot.symbol: snapshot for snapshot in self._snapshots
+                _normalize_symbol_key(snapshot.symbol): snapshot
+                for snapshot in self._snapshots
             }
             await self._load_events()
         except Exception as exc:  # noqa: BLE001 - keep service resilient.
@@ -634,7 +713,10 @@ class AutopilotMemoryService:
                 snapshot.symbol,
             )
         )
-        self._snapshot_map = {snapshot.symbol: snapshot for snapshot in self._snapshots}
+        self._snapshot_map = {
+            _normalize_symbol_key(snapshot.symbol): snapshot
+            for snapshot in self._snapshots
+        }
         await self._load_events()
 
     async def _load_events(self) -> None:
