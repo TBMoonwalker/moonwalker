@@ -13,7 +13,7 @@
   "dependencies": {
     "@vicons/ionicons5": "0.13.0",
     "@vueuse/core": "14.2.1",
-    "axios": "1.13.6",
+    "axios": "1.15.0",
     "echarts": "6.0.0",
     "lightweight-charts": "5.1.0",
     "naive-ui": "2.44.1",
