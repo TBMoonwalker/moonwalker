@@ -7,7 +7,9 @@
 ## Summary
 Moonwalker is a self-hosted cryptocurrency trading bot with a Litestar backend,
 Vue dashboard, exchange integration via CCXT/CCXT Pro, and support for both
-signal-driven entries and dynamic DCA management.
+signal-driven entries and dynamic DCA management. It also includes an
+Autopilot Memory cockpit that surfaces favored and cooling symbols, suggested
+base orders, and plain-language trust signals in the Control Center.
 
 ## Disclaimer
 **Moonwalker is meant to be used for educational purposes only. Use with real funds at your own risk**
