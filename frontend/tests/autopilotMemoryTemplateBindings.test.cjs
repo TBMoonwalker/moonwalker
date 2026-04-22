@@ -115,6 +115,13 @@ test('monitoring preview exposes the required Monitoring action and health copy'
     assert.match(monitoringPreviewSource, /monitoring\.statusTitle/)
     assert.match(monitoringPreviewSource, /monitoring\.statusBody/)
     assert.match(monitoringPreviewSource, /Receiving payloads/)
+    assert.match(
+        monitoringPreviewSource,
+        /production-only console error on overview load/,
+    )
+    assert.match(monitoringPreviewSource, /<button/)
+    assert.doesNotMatch(monitoringPreviewSource, /<n-card/i)
+    assert.doesNotMatch(monitoringPreviewSource, /<n-alert/i)
     assert.doesNotMatch(monitoringPreviewSource, />Monitoring</)
 })
 

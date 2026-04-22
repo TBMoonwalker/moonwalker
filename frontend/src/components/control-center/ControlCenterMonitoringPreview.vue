@@ -9,33 +9,43 @@ const monitoring = useControlCenterMonitoringSummary()
 </script>
 
 <template>
-    <n-card
-        class="monitoring-preview"
-        content-style="padding: 18px 20px;"
-    >
-        <n-flex vertical :size="14" class="preview-stack">
+    <!-- Naive wrappers here triggered a production-only console error on overview load. -->
+    <section class="monitoring-preview">
+        <div class="preview-stack">
             <div class="preview-header">
                 <div class="preview-copy">
                     <h2 class="preview-title">{{ monitoring.statusTitle }}</h2>
-                    <n-text depth="3" class="preview-summary">
+                    <p class="preview-summary">
                         {{ monitoring.statusBody }}
-                    </n-text>
+                    </p>
                 </div>
                 <div class="preview-actions">
-                    <n-button secondary @click="emit('open-monitoring')">
+                    <button
+                        type="button"
+                        class="preview-action-button"
+                        @click="emit('open-monitoring')"
+                    >
                         Open Monitoring
-                    </n-button>
+                    </button>
                 </div>
             </div>
 
-            <n-alert
+            <div
                 v-if="monitoring.alertTitle"
-                :type="monitoring.alertType"
-                :bordered="false"
-                :title="monitoring.alertTitle"
+                class="preview-alert"
+                :data-tone="
+                    monitoring.health === 'attention_needed'
+                        ? 'warning'
+                        : 'info'
+                "
             >
-                {{ monitoring.statusBody }}
-            </n-alert>
+                <strong class="preview-alert-title">
+                    {{ monitoring.alertTitle }}
+                </strong>
+                <p class="preview-alert-body">
+                    {{ monitoring.statusBody }}
+                </p>
+            </div>
 
             <div class="hero-insight">
                 <p class="hero-insight-copy">{{ monitoring.featuredInsight }}</p>
@@ -65,17 +75,26 @@ const monitoring = useControlCenterMonitoringSummary()
                     </strong>
                 </div>
             </div>
-        </n-flex>
-    </n-card>
+        </div>
+    </section>
 </template>
 
 <style scoped>
 .monitoring-preview {
     width: 100%;
+    padding: 18px 20px;
+    border-radius: 12px;
     border-color: rgba(29, 92, 73, 0.14);
+    border: 1px solid rgba(29, 92, 73, 0.14);
     background: var(--mw-surface-shell);
     box-shadow: var(--mw-shadow-card);
     color: var(--mw-color-text-primary);
+}
+
+.preview-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
 }
 
 .preview-title {
@@ -108,11 +127,65 @@ const monitoring = useControlCenterMonitoringSummary()
 }
 
 .preview-summary {
-    display: block;
+    margin: 0;
     min-width: 0;
     color: var(--mw-color-text-secondary);
     line-height: 1.55;
     text-wrap: pretty;
+}
+
+.preview-action-button {
+    border: 1px solid rgba(29, 92, 73, 0.18);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.7);
+    color: var(--mw-color-text-primary);
+    cursor: pointer;
+    font: inherit;
+    font-weight: 600;
+    line-height: 1;
+    padding: 0.72rem 1rem;
+    transition:
+        background-color 120ms ease,
+        border-color 120ms ease,
+        transform 120ms ease;
+}
+
+.preview-action-button:hover {
+    background: rgba(29, 92, 73, 0.08);
+    border-color: rgba(29, 92, 73, 0.28);
+}
+
+.preview-action-button:focus-visible {
+    outline: 2px solid rgba(29, 92, 73, 0.35);
+    outline-offset: 2px;
+}
+
+.preview-alert {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 12px 14px;
+    border-radius: 10px;
+    border: 1px solid rgba(53, 109, 134, 0.16);
+    background: rgba(53, 109, 134, 0.08);
+}
+
+.preview-alert[data-tone='warning'] {
+    border-color: rgba(183, 121, 31, 0.18);
+    background: rgba(183, 121, 31, 0.1);
+}
+
+.preview-alert-title {
+    color: var(--mw-color-text-primary);
+    font-size: 0.95rem;
+    font-weight: 700;
+}
+
+.preview-alert-body {
+    margin: 0;
+    color: var(--mw-color-text-secondary);
+    font-size: 0.95rem;
+    line-height: 1.55;
 }
 
 .hero-insight {
@@ -174,16 +247,16 @@ const monitoring = useControlCenterMonitoringSummary()
         justify-content: flex-start;
     }
 
-    .preview-actions :deep(.n-button) {
-        flex: 1 1 auto;
-    }
-
     .preview-metrics {
         grid-template-columns: 1fr;
     }
 
     .preview-summary {
         white-space: normal;
+    }
+
+    .preview-action-button {
+        width: 100%;
     }
 }
 </style>
