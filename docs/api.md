@@ -44,6 +44,21 @@ Notes:
 - Switching the signal plugin to `csv_signal` is rejected while open trades
   still exist.
 
+## Autopilot Memory
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/autopilot/memory` | Return the persisted Autopilot Memory cockpit read model used by `/control-center/autopilot` and the Control Center overview preview. |
+
+The Autopilot Memory payload is read-only. It includes:
+- current memory status (`fresh`, `warming_up`, `stale`, or baseline-only)
+- favored and cooling trust-board rows with confidence, reasons, adaptive TP
+  delta, and suggested base order
+- one featured symbol summary for the overview cards
+- recent smart-play events in operator-facing language
+- portfolio-effect ranges for adaptive TP and suggested base order
+- entry-sizing status, warmup progress, and stale markers
+
 ## Orders
 
 All mutating order endpoints use `POST`.
@@ -100,6 +115,10 @@ These streams are fan-out based: one producer loop refreshes shared data every
 The live profit stream includes current portfolio values plus runtime state such
 as funds locked, funds available, Autopilot mode, effective max bots, and Green
 Phase status.
+
+It also carries compact Autopilot Memory status fields for the top statistics
+strip, including freshness or warmup state, stale reason, current vs required
+closed-trade count, and the currently featured symbol when available.
 
 ## Market Data
 

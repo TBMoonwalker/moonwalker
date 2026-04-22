@@ -38,7 +38,10 @@ onUnmounted(() => {
 <template>
   <div class="page-shell trades-page">
     <n-flex class="page-section" vertical>
-      <n-card class="dashboard-header-card" content-style="padding: 14px 16px;">
+      <n-card
+        class="dashboard-header-card mw-shell-card"
+        content-style="padding: 14px 16px;"
+      >
         <n-flex class="page-header trades-header" vertical :size="12">
           <div class="header-statistics">
             <Statistics />
@@ -48,7 +51,7 @@ onUnmounted(() => {
     </n-flex>
 
     <n-flex class="page-section" vertical>
-      <n-card content-style="padding: 0;">
+      <n-card class="dashboard-surface-card mw-shell-card" content-style="padding: 0;">
         <n-tabs
           v-model:value="activeProfitTab"
           type="line"
@@ -72,7 +75,7 @@ onUnmounted(() => {
     </n-flex>
 
     <n-flex class="page-section" vertical>
-      <n-card content-style="padding: 0;">
+      <n-card class="dashboard-surface-card mw-shell-card" content-style="padding: 0;">
         <n-tabs
           v-model:value="activeTradesTab"
           type="line"
@@ -122,6 +125,10 @@ onUnmounted(() => {
 }
 
 .dashboard-header-card {
+  width: 100%;
+}
+
+.dashboard-surface-card {
   width: 100%;
 }
 

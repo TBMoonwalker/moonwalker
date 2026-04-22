@@ -4,7 +4,6 @@ import asyncio
 from typing import Any
 
 import helper
-import model
 import socketio
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
@@ -14,9 +13,14 @@ from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
     build_common_runtime_settings,
+    get_active_open_symbols,
     is_max_bots_reached,
+    log_signal_admission_decisions,
+    log_signal_entry_order_decisions,
     parse_signal_settings,
     resolve_max_bots_log_interval,
+    resolve_signal_admission_batch,
+    resolve_signal_entry_orders,
     update_waiting_log_state,
 )
 from service.statistic import Statistic
@@ -400,45 +404,81 @@ class SignalPlugin:
         if not (is_entry_signal and token_old_enough):
             return
 
-        running_trades = (
-            await model.Trades.all().distinct().values_list("bot", flat=True)
-        )
-        current_symbol = f"symsignal_{symbol}"
-        if current_symbol in running_trades:
+        running_symbols = await get_active_open_symbols()
+        if symbol_full.upper() in running_symbols:
             return
 
-        logging.debug("Running trades: %s", running_trades)
+        admission_batch = await resolve_signal_admission_batch(
+            self.config,
+            self.statistic,
+            self.autopilot,
+            [symbol_full],
+        )
+        log_signal_admission_decisions(admission_batch.decisions)
+        if not admission_batch.admitted_symbols:
+            if admission_batch.has_capacity_block:
+                self.__log_max_bots_waiting()
+            return
+
+        logging.debug("Running trades: %s", running_symbols)
         logging.info("Triggering new trade for %s", symbol)
 
-        if self.config.get("dynamic_dca", False) or self._required_history_candles > 0:
-            success = await self.data.add_history_data_for_symbol(
-                symbol_full,
-                history_data,
-                self.config,
-            )
-            if not success:
-                logging.error(
-                    "Not trading %s because history add failed. Please check data.log.",
-                    symbol,
+        try:
+            if (
+                self.config.get("dynamic_dca", False)
+                or self._required_history_candles > 0
+            ):
+                success = await self.data.add_history_data_for_symbol(
+                    symbol_full,
+                    history_data,
+                    self.config,
                 )
-                return
-            if not await self.__has_sufficient_strategy_history(symbol_full):
-                return
+                if not success:
+                    logging.error(
+                        "Not trading %s because history add failed. Please check data.log.",
+                        symbol,
+                    )
+                    return
+                if not await self.__has_sufficient_strategy_history(symbol_full):
+                    return
 
-        await self.watcher_queue.put([symbol_full])
-        order = {
-            "ordersize": self.config.get("bo"),
-            "symbol": symbol_full,
-            "direction": "long",
-            "botname": f"symsignal_{symbol}",
-            "baseorder": True,
-            "safetyorder": False,
-            "order_count": 0,
-            "ordertype": "market",
-            "so_percentage": None,
-            "side": "buy",
-        }
-        await self.orders.receive_buy_order(order, self.config)
+            entry_orders = await resolve_signal_entry_orders(
+                self.config,
+                self.statistic,
+                self.autopilot,
+                [symbol_full],
+                signal_name=f"sym_signals:{event.get('signal_name_id')}",
+                strategy_name=None,
+                timeframe=self._strategy_timeframe,
+            )
+            log_signal_entry_order_decisions(entry_orders.values())
+            entry_order = entry_orders[symbol_full]
+            await self.watcher_queue.put([symbol_full])
+            order = {
+                "ordersize": entry_order.order_size,
+                "symbol": symbol_full,
+                "direction": "long",
+                "botname": f"symsignal_{symbol}",
+                "baseorder": True,
+                "safetyorder": False,
+                "order_count": 0,
+                "ordertype": "market",
+                "so_percentage": None,
+                "side": "buy",
+                "signal_name": entry_order.signal_name,
+                "strategy_name": entry_order.strategy_name,
+                "timeframe": entry_order.timeframe,
+                "metadata_json": entry_order.metadata_json,
+                "baseline_order_size": entry_order.baseline_order_size,
+                "entry_size_applied": entry_order.entry_size_applied,
+                "entry_size_reason_code": entry_order.reason_code,
+                "entry_size_fallback_applied": False,
+                "entry_size_fallback_reason": None,
+            }
+            await self.orders.receive_buy_order(order, self.config)
+        finally:
+            await admission_batch.release_symbol(symbol_full)
+            await admission_batch.release()
 
     async def shutdown(self) -> None:
         """Shutdown the signal plugin.

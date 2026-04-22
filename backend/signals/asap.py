@@ -2,12 +2,10 @@
 
 import asyncio
 import importlib
-import random
 from typing import Any, Optional
 
 import helper
 import httpx
-import model
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
 from service.data import Data
@@ -16,8 +14,13 @@ from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
     build_common_runtime_settings,
+    get_active_open_symbols,
     is_max_bots_reached,
+    log_signal_admission_decisions,
+    log_signal_entry_order_decisions,
     resolve_max_bots_log_interval,
+    resolve_signal_admission_batch,
+    resolve_signal_entry_orders,
     update_waiting_log_state,
 )
 from service.statistic import Statistic
@@ -196,14 +199,16 @@ class SignalPlugin:
         return pairs
 
     @helper.async_ttl_cache(maxsize=1024, ttl=900)
-    async def __get_new_symbol_list(self, running_list: tuple) -> Optional[list[str]]:
+    async def __get_new_symbol_list(
+        self, running_symbols: tuple[str, ...]
+    ) -> Optional[list[str]]:
         """Get the list of new symbols to trade.
 
         Retrieves the symbol list from configuration, ensures history data exists
         for each symbol, and pushes them to watcher queue for processing.
 
         Args:
-            running_list: Tuple of currently running trade bots
+            running_symbols: Tuple of currently running trade symbols
 
         Returns:
             List of symbols to trade, or None if no symbol list configured
@@ -215,12 +220,6 @@ class SignalPlugin:
                 symbol_list = await self.__fetch_symbol_list_from_url(symbol_list)
             else:
                 symbol_list = symbol_list.split(",")
-
-            # Running symbols
-            running_symbols = [
-                f"{symbol.upper()}"
-                for botsuffix, symbol in [item.split("_") for item in running_list]
-            ]
 
             logging.debug("Fetched symbol list: %s", symbol_list)
 
@@ -248,8 +247,6 @@ class SignalPlugin:
                         if not await self.__has_sufficient_strategy_history(symbol):
                             continue
                 eligible_symbols.append(symbol)
-            await self.watcher_queue.put(eligible_symbols)
-
             logging.debug("Running symbols: %s", running_symbols)
             logging.debug("New symbols: %s", eligible_symbols)
             return eligible_symbols
@@ -395,26 +392,53 @@ class SignalPlugin:
             max_bots = await self.__check_max_bots()
             if not max_bots:
                 self._max_bots_blocked = False
-                running_trades = (
-                    await model.Trades.all().distinct().values_list("bot", flat=True)
-                )
-                symbol_list = await self.__get_new_symbol_list(tuple(running_trades))
+                running_symbols = tuple(await get_active_open_symbols())
+                symbol_list = await self.__get_new_symbol_list(running_symbols)
                 if symbol_list:
-                    # Randomize symbols for new deals
-                    random.shuffle(symbol_list)
+                    candidate_symbols: list[str] = []
                     for symbol in symbol_list:
-                        current_symbol = f"asap_{symbol}"
                         signal = await self.__check_entry_point(symbol)
-                        # Check max bots again
-                        max_bots = await self.__check_max_bots()
-                        if (
-                            current_symbol not in running_trades
-                            and not max_bots
-                            and signal
-                        ):
+                        # Slow down on many symbols at once
+                        await asyncio.sleep(1)
+                        if signal:
+                            candidate_symbols.append(symbol)
+
+                    admission_batch = await resolve_signal_admission_batch(
+                        self.config,
+                        self.statistic,
+                        self.autopilot,
+                        candidate_symbols,
+                    )
+                    log_signal_admission_decisions(admission_batch.decisions)
+
+                    if (
+                        admission_batch.has_capacity_block
+                        and not admission_batch.admitted_symbols
+                    ):
+                        self.__log_max_bots_waiting()
+                        continue
+
+                    if admission_batch.admitted_symbols:
+                        await self.watcher_queue.put(admission_batch.admitted_symbols)
+                        entry_orders = await resolve_signal_entry_orders(
+                            self.config,
+                            self.statistic,
+                            self.autopilot,
+                            admission_batch.admitted_symbols,
+                            signal_name="asap",
+                            strategy_name=(
+                                str(self.config.get("signal_strategy") or "") or None
+                            ),
+                            timeframe=self._strategy_timeframe,
+                        )
+                        log_signal_entry_order_decisions(entry_orders.values())
+
+                    try:
+                        for symbol in admission_batch.admitted_symbols:
+                            entry_order = entry_orders[symbol]
                             logging.info("Triggering new trade for %s", symbol)
                             order = {
-                                "ordersize": self.config.get("bo", 12),
+                                "ordersize": entry_order.order_size,
                                 "symbol": symbol,
                                 "direction": "long",
                                 "botname": f"asap_{symbol}",
@@ -424,12 +448,23 @@ class SignalPlugin:
                                 "ordertype": "market",
                                 "so_percentage": None,
                                 "side": "buy",
+                                "signal_name": entry_order.signal_name,
+                                "strategy_name": entry_order.strategy_name,
+                                "timeframe": entry_order.timeframe,
+                                "metadata_json": entry_order.metadata_json,
+                                "baseline_order_size": entry_order.baseline_order_size,
+                                "entry_size_applied": entry_order.entry_size_applied,
+                                "entry_size_reason_code": entry_order.reason_code,
+                                "entry_size_fallback_applied": False,
+                                "entry_size_fallback_reason": None,
                             }
-                            await self.orders.receive_buy_order(order, self.config)
-                        # Slow down on many symbols at once
-                        await asyncio.sleep(1)
-                        if not await self.__check_max_bots():
-                            self._max_bots_blocked = False
+                            try:
+                                await self.orders.receive_buy_order(order, self.config)
+                            finally:
+                                await admission_batch.release_symbol(symbol)
+                            await asyncio.sleep(1)
+                    finally:
+                        await admission_batch.release()
                 else:
                     logging.error(
                         "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."

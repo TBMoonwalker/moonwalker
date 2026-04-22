@@ -34,6 +34,20 @@ body {
   min-width: 0;
 }
 
+.mw-shell-card {
+  background: var(--mw-surface-shell);
+  border-color: rgba(29, 92, 73, 0.14);
+  box-shadow: var(--mw-shadow-card);
+  color: var(--mw-color-text-primary);
+}
+
+.mw-muted-card {
+  background: var(--mw-surface-card-muted);
+  border-color: rgba(29, 92, 73, 0.12);
+  box-shadow: var(--mw-shadow-card);
+  color: var(--mw-color-text-primary);
+}
+
 @media (min-width: 1280px) {
   .page-shell {
     gap: 24px;

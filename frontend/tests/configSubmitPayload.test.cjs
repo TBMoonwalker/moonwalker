@@ -101,6 +101,7 @@ function createBaseOptions(overrides = {}) {
         },
         autopilot: {
             enabled: false,
+            symbol_entry_sizing_enabled: false,
             max_fund: null,
             high_mad: null,
             high_tp: null,
@@ -218,6 +219,10 @@ test(
         assert.equal(parseField(payload, 'history_lookback_time').value, '180d')
         assert.equal(parseField(payload, 'pair_denylist').value, 'BTC/USDT,ETH/USDT')
         assert.equal(parseField(payload, 'os').value, false)
+        assert.equal(
+            parseField(payload, 'autopilot_symbol_entry_sizing_enabled').value,
+            false,
+        )
     },
 )
 

@@ -94,6 +94,7 @@ are not exposed in the UI and must be set via the API.
 | `upnl_housekeeping_interval` | `int` | uPNL history retention in days; `0` keeps all history forever. | `0` |
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |
 | `autopilot` | `bool` | Enable autopilot mode. | `false` |
+| `autopilot_symbol_entry_sizing_enabled` | `bool` | Allow fresh non-neutral Autopilot memory to override new-entry base order size per symbol. When disabled, suggested base orders remain advisory only. | `false` |
 | `autopilot_max_fund` | `int` | Max funds for autopilot calculations. | `1000` |
 | `autopilot_high_mad` | `int` | Max active deals (high setting). | `5` |
 | `autopilot_high_tp` | `float` | TP percent (high setting). | `1.2` |

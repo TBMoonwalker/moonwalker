@@ -315,6 +315,22 @@ class Statistic:
         profit_data["autopilot_green_phase_ramp_ready"] = autopilot_state[
             "green_phase_ramp_ready"
         ]
+        profit_data["autopilot_memory_status"] = autopilot_state.get("memory_status")
+        profit_data["autopilot_memory_stale"] = bool(
+            autopilot_state.get("memory_stale")
+        )
+        profit_data["autopilot_memory_stale_reason"] = autopilot_state.get(
+            "memory_stale_reason"
+        )
+        profit_data["autopilot_memory_current_closes"] = int(
+            autopilot_state.get("memory_current_closes") or 0
+        )
+        profit_data["autopilot_memory_required_closes"] = int(
+            autopilot_state.get("memory_required_closes") or 0
+        )
+        profit_data["autopilot_memory_featured_symbol"] = autopilot_state.get(
+            "memory_featured_symbol"
+        )
 
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
     async def _get_profit_cached(self) -> dict[str, Any]:

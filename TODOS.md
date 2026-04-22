@@ -1,27 +1,35 @@
 # TODOS
 
-## Control Center
+## Completed
+
+### Apply suggested base order as guarded per-symbol entry sizing
+
+**Completed:** v1.2.0.0 (2026-04-22)
+
+**What shipped:** Added an explicit `autopilot_symbol_entry_sizing_enabled`
+switch, extended the shared Autopilot policy seam to resolve entry-size
+decisions alongside adaptive TP, routed ASAP and SymSignals through one shared
+signal-runtime order-size resolver, persisted applied-vs-fallback sizing
+metadata through buy executions, retried once with baseline `bo` on sizing
+validation failures, and surfaced entry-sizing status in the Autopilot cockpit.
 
 ### Add owner-confidence summary to Control Center overview
 
-**What:** Add a later compact owner-confidence summary to the Control Center
-overview so a bot owner can get a fast answer about whether the current setup
-still looks okay without turning Control Center into a second Monitoring page.
+**Completed:** v1.2.0.0 (2026-04-22)
 
-**Why:** This preserves the good product idea behind the old runtime-health TODO
-while keeping the current trust-first implementation focused.
+**What shipped:** Added a compact owner-confidence summary to the Control
+Center overview that rolls up operating mode, config trust, Autopilot memory,
+and a lightweight live-data signal without duplicating Monitoring diagnostics.
 
-**Context:** This follow-up should stay compact and evidence-based. It may
-eventually reuse safe signals such as current mode, readiness state, or a
-proven lightweight activity signal, but it should not duplicate Monitoring
-logs, reconnect counters, or stream-by-stream diagnostics. Revisit it only
-after config trust and invalidation hardening feel stable.
+### Add ranked scarce-bot admission for trusted symbols
 
-**Effort:** M
-**Priority:** P3
-**Depends on:** Config trust and invalidation hardening shipping cleanly first
+**Completed:** v1.2.0.0 (2026-04-22)
 
-## Completed
+**What shipped:** Added a shared ranked admission and reservation seam in
+`backend/service/signal_runtime.py`, reused Autopilot trust memory to rank
+favored, neutral, and cooling symbols, routed ASAP and SymSignals through the
+same decision path, and expanded regression coverage around ranking,
+explanations, and release-on-failure behavior.
 
 ### Finish the deferred backend stabilization slice for data/replay/database seams
 

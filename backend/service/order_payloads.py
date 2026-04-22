@@ -176,6 +176,10 @@ def build_buy_trade_payload(order_status: ExchangeOrderPayload) -> dict[str, Any
         "so_percentage": order_status["so_percentage"],
         "direction": order_status["direction"],
         "side": order_status["side"],
+        "signal_name": order_status.get("signal_name"),
+        "strategy_name": order_status.get("strategy_name"),
+        "timeframe": order_status.get("timeframe"),
+        "metadata_json": order_status.get("metadata_json"),
     }
 
 
@@ -194,6 +198,10 @@ def build_buy_monitor_payload(order_status: ExchangeOrderPayload) -> dict[str, A
         "safetyorder": order_status["safetyorder"],
         "order_count": order_status["order_count"],
         "so_percentage": order_status["so_percentage"],
+        "signal_name": order_status.get("signal_name"),
+        "strategy_name": order_status.get("strategy_name"),
+        "timeframe": order_status.get("timeframe"),
+        "metadata_json": order_status.get("metadata_json"),
     }
 
 

@@ -90,6 +90,10 @@ def test_build_buy_payload_helpers_return_expected_values() -> None:
         "so_percentage": None,
         "direction": "long",
         "side": "buy",
+        "signal_name": "asap",
+        "strategy_name": "ema_cross",
+        "timeframe": "15m",
+        "metadata_json": '{"entry_sizing":{"applied":true}}',
     }
 
     trade_payload = build_buy_trade_payload(order_status)
@@ -99,6 +103,10 @@ def test_build_buy_payload_helpers_return_expected_values() -> None:
     assert trade_payload["bot"] == "asap_BTC/USDT"
     assert trade_payload["fee"] == 0.001
     assert trade_payload["direction"] == "long"
+    assert trade_payload["signal_name"] == "asap"
+    assert trade_payload["timeframe"] == "15m"
+    assert trade_payload["metadata_json"] == '{"entry_sizing":{"applied":true}}'
     assert monitor_payload["symbol"] == "BTC/USDT"
     assert monitor_payload["side"] == "buy"
     assert monitor_payload["ordertype"] == "market"
+    assert monitor_payload["signal_name"] == "asap"

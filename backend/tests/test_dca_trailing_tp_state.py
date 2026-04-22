@@ -1,4 +1,5 @@
 import pytest
+from service.autopilot import ResolvedTradingPolicy
 from service.dca import Dca
 
 
@@ -23,9 +24,30 @@ def _configure_dca(dca: Dca) -> None:
         "mstc": 0,
         "tp_spike_confirm_enabled": False,
     }
-    dca.tp = 10.0
-    dca.sl = 5.0
-    dca.sl_timeout = 0
+
+
+def _build_policy() -> ResolvedTradingPolicy:
+    return ResolvedTradingPolicy(
+        symbol="XPL/USDC",
+        mode="low",
+        effective_max_bots=2,
+        take_profit=10.0,
+        baseline_take_profit=10.0,
+        stop_loss=5.0,
+        stop_loss_timeout=0,
+        green_phase_active=False,
+        green_phase_extra_deals=0,
+        adaptive_tp_applied=False,
+        adaptive_reason_code=None,
+        adaptive_trust_direction=None,
+        adaptive_trust_score=None,
+        adaptive_entry_size_applied=False,
+        adaptive_entry_reason_code=None,
+        memory_status="fresh",
+        baseline_base_order=50.0,
+        entry_order_size=50.0,
+        suggested_base_order=50.0,
+    )
 
 
 @pytest.mark.asyncio
@@ -58,8 +80,8 @@ async def test_trailing_tp_state_is_instance_local(monkeypatch) -> None:
 
     trades = _build_trades()
 
-    await first._Dca__calculate_tp(112.0, trades)
-    await second._Dca__calculate_tp(110.8, trades)
+    await first._Dca__calculate_tp(112.0, trades, _build_policy())
+    await second._Dca__calculate_tp(110.8, trades, _build_policy())
 
     assert first_sell_calls == []
     assert second_sell_calls == []

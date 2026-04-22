@@ -29,6 +29,11 @@ export function createAppRouter(
                 component: () => import('../views/ControlCenterView.vue'),
             },
             {
+                path: '/control-center/autopilot',
+                name: 'controlCenterAutopilot',
+                component: () => import('../views/AutopilotMemoryView.vue'),
+            },
+            {
                 path: '/monitoring',
                 name: 'monitoring',
                 component: () => import('../views/MonitoringView.vue'),

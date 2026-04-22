@@ -22,7 +22,11 @@
                     :value="formatFixed2(upnl)"
                 />
             </div>
-            <div class="stat-cell autopilot-cell">
+            <RouterLink
+                class="stat-cell autopilot-cell autopilot-link"
+                :to="{ name: 'controlCenterAutopilot' }"
+                aria-label="Open Autopilot page"
+            >
                 <div class="autopilot-stat">
                     <span class="autopilot-label">Autopilot mode</span>
                     <span
@@ -38,7 +42,7 @@
                     <span class="autopilot-subtext">{{ autopilot_summary }}</span>
                     <span v-if="green_phase_hint" class="autopilot-detail">{{ green_phase_hint }}</span>
                 </div>
-            </div>
+            </RouterLink>
             <div class="stat-cell">
                 <n-statistic label="Funds locked" :value="formatFixed2(funds_locked)" />
             </div>
@@ -51,6 +55,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { RouterLink } from 'vue-router'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
 import {
@@ -59,7 +64,7 @@ import {
     PauseCircleOutline,
     WarningOutline,
 } from '@vicons/ionicons5'
-
+import { formatAutopilotMemoryHint } from '../autopilot/presentation'
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
 const hasStatisticsData = computed(() => statistics_data.hasReceivedData.value)
@@ -76,6 +81,11 @@ const autopilot_green_phase_detected = ref(false)
 const autopilot_green_phase_active = ref(false)
 const autopilot_green_phase_extra_deals = ref(0)
 const autopilot_green_phase_block_reason = ref<string | null>(null)
+const autopilot_memory_status = ref<string | null>(null)
+const autopilot_memory_stale = ref(false)
+const autopilot_memory_stale_reason = ref<string | null>(null)
+const autopilot_memory_current_closes = ref(0)
+const autopilot_memory_required_closes = ref(0)
 
 const autopilot_summary = computed(() => {
     if (autopilot_state.value === 'none') {
@@ -87,6 +97,15 @@ const autopilot_summary = computed(() => {
 const green_phase_hint = computed(() => {
     if (autopilot_state.value === 'none') {
         return ''
+    }
+    if (autopilot_memory_stale.value || autopilot_memory_status.value === 'warming_up') {
+        return formatAutopilotMemoryHint({
+            currentCloses: autopilot_memory_current_closes.value,
+            requiredCloses: autopilot_memory_required_closes.value,
+            stale: autopilot_memory_stale.value,
+            staleReason: autopilot_memory_stale_reason.value,
+            status: autopilot_memory_status.value,
+        })
     }
     if (autopilot_green_phase_active.value) {
         return `Green phase active (+${autopilot_green_phase_extra_deals.value} deals)`
@@ -145,6 +164,23 @@ watch(statistics_data.data, (newData) => {
             typeof websocket_data.autopilot_green_phase_block_reason === 'string'
                 ? websocket_data.autopilot_green_phase_block_reason
                 : null
+        autopilot_memory_status.value =
+            typeof websocket_data.autopilot_memory_status === 'string'
+                ? websocket_data.autopilot_memory_status
+                : null
+        autopilot_memory_stale.value = Boolean(
+            websocket_data.autopilot_memory_stale,
+        )
+        autopilot_memory_stale_reason.value =
+            typeof websocket_data.autopilot_memory_stale_reason === 'string'
+                ? websocket_data.autopilot_memory_stale_reason
+                : null
+        autopilot_memory_current_closes.value = toNumberOrZero(
+            websocket_data.autopilot_memory_current_closes,
+        )
+        autopilot_memory_required_closes.value = toNumberOrZero(
+            websocket_data.autopilot_memory_required_closes,
+        )
         if (websocket_data.autopilot == "high") {
             autopilot_state.value = 'high'
             autopilot_class.value = "red"
@@ -239,6 +275,26 @@ function formatBlockReason(value: string): string {
     gap: 6px;
     height: 100%;
     width: 100%;
+}
+
+.autopilot-cell {
+    cursor: pointer;
+    transition:
+        border-color 120ms ease,
+        box-shadow 120ms ease,
+        transform 120ms ease;
+}
+
+.autopilot-link {
+    color: inherit;
+    text-decoration: none;
+}
+
+.autopilot-cell:hover,
+.autopilot-cell:focus-visible {
+    border-color: rgba(29, 92, 73, 0.26);
+    box-shadow: 0 10px 24px rgba(24, 33, 29, 0.08);
+    transform: translateY(-1px);
 }
 
 .autopilot-label {

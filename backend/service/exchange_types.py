@@ -31,6 +31,15 @@ class ExchangeOrderPayload(TypedDict, total=False):
     order_count: int
     so_percentage: float | None
     direction: str
+    signal_name: str | None
+    strategy_name: str | None
+    timeframe: str | None
+    metadata_json: str | None
+    baseline_order_size: float
+    entry_size_applied: bool
+    entry_size_reason_code: str | None
+    entry_size_fallback_applied: bool
+    entry_size_fallback_reason: str | None
     type: str
     fallback_min_price: float | str | None
     requires_market_fallback: bool

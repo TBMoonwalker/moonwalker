@@ -679,6 +679,12 @@ class Exchange:
         )
         order["price"] = await self.__get_price_for_symbol(order["symbol"])
         if not order["price"] or not order["amount"] or float(order["amount"]) <= 0:
+            self._last_buy_precheck_result = build_buy_precheck_result(
+                ok=False,
+                reason="invalid_price_or_amount",
+                symbol=str(order.get("symbol") or ""),
+                required_quote=self.__resolve_required_buy_quote(order),
+            )
             logging.error(
                 "Skipping buy for %s: invalid price/amount (price=%s, amount=%s).",
                 order.get("symbol"),

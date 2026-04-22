@@ -1,9 +1,11 @@
 """Autopilot trading mode decision logic."""
 
+from dataclasses import dataclass
 from typing import Any
 
 import helper
 import model
+from service.autopilot_memory import AutopilotMemoryService
 from service.autopilot_runtime import (
     AutopilotRuntimeState,
     get_shared_autopilot_runtime_state,
@@ -11,6 +13,31 @@ from service.autopilot_runtime import (
 from service.green_phase import AVAILABLE_QUOTE_UNSET, GreenPhaseService
 
 logging = helper.LoggerFactory.get_logger("logs/autopilot.log", "autopilot")
+
+
+@dataclass(frozen=True)
+class ResolvedTradingPolicy:
+    """Resolved per-symbol trading policy for the current ticker cycle."""
+
+    symbol: str
+    mode: str
+    effective_max_bots: int
+    take_profit: float
+    baseline_take_profit: float
+    stop_loss: float
+    stop_loss_timeout: int
+    green_phase_active: bool
+    green_phase_extra_deals: int
+    adaptive_tp_applied: bool
+    adaptive_reason_code: str | None
+    adaptive_trust_direction: str | None
+    adaptive_trust_score: float | None
+    adaptive_entry_size_applied: bool
+    adaptive_entry_reason_code: str | None
+    memory_status: str | None
+    baseline_base_order: float
+    entry_order_size: float
+    suggested_base_order: float | None
 
 
 class Autopilot:
@@ -22,6 +49,7 @@ class Autopilot:
     ) -> None:
         """Initialize runtime collaborators and dedupe state."""
         self.green_phase_service: GreenPhaseService | None = None
+        self.memory_service: AutopilotMemoryService | None = None
         self._runtime_state = (
             runtime_state
             if runtime_state is not None
@@ -33,6 +61,12 @@ class Autopilot:
         if self.green_phase_service is None:
             self.green_phase_service = await GreenPhaseService.instance()
         return self.green_phase_service
+
+    async def _get_memory_service(self) -> AutopilotMemoryService:
+        """Return the shared Autopilot memory service instance."""
+        if self.memory_service is None:
+            self.memory_service = await AutopilotMemoryService.instance()
+        return self.memory_service
 
     async def _persist_mode(self, autopilot_mode: str) -> None:
         """Persist the current autopilot mode when it changes."""
@@ -58,6 +92,14 @@ class Autopilot:
             "green_phase_strength": 0.0,
             "green_phase_block_reason": None,
             "green_phase_ramp_ready": False,
+            "memory_status": "empty",
+            "memory_stale": False,
+            "memory_stale_reason": None,
+            "memory_current_closes": 0,
+            "memory_required_closes": 0,
+            "memory_featured_symbol": None,
+            "memory_featured_direction": None,
+            "memory_last_updated_at": None,
             "tp": None,
             "sl": None,
             "sl_timeout": 0,
@@ -151,6 +193,38 @@ class Autopilot:
             green_phase_state.get("effective_max_bots")
             or runtime_state["effective_max_bots"]
         )
+        try:
+            memory_summary = (await self._get_memory_service()).get_runtime_summary()
+        except Exception as exc:  # noqa: BLE001 - fail open to baseline summary.
+            logging.warning(
+                "Autopilot memory summary unavailable: %s",
+                exc,
+            )
+            memory_summary = {
+                "status": "stale",
+                "stale": True,
+                "stale_reason": "memory_unavailable",
+                "current_closes": 0,
+                "required_closes": 0,
+                "featured_symbol": None,
+                "featured_direction": None,
+                "last_updated_at": None,
+                "last_success_at": None,
+            }
+        runtime_state["memory_status"] = memory_summary.get("status")
+        runtime_state["memory_stale"] = bool(memory_summary.get("stale"))
+        runtime_state["memory_stale_reason"] = memory_summary.get("stale_reason")
+        runtime_state["memory_current_closes"] = int(
+            memory_summary.get("current_closes") or 0
+        )
+        runtime_state["memory_required_closes"] = int(
+            memory_summary.get("required_closes") or 0
+        )
+        runtime_state["memory_featured_symbol"] = memory_summary.get("featured_symbol")
+        runtime_state["memory_featured_direction"] = memory_summary.get(
+            "featured_direction"
+        )
+        runtime_state["memory_last_updated_at"] = memory_summary.get("last_updated_at")
 
         if self._runtime_state.update_threshold_percent(threshold_percent):
             logging.debug(
@@ -187,3 +261,105 @@ class Autopilot:
             "green_phase_extra_deals": runtime_state["green_phase_extra_deals"],
             "effective_mad": runtime_state["effective_max_bots"],
         }
+
+    async def resolve_trading_policy(
+        self,
+        symbol: str,
+        funds_locked: float,
+        config: dict[str, Any],
+        *,
+        available_quote: float | None | object = AVAILABLE_QUOTE_UNSET,
+        runtime_state: dict[str, Any] | None = None,
+    ) -> ResolvedTradingPolicy:
+        """Return the explicit per-symbol trading policy for one ticker cycle."""
+        runtime_state = runtime_state or await self.resolve_runtime_state(
+            funds_locked,
+            config,
+            available_quote=available_quote,
+        )
+        baseline_take_profit = (
+            float(runtime_state["tp"])
+            if runtime_state["uses_risk_overrides"] and runtime_state["tp"] is not None
+            else float(config.get("tp", 0.0) or 0.0)
+        )
+        stop_loss = (
+            float(runtime_state["sl"])
+            if runtime_state["uses_risk_overrides"] and runtime_state["sl"] is not None
+            else float(config.get("sl", 0.0) or 0.0)
+        )
+        stop_loss_timeout = (
+            int(runtime_state["sl_timeout"])
+            if runtime_state["uses_risk_overrides"]
+            else 0
+        )
+        baseline_base_order = float(config.get("bo", 0.0) or 0.0)
+        suggested_base_order = baseline_base_order
+        entry_order_size = baseline_base_order
+        adaptive_tp_applied = False
+        adaptive_reason_code: str | None = None
+        adaptive_trust_direction: str | None = None
+        adaptive_trust_score: float | None = None
+        adaptive_entry_size_applied = False
+        adaptive_entry_reason_code: str | None = None
+
+        try:
+            memory_policy = (await self._get_memory_service()).resolve_symbol_policy(
+                symbol,
+                enabled=bool(config.get("autopilot", False)),
+                baseline_take_profit=baseline_take_profit,
+                base_order_amount=baseline_base_order,
+                entry_sizing_enabled=bool(
+                    config.get("autopilot_symbol_entry_sizing_enabled", False)
+                ),
+            )
+        except Exception as exc:  # noqa: BLE001 - fail open to baseline policy.
+            logging.warning(
+                "Autopilot memory policy unavailable for %s: %s",
+                symbol,
+                exc,
+            )
+            memory_policy = {
+                "apply_tp": False,
+                "take_profit": baseline_take_profit,
+                "suggested_base_order": baseline_base_order,
+                "apply_entry_size": False,
+                "entry_order_size": baseline_base_order,
+                "entry_reason_code": "memory_unavailable",
+                "memory_status": "stale",
+                "reason_code": "memory_unavailable",
+                "trust_score": None,
+                "trust_direction": "neutral",
+            }
+        take_profit = float(memory_policy["take_profit"])
+        suggested_base_order = float(memory_policy["suggested_base_order"] or 0.0)
+        adaptive_tp_applied = bool(memory_policy["apply_tp"])
+        adaptive_reason_code = memory_policy.get("reason_code")
+        adaptive_trust_direction = memory_policy.get("trust_direction")
+        adaptive_trust_score = memory_policy.get("trust_score")
+        adaptive_entry_size_applied = bool(memory_policy.get("apply_entry_size"))
+        adaptive_entry_reason_code = memory_policy.get("entry_reason_code")
+        entry_order_size = float(
+            memory_policy.get("entry_order_size") or baseline_base_order
+        )
+
+        return ResolvedTradingPolicy(
+            symbol=symbol,
+            mode=str(runtime_state["mode"]),
+            effective_max_bots=int(runtime_state["effective_max_bots"] or 0),
+            take_profit=take_profit,
+            baseline_take_profit=baseline_take_profit,
+            stop_loss=stop_loss,
+            stop_loss_timeout=stop_loss_timeout,
+            green_phase_active=bool(runtime_state["green_phase_active"]),
+            green_phase_extra_deals=int(runtime_state["green_phase_extra_deals"] or 0),
+            adaptive_tp_applied=adaptive_tp_applied,
+            adaptive_reason_code=adaptive_reason_code,
+            adaptive_trust_direction=adaptive_trust_direction,
+            adaptive_trust_score=adaptive_trust_score,
+            adaptive_entry_size_applied=adaptive_entry_size_applied,
+            adaptive_entry_reason_code=adaptive_entry_reason_code,
+            memory_status=memory_policy.get("memory_status"),
+            baseline_base_order=baseline_base_order,
+            entry_order_size=entry_order_size,
+            suggested_base_order=suggested_base_order,
+        )

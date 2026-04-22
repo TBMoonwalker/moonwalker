@@ -11,10 +11,10 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <n-card class="mode-strip-card" content-style="padding: 12px 14px;">
+    <n-card class="mode-strip-card mw-shell-card" content-style="padding: 12px 14px;">
         <div class="mode-strip-shell">
             <div class="mode-group">
-                <n-text depth="3" class="mode-group-label">Primary</n-text>
+                <n-text depth="3" class="mode-group-label">Operate</n-text>
                 <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
                         :type="routeMode === 'overview' ? 'primary' : 'default'"
@@ -24,6 +24,12 @@ const emit = defineEmits<{
                     >
                         Overview
                     </n-button>
+                </n-flex>
+            </div>
+
+            <div class="mode-group">
+                <n-text depth="3" class="mode-group-label">Configure</n-text>
+                <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
                         :type="routeMode === 'setup' ? 'primary' : 'default'"
                         :secondary="routeMode !== 'setup'"
@@ -32,12 +38,6 @@ const emit = defineEmits<{
                     >
                         Setup
                     </n-button>
-                </n-flex>
-            </div>
-
-            <div class="mode-group">
-                <n-text depth="3" class="mode-group-label">Expert and utility</n-text>
-                <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
                         :type="routeMode === 'advanced' ? 'primary' : 'default'"
                         :secondary="routeMode !== 'advanced'"
@@ -46,6 +46,12 @@ const emit = defineEmits<{
                     >
                         Advanced
                     </n-button>
+                </n-flex>
+            </div>
+
+            <div class="mode-group">
+                <n-text depth="3" class="mode-group-label">Utilities</n-text>
+                <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
                         :type="routeMode === 'utilities' ? 'primary' : 'default'"
                         :secondary="routeMode !== 'utilities'"

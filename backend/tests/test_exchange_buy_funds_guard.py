@@ -163,6 +163,43 @@ async def test_create_spot_market_buy_runs_when_quote_balance_is_sufficient(
     assert precheck["ok"] is True
 
 
+@pytest.mark.asyncio
+async def test_create_spot_market_buy_records_invalid_price_or_amount_reason(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+
+    async def fake_ensure_exchange(_config) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_get_amount(_ordersize, _symbol) -> str:
+        return "0"
+
+    async def fake_get_price(_symbol) -> str:
+        return "100000.0"
+
+    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(
+        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
+    )
+    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+
+    result = await exchange.create_spot_market_buy(
+        {"ordersize": 5.0, "symbol": "BTC/USDT"},
+        {},
+    )
+
+    assert result is None
+    precheck = exchange.get_last_buy_precheck_result()
+    assert precheck is not None
+    assert precheck["ok"] is False
+    assert precheck["reason"] == "invalid_price_or_amount"
+
+
 class _RefreshingTickerExchange:
     def __init__(self) -> None:
         self.fetch_calls = 0

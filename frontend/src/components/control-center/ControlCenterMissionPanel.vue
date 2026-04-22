@@ -33,8 +33,13 @@ defineEmits<{
 <template>
     <n-card class="mission-panel" content-style="padding: 22px 24px;">
         <n-flex vertical :size="18">
-            <n-flex justify="space-between" align="center" :wrap="true">
-                <n-flex vertical :size="6">
+            <n-flex
+                justify="space-between"
+                align="center"
+                :wrap="true"
+                class="mission-header-row"
+            >
+                <n-flex vertical :size="6" class="mission-copy">
                     <n-text depth="3" class="control-center-kicker">
                         Control Center
                     </n-text>
@@ -51,7 +56,12 @@ defineEmits<{
                     </n-text>
                 </n-flex>
 
-                <n-flex align="center" :wrap="true" :size="[10, 10]">
+                <n-flex
+                    align="center"
+                    :wrap="true"
+                    :size="[10, 10]"
+                    class="mission-actions"
+                >
                     <n-button
                         v-if="isDirty"
                         type="primary"
@@ -63,6 +73,7 @@ defineEmits<{
                         Save changes
                     </n-button>
                     <n-button
+                        v-if="!(readiness.complete && readiness.dryRun)"
                         type="primary"
                         strong
                         :loading="activationLoading"
@@ -148,11 +159,23 @@ defineEmits<{
     flex-wrap: wrap;
     align-items: center;
     gap: 10px;
+    min-width: 0;
 }
 
 .mission-heading-group :deep(.mission-status-tag) {
     border-radius: 999px;
     padding: 6px 12px;
+}
+
+.mission-heading-group :deep(.mission-status-tag.n-tag--success-type) {
+    background: var(--mw-color-primary);
+    border-color: var(--mw-color-primary);
+    box-shadow: inset 0 0 0 1px rgba(24, 65, 58, 0.08);
+}
+
+.mission-heading-group
+    :deep(.mission-status-tag.n-tag--success-type .n-tag__content) {
+    color: #f7f8f6;
 }
 
 .mission-heading-group :deep(.mission-status-tag .n-tag__content) {
@@ -161,7 +184,22 @@ defineEmits<{
     line-height: 1;
 }
 
+.mission-header-row {
+    width: 100%;
+}
+
+.mission-copy {
+    flex: 1 1 42rem;
+    min-width: 0;
+}
+
+.mission-actions {
+    flex: 0 0 auto;
+    justify-content: flex-end;
+}
+
 .mission-title {
+    margin: 0;
     font-family: var(--mw-font-display);
     font-size: clamp(1.5rem, 3vw, 2.25rem);
     line-height: 1.1;
@@ -170,6 +208,8 @@ defineEmits<{
 }
 
 .mission-summary {
+    display: block;
+    min-width: 0;
     max-width: 72ch;
 }
 
@@ -180,6 +220,10 @@ defineEmits<{
 }
 
 @media (max-width: 768px) {
+    .mission-summary {
+        white-space: normal;
+    }
+
     .mission-panel :deep(.n-alert) {
         padding-right: 0;
     }

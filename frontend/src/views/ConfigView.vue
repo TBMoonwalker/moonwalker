@@ -5,7 +5,10 @@ import Config from '../components/Config.vue'
 <template>
     <div class="page-shell settings-page">
         <n-flex class="page-section" vertical>
-            <n-card class="settings-intro-card" content-style="padding: 18px 20px;">
+            <n-card
+                class="settings-intro-card mw-shell-card"
+                content-style="padding: 18px 20px;"
+            >
                 <n-flex vertical :size="6">
                     <n-text depth="3" class="settings-kicker">Settings</n-text>
                     <n-text>

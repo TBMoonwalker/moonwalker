@@ -17,6 +17,7 @@ test('createAppRouter keeps only canonical Control Center entry routes', () => {
     const routeNames = router.getRoutes().map((route) => route.name)
 
     assert.equal(routePaths.includes('/control-center'), true)
+    assert.equal(routePaths.includes('/control-center/autopilot'), true)
     assert.equal(routePaths.includes('/monitoring'), true)
     assert.equal(routePaths.includes('/settings'), false)
     assert.equal(routePaths.includes('/config'), false)

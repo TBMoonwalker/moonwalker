@@ -41,7 +41,7 @@ const emit = defineEmits<{
             <h2>{{ backupRestoreTitle }}</h2>
             <n-text depth="3">{{ backupRestoreSummary }}</n-text>
         </div>
-        <n-card title="Backup & Restore" size="small">
+        <n-card title="Backup & Restore" size="small" class="mw-shell-card">
             <n-flex vertical :size="12">
                 <ConfigBackupDownloadControls
                     action-button-class="utility-action-button"
@@ -81,7 +81,7 @@ const emit = defineEmits<{
                 Run operational utility checks without mixing them into the config draft.
             </n-text>
         </div>
-        <n-card size="small">
+        <n-card size="small" class="mw-shell-card">
             <n-flex vertical :size="12">
                 <n-text depth="3">
                     Send a Telegram test using the currently saved monitoring configuration.
@@ -126,8 +126,8 @@ const emit = defineEmits<{
 
 .task-section-header:focus,
 .task-section-header:focus-visible {
-    outline: none;
-    box-shadow: none;
+    outline: 2px solid rgba(29, 92, 73, 0.35);
+    outline-offset: 4px;
 }
 
 .task-section-header h2 {

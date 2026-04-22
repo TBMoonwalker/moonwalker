@@ -3,6 +3,9 @@
 from .appconfig import AppConfig as AppConfig
 from .athcache import AthCache as AthCache
 from .autopilot import Autopilot as Autopilot
+from .autopilotmemoryevent import AutopilotMemoryEvent as AutopilotMemoryEvent
+from .autopilotmemorystate import AutopilotMemoryState as AutopilotMemoryState
+from .autopilotsymbolmemory import AutopilotSymbolMemory as AutopilotSymbolMemory
 from .closedtrades import ClosedTrades as ClosedTrades
 from .emaswingstate import EmaSwingState as EmaSwingState
 from .listings import Listings as Listings
@@ -18,6 +21,9 @@ __all__ = [
     "AppConfig",
     "AthCache",
     "Autopilot",
+    "AutopilotMemoryEvent",
+    "AutopilotMemoryState",
+    "AutopilotSymbolMemory",
     "ClosedTrades",
     "EmaSwingState",
     "Listings",
@@ -33,6 +39,9 @@ __all__ = [
 if __name__ == "__main__":
     __models__ = [
         "Autopilot",
+        "AutopilotMemoryEvent",
+        "AutopilotMemoryState",
+        "AutopilotSymbolMemory",
         "AppConfig",
         "AthCache",
         "Trades",

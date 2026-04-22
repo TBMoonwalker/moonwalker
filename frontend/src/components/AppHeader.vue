@@ -3,7 +3,7 @@ import { computed, h, type Component } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import type { MenuOption } from 'naive-ui/es/menu'
 import { NIcon } from 'naive-ui/es/icon'
-import { PulseOutline, SettingsOutline } from '@vicons/ionicons5'
+import { SettingsOutline } from '@vicons/ionicons5'
 import logoImage from '../assets/logo.png'
 
 function renderMenuIcon(icon: Component) {
@@ -18,11 +18,6 @@ const router = useRouter()
 
 const menuOptions: MenuOption[] = [
   {
-    label: 'Monitoring',
-    key: 'monitoring',
-    icon: renderMenuIcon(PulseOutline),
-  },
-  {
     label: 'Control Center',
     key: 'controlCenter',
     icon: renderMenuIcon(SettingsOutline),
@@ -34,21 +29,12 @@ const activeMenuKey = computed<string | null>(() => {
     return 'controlCenter'
   }
 
-  if (route.name === 'monitoring') {
-    return 'monitoring'
-  }
-
   return null
 })
 
 function handleMenuSelect(key: string | number): void {
   if (key === 'controlCenter') {
     void router.push({ name: 'controlCenter' })
-    return
-  }
-
-  if (key === 'monitoring') {
-    void router.push({ name: 'monitoring' })
   }
 }
 </script>
@@ -201,7 +187,7 @@ function handleMenuSelect(key: string | number): void {
 @media (max-width: 768px) {
   .header-shell {
     grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
+    gap: 8px;
     align-items: center;
   }
 
@@ -211,14 +197,35 @@ function handleMenuSelect(key: string | number): void {
   }
 
   .brand-title {
-    font-size: 1.05rem;
+    font-size: 0.98rem;
   }
 
   .brand-mark {
-    width: 54px;
-    height: 36px;
+    width: 48px;
+    height: 32px;
   }
 
+  .brand-caption {
+    display: none;
+  }
+
+  :deep(.header-menu .n-menu-item-content-header) {
+    display: block;
+    font-size: 0.72rem;
+    line-height: 1.05;
+    white-space: nowrap;
+  }
+
+  :deep(.header-menu .n-menu-item-content__icon) {
+    margin-right: 4px;
+  }
+
+  :deep(.header-menu .n-menu-item-content) {
+    padding-inline: 8px;
+  }
+}
+
+@media (max-width: 480px) {
   :deep(.header-menu .n-menu-item-content-header) {
     display: none;
   }

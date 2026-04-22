@@ -80,6 +80,7 @@ export interface DcaConfigSection {
 
 export interface AutopilotConfigSection {
     enabled: boolean
+    symbol_entry_sizing_enabled: boolean
     max_fund: number | null
     high_mad: number | null
     high_tp: number | null
@@ -302,6 +303,10 @@ export function buildConfigSubmitPayload(
         tp: serializeConfigValue(dca.tp || false, 'float'),
         sl: serializeConfigValue(dca.sl || false, 'float'),
         autopilot: serializeConfigValue(autopilot.enabled || false, 'bool'),
+        autopilot_symbol_entry_sizing_enabled: serializeConfigValue(
+            autopilot.symbol_entry_sizing_enabled ?? false,
+            'bool',
+        ),
         autopilot_max_fund: serializeConfigValue(
             autopilot.max_fund || false,
             'int',
