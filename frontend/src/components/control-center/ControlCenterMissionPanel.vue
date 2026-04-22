@@ -210,6 +210,7 @@ defineEmits<{
 .mission-summary {
     display: block;
     min-width: 0;
+    max-width: 72ch;
 }
 
 .mission-panel :deep(.n-button--primary-type .n-button__content) {

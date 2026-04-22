@@ -171,6 +171,7 @@ function openAutopilotAdvanced(): void {
                                             :key="row.symbol"
                                             class="trust-row trust-row-positive"
                                             type="button"
+                                            :aria-pressed="selectedSymbol === row.symbol"
                                             @click="selectedSymbol = row.symbol"
                                         >
                                             <span>
@@ -197,6 +198,7 @@ function openAutopilotAdvanced(): void {
                                             :key="row.symbol"
                                             class="trust-row trust-row-warning"
                                             type="button"
+                                            :aria-pressed="selectedSymbol === row.symbol"
                                             @click="selectedSymbol = row.symbol"
                                         >
                                             <span>
@@ -406,6 +408,29 @@ function openAutopilotAdvanced(): void {
     text-align: left;
     gap: 12px;
     cursor: pointer;
+    transition:
+        border-color 140ms ease,
+        background-color 140ms ease,
+        box-shadow 140ms ease,
+        transform 140ms ease;
+}
+
+.trust-row:hover {
+    background: var(--mw-surface-card);
+    border-color: rgba(29, 92, 73, 0.24);
+    box-shadow: 0 10px 20px rgba(24, 46, 38, 0.08);
+    transform: translateY(-1px);
+}
+
+.trust-row:focus-visible {
+    outline: 2px solid rgba(29, 92, 73, 0.45);
+    outline-offset: 3px;
+}
+
+.trust-row[aria-pressed='true'] {
+    background: #eef4ef;
+    border-color: rgba(29, 92, 73, 0.32);
+    box-shadow: inset 0 0 0 1px rgba(29, 92, 73, 0.08);
 }
 
 .trust-row strong,
