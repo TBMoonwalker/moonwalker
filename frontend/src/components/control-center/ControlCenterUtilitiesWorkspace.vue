@@ -126,8 +126,8 @@ const emit = defineEmits<{
 
 .task-section-header:focus,
 .task-section-header:focus-visible {
-    outline: none;
-    box-shadow: none;
+    outline: 2px solid rgba(29, 92, 73, 0.35);
+    outline-offset: 4px;
 }
 
 .task-section-header h2 {

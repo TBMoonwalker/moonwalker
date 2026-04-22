@@ -22,14 +22,10 @@
                     :value="formatFixed2(upnl)"
                 />
             </div>
-            <div
-                class="stat-cell autopilot-cell"
-                role="link"
-                tabindex="0"
+            <RouterLink
+                class="stat-cell autopilot-cell autopilot-link"
+                :to="{ name: 'controlCenterAutopilot' }"
                 aria-label="Open Autopilot page"
-                @click="openAutopilotPage"
-                @keydown.enter.prevent="openAutopilotPage"
-                @keydown.space.prevent="openAutopilotPage"
             >
                 <div class="autopilot-stat">
                     <span class="autopilot-label">Autopilot mode</span>
@@ -46,7 +42,7 @@
                     <span class="autopilot-subtext">{{ autopilot_summary }}</span>
                     <span v-if="green_phase_hint" class="autopilot-detail">{{ green_phase_hint }}</span>
                 </div>
-            </div>
+            </RouterLink>
             <div class="stat-cell">
                 <n-statistic label="Funds locked" :value="formatFixed2(funds_locked)" />
             </div>
@@ -59,7 +55,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { RouterLink } from 'vue-router'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
 import {
@@ -69,8 +65,6 @@ import {
     WarningOutline,
 } from '@vicons/ionicons5'
 import { formatAutopilotMemoryHint } from '../autopilot/presentation'
-
-const router = useRouter()
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
 const hasStatisticsData = computed(() => statistics_data.hasReceivedData.value)
@@ -226,10 +220,6 @@ function formatBlockReason(value: string): string {
     return value.replaceAll('_', ' ')
 }
 
-function openAutopilotPage(): void {
-    void router.push({ name: 'controlCenterAutopilot' })
-}
-
 </script>
 
 <style scoped>
@@ -293,6 +283,11 @@ function openAutopilotPage(): void {
         border-color 120ms ease,
         box-shadow 120ms ease,
         transform 120ms ease;
+}
+
+.autopilot-link {
+    color: inherit;
+    text-decoration: none;
 }
 
 .autopilot-cell:hover,

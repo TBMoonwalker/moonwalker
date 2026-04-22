@@ -94,12 +94,14 @@ test('preview exposes the required Autopilot actions and state copy', () => {
 })
 
 test('main dashboard Autopilot card opens the Autopilot page', () => {
-    assert.match(statisticsSource, /role="link"/)
-    assert.match(statisticsSource, /tabindex="0"/)
+    assert.match(statisticsSource, /<RouterLink/)
+    assert.match(statisticsSource, /class="stat-cell autopilot-cell autopilot-link"/)
+    assert.match(statisticsSource, /:to="\{ name: 'controlCenterAutopilot' \}"/)
     assert.match(statisticsSource, /aria-label="Open Autopilot page"/)
-    assert.match(statisticsSource, /@click="openAutopilotPage"/)
-    assert.match(statisticsSource, /@keydown\.enter\.prevent="openAutopilotPage"/)
-    assert.match(statisticsSource, /router\.push\(\{ name: 'controlCenterAutopilot' \}\)/)
+    assert.doesNotMatch(statisticsSource, /role="link"/)
+    assert.doesNotMatch(statisticsSource, /tabindex="0"/)
+    assert.doesNotMatch(statisticsSource, /@click="openAutopilotPage"/)
+    assert.doesNotMatch(statisticsSource, /router\.push\(\{ name: 'controlCenterAutopilot' \}\)/)
 })
 
 test('full Autopilot page stays read-only and links tuning back to Advanced', () => {
