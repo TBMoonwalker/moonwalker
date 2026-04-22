@@ -2,6 +2,24 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.2.0.0] - 2026-04-22
+
+### Added
+
+- Add a persisted Autopilot memory service, `/autopilot/memory` API, trust board cockpit, and Control Center overview previews so operators can see favored and cooling symbols, recent smart plays, and whether trust-driven entry sizing is active.
+- Add ranked scarce-bot admission that uses symbol trust to choose which candidates get the last free bot slots, with one shared resolver and reservation handling across ASAP and SymSignals.
+- Add guarded per-symbol entry sizing on top of the suggested base order, including baseline fallback logic and configuration/UI surfaces for enabling it deliberately.
+
+### Changed
+
+- Rework the Control Center overview around a calmer mission panel, owner-confidence summary, and dedicated Autopilot, Monitoring, and Config preview cards, with direct navigation into the new Autopilot workspace.
+- Surface Autopilot memory hints in the statistics dashboard and expand backend/frontend regression coverage around symbol trust, admission, entry sizing, routing, and Control Center presentation.
+
+### Fixed
+
+- Keep scarce-bot admission honest by tightening max-bot usage, releasing reservations on failed buy paths, and sharing the same ranked decision seam across both signal plugins.
+- Repair Control Center and Autopilot UI regressions found during design and QA, including broken overview mounting, cramped status copy, wrapping and layout glitches, and missing keyboard/focus affordances on interactive surfaces.
+
 ## [1.1.7.0] - 2026-04-09
 
 ### Changed

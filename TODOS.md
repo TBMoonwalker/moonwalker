@@ -4,7 +4,7 @@
 
 ### Apply suggested base order as guarded per-symbol entry sizing
 
-**Completed:** 2026-04-19
+**Completed:** v1.2.0.0 (2026-04-22)
 
 **What shipped:** Added an explicit `autopilot_symbol_entry_sizing_enabled`
 switch, extended the shared Autopilot policy seam to resolve entry-size
@@ -15,7 +15,7 @@ validation failures, and surfaced entry-sizing status in the Autopilot cockpit.
 
 ### Add owner-confidence summary to Control Center overview
 
-**Completed:** 2026-04-19
+**Completed:** v1.2.0.0 (2026-04-22)
 
 **What shipped:** Added a compact owner-confidence summary to the Control
 Center overview that rolls up operating mode, config trust, Autopilot memory,
@@ -23,7 +23,7 @@ and a lightweight live-data signal without duplicating Monitoring diagnostics.
 
 ### Add ranked scarce-bot admission for trusted symbols
 
-**Completed:** 2026-04-19
+**Completed:** v1.2.0.0 (2026-04-22)
 
 **What shipped:** Added a shared ranked admission and reservation seam in
 `backend/service/signal_runtime.py`, reused Autopilot trust memory to rank
