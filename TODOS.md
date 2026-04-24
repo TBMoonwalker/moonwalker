@@ -14,6 +14,21 @@
 **Priority:** P2
 **Depends on:** Global Capital Budget Authority shipping with the compatibility alias for one release.
 
+## Design Review
+
+### Reduce Control Center overview card nesting
+
+**What:** Rework the Control Center overview lower section so configuration, Autopilot, and Monitoring read as one operator workspace instead of three equal cards with nested cards inside them.
+
+**Why:** The current first screen is state-first and clear, but the lower half still drifts toward dashboard-card mosaic. `DESIGN.md` says cards should exist only when the card is the interaction; here several cards are decorative containers around status facts.
+
+**Context:** `/design-review` on 2026-04-24 fixed the dashboard chart contrast, mobile capital-stat clipping, and undersized trade/header touch targets. This remaining layout debt is broader than a tactical CSS fix and should be handled as a focused overview layout pass.
+
+**Impact:** Medium
+**Category:** Visual hierarchy / layout
+**Effort:** M
+**Priority:** P2
+
 ## Completed
 
 ### Apply suggested base order as guarded per-symbol entry sizing
