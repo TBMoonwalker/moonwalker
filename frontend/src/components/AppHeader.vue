@@ -200,6 +200,10 @@ function handleMenuSelect(key: string | number): void {
     font-size: 0.98rem;
   }
 
+  .brand-link {
+    min-height: 44px;
+  }
+
   .brand-mark {
     width: 48px;
     height: 32px;
