@@ -9,7 +9,7 @@ const monitoring = useControlCenterMonitoringSummary()
 </script>
 
 <template>
-    <!-- Naive wrappers here triggered a production-only console error on overview load. -->
+    <!-- Naive card/alert wrappers here triggered a production-only console error on overview load. -->
     <section class="monitoring-preview">
         <div class="preview-stack">
             <div class="preview-header">
@@ -20,31 +20,10 @@ const monitoring = useControlCenterMonitoringSummary()
                     </p>
                 </div>
                 <div class="preview-actions">
-                    <button
-                        type="button"
-                        class="preview-action-button"
-                        @click="emit('open-monitoring')"
-                    >
+                    <n-button secondary @click="emit('open-monitoring')">
                         Open Monitoring
-                    </button>
+                    </n-button>
                 </div>
-            </div>
-
-            <div
-                v-if="monitoring.alertTitle"
-                class="preview-alert"
-                :data-tone="
-                    monitoring.health === 'attention_needed'
-                        ? 'warning'
-                        : 'info'
-                "
-            >
-                <strong class="preview-alert-title">
-                    {{ monitoring.alertTitle }}
-                </strong>
-                <p class="preview-alert-body">
-                    {{ monitoring.statusBody }}
-                </p>
             </div>
 
             <div class="hero-insight">
@@ -134,60 +113,6 @@ const monitoring = useControlCenterMonitoringSummary()
     text-wrap: pretty;
 }
 
-.preview-action-button {
-    border: 1px solid rgba(29, 92, 73, 0.18);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.7);
-    color: var(--mw-color-text-primary);
-    cursor: pointer;
-    font: inherit;
-    font-weight: 600;
-    line-height: 1;
-    padding: 0.72rem 1rem;
-    transition:
-        background-color 120ms ease,
-        border-color 120ms ease,
-        transform 120ms ease;
-}
-
-.preview-action-button:hover {
-    background: rgba(29, 92, 73, 0.08);
-    border-color: rgba(29, 92, 73, 0.28);
-}
-
-.preview-action-button:focus-visible {
-    outline: 2px solid rgba(29, 92, 73, 0.35);
-    outline-offset: 2px;
-}
-
-.preview-alert {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    padding: 12px 14px;
-    border-radius: 10px;
-    border: 1px solid rgba(53, 109, 134, 0.16);
-    background: rgba(53, 109, 134, 0.08);
-}
-
-.preview-alert[data-tone='warning'] {
-    border-color: rgba(183, 121, 31, 0.18);
-    background: rgba(183, 121, 31, 0.1);
-}
-
-.preview-alert-title {
-    color: var(--mw-color-text-primary);
-    font-size: 0.95rem;
-    font-weight: 700;
-}
-
-.preview-alert-body {
-    margin: 0;
-    color: var(--mw-color-text-secondary);
-    font-size: 0.95rem;
-    line-height: 1.55;
-}
-
 .hero-insight {
     padding: 14px 16px;
     border-radius: 10px;
@@ -247,16 +172,16 @@ const monitoring = useControlCenterMonitoringSummary()
         justify-content: flex-start;
     }
 
+    .preview-actions :deep(.n-button) {
+        flex: 1 1 auto;
+    }
+
     .preview-metrics {
         grid-template-columns: 1fr;
     }
 
     .preview-summary {
         white-space: normal;
-    }
-
-    .preview-action-button {
-        width: 100%;
     }
 }
 </style>

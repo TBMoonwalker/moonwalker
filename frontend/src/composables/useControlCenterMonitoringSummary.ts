@@ -145,13 +145,6 @@ export function useControlCenterMonitoringSummary() {
         return null
     })
 
-    const alertType = computed<'warning' | 'info'>(() => {
-        if (closedStream.value) {
-            return 'warning'
-        }
-        return 'info'
-    })
-
     const featuredInsight = computed(() => {
         if (closedStream.value) {
             return `${closedStream.value.label} is down, so the full Monitoring page should be your next stop.`
@@ -167,7 +160,6 @@ export function useControlCenterMonitoringSummary() {
 
     return {
         alertTitle,
-        alertType,
         closedStream,
         connectingStream,
         featuredInsight,

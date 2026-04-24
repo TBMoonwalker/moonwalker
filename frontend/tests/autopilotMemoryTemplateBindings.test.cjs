@@ -108,6 +108,11 @@ test('full Autopilot page stays read-only and links tuning back to Advanced', ()
     assert.match(pageSource, /Back to Control Center/)
     assert.match(pageSource, /Tune Autopilot/)
     assert.match(pageSource, /Latest Autopilot moves/)
+    assert.match(pageSource, /splitTradeSymbol/)
+    assert.match(pageSource, /formatTrustBoardSymbol\(row\.symbol\)/)
+    assert.match(pageSource, /trust-row-symbol/)
+    assert.match(pageSource, /background:\s*rgba\(46,\s*125,\s*91,\s*0\.08\)/)
+    assert.match(pageSource, /trust-row-positive \.trust-row-meta/)
     assert.doesNotMatch(pageSource, /n-form/i)
 })
 
@@ -116,14 +121,17 @@ test('monitoring preview exposes the required Monitoring action and health copy'
     assert.match(monitoringPreviewSource, /useControlCenterMonitoringSummary/)
     assert.match(monitoringPreviewSource, /monitoring\.statusTitle/)
     assert.match(monitoringPreviewSource, /monitoring\.statusBody/)
+    assert.match(monitoringPreviewSource, /monitoring\.featuredInsight/)
     assert.match(monitoringPreviewSource, /Receiving payloads/)
     assert.match(
         monitoringPreviewSource,
         /production-only console error on overview load/,
     )
-    assert.match(monitoringPreviewSource, /<button/)
+    assert.match(monitoringPreviewSource, /<n-button\s+secondary/i)
     assert.doesNotMatch(monitoringPreviewSource, /<n-card/i)
     assert.doesNotMatch(monitoringPreviewSource, /<n-alert/i)
+    assert.match(monitoringPreviewSource, /hero-insight/)
+    assert.doesNotMatch(monitoringPreviewSource, /preview-alert/)
     assert.doesNotMatch(monitoringPreviewSource, />Monitoring</)
 })
 

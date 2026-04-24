@@ -13,6 +13,7 @@ import {
     formatAutopilotStatusTitle,
     formatAutopilotTimestamp,
 } from '../autopilot/presentation'
+import { splitTradeSymbol } from '../helpers/openTrades'
 import type { AutopilotMemorySnapshot } from '../autopilot/types'
 import { useAutopilotMemoryFeed } from '../composables/useAutopilotMemoryFeed'
 
@@ -67,6 +68,10 @@ function openAutopilotAdvanced(): void {
             target: 'autopilot',
         },
     })
+}
+
+function formatTrustBoardSymbol(symbol: string): string {
+    return splitTradeSymbol(symbol)[0] || symbol
 }
 </script>
 
@@ -174,8 +179,10 @@ function openAutopilotAdvanced(): void {
                                             :aria-pressed="selectedSymbol === row.symbol"
                                             @click="selectedSymbol = row.symbol"
                                         >
-                                            <span>
-                                                <strong>{{ row.symbol }}</strong>
+                                            <span class="trust-row-copy">
+                                                <strong class="trust-row-symbol">
+                                                    {{ formatTrustBoardSymbol(row.symbol) }}
+                                                </strong>
                                                 <small>{{ formatAutopilotReason(row.primary_reason_code, row.primary_reason_value) }}</small>
                                             </span>
                                             <span class="trust-row-meta">
@@ -201,8 +208,10 @@ function openAutopilotAdvanced(): void {
                                             :aria-pressed="selectedSymbol === row.symbol"
                                             @click="selectedSymbol = row.symbol"
                                         >
-                                            <span>
-                                                <strong>{{ row.symbol }}</strong>
+                                            <span class="trust-row-copy">
+                                                <strong class="trust-row-symbol">
+                                                    {{ formatTrustBoardSymbol(row.symbol) }}
+                                                </strong>
                                                 <small>{{ formatAutopilotReason(row.primary_reason_code, row.primary_reason_value) }}</small>
                                             </span>
                                             <span class="trust-row-meta">
@@ -411,13 +420,11 @@ function openAutopilotAdvanced(): void {
     transition:
         border-color 140ms ease,
         background-color 140ms ease,
-        box-shadow 140ms ease,
-        transform 140ms ease;
+    box-shadow 140ms ease,
+    transform 140ms ease;
 }
 
 .trust-row:hover {
-    background: var(--mw-surface-card);
-    border-color: rgba(29, 92, 73, 0.24);
     box-shadow: 0 10px 20px rgba(24, 46, 38, 0.08);
     transform: translateY(-1px);
 }
@@ -438,26 +445,79 @@ function openAutopilotAdvanced(): void {
     display: block;
 }
 
+.trust-row-copy {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.trust-row-symbol {
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-mono);
+    font-size: 0.98rem;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    line-height: 1.25;
+}
+
 .trust-row small {
     margin-top: 4px;
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-body);
     font-size: 0.85rem;
+    line-height: 1.45;
 }
 
 .trust-row-positive {
+    background: rgba(46, 125, 91, 0.08);
     border-color: rgba(46, 125, 91, 0.22);
 }
 
+.trust-row-positive:hover {
+    background: rgba(46, 125, 91, 0.12);
+    border-color: rgba(46, 125, 91, 0.34);
+}
+
 .trust-row-warning {
+    background: rgba(183, 121, 31, 0.08);
     border-color: rgba(183, 121, 31, 0.22);
 }
 
+.trust-row-warning:hover {
+    background: rgba(183, 121, 31, 0.12);
+    border-color: rgba(183, 121, 31, 0.34);
+}
+
+.trust-row-positive[aria-pressed='true'] {
+    background: rgba(46, 125, 91, 0.15);
+    border-color: rgba(46, 125, 91, 0.4);
+}
+
+.trust-row-warning[aria-pressed='true'] {
+    background: rgba(183, 121, 31, 0.15);
+    border-color: rgba(183, 121, 31, 0.4);
+}
+
 .trust-row-meta {
-    color: var(--mw-color-text-secondary);
+    flex: 0 0 auto;
+    padding: 0.32rem 0.58rem;
+    border-radius: 999px;
+    border: 1px solid transparent;
     font-family: var(--mw-font-mono);
     font-size: 0.82rem;
+    font-weight: 600;
     white-space: nowrap;
+}
+
+.trust-row-positive .trust-row-meta {
+    background: rgba(46, 125, 91, 0.12);
+    border-color: rgba(46, 125, 91, 0.18);
+    color: var(--mw-color-primary);
+}
+
+.trust-row-warning .trust-row-meta {
+    background: rgba(183, 121, 31, 0.12);
+    border-color: rgba(183, 121, 31, 0.18);
+    color: #8a5e15;
 }
 
 .trust-empty {
@@ -554,7 +614,16 @@ function openAutopilotAdvanced(): void {
         gap: 6px;
     }
 
+    .trust-row {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
     .event-meta {
+        white-space: normal;
+    }
+
+    .trust-row-meta {
         white-space: normal;
     }
 }
