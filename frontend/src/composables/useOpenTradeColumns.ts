@@ -33,6 +33,12 @@ interface UseOpenTradeColumnsOptions {
     onDealStop: (rowData: OpenTradeRow) => void
 }
 
+const tradeActionButtonStyle = {
+    minHeight: '44px',
+    minWidth: '56px',
+    padding: '0 12px',
+}
+
 export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
     function rowClasses(row: OpenTradeRow): string {
         if (Math.sign(row.profit_percent) >= 0) {
@@ -146,8 +152,9 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                         NButton,
                                         {
                                             type: 'error',
-                                            size: 'small',
+                                            size: 'medium',
                                             ghost: true,
+                                            style: tradeActionButtonStyle,
                                             onClick: () =>
                                                 options.onDealStop(rowData),
                                         },
@@ -158,15 +165,16 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                         ]
                     }
                     return [
-                        h(NButtonGroup, { size: 'small', vertical: true }, {
+                        h(NButtonGroup, { size: 'medium', vertical: true }, {
                             default: () => [
                                 h(
                                     NButton,
                                     {
                                         primary: true,
-                                        size: 'small',
+                                        size: 'medium',
                                         ghost: true,
                                         color: '#63e2b7',
+                                        style: tradeActionButtonStyle,
                                         onClick: () =>
                                             options.onDealSell(rowData),
                                     },
@@ -176,9 +184,10 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                     NButton,
                                     {
                                         primary: true,
-                                        size: 'small',
+                                        size: 'medium',
                                         ghost: true,
                                         color: '#63e2b7',
+                                        style: tradeActionButtonStyle,
                                         onClick: () =>
                                             options.onDealBuy(rowData),
                                     },
@@ -188,9 +197,10 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                     NButton,
                                     {
                                         primary: true,
-                                        size: 'small',
+                                        size: 'medium',
                                         ghost: true,
                                         color: '#63e2b7',
+                                        style: tradeActionButtonStyle,
                                         onClick: () =>
                                             options.onDealStop(rowData),
                                     },
