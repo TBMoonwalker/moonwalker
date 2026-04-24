@@ -334,22 +334,16 @@ function formatBlockReason(value: string): string {
     }
 
     .statistics-grid {
-        grid-template-columns: none;
-        grid-auto-flow: column;
-        grid-auto-columns: minmax(118px, 1fr);
-        overflow-x: auto;
-        overflow-y: hidden;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        overflow: visible;
         gap: 8px;
-        padding-bottom: 2px;
-        scroll-snap-type: x proximity;
-        -webkit-overflow-scrolling: touch;
     }
 
     .stat-cell {
         min-width: 0;
-        padding: 4px 6px;
+        min-height: 82px;
+        padding: 8px 6px;
         border-radius: 6px;
-        scroll-snap-align: start;
     }
 
     :deep(.n-statistic-label) {
@@ -358,7 +352,8 @@ function formatBlockReason(value: string): string {
     }
 
     :deep(.n-statistic-value) {
-        font-size: 30px;
+        font-size: 24px;
+        line-height: 1.15;
     }
 
     .autopilot-label {
@@ -371,14 +366,6 @@ function formatBlockReason(value: string): string {
         height: 28px;
     }
 
-    .statistics-grid::-webkit-scrollbar {
-        height: 6px;
-    }
-
-    .statistics-grid::-webkit-scrollbar-thumb {
-        background: rgba(255, 255, 255, 0.18);
-        border-radius: 999px;
-    }
 }
 
 @media (min-width: 769px) and (max-width: 1200px) {
