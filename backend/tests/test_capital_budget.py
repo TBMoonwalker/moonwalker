@@ -8,6 +8,7 @@ from service.capital_budget import CapitalBudgetService
 from service.capital_budget_logic import (
     calculate_order_budget_requirement,
     evaluate_capital_budget,
+    normalize_buffer_pct,
 )
 from service.orders import Orders
 from tortoise import Tortoise
@@ -119,6 +120,53 @@ def test_stretched_safety_order_consumes_only_extra_budget_above_reserve() -> No
 
     assert order_quote == 30.0
     assert required_quote == 18.0
+
+
+def test_capital_budget_buffer_accepts_ui_percent_and_api_ratio() -> None:
+    assert normalize_buffer_pct(50) == 0.5
+    assert normalize_buffer_pct("0.5") == 0.5
+    assert normalize_buffer_pct("2") == 0.02
+
+    percent_input = evaluate_capital_budget(
+        {
+            "capital_max_fund": 10_000,
+            "capital_reserve_safety_orders": True,
+            "capital_budget_buffer_pct": 50,
+            "dynamic_dca": True,
+            "mstc": 5,
+        },
+        {
+            "symbol": "CGPT/USDC",
+            "ordersize": 12.0,
+            "baseorder": True,
+        },
+        funds_locked=0.0,
+        open_trade_reserve=0.0,
+        pending_quote=0.0,
+        closed_profit=0.0,
+    )
+
+    ratio_input = evaluate_capital_budget(
+        {
+            "capital_max_fund": 10_000,
+            "capital_reserve_safety_orders": True,
+            "capital_budget_buffer_pct": 0.5,
+            "dynamic_dca": True,
+            "mstc": 5,
+        },
+        {
+            "symbol": "CGPT/USDC",
+            "ordersize": 12.0,
+            "baseorder": True,
+        },
+        funds_locked=0.0,
+        open_trade_reserve=0.0,
+        pending_quote=0.0,
+        closed_profit=0.0,
+    )
+
+    assert percent_input.required_quote == 108.0
+    assert ratio_input.required_quote == 108.0
 
 
 @pytest.mark.asyncio

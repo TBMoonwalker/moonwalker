@@ -95,7 +95,7 @@ are not exposed in the UI and must be set via the API.
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |
 | `capital_max_fund` | `float` | Global hard capital limit for all live buy paths. New buys fail closed when this is missing or `<= 0` in the runtime config. | `0` |
 | `capital_reserve_safety_orders` | `bool` | Reserve estimated future safety-order budget when admitting base orders and checking the hard limit. | `true` |
-| `capital_budget_buffer_pct` | `float` | Optional extra capital-budget buffer applied to buy requirements. | `0` |
+| `capital_budget_buffer_pct` | `float` | Optional extra capital-budget buffer applied to buy requirements. Whole-percent UI values such as `50` and API ratio values such as `0.5` both mean 50%. | `0` |
 | `autopilot` | `bool` | Enable autopilot mode. | `false` |
 | `autopilot_symbol_entry_sizing_enabled` | `bool` | Allow fresh non-neutral Autopilot memory to override new-entry base order size per symbol. When disabled, suggested base orders remain advisory only. | `false` |
 | `autopilot_max_fund` | `int` | Legacy alias for `capital_max_fund`. Kept for one-release compatibility. | `0` |
