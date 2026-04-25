@@ -104,6 +104,20 @@ def to_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def normalize_buffer_pct(value: Any) -> float:
+    """Normalize ratio-style or whole-percent budget buffers.
+
+    Older API payloads may send `0.5` for 50%, while the UI labels the field as
+    a percentage and naturally leads operators to enter `50`. Accept both.
+    """
+    buffer_pct = to_float(value, 0.0)
+    if buffer_pct <= 0:
+        return 0.0
+    if buffer_pct > 1:
+        return buffer_pct / 100
+    return buffer_pct
+
+
 def has_capital_budget_config(config: dict[str, Any]) -> bool:
     """Return whether this config snapshot carries a capital limit key."""
     return "capital_max_fund" in config or "autopilot_max_fund" in config
@@ -125,7 +139,7 @@ def build_capital_budget_settings(
         if "capital_budget_buffer_pct" in config
         else config.get("buy_fund_buffer_pct")
     )
-    buffer_pct = max(0.0, to_float(buffer_value, 0.0))
+    buffer_pct = normalize_buffer_pct(buffer_value)
     return CapitalBudgetSettings(
         configured=has_capital_budget_config(config),
         principal_limit=resolve_capital_max_fund(config),
