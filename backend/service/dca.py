@@ -111,6 +111,83 @@ class Dca:
             ticks_required=self.__get_tp_confirmation_ticks(),
         )
 
+    @staticmethod
+    def __tp_limit_prearm_ready(
+        *,
+        current_price: float,
+        tp_price: float,
+        margin_percent: float,
+    ) -> bool:
+        """Return whether price is close enough to TP to arm a standing limit."""
+        if tp_price <= 0:
+            return False
+        arm_price = tp_price * (1 - (max(0.0, margin_percent) / 100.0))
+        return current_price >= arm_price
+
+    def __tp_limit_prearm_supported(
+        self,
+        runtime_config: DcaRuntimeConfigView,
+        *,
+        is_unsellable: bool,
+    ) -> bool:
+        """Return whether the current config supports proactive TP limit arming."""
+        sell_order_type = str(
+            (self.config or {}).get("sell_order_type", "market")
+        ).lower()
+        return (
+            bool(runtime_config.tp_limit_prearm_enabled)
+            and sell_order_type == "limit"
+            and runtime_config.trailing_tp <= 0
+            and not runtime_config.tp_strategy
+            and not runtime_config.tp_spike_confirm_enabled
+            and not is_unsellable
+        )
+
+    @staticmethod
+    def __tp_limit_order_outdated(
+        trades: dict[str, Any],
+        *,
+        tp_price: float,
+        total_amount: float,
+    ) -> bool:
+        """Return whether a standing TP limit no longer matches the trade."""
+        order_id = str(trades.get("tp_limit_order_id") or "").strip()
+        if not order_id:
+            return False
+        stored_price = float(trades.get("tp_limit_order_price") or 0.0)
+        stored_amount = float(trades.get("tp_limit_order_amount") or 0.0)
+        price_tolerance = max(abs(tp_price) * 1e-8, 1e-12)
+        amount_tolerance = max(abs(total_amount) * 1e-8, 1e-12)
+        return (
+            abs(stored_price - tp_price) > price_tolerance
+            or abs(stored_amount - total_amount) > amount_tolerance
+        )
+
+    async def __arm_tp_limit_order(
+        self,
+        *,
+        trades: dict[str, Any],
+        current_price: float,
+        take_profit_price: float,
+        actual_pnl: float,
+    ) -> bool:
+        """Place a proactive TP limit order at the exact TP price."""
+        order = {
+            "symbol": trades["symbol"],
+            "direction": trades["direction"],
+            "side": "sell",
+            "type_sell": "order_sell",
+            "sell_reason": "take_profit_prearm",
+            "actual_pnl": actual_pnl,
+            "total_cost": trades["total_cost"],
+            "total_amount": trades["total_amount"],
+            "current_price": current_price,
+            "limit_price": take_profit_price,
+            "tp_price": take_profit_price,
+            "fallback_min_price": take_profit_price,
+        }
+        return await self.orders.arm_tp_limit_order(order, self.config or {})
+
     async def __dynamic_dca_strategy(self, symbol: str) -> tuple[bool, bool]:
         result = False
         payload_changed = True
@@ -313,6 +390,7 @@ class Dca:
         trailing_tp = runtime_config.trailing_tp
         max_safety_orders = runtime_config.max_safety_orders
         sell = False
+        sell_reason: str | None = None
         is_unsellable = bool(trades.get("is_unsellable", False))
         tp_confirmation_pending = False
         tp_confirmation_ticks = 0
@@ -325,6 +403,10 @@ class Dca:
         take_profit_price = average_buy_price * (1 + (trading_policy.take_profit / 100))
         stop_loss_price = average_buy_price * (1 - (trading_policy.stop_loss / 100))
         tp_reached = not is_unsellable and current_price >= take_profit_price
+        prearm_supported = self.__tp_limit_prearm_supported(
+            runtime_config,
+            is_unsellable=is_unsellable,
+        )
 
         if tp_reached and trailing_tp <= 0 and self.__tp_confirmation_enabled():
             trade_timestamp = int(float(trades["timestamp"]))
@@ -335,6 +417,8 @@ class Dca:
                 tp_price=take_profit_price,
             )
             tp_confirmation_pending = not sell
+            if sell:
+                sell_reason = "take_profit"
         elif tp_reached:
             self.__clear_tp_confirmation(
                 trades["symbol"],
@@ -343,6 +427,7 @@ class Dca:
                 tp_price=take_profit_price,
             )
             sell = True
+            sell_reason = "take_profit"
         elif trailing_tp <= 0:
             self.__clear_tp_confirmation(
                 trades["symbol"],
@@ -364,9 +449,37 @@ class Dca:
                 tp_price=take_profit_price,
             )
             sell = True
+            sell_reason = "stop_loss"
 
         # Actual PNL in percent (value for profit calculation)
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
+
+        if await self.orders.reconcile_tp_limit_order(trades, self.config or {}):
+            return
+
+        has_tp_limit_order = bool(trades.get("tp_limit_order_id"))
+        if has_tp_limit_order and (
+            not prearm_supported
+            or self.__tp_limit_order_outdated(
+                trades,
+                tp_price=take_profit_price,
+                total_amount=float(trades["total_amount"]),
+            )
+        ):
+            canceled = await self.orders.cancel_tp_limit_order(
+                trades["symbol"],
+                self.config or {},
+            )
+            if not canceled:
+                return
+            trades = {
+                **trades,
+                "tp_limit_order_id": None,
+                "tp_limit_order_price": None,
+                "tp_limit_order_amount": None,
+                "tp_limit_order_armed_at": None,
+            }
+            has_tp_limit_order = False
 
         # TP strategy
         if not is_unsellable and runtime_config.tp_strategy and sell:
@@ -375,10 +488,11 @@ class Dca:
                 sell = True
             else:
                 sell = False
+                sell_reason = None
 
         # Trailing TP
         if not is_unsellable and trailing_tp > 0:
-            sell = apply_trailing_take_profit(
+            trailing_sell = apply_trailing_take_profit(
                 self._trailing_tp_peaks,
                 logger=logging,
                 symbol=trades["symbol"],
@@ -387,6 +501,9 @@ class Dca:
                 take_profit=trading_policy.take_profit,
                 sell_signal=sell,
             )
+            if trailing_sell and not sell:
+                sell_reason = "trailing_take_profit"
+            sell = trailing_sell
 
         # Sell if Autopilot is enabled and SL is set
         if not is_unsellable and trading_policy.stop_loss_timeout > 0:
@@ -410,29 +527,71 @@ class Dca:
                     tp_price=take_profit_price,
                 )
                 sell = True
+                sell_reason = "autopilot_timeout"
 
         # TP reached - sell order (market)
         if sell:
-            self.__clear_tp_confirmation(
-                trades["symbol"],
-                reason="sell_submitted",
+            if has_tp_limit_order and sell_reason == "take_profit" and prearm_supported:
+                logging.debug(
+                    "TP reached for %s with proactive limit order already armed; "
+                    "waiting for exchange fill reconciliation.",
+                    trades["symbol"],
+                )
+                sell = False
+            else:
+                if has_tp_limit_order:
+                    canceled = await self.orders.cancel_tp_limit_order(
+                        trades["symbol"],
+                        self.config or {},
+                    )
+                    if not canceled:
+                        return
+                    has_tp_limit_order = False
+                self.__clear_tp_confirmation(
+                    trades["symbol"],
+                    reason="sell_submitted",
+                    current_price=current_price,
+                    tp_price=take_profit_price,
+                )
+                order = {
+                    "symbol": trades["symbol"],
+                    "direction": trades["direction"],
+                    "side": "sell",
+                    "type_sell": "order_sell",
+                    "sell_reason": sell_reason,
+                    "actual_pnl": actual_pnl,
+                    "total_cost": trades["total_cost"],
+                    "current_price": current_price,
+                    "tp_price": take_profit_price,
+                    "limit_price": (
+                        take_profit_price
+                        if sell_reason == "take_profit"
+                        and str((self.config or {}).get("sell_order_type", "")).lower()
+                        == "limit"
+                        else None
+                    ),
+                    "fallback_min_price": (
+                        take_profit_price
+                        if current_price >= take_profit_price
+                        else None
+                    ),
+                }
+                await self.orders.receive_sell_order(order, self.config or {})
+        elif (
+            prearm_supported
+            and not has_tp_limit_order
+            and self.__tp_limit_prearm_ready(
                 current_price=current_price,
                 tp_price=take_profit_price,
+                margin_percent=runtime_config.tp_limit_prearm_margin_percent,
             )
-            order = {
-                "symbol": trades["symbol"],
-                "direction": trades["direction"],
-                "side": "sell",
-                "type_sell": "order_sell",
-                "actual_pnl": actual_pnl,
-                "total_cost": trades["total_cost"],
-                "current_price": current_price,
-                "tp_price": take_profit_price,
-                "fallback_min_price": (
-                    take_profit_price if current_price >= take_profit_price else None
-                ),
-            }
-            await self.orders.receive_sell_order(order, self.config)
+        ):
+            has_tp_limit_order = await self.__arm_tp_limit_order(
+                trades=trades,
+                current_price=current_price,
+                take_profit_price=take_profit_price,
+                actual_pnl=actual_pnl,
+            )
 
         if is_unsellable:
             logging.debug(
@@ -468,6 +627,8 @@ class Dca:
             "unsellable_reason": trades.get("unsellable_reason"),
             "tp_confirmation_pending": tp_confirmation_pending,
             "tp_confirmation_ticks": tp_confirmation_ticks,
+            "tp_limit_order_id": trades.get("tp_limit_order_id"),
+            "tp_limit_order_armed": has_tp_limit_order,
         }
         await self.statistic.update_statistic_data(logging_json)
 

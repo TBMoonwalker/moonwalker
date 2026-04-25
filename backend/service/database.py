@@ -507,6 +507,10 @@ class Database:
                 ("unsellable_estimated_notional", "REAL NULL"),
                 ("unsellable_since", "TEXT NULL"),
                 ("unsellable_notice_sent", "INTEGER NOT NULL DEFAULT 0"),
+                ("tp_limit_order_id", "TEXT NULL"),
+                ("tp_limit_order_price", "REAL NULL"),
+                ("tp_limit_order_amount", "REAL NULL"),
+                ("tp_limit_order_armed_at", "TEXT NULL"),
             ),
         )
         if alter_statements:

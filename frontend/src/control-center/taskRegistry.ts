@@ -147,6 +147,8 @@ const KEY_TARGETS: Record<string, ControlCenterTarget> = {
     sell_order_type: 'dca',
     limit_sell_timeout_sec: 'dca',
     limit_sell_fallback_to_market: 'dca',
+    tp_limit_prearm_enabled: 'dca',
+    tp_limit_prearm_margin_percent: 'dca',
     tp_spike_confirm_enabled: 'dca',
     tp_spike_confirm_seconds: 'dca',
     tp_spike_confirm_ticks: 'dca',

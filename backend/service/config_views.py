@@ -136,6 +136,8 @@ class DcaRuntimeConfigView:
     tp_spike_confirm_enabled: bool
     tp_spike_confirm_seconds: float
     tp_spike_confirm_ticks: int
+    tp_limit_prearm_enabled: bool
+    tp_limit_prearm_margin_percent: float
     dca_strategy: str | None
     tp_strategy: str | None
     dca_enabled: bool
@@ -187,6 +189,16 @@ class DcaRuntimeConfigView:
                     "tp_spike_confirm_ticks",
                     default=0,
                     falsey_fallback=0,
+                ),
+            ),
+            tp_limit_prearm_enabled=bool(config.get("tp_limit_prearm_enabled", False)),
+            tp_limit_prearm_margin_percent=max(
+                0.0,
+                _float_config_value(
+                    config,
+                    "tp_limit_prearm_margin_percent",
+                    default=0.25,
+                    falsey_fallback=0.0,
                 ),
             ),
             dca_strategy=_optional_string(config.get("dca_strategy")),

@@ -227,3 +227,24 @@ async def test_create_spot_limit_sell_places_order_and_delegates_fill_handling()
         "current_price": 2500.0,
         "id": "limit-1",
     }
+
+
+@pytest.mark.asyncio
+async def test_resolve_limit_sell_price_prefers_explicit_limit_price() -> None:
+    exchange = _DummyExchange()
+    manager = ExchangeLimitOrderManager(_DummyLogger(), get_exchange=lambda: exchange)
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        raise AssertionError("explicit limit price should avoid live ticker lookup")
+
+    price = await manager.resolve_limit_sell_price(
+        order={
+            "symbol": "ETH/USDT",
+            "limit_price": 2490.0,
+            "current_price": 2500.0,
+        },
+        resolved_symbol="ETH/USDT",
+        get_price_for_symbol=fake_get_price_for_symbol,
+    )
+
+    assert price == "2490.00"

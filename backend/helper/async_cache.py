@@ -35,6 +35,12 @@ def async_ttl_cache(maxsize: int, ttl: int) -> Callable[[F], F]:
                 cache[key] = result
             return result
 
+        async def cache_clear() -> None:
+            """Clear cached values for callers that mutate the backing store."""
+            async with lock:
+                cache.clear()
+
+        wrapper.cache_clear = cache_clear  # type: ignore[attr-defined]
         return wrapper  # type: ignore[return-value]
 
     return decorator

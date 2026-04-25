@@ -167,3 +167,131 @@ async def test_tp_spike_confirmation_does_not_delay_stop_loss(monkeypatch) -> No
 
     assert len(sell_calls) == 1
     assert sell_calls[0]["symbol"] == "XPL/USDC"
+
+
+@pytest.mark.asyncio
+async def test_tp_limit_prearm_arms_before_tp_when_near(monkeypatch) -> None:
+    dca = Dca()
+    _configure_dca(
+        dca,
+        sell_order_type="limit",
+        tp_spike_confirm_enabled=False,
+        tp_limit_prearm_enabled=True,
+        tp_limit_prearm_margin_percent=0.25,
+    )
+    arm_calls: list[dict[str, object]] = []
+
+    async def fake_reconcile_tp_limit_order(_trades, _config) -> bool:
+        return False
+
+    async def fake_arm_tp_limit_order(order, _config) -> bool:
+        arm_calls.append(order)
+        return True
+
+    async def fake_receive_sell_order(_order, _config) -> None:
+        raise AssertionError("pre-arm should not submit an immediate sell")
+
+    async def fake_update_statistic_data(_payload) -> None:
+        return None
+
+    monkeypatch.setattr(
+        dca.orders,
+        "reconcile_tp_limit_order",
+        fake_reconcile_tp_limit_order,
+    )
+    monkeypatch.setattr(dca.orders, "arm_tp_limit_order", fake_arm_tp_limit_order)
+    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.statistic, "update_statistic_data", fake_update_statistic_data
+    )
+
+    await dca._Dca__calculate_tp(109.8, _build_trades(), _build_policy())
+
+    assert len(arm_calls) == 1
+    assert arm_calls[0]["symbol"] == "XPL/USDC"
+    assert arm_calls[0]["limit_price"] == pytest.approx(110.0)
+    assert arm_calls[0]["fallback_min_price"] == pytest.approx(110.0)
+
+
+@pytest.mark.asyncio
+async def test_tp_limit_prearm_skips_when_spike_confirmation_enabled(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    _configure_dca(
+        dca,
+        sell_order_type="limit",
+        tp_limit_prearm_enabled=True,
+        tp_limit_prearm_margin_percent=0.25,
+    )
+    arm_calls: list[dict[str, object]] = []
+
+    async def fake_reconcile_tp_limit_order(_trades, _config) -> bool:
+        return False
+
+    async def fake_arm_tp_limit_order(order, _config) -> bool:
+        arm_calls.append(order)
+        return True
+
+    async def fake_update_statistic_data(_payload) -> None:
+        return None
+
+    monkeypatch.setattr(
+        dca.orders,
+        "reconcile_tp_limit_order",
+        fake_reconcile_tp_limit_order,
+    )
+    monkeypatch.setattr(dca.orders, "arm_tp_limit_order", fake_arm_tp_limit_order)
+    monkeypatch.setattr(
+        dca.statistic, "update_statistic_data", fake_update_statistic_data
+    )
+    monkeypatch.setattr(dca, "_Dca__get_monotonic_time", lambda: 100.0)
+
+    await dca._Dca__calculate_tp(109.8, _build_trades(), _build_policy())
+
+    assert arm_calls == []
+
+
+@pytest.mark.asyncio
+async def test_tp_limit_prearm_waits_for_existing_order_at_tp(monkeypatch) -> None:
+    dca = Dca()
+    _configure_dca(
+        dca,
+        sell_order_type="limit",
+        tp_spike_confirm_enabled=False,
+        tp_limit_prearm_enabled=True,
+        tp_limit_prearm_margin_percent=0.25,
+    )
+    trades = _build_trades()
+    trades.update(
+        {
+            "tp_limit_order_id": "tp-1",
+            "tp_limit_order_price": 110.0,
+            "tp_limit_order_amount": 1.0,
+        }
+    )
+    stat_payloads: list[dict[str, object]] = []
+
+    async def fake_reconcile_tp_limit_order(_trades, _config) -> bool:
+        return False
+
+    async def fake_receive_sell_order(_order, _config) -> None:
+        raise AssertionError("existing proactive limit order should own TP fill")
+
+    async def fake_update_statistic_data(payload) -> None:
+        stat_payloads.append(payload)
+
+    monkeypatch.setattr(
+        dca.orders,
+        "reconcile_tp_limit_order",
+        fake_reconcile_tp_limit_order,
+    )
+    monkeypatch.setattr(dca.orders, "receive_sell_order", fake_receive_sell_order)
+    monkeypatch.setattr(
+        dca.statistic, "update_statistic_data", fake_update_statistic_data
+    )
+
+    await dca._Dca__calculate_tp(111.0, trades, _build_policy())
+
+    assert stat_payloads[-1]["sell"] is False
+    assert stat_payloads[-1]["tp_limit_order_armed"] is True

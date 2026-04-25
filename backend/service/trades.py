@@ -2,6 +2,7 @@
 
 import os
 from collections.abc import Awaitable, Iterable
+from datetime import datetime, timezone
 from typing import Any, TypedDict, TypeVar
 from uuid import UUID, uuid4
 
@@ -121,6 +122,12 @@ class Trades:
         except BaseORMException as exc:
             self._log_db_error(error_message, exc)
             return False
+
+    async def _clear_order_cache(self) -> None:
+        """Clear cached trade aggregates after open-position mutations."""
+        cache_clear = getattr(self.get_trades_for_orders, "cache_clear", None)
+        if cache_clear is not None:
+            await cache_clear()
 
     @helper.async_ttl_cache(maxsize=1024, ttl=60)
     async def get_trade_by_ordertype(
@@ -296,6 +303,53 @@ class Trades:
                 ),
                 f"Error updating SO count for {symbol}.",
             )
+            await self._clear_order_cache()
+
+    async def set_tp_limit_order(
+        self,
+        symbol: str,
+        *,
+        order_id: str,
+        price: float,
+        amount: float,
+    ) -> bool:
+        """Persist the currently armed proactive TP limit order for a symbol."""
+        try:
+            updated_count = await model.OpenTrades.filter(symbol=symbol).update(
+                tp_limit_order_id=order_id,
+                tp_limit_order_price=float(price),
+                tp_limit_order_amount=float(amount),
+                tp_limit_order_armed_at=datetime.now(timezone.utc).isoformat(),
+            )
+        except BaseORMException as exc:
+            self._log_db_error(
+                f"Error setting proactive TP limit order for {symbol}.",
+                exc,
+            )
+            return False
+        if updated_count <= 0:
+            logging.error(
+                "Could not persist proactive TP limit order for %s: open trade missing.",
+                symbol,
+            )
+            return False
+        await self._clear_order_cache()
+        return True
+
+    async def clear_tp_limit_order(self, symbol: str) -> bool:
+        """Clear persisted proactive TP limit order metadata for a symbol."""
+        updated = await self._write_db(
+            model.OpenTrades.filter(symbol=symbol).update(
+                tp_limit_order_id=None,
+                tp_limit_order_price=None,
+                tp_limit_order_amount=None,
+                tp_limit_order_armed_at=None,
+            ),
+            f"Error clearing proactive TP limit order for {symbol}.",
+        )
+        if updated:
+            await self._clear_order_cache()
+        return updated
 
     async def add_partial_sell_execution(
         self,
@@ -590,6 +644,18 @@ class Trades:
                 "safetyorders": safetyorders,
                 "safetyorders_count": safetyorders_count,
                 "ordertype": baseorder["ordertype"],
+                "tp_limit_order_id": (
+                    open_trade.get("tp_limit_order_id") if open_trade else None
+                ),
+                "tp_limit_order_price": (
+                    open_trade.get("tp_limit_order_price") if open_trade else None
+                ),
+                "tp_limit_order_amount": (
+                    open_trade.get("tp_limit_order_amount") if open_trade else None
+                ),
+                "tp_limit_order_armed_at": (
+                    open_trade.get("tp_limit_order_armed_at") if open_trade else None
+                ),
                 **unsellable_state,
             }
 

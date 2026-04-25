@@ -832,7 +832,7 @@ def test_order_mutations_require_post(monkeypatch) -> None:
         captured_calls.append(("buy", (symbol, ordersize)))
         return True
 
-    async def _fake_stop(symbol: str) -> bool:
+    async def _fake_stop(symbol: str, _config: Any) -> bool:
         captured_calls.append(("stop", (symbol,)))
         return True
 

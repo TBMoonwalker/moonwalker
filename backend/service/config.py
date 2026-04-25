@@ -50,6 +50,8 @@ DEFAULT_CONFIG_VALUES = {
     "tp_spike_confirm_enabled": False,
     "tp_spike_confirm_seconds": 3.0,
     "tp_spike_confirm_ticks": 0,
+    "tp_limit_prearm_enabled": False,
+    "tp_limit_prearm_margin_percent": 0.25,
     "autopilot_green_phase_enabled": False,
     "autopilot_green_phase_ramp_days": 30,
     "autopilot_green_phase_eval_interval_sec": 60,
