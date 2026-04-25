@@ -4,6 +4,7 @@ import type { VNodeRef } from 'vue'
 
 import type { SetupEntryChoice } from '../../control-center/setupEntryHistory'
 import type {
+    CapitalModel,
     DcaModel,
     ExchangeModel,
     GeneralModel,
@@ -18,6 +19,7 @@ import type {
 } from '../../control-center/types'
 import type { SetupStyle } from '../../composables/useControlCenterSetupFlow'
 import ControlCenterSetupWorkspace from './ControlCenterSetupWorkspace.vue'
+import ConfigCapitalSection from '../config/ConfigCapitalSection.vue'
 import ConfigDcaSection from '../config/ConfigDcaSection.vue'
 import ConfigExchangeSection from '../config/ConfigExchangeSection.vue'
 import ConfigGeneralSection from '../config/ConfigGeneralSection.vue'
@@ -36,6 +38,8 @@ defineProps<{
         target: ControlCenterTarget,
     ) => (element: Element | null) => void
     canTestMonitoringTelegram: boolean
+    capital: CapitalModel
+    capitalFormRef?: VNodeRef
     currency: StringSelectOption[]
     dca: DcaModel
     dcaFormRef?: VNodeRef
@@ -166,6 +170,14 @@ const emit = defineEmits<{
                 :sell-order-type-options="sellOrderTypeOptions"
                 :show-advanced-general="setupShowsAdvancedFields"
                 :strategy-options="signal.strategy_plugins"
+            />
+        </template>
+
+        <template #capital>
+            <ConfigCapitalSection
+                :ref="capitalFormRef"
+                :capital="capital"
+                :rules="rules"
             />
         </template>
 

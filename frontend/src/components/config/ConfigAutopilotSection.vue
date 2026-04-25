@@ -22,12 +22,53 @@
                 >
                     <n-checkbox v-model:checked="autopilot.symbol_entry_sizing_enabled" />
                 </n-form-item>
-                <n-form-item label="Max fund" path="maxfund">
-                    <n-input-number
-                        v-model:value="autopilot.max_fund"
-                        placeholder="Max fund"
-                    />
+                <n-form-item
+                    label="Profit stretch"
+                    path="profit_stretch_enabled"
+                    label-placement="left"
+                >
+                    <n-checkbox v-model:checked="autopilot.profit_stretch_enabled" />
                 </n-form-item>
+                <template v-if="autopilot.profit_stretch_enabled">
+                    <n-form-item label="Stretch ratio" path="profit_stretch_ratio">
+                        <n-input-number
+                            v-model:value="autopilot.profit_stretch_ratio"
+                            placeholder="0"
+                            :min="0"
+                            :step="0.05"
+                        />
+                    </n-form-item>
+                    <n-form-item label="Stretch cap" path="profit_stretch_max">
+                        <n-input-number
+                            v-model:value="autopilot.profit_stretch_max"
+                            placeholder="0"
+                            :min="0"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Entry stretch multiplier"
+                        path="entry_stretch_max_multiplier"
+                    >
+                        <n-input-number
+                            v-model:value="autopilot.entry_stretch_max_multiplier"
+                            placeholder="1"
+                            :min="1"
+                            :step="0.05"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Safety stretch multiplier"
+                        path="safety_stretch_max_multiplier"
+                    >
+                        <n-input-number
+                            v-model:value="autopilot.safety_stretch_max_multiplier"
+                            placeholder="1"
+                            :min="1"
+                            :step="0.05"
+                        />
+                    </n-form-item>
+                </template>
+                <n-divider />
                 <n-form-item label="Max bots for high setting" path="highmad">
                     <n-input-number
                         v-model:value="autopilot.high_mad"

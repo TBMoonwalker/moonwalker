@@ -61,6 +61,14 @@ export function useConfigAdvancedGeneral(
                 options.defaults.defaultGreenPhaseReleaseCycles,
             defaultGreenPhaseMaxLockedFundPercent:
                 options.defaults.defaultGreenPhaseMaxLockedFundPercent,
+            defaultAutopilotProfitStretchRatio:
+                options.defaults.defaultAutopilotProfitStretchRatio,
+            defaultAutopilotProfitStretchMax:
+                options.defaults.defaultAutopilotProfitStretchMax,
+            defaultAutopilotEntryStretchMaxMultiplier:
+                options.defaults.defaultAutopilotEntryStretchMaxMultiplier,
+            defaultAutopilotSafetyStretchMaxMultiplier:
+                options.defaults.defaultAutopilotSafetyStretchMaxMultiplier,
         }
     }
 

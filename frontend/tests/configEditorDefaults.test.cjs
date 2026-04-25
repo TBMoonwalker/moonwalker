@@ -55,6 +55,10 @@ test('config editor defaults expose the shared API and payload defaults', () => 
         defaultGreenPhaseConfirmCycles: 2,
         defaultGreenPhaseReleaseCycles: 4,
         defaultGreenPhaseMaxLockedFundPercent: 85,
+        defaultAutopilotProfitStretchRatio: 0,
+        defaultAutopilotProfitStretchMax: 0,
+        defaultAutopilotEntryStretchMaxMultiplier: 1,
+        defaultAutopilotSafetyStretchMaxMultiplier: 1,
     })
 })
 

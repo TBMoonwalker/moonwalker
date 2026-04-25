@@ -2,6 +2,25 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.3.0.0] - 2026-04-25
+
+### Added
+
+- Add a global capital budget authority so every live buy path is checked against the protected capital limit before exchange execution, even when Autopilot is disabled.
+- Add Capital Budget controls to setup and advanced configuration, with one-release compatibility for existing `autopilot_max_fund` installs.
+- Show real tradable funds in the dashboard by combining exchange free balance with remaining global budget headroom.
+
+### Changed
+
+- Let Autopilot optionally stretch the effective capital limit from realized closed-trade profit, with wider entry and safety-order ranges only inside that earned-profit envelope.
+- Reserve estimated future safety-order budget for open deals so new entries do not consume capital that existing DCA plans may still need.
+- Route Green Phase and Autopilot threshold calculations through the global capital limit instead of the old Autopilot-scoped max-fund setting.
+
+### Fixed
+
+- Return manual buy failures back to the caller when the shared budget or exchange preflight blocks the order, so the API no longer reports success for a skipped buy.
+- Tighten backend and frontend regression coverage around capital leases, configured budget persistence, manual buy blocking, legacy alias loading, profit stretch, and dashboard tradable funds.
+
 ## [1.2.0.0] - 2026-04-22
 
 ### Added

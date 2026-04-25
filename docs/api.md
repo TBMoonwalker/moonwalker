@@ -113,8 +113,15 @@ These streams are fan-out based: one producer loop refreshes shared data every
 | `GET` | `/statistic/profit-overall/timeline` | Return the adaptive last-12-month profit timeline. |
 
 The live profit stream includes current portfolio values plus runtime state such
-as funds locked, funds available, Autopilot mode, effective max bots, and Green
-Phase status.
+as funds locked, exchange-free funds, funds actually tradable after global
+capital-budget headroom, Autopilot mode, effective max bots, and Green Phase
+status.
+
+Capital-budget fields include `capital_max_fund`,
+`capital_effective_max_fund`, `capital_stretch_quote`,
+`capital_funds_locked`, `capital_open_trade_reserve`,
+`capital_pending_quote`, `capital_available_quote`,
+`capital_budget_available`, and `capital_budget_reason`.
 
 It also carries compact Autopilot Memory status fields for the top statistics
 strip, including freshness or warmup state, stale reason, current vs required

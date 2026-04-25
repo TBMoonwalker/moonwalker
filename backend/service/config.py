@@ -38,6 +38,15 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 }
 
 DEFAULT_CONFIG_VALUES = {
+    "capital_max_fund": 0.0,
+    "capital_reserve_safety_orders": True,
+    "capital_budget_buffer_pct": 0.0,
+    "autopilot_max_fund": 0.0,
+    "autopilot_profit_stretch_enabled": False,
+    "autopilot_profit_stretch_ratio": 0.0,
+    "autopilot_profit_stretch_max": 0.0,
+    "autopilot_entry_stretch_max_multiplier": 1.0,
+    "autopilot_safety_stretch_max_multiplier": 1.0,
     "tp_spike_confirm_enabled": False,
     "tp_spike_confirm_seconds": 3.0,
     "tp_spike_confirm_ticks": 0,
@@ -248,7 +257,21 @@ class Config:
 
     def snapshot(self) -> dict[str, Any]:
         """Return a defensive copy of the current config state."""
-        return self._store.snapshot(defaults=DEFAULT_CONFIG_VALUES)
+        return self.__apply_capital_aliases(
+            self._store.snapshot(defaults=DEFAULT_CONFIG_VALUES)
+        )
+
+    def __apply_capital_aliases(self, snapshot: dict[str, Any]) -> dict[str, Any]:
+        """Mirror legacy Autopilot max-fund config to the global capital key."""
+        capital_persisted = self._store.has_entry("capital_max_fund")
+        legacy_persisted = self._store.has_entry("autopilot_max_fund")
+        if capital_persisted:
+            snapshot["autopilot_max_fund"] = snapshot.get("capital_max_fund", 0.0)
+        elif legacy_persisted:
+            snapshot["capital_max_fund"] = snapshot.get("autopilot_max_fund", 0.0)
+        else:
+            snapshot["autopilot_max_fund"] = snapshot.get("capital_max_fund", 0.0)
+        return snapshot
 
     def __notify_subscribers(self) -> None:
         """Notify local subscribers that cache values changed."""
@@ -357,6 +380,8 @@ class Config:
         Returns:
             The configuration value or default if key not found
         """
+        if key in {"capital_max_fund", "autopilot_max_fund"}:
+            return self.snapshot().get(key, default)
         return self._store.get(key, defaults=DEFAULT_CONFIG_VALUES, default=default)
 
     async def set(self, key: str, value: Any) -> bool:

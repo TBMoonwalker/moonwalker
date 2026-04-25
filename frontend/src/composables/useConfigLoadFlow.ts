@@ -9,6 +9,7 @@ import {
 import type { OperationResult } from '../control-center/operationResults'
 import type {
     AutopilotConfigSection,
+    CapitalConfigSection,
     DcaConfigSection,
     ExchangeConfigSection,
     FilterConfigSection,
@@ -31,6 +32,7 @@ interface UseConfigLoadFlowOptions {
     filter: Ref<FilterConfigSection>
     exchange: Ref<ExchangeConfigSection>
     dca: Ref<DcaConfigSection>
+    capital: Ref<CapitalConfigSection>
     autopilot: Ref<AutopilotConfigSection>
     monitoring: Ref<MonitoringConfigSection>
     indicator: Ref<IndicatorConfigSection>
@@ -76,6 +78,7 @@ export function useConfigLoadFlow(options: UseConfigLoadFlowOptions) {
             Object.assign(options.filter.value, loadedConfig.filter)
             Object.assign(options.exchange.value, loadedConfig.exchange)
             Object.assign(options.dca.value, loadedConfig.dca)
+            Object.assign(options.capital.value, loadedConfig.capital)
             Object.assign(options.autopilot.value, loadedConfig.autopilot)
             Object.assign(options.monitoring.value, loadedConfig.monitoring)
             Object.assign(options.indicator.value, loadedConfig.indicator)

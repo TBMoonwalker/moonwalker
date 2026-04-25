@@ -1,6 +1,7 @@
 import type { LoadedSignalConfigSection } from '../helpers/configLoad'
 import type {
     AutopilotConfigSection,
+    CapitalConfigSection,
     DcaConfigSection,
     ExchangeConfigSection,
     FilterConfigSection,
@@ -22,6 +23,7 @@ export interface MixedSelectOption {
 export type GeneralModel = GeneralConfigSection
 export type ExchangeModel = ExchangeConfigSection
 export type DcaModel = DcaConfigSection
+export type CapitalModel = CapitalConfigSection
 export type AutopilotModel = AutopilotConfigSection
 export type MonitoringModel = MonitoringConfigSection
 export type FilterModel = FilterConfigSection

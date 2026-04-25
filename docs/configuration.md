@@ -93,9 +93,17 @@ are not exposed in the UI and must be set via the API.
 | `history_lookback_time` | `string` | Canonical indicator history lookback using `d/w/m/y` suffixes such as `30d`, `12w`, `6m`, or `1y`. | `90d` |
 | `upnl_housekeeping_interval` | `int` | uPNL history retention in days; `0` keeps all history forever. | `0` |
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |
+| `capital_max_fund` | `float` | Global hard capital limit for all live buy paths. New buys fail closed when this is missing or `<= 0` in the runtime config. | `0` |
+| `capital_reserve_safety_orders` | `bool` | Reserve estimated future safety-order budget when admitting base orders and checking the hard limit. | `true` |
+| `capital_budget_buffer_pct` | `float` | Optional extra capital-budget buffer applied to buy requirements. | `0` |
 | `autopilot` | `bool` | Enable autopilot mode. | `false` |
 | `autopilot_symbol_entry_sizing_enabled` | `bool` | Allow fresh non-neutral Autopilot memory to override new-entry base order size per symbol. When disabled, suggested base orders remain advisory only. | `false` |
-| `autopilot_max_fund` | `int` | Max funds for autopilot calculations. | `1000` |
+| `autopilot_max_fund` | `int` | Legacy alias for `capital_max_fund`. Kept for one-release compatibility. | `0` |
+| `autopilot_profit_stretch_enabled` | `bool` | Allow Autopilot to stretch the effective capital limit above `capital_max_fund` using realized closed profit. | `false` |
+| `autopilot_profit_stretch_ratio` | `float` | Fraction of positive realized `ClosedTrades.profit` that can be added above the hard principal limit. Negative profit never reduces principal. | `0` |
+| `autopilot_profit_stretch_max` | `float` | Absolute cap for Autopilot profit stretch. `0` disables added stretch even when the ratio is positive. | `0` |
+| `autopilot_entry_stretch_max_multiplier` | `float` | Multiplier for Autopilot memory's base-order adjustment range when profit stretch is enabled. | `1` |
+| `autopilot_safety_stretch_max_multiplier` | `float` | Multiplier used when reserving future safety-order budget while profit stretch is enabled. | `1` |
 | `autopilot_high_mad` | `int` | Max active deals (high setting). | `5` |
 | `autopilot_high_tp` | `float` | TP percent (high setting). | `1.2` |
 | `autopilot_high_sl` | `float` | SL percent (high setting). | `2.5` |
@@ -116,7 +124,7 @@ are not exposed in the UI and must be set via the API.
 | `autopilot_green_phase_max_extra_deals` | `int` | Maximum number of additional deals Green Phase may add on top of the current effective `max_bots`. | `2` |
 | `autopilot_green_phase_confirm_cycles` | `int` | Number of consecutive evaluation runs that must satisfy the enter condition before Green Phase activates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `2` |
 | `autopilot_green_phase_release_cycles` | `int` | Number of consecutive evaluation runs below the exit condition before Green Phase deactivates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `4` |
-| `autopilot_green_phase_max_locked_fund_percent` | `float` | Hard ceiling for locked funds, in percent of `autopilot_max_fund`, above which Green Phase may not add extra deals. | `85` |
+| `autopilot_green_phase_max_locked_fund_percent` | `float` | Hard ceiling for locked funds, in percent of `capital_max_fund`, above which Green Phase may not add extra deals. | `85` |
 | `monitoring_enabled` | `bool` | Enable outbound monitoring notifications for executed buys/sells. | `false` |
 | `monitoring_telegram_api_id` | `int` | Telegram API ID used by Telethon client. | `1234567` |
 | `monitoring_telegram_api_hash` | `string` | Telegram API hash used by Telethon client. | `0123456789abcdef...` |
@@ -130,6 +138,27 @@ are not exposed in the UI and must be set via the API.
 Read-only metadata keys such as `strategies` and `signal_plugins` are returned
 in config snapshots for the dashboard and should not be treated as persisted
 user-entered values.
+
+## Global Capital Budget
+
+`capital_max_fund` is the global hard limit for live buy execution. It applies
+whether Autopilot is enabled or disabled, so manual buy signals, signal entries,
+and safety orders all pass through the same capital preflight before the
+exchange order is placed.
+
+When `capital_reserve_safety_orders` is enabled, Moonwalker also reserves the
+estimated remaining safety-order budget for open deals. That keeps a new base
+order from consuming capital that existing deals may still need for their DCA
+plan.
+
+Autopilot can optionally stretch the effective limit above the global principal
+limit using realized closed profit:
+
+- Stretch uses `ClosedTrades.profit` only, not uPNL.
+- Negative realized profit never reduces `capital_max_fund`.
+- `autopilot_profit_stretch_max = 0` means no stretch is added.
+- `autopilot_max_fund` is still read as a legacy alias, but new configs should
+  use `capital_max_fund`.
 
 ## Autopilot Green Phase
 

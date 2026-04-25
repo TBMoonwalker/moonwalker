@@ -28,6 +28,12 @@ function hasRequiredValue(value: unknown): boolean {
     return true
 }
 
+function hasPositiveNumber(value: unknown): boolean {
+    const numericValue =
+        typeof value === 'number' ? value : Number.parseFloat(String(value ?? ''))
+    return Number.isFinite(numericValue) && numericValue > 0
+}
+
 function collectAlwaysRequiredBlockers(
     config: SharedConfigPayload,
 ): ControlCenterBlocker[] {
@@ -43,6 +49,11 @@ function collectAlwaysRequiredBlockers(
         ['bo', 'Base order missing', 'Set the base order amount for a safe dry-run configuration.'],
         ['tp', 'Take profit missing', 'Set the take profit target before activating trades.'],
         [
+            'capital_max_fund',
+            'Global max fund missing',
+            'Set the global capital cap before Moonwalker can admit buy orders.',
+        ],
+        [
             'history_lookback_time',
             'History window missing',
             'Set the history lookback window so indicators can initialize reliably.',
@@ -50,7 +61,9 @@ function collectAlwaysRequiredBlockers(
     ]
 
     return requiredKeys.flatMap(([key, title, description]) =>
-        hasRequiredValue(config[key])
+        (key === 'capital_max_fund'
+            ? hasPositiveNumber(config[key])
+            : hasRequiredValue(config[key]))
             ? []
             : [resolveControlCenterBlocker(key, description, title)],
     )

@@ -53,6 +53,12 @@
             :strategy-options="signal.strategy_plugins"
         />
 
+        <ConfigCapitalSection
+            ref="capitalFormRef"
+            :capital="capital"
+            :rules="rules"
+        />
+
         <ConfigAutopilotSection
             ref="autopilotFormRef"
             :autopilot="autopilot"
@@ -137,6 +143,7 @@
 import ConfigAutopilotSection from './config/ConfigAutopilotSection.vue'
 import ConfigBackupDownloadControls from './config/ConfigBackupDownloadControls.vue'
 import ConfigBackupRestoreControls from './config/ConfigBackupRestoreControls.vue'
+import ConfigCapitalSection from './config/ConfigCapitalSection.vue'
 import ConfigDcaSection from './config/ConfigDcaSection.vue'
 import ConfigExchangeSection from './config/ConfigExchangeSection.vue'
 import ConfigFilterSection from './config/ConfigFilterSection.vue'
@@ -158,6 +165,8 @@ const {
     backupIncludeTradeData,
     bindBackupFileInput,
     canTestMonitoringTelegram,
+    capital,
+    capitalFormRef,
     clearSelectedBackup,
     confirmDiscardUnsavedChanges,
     currency,

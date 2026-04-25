@@ -108,7 +108,10 @@ def build_green_phase_settings(config: dict[str, Any]) -> GreenPhaseSettings:
             config.get("autopilot_green_phase_max_locked_fund_percent"),
             85.0,
         ),
-        autopilot_max_fund=to_float(config.get("autopilot_max_fund"), 0.0),
+        autopilot_max_fund=to_float(
+            config.get("capital_max_fund", config.get("autopilot_max_fund")),
+            0.0,
+        ),
         base_order_size=max(0.0, to_float(config.get("bo"), 0.0)),
     )
 

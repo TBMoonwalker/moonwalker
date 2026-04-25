@@ -198,11 +198,25 @@ def _tp_delta_limit(baseline_take_profit: float) -> float:
     return _clamp(abs(baseline_take_profit) * 0.15, 0.15, 0.5)
 
 
-def _base_order_delta_limit(base_order_amount: float) -> float:
+def _base_order_delta_limit(
+    base_order_amount: float,
+    *,
+    stretch_multiplier: float = 1.0,
+) -> float:
     """Return the maximum read-only base-order suggestion delta."""
     if base_order_amount <= 0:
         return 0.0
-    return max(base_order_amount * 0.15, 5.0)
+    return max(base_order_amount * 0.15, 5.0) * max(1.0, stretch_multiplier)
+
+
+def _entry_stretch_multiplier(config: dict[str, Any]) -> float:
+    """Return configured Autopilot entry-size stretch multiplier."""
+    if not bool(config.get("autopilot_profit_stretch_enabled", False)):
+        return 1.0
+    return max(
+        1.0,
+        _safe_float(config.get("autopilot_entry_stretch_max_multiplier")) or 1.0,
+    )
 
 
 def _memory_status_reason_code(state: dict[str, Any]) -> str | None:
@@ -1110,7 +1124,10 @@ class AutopilotMemoryService:
                 secondary_reason_code = "quick_profitable_closes"
                 secondary_reason_value = profitable_closes
 
-            max_bo_delta = _base_order_delta_limit(base_order_amount)
+            max_bo_delta = _base_order_delta_limit(
+                base_order_amount,
+                stretch_multiplier=_entry_stretch_multiplier(self.config),
+            )
             suggested_base_order = max(
                 0.0,
                 base_order_amount + tp_delta_ratio * max_bo_delta,
@@ -1201,7 +1218,11 @@ class AutopilotMemoryService:
                 round(
                     max(
                         0.0,
-                        base_order_amount - _base_order_delta_limit(base_order_amount),
+                        base_order_amount
+                        - _base_order_delta_limit(
+                            base_order_amount,
+                            stretch_multiplier=_entry_stretch_multiplier(self.config),
+                        ),
                     ),
                     8,
                 )
@@ -1210,7 +1231,11 @@ class AutopilotMemoryService:
             ),
             "suggested_base_order_max": (
                 round(
-                    base_order_amount + _base_order_delta_limit(base_order_amount),
+                    base_order_amount
+                    + _base_order_delta_limit(
+                        base_order_amount,
+                        stretch_multiplier=_entry_stretch_multiplier(self.config),
+                    ),
                     8,
                 )
                 if base_order_amount > 0

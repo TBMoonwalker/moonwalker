@@ -56,6 +56,10 @@ class ConfigRuntimeStore:
         """Remove one persisted entry by key."""
         return self._entries.pop(key, None) is not None
 
+    def has_entry(self, key: str) -> bool:
+        """Return whether a key exists in persisted runtime entries."""
+        return key in self._entries
+
     def set_metadata(self, metadata: Mapping[str, Any]) -> None:
         """Replace derived runtime metadata with a defensive copy."""
         self._metadata = copy.deepcopy(dict(metadata))

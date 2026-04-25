@@ -42,6 +42,15 @@ const TASKS: readonly ControlCenterTaskPresentation[] = [
         emphasis: 'primary',
     },
     {
+        target: 'capital',
+        title: 'Capital budget',
+        summary: 'Global hard cap and reserve buffer for every live buy path.',
+        defaultMode: 'setup',
+        modes: ['setup', 'advanced'],
+        sectionId: 'control-center-capital',
+        emphasis: 'primary',
+    },
+    {
         target: 'monitoring',
         title: 'Operator alerts',
         summary: 'Configure Telegram delivery so the operator can verify notifications.',
@@ -104,6 +113,7 @@ const TASKS_BY_TARGET = new Map(
 const KEY_TARGET_PREFIXES: ReadonlyArray<[string, ControlCenterTarget]> = [
     ['signal_settings.', 'signal'],
     ['monitoring_', 'monitoring'],
+    ['capital_', 'capital'],
     ['autopilot_', 'autopilot'],
     ['ws_', 'general'],
 ]
@@ -120,6 +130,7 @@ const KEY_TARGETS: Record<string, ControlCenterTarget> = {
     market: 'exchange',
     exchange_hostname: 'exchange',
     watcher_ohlcv: 'exchange',
+    autopilot_max_fund: 'capital',
     signal: 'signal',
     symbol_list: 'signal',
     rsi_max: 'filter',
@@ -177,10 +188,14 @@ export function isKnownControlCenterTarget(
 
 export function resolveTargetForConfigKey(key: string): ControlCenterTarget {
     const normalizedKey = key.trim()
+    const exactTarget = KEY_TARGETS[normalizedKey]
+    if (exactTarget) {
+        return exactTarget
+    }
     for (const [prefix, target] of KEY_TARGET_PREFIXES) {
         if (normalizedKey.startsWith(prefix)) {
             return target
         }
     }
-    return KEY_TARGETS[normalizedKey] ?? 'general'
+    return 'general'
 }

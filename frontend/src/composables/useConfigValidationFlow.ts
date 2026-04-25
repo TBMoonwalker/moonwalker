@@ -26,6 +26,7 @@ export function useConfigValidationFlow(
     const filterFormRef = ref<ConfigSectionFormExpose | null>(null)
     const exchangeFormRef = ref<ConfigSectionFormExpose | null>(null)
     const dcaFormRef = ref<ConfigSectionFormExpose | null>(null)
+    const capitalFormRef = ref<ConfigSectionFormExpose | null>(null)
     const autopilotFormRef = ref<ConfigSectionFormExpose | null>(null)
     const monitoringFormRef = ref<ConfigSectionFormExpose | null>(null)
     const indicatorFormRef = ref<ConfigSectionFormExpose | null>(null)
@@ -43,6 +44,7 @@ export function useConfigValidationFlow(
             ['filter', filterFormRef.value],
             ['exchange', exchangeFormRef.value],
             ['dca', dcaFormRef.value],
+            ['capital', capitalFormRef.value],
             ['autopilot', autopilotFormRef.value],
             ['monitoring', monitoringFormRef.value],
             ['indicator', indicatorFormRef.value],
@@ -96,6 +98,7 @@ export function useConfigValidationFlow(
 
     return {
         autopilotFormRef,
+        capitalFormRef,
         dcaFormRef,
         exchangeFormRef,
         filterFormRef,

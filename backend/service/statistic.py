@@ -9,6 +9,7 @@ import helper
 import model
 import pandas as pd
 from service.autopilot import Autopilot
+from service.capital_budget import CapitalBudgetService
 from service.config import Config
 from service.database import run_sqlite_write_with_retry
 from service.green_phase import AVAILABLE_QUOTE_UNSET
@@ -27,6 +28,7 @@ class Statistic:
     def __init__(self) -> None:
         self.trades = Trades()
         self.autopilot = Autopilot()
+        self.capital_budget = CapitalBudgetService()
         self.snapshot_interval_seconds = 60
         self.timeline_horizons = {
             "day": timedelta(days=1),
@@ -226,6 +228,10 @@ class Statistic:
             available_quote=available_quote,
         )
         profit_data["funds_available"] = available_quote
+        profit_data["funds_tradable"] = self._derive_tradable_quote(
+            available_quote,
+            profit_data,
+        )
         return profit_data
 
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
@@ -288,11 +294,14 @@ class Statistic:
     ) -> None:
         """Attach current Autopilot/Green Phase state to profit payloads."""
         config = await Config.instance()
+        config_snapshot = config.snapshot()
         autopilot_state = await self.autopilot.resolve_runtime_state(
             funds_locked=float(profit_data.get("funds_locked") or 0.0),
-            config=config.snapshot(),
+            config=config_snapshot,
             available_quote=available_quote,
         )
+        capital_state = await self.capital_budget.get_runtime_state(config_snapshot)
+        profit_data.update(capital_state)
         profit_data["autopilot"] = autopilot_state["mode"]
         profit_data["autopilot_effective_max_bots"] = autopilot_state[
             "effective_max_bots"
@@ -330,6 +339,42 @@ class Statistic:
         )
         profit_data["autopilot_memory_featured_symbol"] = autopilot_state.get(
             "memory_featured_symbol"
+        )
+
+    @staticmethod
+    def _to_optional_float(value: Any) -> float | None:
+        """Return a finite float or None for unavailable values."""
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if pd.notna(parsed) else None
+
+    @classmethod
+    def _derive_tradable_quote(
+        cls,
+        available_quote: float | None,
+        profit_data: dict[str, Any],
+    ) -> float | None:
+        """Return exchange-free funds constrained by the global capital budget."""
+        exchange_available = cls._to_optional_float(available_quote)
+        if exchange_available is None:
+            return None
+
+        if profit_data.get("capital_budget_reason") == "capital_budget_unconfigured":
+            return round(max(0.0, exchange_available), 8)
+
+        capital_available = cls._to_optional_float(
+            profit_data.get("capital_available_quote")
+        )
+        if capital_available is None:
+            return 0.0
+
+        return round(
+            min(max(0.0, exchange_available), max(0.0, capital_available)),
+            8,
         )
 
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
