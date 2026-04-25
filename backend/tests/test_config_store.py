@@ -186,6 +186,34 @@ async def test_config_snapshot_returns_defensive_copy(tmp_path, monkeypatch) -> 
 
 
 @pytest.mark.asyncio
+async def test_config_snapshot_mirrors_legacy_autopilot_max_fund_alias(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    config = Config()
+    await config.set("autopilot_max_fund", {"value": 250, "type": "int"})
+    await config.load_all()
+
+    snapshot = config.snapshot()
+    assert snapshot["capital_max_fund"] == 250
+    assert snapshot["autopilot_max_fund"] == 250
+
+    await config.set("capital_max_fund", {"value": 300, "type": "int"})
+    snapshot = config.snapshot()
+    assert snapshot["capital_max_fund"] == 300
+    assert snapshot["autopilot_max_fund"] == 300
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_config_subscribers_receive_defensive_snapshot(
     tmp_path, monkeypatch
 ) -> None:

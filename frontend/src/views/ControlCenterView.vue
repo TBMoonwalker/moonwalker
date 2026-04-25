@@ -58,6 +58,8 @@ const {
     backupIncludeTradeData,
     bindBackupFileInput,
     canTestMonitoringTelegram,
+    capital,
+    capitalFormRef,
     changedSectionLabels,
     clearSelectedBackup,
     confirmDiscardUnsavedChanges,
@@ -455,6 +457,8 @@ async function handleToggleAutopilot(): Promise<void> {
                 <ControlCenterSetupMode
                     :bind-backup-file-input="bindBackupFileInput"
                     :bind-target-element="bindTargetElement"
+                    :capital="capital"
+                    :capital-form-ref="capitalFormRef"
                     :can-test-monitoring-telegram="canTestMonitoringTelegram()"
                     :currency="currency"
                     :dca="dca"
@@ -514,6 +518,8 @@ async function handleToggleAutopilot(): Promise<void> {
                     :autopilot="autopilot"
                     :autopilot-form-ref="autopilotFormRef"
                     :bind-target-element="bindTargetElement"
+                    :capital="capital"
+                    :capital-form-ref="capitalFormRef"
                     :dca="dca"
                     :dca-form-ref="dcaFormRef"
                     :exchange="exchange"

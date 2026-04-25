@@ -7,6 +7,7 @@ import {
 } from './configForm'
 import type {
     AutopilotConfigSection,
+    CapitalConfigSection,
     DcaConfigSection,
     ExchangeConfigSection,
     FilterConfigSection,
@@ -44,6 +45,10 @@ export interface ConfigLoadDefaults {
     defaultGreenPhaseConfirmCycles: number
     defaultGreenPhaseReleaseCycles: number
     defaultGreenPhaseMaxLockedFundPercent: number
+    defaultAutopilotProfitStretchRatio: number
+    defaultAutopilotProfitStretchMax: number
+    defaultAutopilotEntryStretchMaxMultiplier: number
+    defaultAutopilotSafetyStretchMaxMultiplier: number
 }
 
 export interface LoadedSignalConfigSection extends SignalConfigSection {
@@ -57,6 +62,7 @@ export interface LoadedSignalConfigSection extends SignalConfigSection {
 
 export interface LoadedConfigState {
     autopilot: AutopilotConfigSection
+    capital: CapitalConfigSection
     dca: DcaConfigSection
     exchange: ExchangeConfigSection
     filter: FilterConfigSection
@@ -228,13 +234,38 @@ export function buildLoadedConfigState(
             tp: toNumberOrNull(response.tp),
             sl: toNumberOrNull(response.sl),
         },
+        capital: {
+            max_fund:
+                toNumberOrNull(response.capital_max_fund) ??
+                toNumberOrNull(response.autopilot_max_fund),
+            reserve_safety_orders:
+                parseBooleanString(response.capital_reserve_safety_orders) ?? true,
+            budget_buffer_pct:
+                toNumberOrNull(response.capital_budget_buffer_pct) ?? 0,
+        },
         autopilot: {
             enabled: parseBooleanString(response.autopilot) ?? false,
             symbol_entry_sizing_enabled:
                 parseBooleanString(
                     response.autopilot_symbol_entry_sizing_enabled,
                 ) ?? false,
-            max_fund: toNumberOrNull(response.autopilot_max_fund),
+            profit_stretch_enabled:
+                parseBooleanString(response.autopilot_profit_stretch_enabled) ??
+                false,
+            profit_stretch_ratio:
+                toNumberOrNull(response.autopilot_profit_stretch_ratio) ??
+                defaults.defaultAutopilotProfitStretchRatio,
+            profit_stretch_max:
+                toNumberOrNull(response.autopilot_profit_stretch_max) ??
+                defaults.defaultAutopilotProfitStretchMax,
+            entry_stretch_max_multiplier:
+                toNumberOrNull(
+                    response.autopilot_entry_stretch_max_multiplier
+                ) ?? defaults.defaultAutopilotEntryStretchMaxMultiplier,
+            safety_stretch_max_multiplier:
+                toNumberOrNull(
+                    response.autopilot_safety_stretch_max_multiplier
+                ) ?? defaults.defaultAutopilotSafetyStretchMaxMultiplier,
             high_mad: toNumberOrNull(response.autopilot_high_mad),
             high_tp: toNumberOrNull(response.autopilot_high_tp),
             high_sl: toNumberOrNull(response.autopilot_high_sl),

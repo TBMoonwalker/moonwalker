@@ -28,6 +28,10 @@ function createLoadDefaults(overrides = {}) {
         defaultGreenPhaseConfirmCycles: 3,
         defaultGreenPhaseReleaseCycles: 2,
         defaultGreenPhaseMaxLockedFundPercent: 55,
+        defaultAutopilotProfitStretchRatio: 0,
+        defaultAutopilotProfitStretchMax: 0,
+        defaultAutopilotEntryStretchMaxMultiplier: 1,
+        defaultAutopilotSafetyStretchMaxMultiplier: 1,
         ...overrides,
     }
 }
@@ -46,6 +50,14 @@ test(
                 ws_stale_timeout_ms: '8000',
                 ws_reconnect_debounce_ms: '7000',
                 exchange_hostname: 'api.exchange.test',
+                capital_max_fund: '250',
+                capital_reserve_safety_orders: 'false',
+                capital_budget_buffer_pct: '0.02',
+                autopilot_profit_stretch_enabled: 'true',
+                autopilot_profit_stretch_ratio: '0.5',
+                autopilot_profit_stretch_max: '75',
+                autopilot_entry_stretch_max_multiplier: '2',
+                autopilot_safety_stretch_max_multiplier: '1.5',
                 signal: 'csv_signal',
                 signal_settings: {
                     csv_source: 'pair;side\nBTC/USDT;buy',
@@ -75,6 +87,14 @@ test(
             defaults.defaultGreenPhaseRampDays,
         )
         assert.equal(state.autopilot.symbol_entry_sizing_enabled, false)
+        assert.equal(state.capital.max_fund, 250)
+        assert.equal(state.capital.reserve_safety_orders, false)
+        assert.equal(state.capital.budget_buffer_pct, 0.02)
+        assert.equal(state.autopilot.profit_stretch_enabled, true)
+        assert.equal(state.autopilot.profit_stretch_ratio, 0.5)
+        assert.equal(state.autopilot.profit_stretch_max, 75)
+        assert.equal(state.autopilot.entry_stretch_max_multiplier, 2)
+        assert.equal(state.autopilot.safety_stretch_max_multiplier, 1.5)
     },
 )
 

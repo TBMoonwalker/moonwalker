@@ -46,6 +46,21 @@ test('control center blocker helper ignores malformed blocker rows', () => {
     ])
 })
 
+test('control center blocker helper maps capital fields globally', () => {
+    const blocker = resolveControlCenterBlocker(
+        'capital_max_fund',
+        'Set the global hard cap.',
+    )
+
+    assert.deepEqual(blocker, {
+        key: 'capital_max_fund',
+        title: 'Capital budget',
+        description: 'Set the global hard cap.',
+        mode: 'setup',
+        target: 'capital',
+    })
+})
+
 test('control center blocker helper preserves custom titles for readiness copy', () => {
     const blocker = resolveControlCenterBlocker(
         'key',

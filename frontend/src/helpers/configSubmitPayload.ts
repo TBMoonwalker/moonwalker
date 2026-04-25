@@ -78,10 +78,20 @@ export interface DcaConfigSection {
     sl: number | null
 }
 
+export interface CapitalConfigSection {
+    max_fund: number | null
+    reserve_safety_orders: boolean
+    budget_buffer_pct: number | null
+}
+
 export interface AutopilotConfigSection {
     enabled: boolean
     symbol_entry_sizing_enabled: boolean
-    max_fund: number | null
+    profit_stretch_enabled: boolean
+    profit_stretch_ratio: number | null
+    profit_stretch_max: number | null
+    entry_stretch_max_multiplier: number | null
+    safety_stretch_max_multiplier: number | null
     high_mad: number | null
     high_tp: number | null
     high_sl: number | null
@@ -136,6 +146,10 @@ export interface ConfigSubmitPayloadDefaults {
     defaultGreenPhaseConfirmCycles: number
     defaultGreenPhaseReleaseCycles: number
     defaultGreenPhaseMaxLockedFundPercent: number
+    defaultAutopilotProfitStretchRatio: number
+    defaultAutopilotProfitStretchMax: number
+    defaultAutopilotEntryStretchMaxMultiplier: number
+    defaultAutopilotSafetyStretchMaxMultiplier: number
 }
 
 export interface BuildConfigSubmitPayloadOptions {
@@ -144,6 +158,7 @@ export interface BuildConfigSubmitPayloadOptions {
     filter: FilterConfigSection
     exchange: ExchangeConfigSection
     dca: DcaConfigSection
+    capital: CapitalConfigSection
     autopilot: AutopilotConfigSection
     monitoring: MonitoringConfigSection
     indicator: IndicatorConfigSection
@@ -162,6 +177,7 @@ export function buildConfigSubmitPayload(
         filter,
         exchange,
         dca,
+        capital,
         autopilot,
         monitoring,
         indicator,
@@ -307,9 +323,45 @@ export function buildConfigSubmitPayload(
             autopilot.symbol_entry_sizing_enabled ?? false,
             'bool',
         ),
-        autopilot_max_fund: serializeConfigValue(
-            autopilot.max_fund || false,
+        capital_max_fund: serializeConfigValue(
+            capital.max_fund || false,
             'int',
+        ),
+        autopilot_max_fund: serializeConfigValue(
+            capital.max_fund || false,
+            'int',
+        ),
+        capital_reserve_safety_orders: serializeConfigValue(
+            capital.reserve_safety_orders ?? true,
+            'bool',
+        ),
+        capital_budget_buffer_pct: serializeConfigValue(
+            capital.budget_buffer_pct ?? 0,
+            'float',
+        ),
+        autopilot_profit_stretch_enabled: serializeConfigValue(
+            autopilot.profit_stretch_enabled ?? false,
+            'bool',
+        ),
+        autopilot_profit_stretch_ratio: serializeConfigValue(
+            autopilot.profit_stretch_ratio ??
+                defaults.defaultAutopilotProfitStretchRatio,
+            'float',
+        ),
+        autopilot_profit_stretch_max: serializeConfigValue(
+            autopilot.profit_stretch_max ??
+                defaults.defaultAutopilotProfitStretchMax,
+            'float',
+        ),
+        autopilot_entry_stretch_max_multiplier: serializeConfigValue(
+            autopilot.entry_stretch_max_multiplier ??
+                defaults.defaultAutopilotEntryStretchMaxMultiplier,
+            'float',
+        ),
+        autopilot_safety_stretch_max_multiplier: serializeConfigValue(
+            autopilot.safety_stretch_max_multiplier ??
+                defaults.defaultAutopilotSafetyStretchMaxMultiplier,
+            'float',
         ),
         autopilot_high_mad: serializeConfigValue(
             autopilot.high_mad || false,

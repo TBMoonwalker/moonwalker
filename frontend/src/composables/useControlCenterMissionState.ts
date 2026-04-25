@@ -65,6 +65,13 @@ export function useControlCenterMissionState(
                     'Advanced take-profit confirmation controls for noisy or thin markets.',
                 sectionId: 'control-center-dca',
             },
+            {
+                target: 'capital',
+                title: 'Capital guardrails',
+                summary:
+                    'Global max fund, safety-order reserve, and buy-admission buffer.',
+                sectionId: 'control-center-capital',
+            },
             ...expertDomains,
         ]
     })

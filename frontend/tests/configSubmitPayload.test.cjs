@@ -24,6 +24,10 @@ function createPayloadDefaults(overrides = {}) {
         defaultGreenPhaseConfirmCycles: 3,
         defaultGreenPhaseReleaseCycles: 2,
         defaultGreenPhaseMaxLockedFundPercent: 55,
+        defaultAutopilotProfitStretchRatio: 0,
+        defaultAutopilotProfitStretchMax: 0,
+        defaultAutopilotEntryStretchMaxMultiplier: 1,
+        defaultAutopilotSafetyStretchMaxMultiplier: 1,
         ...overrides,
     }
 }
@@ -99,10 +103,19 @@ function createBaseOptions(overrides = {}) {
             tp: 1.8,
             sl: null,
         },
+        capital: {
+            max_fund: null,
+            reserve_safety_orders: true,
+            budget_buffer_pct: 0,
+        },
         autopilot: {
             enabled: false,
             symbol_entry_sizing_enabled: false,
-            max_fund: null,
+            profit_stretch_enabled: false,
+            profit_stretch_ratio: 0,
+            profit_stretch_max: 0,
+            entry_stretch_max_multiplier: 1,
+            safety_stretch_max_multiplier: 1,
             high_mad: null,
             high_tp: null,
             high_sl: null,
@@ -221,6 +234,16 @@ test(
         assert.equal(parseField(payload, 'os').value, false)
         assert.equal(
             parseField(payload, 'autopilot_symbol_entry_sizing_enabled').value,
+            false,
+        )
+        assert.deepEqual(parseField(payload, 'capital_max_fund'), {
+            value: false,
+            type: 'int',
+        })
+        assert.equal(parseField(payload, 'capital_reserve_safety_orders').value, true)
+        assert.equal(parseField(payload, 'capital_budget_buffer_pct').value, 0)
+        assert.equal(
+            parseField(payload, 'autopilot_profit_stretch_enabled').value,
             false,
         )
     },

@@ -13,6 +13,7 @@ export const CONTROL_CENTER_TARGETS = [
     'signal',
     'filter',
     'dca',
+    'capital',
     'autopilot',
     'monitoring',
     'indicator',

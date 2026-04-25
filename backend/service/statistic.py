@@ -9,6 +9,7 @@ import helper
 import model
 import pandas as pd
 from service.autopilot import Autopilot
+from service.capital_budget import CapitalBudgetService
 from service.config import Config
 from service.database import run_sqlite_write_with_retry
 from service.green_phase import AVAILABLE_QUOTE_UNSET
@@ -27,6 +28,7 @@ class Statistic:
     def __init__(self) -> None:
         self.trades = Trades()
         self.autopilot = Autopilot()
+        self.capital_budget = CapitalBudgetService()
         self.snapshot_interval_seconds = 60
         self.timeline_horizons = {
             "day": timedelta(days=1),
@@ -288,11 +290,14 @@ class Statistic:
     ) -> None:
         """Attach current Autopilot/Green Phase state to profit payloads."""
         config = await Config.instance()
+        config_snapshot = config.snapshot()
         autopilot_state = await self.autopilot.resolve_runtime_state(
             funds_locked=float(profit_data.get("funds_locked") or 0.0),
-            config=config.snapshot(),
+            config=config_snapshot,
             available_quote=available_quote,
         )
+        capital_state = await self.capital_budget.get_runtime_state(config_snapshot)
+        profit_data.update(capital_state)
         profit_data["autopilot"] = autopilot_state["mode"]
         profit_data["autopilot_effective_max_bots"] = autopilot_state[
             "effective_max_bots"

@@ -8,6 +8,7 @@ import type {
 import { getAllTimeZones } from '../helpers/timezone'
 import type {
     AutopilotConfigSection,
+    CapitalConfigSection,
     ConfigSubmitPayloadDefaults,
     DcaConfigSection,
     ExchangeConfigSection,
@@ -206,10 +207,22 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         sl: null,
     })
 
+    const capital = ref<CapitalConfigSection>({
+        max_fund: null,
+        reserve_safety_orders: true,
+        budget_buffer_pct: 0,
+    })
+
     const autopilot = ref<AutopilotConfigSection>({
         enabled: false,
         symbol_entry_sizing_enabled: false,
-        max_fund: null,
+        profit_stretch_enabled: false,
+        profit_stretch_ratio: options.defaults.defaultAutopilotProfitStretchRatio,
+        profit_stretch_max: options.defaults.defaultAutopilotProfitStretchMax,
+        entry_stretch_max_multiplier:
+            options.defaults.defaultAutopilotEntryStretchMaxMultiplier,
+        safety_stretch_max_multiplier:
+            options.defaults.defaultAutopilotSafetyStretchMaxMultiplier,
         high_mad: null,
         high_tp: null,
         high_sl: null,
@@ -273,6 +286,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
 
     return {
         autopilot,
+        capital,
         currency: CURRENCY_OPTIONS,
         dca,
         exchange,

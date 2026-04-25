@@ -220,7 +220,10 @@ class GreenPhaseService:
         if not currency:
             return None
 
-        max_fund = to_float(config.get("autopilot_max_fund"), 0.0)
+        max_fund = to_float(
+            config.get("capital_max_fund", config.get("autopilot_max_fund")),
+            0.0,
+        )
         if max_fund > 0:
             return max(0.0, max_fund - float(funds_locked or 0.0))
         return None

@@ -40,6 +40,7 @@ function createDerivedStateHarness(overrides = {}) {
                 currency: 'USDT',
                 max_bots: 2,
                 bo: 20,
+                capital_max_fund: 250,
                 tp: 1.5,
                 history_lookback_time: '180d',
                 symbol_list: 'BTC/USDT',

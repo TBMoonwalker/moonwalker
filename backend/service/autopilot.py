@@ -10,7 +10,13 @@ from service.autopilot_runtime import (
     AutopilotRuntimeState,
     get_shared_autopilot_runtime_state,
 )
+from service.capital_budget_logic import (
+    build_capital_budget_settings,
+    calculate_effective_capital_limit,
+)
 from service.green_phase import AVAILABLE_QUOTE_UNSET, GreenPhaseService
+from tortoise.exceptions import BaseORMException
+from tortoise.functions import Sum
 
 logging = helper.LoggerFactory.get_logger("logs/autopilot.log", "autopilot")
 
@@ -74,12 +80,37 @@ class Autopilot:
             return
         await model.Autopilot.create(mode=autopilot_mode)
 
+    async def _resolve_closed_profit_for_stretch(self, config: dict[str, Any]) -> float:
+        """Return realized closed profit when profit stretch is configured."""
+        settings = build_capital_budget_settings(config)
+        if not (
+            settings.autopilot_active
+            and settings.profit_stretch_enabled
+            and settings.profit_stretch_ratio > 0
+            and settings.profit_stretch_max > 0
+        ):
+            return 0.0
+        try:
+            result = (
+                await model.ClosedTrades.all()
+                .annotate(total=Sum("profit"))
+                .values_list(
+                    "total",
+                    flat=True,
+                )
+            )
+            return float((result[0] if result else 0.0) or 0.0)
+        except BaseORMException as exc:
+            logging.warning("Autopilot profit stretch unavailable: %s", exc)
+            return 0.0
+
     @staticmethod
     def _build_default_runtime_state(
         config: dict[str, Any], autopilot_mode: str = "none"
     ) -> dict[str, Any]:
         """Return the default runtime state payload."""
         base_max_bots = int(config.get("max_bots", 0) or 0)
+        capital_settings = build_capital_budget_settings(config)
         return {
             "enabled": bool(config.get("autopilot", False)),
             "mode": autopilot_mode,
@@ -104,6 +135,8 @@ class Autopilot:
             "sl": None,
             "sl_timeout": 0,
             "uses_risk_overrides": False,
+            "capital_effective_max_fund": capital_settings.principal_limit,
+            "capital_stretch_quote": 0.0,
         }
 
     async def resolve_runtime_state(
@@ -119,16 +152,21 @@ class Autopilot:
             await self._persist_mode("none")
             return runtime_state
 
-        max_fund = float(config.get("autopilot_max_fund", 0) or 0)
+        capital_settings = build_capital_budget_settings(config)
+        closed_profit = await self._resolve_closed_profit_for_stretch(config)
+        max_fund, capital_stretch = calculate_effective_capital_limit(
+            capital_settings,
+            closed_profit,
+        )
         autopilot_mode = "low"
         threshold_percent = 0.0
         if max_fund <= 0:
             logging.warning(
-                "Autopilot enabled but autopilot_max_fund is missing/invalid (%s).",
-                config.get("autopilot_max_fund"),
+                "Autopilot enabled but capital_max_fund is missing/invalid (%s).",
+                capital_settings.principal_limit,
             )
             runtime_state["mode"] = autopilot_mode
-            runtime_state["green_phase_block_reason"] = "invalid_autopilot_max_fund"
+            runtime_state["green_phase_block_reason"] = "invalid_capital_max_fund"
             await self._persist_mode(autopilot_mode)
             return runtime_state
 
@@ -171,6 +209,8 @@ class Autopilot:
 
         runtime_state["mode"] = autopilot_mode
         runtime_state["threshold_percent"] = threshold_percent
+        runtime_state["capital_effective_max_fund"] = max_fund
+        runtime_state["capital_stretch_quote"] = capital_stretch
         runtime_state["green_phase_detected"] = bool(
             green_phase_state.get("green_phase_detected")
         )

@@ -4,6 +4,7 @@ import type { VNodeRef } from 'vue'
 
 import type {
     AutopilotModel,
+    CapitalModel,
     DcaAdvancedModel,
     ExchangeAdvancedModel,
     FilterModel,
@@ -15,6 +16,7 @@ import type {
 import type { ControlCenterTarget } from '../../control-center/types'
 import ControlCenterAdvancedWorkspace from './ControlCenterAdvancedWorkspace.vue'
 import ConfigAutopilotSection from '../config/ConfigAutopilotSection.vue'
+import ConfigCapitalSection from '../config/ConfigCapitalSection.vue'
 import ConfigDcaAdvancedSection from '../config/ConfigDcaAdvancedSection.vue'
 import ConfigExchangeAdvancedSection from '../config/ConfigExchangeAdvancedSection.vue'
 import ConfigFilterSection from '../config/ConfigFilterSection.vue'
@@ -32,6 +34,8 @@ defineProps<{
     advancedSections: AdvancedSection[]
     autopilot: AutopilotModel
     autopilotFormRef?: VNodeRef
+    capital: CapitalModel
+    capitalFormRef?: VNodeRef
     bindTargetElement: (
         target: ControlCenterTarget,
     ) => (element: Element | null) => void
@@ -76,6 +80,15 @@ defineProps<{
             <ConfigDcaAdvancedSection
                 :ref="dcaFormRef"
                 :dca="dca"
+                :rules="rules"
+            />
+        </template>
+
+        <template #capital>
+            <ConfigCapitalSection
+                :ref="capitalFormRef"
+                :capital="capital"
+                :card-title="null"
                 :rules="rules"
             />
         </template>

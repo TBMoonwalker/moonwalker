@@ -3,6 +3,7 @@ import type { Ref } from 'vue'
 import type { LoadedSignalConfigSection } from '../helpers/configLoad'
 import type {
     AutopilotConfigSection,
+    CapitalConfigSection,
     DcaConfigSection,
     ExchangeConfigSection,
     FilterConfigSection,
@@ -17,6 +18,7 @@ import {
 
 interface UseConfigPersistableStateOptions {
     autopilot: Ref<AutopilotConfigSection>
+    capital: Ref<CapitalConfigSection>
     dca: Ref<DcaConfigSection>
     exchange: Ref<ExchangeConfigSection>
     filter: Ref<FilterConfigSection>
@@ -32,6 +34,7 @@ const SECTION_LABELS: Record<string, string> = {
     filter: 'Filter',
     exchange: 'Exchange',
     dca: 'DCA',
+    capital: 'Capital',
     autopilot: 'Autopilot',
     monitoring: 'Monitoring',
     indicator: 'Indicator',
@@ -60,6 +63,7 @@ function buildPersistableState(
         filter: { ...options.filter.value },
         exchange: { ...options.exchange.value },
         dca: { ...options.dca.value },
+        capital: { ...options.capital.value },
         autopilot: { ...options.autopilot.value },
         monitoring: { ...options.monitoring.value },
         indicator: { ...options.indicator.value },

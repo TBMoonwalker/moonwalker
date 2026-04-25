@@ -79,6 +79,7 @@ export function useConfigEditorAssembly(
     })
     const persistableState = useConfigPersistableState({
         autopilot: pageState.autopilot,
+        capital: pageState.capital,
         dca: pageState.dca,
         exchange: pageState.exchange,
         filter: pageState.filter,
@@ -108,6 +109,7 @@ export function useConfigEditorAssembly(
                 filter: pageState.filter.value,
                 exchange: pageState.exchange.value,
                 dca: pageState.dca.value,
+                capital: pageState.capital.value,
                 autopilot: pageState.autopilot.value,
                 monitoring: pageState.monitoring.value,
                 indicator: pageState.indicator.value,
@@ -187,6 +189,7 @@ export function useConfigEditorAssembly(
         filter: pageState.filter,
         exchange: pageState.exchange,
         dca: pageState.dca,
+        capital: pageState.capital,
         autopilot: pageState.autopilot,
         monitoring: pageState.monitoring,
         indicator: pageState.indicator,

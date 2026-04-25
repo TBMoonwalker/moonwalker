@@ -7,6 +7,7 @@ from datetime import datetime
 from typing import Any, TypeGuard
 
 import helper
+from service.capital_budget import CapitalBudgetService
 from service.exchange import Exchange
 from service.exchange_types import (
     ExchangeOrderPayload,
@@ -49,6 +50,7 @@ class Orders:
 
     _sell_locks: dict[str, asyncio.Lock] = {}
     _ENTRY_SIZING_RETRY_REASONS = {
+        "capital_budget_exceeded",
         "insufficient_quote_balance",
         "invalid_required_quote",
         "invalid_price_or_amount",
@@ -56,6 +58,7 @@ class Orders:
 
     def __init__(self):
         self.utils = helper.Utils()
+        self.capital_budget = CapitalBudgetService()
         self.exchange = Exchange()
         self.monitoring = MonitoringService()
         self.trades = Trades()
@@ -391,14 +394,12 @@ class Orders:
         logging.info("Incoming buy order for %s", order["symbol"])
 
         try:
-            # 1. Create exchange order
-            order_status = await self.exchange.create_spot_market_buy(
-                dict(order), config
+            order_filled, precheck = await self._execute_budgeted_buy_order(
+                dict(order),
+                config,
             )
-            if order_status:
-                return await self._finalize_buy_order(order_status, config)
-
-            precheck = self.exchange.get_last_buy_precheck_result()
+            if order_filled:
+                return True
             retry_order = self._build_entry_size_retry_order(order, precheck)
             if retry_order is not None:
                 logging.warning(
@@ -407,18 +408,46 @@ class Orders:
                     retry_order["ordersize"],
                     (precheck or {}).get("reason", "unknown"),
                 )
-                retry_status = await self.exchange.create_spot_market_buy(
-                    retry_order,
+                retry_filled, precheck = await self._execute_budgeted_buy_order(
+                    dict(retry_order),
                     config,
                 )
-                if retry_status:
-                    return await self._finalize_buy_order(retry_status, config)
-                precheck = self.exchange.get_last_buy_precheck_result()
+                if retry_filled:
+                    return True
 
             self._log_buy_failure(order["symbol"], precheck)
             return False
         finally:
             await self.exchange.close()
+
+    async def _execute_budgeted_buy_order(
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+    ) -> tuple[bool, dict[str, Any] | None]:
+        """Run capital-budget preflight, exchange buy, and persistence."""
+        budget_lease, budget_check = await self.capital_budget.acquire_order_lease(
+            order,
+            config,
+        )
+        if not budget_check.ok:
+            precheck = budget_check.to_precheck_result()
+            logging.warning(
+                "Skipping buy for %s: capital budget check failed (%s). required=%s available=%s",
+                order.get("symbol"),
+                precheck.get("reason", "unknown"),
+                precheck.get("required_quote"),
+                precheck.get("available_quote"),
+            )
+            return False, precheck
+
+        try:
+            order_status = await self.exchange.create_spot_market_buy(order, config)
+            if not order_status:
+                return False, self.exchange.get_last_buy_precheck_result()
+            return await self._finalize_buy_order(order_status, config), None
+        finally:
+            await budget_lease.release()
 
     async def receive_manual_buy_add(
         self,
@@ -488,6 +517,12 @@ class Orders:
             order_count=order_count,
             tp_percent=float(config.get("tp", 0.0) or 0.0),
         )
+        budget_warning = await self._build_manual_buy_budget_warning(
+            normalized_symbol,
+            float(ordersize),
+            order_count,
+            config,
+        )
 
         await persist_manual_buy_add(
             normalized_symbol,
@@ -502,7 +537,37 @@ class Orders:
             "ordersize": float(ordersize),
             "so_percentage": float(so_percentage),
             "order_count": order_count,
+            **({"capital_budget_warning": budget_warning} if budget_warning else {}),
         }
+
+    async def _build_manual_buy_budget_warning(
+        self,
+        symbol: str,
+        ordersize: float,
+        order_count: int,
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Return a warning payload for ledger-only manual buys that exceed budget."""
+        budget_check = await self.capital_budget.check_order(
+            {
+                "ordersize": float(ordersize),
+                "symbol": symbol,
+                "baseorder": False,
+                "safetyorder": True,
+                "order_count": order_count,
+            },
+            config,
+        )
+        if budget_check.ok:
+            return None
+        warning = budget_check.to_precheck_result()
+        logging.warning(
+            "Manual ledger buy add for %s exceeds capital budget (%s). "
+            "Recording ledger row without exchange execution.",
+            symbol,
+            warning.get("reason", "unknown"),
+        )
+        return warning
 
     async def receive_stop_signal(self, symbol: str) -> bool:
         """Stop trading for a symbol."""
