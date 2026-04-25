@@ -5,7 +5,10 @@ import model
 import pytest
 import service.orders as orders_module
 from service.capital_budget import CapitalBudgetService
-from service.capital_budget_logic import evaluate_capital_budget
+from service.capital_budget_logic import (
+    calculate_order_budget_requirement,
+    evaluate_capital_budget,
+)
 from service.orders import Orders
 from tortoise import Tortoise
 
@@ -60,6 +63,62 @@ def test_capital_budget_stretches_only_realized_positive_profit() -> None:
     assert stretched.stretch_quote == 20.0
     assert loss_case.ok is False
     assert loss_case.effective_limit == 100.0
+
+
+def test_base_order_reserves_baseline_ladder_not_safety_stretch_cap() -> None:
+    config = {
+        "capital_max_fund": 10_000,
+        "capital_reserve_safety_orders": True,
+        "dynamic_dca": True,
+        "mstc": 5,
+        "autopilot": True,
+        "autopilot_profit_stretch_enabled": True,
+        "autopilot_profit_stretch_ratio": 1.0,
+        "autopilot_profit_stretch_max": 1_000,
+        "autopilot_safety_stretch_max_multiplier": 61.0,
+    }
+
+    check = evaluate_capital_budget(
+        config,
+        {
+            "symbol": "NIL/USDC",
+            "ordersize": 12.0,
+            "baseorder": True,
+        },
+        funds_locked=0.0,
+        open_trade_reserve=0.0,
+        pending_quote=0.0,
+        closed_profit=1_000.0,
+    )
+
+    assert check.ok is True
+    assert check.required_quote == 72.0
+
+
+def test_stretched_safety_order_consumes_only_extra_budget_above_reserve() -> None:
+    config = {
+        "capital_reserve_safety_orders": True,
+        "dynamic_dca": True,
+        "bo": 12.0,
+        "mstc": 5,
+        "autopilot": True,
+        "autopilot_profit_stretch_enabled": True,
+        "autopilot_safety_stretch_max_multiplier": 61.0,
+    }
+
+    order_quote, required_quote = calculate_order_budget_requirement(
+        config,
+        {
+            "symbol": "NIL/USDC",
+            "ordersize": 30.0,
+            "baseorder": False,
+            "safetyorder": True,
+            "order_count": 1,
+        },
+    )
+
+    assert order_quote == 30.0
+    assert required_quote == 18.0
 
 
 @pytest.mark.asyncio
