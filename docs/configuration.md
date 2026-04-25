@@ -103,7 +103,7 @@ are not exposed in the UI and must be set via the API.
 | `autopilot_profit_stretch_ratio` | `float` | Fraction of positive realized `ClosedTrades.profit` that can be added above the hard principal limit. Negative profit never reduces principal. | `0` |
 | `autopilot_profit_stretch_max` | `float` | Absolute cap for Autopilot profit stretch. `0` disables added stretch even when the ratio is positive. | `0` |
 | `autopilot_entry_stretch_max_multiplier` | `float` | Multiplier for Autopilot memory's base-order adjustment range when profit stretch is enabled. | `1` |
-| `autopilot_safety_stretch_max_multiplier` | `float` | Multiplier used when reserving future safety-order budget while profit stretch is enabled. | `1` |
+| `autopilot_safety_stretch_max_multiplier` | `float` | Maximum Autopilot safety-order sizing stretch while profit stretch is enabled. Baseline reserve math still uses the configured DCA ladder; actual larger safety orders consume extra budget at execution. | `1` |
 | `autopilot_high_mad` | `int` | Max active deals (high setting). | `5` |
 | `autopilot_high_tp` | `float` | TP percent (high setting). | `1.2` |
 | `autopilot_high_sl` | `float` | SL percent (high setting). | `2.5` |
@@ -149,7 +149,10 @@ exchange order is placed.
 When `capital_reserve_safety_orders` is enabled, Moonwalker also reserves the
 estimated remaining safety-order budget for open deals. That keeps a new base
 order from consuming capital that existing deals may still need for their DCA
-plan.
+plan. The reserve uses the baseline configured DCA ladder; Autopilot stretch
+does not multiply every hypothetical future safety order up front. If a later
+stretched safety order is larger than the baseline reserve for that slot, only
+the extra amount must fit the then-current global budget.
 
 Autopilot can optionally stretch the effective limit above the global principal
 limit using realized closed profit:

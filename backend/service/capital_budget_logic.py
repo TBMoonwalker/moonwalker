@@ -197,20 +197,13 @@ def estimate_remaining_trade_reserve(
     if remaining_orders <= 0:
         return 0.0
 
-    settings = build_capital_budget_settings(config)
-    safety_multiplier = (
-        settings.safety_stretch_max_multiplier
-        if settings.autopilot_active and settings.profit_stretch_enabled
-        else 1.0
-    )
-
     if to_bool(config.get("dynamic_dca"), default=False):
         unit_cost = (
             max(0.0, float(base_order_size))
             if base_order_size is not None
             else max(0.0, to_float(config.get("bo"), 0.0))
         )
-        return round(unit_cost * remaining_orders * safety_multiplier, 8)
+        return round(unit_cost * remaining_orders, 8)
 
     safety_order_size = max(0.0, to_float(config.get("so"), 0.0))
     if safety_order_size <= 0:
@@ -223,7 +216,7 @@ def estimate_remaining_trade_reserve(
     reserve = 0.0
     for order_index in range(max(0, int(so_count or 0)), max_safety_orders):
         reserve += safety_order_size * (volume_scale**order_index)
-    return round(reserve * safety_multiplier, 8)
+    return round(reserve, 8)
 
 
 def estimate_open_trade_reserve(
