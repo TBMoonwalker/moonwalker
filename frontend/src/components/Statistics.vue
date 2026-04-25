@@ -27,7 +27,7 @@
                 :to="{ name: 'controlCenterAutopilot' }"
                 aria-label="Open Autopilot page"
             >
-                <div class="autopilot-stat">
+                <div class="stacked-stat autopilot-stat">
                     <span class="autopilot-label">Autopilot mode</span>
                     <span
                         class="autopilot-icon"
@@ -47,7 +47,18 @@
                 <n-statistic label="Funds locked" :value="formatFixed2(funds_locked)" />
             </div>
             <div class="stat-cell">
-                <n-statistic label="Funds available" :value="formatFixed2(funds_available)" />
+                <div class="stacked-stat funds-stat">
+                    <span class="funds-label">Funds available</span>
+                    <span class="funds-value">
+                        {{ formatOptionalFixed2(funds_tradable) }}
+                    </span>
+                    <span class="stat-detail">
+                        Exchange free {{ formatOptionalFixed2(funds_available) }}
+                    </span>
+                    <span v-if="capital_available_quote !== null" class="stat-detail">
+                        Budget headroom {{ formatFixed2(Math.max(0, capital_available_quote)) }}
+                    </span>
+                </div>
             </div>
         </div>
     </n-flex>
@@ -73,7 +84,9 @@ const profit_class = ref<'green' | 'red'>('green')
 const upnl = ref(0)
 const upnl_class = ref<'green' | 'red'>('green')
 const funds_locked = ref(0)
-const funds_available = ref(0)
+const funds_available = ref<number | null>(null)
+const funds_tradable = ref<number | null>(null)
+const capital_available_quote = ref<number | null>(null)
 const autopilot_class = ref<'green' | 'red' | 'orange' | 'muted'>('muted')
 const autopilot_state = ref<'high' | 'medium' | 'low' | 'none'>('none')
 const autopilot_effective_max_bots = ref(0)
@@ -151,7 +164,17 @@ watch(statistics_data.data, (newData) => {
         profit_overall.value = toNumberOrZero(websocket_data.profit_overall)
         profit_class.value = row_classes(profit_overall.value)
         funds_locked.value = toNumberOrZero(websocket_data.funds_locked)
-        funds_available.value = toNumberOrZero(websocket_data.funds_available)
+        funds_available.value = toOptionalNumber(websocket_data.funds_available)
+        capital_available_quote.value = toOptionalNumber(
+            websocket_data.capital_available_quote,
+        )
+        funds_tradable.value =
+            toOptionalNumber(websocket_data.funds_tradable) ??
+            deriveTradableFunds(
+                funds_available.value,
+                capital_available_quote.value,
+                websocket_data.capital_budget_reason,
+            )
         autopilot_effective_max_bots.value =
             toNumberOrZero(websocket_data.autopilot_effective_max_bots)
         autopilot_green_phase_detected.value =
@@ -212,8 +235,37 @@ function toNumberOrZero(value: unknown): number {
     return Number.isFinite(parsed) ? parsed : 0
 }
 
+function toOptionalNumber(value: unknown): number | null {
+    if (value === null || value === undefined) {
+        return null
+    }
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+}
+
+function deriveTradableFunds(
+    exchangeAvailable: number | null,
+    capitalAvailable: number | null,
+    capitalReason: unknown,
+): number | null {
+    if (exchangeAvailable === null) {
+        return null
+    }
+    if (
+        capitalAvailable === null ||
+        capitalReason === 'capital_budget_unconfigured'
+    ) {
+        return Math.max(0, exchangeAvailable)
+    }
+    return Math.min(Math.max(0, exchangeAvailable), Math.max(0, capitalAvailable))
+}
+
 function formatFixed2(value: number): string {
     return value.toFixed(2)
+}
+
+function formatOptionalFixed2(value: number | null): string {
+    return value === null ? 'Unavailable' : formatFixed2(value)
 }
 
 function formatBlockReason(value: string): string {
@@ -245,6 +297,14 @@ function formatBlockReason(value: string): string {
     justify-content: center;
 }
 
+.stat-detail {
+    color: rgba(255, 255, 255, 0.72);
+    font-size: 12px;
+    line-height: 1.25;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
 :deep(.n-statistic) {
     width: 100%;
     text-align: center;
@@ -266,7 +326,7 @@ function formatBlockReason(value: string): string {
     --n-value-text-color: rgb(240, 173, 78) !important;
 }
 
-.autopilot-stat {
+.stacked-stat {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -275,6 +335,14 @@ function formatBlockReason(value: string): string {
     gap: 6px;
     height: 100%;
     width: 100%;
+}
+
+.funds-value {
+    color: var(--n-value-text-color);
+    font-size: 24px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.15;
 }
 
 .autopilot-cell {
@@ -297,7 +365,8 @@ function formatBlockReason(value: string): string {
     transform: translateY(-1px);
 }
 
-.autopilot-label {
+.autopilot-label,
+.funds-label {
     font-size: 14px;
     color: var(--n-label-text-color, rgba(255, 255, 255, 0.65));
 }
@@ -356,7 +425,8 @@ function formatBlockReason(value: string): string {
         line-height: 1.15;
     }
 
-    .autopilot-label {
+    .autopilot-label,
+    .funds-label {
         font-size: 12px;
         line-height: 1.2;
     }

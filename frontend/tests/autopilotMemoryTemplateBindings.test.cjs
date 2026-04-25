@@ -104,6 +104,13 @@ test('main dashboard Autopilot card opens the Autopilot page', () => {
     assert.doesNotMatch(statisticsSource, /router\.push\(\{ name: 'controlCenterAutopilot' \}\)/)
 })
 
+test('main dashboard funds card shows tradable funds with exchange context', () => {
+    assert.match(statisticsSource, /funds_tradable/)
+    assert.match(statisticsSource, /capital_available_quote/)
+    assert.match(statisticsSource, /Exchange free/)
+    assert.match(statisticsSource, /Budget headroom/)
+})
+
 test('full Autopilot page stays read-only and links tuning back to Advanced', () => {
     assert.match(pageSource, /Back to Control Center/)
     assert.match(pageSource, /Tune Autopilot/)

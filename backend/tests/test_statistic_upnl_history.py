@@ -338,8 +338,72 @@ async def test_get_profit_for_dashboard_uses_available_quote_override(
     data = await statistic.get_profit_for_dashboard(321.5)
 
     assert data["funds_available"] == 321.5
+    assert data["funds_tradable"] == 321.5
     assert data["autopilot_effective_max_bots"] == 5
     assert captured["available_quote"] == 321.5
+
+
+@pytest.mark.asyncio
+async def test_get_profit_for_dashboard_caps_tradable_funds_by_capital_budget(
+    monkeypatch,
+) -> None:
+    statistic = Statistic()
+
+    async def fake_profit_base() -> dict[str, object]:
+        return {
+            "upnl": 0.0,
+            "profit_overall": 0.0,
+            "funds_locked": 50.0,
+            "profit_week": {},
+            "profit_overall_timestamp": "2026-03-18 12:00:00",
+        }
+
+    async def fake_resolve_runtime_state(*_args, **_kwargs) -> dict[str, object]:
+        return {
+            "mode": "none",
+            "effective_max_bots": 0,
+            "green_phase_detected": False,
+            "green_phase_active": False,
+            "green_phase_extra_deals": 0,
+            "green_phase_strength": 0.0,
+            "green_phase_block_reason": None,
+            "green_phase_ramp_ready": False,
+        }
+
+    async def fake_capital_runtime_state(_config) -> dict[str, object]:
+        return {
+            "capital_budget_available": True,
+            "capital_budget_reason": "ok",
+            "capital_max_fund": 200.0,
+            "capital_effective_max_fund": 200.0,
+            "capital_stretch_quote": 0.0,
+            "capital_funds_locked": 50.0,
+            "capital_open_trade_reserve": 75.0,
+            "capital_pending_quote": 0.0,
+            "capital_available_quote": 75.25,
+        }
+
+    async def fake_config_instance():
+        return types.SimpleNamespace(snapshot=lambda: {"capital_max_fund": 200.0})
+
+    monkeypatch.setattr(statistic, "_get_profit_base_cached", fake_profit_base)
+    monkeypatch.setattr(
+        statistic.autopilot,
+        "resolve_runtime_state",
+        fake_resolve_runtime_state,
+    )
+    monkeypatch.setattr(
+        statistic.capital_budget,
+        "get_runtime_state",
+        fake_capital_runtime_state,
+    )
+    monkeypatch.setattr(Config, "instance", staticmethod(fake_config_instance))
+
+    data = await statistic.get_profit_for_dashboard(321.5)
+
+    assert data["funds_available"] == 321.5
+    assert data["capital_available_quote"] == 75.25
+    assert data["funds_tradable"] == 75.25
 
 
 def _async_autopilot_state(value):

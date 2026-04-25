@@ -228,6 +228,10 @@ class Statistic:
             available_quote=available_quote,
         )
         profit_data["funds_available"] = available_quote
+        profit_data["funds_tradable"] = self._derive_tradable_quote(
+            available_quote,
+            profit_data,
+        )
         return profit_data
 
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
@@ -335,6 +339,42 @@ class Statistic:
         )
         profit_data["autopilot_memory_featured_symbol"] = autopilot_state.get(
             "memory_featured_symbol"
+        )
+
+    @staticmethod
+    def _to_optional_float(value: Any) -> float | None:
+        """Return a finite float or None for unavailable values."""
+        if value is None:
+            return None
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            return None
+        return parsed if pd.notna(parsed) else None
+
+    @classmethod
+    def _derive_tradable_quote(
+        cls,
+        available_quote: float | None,
+        profit_data: dict[str, Any],
+    ) -> float | None:
+        """Return exchange-free funds constrained by the global capital budget."""
+        exchange_available = cls._to_optional_float(available_quote)
+        if exchange_available is None:
+            return None
+
+        if profit_data.get("capital_budget_reason") == "capital_budget_unconfigured":
+            return round(max(0.0, exchange_available), 8)
+
+        capital_available = cls._to_optional_float(
+            profit_data.get("capital_available_quote")
+        )
+        if capital_available is None:
+            return 0.0
+
+        return round(
+            min(max(0.0, exchange_available), max(0.0, capital_available)),
+            8,
         )
 
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
