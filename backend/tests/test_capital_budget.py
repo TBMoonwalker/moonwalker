@@ -4,6 +4,7 @@ from typing import Any
 import model
 import pytest
 import service.orders as orders_module
+from service.capital_budget import CapitalBudgetService
 from service.capital_budget_logic import evaluate_capital_budget
 from service.orders import Orders
 from tortoise import Tortoise
@@ -59,6 +60,58 @@ def test_capital_budget_stretches_only_realized_positive_profit() -> None:
     assert stretched.stretch_quote == 20.0
     assert loss_case.ok is False
     assert loss_case.effective_limit == 100.0
+
+
+@pytest.mark.asyncio
+async def test_capital_budget_lease_blocks_overlapping_buy_admission(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    service = CapitalBudgetService()
+    CapitalBudgetService._leases.clear()
+
+    try:
+        first_lease, first_check = await service.acquire_order_lease(
+            {"symbol": "BTC/USDT", "ordersize": 60.0},
+            {
+                "capital_max_fund": 100.0,
+                "capital_reserve_safety_orders": False,
+            },
+        )
+        second_lease, second_check = await service.acquire_order_lease(
+            {"symbol": "ETH/USDT", "ordersize": 50.0},
+            {
+                "capital_max_fund": 100.0,
+                "capital_reserve_safety_orders": False,
+            },
+        )
+        await second_lease.release()
+
+        assert first_check.ok is True
+        assert second_check.ok is False
+        assert second_check.reason == "capital_budget_exceeded"
+        assert second_check.pending_quote == 60.0
+
+        await first_lease.release()
+        third_lease, third_check = await service.acquire_order_lease(
+            {"symbol": "SOL/USDT", "ordersize": 50.0},
+            {
+                "capital_max_fund": 100.0,
+                "capital_reserve_safety_orders": False,
+            },
+        )
+        await third_lease.release()
+
+        assert third_check.ok is True
+        assert CapitalBudgetService._pending_reserved_quote() == 0.0
+    finally:
+        CapitalBudgetService._leases.clear()
+        await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio

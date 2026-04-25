@@ -276,3 +276,86 @@ test('buildConfigSubmitPayload normalizes ASAP symbol selections', () => {
     )
     assert.equal(parseField(payload, 'signal_strategy').value, 'ema_cross')
 })
+
+test('buildConfigSubmitPayload persists configured capital budget and stretch settings', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            capital: {
+                max_fund: 250,
+                reserve_safety_orders: false,
+                budget_buffer_pct: 0.03,
+            },
+            autopilot: {
+                enabled: true,
+                symbol_entry_sizing_enabled: true,
+                profit_stretch_enabled: true,
+                profit_stretch_ratio: 0.5,
+                profit_stretch_max: 75,
+                entry_stretch_max_multiplier: 2,
+                safety_stretch_max_multiplier: 1.5,
+                high_mad: null,
+                high_tp: null,
+                high_sl: null,
+                high_sl_timeout: null,
+                high_threshold: null,
+                medium_mad: null,
+                medium_tp: null,
+                medium_sl: null,
+                medium_sl_timeout: null,
+                medium_threshold: null,
+                green_phase_enabled: false,
+                green_phase_ramp_days: null,
+                green_phase_eval_interval_sec: null,
+                green_phase_window_minutes: null,
+                green_phase_min_profitable_close_ratio: null,
+                green_phase_speed_multiplier: null,
+                green_phase_exit_multiplier: null,
+                green_phase_max_extra_deals: null,
+                green_phase_confirm_cycles: null,
+                green_phase_release_cycles: null,
+                green_phase_max_locked_fund_percent: null,
+            },
+        }),
+    )
+
+    assert.deepEqual(parseField(payload, 'capital_max_fund'), {
+        value: 250,
+        type: 'int',
+    })
+    assert.deepEqual(parseField(payload, 'autopilot_max_fund'), {
+        value: 250,
+        type: 'int',
+    })
+    assert.deepEqual(parseField(payload, 'capital_reserve_safety_orders'), {
+        value: false,
+        type: 'bool',
+    })
+    assert.deepEqual(parseField(payload, 'capital_budget_buffer_pct'), {
+        value: 0.03,
+        type: 'float',
+    })
+    assert.deepEqual(parseField(payload, 'autopilot_symbol_entry_sizing_enabled'), {
+        value: true,
+        type: 'bool',
+    })
+    assert.deepEqual(parseField(payload, 'autopilot_profit_stretch_enabled'), {
+        value: true,
+        type: 'bool',
+    })
+    assert.deepEqual(parseField(payload, 'autopilot_profit_stretch_ratio'), {
+        value: 0.5,
+        type: 'float',
+    })
+    assert.deepEqual(parseField(payload, 'autopilot_profit_stretch_max'), {
+        value: 75,
+        type: 'float',
+    })
+    assert.deepEqual(parseField(payload, 'autopilot_entry_stretch_max_multiplier'), {
+        value: 2,
+        type: 'float',
+    })
+    assert.deepEqual(parseField(payload, 'autopilot_safety_stretch_max_multiplier'), {
+        value: 1.5,
+        type: 'float',
+    })
+})
