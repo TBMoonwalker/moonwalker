@@ -138,3 +138,36 @@ async def test_receive_buy_signal_builds_and_dispatches_manual_buy_order(
             {"dry_run": True},
         )
     ]
+
+
+@pytest.mark.asyncio
+async def test_receive_buy_signal_returns_failed_dispatch_result(monkeypatch) -> None:
+    orders = Orders()
+
+    async def fake_get_trades_for_orders(_symbol: str) -> dict[str, Any]:
+        return {
+            "symbol": "ETH/USDT",
+            "direction": "long",
+            "bot": "asap_ETH/USDT",
+            "current_price": 900.0,
+            "total_cost": 1000.0,
+            "fee": 0.0,
+            "total_amount": 1.0,
+            "safetyorders": [{"price": 950.0}],
+        }
+
+    async def fake_receive_buy_order(
+        _order: dict[str, Any], _config: dict[str, Any]
+    ) -> bool:
+        return False
+
+    monkeypatch.setattr(
+        orders.trades,
+        "get_trades_for_orders",
+        fake_get_trades_for_orders,
+    )
+    monkeypatch.setattr(orders, "receive_buy_order", fake_receive_buy_order)
+
+    result = await orders.receive_buy_signal("eth-usdt", 25.0, {"dry_run": True})
+
+    assert result is False

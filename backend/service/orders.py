@@ -620,5 +620,4 @@ class Orders:
 
         actual_pnl = self.utils.calculate_actual_pnl(trades)
         order = build_manual_buy_order_intent(symbol, ordersize, trades, actual_pnl)
-        await self.receive_buy_order(order, config)
-        return True
+        return await self.receive_buy_order(order, config)
