@@ -39,7 +39,7 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 
 DEFAULT_CONFIG_VALUES = {
     "capital_max_fund": 0.0,
-    "capital_reserve_safety_orders": True,
+    "capital_reserve_safety_orders": False,
     "capital_budget_buffer_pct": 0.0,
     "autopilot_max_fund": 0.0,
     "autopilot_profit_stretch_enabled": False,

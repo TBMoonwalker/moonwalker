@@ -92,6 +92,29 @@ def test_base_order_reserves_baseline_ladder_not_safety_stretch_cap() -> None:
     assert check.required_quote == 72.0
 
 
+def test_missing_safety_reserve_config_defaults_to_order_only_requirement() -> None:
+    check = capital_budget_logic.evaluate_capital_budget(
+        {
+            "capital_max_fund": 100.0,
+            "dynamic_dca": True,
+            "mstc": 5,
+        },
+        {
+            "symbol": "PARTI/USDC",
+            "ordersize": 12.0,
+            "baseorder": True,
+        },
+        funds_locked=0.0,
+        open_trade_reserve=0.0,
+        pending_quote=0.0,
+        closed_profit=0.0,
+    )
+
+    assert check.ok is True
+    assert check.reserve_safety_orders is False
+    assert check.required_quote == 12.0
+
+
 def test_stretched_safety_order_consumes_only_extra_budget_above_reserve() -> None:
     config = {
         "capital_reserve_safety_orders": True,

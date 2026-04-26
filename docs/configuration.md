@@ -96,7 +96,7 @@ are not exposed in the UI and must be set via the API.
 | `upnl_housekeeping_interval` | `int` | uPNL history retention in days; `0` keeps all history forever. | `0` |
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |
 | `capital_max_fund` | `float` | Global hard capital limit for all live buy paths. New buys fail closed when this is missing or `<= 0` in the runtime config. | `0` |
-| `capital_reserve_safety_orders` | `bool` | Reserve estimated future safety-order budget when admitting base orders and checking the hard limit. | `true` |
+| `capital_reserve_safety_orders` | `bool` | Reserve estimated future safety-order budget when admitting base orders and checking the hard limit. | `false` |
 | `capital_budget_buffer_pct` | `float` | Optional extra capital-budget buffer applied to buy requirements. Whole-percent UI values such as `50` and API ratio values such as `0.5` both mean 50%. | `0` |
 | `autopilot` | `bool` | Enable autopilot mode. | `false` |
 | `autopilot_symbol_entry_sizing_enabled` | `bool` | Allow fresh non-neutral Autopilot memory to override new-entry base order size per symbol. When disabled, suggested base orders remain advisory only. | `false` |
@@ -148,15 +148,15 @@ whether Autopilot is enabled or disabled, so manual buy signals, signal entries,
 and safety orders all pass through the same capital preflight before the
 exchange order is placed.
 
-When `capital_reserve_safety_orders` is enabled, Moonwalker also reserves the
-estimated remaining safety-order budget for open deals. That keeps a new base
-order from consuming capital that existing deals may still need for their DCA
-plan. When disabled, only actual locked funds and in-flight buy reservations
-reduce the capital headroom. The reserve uses the baseline configured DCA
-ladder; Autopilot stretch does not multiply every hypothetical future safety
-order up front. If a later stretched safety order is larger than the baseline
-reserve for that slot, only the extra amount must fit the then-current global
-budget.
+`capital_reserve_safety_orders` defaults to disabled. When enabled, Moonwalker
+also reserves the estimated remaining safety-order budget for open deals. That
+keeps a new base order from consuming capital that existing deals may still need
+for their DCA plan. When disabled, only actual locked funds and in-flight buy
+reservations reduce the capital headroom. The reserve uses the baseline
+configured DCA ladder; Autopilot stretch does not multiply every hypothetical
+future safety order up front. If a later stretched safety order is larger than
+the baseline reserve for that slot, only the extra amount must fit the
+then-current global budget.
 
 Autopilot can optionally stretch the effective limit above the global principal
 limit using realized closed profit:
@@ -289,6 +289,9 @@ This path is intentionally limited to static TP exits:
 - `trailing_tp` must be disabled.
 - `tp_strategy` must be disabled.
 - `tp_spike_confirm_enabled` must be disabled.
+
+The config UI warns when TP limit pre-arm is enabled while trailing TP or TP
+spike confirmation is already active.
 
 Those modes need the bot to decide at trigger time. A resting exchange order
 would bypass that decision and could fill on a wick.

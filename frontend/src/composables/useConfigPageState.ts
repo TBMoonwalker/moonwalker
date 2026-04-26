@@ -211,7 +211,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
 
     const capital = ref<CapitalConfigSection>({
         max_fund: null,
-        reserve_safety_orders: true,
+        reserve_safety_orders: false,
         budget_buffer_pct: 0,
     })
 

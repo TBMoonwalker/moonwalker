@@ -290,12 +290,14 @@ async def test_config_load_all_applies_tp_spike_defaults(tmp_path, monkeypatch) 
     assert config.get("tp_spike_confirm_ticks") == 0
     assert config.get("tp_limit_prearm_enabled") is False
     assert config.get("tp_limit_prearm_margin_percent") == 0.25
+    assert config.get("capital_reserve_safety_orders") is False
     snapshot = config.snapshot()
     assert snapshot["tp_spike_confirm_enabled"] is False
     assert snapshot["tp_spike_confirm_seconds"] == 3.0
     assert snapshot["tp_spike_confirm_ticks"] == 0
     assert snapshot["tp_limit_prearm_enabled"] is False
     assert snapshot["tp_limit_prearm_margin_percent"] == 0.25
+    assert snapshot["capital_reserve_safety_orders"] is False
 
     await Tortoise.close_connections()
 
@@ -390,9 +392,11 @@ async def test_config_snapshot_keeps_defaults_and_metadata_out_of_persisted_entr
 
     assert "tp_spike_confirm_enabled" not in config._store._entries
     assert "tp_limit_prearm_enabled" not in config._store._entries
+    assert "capital_reserve_safety_orders" not in config._store._entries
     assert "signal_plugins" not in config._store._entries
     assert config.snapshot()["tp_spike_confirm_enabled"] is False
     assert config.snapshot()["tp_limit_prearm_enabled"] is False
+    assert config.snapshot()["capital_reserve_safety_orders"] is False
     assert "asap" in config.snapshot()["signal_plugins"]
 
     await Tortoise.close_connections()

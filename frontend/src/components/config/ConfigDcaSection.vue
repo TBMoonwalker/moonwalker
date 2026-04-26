@@ -80,6 +80,14 @@
                 >
                     <n-checkbox v-model:checked="dca.tp_limit_prearm_enabled" />
                 </n-form-item>
+                <n-alert
+                    v-if="showTpLimitPrearmConflictWarning"
+                    class="tp-limit-prearm-warning"
+                    type="warning"
+                    :bordered="false"
+                >
+                    {{ tpLimitPrearmConflictWarningText }}
+                </n-alert>
                 <n-form-item
                     v-if="dca.tp_limit_prearm_enabled"
                     label="TP pre-arm margin (%)"
@@ -177,11 +185,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
 import type { DcaModel, StringSelectOption } from '../../config-editor/types'
 
-defineProps<{
+const props = defineProps<{
     dca: DcaModel
     rules: FormRules
     sellOrderTypeOptions: StringSelectOption[]
@@ -190,6 +198,37 @@ defineProps<{
 }>()
 
 const formRef = ref<FormInst | null>(null)
+const tpLimitPrearmConflictNames = computed(() => {
+    if (!props.dca.tp_limit_prearm_enabled) {
+        return []
+    }
+
+    const conflicts: string[] = []
+    const trailingTp = Number(props.dca.trailing_tp ?? 0)
+    if (Number.isFinite(trailingTp) && trailingTp > 0) {
+        conflicts.push('trailing TP')
+    }
+    if (props.dca.tp_spike_confirm_enabled) {
+        conflicts.push('TP spike confirmation')
+    }
+    return conflicts
+})
+const showTpLimitPrearmConflictWarning = computed(
+    () => tpLimitPrearmConflictNames.value.length > 0,
+)
+const tpLimitPrearmConflictWarningText = computed(() => {
+    const conflicts = tpLimitPrearmConflictNames.value
+    if (conflicts.length === 0) {
+        return ''
+    }
+    const conflictList =
+        conflicts.length === 1
+            ? conflicts[0]
+            : `${conflicts.slice(0, -1).join(', ')} and ${
+                  conflicts[conflicts.length - 1]
+              }`
+    return `TP limit pre-arm does not support ${conflictList}. Disable ${conflictList} before using pre-armed limit exits.`
+})
 
 async function validate(): Promise<boolean> {
     if (!formRef.value) {
@@ -204,3 +243,9 @@ defineExpose({
     validate,
 })
 </script>
+
+<style scoped>
+.tp-limit-prearm-warning {
+    margin-bottom: 18px;
+}
+</style>
