@@ -56,6 +56,7 @@
         <ConfigCapitalSection
             ref="capitalFormRef"
             :capital="capital"
+            :dynamic-dca-enabled="dca.enabled && dca.dynamic"
             :rules="rules"
         />
 

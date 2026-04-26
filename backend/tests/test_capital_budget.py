@@ -188,6 +188,32 @@ def test_capital_budget_buffer_accepts_ui_percent_and_api_ratio() -> None:
     assert ratio_input.required_quote == 108.0
 
 
+def test_capital_budget_buffer_is_ignored_for_static_dca() -> None:
+    result = capital_budget_logic.evaluate_capital_budget(
+        {
+            "capital_max_fund": 10_000,
+            "capital_reserve_safety_orders": True,
+            "capital_budget_buffer_pct": 50,
+            "dynamic_dca": False,
+            "so": 10,
+            "mstc": 2,
+            "os": 2,
+        },
+        {
+            "symbol": "CGPT/USDC",
+            "ordersize": 12.0,
+            "baseorder": True,
+        },
+        funds_locked=0.0,
+        open_trade_reserve=0.0,
+        pending_quote=0.0,
+        closed_profit=0.0,
+    )
+
+    assert result.required_quote == 42.0
+    assert result.buffer_pct == 0.0
+
+
 def test_open_trade_reserve_is_zero_when_safety_reserve_is_disabled() -> None:
     reserve = capital_budget_logic.estimate_open_trade_reserve(
         {

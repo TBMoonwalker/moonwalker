@@ -49,6 +49,8 @@ test(
                 ws_stale_timeout_ms: '8000',
                 ws_reconnect_debounce_ms: '7000',
                 exchange_hostname: 'api.exchange.test',
+                dca: 'true',
+                dynamic_dca: 'true',
                 capital_max_fund: '250',
                 capital_reserve_safety_orders: 'false',
                 capital_budget_buffer_pct: '0.02',
@@ -94,6 +96,21 @@ test(
         assert.equal(state.autopilot.base_order_stretch_max_multiplier, 2)
     },
 )
+
+test('buildLoadedConfigState clears dynamic safety-order buffer for static DCA', () => {
+    const state = buildLoadedConfigState(
+        {
+            dca: 'true',
+            dynamic_dca: 'false',
+            capital_budget_buffer_pct: '50',
+            timeframe: '1h',
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(state.dca.dynamic, false)
+    assert.equal(state.capital.budget_buffer_pct, 0)
+})
 
 test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () => {
     const defaults = createLoadDefaults()
