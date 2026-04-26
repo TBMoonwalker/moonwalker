@@ -151,10 +151,12 @@ exchange order is placed.
 When `capital_reserve_safety_orders` is enabled, Moonwalker also reserves the
 estimated remaining safety-order budget for open deals. That keeps a new base
 order from consuming capital that existing deals may still need for their DCA
-plan. The reserve uses the baseline configured DCA ladder; Autopilot stretch
-does not multiply every hypothetical future safety order up front. If a later
-stretched safety order is larger than the baseline reserve for that slot, only
-the extra amount must fit the then-current global budget.
+plan. When disabled, only actual locked funds and in-flight buy reservations
+reduce the capital headroom. The reserve uses the baseline configured DCA
+ladder; Autopilot stretch does not multiply every hypothetical future safety
+order up front. If a later stretched safety order is larger than the baseline
+reserve for that slot, only the extra amount must fit the then-current global
+budget.
 
 Autopilot can optionally stretch the effective limit above the global principal
 limit using realized closed profit:

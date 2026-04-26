@@ -238,6 +238,10 @@ def estimate_open_trade_reserve(
     open_trades: Iterable[dict[str, Any]],
 ) -> float:
     """Estimate remaining future safety-order budget for active open trades."""
+    settings = build_capital_budget_settings(config)
+    if not settings.reserve_safety_orders:
+        return 0.0
+
     total = 0.0
     for open_trade in open_trades:
         if float(open_trade.get("unsellable_amount") or 0.0) > 0 and open_trade.get(
