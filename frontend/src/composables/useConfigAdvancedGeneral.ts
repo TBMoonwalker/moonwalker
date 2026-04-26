@@ -65,10 +65,8 @@ export function useConfigAdvancedGeneral(
                 options.defaults.defaultAutopilotProfitStretchRatio,
             defaultAutopilotProfitStretchMax:
                 options.defaults.defaultAutopilotProfitStretchMax,
-            defaultAutopilotEntryStretchMaxMultiplier:
-                options.defaults.defaultAutopilotEntryStretchMaxMultiplier,
-            defaultAutopilotSafetyStretchMaxMultiplier:
-                options.defaults.defaultAutopilotSafetyStretchMaxMultiplier,
+            defaultAutopilotBaseOrderStretchMaxMultiplier:
+                options.defaults.defaultAutopilotBaseOrderStretchMaxMultiplier,
         }
     }
 

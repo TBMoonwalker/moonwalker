@@ -104,8 +104,7 @@ are not exposed in the UI and must be set via the API.
 | `autopilot_profit_stretch_enabled` | `bool` | Allow Autopilot to stretch the effective capital limit above `capital_max_fund` using realized closed profit. | `false` |
 | `autopilot_profit_stretch_ratio` | `float` | Fraction of positive realized `ClosedTrades.profit` that can be added above the hard principal limit. Negative profit never reduces principal. | `0` |
 | `autopilot_profit_stretch_max` | `float` | Absolute cap for Autopilot profit stretch. `0` disables added stretch even when the ratio is positive. | `0` |
-| `autopilot_entry_stretch_max_multiplier` | `float` | Multiplier for Autopilot memory's base-order adjustment range when profit stretch is enabled. | `1` |
-| `autopilot_safety_stretch_max_multiplier` | `float` | Maximum Autopilot safety-order sizing stretch while profit stretch is enabled. Baseline reserve math still uses the configured DCA ladder; actual larger safety orders consume extra budget at execution. | `1` |
+| `autopilot_base_order_stretch_max_multiplier` | `float` | Multiplier for Autopilot memory's base-order adjustment range when profit stretch is enabled. | `1` |
 | `autopilot_high_mad` | `int` | Max active deals (high setting). | `5` |
 | `autopilot_high_tp` | `float` | TP percent (high setting). | `1.2` |
 | `autopilot_high_sl` | `float` | SL percent (high setting). | `2.5` |
@@ -166,6 +165,56 @@ limit using realized closed profit:
 - `autopilot_profit_stretch_max = 0` means no stretch is added.
 - `autopilot_max_fund` is still read as a legacy alias, but new configs should
   use `capital_max_fund`.
+
+Example:
+
+| Setting | Value |
+| --- | ---: |
+| `capital_max_fund` | `1000` |
+| `autopilot` | `true` |
+| `autopilot_profit_stretch_enabled` | `true` |
+| `autopilot_profit_stretch_ratio` | `0.5` |
+| `autopilot_profit_stretch_max` | `200` |
+
+With those settings, Autopilot may add 50% of realized positive closed-trade
+profit above the global principal limit, but never more than 200.
+
+| Realized closed profit | Added stretch | Effective buy budget |
+| ---: | ---: | ---: |
+| `0` | `0` | `1000` |
+| `120` | `60` | `1060` |
+| `600` | `200` | `1200` |
+
+The last row is capped: 50% of 600 would be 300, but
+`autopilot_profit_stretch_max` limits the extra headroom to 200. This does not
+increase exchange balance and it does not lower the principal cap after a loss;
+it only lets Autopilot reinvest a bounded part of realized profit while every buy
+still passes the global capital-budget check.
+
+The base order stretch multiplier widens the range Autopilot memory may use for
+per-symbol base-order suggestions. It only matters when profit stretch is enabled.
+It affects actual new buys only when `autopilot_symbol_entry_sizing_enabled` is
+also enabled; otherwise Moonwalker still records the suggestion but uses the
+configured `bo`.
+
+Example:
+
+| Setting | Value |
+| --- | ---: |
+| `bo` | `12` |
+| `autopilot_profit_stretch_enabled` | `true` |
+| `autopilot_base_order_stretch_max_multiplier` | `2` |
+
+Autopilot's normal base-order adjustment range is `max(15% of bo, 5)`. With a
+base order of 12, that normal range is 5. The multiplier stretches that range:
+
+| Base order stretch multiplier | Suggestion range |
+| ---: | ---: |
+| `1` | `7` to `17` |
+| `2` | `2` to `22` |
+
+The final order still has to pass the global capital-budget check. Safety-order
+reserve math stays based on the configured DCA ladder, not this multiplier.
 
 ## Autopilot Green Phase
 

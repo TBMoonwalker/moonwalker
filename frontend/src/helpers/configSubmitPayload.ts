@@ -92,8 +92,7 @@ export interface AutopilotConfigSection {
     profit_stretch_enabled: boolean
     profit_stretch_ratio: number | null
     profit_stretch_max: number | null
-    entry_stretch_max_multiplier: number | null
-    safety_stretch_max_multiplier: number | null
+    base_order_stretch_max_multiplier: number | null
     high_mad: number | null
     high_tp: number | null
     high_sl: number | null
@@ -150,8 +149,7 @@ export interface ConfigSubmitPayloadDefaults {
     defaultGreenPhaseMaxLockedFundPercent: number
     defaultAutopilotProfitStretchRatio: number
     defaultAutopilotProfitStretchMax: number
-    defaultAutopilotEntryStretchMaxMultiplier: number
-    defaultAutopilotSafetyStretchMaxMultiplier: number
+    defaultAutopilotBaseOrderStretchMaxMultiplier: number
 }
 
 export interface BuildConfigSubmitPayloadOptions {
@@ -363,14 +361,9 @@ export function buildConfigSubmitPayload(
                 defaults.defaultAutopilotProfitStretchMax,
             'float',
         ),
-        autopilot_entry_stretch_max_multiplier: serializeConfigValue(
-            autopilot.entry_stretch_max_multiplier ??
-                defaults.defaultAutopilotEntryStretchMaxMultiplier,
-            'float',
-        ),
-        autopilot_safety_stretch_max_multiplier: serializeConfigValue(
-            autopilot.safety_stretch_max_multiplier ??
-                defaults.defaultAutopilotSafetyStretchMaxMultiplier,
+        autopilot_base_order_stretch_max_multiplier: serializeConfigValue(
+            autopilot.base_order_stretch_max_multiplier ??
+                defaults.defaultAutopilotBaseOrderStretchMaxMultiplier,
             'float',
         ),
         autopilot_high_mad: serializeConfigValue(
