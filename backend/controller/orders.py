@@ -68,7 +68,8 @@ async def stop_order(symbol: str) -> dict[str, Any]:
     Example:
         {"result": "stop"} or {"result": ""}
     """
-    if await orders.receive_stop_signal(symbol):
+    config = await Config.instance()
+    if await orders.receive_stop_signal(symbol, config):
         return {"result": "stop"}
     else:
         return {"result": ""}

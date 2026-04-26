@@ -73,6 +73,24 @@
                         v-model:checked="dca.limit_sell_fallback_to_market"
                     />
                 </n-form-item>
+                <n-form-item
+                    label="Pre-arm TP limit order"
+                    path="tp_limit_prearm_enabled"
+                    label-placement="left"
+                >
+                    <n-checkbox v-model:checked="dca.tp_limit_prearm_enabled" />
+                </n-form-item>
+                <n-form-item
+                    v-if="dca.tp_limit_prearm_enabled"
+                    label="TP pre-arm margin (%)"
+                    path="tp_limit_prearm_margin_percent"
+                >
+                    <n-input-number
+                        v-model:value="dca.tp_limit_prearm_margin_percent"
+                        :min="0"
+                        placeholder="0.25"
+                    />
+                </n-form-item>
             </template>
             <template v-if="showAdvancedGeneral">
                 <n-form-item

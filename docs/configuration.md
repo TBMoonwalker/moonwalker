@@ -66,6 +66,8 @@ are not exposed in the UI and must be set via the API.
 | `sell_order_type` | `string` | Sell execution type for TP/exit orders. Supported values are `market` and `limit`. | `market` |
 | `limit_sell_timeout_sec` | `int` | Timeout in seconds before an unfilled limit sell is treated as timed out. | `60` |
 | `limit_sell_fallback_to_market` | `bool` | Allow a timed-out limit sell to fall back to a market sell when guards still permit it. | `true` |
+| `tp_limit_prearm_enabled` | `bool` | For static limit TP exits, place a standing limit sell before TP is reached. | `false` |
+| `tp_limit_prearm_margin_percent` | `float` | Distance below TP where proactive limit sell arming begins. `0.25` means arm within 0.25% of TP. | `0.25` |
 | `tp_spike_confirm_enabled` | `bool` | Enable TP spike confirmation so a single wick above TP does not immediately trigger a sell. | `false` |
 | `tp_spike_confirm_seconds` | `float` | Required time the price must continue to qualify above TP before the sell is confirmed. | `3` |
 | `tp_spike_confirm_ticks` | `int` | Minimum number of qualifying ticker updates above TP required before the sell is confirmed. `0` disables the tick requirement. | `0` |
@@ -149,10 +151,12 @@ exchange order is placed.
 When `capital_reserve_safety_orders` is enabled, Moonwalker also reserves the
 estimated remaining safety-order budget for open deals. That keeps a new base
 order from consuming capital that existing deals may still need for their DCA
-plan. The reserve uses the baseline configured DCA ladder; Autopilot stretch
-does not multiply every hypothetical future safety order up front. If a later
-stretched safety order is larger than the baseline reserve for that slot, only
-the extra amount must fit the then-current global budget.
+plan. When disabled, only actual locked funds and in-flight buy reservations
+reduce the capital headroom. The reserve uses the baseline configured DCA
+ladder; Autopilot stretch does not multiply every hypothetical future safety
+order up front. If a later stretched safety order is larger than the baseline
+reserve for that slot, only the extra amount must fit the then-current global
+budget.
 
 Autopilot can optionally stretch the effective limit above the global principal
 limit using realized closed profit:
@@ -273,10 +277,30 @@ window and, optionally, for a minimum number of ticker updates.
 This helps avoid selling into wick spikes that revert before the actual sell
 order is placed.
 
+## Proactive TP Limit Arming
+
+When `sell_order_type` is `limit` and `tp_limit_prearm_enabled` is true,
+Moonwalker can place a standing limit sell at the exact TP price before the
+ticker reaches TP. The arming threshold is controlled by
+`tp_limit_prearm_margin_percent`.
+
+This path is intentionally limited to static TP exits:
+
+- `trailing_tp` must be disabled.
+- `tp_strategy` must be disabled.
+- `tp_spike_confirm_enabled` must be disabled.
+
+Those modes need the bot to decide at trigger time. A resting exchange order
+would bypass that decision and could fill on a wick.
+
+Moonwalker persists the armed order id on the open trade, reconciles fills on
+later ticker updates, cancels the order before safety/manual buys that change
+the position, and cancels/replaces it when the TP price or amount changes.
+
 ## Limit Sell Timeout And Fallback
 
-When `sell_order_type` is set to `limit`, Moonwalker places a limit sell at the
-target price and waits for up to `limit_sell_timeout_sec` seconds.
+When `sell_order_type` is set to `limit`, Moonwalker places a limit sell and
+waits for up to `limit_sell_timeout_sec` seconds.
 
 If the order is not filled in time and `limit_sell_fallback_to_market` is
 enabled, the bot may fall back to a market sell. That fallback is guarded:

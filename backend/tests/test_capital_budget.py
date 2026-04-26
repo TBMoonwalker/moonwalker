@@ -3,19 +3,15 @@ from typing import Any
 
 import model
 import pytest
+import service.capital_budget_logic as capital_budget_logic
 import service.orders as orders_module
 from service.capital_budget import CapitalBudgetService
-from service.capital_budget_logic import (
-    calculate_order_budget_requirement,
-    evaluate_capital_budget,
-    normalize_buffer_pct,
-)
 from service.orders import Orders
 from tortoise import Tortoise
 
 
 def test_capital_budget_uses_legacy_autopilot_max_fund_as_alias() -> None:
-    check = evaluate_capital_budget(
+    check = capital_budget_logic.evaluate_capital_budget(
         {
             "autopilot_max_fund": 100,
             "capital_reserve_safety_orders": False,
@@ -42,7 +38,7 @@ def test_capital_budget_stretches_only_realized_positive_profit() -> None:
         "autopilot_profit_stretch_max": 20,
     }
 
-    stretched = evaluate_capital_budget(
+    stretched = capital_budget_logic.evaluate_capital_budget(
         config,
         {"symbol": "BTC/USDT", "ordersize": 15.0},
         funds_locked=100.0,
@@ -50,7 +46,7 @@ def test_capital_budget_stretches_only_realized_positive_profit() -> None:
         pending_quote=0.0,
         closed_profit=50.0,
     )
-    loss_case = evaluate_capital_budget(
+    loss_case = capital_budget_logic.evaluate_capital_budget(
         config,
         {"symbol": "BTC/USDT", "ordersize": 1.0},
         funds_locked=100.0,
@@ -79,7 +75,7 @@ def test_base_order_reserves_baseline_ladder_not_safety_stretch_cap() -> None:
         "autopilot_safety_stretch_max_multiplier": 61.0,
     }
 
-    check = evaluate_capital_budget(
+    check = capital_budget_logic.evaluate_capital_budget(
         config,
         {
             "symbol": "NIL/USDC",
@@ -107,15 +103,17 @@ def test_stretched_safety_order_consumes_only_extra_budget_above_reserve() -> No
         "autopilot_safety_stretch_max_multiplier": 61.0,
     }
 
-    order_quote, required_quote = calculate_order_budget_requirement(
-        config,
-        {
-            "symbol": "NIL/USDC",
-            "ordersize": 30.0,
-            "baseorder": False,
-            "safetyorder": True,
-            "order_count": 1,
-        },
+    order_quote, required_quote = (
+        capital_budget_logic.calculate_order_budget_requirement(
+            config,
+            {
+                "symbol": "NIL/USDC",
+                "ordersize": 30.0,
+                "baseorder": False,
+                "safetyorder": True,
+                "order_count": 1,
+            },
+        )
     )
 
     assert order_quote == 30.0
@@ -123,11 +121,11 @@ def test_stretched_safety_order_consumes_only_extra_budget_above_reserve() -> No
 
 
 def test_capital_budget_buffer_accepts_ui_percent_and_api_ratio() -> None:
-    assert normalize_buffer_pct(50) == 0.5
-    assert normalize_buffer_pct("0.5") == 0.5
-    assert normalize_buffer_pct("2") == 0.02
+    assert capital_budget_logic.normalize_buffer_pct(50) == 0.5
+    assert capital_budget_logic.normalize_buffer_pct("0.5") == 0.5
+    assert capital_budget_logic.normalize_buffer_pct("2") == 0.02
 
-    percent_input = evaluate_capital_budget(
+    percent_input = capital_budget_logic.evaluate_capital_budget(
         {
             "capital_max_fund": 10_000,
             "capital_reserve_safety_orders": True,
@@ -146,7 +144,7 @@ def test_capital_budget_buffer_accepts_ui_percent_and_api_ratio() -> None:
         closed_profit=0.0,
     )
 
-    ratio_input = evaluate_capital_budget(
+    ratio_input = capital_budget_logic.evaluate_capital_budget(
         {
             "capital_max_fund": 10_000,
             "capital_reserve_safety_orders": True,
@@ -167,6 +165,92 @@ def test_capital_budget_buffer_accepts_ui_percent_and_api_ratio() -> None:
 
     assert percent_input.required_quote == 108.0
     assert ratio_input.required_quote == 108.0
+
+
+def test_open_trade_reserve_is_zero_when_safety_reserve_is_disabled() -> None:
+    reserve = capital_budget_logic.estimate_open_trade_reserve(
+        {
+            "capital_reserve_safety_orders": False,
+            "dynamic_dca": False,
+            "so": 1200.0,
+            "mstc": 5,
+            "os": 2.0,
+        },
+        [
+            {
+                "symbol": "PARTI/USDC",
+                "so_count": 0,
+                "cost": 12.0,
+            }
+        ],
+    )
+
+    assert reserve == 0.0
+
+
+@pytest.mark.asyncio
+async def test_runtime_state_does_not_subtract_reserve_when_disabled(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    try:
+        await model.OpenTrades.create(symbol="PARTI/USDC", cost=12.0, so_count=0)
+        service = CapitalBudgetService()
+
+        state = await service.get_runtime_state(
+            {
+                "capital_max_fund": 2000.0,
+                "capital_reserve_safety_orders": False,
+                "dynamic_dca": False,
+                "so": 1200.0,
+                "mstc": 5,
+                "os": 2.0,
+            }
+        )
+
+        assert state["capital_budget_available"] is True
+        assert state["capital_funds_locked"] == 12.0
+        assert state["capital_open_trade_reserve"] == 0.0
+        assert state["capital_available_quote"] == 1988.0
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_runtime_state_reserves_baseline_dca_ladder_when_enabled(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    try:
+        await model.OpenTrades.create(symbol="PARTI/USDC", cost=12.0, so_count=0)
+        service = CapitalBudgetService()
+
+        state = await service.get_runtime_state(
+            {
+                "capital_max_fund": 2000.0,
+                "capital_reserve_safety_orders": True,
+                "dynamic_dca": True,
+                "bo": 12.0,
+                "mstc": 5,
+            }
+        )
+
+        assert state["capital_budget_available"] is True
+        assert state["capital_funds_locked"] == 12.0
+        assert state["capital_open_trade_reserve"] == 60.0
+        assert state["capital_available_quote"] == 1928.0
+    finally:
+        await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio

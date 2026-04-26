@@ -16,6 +16,7 @@ class ExchangeOrderPayload(TypedDict, total=False):
     actual_pnl: float
     ordersize: float
     price: float | str
+    limit_price: float | str
     current_price: float | str
     cost: float
     timestamp: int

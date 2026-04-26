@@ -742,6 +742,75 @@ class Exchange:
             ),
         )
 
+    async def place_spot_limit_sell(
+        self, order: dict[str, Any], config: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Place a limit sell without waiting for fill reconciliation."""
+        return await self._limit_order_manager.create_spot_limit_sell(
+            order=order,
+            config=config,
+            context=LimitSellPlacementContext(
+                ensure_exchange=self.__ensure_exchange,
+                ensure_markets_loaded=self.__ensure_markets_loaded,
+                resolve_symbol=self.__resolve_symbol_with_refresh,
+                resolve_sell_amount=self.__resolve_sell_amount,
+                is_notional_below_minimum=self.__build_notional_check(
+                    is_market_order=False
+                ),
+                get_price_for_symbol=self.__get_price_for_symbol,
+                handle_limit_sell_fill=lambda sell_order, _symbol, _cfg, _original: (
+                    self.__return_limit_sell_order(sell_order)
+                ),
+            ),
+        )
+
+    async def __return_limit_sell_order(
+        self, sell_order: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Return a just-placed limit sell for external lifecycle ownership."""
+        return sell_order
+
+    async def fetch_spot_order(
+        self,
+        symbol: str,
+        order_id: str,
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Fetch one exchange order by symbol and id."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        exchange = self.exchange
+        if exchange is None:
+            return None
+        resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
+        if resolved_symbol is None:
+            return None
+        try:
+            return await exchange.fetch_order(order_id, resolved_symbol)
+        except (ccxt.BaseError, RuntimeError, TypeError, ValueError) as exc:
+            logging.warning(
+                "Fetching order %s for %s failed: %s",
+                order_id,
+                symbol,
+                exc,
+            )
+            return None
+
+    async def cancel_spot_order(
+        self,
+        symbol: str,
+        order_id: str,
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Cancel one exchange order and return its latest status if available."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
+        if resolved_symbol is None:
+            return None
+        await self._limit_sell_manager.cancel_order_safe(resolved_symbol, order_id)
+        return await self.fetch_spot_order(resolved_symbol, order_id, config)
+
     async def __can_fallback_to_market_sell(
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> bool:
@@ -801,6 +870,17 @@ class Exchange:
             order_status,
             total_cost=float(order["total_cost"]),
             actual_pnl=order["actual_pnl"],
+        )
+
+    async def build_spot_sell_order_status(
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Build normalized sell status for a pre-existing exchange sell order."""
+        return await self.__build_sell_order_status(
+            order,
+            order_check_range_seconds=self.__get_order_check_range_seconds(config),
         )
 
     async def create_spot_limit_sell(

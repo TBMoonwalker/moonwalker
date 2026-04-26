@@ -65,6 +65,8 @@ def test_dca_runtime_config_view_applies_tp_confirmation_defaults() -> None:
     assert config.tp_spike_confirm_enabled is False
     assert config.tp_spike_confirm_seconds == 3.0
     assert config.tp_spike_confirm_ticks == 0
+    assert config.tp_limit_prearm_enabled is False
+    assert config.tp_limit_prearm_margin_percent == 0.25
     assert config.dca_strategy is None
     assert config.tp_strategy is None
     assert config.dca_enabled is False
@@ -93,6 +95,8 @@ def test_dca_runtime_config_view_normalizes_dynamic_dca_fields() -> None:
             "tp_spike_confirm_enabled": True,
             "tp_spike_confirm_seconds": "4.5",
             "tp_spike_confirm_ticks": "2",
+            "tp_limit_prearm_enabled": True,
+            "tp_limit_prearm_margin_percent": "0.75",
             "dca_strategy": "  ema_swing  ",
             "tp_strategy": "  ema_down  ",
             "dca": True,
@@ -119,6 +123,8 @@ def test_dca_runtime_config_view_normalizes_dynamic_dca_fields() -> None:
     assert config.tp_spike_confirm_enabled is True
     assert config.tp_spike_confirm_seconds == 4.5
     assert config.tp_spike_confirm_ticks == 2
+    assert config.tp_limit_prearm_enabled is True
+    assert config.tp_limit_prearm_margin_percent == 0.75
     assert config.dca_strategy == "ema_swing"
     assert config.tp_strategy == "ema_down"
     assert config.dca_enabled is True

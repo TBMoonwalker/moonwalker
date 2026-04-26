@@ -132,9 +132,15 @@ class ExchangeLimitOrderManager:
     ) -> str:
         """Resolve the limit price from payload or live ticker."""
         exchange = self._get_exchange()
+        explicit_limit_price = order.get("limit_price")
         current_price = order.get("current_price")
         if exchange is None:
             raise ValueError("Exchange client is not available")
+        if explicit_limit_price and float(explicit_limit_price) > 0:
+            return exchange.price_to_precision(
+                resolved_symbol,
+                float(explicit_limit_price),
+            )
         if current_price and float(current_price) > 0:
             return exchange.price_to_precision(resolved_symbol, float(current_price))
 

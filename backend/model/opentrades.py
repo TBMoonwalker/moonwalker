@@ -27,6 +27,10 @@ class OpenTrades(Model):
     unsellable_estimated_notional = fields.FloatField(null=True)
     unsellable_since = fields.TextField(null=True)
     unsellable_notice_sent = fields.BooleanField(default=False)
+    tp_limit_order_id = fields.CharField(max_length=128, null=True)
+    tp_limit_order_price = fields.FloatField(null=True)
+    tp_limit_order_amount = fields.FloatField(null=True)
+    tp_limit_order_armed_at = fields.TextField(null=True)
 
     def __dict__(self):
         return (
@@ -42,5 +46,9 @@ class OpenTrades(Model):
             f"'unsellable_min_notional': {self.unsellable_min_notional}, "
             f"'unsellable_estimated_notional': {self.unsellable_estimated_notional}, "
             f"'unsellable_since': {self.unsellable_since}, "
-            f"'unsellable_notice_sent': {self.unsellable_notice_sent}"
+            f"'unsellable_notice_sent': {self.unsellable_notice_sent}, "
+            f"'tp_limit_order_id': {self.tp_limit_order_id}, "
+            f"'tp_limit_order_price': {self.tp_limit_order_price}, "
+            f"'tp_limit_order_amount': {self.tp_limit_order_amount}, "
+            f"'tp_limit_order_armed_at': {self.tp_limit_order_armed_at}"
         )

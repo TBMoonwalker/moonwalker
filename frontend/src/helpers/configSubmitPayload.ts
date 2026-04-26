@@ -65,6 +65,8 @@ export interface DcaConfigSection {
     sell_order_type: string | null
     limit_sell_timeout_sec: number | null
     limit_sell_fallback_to_market: boolean
+    tp_limit_prearm_enabled: boolean
+    tp_limit_prearm_margin_percent: number | null
     tp_spike_confirm_enabled: boolean
     tp_spike_confirm_seconds: number | null
     tp_spike_confirm_ticks: number | null
@@ -290,6 +292,14 @@ export function buildConfigSubmitPayload(
         limit_sell_fallback_to_market: serializeConfigValue(
             dca.limit_sell_fallback_to_market ?? true,
             'bool',
+        ),
+        tp_limit_prearm_enabled: serializeConfigValue(
+            dca.tp_limit_prearm_enabled ?? false,
+            'bool',
+        ),
+        tp_limit_prearm_margin_percent: serializeConfigValue(
+            dca.tp_limit_prearm_margin_percent ?? 0.25,
+            'float',
         ),
         tp_spike_confirm_enabled: serializeConfigValue(
             dca.tp_spike_confirm_enabled ?? false,

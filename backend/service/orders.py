@@ -170,6 +170,340 @@ class Orders:
             cls._sell_locks[symbol] = lock
         return lock
 
+    @staticmethod
+    def _is_exchange_order_filled(status: dict[str, Any]) -> bool:
+        """Return whether an exchange order status represents a completed fill."""
+        order_status = str(status.get("status") or "").lower()
+        filled = float(status.get("filled") or 0.0)
+        amount = float(status.get("amount") or 0.0)
+        return order_status in {"closed", "filled"} or (amount > 0 and filled >= amount)
+
+    @staticmethod
+    def _is_exchange_order_inactive(status: dict[str, Any]) -> bool:
+        """Return whether an exchange order is safely no longer open."""
+        order_status = str(status.get("status") or "").lower()
+        return order_status in {"canceled", "cancelled", "rejected", "expired"}
+
+    @staticmethod
+    def _exchange_order_partial_fill(status: dict[str, Any]) -> tuple[float, float]:
+        """Return filled amount and average price for a partial exchange order."""
+        filled_amount = float(status.get("filled") or 0.0)
+        if filled_amount <= 0:
+            return 0.0, 0.0
+        average_price = float(status.get("average") or status.get("price") or 0.0)
+        if average_price <= 0 and float(status.get("cost") or 0.0) > 0:
+            average_price = float(status["cost"]) / filled_amount
+        return filled_amount, average_price
+
+    async def _persist_tp_limit_partial_fill(
+        self,
+        symbol: str,
+        exchange_status: dict[str, Any],
+    ) -> None:
+        """Persist any partial fill from a canceled proactive TP limit order."""
+        filled_amount, average_price = self._exchange_order_partial_fill(
+            exchange_status
+        )
+        if filled_amount <= 0:
+            return
+        proceeds = float(exchange_status.get("cost") or filled_amount * average_price)
+        timestamp = exchange_status.get("timestamp")
+        await self.trades.add_partial_sell_execution(
+            symbol,
+            filled_amount,
+            proceeds,
+            [
+                {
+                    "symbol": str(exchange_status.get("symbol") or symbol),
+                    "side": str(exchange_status.get("side") or "sell"),
+                    "role": "partial_sell",
+                    "timestamp": str(int(timestamp)) if timestamp is not None else "",
+                    "price": average_price,
+                    "amount": filled_amount,
+                    "ordersize": proceeds,
+                    "fee": 0.0,
+                    "order_id": (
+                        str(exchange_status.get("id"))
+                        if exchange_status.get("id") is not None
+                        else None
+                    ),
+                    "order_type": "limit",
+                }
+            ],
+        )
+
+    def _build_tp_limit_sell_payload(
+        self,
+        trades: dict[str, Any],
+        exchange_status: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Build a sell payload for a filled proactive TP limit order."""
+        fallback_price = float(
+            exchange_status.get("average")
+            or exchange_status.get("price")
+            or trades.get("tp_limit_order_price")
+            or trades.get("tp_price")
+            or trades.get("current_price")
+            or 0.0
+        )
+        amount = float(
+            exchange_status.get("filled")
+            or exchange_status.get("amount")
+            or trades.get("tp_limit_order_amount")
+            or trades.get("total_amount")
+            or 0.0
+        )
+        cost = float(exchange_status.get("cost") or amount * fallback_price)
+        timestamp = int(
+            exchange_status.get("timestamp") or datetime.now().timestamp() * 1000
+        )
+        actual_pnl = self.utils.calculate_actual_pnl(trades, fallback_price)
+        return {
+            "id": str(exchange_status.get("id") or trades["tp_limit_order_id"]),
+            "symbol": str(exchange_status.get("symbol") or trades["symbol"]),
+            "side": str(exchange_status.get("side") or "sell"),
+            "ordertype": str(exchange_status.get("type") or "limit"),
+            "amount": amount,
+            "total_amount": amount,
+            "price": fallback_price,
+            "cost": cost,
+            "timestamp": timestamp,
+            "fee": exchange_status.get("fee") or 0.0,
+            "total_cost": float(trades.get("total_cost") or 0.0),
+            "actual_pnl": actual_pnl,
+        }
+
+    async def _finalize_completed_sell(
+        self,
+        order_status: SoldCheckStatus,
+        config: dict[str, Any],
+    ) -> None:
+        """Persist a completed sell status and emit monitoring."""
+        close_context = await self.__calculate_closed_trade_stats(order_status)
+        await persist_closed_trade(order_status["symbol"], close_context["payload"])
+        await self.trades._clear_order_cache()
+        await self.monitoring.notify_trade(
+            "trade.sell",
+            close_context["monitor_payload"],
+            config,
+        )
+
+    async def _reconcile_tp_limit_order_locked(
+        self,
+        trades: dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Reconcile a persisted proactive TP limit order while holding sell lock."""
+        order_id = str(trades.get("tp_limit_order_id") or "").strip()
+        symbol = str(trades.get("symbol") or "").strip()
+        if not order_id or not symbol:
+            return False
+
+        try:
+            exchange_status = await self.exchange.fetch_spot_order(
+                symbol,
+                order_id,
+                config,
+            )
+            if not exchange_status:
+                return False
+            if self._is_exchange_order_filled(exchange_status):
+                payload = self._build_tp_limit_sell_payload(trades, exchange_status)
+                order_status = await self.exchange.build_spot_sell_order_status(
+                    payload,
+                    config,
+                )
+                if not order_status:
+                    logging.error(
+                        "Filled proactive TP limit order %s for %s could not be "
+                        "normalized. Keeping metadata for retry.",
+                        order_id,
+                        symbol,
+                    )
+                    return False
+                if not self._is_sold_check_status(order_status):
+                    logging.error(
+                        "Filled proactive TP limit order %s for %s returned "
+                        "unsupported status: %s",
+                        order_id,
+                        symbol,
+                        order_status,
+                    )
+                    return False
+                await self._finalize_completed_sell(order_status, config)
+                logging.info(
+                    "Closed %s from proactive TP limit order %s.",
+                    symbol,
+                    order_id,
+                )
+                return True
+            if self._is_exchange_order_inactive(exchange_status):
+                await self._persist_tp_limit_partial_fill(symbol, exchange_status)
+                await self.trades.clear_tp_limit_order(symbol)
+                logging.info(
+                    "Cleared inactive proactive TP limit order %s for %s.",
+                    order_id,
+                    symbol,
+                )
+            return False
+        finally:
+            await self.exchange.close()
+
+    async def reconcile_tp_limit_order(
+        self,
+        trades: dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Close the trade if its proactive TP limit order filled."""
+        symbol = str(trades.get("symbol") or "")
+        if not trades.get("tp_limit_order_id") or not symbol:
+            return False
+        sell_lock = self._get_sell_lock(symbol)
+        async with sell_lock:
+            return await self._reconcile_tp_limit_order_locked(trades, config)
+
+    async def _cancel_tp_limit_order_locked(
+        self,
+        symbol: str,
+        config: dict[str, Any],
+    ) -> bool:
+        """Cancel an armed proactive TP limit order while holding sell lock."""
+        open_trade_rows = await self.trades.get_open_trades_by_symbol(symbol)
+        open_trade = open_trade_rows[0] if open_trade_rows else None
+        order_id = str((open_trade or {}).get("tp_limit_order_id") or "").strip()
+        if not order_id:
+            return True
+
+        trade_data = await self.trades.get_trades_for_orders(symbol)
+        if trade_data and await self._reconcile_tp_limit_order_locked(
+            trade_data, config
+        ):
+            return False
+
+        open_trade_rows = await self.trades.get_open_trades_by_symbol(symbol)
+        open_trade = open_trade_rows[0] if open_trade_rows else None
+        order_id = str((open_trade or {}).get("tp_limit_order_id") or "").strip()
+        if not order_id:
+            return True
+
+        try:
+            exchange_status = await self.exchange.cancel_spot_order(
+                symbol,
+                order_id,
+                config,
+            )
+            if exchange_status and self._is_exchange_order_filled(exchange_status):
+                if trade_data:
+                    payload = self._build_tp_limit_sell_payload(
+                        trade_data,
+                        exchange_status,
+                    )
+                    order_status = await self.exchange.build_spot_sell_order_status(
+                        payload,
+                        config,
+                    )
+                    if order_status and self._is_sold_check_status(order_status):
+                        await self._finalize_completed_sell(order_status, config)
+                return False
+            if exchange_status is None:
+                logging.warning(
+                    "Could not confirm proactive TP limit order %s for %s after "
+                    "cancel request. Keeping metadata for retry.",
+                    order_id,
+                    symbol,
+                )
+                return False
+
+            if self._is_exchange_order_inactive(exchange_status):
+                await self._persist_tp_limit_partial_fill(symbol, exchange_status)
+                await self.trades.clear_tp_limit_order(symbol)
+                logging.info(
+                    "Canceled proactive TP limit order %s for %s.",
+                    order_id,
+                    symbol,
+                )
+                return True
+
+            logging.warning(
+                "Could not confirm proactive TP limit order %s for %s was canceled. "
+                "Keeping the trade unchanged.",
+                order_id,
+                symbol,
+            )
+            return False
+        finally:
+            await self.exchange.close()
+
+    async def cancel_tp_limit_order(
+        self,
+        symbol: str,
+        config: dict[str, Any],
+    ) -> bool:
+        """Cancel a persisted proactive TP limit order if one exists."""
+        sell_lock = self._get_sell_lock(symbol)
+        async with sell_lock:
+            return await self._cancel_tp_limit_order_locked(symbol, config)
+
+    async def arm_tp_limit_order(
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Place and persist a proactive TP limit sell order."""
+        symbol = str(order["symbol"])
+        sell_lock = self._get_sell_lock(symbol)
+        async with sell_lock:
+            try:
+                order_status = await self.exchange.place_spot_limit_sell(order, config)
+                if not order_status or order_status.get("requires_market_fallback"):
+                    logging.info(
+                        "Proactive TP limit order for %s was not armed: %s",
+                        symbol,
+                        order_status,
+                    )
+                    return False
+
+                order_id = str(order_status.get("id") or "").strip()
+                if not order_id:
+                    logging.error(
+                        "Proactive TP limit order for %s returned no order id.",
+                        symbol,
+                    )
+                    return False
+
+                price = float(
+                    order_status.get("price")
+                    or order_status.get("limit_price")
+                    or order.get("limit_price")
+                    or 0.0
+                )
+                amount = float(
+                    order_status.get("total_amount")
+                    or order_status.get("amount")
+                    or order.get("total_amount")
+                    or 0.0
+                )
+                persisted = await self.trades.set_tp_limit_order(
+                    symbol,
+                    order_id=order_id,
+                    price=price,
+                    amount=amount,
+                )
+                if not persisted:
+                    await self.exchange.cancel_spot_order(symbol, order_id, config)
+                    return False
+
+                logging.info(
+                    "Armed proactive TP limit order for %s: id=%s amount=%s price=%s.",
+                    symbol,
+                    order_id,
+                    amount,
+                    price,
+                )
+                return True
+            finally:
+                await self.exchange.close()
+
     async def receive_sell_order(
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> None:
@@ -185,6 +519,19 @@ class Orders:
 
         async with sell_lock:
             try:
+                if not bool(order.get("skip_tp_limit_cancel", False)):
+                    canceled = await self._cancel_tp_limit_order_locked(
+                        order["symbol"],
+                        config,
+                    )
+                    if not canceled:
+                        logging.warning(
+                            "Skipping sell for %s because an armed proactive TP "
+                            "limit order could not be canceled first.",
+                            order["symbol"],
+                        )
+                        return
+
                 order["total_amount"] = await self.trades.get_token_amount_from_trades(
                     order["symbol"]
                 )
@@ -212,13 +559,7 @@ class Orders:
                     )
                     return
 
-                close_context = await self.__calculate_closed_trade_stats(order_status)
-                await persist_closed_trade(order["symbol"], close_context["payload"])
-                await self.monitoring.notify_trade(
-                    "trade.sell",
-                    close_context["monitor_payload"],
-                    config,
-                )
+                await self._finalize_completed_sell(order_status, config)
             finally:
                 await self.exchange.close()
 
@@ -394,6 +735,16 @@ class Orders:
         logging.info("Incoming buy order for %s", order["symbol"])
 
         try:
+            if bool(order.get("safetyorder")) and not bool(order.get("baseorder")):
+                canceled = await self.cancel_tp_limit_order(order["symbol"], config)
+                if not canceled:
+                    logging.warning(
+                        "Skipping safety order for %s because an armed proactive "
+                        "TP limit order could not be canceled first.",
+                        order["symbol"],
+                    )
+                    return False
+
             order_filled, precheck = await self._execute_budgeted_buy_order(
                 dict(order),
                 config,
@@ -524,11 +875,19 @@ class Orders:
             config,
         )
 
+        canceled = await self.cancel_tp_limit_order(normalized_symbol, config)
+        if not canceled:
+            raise ValueError(
+                "Cannot add manual buy while the proactive TP limit order is filled "
+                "or could not be canceled."
+            )
+
         await persist_manual_buy_add(
             normalized_symbol,
             trade_payload,
             open_trade_payload,
         )
+        await self.trades._clear_order_cache()
         return {
             "symbol": normalized_symbol,
             "timestamp": request.timestamp_ms,
@@ -569,12 +928,20 @@ class Orders:
         )
         return warning
 
-    async def receive_stop_signal(self, symbol: str) -> bool:
+    async def receive_stop_signal(
+        self,
+        symbol: str,
+        config: dict[str, Any] | None = None,
+    ) -> bool:
         """Stop trading for a symbol."""
         logging.info("Incoming stop order")
         symbol = normalize_order_symbol(symbol)
         try:
+            canceled = await self.cancel_tp_limit_order(symbol, config or {})
+            if not canceled:
+                return False
             await persist_stopped_trade(symbol)
+            await self.trades._clear_order_cache()
             return True
         except (
             ConfigurationError,

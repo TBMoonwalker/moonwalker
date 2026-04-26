@@ -194,6 +194,8 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         sell_order_type: 'market',
         limit_sell_timeout_sec: 60,
         limit_sell_fallback_to_market: true,
+        tp_limit_prearm_enabled: false,
+        tp_limit_prearm_margin_percent: 0.25,
         tp_spike_confirm_enabled: false,
         tp_spike_confirm_seconds: options.defaults.defaultTpSpikeConfirmSeconds,
         tp_spike_confirm_ticks: options.defaults.defaultTpSpikeConfirmTicks,

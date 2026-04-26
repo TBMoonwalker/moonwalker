@@ -216,6 +216,10 @@ export function buildLoadedConfigState(
                 toNumberOrNull(response.limit_sell_timeout_sec) ?? 60,
             limit_sell_fallback_to_market:
                 parseBooleanString(response.limit_sell_fallback_to_market) ?? true,
+            tp_limit_prearm_enabled:
+                parseBooleanString(response.tp_limit_prearm_enabled) ?? false,
+            tp_limit_prearm_margin_percent:
+                toNumberOrNull(response.tp_limit_prearm_margin_percent) ?? 0.25,
             tp_spike_confirm_enabled:
                 parseBooleanString(response.tp_spike_confirm_enabled) ?? false,
             tp_spike_confirm_seconds:
