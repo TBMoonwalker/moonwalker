@@ -553,6 +553,49 @@ def test_live_activation_endpoint_blocks_when_setup_is_incomplete(monkeypatch) -
     assert service.last_single is None
 
 
+def test_live_activation_endpoint_blocks_missing_global_max_fund(monkeypatch) -> None:
+    """Dedicated live activation must require a positive global max fund."""
+    service = _DummyConfigService()
+    service._cache.update(
+        {
+            "dry_run": True,
+            "timezone": "Europe/Vienna",
+            "signal": "asap",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "key": "api-key",
+            "secret": "api-secret",
+            "currency": "USDT",
+            "max_bots": 2,
+            "bo": 20,
+            "tp": 1.5,
+            "capital_max_fund": 0,
+            "history_lookback_time": "180d",
+            "symbol_list": "BTC/USDT",
+        }
+    )
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.activate_live_trading])
+    with TestClient(app=app) as client:
+        response = client.post("/config/live/activate", json={"confirm": True})
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["error"] == "Live activation blocked until setup is complete."
+    assert {
+        "key": "capital_max_fund",
+        "message": "Set a positive global max fund.",
+    } in payload["blockers"]
+    assert service.last_single is None
+
+
 def test_live_activation_endpoint_switches_dry_run_off(monkeypatch) -> None:
     """Dedicated live activation should persist dry_run=false when ready."""
     service = _DummyConfigService()
@@ -569,6 +612,7 @@ def test_live_activation_endpoint_switches_dry_run_off(monkeypatch) -> None:
             "max_bots": 2,
             "bo": 20,
             "tp": 1.5,
+            "capital_max_fund": 250,
             "history_lookback_time": "180d",
             "symbol_list": "BTC/USDT",
         }
@@ -614,6 +658,7 @@ def test_config_route_handlers_expose_freshness_and_live_activation(
             "max_bots": 2,
             "bo": 20,
             "tp": 1.5,
+            "capital_max_fund": 250,
             "history_lookback_time": "180d",
             "symbol_list": "BTC/USDT",
         }

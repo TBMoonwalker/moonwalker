@@ -1,6 +1,7 @@
 """Configuration API endpoints."""
 
 import json
+import math
 from typing import Any
 
 import helper
@@ -52,6 +53,17 @@ def _has_required_value(value: Any) -> bool:
     return True
 
 
+def _has_positive_number(value: Any) -> bool:
+    """Return whether the config value is a finite positive number."""
+    if value is None or isinstance(value, bool):
+        return False
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return False
+    return math.isfinite(numeric_value) and numeric_value > 0
+
+
 def _parse_signal_settings(raw_value: Any) -> dict[str, Any]:
     """Return normalized signal settings payload from string or object input."""
     if isinstance(raw_value, dict):
@@ -94,6 +106,18 @@ def _find_live_activation_blockers(
     for key, message in always_required_keys:
         if not _has_required_value(config_snapshot.get(key)):
             blockers.append({"key": key, "message": message})
+
+    capital_limit = config_snapshot.get(
+        "capital_max_fund",
+        config_snapshot.get("autopilot_max_fund"),
+    )
+    if not _has_positive_number(capital_limit):
+        blockers.append(
+            {
+                "key": "capital_max_fund",
+                "message": "Set a positive global max fund.",
+            }
+        )
 
     dca_enabled = bool(config_snapshot.get("dca"))
     if dca_enabled:

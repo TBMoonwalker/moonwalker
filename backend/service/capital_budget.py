@@ -290,6 +290,7 @@ class CapitalBudgetService:
         pending_quote: float,
     ) -> CapitalBudgetCheck:
         """Build a fail-closed result when budget usage cannot be loaded."""
+        settings = build_capital_budget_settings(config)
         principal_limit = resolve_capital_max_fund(config)
         return CapitalBudgetCheck(
             ok=False,
@@ -306,5 +307,5 @@ class CapitalBudgetService:
             pending_quote=pending_quote,
             projected_total=None,
             buffer_pct=0.0,
-            reserve_safety_orders=True,
+            reserve_safety_orders=settings.reserve_safety_orders,
         )

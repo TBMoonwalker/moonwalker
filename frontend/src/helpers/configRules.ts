@@ -69,9 +69,33 @@ function createRequiredAfterSubmitValidator(
     }
 }
 
+function createPositiveNumberAfterSubmitValidator(
+    submitAttempted: Ref<boolean>,
+    messageText: string,
+) {
+    return (_rule: FormItemRule, value: unknown) => {
+        if (!submitAttempted.value) {
+            return true
+        }
+        const numericValue =
+            typeof value === 'number'
+                ? value
+                : Number.parseFloat(String(value ?? ''))
+        if (!Number.isFinite(numericValue) || numericValue <= 0) {
+            return new Error(messageText)
+        }
+        return true
+    }
+}
+
 export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
     const requiredAfterSubmit = (messageText: string) =>
         createRequiredAfterSubmitValidator(options.submitAttempted, messageText)
+    const positiveNumberAfterSubmit = (messageText: string) =>
+        createPositiveNumberAfterSubmitValidator(
+            options.submitAttempted,
+            messageText,
+        )
     const dcaFieldValidator = (
         fieldLabel: string,
         requiredWhen: () => boolean = () => true,
@@ -238,6 +262,10 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
         },
         tp: {
             validator: requiredAfterSubmit('Please add tp'),
+            trigger: ['submit', 'change'],
+        },
+        max_fund: {
+            validator: positiveNumberAfterSubmit('Please add global max fund'),
             trigger: ['submit', 'change'],
         },
         upnl_housekeeping_interval: {

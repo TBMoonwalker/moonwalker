@@ -143,6 +143,12 @@ test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () =>
     ])
 })
 
+test('buildLoadedConfigState defaults safety-order reserve to disabled', () => {
+    const state = buildLoadedConfigState({}, createLoadDefaults())
+
+    assert.equal(state.capital.reserve_safety_orders, false)
+})
+
 test('buildLoadedConfigState ignores removed legacy filter shadow payload', () => {
     const defaults = createLoadDefaults()
     const state = buildLoadedConfigState(

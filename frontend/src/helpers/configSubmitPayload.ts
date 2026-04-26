@@ -342,7 +342,7 @@ export function buildConfigSubmitPayload(
             'int',
         ),
         capital_reserve_safety_orders: serializeConfigValue(
-            capital.reserve_safety_orders ?? true,
+            capital.reserve_safety_orders ?? false,
             'bool',
         ),
         capital_budget_buffer_pct: serializeConfigValue(

@@ -145,7 +145,7 @@ def build_capital_budget_settings(
         principal_limit=resolve_capital_max_fund(config),
         reserve_safety_orders=to_bool(
             config.get("capital_reserve_safety_orders"),
-            default=True,
+            default=False,
         ),
         buffer_pct=buffer_pct,
         autopilot_active=to_bool(config.get("autopilot"), default=False),

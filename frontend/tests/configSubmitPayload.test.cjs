@@ -105,7 +105,7 @@ function createBaseOptions(overrides = {}) {
         },
         capital: {
             max_fund: null,
-            reserve_safety_orders: true,
+            reserve_safety_orders: false,
             budget_buffer_pct: 0,
         },
         autopilot: {
@@ -240,7 +240,7 @@ test(
             value: false,
             type: 'int',
         })
-        assert.equal(parseField(payload, 'capital_reserve_safety_orders').value, true)
+        assert.equal(parseField(payload, 'capital_reserve_safety_orders').value, false)
         assert.equal(parseField(payload, 'capital_budget_buffer_pct').value, 0)
         assert.equal(
             parseField(payload, 'autopilot_profit_stretch_enabled').value,

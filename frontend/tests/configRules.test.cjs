@@ -153,3 +153,21 @@ test('config rules only require manual DCA fields when needed', () => {
         'Please add safety order amount',
     )
 })
+
+test('config rules require a positive global max fund after submit', () => {
+    const missingContext = createRuleContext()
+    assert.equal(
+        missingContext.rules.max_fund.validator({}, null).message,
+        'Please add global max fund',
+    )
+    assert.equal(
+        missingContext.rules.max_fund.validator({}, 0).message,
+        'Please add global max fund',
+    )
+    assert.equal(missingContext.rules.max_fund.validator({}, 250), true)
+
+    const untouchedContext = createRuleContext({
+        submitAttempted: { value: false },
+    })
+    assert.equal(untouchedContext.rules.max_fund.validator({}, null), true)
+})
