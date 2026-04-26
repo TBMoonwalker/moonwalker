@@ -89,6 +89,7 @@ defineProps<{
                 :ref="capitalFormRef"
                 :capital="capital"
                 :card-title="null"
+                :dynamic-dca-enabled="dca.enabled && dca.dynamic"
                 :rules="rules"
             />
         </template>

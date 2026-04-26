@@ -195,6 +195,8 @@ export function buildConfigSubmitPayload(
               )
             : null
     const normalizedDenyList = normalizePairEntries(filter.denylist, quoteCurrency)
+    const capitalBudgetBufferPct =
+        dca.enabled && dca.dynamic ? (capital.budget_buffer_pct ?? 0) : 0
 
     return {
         timezone: serializeConfigValue(
@@ -344,7 +346,7 @@ export function buildConfigSubmitPayload(
             'bool',
         ),
         capital_budget_buffer_pct: serializeConfigValue(
-            capital.budget_buffer_pct ?? 0,
+            capitalBudgetBufferPct,
             'float',
         ),
         autopilot_profit_stretch_enabled: serializeConfigValue(

@@ -278,6 +278,10 @@ test('buildConfigSubmitPayload normalizes ASAP symbol selections', () => {
 test('buildConfigSubmitPayload persists configured capital budget and stretch settings', () => {
     const payload = buildConfigSubmitPayload(
         createBaseOptions({
+            dca: {
+                enabled: true,
+                dynamic: true,
+            },
             capital: {
                 max_fund: 250,
                 reserve_safety_orders: false,
@@ -362,4 +366,21 @@ test('buildConfigSubmitPayload persists configured capital budget and stretch se
         'autopilot_entry_stretch_max_multiplier' in payload,
         false,
     )
+})
+
+test('buildConfigSubmitPayload clears dynamic safety-order buffer for static DCA', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            capital: {
+                max_fund: 250,
+                reserve_safety_orders: true,
+                budget_buffer_pct: 50,
+            },
+        }),
+    )
+
+    assert.deepEqual(parseField(payload, 'capital_budget_buffer_pct'), {
+        value: 0,
+        type: 'float',
+    })
 })

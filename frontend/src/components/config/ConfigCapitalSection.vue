@@ -24,7 +24,11 @@
             >
                 <n-checkbox v-model:checked="capital.reserve_safety_orders" />
             </n-form-item>
-            <n-form-item label="Budget buffer (%)" path="budget_buffer_pct">
+            <n-form-item
+                v-if="dynamicDcaEnabled"
+                label="Budget buffer for dynamic safety orders (%)"
+                path="budget_buffer_pct"
+            >
                 <n-input-number
                     v-model:value="capital.budget_buffer_pct"
                     placeholder="0"
@@ -45,6 +49,7 @@ withDefaults(
     defineProps<{
         capital: CapitalModel
         cardTitle?: string | null
+        dynamicDcaEnabled: boolean
         rules: FormRules
     }>(),
     {

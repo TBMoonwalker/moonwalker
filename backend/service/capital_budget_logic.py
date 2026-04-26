@@ -137,7 +137,8 @@ def build_capital_budget_settings(
         if "capital_budget_buffer_pct" in config
         else config.get("buy_fund_buffer_pct")
     )
-    buffer_pct = normalize_buffer_pct(buffer_value)
+    dynamic_dca = to_bool(config.get("dynamic_dca"), default=False)
+    buffer_pct = normalize_buffer_pct(buffer_value) if dynamic_dca else 0.0
     return CapitalBudgetSettings(
         configured=has_capital_budget_config(config),
         principal_limit=resolve_capital_max_fund(config),

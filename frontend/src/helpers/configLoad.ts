@@ -154,6 +154,8 @@ export function buildLoadedConfigState(
         market: toNullableString(response.market) || 'spot',
         watcher_ohlcv: parseBooleanString(response.watcher_ohlcv) ?? false,
     }
+    const dcaEnabled = parseBooleanString(response.dca) ?? false
+    const dynamicDca = parseBooleanString(response.dynamic_dca) ?? false
 
     return {
         general,
@@ -203,8 +205,8 @@ export function buildLoadedConfigState(
         },
         exchange,
         dca: {
-            enabled: parseBooleanString(response.dca) ?? false,
-            dynamic: parseBooleanString(response.dynamic_dca) ?? false,
+            enabled: dcaEnabled,
+            dynamic: dynamicDca,
             strategy: toNullableString(response.dca_strategy),
             timeframe,
             trailing_tp: toNumberOrNull(response.trailing_tp),
@@ -244,7 +246,9 @@ export function buildLoadedConfigState(
             reserve_safety_orders:
                 parseBooleanString(response.capital_reserve_safety_orders) ?? false,
             budget_buffer_pct:
-                toNumberOrNull(response.capital_budget_buffer_pct) ?? 0,
+                dcaEnabled && dynamicDca
+                    ? toNumberOrNull(response.capital_budget_buffer_pct) ?? 0
+                    : 0,
         },
         autopilot: {
             enabled: parseBooleanString(response.autopilot) ?? false,
