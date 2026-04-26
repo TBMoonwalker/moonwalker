@@ -221,10 +221,8 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         profit_stretch_enabled: false,
         profit_stretch_ratio: options.defaults.defaultAutopilotProfitStretchRatio,
         profit_stretch_max: options.defaults.defaultAutopilotProfitStretchMax,
-        entry_stretch_max_multiplier:
-            options.defaults.defaultAutopilotEntryStretchMaxMultiplier,
-        safety_stretch_max_multiplier:
-            options.defaults.defaultAutopilotSafetyStretchMaxMultiplier,
+        base_order_stretch_max_multiplier:
+            options.defaults.defaultAutopilotBaseOrderStretchMaxMultiplier,
         high_mad: null,
         high_tp: null,
         high_sl: null,

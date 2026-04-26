@@ -26,8 +26,7 @@ function createPayloadDefaults(overrides = {}) {
         defaultGreenPhaseMaxLockedFundPercent: 55,
         defaultAutopilotProfitStretchRatio: 0,
         defaultAutopilotProfitStretchMax: 0,
-        defaultAutopilotEntryStretchMaxMultiplier: 1,
-        defaultAutopilotSafetyStretchMaxMultiplier: 1,
+        defaultAutopilotBaseOrderStretchMaxMultiplier: 1,
         ...overrides,
     }
 }
@@ -114,8 +113,7 @@ function createBaseOptions(overrides = {}) {
             profit_stretch_enabled: false,
             profit_stretch_ratio: 0,
             profit_stretch_max: 0,
-            entry_stretch_max_multiplier: 1,
-            safety_stretch_max_multiplier: 1,
+            base_order_stretch_max_multiplier: 1,
             high_mad: null,
             high_tp: null,
             high_sl: null,
@@ -291,8 +289,7 @@ test('buildConfigSubmitPayload persists configured capital budget and stretch se
                 profit_stretch_enabled: true,
                 profit_stretch_ratio: 0.5,
                 profit_stretch_max: 75,
-                entry_stretch_max_multiplier: 2,
-                safety_stretch_max_multiplier: 1.5,
+                base_order_stretch_max_multiplier: 2,
                 high_mad: null,
                 high_tp: null,
                 high_sl: null,
@@ -350,12 +347,19 @@ test('buildConfigSubmitPayload persists configured capital budget and stretch se
         value: 75,
         type: 'float',
     })
-    assert.deepEqual(parseField(payload, 'autopilot_entry_stretch_max_multiplier'), {
-        value: 2,
-        type: 'float',
-    })
-    assert.deepEqual(parseField(payload, 'autopilot_safety_stretch_max_multiplier'), {
-        value: 1.5,
-        type: 'float',
-    })
+    assert.deepEqual(
+        parseField(payload, 'autopilot_base_order_stretch_max_multiplier'),
+        {
+            value: 2,
+            type: 'float',
+        },
+    )
+    assert.equal(
+        'autopilot_safety_stretch_max_multiplier' in payload,
+        false,
+    )
+    assert.equal(
+        'autopilot_entry_stretch_max_multiplier' in payload,
+        false,
+    )
 })

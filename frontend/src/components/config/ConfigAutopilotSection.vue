@@ -46,22 +46,11 @@
                         />
                     </n-form-item>
                     <n-form-item
-                        label="Entry stretch multiplier"
-                        path="entry_stretch_max_multiplier"
+                        label="Base order stretch multiplier"
+                        path="base_order_stretch_max_multiplier"
                     >
                         <n-input-number
-                            v-model:value="autopilot.entry_stretch_max_multiplier"
-                            placeholder="1"
-                            :min="1"
-                            :step="0.05"
-                        />
-                    </n-form-item>
-                    <n-form-item
-                        label="Safety stretch multiplier"
-                        path="safety_stretch_max_multiplier"
-                    >
-                        <n-input-number
-                            v-model:value="autopilot.safety_stretch_max_multiplier"
+                            v-model:value="autopilot.base_order_stretch_max_multiplier"
                             placeholder="1"
                             :min="1"
                             :step="0.05"

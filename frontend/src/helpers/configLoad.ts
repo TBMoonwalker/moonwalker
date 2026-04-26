@@ -47,8 +47,7 @@ export interface ConfigLoadDefaults {
     defaultGreenPhaseMaxLockedFundPercent: number
     defaultAutopilotProfitStretchRatio: number
     defaultAutopilotProfitStretchMax: number
-    defaultAutopilotEntryStretchMaxMultiplier: number
-    defaultAutopilotSafetyStretchMaxMultiplier: number
+    defaultAutopilotBaseOrderStretchMaxMultiplier: number
 }
 
 export interface LoadedSignalConfigSection extends SignalConfigSection {
@@ -262,14 +261,12 @@ export function buildLoadedConfigState(
             profit_stretch_max:
                 toNumberOrNull(response.autopilot_profit_stretch_max) ??
                 defaults.defaultAutopilotProfitStretchMax,
-            entry_stretch_max_multiplier:
+            base_order_stretch_max_multiplier:
                 toNumberOrNull(
-                    response.autopilot_entry_stretch_max_multiplier
-                ) ?? defaults.defaultAutopilotEntryStretchMaxMultiplier,
-            safety_stretch_max_multiplier:
-                toNumberOrNull(
-                    response.autopilot_safety_stretch_max_multiplier
-                ) ?? defaults.defaultAutopilotSafetyStretchMaxMultiplier,
+                    response.autopilot_base_order_stretch_max_multiplier
+                ) ??
+                toNumberOrNull(response.autopilot_entry_stretch_max_multiplier) ??
+                defaults.defaultAutopilotBaseOrderStretchMaxMultiplier,
             high_mad: toNumberOrNull(response.autopilot_high_mad),
             high_tp: toNumberOrNull(response.autopilot_high_tp),
             high_sl: toNumberOrNull(response.autopilot_high_sl),

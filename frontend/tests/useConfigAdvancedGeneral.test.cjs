@@ -28,8 +28,7 @@ function createPayloadDefaults(overrides = {}) {
         defaultGreenPhaseMaxLockedFundPercent: 55,
         defaultAutopilotProfitStretchRatio: 0,
         defaultAutopilotProfitStretchMax: 0,
-        defaultAutopilotEntryStretchMaxMultiplier: 1,
-        defaultAutopilotSafetyStretchMaxMultiplier: 1,
+        defaultAutopilotBaseOrderStretchMaxMultiplier: 1,
         ...overrides,
     }
 }

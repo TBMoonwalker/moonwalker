@@ -7,7 +7,12 @@ import pytest
 from controller import autopilot_memory as autopilot_memory_controller
 from litestar import Litestar
 from litestar.testing import TestClient
-from service.autopilot_memory import AutopilotMemoryService, SymbolMemorySnapshot
+from service.autopilot_memory import (
+    AutopilotMemoryService,
+    SymbolMemorySnapshot,
+    _base_order_delta_limit,
+    _base_order_stretch_multiplier,
+)
 from tortoise import Tortoise
 
 
@@ -23,6 +28,39 @@ def _config(**overrides):
     }
     payload.update(overrides)
     return payload
+
+
+def test_base_order_stretch_multiplier_uses_new_key_with_legacy_fallback() -> None:
+    assert (
+        _base_order_delta_limit(
+            12.0,
+            stretch_multiplier=_base_order_stretch_multiplier(
+                {
+                    "autopilot_profit_stretch_enabled": True,
+                    "autopilot_base_order_stretch_max_multiplier": 2.0,
+                }
+            ),
+        )
+        == 10.0
+    )
+    assert (
+        _base_order_stretch_multiplier(
+            {
+                "autopilot_profit_stretch_enabled": True,
+                "autopilot_entry_stretch_max_multiplier": 1.75,
+            }
+        )
+        == 1.75
+    )
+    assert (
+        _base_order_stretch_multiplier(
+            {
+                "autopilot_profit_stretch_enabled": False,
+                "autopilot_base_order_stretch_max_multiplier": 2.0,
+            }
+        )
+        == 1.0
+    )
 
 
 @pytest.mark.asyncio

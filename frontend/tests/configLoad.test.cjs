@@ -30,8 +30,7 @@ function createLoadDefaults(overrides = {}) {
         defaultGreenPhaseMaxLockedFundPercent: 55,
         defaultAutopilotProfitStretchRatio: 0,
         defaultAutopilotProfitStretchMax: 0,
-        defaultAutopilotEntryStretchMaxMultiplier: 1,
-        defaultAutopilotSafetyStretchMaxMultiplier: 1,
+        defaultAutopilotBaseOrderStretchMaxMultiplier: 1,
         ...overrides,
     }
 }
@@ -56,8 +55,7 @@ test(
                 autopilot_profit_stretch_enabled: 'true',
                 autopilot_profit_stretch_ratio: '0.5',
                 autopilot_profit_stretch_max: '75',
-                autopilot_entry_stretch_max_multiplier: '2',
-                autopilot_safety_stretch_max_multiplier: '1.5',
+                autopilot_base_order_stretch_max_multiplier: '2',
                 signal: 'csv_signal',
                 signal_settings: {
                     csv_source: 'pair;side\nBTC/USDT;buy',
@@ -93,8 +91,7 @@ test(
         assert.equal(state.autopilot.profit_stretch_enabled, true)
         assert.equal(state.autopilot.profit_stretch_ratio, 0.5)
         assert.equal(state.autopilot.profit_stretch_max, 75)
-        assert.equal(state.autopilot.entry_stretch_max_multiplier, 2)
-        assert.equal(state.autopilot.safety_stretch_max_multiplier, 1.5)
+        assert.equal(state.autopilot.base_order_stretch_max_multiplier, 2)
     },
 )
 
@@ -147,6 +144,17 @@ test('buildLoadedConfigState defaults safety-order reserve to disabled', () => {
     const state = buildLoadedConfigState({}, createLoadDefaults())
 
     assert.equal(state.capital.reserve_safety_orders, false)
+})
+
+test('buildLoadedConfigState reads legacy entry stretch multiplier', () => {
+    const state = buildLoadedConfigState(
+        {
+            autopilot_entry_stretch_max_multiplier: '1.75',
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(state.autopilot.base_order_stretch_max_multiplier, 1.75)
 })
 
 test('buildLoadedConfigState ignores removed legacy filter shadow payload', () => {

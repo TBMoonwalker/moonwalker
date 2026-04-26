@@ -20,8 +20,6 @@ class CapitalBudgetSettings:
     profit_stretch_enabled: bool
     profit_stretch_ratio: float
     profit_stretch_max: float
-    entry_stretch_max_multiplier: float
-    safety_stretch_max_multiplier: float
 
 
 @dataclass(frozen=True)
@@ -160,14 +158,6 @@ def build_capital_budget_settings(
         profit_stretch_max=max(
             0.0,
             to_float(config.get("autopilot_profit_stretch_max"), 0.0),
-        ),
-        entry_stretch_max_multiplier=max(
-            1.0,
-            to_float(config.get("autopilot_entry_stretch_max_multiplier"), 1.0),
-        ),
-        safety_stretch_max_multiplier=max(
-            1.0,
-            to_float(config.get("autopilot_safety_stretch_max_multiplier"), 1.0),
         ),
     )
 

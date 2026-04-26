@@ -62,7 +62,7 @@ def test_capital_budget_stretches_only_realized_positive_profit() -> None:
     assert loss_case.effective_limit == 100.0
 
 
-def test_base_order_reserves_baseline_ladder_not_safety_stretch_cap() -> None:
+def test_base_order_reserves_baseline_ladder() -> None:
     config = {
         "capital_max_fund": 10_000,
         "capital_reserve_safety_orders": True,
@@ -72,7 +72,6 @@ def test_base_order_reserves_baseline_ladder_not_safety_stretch_cap() -> None:
         "autopilot_profit_stretch_enabled": True,
         "autopilot_profit_stretch_ratio": 1.0,
         "autopilot_profit_stretch_max": 1_000,
-        "autopilot_safety_stretch_max_multiplier": 61.0,
     }
 
     check = capital_budget_logic.evaluate_capital_budget(
@@ -123,7 +122,6 @@ def test_stretched_safety_order_consumes_only_extra_budget_above_reserve() -> No
         "mstc": 5,
         "autopilot": True,
         "autopilot_profit_stretch_enabled": True,
-        "autopilot_safety_stretch_max_multiplier": 61.0,
     }
 
     order_quote, required_quote = (

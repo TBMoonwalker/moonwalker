@@ -209,13 +209,17 @@ def _base_order_delta_limit(
     return max(base_order_amount * 0.15, 5.0) * max(1.0, stretch_multiplier)
 
 
-def _entry_stretch_multiplier(config: dict[str, Any]) -> float:
-    """Return configured Autopilot entry-size stretch multiplier."""
+def _base_order_stretch_multiplier(config: dict[str, Any]) -> float:
+    """Return configured Autopilot base-order stretch multiplier."""
     if not bool(config.get("autopilot_profit_stretch_enabled", False)):
         return 1.0
+    configured_multiplier = config.get(
+        "autopilot_base_order_stretch_max_multiplier",
+        config.get("autopilot_entry_stretch_max_multiplier"),
+    )
     return max(
         1.0,
-        _safe_float(config.get("autopilot_entry_stretch_max_multiplier")) or 1.0,
+        _safe_float(configured_multiplier) or 1.0,
     )
 
 
@@ -1126,7 +1130,7 @@ class AutopilotMemoryService:
 
             max_bo_delta = _base_order_delta_limit(
                 base_order_amount,
-                stretch_multiplier=_entry_stretch_multiplier(self.config),
+                stretch_multiplier=_base_order_stretch_multiplier(self.config),
             )
             suggested_base_order = max(
                 0.0,
@@ -1221,7 +1225,9 @@ class AutopilotMemoryService:
                         base_order_amount
                         - _base_order_delta_limit(
                             base_order_amount,
-                            stretch_multiplier=_entry_stretch_multiplier(self.config),
+                            stretch_multiplier=_base_order_stretch_multiplier(
+                                self.config
+                            ),
                         ),
                     ),
                     8,
@@ -1234,7 +1240,7 @@ class AutopilotMemoryService:
                     base_order_amount
                     + _base_order_delta_limit(
                         base_order_amount,
-                        stretch_multiplier=_entry_stretch_multiplier(self.config),
+                        stretch_multiplier=_base_order_stretch_multiplier(self.config),
                     ),
                     8,
                 )
