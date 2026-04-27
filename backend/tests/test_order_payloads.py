@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 
 from service.order_payloads import (
     build_buy_monitor_payload,
@@ -40,6 +40,28 @@ def test_build_closed_trade_payloads_includes_partial_sell_proceeds() -> None:
     assert payload["profit"] == 75.0
     assert monitor_payload["amount"] == 1.5
     assert monitor_payload["so_count"] == 2
+
+
+def test_build_closed_trade_payloads_stores_timezone_explicit_dates() -> None:
+    opened_at = datetime(2026, 4, 26, 19, 57, 41, tzinfo=timezone.utc)
+    closed_at = datetime(2026, 4, 26, 20, 12, 41, tzinfo=timezone.utc)
+
+    result = build_closed_trade_payloads(
+        {
+            "symbol": "BTC/USDC",
+            "total_cost": 100.0,
+            "total_amount": 1.0,
+            "price": 101.0,
+            "timestamp": int(closed_at.timestamp() * 1000),
+        },
+        so_count=0,
+        open_timestamp_ms=opened_at.timestamp() * 1000,
+    )
+
+    payload = result["payload"]
+
+    assert payload["open_date"] == "2026-04-26 19:57:41+00:00"
+    assert payload["close_date"] == "2026-04-26 20:12:41+00:00"
 
 
 def test_build_manual_buy_payload_helpers_return_expected_values() -> None:

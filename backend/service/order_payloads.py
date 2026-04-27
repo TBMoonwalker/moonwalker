@@ -1,7 +1,7 @@
 """Pure helpers for order persistence payload construction."""
 
 import json
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from service.exchange_types import (
@@ -11,10 +11,27 @@ from service.exchange_types import (
 )
 
 
+def normalize_trade_datetime(value: datetime) -> datetime:
+    """Normalize trade timestamps to timezone-aware UTC datetimes."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def trade_datetime_from_ms(timestamp_ms: float) -> datetime:
+    """Return a UTC datetime for a Unix millisecond timestamp."""
+    return datetime.fromtimestamp(timestamp_ms / 1000.0, tz=timezone.utc)
+
+
+def format_trade_datetime(value: datetime) -> str:
+    """Return a stable text timestamp with an explicit UTC offset."""
+    return normalize_trade_datetime(value).isoformat(sep=" ")
+
+
 def calculate_trade_duration(start_date_ms: float, end_date_ms: float) -> str:
     """Return trade duration as a JSON string from millisecond timestamps."""
-    date1 = datetime.fromtimestamp(start_date_ms / 1000.0)
-    date2 = datetime.fromtimestamp(end_date_ms / 1000.0)
+    date1 = trade_datetime_from_ms(start_date_ms)
+    date2 = trade_datetime_from_ms(end_date_ms)
     time_difference = date2 - date1
 
     days = time_difference.days
@@ -67,13 +84,13 @@ def build_closed_trade_payloads(
 
     sell_timestamp_raw = order_status.get("timestamp")
     if closed_at is not None:
-        sell_date = closed_at
+        sell_date = normalize_trade_datetime(closed_at)
     elif sell_timestamp_raw is not None:
-        sell_date = datetime.fromtimestamp(float(sell_timestamp_raw) / 1000.0)
+        sell_date = trade_datetime_from_ms(float(sell_timestamp_raw))
     else:
-        sell_date = datetime.now()
+        sell_date = datetime.now(timezone.utc)
     sell_timestamp_ms = sell_date.timestamp() * 1000
-    open_date = datetime.fromtimestamp(open_timestamp_ms / 1000.0)
+    open_date = trade_datetime_from_ms(open_timestamp_ms)
     duration_data = calculate_trade_duration(open_timestamp_ms, sell_timestamp_ms)
 
     payload = {
@@ -85,8 +102,8 @@ def build_closed_trade_payloads(
         "cost": total_cost,
         "tp_price": avg_sell_price,
         "avg_price": avg_buy_price,
-        "open_date": open_date,
-        "close_date": sell_date,
+        "open_date": format_trade_datetime(open_date),
+        "close_date": format_trade_datetime(sell_date),
         "duration": duration_data,
         "sell_executions": build_final_sell_executions(
             order_status,

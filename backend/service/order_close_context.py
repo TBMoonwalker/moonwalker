@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from service.exchange_types import PartialSellStatus, TradeExecutionPayload
-from service.order_payloads import calculate_trade_duration
+from service.order_payloads import (
+    calculate_trade_duration,
+    format_trade_datetime,
+    normalize_trade_datetime,
+    trade_datetime_from_ms,
+)
 
 
 @dataclass(frozen=True)
@@ -109,9 +114,13 @@ def build_unsellable_remainder_context(
 
     closed_trade_payload: dict[str, Any] | None = None
     if snapshot.partial_amount > 0 and open_timestamp_ms is not None:
-        close_date = closed_at or datetime.now()
+        close_date = (
+            normalize_trade_datetime(closed_at)
+            if closed_at is not None
+            else datetime.now(timezone.utc)
+        )
         close_timestamp = close_date.timestamp() * 1000
-        open_date = datetime.fromtimestamp(open_timestamp_ms / 1000.0)
+        open_date = trade_datetime_from_ms(open_timestamp_ms)
         duration_data = calculate_trade_duration(open_timestamp_ms, close_timestamp)
         partial_avg_sell_price = snapshot.partial_proceeds / snapshot.partial_amount
         partial_profit = snapshot.partial_proceeds - sold_cost
@@ -131,8 +140,8 @@ def build_unsellable_remainder_context(
             "cost": sold_cost,
             "tp_price": partial_avg_sell_price,
             "avg_price": avg_buy_price,
-            "open_date": open_date,
-            "close_date": close_date,
+            "open_date": format_trade_datetime(open_date),
+            "close_date": format_trade_datetime(close_date),
             "duration": duration_data,
         }
 
