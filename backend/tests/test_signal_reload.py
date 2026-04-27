@@ -132,3 +132,49 @@ async def test_signal_shutdown_cancels_inflight_reload() -> None:
 
     assert cancelled.is_set()
     assert signal._reload_task is None
+
+
+@pytest.mark.asyncio
+async def test_signal_plugin_crash_is_logged_and_restarted(monkeypatch) -> None:
+    signal = Signal(asyncio.Queue())
+    signal.PLUGIN_RESTART_DELAY_SECONDS = 0
+    created_plugins: list[object] = []
+    error_logs: list[str] = []
+
+    class FakePlugin:
+        def __init__(self, _watcher_queue: asyncio.Queue[list[str]]) -> None:
+            self.shutdown_calls = 0
+            created_plugins.append(self)
+
+        async def run(self, _config: dict[str, object]) -> None:
+            if len(created_plugins) == 1:
+                raise RuntimeError("websocket receive failed")
+            await asyncio.sleep(3600)
+
+        async def shutdown(self) -> None:
+            self.shutdown_calls += 1
+
+    def fake_import_module(_module_name: str) -> types.SimpleNamespace:
+        return types.SimpleNamespace(SignalPlugin=FakePlugin)
+
+    def capture_error(message: str, *args, **_kwargs) -> None:
+        error_logs.append(message % args if args else message)
+
+    async def wait_for_restart() -> None:
+        while len(created_plugins) < 2:
+            await asyncio.sleep(0)
+
+    monkeypatch.setattr(signal_module.importlib, "import_module", fake_import_module)
+    monkeypatch.setattr(signal_module.logging, "error", capture_error)
+
+    await signal._reload_plugin({"signal": "sym_signals"})
+    await asyncio.wait_for(wait_for_restart(), timeout=1)
+
+    assert any("websocket receive failed" in entry for entry in error_logs)
+    assert created_plugins[0].shutdown_calls == 1
+    assert signal.signal_plugin is created_plugins[1]
+    assert signal.signal_name == "sym_signals"
+    assert signal._task is not None
+    assert not signal._task.done()
+
+    await signal.shutdown()

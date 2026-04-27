@@ -33,6 +33,8 @@ class SignalPluginLifecycleError(RuntimeError):
 class Signal:
     """Manage signal plugin lifecycle and reload on config changes."""
 
+    PLUGIN_RESTART_DELAY_SECONDS = 10.0
+
     def __init__(self, watcher_queue: asyncio.Queue[Any]):
         self.watcher_queue = watcher_queue
         self.signal_name: str | None = None
@@ -40,7 +42,9 @@ class Signal:
         self._task: asyncio.Task[Any] | None = None
         self._reload_lock = asyncio.Lock()
         self._reload_task: asyncio.Task[Any] | None = None
+        self._restart_task: asyncio.Task[Any] | None = None
         self._pending_reload_config: dict[str, Any] | None = None
+        self._shutting_down = False
 
     async def init(self) -> None:
         """Initialize signal plugin based on current configuration."""
@@ -50,7 +54,12 @@ class Signal:
 
     async def shutdown(self) -> None:
         """Cancel active plugin run task and call plugin shutdown hook."""
+        self._shutting_down = True
         self._pending_reload_config = None
+        if self._restart_task is not None and not self._restart_task.done():
+            self._restart_task.cancel()
+            await asyncio.gather(self._restart_task, return_exceptions=True)
+            self._restart_task = None
         if self._reload_task is not None and not self._reload_task.done():
             self._reload_task.cancel()
             await asyncio.gather(self._reload_task, return_exceptions=True)
@@ -110,7 +119,69 @@ class Signal:
                 f"Signal plugin '{signal_name}' run() must return a coroutine."
             )
 
-        return asyncio.create_task(run_result)
+        task = asyncio.create_task(run_result, name=f"signal:{signal_name}")
+        task.add_done_callback(
+            lambda completed_task: self._handle_plugin_task_done(
+                completed_task,
+                signal_name,
+                config,
+            )
+        )
+        return task
+
+    def _handle_plugin_task_done(
+        self,
+        task: asyncio.Task[Any],
+        signal_name: str,
+        config: dict[str, Any],
+    ) -> None:
+        """Log and recover when the active plugin task exits unexpectedly."""
+        if self._shutting_down or task is not self._task or task.cancelled():
+            return
+
+        restart_delay = self.PLUGIN_RESTART_DELAY_SECONDS
+        exc = task.exception()
+        if exc is None:
+            logging.warning(
+                "Signal plugin '%s' stopped unexpectedly. Restarting in %s seconds.",
+                signal_name,
+                restart_delay,
+            )
+        else:
+            logging.error(
+                "Signal plugin '%s' crashed. Restarting in %s seconds. Cause: %s",
+                signal_name,
+                restart_delay,
+                exc,
+                exc_info=(type(exc), exc, exc.__traceback__),
+            )
+
+        if self._restart_task is not None and not self._restart_task.done():
+            return
+        self._restart_task = asyncio.create_task(
+            self._restart_plugin_after_failure(task, config, restart_delay),
+            name=f"signal:{signal_name}:restart",
+        )
+
+    async def _restart_plugin_after_failure(
+        self,
+        failed_task: asyncio.Task[Any],
+        config: dict[str, Any],
+        restart_delay: float,
+    ) -> None:
+        """Restart the current plugin after an unexpected task exit."""
+        try:
+            await asyncio.sleep(restart_delay)
+            if self._shutting_down or self._task is not failed_task:
+                return
+
+            self._pending_reload_config = dict(config)
+            if self._reload_task is None or self._reload_task.done():
+                self._reload_task = asyncio.create_task(self._drain_plugin_reloads())
+        finally:
+            current_task = asyncio.current_task()
+            if self._restart_task is current_task:
+                self._restart_task = None
 
     async def _shutdown_plugin(self, plugin: SignalPluginProtocol) -> None:
         """Run the plugin shutdown hook and enforce its awaitable contract."""
@@ -151,6 +222,7 @@ class Signal:
     async def _reload_plugin(self, config: dict[str, Any]) -> None:
         """Reload signal plugin in a serialized critical section."""
         async with self._reload_lock:
+            self._shutting_down = False
             await self._stop_current_plugin()
 
             signal_config = SignalPluginConfigView.from_config(config)

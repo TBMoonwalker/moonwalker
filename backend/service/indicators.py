@@ -7,10 +7,12 @@ import helper
 import talib
 from service.config import resolve_history_lookback_days
 from service.data import Data
+from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/indicators.log", "indicators")
 INDICATOR_CALCULATION_EXCEPTIONS = (
     AttributeError,
+    BaseORMException,
     IndexError,
     KeyError,
     RuntimeError,
