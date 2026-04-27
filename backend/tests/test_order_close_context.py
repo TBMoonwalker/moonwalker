@@ -67,6 +67,8 @@ def test_build_unsellable_remainder_context_returns_close_and_archive_payloads()
     assert context.already_notified is False
     assert context.closed_trade_payload is not None
     assert context.closed_trade_payload["symbol"] == "LPT/USDC"
+    assert context.closed_trade_payload["open_date"] == "2026-03-15 13:06:40+00:00"
+    assert context.closed_trade_payload["close_date"] == "2026-03-14 12:00:00+00:00"
     assert context.closed_trade_payload["amount"] == pytest.approx(5.12)
     assert context.closed_trade_payload["cost"] == pytest.approx(11.95664717)
     assert context.closed_trade_payload["tp_price"] == pytest.approx(2.274)
