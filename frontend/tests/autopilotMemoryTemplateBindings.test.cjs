@@ -76,6 +76,7 @@ test('overview workspace renders the Autopilot preview section', () => {
     assert.match(overviewSource, /ControlCenterConfigPreview/)
     assert.match(overviewSource, /ControlCenterMonitoringPreview/)
     assert.match(overviewSource, /ControlCenterOwnerConfidenceSummary/)
+    assert.match(overviewSource, /systems-workspace/)
     assert.match(overviewSource, /@open-config/)
     assert.match(overviewSource, /@open-monitoring/)
     assert.match(overviewSource, /@toggle-autopilot/)
@@ -89,6 +90,7 @@ test('preview exposes the required Autopilot actions and state copy', () => {
     assert.match(previewSource, /Learning from/)
     assert.match(previewSource, /Adaptive TP band/)
     assert.match(previewSource, /Entry sizing/)
+    assert.doesNotMatch(previewSource, /<n-card/i)
     assert.doesNotMatch(previewSource, /Autopilot is off'\s*"/)
     assert.doesNotMatch(previewSource, />Autopilot Memory</)
 })
@@ -150,6 +152,7 @@ test('config preview exposes the required config action and trust copy', () => {
         /Configuration is being verified|Configuration needs a reload decision|Configuration has a newer saved version|Configuration is current/,
     )
     assert.match(configPreviewSource, /Trading posture/)
+    assert.doesNotMatch(configPreviewSource, /<n-card/i)
     assert.doesNotMatch(configPreviewSource, />Configuration</)
 })
 

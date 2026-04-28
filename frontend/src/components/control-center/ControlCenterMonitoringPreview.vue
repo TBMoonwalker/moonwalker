@@ -61,12 +61,6 @@ const monitoring = useControlCenterMonitoringSummary()
 <style scoped>
 .monitoring-preview {
     width: 100%;
-    padding: 18px 20px;
-    border-radius: 12px;
-    border-color: rgba(29, 92, 73, 0.14);
-    border: 1px solid rgba(29, 92, 73, 0.14);
-    background: var(--mw-surface-shell);
-    box-shadow: var(--mw-shadow-card);
     color: var(--mw-color-text-primary);
 }
 
@@ -77,12 +71,12 @@ const monitoring = useControlCenterMonitoringSummary()
 }
 
 .preview-title {
-    margin: 6px 0 4px;
+    margin: 0 0 4px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
-    font-size: 1.35rem;
+    font-size: 1.12rem;
     font-weight: 700;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.015em;
 }
 
 .preview-copy {
@@ -114,17 +108,15 @@ const monitoring = useControlCenterMonitoringSummary()
 }
 
 .hero-insight {
-    padding: 14px 16px;
-    border-radius: 10px;
-    background: var(--mw-surface-card-subtle);
-    border: 1px solid rgba(29, 92, 73, 0.1);
+    padding-left: 14px;
+    border-left: 3px solid rgba(29, 92, 73, 0.24);
 }
 
 .hero-insight-copy {
     margin: 0 0 6px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
-    font-size: 1.1rem;
+    font-size: 1rem;
     font-weight: 600;
     letter-spacing: -0.015em;
 }
@@ -138,28 +130,31 @@ const monitoring = useControlCenterMonitoringSummary()
 
 .preview-metrics {
     display: grid;
-    gap: 12px;
+    gap: 10px 16px;
     grid-template-columns: repeat(3, minmax(0, 1fr));
+    padding-top: 8px;
+    border-top: 1px solid rgba(29, 92, 73, 0.1);
 }
 
 .metric-chip {
-    padding: 12px 14px;
-    border-radius: 10px;
-    background: var(--mw-surface-card-muted);
-    border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    min-width: 0;
 }
 
 .metric-label {
     display: block;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
     color: var(--mw-color-text-secondary);
-    font-size: 0.84rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
 }
 
 .metric-value {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-mono);
     font-size: 1rem;
+    line-height: 1.4;
 }
 
 @media (max-width: 768px) {

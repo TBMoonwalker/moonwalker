@@ -1,21 +1,17 @@
 # TODOS
 
-## Design Review
+## Completed
 
 ### Reduce Control Center overview card nesting
 
-**What:** Rework the Control Center overview lower section so configuration, Autopilot, and Monitoring read as one operator workspace instead of three equal cards with nested cards inside them.
+**Completed:** v1.4.0.0 (2026-04-28)
 
-**Why:** The current first screen is state-first and clear, but the lower half still drifts toward dashboard-card mosaic. `DESIGN.md` says cards should exist only when the card is the interaction; here several cards are decorative containers around status facts.
-
-**Context:** `/design-review` on 2026-04-24 fixed the dashboard chart contrast, mobile capital-stat clipping, and undersized trade/header touch targets. This remaining layout debt is broader than a tactical CSS fix and should be handled as a focused overview layout pass.
-
-**Impact:** Medium
-**Category:** Visual hierarchy / layout
-**Effort:** M
-**Priority:** P2
-
-## Completed
+**What shipped:** Reworked the Control Center overview lower section into one
+shared operator workspace for Configuration, Autopilot, and Monitoring;
+flattened the preview shells so the three surfaces read as related subsections
+instead of equal nested cards; softened the owner-confidence summary to match
+the overview shell; and added frontend regression checks so the preview
+components stay out of full-card wrappers.
 
 ### Remove deprecated `autopilot_max_fund` compatibility alias
 

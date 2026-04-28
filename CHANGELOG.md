@@ -13,6 +13,7 @@ All notable changes to Moonwalker are documented in this file.
 
 - Stop exposing `autopilot_max_fund` in backend config snapshots, frontend config load or submit flows, Control Center key routing, and Green Phase or capital-budget runtime resolution.
 - Filter removed config keys out of newly exported backups so new-version backups stay restoreable without carrying forward dead config rows.
+- Rework the Control Center overview lower section into one shared operator workspace so Configuration, Autopilot, and Monitoring read as related subsections instead of a stack of equal nested cards.
 
 ### Fixed
 

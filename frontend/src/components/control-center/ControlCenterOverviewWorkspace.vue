@@ -95,28 +95,53 @@ const emit = defineEmits<{
                         :readiness="readiness"
                     />
 
-                    <div class="systems-grid">
-                        <ControlCenterConfigPreview
-                            :activation-loading="activationLoading"
-                            :config-trust-state="configTrustState"
-                            :formatted-trust-timestamp="formattedTrustTimestamp"
-                            :readiness="readiness"
-                            @activate-live="emit('activate-live')"
-                            @open-config="emit('open-config')"
-                        />
-                        <ControlCenterAutopilotPreview
-                            :enabled="autopilotEnabled"
-                            :error="autopilotMemoryError"
-                            :loading="autopilotMemoryLoading"
-                            :memory="autopilotMemory"
-                            :toggle-loading="autopilotToggleLoading"
-                            @toggle-autopilot="emit('toggle-autopilot')"
-                            @tune-autopilot="emit('tune-autopilot')"
-                        />
-                        <ControlCenterMonitoringPreview
-                            @open-monitoring="emit('open-monitoring')"
-                        />
-                    </div>
+                    <section class="systems-workspace">
+                        <div class="systems-workspace-header">
+                            <span class="systems-workspace-kicker">
+                                Shared workspace
+                            </span>
+                            <h3 class="systems-workspace-title">
+                                Config, Autopilot, and Monitoring
+                            </h3>
+                            <n-text depth="3" class="systems-workspace-summary">
+                                One calm operator rail for setup trust, trading
+                                posture, and live-system signals.
+                            </n-text>
+                        </div>
+
+                        <div class="systems-grid">
+                            <div class="system-cell">
+                                <ControlCenterConfigPreview
+                                    :activation-loading="activationLoading"
+                                    :config-trust-state="configTrustState"
+                                    :formatted-trust-timestamp="
+                                        formattedTrustTimestamp
+                                    "
+                                    :readiness="readiness"
+                                    @activate-live="emit('activate-live')"
+                                    @open-config="emit('open-config')"
+                                />
+                            </div>
+                            <div class="system-cell">
+                                <ControlCenterAutopilotPreview
+                                    :enabled="autopilotEnabled"
+                                    :error="autopilotMemoryError"
+                                    :loading="autopilotMemoryLoading"
+                                    :memory="autopilotMemory"
+                                    :toggle-loading="autopilotToggleLoading"
+                                    @toggle-autopilot="
+                                        emit('toggle-autopilot')
+                                    "
+                                    @tune-autopilot="emit('tune-autopilot')"
+                                />
+                            </div>
+                            <div class="system-cell">
+                                <ControlCenterMonitoringPreview
+                                    @open-monitoring="emit('open-monitoring')"
+                                />
+                            </div>
+                        </div>
+                    </section>
                 </div>
             </template>
         </n-flex>
@@ -149,11 +174,58 @@ const emit = defineEmits<{
     font-weight: 700;
     letter-spacing: -0.015em;
 }
+
+.systems-workspace {
+    border: 1px solid rgba(29, 92, 73, 0.14);
+    border-radius: 14px;
+    background: rgba(247, 248, 246, 0.58);
+    overflow: hidden;
+}
+
+.systems-workspace-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 18px 14px;
+    border-bottom: 1px solid rgba(29, 92, 73, 0.12);
+}
+
+.systems-workspace-kicker {
+    color: var(--mw-color-text-muted);
+    font-family: var(--mw-font-body);
+    font-size: 0.78rem;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+}
+
+.systems-workspace-title {
+    margin: 0;
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+}
+
+.systems-workspace-summary {
+    display: block;
+    max-width: 64ch;
+}
+
 .systems-grid {
     display: grid;
-    gap: 14px;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: start;
+}
+
+.system-cell {
+    min-width: 0;
+    padding: 18px 18px 20px;
+}
+
+.system-cell + .system-cell {
+    border-left: 1px solid rgba(29, 92, 73, 0.12);
 }
 
 .status-card {
@@ -178,6 +250,11 @@ const emit = defineEmits<{
 @media (max-width: 768px) {
     .systems-grid {
         grid-template-columns: 1fr;
+    }
+
+    .system-cell + .system-cell {
+        border-left: 0;
+        border-top: 1px solid rgba(29, 92, 73, 0.12);
     }
 }
 </style>

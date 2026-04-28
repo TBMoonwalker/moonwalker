@@ -250,10 +250,7 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
 </script>
 
 <template>
-    <n-card
-        class="owner-confidence-summary"
-        content-style="padding: 18px 20px;"
-    >
+    <section class="owner-confidence-summary">
         <div class="confidence-shell">
             <div class="confidence-copy">
                 <div class="confidence-kicker-row">
@@ -280,16 +277,18 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
                 </div>
             </div>
         </div>
-    </n-card>
+    </section>
 </template>
 
 <style scoped>
 .owner-confidence-summary {
     width: 100%;
     border-color: rgba(29, 92, 73, 0.18);
-    background: var(--mw-surface-shell);
-    box-shadow: var(--mw-shadow-card);
+    border: 1px solid rgba(29, 92, 73, 0.18);
+    border-radius: 12px;
+    background: rgba(247, 248, 246, 0.74);
     color: var(--mw-color-text-primary);
+    padding: 18px 20px;
 }
 
 .confidence-shell {
@@ -341,15 +340,13 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
 
 .confidence-evidence-grid {
     display: grid;
-    gap: 10px;
+    gap: 12px 16px;
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .evidence-chip {
-    padding: 12px 14px;
-    border-radius: 12px;
-    background: var(--mw-surface-card-muted);
-    border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    padding-top: 10px;
+    border-top: 1px solid rgba(29, 92, 73, 0.1);
     min-width: 0;
 }
 
