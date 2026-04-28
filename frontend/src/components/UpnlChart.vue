@@ -94,7 +94,7 @@ const option = computed(() => {
   const profitLineColor = isNegative ? 'rgb(224, 108, 117)' : 'rgb(99, 226, 183)'
   const profitAreaColor = isNegative ? 'rgba(224, 108, 117, 0.18)' : 'rgba(99, 226, 183, 0.18)'
   const lockedLineColor = 'rgb(245, 166, 35)'
-  const chartTextColor = '#33403A'
+  const chartLegendTextColor = '#ECEFEA'
   const chartMutedTextColor = '#8A948D'
 
   return {
@@ -110,7 +110,7 @@ const option = computed(() => {
       top: 8,
       right: 8,
       textStyle: {
-        color: chartTextColor,
+        color: chartLegendTextColor,
       },
       data: ['Profit overall', 'Funds locked'],
     },
