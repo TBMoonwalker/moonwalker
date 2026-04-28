@@ -77,6 +77,8 @@ test('overview workspace renders the Autopilot preview section', () => {
     assert.match(overviewSource, /ControlCenterMonitoringPreview/)
     assert.match(overviewSource, /ControlCenterOwnerConfidenceSummary/)
     assert.match(overviewSource, /systems-workspace/)
+    assert.match(overviewSource, /align-items:\s*stretch/)
+    assert.doesNotMatch(overviewSource, /align-items:\s*start/)
     assert.match(overviewSource, /@open-config/)
     assert.match(overviewSource, /@open-monitoring/)
     assert.match(overviewSource, /@toggle-autopilot/)

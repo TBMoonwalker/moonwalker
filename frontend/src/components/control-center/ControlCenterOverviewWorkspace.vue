@@ -216,7 +216,7 @@ const emit = defineEmits<{
 .systems-grid {
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
-    align-items: start;
+    align-items: stretch;
 }
 
 .system-cell {
