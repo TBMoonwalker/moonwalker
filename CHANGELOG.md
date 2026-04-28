@@ -2,6 +2,22 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [1.4.0.0] - 2026-04-28
+
+### Breaking Changes
+
+- Remove the one-release `autopilot_max_fund` compatibility alias. Moonwalker now accepts only `capital_max_fund` for the global capital limit.
+- Reject config writes and backup restores that still reference `autopilot_max_fund`, so pre-cutover clients and backups must be updated before they can be used with this version.
+
+### Changed
+
+- Stop exposing `autopilot_max_fund` in backend config snapshots, frontend config load or submit flows, Control Center key routing, and Green Phase or capital-budget runtime resolution.
+- Filter removed config keys out of newly exported backups so new-version backups stay restoreable without carrying forward dead config rows.
+
+### Fixed
+
+- Tighten backend and frontend regression coverage around removed-key snapshot filtering, config update rejection, backup export or restore behavior, and canonical capital-limit usage across Autopilot and Green Phase.
+
 ## [1.3.0.0] - 2026-04-25
 
 ### Added

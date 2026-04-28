@@ -17,7 +17,7 @@ async def test_autopilot_high_threshold_triggers_db_write(monkeypatch) -> None:
 
     config = {
         "autopilot": True,
-        "autopilot_max_fund": 100,
+        "capital_max_fund": 100,
         "autopilot_high_threshold": 80,
         "autopilot_high_mad": 5,
         "autopilot_high_tp": 1.2,
@@ -68,7 +68,7 @@ async def test_autopilot_enabled_below_threshold_persists_low_mode(
 
     config = {
         "autopilot": True,
-        "autopilot_max_fund": 100,
+        "capital_max_fund": 100,
         "autopilot_high_threshold": 80,
         "autopilot_medium_threshold": 50,
         "max_bots": 4,
@@ -148,7 +148,7 @@ async def test_autopilot_passes_available_quote_override_to_green_phase(
     autopilot.memory_service = _memory_summary()
     config = {
         "autopilot": True,
-        "autopilot_max_fund": 100,
+        "capital_max_fund": 100,
         "autopilot_high_threshold": 80,
         "autopilot_medium_threshold": 50,
         "max_bots": 4,
@@ -183,7 +183,7 @@ async def test_autopilot_runtime_state_is_instance_injectable(monkeypatch) -> No
     second.memory_service = _memory_summary()
     config = {
         "autopilot": True,
-        "autopilot_max_fund": 100,
+        "capital_max_fund": 100,
         "autopilot_high_threshold": 80,
         "autopilot_medium_threshold": 50,
         "max_bots": 4,
@@ -251,7 +251,7 @@ async def test_autopilot_resolve_trading_policy_exposes_entry_sizing_fields(
         10.0,
         {
             "autopilot": True,
-            "autopilot_max_fund": 100,
+            "capital_max_fund": 100,
             "autopilot_high_threshold": 80,
             "autopilot_medium_threshold": 50,
             "max_bots": 4,

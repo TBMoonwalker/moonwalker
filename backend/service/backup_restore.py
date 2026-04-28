@@ -8,7 +8,12 @@ from typing import Any
 
 import helper
 import model
-from service.config import Config, resolve_history_lookback_days
+from service.config import (
+    Config,
+    build_removed_config_key_message,
+    is_removed_config_key,
+    resolve_history_lookback_days,
+)
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from tortoise import fields
@@ -44,7 +49,11 @@ class BackupService:
 
     async def export_backup(self, include_trade_data: bool) -> dict[str, Any]:
         """Build a JSON-safe backup payload."""
-        config_rows = await model.AppConfig.all().order_by("id").values()
+        config_rows = [
+            row
+            for row in await model.AppConfig.all().order_by("id").values()
+            if not is_removed_config_key(str(row.get("key") or ""))
+        ]
         payload: dict[str, Any] = {
             "schema_version": BACKUP_SCHEMA_VERSION,
             "created_at": datetime.now(timezone.utc).isoformat(),
@@ -154,6 +163,8 @@ class BackupService:
             value_type = str(raw_row.get("value_type") or "").strip()
             if not key or not value_type:
                 raise ValueError("Backup config rows must include key and value_type.")
+            if is_removed_config_key(key):
+                raise ValueError(build_removed_config_key_message(key))
             normalized_rows.append(
                 {
                     "key": key,

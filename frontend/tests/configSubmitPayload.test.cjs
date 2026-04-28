@@ -323,10 +323,7 @@ test('buildConfigSubmitPayload persists configured capital budget and stretch se
         value: 250,
         type: 'int',
     })
-    assert.deepEqual(parseField(payload, 'autopilot_max_fund'), {
-        value: 250,
-        type: 'int',
-    })
+    assert.equal('autopilot_max_fund' in payload, false)
     assert.deepEqual(parseField(payload, 'capital_reserve_safety_orders'), {
         value: false,
         type: 'bool',

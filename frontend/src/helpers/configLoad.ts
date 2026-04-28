@@ -240,9 +240,7 @@ export function buildLoadedConfigState(
             sl: toNumberOrNull(response.sl),
         },
         capital: {
-            max_fund:
-                toNumberOrNull(response.capital_max_fund) ??
-                toNumberOrNull(response.autopilot_max_fund),
+            max_fund: toNumberOrNull(response.capital_max_fund),
             reserve_safety_orders:
                 parseBooleanString(response.capital_reserve_safety_orders) ?? false,
             budget_buffer_pct:

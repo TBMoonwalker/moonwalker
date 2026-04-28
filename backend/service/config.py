@@ -21,6 +21,10 @@ from service.strategy_capability import filter_supported_strategies
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
+REMOVED_CONFIG_KEY_REPLACEMENTS = {
+    "autopilot_max_fund": "capital_max_fund",
+}
+REMOVED_CONFIG_VERSION = "1.4.0.0"
 
 HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
     "1m": "30d",
@@ -41,7 +45,6 @@ DEFAULT_CONFIG_VALUES = {
     "capital_max_fund": 0.0,
     "capital_reserve_safety_orders": False,
     "capital_budget_buffer_pct": 0.0,
-    "autopilot_max_fund": 0.0,
     "autopilot_profit_stretch_enabled": False,
     "autopilot_profit_stretch_ratio": 0.0,
     "autopilot_profit_stretch_max": 0.0,
@@ -63,6 +66,23 @@ DEFAULT_CONFIG_VALUES = {
     "autopilot_green_phase_release_cycles": 4,
     "autopilot_green_phase_max_locked_fund_percent": 85.0,
 }
+
+
+def is_removed_config_key(key: str) -> bool:
+    """Return whether the config key was removed from supported runtime config."""
+    return str(key).strip() in REMOVED_CONFIG_KEY_REPLACEMENTS
+
+
+def build_removed_config_key_message(key: str) -> str:
+    """Return the operator-facing error for a removed config key."""
+    normalized_key = str(key).strip()
+    replacement = REMOVED_CONFIG_KEY_REPLACEMENTS.get(normalized_key)
+    if replacement:
+        return (
+            f"Config key '{normalized_key}' was removed in v{REMOVED_CONFIG_VERSION}. "
+            f"Use '{replacement}' instead."
+        )
+    return f"Config key '{normalized_key}' was removed in v{REMOVED_CONFIG_VERSION}."
 
 
 def resolve_timeframe(config: dict[str, Any], default: str = "1m") -> str:
@@ -170,6 +190,8 @@ class Config:
         entries: list[ConfigEntry] = []
         rows = await AppConfig.all()
         for row in rows:
+            if is_removed_config_key(row.key):
+                continue
             entries.append(self.__build_entry(row.key, row.value, row.value_type))
         self._store.replace_entries(entries)
         self.__refresh_runtime_metadata()
@@ -183,6 +205,8 @@ class Config:
         rows = await AppConfig.filter(key__in=normalized_keys)
         loaded_keys = set()
         for row in rows:
+            if is_removed_config_key(row.key):
+                continue
             self._store.upsert_entry(
                 self.__build_entry(row.key, row.value, row.value_type)
             )
@@ -258,21 +282,7 @@ class Config:
 
     def snapshot(self) -> dict[str, Any]:
         """Return a defensive copy of the current config state."""
-        return self.__apply_capital_aliases(
-            self._store.snapshot(defaults=DEFAULT_CONFIG_VALUES)
-        )
-
-    def __apply_capital_aliases(self, snapshot: dict[str, Any]) -> dict[str, Any]:
-        """Mirror legacy Autopilot max-fund config to the global capital key."""
-        capital_persisted = self._store.has_entry("capital_max_fund")
-        legacy_persisted = self._store.has_entry("autopilot_max_fund")
-        if capital_persisted:
-            snapshot["autopilot_max_fund"] = snapshot.get("capital_max_fund", 0.0)
-        elif legacy_persisted:
-            snapshot["capital_max_fund"] = snapshot.get("autopilot_max_fund", 0.0)
-        else:
-            snapshot["autopilot_max_fund"] = snapshot.get("capital_max_fund", 0.0)
-        return snapshot
+        return self._store.snapshot(defaults=DEFAULT_CONFIG_VALUES)
 
     def __notify_subscribers(self) -> None:
         """Notify local subscribers that cache values changed."""
@@ -331,6 +341,7 @@ class Config:
         raw_value: Any,
     ) -> ConfigUpdateAction:
         """Normalize one incoming config mutation into a typed action."""
+        self.__assert_supported_key(key)
         update = self.__parse_update_payload(raw_value)
         value_type = str(update["type"]).strip()
         value_data = update["value"]
@@ -352,6 +363,12 @@ class Config:
             serialized_value=serialized_value,
             runtime_value=self.__set_type(serialized_value, value_type),
         )
+
+    def __assert_supported_key(self, key: str) -> None:
+        """Reject config writes for removed keys."""
+        normalized_key = str(key).strip()
+        if is_removed_config_key(normalized_key):
+            raise ValueError(build_removed_config_key_message(normalized_key))
 
     def __get_strategies(self) -> list[str]:
         """Get a list of available strategy filenames from the strategies directory.
@@ -381,8 +398,6 @@ class Config:
         Returns:
             The configuration value or default if key not found
         """
-        if key in {"capital_max_fund", "autopilot_max_fund"}:
-            return self.snapshot().get(key, default)
         return self._store.get(key, defaults=DEFAULT_CONFIG_VALUES, default=default)
 
     async def set(self, key: str, value: Any) -> bool:
@@ -428,6 +443,9 @@ class Config:
         Returns:
             True if the operation succeeded
         """
+        for key in updates:
+            self.__assert_supported_key(key)
+
         changed_keys: list[str] = []
         for key, raw_value in updates.items():
             try:

@@ -1,19 +1,5 @@
 # TODOS
 
-## Capital Budget
-
-### Remove deprecated `autopilot_max_fund` compatibility alias
-
-**What:** Remove the deprecated `autopilot_max_fund` compatibility alias after one release.
-
-**Why:** `capital_max_fund` is the canonical global capital authority. Keeping the old Autopilot-scoped alias indefinitely would leave two apparent max-fund sources and make future budget behavior harder to reason about.
-
-**Context:** The Global Capital Budget Authority plan keeps `autopilot_max_fund` as a one-release read alias so existing installs can migrate without losing their configured limit. After that compatibility window, remove alias handling from backend config, frontend compatibility tests, docs, and any mirrored API response fields.
-
-**Effort:** S
-**Priority:** P2
-**Depends on:** Global Capital Budget Authority shipping with the compatibility alias for one release.
-
 ## Design Review
 
 ### Reduce Control Center overview card nesting
@@ -30,6 +16,18 @@
 **Priority:** P2
 
 ## Completed
+
+### Remove deprecated `autopilot_max_fund` compatibility alias
+
+**Completed:** v1.4.0.0 (2026-04-28)
+
+**What shipped:** Removed the one-release `autopilot_max_fund`
+compatibility alias from backend runtime config, frontend config loading and
+submit payloads, and mirrored API surfaces; switched the remaining capital and
+Green Phase logic to the canonical `capital_max_fund` key; rejected removed-key
+config writes and legacy backup restores; filtered removed keys from new backup
+exports; and documented the breaking upgrade requirement in the release notes
+and config or API docs.
 
 ### Apply suggested base order as guarded per-symbol entry sizing
 

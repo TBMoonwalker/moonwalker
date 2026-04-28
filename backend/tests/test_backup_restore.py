@@ -242,3 +242,72 @@ async def test_restore_backup_config_only_keeps_existing_trade_rows(
 
     await Tortoise.close_connections()
     Config._instance = None
+
+
+@pytest.mark.asyncio
+async def test_export_backup_omits_removed_legacy_autopilot_max_fund_key(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    import model
+
+    await model.AppConfig.create(
+        key="autopilot_max_fund", value="250", value_type="int"
+    )
+    await model.AppConfig.create(key="capital_max_fund", value="300", value_type="int")
+
+    backup_service = BackupService()
+    backup_payload = await backup_service.export_backup(include_trade_data=False)
+
+    assert len(backup_payload["config"]) == 1
+    assert backup_payload["config"][0]["id"] == 2
+    assert backup_payload["config"][0]["key"] == "capital_max_fund"
+    assert backup_payload["config"][0]["value"] == "300"
+    assert backup_payload["config"][0]["value_type"] == "int"
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_restore_backup_rejects_removed_legacy_autopilot_max_fund_key(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+    monkeypatch.setattr(Config, "instance", classmethod(_fake_config_instance))
+    Config._instance = None
+
+    backup_service = BackupService()
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
+            "Use 'capital_max_fund' instead."
+        ),
+    ):
+        await backup_service.restore_backup(
+            {
+                "schema_version": 1,
+                "config": [
+                    {
+                        "key": "autopilot_max_fund",
+                        "value": "250",
+                        "value_type": "int",
+                    }
+                ],
+            },
+            restore_trade_data=False,
+        )
+
+    await Tortoise.close_connections()
+    Config._instance = None

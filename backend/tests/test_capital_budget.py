@@ -10,10 +10,10 @@ from service.orders import Orders
 from tortoise import Tortoise
 
 
-def test_capital_budget_uses_legacy_autopilot_max_fund_as_alias() -> None:
+def test_capital_budget_blocks_when_global_max_fund_is_exceeded() -> None:
     check = capital_budget_logic.evaluate_capital_budget(
         {
-            "autopilot_max_fund": 100,
+            "capital_max_fund": 100,
             "capital_reserve_safety_orders": False,
         },
         {"symbol": "BTC/USDT", "ordersize": 25.0},

@@ -16,7 +16,7 @@ from tortoise import Tortoise
 def _build_config(**overrides):
     config = {
         "autopilot": True,
-        "autopilot_max_fund": 1_000,
+        "capital_max_fund": 1_000,
         "autopilot_green_phase_enabled": True,
         "autopilot_green_phase_ramp_days": 10,
         "autopilot_green_phase_eval_interval_sec": 60,
@@ -93,7 +93,7 @@ def test_green_phase_analysis_requires_confirm_cycles_before_detection() -> None
 def test_green_phase_guardrails_block_when_locked_fund_limit_is_exceeded() -> None:
     settings = build_green_phase_settings(
         _build_config(
-            autopilot_max_fund=1_000,
+            capital_max_fund=1_000,
             autopilot_green_phase_max_locked_fund_percent=70,
             autopilot_green_phase_max_extra_deals=2,
             bo=100,

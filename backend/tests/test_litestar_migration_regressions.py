@@ -767,6 +767,77 @@ def test_config_multiple_rejects_legacy_stringified_update_payloads() -> None:
     }
 
 
+def test_config_single_rejects_removed_legacy_autopilot_max_fund_key(
+    monkeypatch,
+) -> None:
+    """Single-key config updates should reject removed legacy max-fund writes."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_config_key])
+    with TestClient(app=app) as client:
+        response = client.put(
+            "/config/single/autopilot_max_fund",
+            json={"value": {"value": 250, "type": "int"}},
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": (
+            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
+            "Use 'capital_max_fund' instead."
+        ),
+        "message": (
+            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
+            "Use 'capital_max_fund' instead."
+        ),
+    }
+    assert service.last_single is None
+
+
+def test_config_multiple_rejects_removed_legacy_autopilot_max_fund_key(
+    monkeypatch,
+) -> None:
+    """Batch config updates should reject removed legacy max-fund writes."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/config/multiple",
+            json={
+                "capital_max_fund": {"value": 250, "type": "int"},
+                "autopilot_max_fund": {"value": 250, "type": "int"},
+            },
+        )
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": (
+            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
+            "Use 'capital_max_fund' instead."
+        ),
+        "message": (
+            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
+            "Use 'capital_max_fund' instead."
+        ),
+    }
+    assert service.last_batch is None
+
+
 def test_trades_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> None:
     """Expected WebSocket disconnect should not trigger error logging."""
     errors: list[tuple[Any, ...]] = []
