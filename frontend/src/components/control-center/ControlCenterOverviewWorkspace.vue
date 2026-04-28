@@ -176,9 +176,9 @@ const emit = defineEmits<{
 }
 
 .systems-workspace {
-    border: 1px solid rgba(29, 92, 73, 0.14);
+    border: 1px solid var(--mw-color-border-strong);
     border-radius: 14px;
-    background: rgba(247, 248, 246, 0.58);
+    background: var(--mw-surface-card-muted);
     overflow: hidden;
 }
 
@@ -187,7 +187,7 @@ const emit = defineEmits<{
     flex-direction: column;
     gap: 4px;
     padding: 16px 18px 14px;
-    border-bottom: 1px solid rgba(29, 92, 73, 0.12);
+    border-bottom: 1px solid var(--color-border);
 }
 
 .systems-workspace-kicker {
@@ -225,7 +225,7 @@ const emit = defineEmits<{
 }
 
 .system-cell + .system-cell {
-    border-left: 1px solid rgba(29, 92, 73, 0.12);
+    border-left: 1px solid var(--color-border);
 }
 
 .status-card {
@@ -254,7 +254,7 @@ const emit = defineEmits<{
 
     .system-cell + .system-cell {
         border-left: 0;
-        border-top: 1px solid rgba(29, 92, 73, 0.12);
+        border-top: 1px solid var(--color-border);
     }
 }
 </style>
