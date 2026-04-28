@@ -186,7 +186,36 @@ async def test_config_snapshot_returns_defensive_copy(tmp_path, monkeypatch) -> 
 
 
 @pytest.mark.asyncio
-async def test_config_snapshot_mirrors_legacy_autopilot_max_fund_alias(
+async def test_config_snapshot_ignores_removed_legacy_autopilot_max_fund_key(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    import model
+
+    await model.AppConfig.create(
+        key="autopilot_max_fund", value="250", value_type="int"
+    )
+
+    config = Config()
+    await config.load_all()
+
+    snapshot = config.snapshot()
+    assert snapshot["capital_max_fund"] == 0.0
+    assert "autopilot_max_fund" not in snapshot
+    assert config.get("autopilot_max_fund") is None
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_config_set_rejects_removed_legacy_autopilot_max_fund_key(
     tmp_path,
     monkeypatch,
 ) -> None:
@@ -198,17 +227,14 @@ async def test_config_snapshot_mirrors_legacy_autopilot_max_fund_alias(
     monkeypatch.setattr(config_module, "redis_client", DummyRedis())
 
     config = Config()
-    await config.set("autopilot_max_fund", {"value": 250, "type": "int"})
-    await config.load_all()
-
-    snapshot = config.snapshot()
-    assert snapshot["capital_max_fund"] == 250
-    assert snapshot["autopilot_max_fund"] == 250
-
-    await config.set("capital_max_fund", {"value": 300, "type": "int"})
-    snapshot = config.snapshot()
-    assert snapshot["capital_max_fund"] == 300
-    assert snapshot["autopilot_max_fund"] == 300
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Config key 'autopilot_max_fund' was removed in v1.4.0.0. "
+            "Use 'capital_max_fund' instead."
+        ),
+    ):
+        await config.set("autopilot_max_fund", {"value": 250, "type": "int"})
 
     await Tortoise.close_connections()
 

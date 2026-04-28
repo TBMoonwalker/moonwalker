@@ -130,7 +130,6 @@ const KEY_TARGETS: Record<string, ControlCenterTarget> = {
     market: 'exchange',
     exchange_hostname: 'exchange',
     watcher_ohlcv: 'exchange',
-    autopilot_max_fund: 'capital',
     signal: 'signal',
     symbol_list: 'signal',
     rsi_max: 'filter',

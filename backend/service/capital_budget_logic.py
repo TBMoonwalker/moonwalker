@@ -118,14 +118,12 @@ def normalize_buffer_pct(value: Any) -> float:
 
 def has_capital_budget_config(config: dict[str, Any]) -> bool:
     """Return whether this config snapshot carries a capital limit key."""
-    return "capital_max_fund" in config or "autopilot_max_fund" in config
+    return "capital_max_fund" in config
 
 
 def resolve_capital_max_fund(config: dict[str, Any]) -> float:
-    """Return the canonical capital limit with legacy-key fallback."""
-    if "capital_max_fund" in config:
-        return to_float(config.get("capital_max_fund"), 0.0)
-    return to_float(config.get("autopilot_max_fund"), 0.0)
+    """Return the canonical capital limit."""
+    return to_float(config.get("capital_max_fund"), 0.0)
 
 
 def build_capital_budget_settings(

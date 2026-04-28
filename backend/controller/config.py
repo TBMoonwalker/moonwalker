@@ -11,7 +11,11 @@ from litestar.exceptions import SerializationException
 from litestar.handlers import get, post, put
 from model import AppConfig, OpenTrades
 from service.backup_restore import BackupService
-from service.config import Config
+from service.config import (
+    Config,
+    build_removed_config_key_message,
+    is_removed_config_key,
+)
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
@@ -107,10 +111,7 @@ def _find_live_activation_blockers(
         if not _has_required_value(config_snapshot.get(key)):
             blockers.append({"key": key, "message": message})
 
-    capital_limit = config_snapshot.get(
-        "capital_max_fund",
-        config_snapshot.get("autopilot_max_fund"),
-    )
+    capital_limit = config_snapshot.get("capital_max_fund")
     if not _has_positive_number(capital_limit):
         blockers.append(
             {
@@ -184,6 +185,14 @@ def _validate_live_activation_boundary(updates: dict[str, Any]) -> str | None:
         return None
     if _is_live_activation_attempt(raw_value):
         return LIVE_ACTIVATION_DENIED_MESSAGE
+    return None
+
+
+def _validate_removed_config_keys(updates: ConfigUpdateMap) -> str | None:
+    """Return an error when the payload references a removed config key."""
+    for key in updates:
+        if is_removed_config_key(key):
+            return build_removed_config_key_message(key)
     return None
 
 
@@ -297,6 +306,10 @@ async def _validate_config_updates(
     updates: ConfigUpdateMap,
 ) -> Any | None:
     """Validate shared config update invariants before persistence."""
+    error_message = _validate_removed_config_keys(updates)
+    if error_message:
+        return _config_update_conflict(error_message)
+
     if "signal" in updates:
         error_message = await _validate_csv_signal_switch(config, updates["signal"])
         if error_message:
@@ -383,7 +396,10 @@ async def update_config_key(key: str, request: Request[Any, Any, Any]) -> Any:
         return validation_error
 
     # Save to DB and trigger Pub/Sub
-    success = await config.set(key, value)
+    try:
+        success = await config.set(key, value)
+    except ValueError as exc:
+        return _config_update_conflict(str(exc))
     if success:
         return {"message": f"Config '{key}' updated", "value": value}
     return _config_update_failed_response()
@@ -412,7 +428,10 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
     if validation_error is not None:
         return validation_error
 
-    success = await config.batch_set(updates)
+    try:
+        success = await config.batch_set(updates)
+    except ValueError as exc:
+        return _config_update_conflict(str(exc))
 
     if success:
         return {"message": "Config updated"}

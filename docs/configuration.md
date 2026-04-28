@@ -100,7 +100,6 @@ are not exposed in the UI and must be set via the API.
 | `capital_budget_buffer_pct` | `float` | Optional extra capital-budget buffer for dynamic safety-order requirements. Static DCA always uses `0`. Whole-percent UI values such as `50` and API ratio values such as `0.5` both mean 50%. | `0` |
 | `autopilot` | `bool` | Enable autopilot mode. | `false` |
 | `autopilot_symbol_entry_sizing_enabled` | `bool` | Allow fresh non-neutral Autopilot memory to override new-entry base order size per symbol. When disabled, suggested base orders remain advisory only. | `false` |
-| `autopilot_max_fund` | `int` | Legacy alias for `capital_max_fund`. Kept for one-release compatibility. | `0` |
 | `autopilot_profit_stretch_enabled` | `bool` | Allow Autopilot to stretch the effective capital limit above `capital_max_fund` using realized closed profit. | `false` |
 | `autopilot_profit_stretch_ratio` | `float` | Fraction of positive realized `ClosedTrades.profit` that can be added above the hard principal limit. Negative profit never reduces principal. | `0` |
 | `autopilot_profit_stretch_max` | `float` | Absolute cap for Autopilot profit stretch. `0` disables added stretch even when the ratio is positive. | `0` |
@@ -165,11 +164,12 @@ Moonwalker treats the buffer as `0` whenever `dynamic_dca` is disabled.
 Autopilot can optionally stretch the effective limit above the global principal
 limit using realized closed profit:
 
+- Breaking change in `v1.4.0.0`: `autopilot_max_fund` was removed. Only
+  `capital_max_fund` is accepted in config writes, runtime snapshots, and
+  backup restore payloads.
 - Stretch uses `ClosedTrades.profit` only, not uPNL.
 - Negative realized profit never reduces `capital_max_fund`.
 - `autopilot_profit_stretch_max = 0` means no stretch is added.
-- `autopilot_max_fund` is still read as a legacy alias, but new configs should
-  use `capital_max_fund`.
 
 Example:
 

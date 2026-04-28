@@ -337,10 +337,6 @@ export function buildConfigSubmitPayload(
             capital.max_fund || false,
             'int',
         ),
-        autopilot_max_fund: serializeConfigValue(
-            capital.max_fund || false,
-            'int',
-        ),
         capital_reserve_safety_orders: serializeConfigValue(
             capital.reserve_safety_orders ?? false,
             'bool',

@@ -24,7 +24,7 @@ class GreenPhaseSettings:
     min_profitable_close_ratio: float
     max_extra_deals: int
     max_locked_fund_percent: float
-    autopilot_max_fund: float
+    capital_max_fund: float
     base_order_size: float
 
 
@@ -108,10 +108,7 @@ def build_green_phase_settings(config: dict[str, Any]) -> GreenPhaseSettings:
             config.get("autopilot_green_phase_max_locked_fund_percent"),
             85.0,
         ),
-        autopilot_max_fund=to_float(
-            config.get("capital_max_fund", config.get("autopilot_max_fund")),
-            0.0,
-        ),
+        capital_max_fund=to_float(config.get("capital_max_fund"), 0.0),
         base_order_size=max(0.0, to_float(config.get("bo"), 0.0)),
     )
 
@@ -316,10 +313,10 @@ def apply_green_phase_guardrails(
     evaluated["guardrail_block_reason"] = "reserve_shortfall"
 
     for extra_deals in range(max_extra_deals, 0, -1):
-        if settings.autopilot_max_fund > 0 and settings.base_order_size > 0:
+        if settings.capital_max_fund > 0 and settings.base_order_size > 0:
             projected_locked_percent = (
                 (float(funds_locked) + settings.base_order_size * extra_deals)
-                / settings.autopilot_max_fund
+                / settings.capital_max_fund
             ) * 100
             if projected_locked_percent > settings.max_locked_fund_percent:
                 evaluated["guardrail_block_reason"] = "locked_fund_guardrail"

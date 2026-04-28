@@ -174,6 +174,17 @@ test('buildLoadedConfigState reads legacy entry stretch multiplier', () => {
     assert.equal(state.autopilot.base_order_stretch_max_multiplier, 1.75)
 })
 
+test('buildLoadedConfigState ignores removed legacy autopilot max fund key', () => {
+    const state = buildLoadedConfigState(
+        {
+            autopilot_max_fund: '250',
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(state.capital.max_fund, null)
+})
+
 test('buildLoadedConfigState ignores removed legacy filter shadow payload', () => {
     const defaults = createLoadDefaults()
     const state = buildLoadedConfigState(
