@@ -26,9 +26,11 @@ from service.data_ohlcv import (
 from service.data_timeframes import (
     calculate_min_candle_date,
     resolve_required_history_window,
+    timeframe_to_milliseconds,
 )
 from service.database import run_sqlite_write_with_retry
 from service.exchange import Exchange
+from service.replay_candles import archive_replay_candles_for_deal
 from service.sqlite_timestamps import build_normalized_text_timestamp_sql
 from service.watcher_runtime import get_live_candle_snapshot
 from tortoise import Tortoise
@@ -530,6 +532,60 @@ class Data:
             return None
         return await asyncio.to_thread(rows_to_dataframe, rows)
 
+    async def __repair_archived_replay_if_needed(
+        self,
+        deal_id: str,
+        timerange: str,
+        timestamp_start: float | None,
+        timestamp_end: float | None,
+        df_source: pd.DataFrame | None,
+    ) -> pd.DataFrame | None:
+        """Repair a legacy replay archive on demand when a chart would be sparse."""
+        current_row_count = 0 if df_source is None else len(df_source.index)
+        if df_source is not None and not df_source.empty and current_row_count > 2:
+            return df_source
+
+        should_repair_missing_archive = df_source is None or df_source.empty
+        if not should_repair_missing_archive and timestamp_end is not None:
+            requested_window_ms = max(0, int(timestamp_end) - int(timestamp_start or 0))
+            should_repair_missing_archive = requested_window_ms > (
+                timeframe_to_milliseconds(timerange) * 2
+            )
+
+        if not should_repair_missing_archive:
+            return df_source
+
+        closed_trade = await model.ClosedTrades.get_or_none(deal_id=deal_id)
+        if (
+            closed_trade is None
+            or not str(closed_trade.symbol or "").strip()
+            or closed_trade.open_date is None
+            or closed_trade.close_date is None
+        ):
+            return df_source
+
+        archived_rows = await archive_replay_candles_for_deal(
+            deal_id,
+            closed_trade.symbol,
+            open_date=closed_trade.open_date,
+            close_date=closed_trade.close_date,
+            allow_missing_archive_exchange_repair=True,
+        )
+        if archived_rows <= 0:
+            return df_source
+
+        repaired_df = await self.__get_dataframe_for_replay_deal(
+            deal_id,
+            start_timestamp=timestamp_start,
+            end_timestamp=timestamp_end,
+            fields=("timestamp", "open", "high", "low", "close", "volume"),
+        )
+        if repaired_df is None:
+            return df_source
+        if current_row_count >= len(repaired_df.index):
+            return df_source
+        return repaired_df
+
     async def get_ohlcv_for_pair(
         self,
         pair: str,
@@ -581,6 +637,13 @@ class Data:
             start_timestamp=timestamp_start,
             end_timestamp=timestamp_end,
             fields=("timestamp", "open", "high", "low", "close", "volume"),
+        )
+        df_source = await self.__repair_archived_replay_if_needed(
+            normalized_deal_id,
+            timerange,
+            timestamp_start,
+            timestamp_end,
+            df_source,
         )
         return await asyncio.to_thread(
             build_archived_ohlcv_payload,
