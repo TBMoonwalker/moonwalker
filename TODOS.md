@@ -1,5 +1,60 @@
 # TODOS
 
+## Deferred
+
+### Prioritize eligible waiting campaigns over brand-new symbols when capacity is constrained
+
+**What:** Prefer an eligible `flat_waiting_reentry` campaign over a brand-new
+symbol when capital or bot-slot admission is scarce.
+
+**Why:** The approved sidestep design treats re-entry as part of one ongoing
+campaign, but v1 intentionally makes waiting campaigns compete normally for
+capacity. That keeps the first release simpler, yet it can still leave a
+sidestepped symbol stranded while fresh symbols consume the available slots.
+
+**Pros:** Preserves the operator mental model that one campaign stays alive
+until TP, improves continuity after tactical exits, and makes future
+campaign-aware ranking feel more intentional.
+
+**Cons:** Adds scheduling policy on top of the already-more-complex campaign
+lifecycle and interacts with the shared admission guard plus campaign-owned
+re-entry rules.
+
+**Context:** If this lands later, the likely implementation seams are the
+shared admission flow in `backend/service/signal_runtime.py` and the future
+campaign summary/admission read model.
+
+**Depends on / blocked by:** Depends on v1 `SpotCampaigns`, the shared
+campaign-aware admission guard, and the waiting-campaign summary read model
+shipping first.
+
+### Add campaign-level analytics and grouped history for sidestep missions
+
+**What:** Add campaign-level analytics and grouped history so operators can see
+the cumulative PnL and leg sequence for one sidestep campaign, not only the
+individual leg closes.
+
+**Why:** The approved v1 keeps lifecycle truth and `ClosedTrades` semantics
+clean, but it still reports leg summaries first. That is enough to ship safely,
+yet it makes multi-leg campaigns harder to evaluate as one mission.
+
+**Pros:** Improves operator trust in the campaign model, makes performance of a
+multi-leg sidestep easier to understand, and creates a cleaner base for future
+reporting or Autopilot features.
+
+**Cons:** Adds reporting and read-model complexity on top of the already
+cross-cutting persistence changes, and it is not required for the core v1
+lifecycle to work.
+
+**Context:** If this is picked up later, the likely seams are the future
+`SpotCampaigns` read model, `backend/service/statistic.py`,
+`backend/service/data.py`, and the closed-trades / waiting-campaign frontend
+surfaces.
+
+**Depends on / blocked by:** Depends on v1 `campaign_id` propagation,
+`close_reason` policy updates, and the waiting-campaign/read-model foundations
+landing first.
+
 ## Completed
 
 ### Reduce Control Center overview card nesting

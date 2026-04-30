@@ -76,6 +76,10 @@ export interface DcaConfigSection {
     ss: number | null
     os: number | null
     trade_safety_order_budget_ratio: number | null
+    sidestep_campaign_enabled: boolean
+    sidestep_bearish_strategy: string | null
+    sidestep_reentry_cooldown_candles: number | null
+    sidestep_reentry_requires_fresh_long_signal: boolean
     tp: number | null
     sl: number | null
 }
@@ -325,6 +329,22 @@ export function buildConfigSubmitPayload(
         trade_safety_order_budget_ratio: serializeConfigValue(
             dca.trade_safety_order_budget_ratio ?? 0.95,
             'float',
+        ),
+        sidestep_campaign_enabled: serializeConfigValue(
+            dca.sidestep_campaign_enabled ?? false,
+            'bool',
+        ),
+        sidestep_bearish_strategy: serializeConfigValue(
+            toNullableConfigString(dca.sidestep_bearish_strategy),
+            'str',
+        ),
+        sidestep_reentry_cooldown_candles: serializeConfigValue(
+            dca.sidestep_reentry_cooldown_candles ?? 0,
+            'int',
+        ),
+        sidestep_reentry_requires_fresh_long_signal: serializeConfigValue(
+            dca.sidestep_reentry_requires_fresh_long_signal ?? true,
+            'bool',
         ),
         tp: serializeConfigValue(dca.tp || false, 'float'),
         sl: serializeConfigValue(dca.sl || false, 'float'),

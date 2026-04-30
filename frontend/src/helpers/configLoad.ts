@@ -236,6 +236,17 @@ export function buildLoadedConfigState(
             os: toNumberOrNull(response.os),
             trade_safety_order_budget_ratio:
                 toNumberOrNull(response.trade_safety_order_budget_ratio) ?? 0.95,
+            sidestep_campaign_enabled:
+                parseBooleanString(response.sidestep_campaign_enabled) ?? false,
+            sidestep_bearish_strategy: toNullableString(
+                response.sidestep_bearish_strategy
+            ),
+            sidestep_reentry_cooldown_candles:
+                toNumberOrNull(response.sidestep_reentry_cooldown_candles) ?? 0,
+            sidestep_reentry_requires_fresh_long_signal:
+                parseBooleanString(
+                    response.sidestep_reentry_requires_fresh_long_signal
+                ) ?? true,
             tp: toNumberOrNull(response.tp),
             sl: toNumberOrNull(response.sl),
         },

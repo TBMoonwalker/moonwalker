@@ -23,6 +23,7 @@ from service.signal_runtime import (
     resolve_signal_entry_orders,
     update_waiting_log_state,
 )
+from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
 from service.strategy_capability import (
     ensure_strategy_supported,
@@ -401,6 +402,20 @@ class SignalPlugin:
                         # Slow down on many symbols at once
                         await asyncio.sleep(1)
                         if signal:
+                            sidestep_campaigns = (
+                                await SpotSidestepCampaignService.instance()
+                            )
+                            await sidestep_campaigns.record_long_signal(
+                                symbol,
+                                signal_name="asap",
+                                strategy_name=(
+                                    str(self.config.get("signal_strategy") or "")
+                                    or None
+                                ),
+                                timeframe=self._strategy_timeframe,
+                                metadata_json=None,
+                                source="asap",
+                            )
                             candidate_symbols.append(symbol)
 
                     admission_batch = await resolve_signal_admission_batch(

@@ -172,6 +172,7 @@ export function useConfigEditorAssembly(
 
     const rules = buildConfigRules({
         dca: pageState.dca,
+        exchange: pageState.exchange,
         getAsapMissingFieldsLabel: signalFlow.getAsapMissingFieldsLabel,
         isAsapExchangeReady: signalFlow.isAsapExchangeReady,
         isCurrencyConfigured: signalFlow.isCurrencyConfigured,

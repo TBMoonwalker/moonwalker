@@ -9,6 +9,7 @@ from service.strategy_capability import (
 
 def test_supported_strategy_has_no_support_error() -> None:
     assert get_strategy_support_error("ema_cross") is None
+    assert get_strategy_support_error("ema_swing_reverse") is None
 
 
 def test_unsupported_strategy_reports_missing_indicator_methods() -> None:
@@ -29,6 +30,7 @@ def test_filter_supported_strategies_removes_unsupported_entries() -> None:
 def test_get_strategy_min_history_candles_returns_expected_warmup() -> None:
     assert get_strategy_min_history_candles("ema_cross") == 22
     assert get_strategy_min_history_candles("ema_low") == 200
+    assert get_strategy_min_history_candles("ema_swing_reverse") == 200
     assert get_strategy_min_history_candles(None) == 0
 
 

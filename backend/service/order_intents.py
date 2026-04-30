@@ -15,6 +15,7 @@ class ManualSellOrderIntent(TypedDict):
     actual_pnl: float
     total_cost: float
     current_price: float
+    sell_reason: str
 
 
 class ManualBuyOrderIntent(TypedDict):
@@ -44,6 +45,7 @@ def build_manual_sell_order_intent(
         "actual_pnl": float(actual_pnl),
         "total_cost": float(trades["total_cost"]),
         "current_price": float(trades["current_price"]),
+        "sell_reason": "manual_sell",
     }
 
 

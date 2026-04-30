@@ -9,6 +9,7 @@ class ClosedTrades(Model):
 
     symbol = fields.CharField(max_length=50)
     deal_id = fields.CharField(max_length=36, null=True, unique=True)
+    campaign_id = fields.CharField(max_length=36, null=True)
     execution_history_complete = fields.BooleanField(default=False)
     so_count = fields.IntField(null=True)
     profit = fields.FloatField(null=True)
@@ -20,10 +21,11 @@ class ClosedTrades(Model):
     open_date = fields.TextField(null=True)
     close_date = fields.TextField(null=True)
     duration = fields.TextField(null=True)
+    close_reason = fields.TextField(null=True)
 
     class Meta:
         table = "closedtrades"
-        indexes = (("close_date",),)
+        indexes = (("close_date",), ("campaign_id", "close_date"), ("close_reason",))
 
     def __dict__(self):
-        return f"'symbol': {self.symbol}, 'deal_id': {self.deal_id}, 'execution_history_complete': {self.execution_history_complete}, 'so_count': {self.so_count}, 'profit': {self.profit}, 'profit_percent': {self.profit_percent}, 'amount': {self.amount}, 'cost': {self.cost}, 'tp_price': {self.tp_price}, 'avg_price': {self.avg_price}, 'open_date': {self.open_date}, 'close_date': {self.close_date}, 'duration': {self.duration}"
+        return f"'symbol': {self.symbol}, 'deal_id': {self.deal_id}, 'campaign_id': {self.campaign_id}, 'execution_history_complete': {self.execution_history_complete}, 'so_count': {self.so_count}, 'profit': {self.profit}, 'profit_percent': {self.profit_percent}, 'amount': {self.amount}, 'cost': {self.cost}, 'tp_price': {self.tp_price}, 'avg_price': {self.avg_price}, 'open_date': {self.open_date}, 'close_date': {self.close_date}, 'duration': {self.duration}, 'close_reason': {self.close_reason}"

@@ -110,6 +110,36 @@ class SignalPluginConfigView:
 
 
 @dataclass(frozen=True)
+class SidestepCampaignConfigView:
+    """Typed sidestep campaign settings derived from the config snapshot."""
+
+    enabled: bool
+    market: str
+    bearish_strategy: str | None
+    reentry_cooldown_candles: int
+    reentry_requires_fresh_long_signal: bool
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "SidestepCampaignConfigView":
+        """Build normalized sidestep campaign settings from raw config."""
+        return cls(
+            enabled=bool(config.get("sidestep_campaign_enabled", False)),
+            market=_optional_string(config.get("market")) or "spot",
+            bearish_strategy=_optional_string(config.get("sidestep_bearish_strategy")),
+            reentry_cooldown_candles=max(
+                0,
+                _int_config_default_only(
+                    config.get("sidestep_reentry_cooldown_candles"),
+                    default=0,
+                ),
+            ),
+            reentry_requires_fresh_long_signal=bool(
+                config.get("sidestep_reentry_requires_fresh_long_signal", True)
+            ),
+        )
+
+
+@dataclass(frozen=True)
 class WatcherRuntimeConfigView:
     """Typed watcher runtime settings derived from the config snapshot."""
 

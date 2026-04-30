@@ -18,6 +18,7 @@ REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {
     "ema_down": ("calculate_ema",),
     "ema_low": ("calculate_ema", "get_close_price"),
     "ema_swing": ("calculate_ema", "get_close_price"),
+    "ema_swing_reverse": ("calculate_ema", "get_close_price"),
     "ichimoku_cross": ("calculate_ichimoku_cross",),
     "tothemoonv2": (
         "calculate_ema_slope",
@@ -33,6 +34,7 @@ MIN_HISTORY_CANDLES_BY_STRATEGY: dict[str, int] = {
     "ema_down": 200,
     "ema_low": 200,
     "ema_swing": 200,
+    "ema_swing_reverse": 200,
     "ichimoku_cross": 52,
     "tothemoonv2": 50,
 }

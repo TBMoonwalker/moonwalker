@@ -9,6 +9,7 @@ class TradeExecutions(Model):
 
     id = fields.IntField(primary_key=True)
     deal_id = fields.CharField(max_length=36)
+    campaign_id = fields.CharField(max_length=36, null=True)
     symbol = fields.CharField(max_length=50)
     side = fields.CharField(max_length=8)
     role = fields.CharField(max_length=32)
@@ -30,6 +31,7 @@ class TradeExecutions(Model):
         table = "tradeexecutions"
         indexes = (
             ("deal_id", "timestamp"),
+            ("campaign_id", "timestamp"),
             ("symbol", "timestamp"),
             ("side", "role"),
         )

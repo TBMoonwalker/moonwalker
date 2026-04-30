@@ -29,6 +29,7 @@ export type ClosedTradeRow = {
   id: number
   symbol: string
   deal_id?: string | null
+  campaign_id?: string | null
   execution_history_complete: boolean
   amount: number | string
   cost: number | string
@@ -40,8 +41,24 @@ export type ClosedTradeRow = {
   open_date: string
   duration: string
   close_date: string
+  close_reason?: string | null
   precision: number
   key: number
+}
+
+export type WaitingCampaignRow = {
+  campaign_id: string
+  symbol: string
+  state: string
+  sidestep_count: number
+  last_exit_reason?: string | null
+  cooldown_until?: string | null
+  last_transition_at: string
+  tp_percent: number
+  gate_status: string
+  gate_detail: string
+  last_long_signal_at?: string | null
+  key: string
 }
 
 export type UnsellableTradeRow = {
@@ -135,7 +152,8 @@ export const useTradesStore = defineStore('trades', {
   state: () => ({
     openTrades: [] as OpenTradeRow[],
     closedTrades: [] as ClosedTradeRow[],
-    unsellableTrades: [] as UnsellableTradeRow[]
+    unsellableTrades: [] as UnsellableTradeRow[],
+    waitingCampaigns: [] as WaitingCampaignRow[]
   }),
   actions: {
     setOpenTrades(raw: any[]) {
@@ -209,7 +227,9 @@ export const useTradesStore = defineStore('trades', {
           close_date: String(val.close_date ?? ''),
           duration: formatDuration(val.duration),
           deal_id: val.deal_id ?? null,
+          campaign_id: val.campaign_id ?? null,
           execution_history_complete: Boolean(val.execution_history_complete ?? false),
+          close_reason: val.close_reason ?? null,
           precision: Math.max(tpPrecision, avgPrecision)
         }
       })
@@ -243,6 +263,22 @@ export const useTradesStore = defineStore('trades', {
           unsellable_since: val.unsellable_since ?? null
         }
       })
+    },
+    setWaitingCampaigns(raw: any[]) {
+      this.waitingCampaigns = raw.map((val: any) => ({
+        campaign_id: String(val.campaign_id ?? ''),
+        symbol: String(val.symbol ?? ''),
+        state: String(val.state ?? ''),
+        sidestep_count: Number(val.sidestep_count ?? 0),
+        last_exit_reason: val.last_exit_reason ?? null,
+        cooldown_until: val.cooldown_until ?? null,
+        last_transition_at: String(val.last_transition_at ?? ''),
+        tp_percent: Number(val.tp_percent ?? 0),
+        gate_status: String(val.gate_status ?? ''),
+        gate_detail: String(val.gate_detail ?? ''),
+        last_long_signal_at: val.last_long_signal_at ?? null,
+        key: String(val.campaign_id ?? ''),
+      }))
     }
   }
 })

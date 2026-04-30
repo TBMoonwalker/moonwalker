@@ -9,6 +9,7 @@ class OpenTrades(Model):
 
     symbol = fields.CharField(max_length=50, unique=True)
     deal_id = fields.CharField(max_length=36, null=True, unique=True)
+    campaign_id = fields.CharField(max_length=36, null=True)
     execution_history_complete = fields.BooleanField(default=True)
     so_count = fields.IntField(default=0)
     profit = fields.FloatField(default=0.0)
@@ -35,6 +36,7 @@ class OpenTrades(Model):
     def __dict__(self):
         return (
             f"'symbol': {self.symbol}, 'deal_id': {self.deal_id}, "
+            f"'campaign_id': {self.campaign_id}, "
             f"'execution_history_complete': {self.execution_history_complete}, "
             f"'so_count': {self.so_count}, "
             f"'profit': {self.profit}, 'profit_percent': {self.profit_percent}, "

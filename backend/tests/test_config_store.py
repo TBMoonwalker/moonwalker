@@ -366,6 +366,7 @@ def test_config_discovers_runtime_metadata_relative_to_backend_root(
     signal_plugins = config._Config__get_filenames_in_directory("signals")
 
     assert "ema_swing" in strategies
+    assert "ema_swing_reverse" in strategies
     assert "asap" in signal_plugins
 
 

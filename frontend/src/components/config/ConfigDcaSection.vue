@@ -180,6 +180,71 @@
                     placeholder="0.95"
                 />
             </n-form-item>
+            <template v-if="dca.enabled">
+                <n-alert
+                    v-if="showSidestepSpotOnlyNotice"
+                    class="sidestep-campaign-note"
+                    type="info"
+                    :bordered="false"
+                >
+                    Spot sidestep campaigns only run when the exchange market is set
+                    to spot. You can keep these settings configured here, but the
+                    service stays inactive on non-spot markets.
+                </n-alert>
+                <n-form-item
+                    label="Spot sidestep campaigns"
+                    path="sidestep_campaign_enabled"
+                    label-placement="left"
+                >
+                    <n-checkbox v-model:checked="dca.sidestep_campaign_enabled">
+                        Enable sell, wait flat, and rebuy campaigns on bearish
+                        signals
+                    </n-checkbox>
+                </n-form-item>
+                <n-alert
+                    v-if="dca.sidestep_campaign_enabled"
+                    class="sidestep-campaign-note"
+                    type="info"
+                    :bordered="false"
+                >
+                    Bearish sidestep exits sell the live spot leg, pause DCA while
+                    flat, and wait for a long re-entry before the take-profit mission
+                    is considered complete.
+                </n-alert>
+                <template v-if="dca.sidestep_campaign_enabled">
+                    <n-form-item
+                        label="Bearish sidestep strategy"
+                        path="sidestep_bearish_strategy"
+                    >
+                        <n-select
+                            v-model:value="dca.sidestep_bearish_strategy"
+                            placeholder="Select"
+                            :options="strategyOptions"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Re-entry cooldown (candles)"
+                        path="sidestep_reentry_cooldown_candles"
+                    >
+                        <n-input-number
+                            v-model:value="dca.sidestep_reentry_cooldown_candles"
+                            :min="0"
+                            placeholder="0"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Require fresh long signal before re-entry"
+                        path="sidestep_reentry_requires_fresh_long_signal"
+                        label-placement="left"
+                    >
+                        <n-checkbox
+                            v-model:checked="
+                                dca.sidestep_reentry_requires_fresh_long_signal
+                            "
+                        />
+                    </n-form-item>
+                </template>
+            </template>
         </n-form>
     </n-card>
 </template>
@@ -191,6 +256,7 @@ import type { DcaModel, StringSelectOption } from '../../config-editor/types'
 
 const props = defineProps<{
     dca: DcaModel
+    market: string | null
     rules: FormRules
     sellOrderTypeOptions: StringSelectOption[]
     showAdvancedGeneral: boolean
@@ -229,6 +295,12 @@ const tpLimitPrearmConflictWarningText = computed(() => {
               }`
     return `TP limit pre-arm does not support ${conflictList}. Disable ${conflictList} before using pre-armed limit exits.`
 })
+const normalizedMarket = computed(() =>
+    String(props.market || 'spot').trim().toLowerCase(),
+)
+const showSidestepSpotOnlyNotice = computed(
+    () => props.dca.enabled && normalizedMarket.value !== 'spot',
+)
 
 async function validate(): Promise<boolean> {
     if (!formRef.value) {
@@ -246,6 +318,10 @@ defineExpose({
 
 <style scoped>
 .tp-limit-prearm-warning {
+    margin-bottom: 18px;
+}
+
+.sidestep-campaign-note {
     margin-bottom: 18px;
 }
 </style>

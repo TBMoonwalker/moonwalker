@@ -8,11 +8,13 @@ from uuid import uuid4
 import model
 from service.database import run_sqlite_write_with_retry
 from service.replay_candles import archive_replay_candles_for_deal
+from tortoise.expressions import F
 from tortoise.transactions import in_transaction
 
 SUMMARY_TRADE_KEYS = {
     "symbol",
     "deal_id",
+    "campaign_id",
     "execution_history_complete",
     "so_count",
     "profit",
@@ -24,6 +26,7 @@ SUMMARY_TRADE_KEYS = {
     "open_date",
     "close_date",
     "duration",
+    "close_reason",
 }
 
 
@@ -52,6 +55,7 @@ def _build_trade_execution_payload(
     """Normalize a trade-row payload into a TradeExecutions insert payload."""
     return {
         "deal_id": deal_id,
+        "campaign_id": payload.get("campaign_id"),
         "symbol": str(payload.get("symbol") or ""),
         "side": str(payload.get("side") or "buy"),
         "role": role,
@@ -114,11 +118,83 @@ async def _resolve_open_deal_state(symbol: str, conn: Any) -> tuple[str, bool]:
     return deal_id, bool(open_trade.execution_history_complete)
 
 
+async def _apply_buy_campaign_context(
+    conn: Any,
+    *,
+    symbol: str,
+    deal_id: str,
+    context: dict[str, Any] | None,
+) -> str | None:
+    """Persist active campaign state for a buy leg and return campaign id."""
+    if not context:
+        return None
+
+    campaign_id = str(context.get("campaign_id") or "").strip() or None
+    if campaign_id is None:
+        return None
+
+    update_payload = {
+        "symbol": symbol,
+        "state": str(context.get("state") or "active_long"),
+        "started_at": str(context.get("started_at") or ""),
+        "last_transition_at": str(context.get("last_transition_at") or ""),
+        "current_deal_id": deal_id,
+        "tp_percent": float(context.get("tp_percent") or 0.0),
+        "metadata_json": context.get("metadata_json"),
+        "cooldown_until": None,
+    }
+    if bool(context.get("create_campaign")):
+        await model.SpotCampaigns.create(
+            campaign_id=campaign_id,
+            sidestep_count=int(context.get("sidestep_count") or 0),
+            last_exit_reason=context.get("last_exit_reason"),
+            **update_payload,
+            using_db=conn,
+        )
+    else:
+        await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(conn).update(
+            **update_payload,
+        )
+    return campaign_id
+
+
+async def _apply_close_campaign_context(
+    conn: Any,
+    *,
+    campaign_id: str | None,
+    context: dict[str, Any] | None,
+) -> None:
+    """Persist campaign transition after a completed sell leg."""
+    if not context or not campaign_id:
+        return
+
+    update_payload = {
+        "state": str(context.get("state") or ""),
+        "last_transition_at": str(context.get("last_transition_at") or ""),
+        "current_deal_id": None,
+        "last_exit_reason": context.get("last_exit_reason"),
+        "cooldown_until": context.get("cooldown_until"),
+        "tp_percent": float(context.get("tp_percent") or 0.0),
+        "metadata_json": context.get("metadata_json"),
+    }
+    sidestep_increment = int(context.get("sidestep_increment") or 0)
+    if sidestep_increment > 0:
+        await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(conn).update(
+            sidestep_count=F("sidestep_count") + sidestep_increment,
+            **update_payload,
+        )
+        return
+    await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(conn).update(
+        **update_payload,
+    )
+
+
 async def persist_buy_trade(
     symbol: str,
     payload: dict[str, Any],
     *,
     create_open_trade: bool,
+    campaign_context: dict[str, Any] | None = None,
 ) -> None:
     """Persist a filled buy trade and create the open-trade row when needed."""
 
@@ -130,7 +206,14 @@ async def persist_buy_trade(
             else:
                 deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
 
+            campaign_id = await _apply_buy_campaign_context(
+                conn,
+                symbol=symbol,
+                deal_id=deal_id,
+                context=campaign_context,
+            )
             payload["deal_id"] = deal_id
+            payload["campaign_id"] = campaign_id
             await model.Trades.create(**payload, using_db=conn)
             await model.TradeExecutions.create(
                 **_build_trade_execution_payload(
@@ -144,8 +227,13 @@ async def persist_buy_trade(
                 await model.OpenTrades.create(
                     symbol=symbol,
                     deal_id=deal_id,
+                    campaign_id=campaign_id,
                     execution_history_complete=history_complete,
                     using_db=conn,
+                )
+            elif campaign_id is not None:
+                await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
+                    campaign_id=campaign_id,
                 )
 
     await run_sqlite_write_with_retry(
@@ -153,7 +241,12 @@ async def persist_buy_trade(
     )
 
 
-async def persist_closed_trade(symbol: str, payload: dict[str, Any]) -> None:
+async def persist_closed_trade(
+    symbol: str,
+    payload: dict[str, Any],
+    *,
+    campaign_context: dict[str, Any] | None = None,
+) -> None:
     """Persist a closed trade and remove its open-trade rows."""
 
     async def _persist_sell() -> None:
@@ -166,6 +259,16 @@ async def persist_closed_trade(symbol: str, payload: dict[str, Any]) -> None:
             }
             summary_payload["deal_id"] = deal_id
             summary_payload["execution_history_complete"] = history_complete
+            summary_payload["campaign_id"] = (
+                campaign_context.get("campaign_id")
+                if campaign_context
+                else payload.get("campaign_id")
+            )
+            summary_payload["close_reason"] = (
+                campaign_context.get("close_reason")
+                if campaign_context
+                else payload.get("close_reason")
+            )
             await model.ClosedTrades.create(**summary_payload, using_db=conn)
 
             for sell_execution in payload.get("sell_executions") or []:
@@ -176,7 +279,10 @@ async def persist_closed_trade(symbol: str, payload: dict[str, Any]) -> None:
                 await model.TradeExecutions.create(
                     **_build_trade_execution_payload(
                         deal_id,
-                        sell_execution,
+                        {
+                            **sell_execution,
+                            "campaign_id": summary_payload.get("campaign_id"),
+                        },
                         role=str(sell_execution.get("role") or "final_sell"),
                     ),
                     using_db=conn,
@@ -190,6 +296,12 @@ async def persist_closed_trade(symbol: str, payload: dict[str, Any]) -> None:
             )
             await model.Trades.filter(symbol=symbol).using_db(conn).delete()
             await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
+            await _apply_close_campaign_context(
+                conn,
+                campaign_id=str(summary_payload.get("campaign_id") or "").strip()
+                or None,
+                context=campaign_context,
+            )
 
     await run_sqlite_write_with_retry(
         _persist_sell, f"persisting sell order for {symbol}"
@@ -207,6 +319,15 @@ async def persist_manual_buy_add(
         async with in_transaction() as conn:
             deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
             trade_payload["deal_id"] = deal_id
+            open_trade = (
+                await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
+            )
+            campaign_id = (
+                str(open_trade.campaign_id).strip()
+                if open_trade is not None and open_trade.campaign_id
+                else None
+            )
+            trade_payload["campaign_id"] = campaign_id
             await model.Trades.create(**trade_payload, using_db=conn)
             await model.TradeExecutions.create(
                 **_build_trade_execution_payload(
@@ -217,6 +338,7 @@ async def persist_manual_buy_add(
                 using_db=conn,
             )
             open_trade_payload["deal_id"] = deal_id
+            open_trade_payload["campaign_id"] = campaign_id
             open_trade_payload["execution_history_complete"] = history_complete
             updated = (
                 await model.OpenTrades.filter(symbol=symbol)
@@ -253,7 +375,11 @@ async def persist_unsellable_remainder(
     )
 
 
-async def persist_stopped_trade(symbol: str) -> None:
+async def persist_stopped_trade(
+    symbol: str,
+    *,
+    campaign_context: dict[str, Any] | None = None,
+) -> None:
     """Delete open-trade state for a stopped symbol."""
 
     async def _persist_stop() -> None:
@@ -263,6 +389,15 @@ async def persist_stopped_trade(symbol: str) -> None:
             )
             await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
             await model.Trades.filter(symbol=symbol).using_db(conn).delete()
+            await _apply_close_campaign_context(
+                conn,
+                campaign_id=(
+                    str(open_trade.campaign_id).strip()
+                    if open_trade is not None and open_trade.campaign_id
+                    else None
+                ),
+                context=campaign_context,
+            )
             if open_trade and open_trade.deal_id:
                 await model.TradeExecutions.filter(
                     deal_id=open_trade.deal_id,

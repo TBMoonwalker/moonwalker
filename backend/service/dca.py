@@ -26,6 +26,7 @@ from service.dca_tp_state import (
 from service.exchange import Exchange
 from service.indicators import Indicators
 from service.orders import Orders
+from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
 from service.strategy_capability import ensure_strategy_supported
 from service.trades import Trades
@@ -47,6 +48,7 @@ class Dca:
         self.statistic = Statistic()
         self.trades = Trades()
         self.utils = helper.Utils()
+        self.sidestep_campaigns: SpotSidestepCampaignService | None = None
         self.config: dict[str, Any] | None = None
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
         self._pending_tp_confirmations: dict[str, TpConfirmationState] = {}
@@ -55,6 +57,12 @@ class Dca:
     def __get_monotonic_time(self) -> float:
         """Return a monotonic timestamp for TP confirmation timing."""
         return asyncio.get_running_loop().time()
+
+    async def _get_sidestep_campaigns(self) -> SpotSidestepCampaignService:
+        """Return the shared sidestep campaign service instance."""
+        if self.sidestep_campaigns is None:
+            self.sidestep_campaigns = await SpotSidestepCampaignService.instance()
+        return self.sidestep_campaigns
 
     def __runtime_config(self) -> DcaRuntimeConfigView:
         """Return the typed DCA runtime settings for the current config snapshot."""
@@ -215,6 +223,26 @@ class Dca:
                     payload_changed = current_payload != previous_payload
 
         return result, payload_changed
+
+    async def __sidestep_exit_strategy(self, symbol: str) -> bool:
+        """Return whether the configured bearish sidestep strategy wants to exit."""
+        sidestep_campaigns = await self._get_sidestep_campaigns()
+        if not sidestep_campaigns.is_enabled(self.config):
+            return False
+
+        bearish_strategy_name = str(
+            (self.config or {}).get("sidestep_bearish_strategy") or ""
+        ).strip()
+        if not bearish_strategy_name:
+            return False
+
+        strategy_timeframe = resolve_timeframe(self.config or {})
+        sidestep_strategy_plugin = self.__get_strategy_plugin(
+            bearish_strategy_name,
+            strategy_timeframe,
+            "sidestep_exit",
+        )
+        return bool(await sidestep_strategy_plugin.run(symbol, "sell"))
 
     def __tp_strategy(self, symbol: str) -> bool:
         result = False
@@ -800,6 +828,15 @@ class Dca:
             trades = await self.trades.get_trades_for_orders(ticker["ticker"]["symbol"])
             if trades:
                 runtime_config = self.__runtime_config()
+                sidestep_campaigns = await self._get_sidestep_campaigns()
+                ensured_campaign_id = (
+                    await sidestep_campaigns.ensure_campaign_for_open_trade(
+                        trades,
+                        self.config or {},
+                    )
+                )
+                if ensured_campaign_id and not trades.get("campaign_id"):
+                    trades = {**trades, "campaign_id": ensured_campaign_id}
 
                 # Check Autopilot
                 profit = await self.statistic.get_profit()
@@ -809,6 +846,9 @@ class Dca:
                     self.config,
                 )
 
+                if await self.__should_sidestep_exit(trades, price, trading_policy):
+                    return
+
                 # Check DCA (only when DCA is enabled)
                 if runtime_config.dca_enabled and not trades.get(
                     "is_unsellable", False
@@ -817,6 +857,51 @@ class Dca:
 
                 # Check TP
                 await self.__calculate_tp(price, trades, trading_policy)
+
+    async def __should_sidestep_exit(
+        self,
+        trades: dict[str, Any],
+        current_price: float,
+        trading_policy: ResolvedTradingPolicy,
+    ) -> bool:
+        """Sell early into flat-waiting mode when the bearish sidestep says so."""
+        sidestep_campaigns = await self._get_sidestep_campaigns()
+        if not sidestep_campaigns.is_enabled(self.config):
+            return False
+        if trades.get("is_unsellable", False):
+            return False
+        if not trades.get("campaign_id"):
+            return False
+
+        total_amount = float(trades.get("total_amount") or 0.0)
+        total_cost = float(trades.get("total_cost") or 0.0)
+        total_fee = float(trades.get("fee") or 0.0)
+        if total_amount <= 0:
+            return False
+
+        average_buy_price = (total_cost + (total_cost * total_fee)) / total_amount
+        take_profit_price = average_buy_price * (1 + (trading_policy.take_profit / 100))
+        if current_price >= take_profit_price:
+            return False
+
+        if not await self.__sidestep_exit_strategy(trades["symbol"]):
+            return False
+
+        actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
+        order = {
+            "symbol": trades["symbol"],
+            "direction": trades["direction"],
+            "side": "sell",
+            "type_sell": "order_sell",
+            "sell_reason": "sidestep_exit",
+            "actual_pnl": actual_pnl,
+            "total_cost": trades["total_cost"],
+            "current_price": current_price,
+            "tp_price": take_profit_price,
+            "campaign_id": trades.get("campaign_id"),
+        }
+        await self.orders.receive_sell_order(order, self.config or {})
+        return True
 
     async def __evaluate_dynamic_dca_trigger(
         self,

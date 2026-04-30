@@ -238,6 +238,11 @@ class Database:
             ("tickers", "idx_tickers_timestamp", ("timestamp",)),
             ("trades", "idx_trades_symbol", ("symbol",)),
             ("trades", "idx_trades_deal_id_timestamp", ("deal_id", "timestamp")),
+            (
+                "trades",
+                "idx_trades_campaign_id_timestamp",
+                ("campaign_id", "timestamp"),
+            ),
             ("trades", "idx_trades_symbol_baseorder", ("symbol", "baseorder")),
             (
                 "trades",
@@ -246,9 +251,20 @@ class Database:
             ),
             ("closedtrades", "idx_closedtrades_close_date", ("close_date",)),
             (
+                "closedtrades",
+                "idx_closedtrades_campaign_id_close_date",
+                ("campaign_id", "close_date"),
+            ),
+            ("closedtrades", "idx_closedtrades_close_reason", ("close_reason",)),
+            (
                 "tradeexecutions",
                 "idx_tradeexecutions_deal_time",
                 ("deal_id", "timestamp"),
+            ),
+            (
+                "tradeexecutions",
+                "idx_tradeexecutions_campaign_time",
+                ("campaign_id", "timestamp"),
             ),
             (
                 "tradeexecutions",
@@ -256,6 +272,18 @@ class Database:
                 ("symbol", "timestamp"),
             ),
             ("tradeexecutions", "idx_tradeexecutions_side_role", ("side", "role")),
+            ("spotcampaigns", "idx_spotcampaigns_symbol", ("symbol",)),
+            ("spotcampaigns", "idx_spotcampaigns_state_symbol", ("state", "symbol")),
+            (
+                "spotcampaigns",
+                "idx_spotcampaigns_current_deal_id",
+                ("current_deal_id",),
+            ),
+            (
+                "spotcampaigns",
+                "idx_spotcampaigns_last_transition_at",
+                ("last_transition_at",),
+            ),
             (
                 "tradereplaycandles",
                 "idx_tradereplaycandles_deal_time",
@@ -282,6 +310,7 @@ class Database:
         desired_unique_indexes: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             ("opentrades", "uidx_opentrades_deal_id", ("deal_id",)),
             ("closedtrades", "uidx_closedtrades_deal_id", ("deal_id",)),
+            ("spotcampaigns", "uidx_spotcampaigns_campaign_id", ("campaign_id",)),
             ("unsellabletrades", "uidx_unsellabletrades_deal_id", ("deal_id",)),
         )
         existing_signatures: set[tuple[str, tuple[str, ...]]] = set()
@@ -333,13 +362,20 @@ class Database:
 
         connection = Tortoise.get_connection("default")
         table_columns = {
-            "trades": (("deal_id", "TEXT NULL"),),
+            "trades": (
+                ("deal_id", "TEXT NULL"),
+                ("campaign_id", "TEXT NULL"),
+            ),
+            "tradeexecutions": (("campaign_id", "TEXT NULL"),),
             "opentrades": (
                 ("deal_id", "TEXT NULL"),
+                ("campaign_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 1"),
             ),
             "closedtrades": (
                 ("deal_id", "TEXT NULL"),
+                ("campaign_id", "TEXT NULL"),
+                ("close_reason", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
             ),
             "unsellabletrades": (

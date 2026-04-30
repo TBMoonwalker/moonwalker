@@ -4,6 +4,11 @@ import type { Ref } from 'vue'
 interface DcaRulesState {
     dynamic: boolean
     enabled: boolean
+    sidestep_campaign_enabled: boolean
+}
+
+interface ExchangeRulesState {
+    market: string | null
 }
 
 interface SignalRulesState {
@@ -18,6 +23,7 @@ interface SignalRulesState {
 
 interface BuildConfigRulesOptions {
     dca: Ref<DcaRulesState>
+    exchange: Ref<ExchangeRulesState>
     getAsapMissingFieldsLabel: () => string
     isAsapExchangeReady: () => boolean
     isCurrencyConfigured: () => boolean
@@ -262,6 +268,28 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
         },
         tp: {
             validator: requiredAfterSubmit('Please add tp'),
+            trigger: ['submit', 'change'],
+        },
+        sidestep_bearish_strategy: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (
+                    !options.submitAttempted.value ||
+                    !options.dca.value.enabled ||
+                    !options.dca.value.sidestep_campaign_enabled ||
+                    String(options.exchange.value.market || 'spot')
+                        .trim()
+                        .toLowerCase() !== 'spot'
+                ) {
+                    return true
+                }
+                if (value === null || value === undefined) {
+                    return new Error('Please select bearish sidestep strategy')
+                }
+                if (typeof value === 'string' && value.trim().length === 0) {
+                    return new Error('Please select bearish sidestep strategy')
+                }
+                return true
+            },
             trigger: ['submit', 'change'],
         },
         max_fund: {

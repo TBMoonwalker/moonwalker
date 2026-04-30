@@ -374,6 +374,11 @@ class Trades:
                     return
 
                 deal_id = open_trade.deal_id or str(uuid4())
+                campaign_id = (
+                    str(open_trade.campaign_id).strip()
+                    if open_trade.campaign_id
+                    else None
+                )
                 history_complete = bool(open_trade.execution_history_complete) and bool(
                     execution_rows
                 )
@@ -405,6 +410,7 @@ class Trades:
                         continue
                     await model.TradeExecutions.create(
                         deal_id=deal_id,
+                        campaign_id=campaign_id,
                         symbol=str(execution.get("symbol") or symbol),
                         side=str(execution.get("side") or "sell"),
                         role=str(execution.get("role") or "partial_sell"),
@@ -636,6 +642,12 @@ class Trades:
                 "total_cost": total_cost,
                 "total_amount": total_amount,
                 "symbol": latest_order["symbol"],
+                "deal_id": latest_order.get("deal_id"),
+                "campaign_id": (
+                    open_trade.get("campaign_id")
+                    if open_trade and open_trade.get("campaign_id") is not None
+                    else latest_order.get("campaign_id")
+                ),
                 "direction": latest_order["direction"],
                 "side": latest_order["side"],
                 "bot": latest_order["bot"],
@@ -644,6 +656,7 @@ class Trades:
                 "safetyorders": safetyorders,
                 "safetyorders_count": safetyorders_count,
                 "ordertype": baseorder["ordertype"],
+                "open_date": open_trade.get("open_date") if open_trade else None,
                 "tp_limit_order_id": (
                     open_trade.get("tp_limit_order_id") if open_trade else None
                 ),

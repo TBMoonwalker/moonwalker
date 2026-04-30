@@ -14,6 +14,7 @@ import helper
 import model
 from service.config import Config
 from service.database import run_sqlite_write_with_retry
+from service.spot_campaign_types import TradeCloseReason
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger(
@@ -693,7 +694,9 @@ class AutopilotMemoryService:
         """Recompute the persisted symbol-memory state from closed trades."""
         try:
             raw_rows = (
-                await model.ClosedTrades.all()
+                await model.ClosedTrades.exclude(
+                    close_reason=TradeCloseReason.SIDESTEP_EXIT.value
+                )
                 .order_by("-id")
                 .limit(self.MAX_ANALYSIS_ROWS)
                 .values(

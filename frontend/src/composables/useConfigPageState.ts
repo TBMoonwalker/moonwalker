@@ -205,6 +205,10 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         ss: null,
         os: null,
         trade_safety_order_budget_ratio: 0.95,
+        sidestep_campaign_enabled: false,
+        sidestep_bearish_strategy: null,
+        sidestep_reentry_cooldown_candles: 0,
+        sidestep_reentry_requires_fresh_long_signal: true,
         tp: null,
         sl: null,
     })

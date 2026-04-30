@@ -10,6 +10,7 @@ class ExchangeOrderPayload(TypedDict, total=False):
     symbol: str
     ordertype: str
     side: str
+    campaign_id: str | None
     amount: float | str
     total_amount: float
     total_cost: float
@@ -36,6 +37,7 @@ class ExchangeOrderPayload(TypedDict, total=False):
     strategy_name: str | None
     timeframe: str | None
     metadata_json: str | None
+    close_reason: str | None
     baseline_order_size: float
     entry_size_applied: bool
     entry_size_reason_code: str | None
@@ -73,6 +75,7 @@ class TradeExecutionPayload(TypedDict, total=False):
     symbol: str
     side: str
     role: str
+    campaign_id: str | None
     timestamp: str | int
     price: float
     amount: float
@@ -131,9 +134,11 @@ class SoldCheckStatus(TypedDict, total=False):
     tp_price: float
     profit: float
     profit_percent: float
+    campaign_id: str | None
     timestamp: int
     orderid: str
     side: str
+    close_reason: str | None
     amount_fee: Any
     base_fee: float
     ordersize: float
