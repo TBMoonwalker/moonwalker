@@ -14,18 +14,23 @@ logging = helper.LoggerFactory.get_logger(
     "ema_swing_reverse",
 )
 
+EMA20_LOOKBACK_LENGTH = 50
+EMA20_STATE_VERSION_SUFFIX = ":v2"
+
 
 class Strategy:
     """EMA swing reverse strategy implementation.
 
-    The strategy requires EMA-low swing-up events and only returns True when
-    the latest swing low and EMA20 are both lower than the previously recorded
-    swing state for the same symbol and timeframe.
+    The strategy only evaluates EMA20. It looks for completed EMA20 swings
+    where the line turns from rising to falling and returns True when both the
+    latest EMA20 value and that swing value are lower than the previously
+    recorded EMA20 swing state for the same symbol and timeframe.
     """
 
     def __init__(self, timeframe: str, btc_pulse: Any | None = None):
         del btc_pulse
         self.timeframe = timeframe
+        self._state_timeframe = f"{timeframe}{EMA20_STATE_VERSION_SUFFIX}"
         self.indicators = Indicators()
         self._last_log_by_symbol: dict[str, dict[str, Any]] = {}
         self._previous_state_by_symbol: dict[str, tuple[float, float]] = {}
@@ -39,100 +44,63 @@ class Strategy:
     def _evaluate_swing_candidate(
         cls,
         *,
-        close_now: Any,
-        close_prev: Any,
-        close_prev2: Any,
-        ema20: Any,
-        ema50: Any,
-        ema100: Any,
-        ema200: Any,
-    ) -> tuple[bool, bool, float | None, float | None]:
-        """Return trend/swing flags plus the candidate swing state."""
-        raw_values = (
-            close_now,
-            close_prev,
-            close_prev2,
-            ema20,
-            ema50,
-            ema100,
-            ema200,
-        )
+        ema20_now: Any,
+        ema20_prev: Any,
+        ema20_prev2: Any,
+    ) -> tuple[bool, float | None, float | None]:
+        """Return the EMA20 down-swing flag plus the candidate swing state."""
+        raw_values = (ema20_now, ema20_prev, ema20_prev2)
         if any(cls._is_missing_number(value) for value in raw_values):
-            return False, False, None, None
+            return False, None, None
 
-        close_now_value = float(close_now)
-        close_prev_value = float(close_prev)
-        close_prev2_value = float(close_prev2)
-        ema20_value = float(ema20)
-        ema50_value = float(ema50)
-        ema100_value = float(ema100)
-        ema200_value = float(ema200)
+        ema20_now_value = float(ema20_now)
+        ema20_prev_value = float(ema20_prev)
+        ema20_prev2_value = float(ema20_prev2)
 
-        trend_ok = (
-            ema20_value < ema200_value
-            and ema50_value < ema200_value
-            and ema100_value < ema200_value
+        swing_down = (
+            ema20_prev_value > ema20_prev2_value and ema20_prev_value > ema20_now_value
         )
-        swing_up = close_now_value > ema20_value and close_prev_value < ema20_value
-        swing_low = min(close_prev_value, close_prev2_value)
-        return trend_ok, swing_up, swing_low, ema20_value
+        return swing_down, ema20_prev_value, ema20_now_value
 
     @classmethod
     def _find_latest_qualified_swing_state_from_series(
         cls,
-        close_series: Any,
         ema20_series: Any,
-        ema50_series: Any,
-        ema100_series: Any,
-        ema200_series: Any,
     ) -> tuple[float, float] | None:
-        """Return the latest qualified swing state visible in the provided history."""
+        """Return the latest EMA20 swing state visible in the provided history."""
         latest_state: tuple[float, float] | None = None
-        for idx in range(2, len(close_series)):
-            trend_ok, swing_up, swing_low, ema20_value = cls._evaluate_swing_candidate(
-                close_now=close_series.iloc[idx],
-                close_prev=close_series.iloc[idx - 1],
-                close_prev2=close_series.iloc[idx - 2],
-                ema20=ema20_series.iloc[idx],
-                ema50=ema50_series.iloc[idx],
-                ema100=ema100_series.iloc[idx],
-                ema200=ema200_series.iloc[idx],
+        for idx in range(2, len(ema20_series)):
+            swing_down, swing_value, ema20_value = cls._evaluate_swing_candidate(
+                ema20_now=ema20_series.iloc[idx],
+                ema20_prev=ema20_series.iloc[idx - 1],
+                ema20_prev2=ema20_series.iloc[idx - 2],
             )
-            if (
-                trend_ok
-                and swing_up
-                and swing_low is not None
-                and ema20_value is not None
-            ):
-                latest_state = (swing_low, ema20_value)
+            if swing_down and swing_value is not None and ema20_value is not None:
+                latest_state = (swing_value, ema20_value)
         return latest_state
+
+    @staticmethod
+    def _build_ema20_series(close_series: Any) -> Any:
+        """Build the EMA20 series from the provided close history."""
+        return talib.EMA(close_series, timeperiod=20)
 
     def _bootstrap_previous_state_from_history(
         self,
         close_series: Any,
     ) -> tuple[float, float] | None:
-        """Reconstruct the latest qualified swing state from stored candle history."""
-        ema20_series = talib.EMA(close_series, timeperiod=20)
-        ema50_series = talib.EMA(close_series, timeperiod=50)
-        ema100_series = talib.EMA(close_series, timeperiod=100)
-        ema200_series = talib.EMA(close_series, timeperiod=200)
-        return self._find_latest_qualified_swing_state_from_series(
-            close_series,
-            ema20_series,
-            ema50_series,
-            ema100_series,
-            ema200_series,
-        )
+        """Reconstruct the latest EMA20 swing state from stored candle history."""
+        ema20_series = self._build_ema20_series(close_series)
+        return self._find_latest_qualified_swing_state_from_series(ema20_series)
 
     async def _load_persisted_state(
         self,
         symbol: str,
     ) -> tuple[float, float] | None:
-        """Load the last qualified swing state from persistent storage."""
+        """Load the last qualified EMA20 swing state from persistent storage."""
         try:
             row = await model.EmaSwingReverseState.get_or_none(
                 symbol=symbol,
-                timeframe=self.timeframe,
+                timeframe=self._state_timeframe,
             )
         except (
             BaseORMException,
@@ -160,7 +128,7 @@ class Strategy:
         swing_low: float,
         ema20_value: float,
     ) -> None:
-        """Persist the latest qualified swing state for restart-safe recovery."""
+        """Persist the latest qualified EMA20 swing state for restart-safe recovery."""
 
         async def _persist() -> None:
             await model.EmaSwingReverseState.update_or_create(
@@ -169,7 +137,7 @@ class Strategy:
                     "previous_ema20": ema20_value,
                 },
                 symbol=symbol,
-                timeframe=self.timeframe,
+                timeframe=self._state_timeframe,
             )
 
         try:
@@ -210,7 +178,7 @@ class Strategy:
         symbol: str,
         close_series: Any,
     ) -> tuple[tuple[float, float] | None, bool]:
-        """Return the prior qualified swing state and whether it was bootstrapped."""
+        """Return the prior EMA20 swing state and whether it was bootstrapped."""
         if symbol in self._previous_state_by_symbol:
             return self._previous_state_by_symbol[symbol], False
 
@@ -231,74 +199,67 @@ class Strategy:
         return bootstrapped_state, True
 
     async def run(self, symbol: str, type: str) -> bool:
-        """Evaluate EMA swing reverse progression for a symbol."""
+        """Evaluate EMA20 swing reverse progression for a symbol."""
         del type
         result = False
-        ema = await self.indicators.calculate_ema(
-            symbol, self.timeframe, [20, 50, 100, 200]
+        ema = await self.indicators.calculate_ema(symbol, self.timeframe, [20])
+        close = await self.indicators.get_close_price(
+            symbol,
+            self.timeframe,
+            EMA20_LOOKBACK_LENGTH,
         )
-        close = await self.indicators.get_close_price(symbol, self.timeframe, 8)
 
         try:
-            required_emas = ("ema_20", "ema_50", "ema_100", "ema_200")
-            if any(ema.get(key) is None for key in required_emas):
+            if ema.get("ema_20") is None:
                 return False
             if close is None:
                 return False
             close_series = close.dropna()
-            if len(close_series) < 4:
+            if len(close_series) < 22:
                 return False
 
-            trend_ok, swing_up, current_swing_low, current_ema20 = (
+            ema20_series = self._build_ema20_series(close_series)
+            swing_down, current_swing_value, current_ema20 = (
                 self._evaluate_swing_candidate(
-                    close_now=close_series.iloc[-1],
-                    close_prev=close_series.iloc[-2],
-                    close_prev2=close_series.iloc[-3],
-                    ema20=ema["ema_20"],
-                    ema50=ema["ema_50"],
-                    ema100=ema["ema_100"],
-                    ema200=ema["ema_200"],
+                    ema20_now=ema20_series.iloc[-1],
+                    ema20_prev=ema20_series.iloc[-2],
+                    ema20_prev2=ema20_series.iloc[-3],
                 )
             )
             previous_state, bootstrapped = await self._resolve_previous_state(
                 symbol,
                 close_series,
             )
-            previous_swing_low = previous_state[0] if previous_state else None
+            previous_swing_value = previous_state[0] if previous_state else None
             previous_ema20 = previous_state[1] if previous_state else None
 
             if (
-                trend_ok
-                and swing_up
-                and current_swing_low is not None
+                swing_down
+                and current_swing_value is not None
                 and current_ema20 is not None
             ):
                 if (
                     previous_state is not None
                     and not bootstrapped
-                    and previous_swing_low is not None
+                    and previous_swing_value is not None
                     and previous_ema20 is not None
                 ):
                     result = (
-                        current_swing_low < previous_swing_low
+                        current_swing_value < previous_swing_value
                         and current_ema20 < previous_ema20
                     )
-                if previous_state != (current_swing_low, current_ema20):
+                if previous_state != (current_swing_value, current_ema20):
                     await self._remember_previous_state(
                         symbol,
-                        current_swing_low,
+                        current_swing_value,
                         current_ema20,
                     )
 
             logging_json = {
                 "symbol": symbol,
-                "ema(20/50/100/200)": (
-                    f"{ema['ema_20']}, {ema['ema_50']}, "
-                    f"{ema['ema_100']}, {ema['ema_200']}"
-                ),
-                "close price(last)": f"{close_series.iloc[-1]}",
-                "swing_low(current)": current_swing_low,
-                "swing_low(previous)": previous_swing_low,
+                "ema20(series/current)": f"{ema20_series.iloc[-1]} / {ema['ema_20']}",
+                "ema20_swing(current)": current_swing_value,
+                "ema20_swing(previous)": previous_swing_value,
                 "ema20(current)": current_ema20,
                 "ema20(previous)": previous_ema20,
                 "state_bootstrapped": bootstrapped,
