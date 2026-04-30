@@ -53,6 +53,12 @@ def _resolve_sqlite_db_path(db_url: str) -> str:
 
 def _extract_corrupted_index_name(messages: list[str]) -> str | None:
     """Return the damaged SQLite index name when integrity_check is index-only."""
+    index_names = _extract_corrupted_index_names(messages)
+    return index_names[0] if index_names and len(index_names) == 1 else None
+
+
+def _extract_corrupted_index_names(messages: list[str]) -> list[str] | None:
+    """Return damaged SQLite index names when integrity_check is index-only."""
     if not messages:
         return None
 
@@ -72,7 +78,14 @@ def _extract_corrupted_index_name(messages: list[str]) -> str | None:
         if not matched:
             return None
 
-    return next(iter(index_names)) if len(index_names) == 1 else None
+    return sorted(index_names) if index_names else None
+
+
+def _integrity_check_is_clean(messages: list[str]) -> bool:
+    """Return True when integrity_check reported a healthy database."""
+    if not messages:
+        return False
+    return all(str(message).strip().lower() == "ok" for message in messages)
 
 
 def _plan_additive_column_statements(
@@ -105,6 +118,16 @@ def _build_sqlite_corruption_message(
     integrity_messages: list[str],
 ) -> str:
     """Return operator guidance for detected SQLite corruption."""
+    corrupted_index_names = _extract_corrupted_index_names(integrity_messages)
+    if corrupted_index_names and len(corrupted_index_names) > 1:
+        return (
+            f"SQLite index corruption detected in {db_path} "
+            f"({', '.join(corrupted_index_names)}). Moonwalker cannot safely continue. "
+            f"First try `sqlite3 {db_path} 'REINDEX; PRAGMA integrity_check;'`. "
+            "If integrity_check still reports errors, restore from "
+            "a known-good backup or recover the database before restarting."
+        )
+
     corrupted_index_name = _extract_corrupted_index_name(integrity_messages)
     if corrupted_index_name:
         return (
@@ -598,6 +621,48 @@ class Database:
 
         return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
 
+    async def _reindex_sqlite_database(self) -> None:
+        """Rebuild all indexes for the active SQLite database."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        await connection.execute_query("REINDEX")
+
+    async def _repair_index_only_corruption_if_needed(self) -> None:
+        """Repair index-only SQLite corruption before runtime services start."""
+        integrity_messages = await self._run_sqlite_integrity_check()
+        if not integrity_messages:
+            return
+        if _integrity_check_is_clean(integrity_messages):
+            return
+
+        corrupted_index_names = _extract_corrupted_index_names(integrity_messages)
+        if corrupted_index_names is None:
+            db_path = _resolve_sqlite_db_path(self.db_url)
+            message = _build_sqlite_corruption_message(db_path, integrity_messages)
+            logging.error(message)
+            raise RuntimeError(message)
+
+        logging.warning(
+            "SQLite index-only corruption detected in %s for indexes: %s. "
+            "Attempting automatic REINDEX before startup continues.",
+            _resolve_sqlite_db_path(self.db_url),
+            ", ".join(corrupted_index_names),
+        )
+        await self._reindex_sqlite_database()
+        repaired_messages = await self._run_sqlite_integrity_check()
+        if _integrity_check_is_clean(repaired_messages):
+            logging.warning(
+                "SQLite index corruption repaired successfully via REINDEX."
+            )
+            return
+
+        db_path = _resolve_sqlite_db_path(self.db_url)
+        message = _build_sqlite_corruption_message(db_path, repaired_messages)
+        logging.error(message)
+        raise RuntimeError(message)
+
     async def _run_schema_init_steps(self) -> None:
         """Run additive schema and index maintenance for existing databases."""
         await self._ensure_open_trades_columns()
@@ -630,6 +695,7 @@ class Database:
             # Generate the schema
             await Tortoise.generate_schemas()
             await self._run_schema_init_steps()
+            await self._repair_index_only_corruption_if_needed()
             await self._run_backfill_init_steps()
             logging.info("Database initialized successfully")
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during init
