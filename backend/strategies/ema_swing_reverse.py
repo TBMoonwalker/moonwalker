@@ -258,10 +258,12 @@ class Strategy:
             logging_json = {
                 "symbol": symbol,
                 "ema20(series/current)": f"{ema20_series.iloc[-1]} / {ema['ema_20']}",
+                "ema20(prev2)": ema20_series.iloc[-3],
                 "ema20_swing(current)": current_swing_value,
                 "ema20_swing(previous)": previous_swing_value,
                 "ema20(current)": current_ema20,
                 "ema20(previous)": previous_ema20,
+                "swing_down_detected": swing_down,
                 "state_bootstrapped": bootstrapped,
                 "creating_order": result,
             }
