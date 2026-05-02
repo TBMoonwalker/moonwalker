@@ -9,7 +9,10 @@ from uuid import UUID, uuid4
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
-from service.spot_campaign_types import NON_TERMINAL_CLOSE_REASON_VALUES
+from service.spot_campaign_types import (
+    NON_TERMINAL_CLOSE_REASON_VALUES,
+    TradeExposureState,
+)
 from tortoise.exceptions import BaseORMException
 from tortoise.expressions import F
 from tortoise.functions import Sum
@@ -180,14 +183,80 @@ class Trades:
             [],
         )
 
-    async def get_open_trades(self) -> list[dict[str, Any]]:
+    @staticmethod
+    def _build_flat_waiting_trade_data(
+        symbol: str,
+        open_trade: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return active-flat trade context when no live exposure legs exist."""
+        transition_timestamp = str(
+            open_trade.get("last_transition_at")
+            or open_trade.get("open_date")
+            or datetime.now(timezone.utc).timestamp() * 1000
+        )
+        return {
+            "timestamp": transition_timestamp,
+            "fee": 0.0,
+            "total_cost": 0.0,
+            "total_amount": 0.0,
+            "symbol": symbol,
+            "deal_id": open_trade.get("deal_id"),
+            "campaign_id": open_trade.get("campaign_id"),
+            "lifecycle_mode": open_trade.get("lifecycle_mode"),
+            "exposure_state": open_trade.get("exposure_state"),
+            "direction": "long",
+            "side": "buy",
+            "bot": f"sidestep_{symbol}",
+            "bo_price": 0.0,
+            "current_price": float(open_trade.get("current_price") or 0.0),
+            "safetyorders": [],
+            "safetyorders_count": 0,
+            "ordertype": "market",
+            "open_date": open_trade.get("open_date"),
+            "last_transition_at": open_trade.get("last_transition_at"),
+            "tp_limit_order_id": None,
+            "tp_limit_order_price": None,
+            "tp_limit_order_amount": None,
+            "tp_limit_order_armed_at": None,
+            "reserved_reentry_quote": float(
+                open_trade.get("reserved_reentry_quote") or 0.0
+            ),
+            "waiting_reference_price": float(
+                open_trade.get("waiting_reference_price") or 0.0
+            ),
+            "waiting_reference_amount": float(
+                open_trade.get("waiting_reference_amount") or 0.0
+            ),
+            "waiting_reference_quote": float(
+                open_trade.get("waiting_reference_quote") or 0.0
+            ),
+            "virtual_waiting_profit": float(
+                open_trade.get("virtual_waiting_profit") or 0.0
+            ),
+            "virtual_waiting_profit_percent": float(
+                open_trade.get("virtual_waiting_profit_percent") or 0.0
+            ),
+            "is_unsellable": False,
+            "unsellable_reason": None,
+            "unsellable_amount": 0.0,
+            "unsellable_min_notional": None,
+            "unsellable_estimated_notional": None,
+        }
+
+    async def get_open_trades(
+        self,
+        *,
+        exposure_state: str = TradeExposureState.LONG_EXPOSED.value,
+    ) -> list[dict[str, Any]]:
         """
         Gives back the open orders including all base
         and safetyorders
         """
 
         try:
-            orders = await model.OpenTrades.all().values()
+            orders = await model.OpenTrades.filter(
+                exposure_state=exposure_state
+            ).values()
             orders = [
                 order
                 for order in orders
@@ -231,6 +300,12 @@ class Trades:
             # Broad catch to keep open trades endpoint responsive.
             logging.error("Error getting open orders. Cause: %s", e)
             return []
+
+    async def get_waiting_trades(self) -> list[dict[str, Any]]:
+        """Return active-flat sidestep rows using the shared open-trade shape."""
+        return await self.get_open_trades(
+            exposure_state=TradeExposureState.FLAT_WAITING_REENTRY.value
+        )
 
     async def get_unsellable_trades(self) -> list[dict[str, Any]]:
         """Return archived unsellable trade remnants."""
@@ -625,6 +700,11 @@ class Trades:
                     safetyorders.append(safetyorder)
 
             if not latest_order:
+                if open_trade and (
+                    str(open_trade.get("exposure_state") or "")
+                    == TradeExposureState.FLAT_WAITING_REENTRY.value
+                ):
+                    return self._build_flat_waiting_trade_data(symbol, open_trade)
                 return None
             if not baseorder:
                 baseorder = min(trades, key=lambda trade: float(trade["timestamp"]))
@@ -650,6 +730,12 @@ class Trades:
                     if open_trade and open_trade.get("campaign_id") is not None
                     else latest_order.get("campaign_id")
                 ),
+                "lifecycle_mode": (
+                    open_trade.get("lifecycle_mode") if open_trade else None
+                ),
+                "exposure_state": (
+                    open_trade.get("exposure_state") if open_trade else None
+                ),
                 "direction": latest_order["direction"],
                 "side": latest_order["side"],
                 "bot": latest_order["bot"],
@@ -671,9 +757,41 @@ class Trades:
                 "tp_limit_order_armed_at": (
                     open_trade.get("tp_limit_order_armed_at") if open_trade else None
                 ),
+                "last_transition_at": (
+                    open_trade.get("last_transition_at") if open_trade else None
+                ),
+                "reserved_reentry_quote": (
+                    float(open_trade.get("reserved_reentry_quote") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "waiting_reference_price": (
+                    float(open_trade.get("waiting_reference_price") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "waiting_reference_amount": (
+                    float(open_trade.get("waiting_reference_amount") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "waiting_reference_quote": (
+                    float(open_trade.get("waiting_reference_quote") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "virtual_waiting_profit": (
+                    float(open_trade.get("virtual_waiting_profit") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "virtual_waiting_profit_percent": (
+                    float(open_trade.get("virtual_waiting_profit_percent") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
                 **unsellable_state,
             }
-
             return trade_data
         except BaseORMException:
             # Broad catch to return None when trade aggregation fails.
@@ -681,8 +799,22 @@ class Trades:
 
     async def get_symbols(self) -> list[str]:
         """Return distinct trade symbols."""
-        return await self._execute_db(
-            model.Trades.all().distinct().values_list("symbol", flat=True),
+        rows = await self._execute_db(
+            model.OpenTrades.all().values(
+                "symbol",
+                "unsellable_amount",
+                "unsellable_reason",
+            ),
             "Error getting trade symbols.",
             [],
         )
+        symbols: list[str] = []
+        for row in rows:
+            if float(row.get("unsellable_amount") or 0.0) > 0 and row.get(
+                "unsellable_reason"
+            ):
+                continue
+            symbol = str(row.get("symbol") or "").strip()
+            if symbol:
+                symbols.append(symbol)
+        return symbols

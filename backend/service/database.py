@@ -308,6 +308,21 @@ class Database:
                 ("last_transition_at",),
             ),
             (
+                "opentrades",
+                "idx_opentrades_exposure_state_symbol",
+                ("exposure_state", "symbol"),
+            ),
+            (
+                "opentrades",
+                "idx_opentrades_lifecycle_mode",
+                ("lifecycle_mode",),
+            ),
+            (
+                "spotcampaigns",
+                "idx_spotcampaigns_lifecycle_state_symbol",
+                ("lifecycle_mode", "state", "symbol"),
+            ),
+            (
                 "tradereplaycandles",
                 "idx_tradereplaycandles_deal_time",
                 ("deal_id", "timestamp"),
@@ -394,6 +409,21 @@ class Database:
                 ("deal_id", "TEXT NULL"),
                 ("campaign_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 1"),
+                (
+                    "lifecycle_mode",
+                    "TEXT NOT NULL DEFAULT 'classic_dca'",
+                ),
+                (
+                    "exposure_state",
+                    "TEXT NOT NULL DEFAULT 'long_exposed'",
+                ),
+                ("reserved_reentry_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("waiting_reference_price", "REAL NOT NULL DEFAULT 0.0"),
+                ("waiting_reference_amount", "REAL NOT NULL DEFAULT 0.0"),
+                ("waiting_reference_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("virtual_waiting_profit", "REAL NOT NULL DEFAULT 0.0"),
+                ("virtual_waiting_profit_percent", "REAL NOT NULL DEFAULT 0.0"),
+                ("last_transition_at", "TEXT NULL"),
             ),
             "closedtrades": (
                 ("deal_id", "TEXT NULL"),
@@ -404,6 +434,16 @@ class Database:
             "unsellabletrades": (
                 ("deal_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
+            ),
+            "spotcampaigns": (
+                (
+                    "lifecycle_mode",
+                    "TEXT NOT NULL DEFAULT 'sidestep_reentry'",
+                ),
+                ("principal_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("reserved_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("cumulative_realized_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("cumulative_realized_percent", "REAL NOT NULL DEFAULT 0.0"),
             ),
         }
 

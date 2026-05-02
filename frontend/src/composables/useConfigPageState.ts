@@ -185,6 +185,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
 
     const dca = ref<DcaConfigSection>({
         enabled: false,
+        trade_lifecycle_mode: 'classic_dca',
         dynamic: false,
         strategy: null,
         timeframe: null,
@@ -207,8 +208,9 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         trade_safety_order_budget_ratio: 0.95,
         sidestep_campaign_enabled: false,
         sidestep_bearish_strategy: null,
+        sidestep_reentry_strategy: null,
         sidestep_reentry_cooldown_candles: 0,
-        sidestep_reentry_requires_fresh_long_signal: true,
+        sidestep_reentry_requires_fresh_long_signal: false,
         tp: null,
         sl: null,
     })

@@ -154,6 +154,45 @@ async def test_get_trades_for_orders_uses_unsellable_open_trade_amounts(
 
 
 @pytest.mark.asyncio
+async def test_get_trades_for_orders_returns_active_flat_waiting_context(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        campaign_id="campaign-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        current_price=95.0,
+        reserved_reentry_quote=101.5,
+        waiting_reference_price=101.5,
+        waiting_reference_amount=1.0,
+        waiting_reference_quote=101.5,
+        virtual_waiting_profit=6.5,
+        virtual_waiting_profit_percent=6.4,
+        last_transition_at="2026-05-02T10:00:00+00:00",
+    )
+
+    trades = Trades()
+    aggregated = await trades.get_trades_for_orders("BTC/USDT")
+
+    assert aggregated is not None
+    assert aggregated["campaign_id"] == "campaign-1"
+    assert aggregated["lifecycle_mode"] == "sidestep_reentry"
+    assert aggregated["exposure_state"] == "flat_waiting_reentry"
+    assert aggregated["reserved_reentry_quote"] == 101.5
+    assert aggregated["virtual_waiting_profit"] == 6.5
+    assert aggregated["total_amount"] == 0.0
+    assert aggregated["total_cost"] == 0.0
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_get_closed_trades_hides_non_terminal_sidestep_legs(
     tmp_path, monkeypatch
 ) -> None:

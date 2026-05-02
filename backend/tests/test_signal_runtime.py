@@ -194,14 +194,13 @@ async def test_is_max_bots_reached_ignores_unsellable_open_trade_rows(
 
 
 @pytest.mark.asyncio
-async def test_is_max_bots_reached_counts_waiting_campaigns_toward_capacity(
+async def test_is_max_bots_reached_counts_active_flat_open_trades_toward_capacity(
     monkeypatch,
-    _default_campaign_service,
 ) -> None:
     _DummyOpenTradesModel.rows = [
         {"symbol": "BTC/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+        {"symbol": "ETH/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
     ]
-    _default_campaign_service.waiting_symbols = ["ETH/USDT"]
     monkeypatch.setattr(model, "OpenTrades", _DummyOpenTradesModel)
 
     statistic = types.SimpleNamespace(get_profit=_async_result({}))

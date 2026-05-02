@@ -38,8 +38,7 @@ async def _get_unsellable_trades_cached() -> list[dict[str, Any]]:
 
 @helper.async_ttl_cache(maxsize=1, ttl=2)
 async def _get_waiting_campaigns_cached() -> list[dict[str, Any]]:
-    sidestep_campaigns = await SpotSidestepCampaignService.instance()
-    return await sidestep_campaigns.get_waiting_campaign_summaries()
+    return await trades.get_waiting_trades()
 
 
 async def _build_open_trades_payload() -> str:

@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from service.spot_campaign_types import TradeExposureState
+
 EPSILON = 1e-12
 
 
@@ -228,14 +230,19 @@ def estimate_open_trade_reserve(
 ) -> float:
     """Estimate remaining future safety-order budget for active open trades."""
     settings = build_capital_budget_settings(config)
-    if not settings.reserve_safety_orders:
-        return 0.0
-
     total = 0.0
     for open_trade in open_trades:
         if float(open_trade.get("unsellable_amount") or 0.0) > 0 and open_trade.get(
             "unsellable_reason"
         ):
+            continue
+        if (
+            str(open_trade.get("exposure_state") or "")
+            == TradeExposureState.FLAT_WAITING_REENTRY.value
+        ):
+            total += max(0.0, float(open_trade.get("reserved_reentry_quote") or 0.0))
+            continue
+        if not settings.reserve_safety_orders:
             continue
         total += estimate_remaining_trade_reserve(
             config,
@@ -287,8 +294,14 @@ def calculate_order_budget_requirement(
     order_quote = resolve_order_quote(order)
     if order_quote is None:
         return None, None
+    reserved_reentry_credit = max(
+        0.0,
+        float(order.get("capital_reserved_credit") or 0.0),
+    )
 
     resolved_settings = settings or build_capital_budget_settings(config)
+    if to_bool(order.get("baseorder"), default=False) and reserved_reentry_credit > 0:
+        return order_quote, max(0.0, order_quote - reserved_reentry_credit)
     if not resolved_settings.reserve_safety_orders:
         return order_quote, order_quote
 

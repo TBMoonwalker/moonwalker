@@ -42,10 +42,12 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 }
 
 DEFAULT_CONFIG_VALUES = {
+    "trade_lifecycle_mode": "classic_dca",
     "sidestep_campaign_enabled": False,
     "sidestep_bearish_strategy": "",
+    "sidestep_reentry_strategy": "",
     "sidestep_reentry_cooldown_candles": 0,
-    "sidestep_reentry_requires_fresh_long_signal": True,
+    "sidestep_reentry_requires_fresh_long_signal": False,
     "capital_max_fund": 0.0,
     "capital_reserve_safety_orders": False,
     "capital_budget_buffer_pct": 0.0,

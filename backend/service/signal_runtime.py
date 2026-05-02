@@ -348,10 +348,6 @@ async def _resolve_runtime_capacity(
     """Return current active symbols and the effective max-bot limit."""
     max_bots = int(config.get("max_bots", 0) or 0)
     active_symbols = await get_active_open_symbols()
-    if sidestep_campaigns is None:
-        sidestep_campaigns = await SpotSidestepCampaignService.instance()
-    waiting_symbols = await sidestep_campaigns.get_waiting_campaign_symbols()
-    active_symbols = list(dict.fromkeys([*active_symbols, *waiting_symbols]))
     profit = await statistic.get_profit()
     effective_max_bots = profit.get("autopilot_effective_max_bots")
     if effective_max_bots is None and config.get("autopilot", False):

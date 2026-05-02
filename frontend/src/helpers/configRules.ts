@@ -5,6 +5,7 @@ interface DcaRulesState {
     dynamic: boolean
     enabled: boolean
     sidestep_campaign_enabled: boolean
+    trade_lifecycle_mode?: string | null
 }
 
 interface ExchangeRulesState {
@@ -275,7 +276,8 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
                 if (
                     !options.submitAttempted.value ||
                     !options.dca.value.enabled ||
-                    !options.dca.value.sidestep_campaign_enabled ||
+                    (options.dca.value.trade_lifecycle_mode ?? 'classic_dca') !==
+                        'sidestep_reentry' ||
                     String(options.exchange.value.market || 'spot')
                         .trim()
                         .toLowerCase() !== 'spot'
@@ -287,6 +289,29 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
                 }
                 if (typeof value === 'string' && value.trim().length === 0) {
                     return new Error('Please select bearish sidestep strategy')
+                }
+                return true
+            },
+            trigger: ['submit', 'change'],
+        },
+        sidestep_reentry_strategy: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (
+                    !options.submitAttempted.value ||
+                    !options.dca.value.enabled ||
+                    (options.dca.value.trade_lifecycle_mode ?? 'classic_dca') !==
+                        'sidestep_reentry' ||
+                    String(options.exchange.value.market || 'spot')
+                        .trim()
+                        .toLowerCase() !== 'spot'
+                ) {
+                    return true
+                }
+                if (value === null || value === undefined) {
+                    return new Error('Please select sidestep re-entry strategy')
+                }
+                if (typeof value === 'string' && value.trim().length === 0) {
+                    return new Error('Please select sidestep re-entry strategy')
                 }
                 return true
             },

@@ -206,6 +206,11 @@ export function buildLoadedConfigState(
         exchange,
         dca: {
             enabled: dcaEnabled,
+            trade_lifecycle_mode:
+                toNullableString(response.trade_lifecycle_mode) ??
+                ((parseBooleanString(response.sidestep_campaign_enabled) ?? false)
+                    ? 'sidestep_reentry'
+                    : 'classic_dca'),
             dynamic: dynamicDca,
             strategy: toNullableString(response.dca_strategy),
             timeframe,
@@ -241,12 +246,15 @@ export function buildLoadedConfigState(
             sidestep_bearish_strategy: toNullableString(
                 response.sidestep_bearish_strategy
             ),
+            sidestep_reentry_strategy:
+                toNullableString(response.sidestep_reentry_strategy) ??
+                toNullableString(response.dca_strategy),
             sidestep_reentry_cooldown_candles:
                 toNumberOrNull(response.sidestep_reentry_cooldown_candles) ?? 0,
             sidestep_reentry_requires_fresh_long_signal:
                 parseBooleanString(
                     response.sidestep_reentry_requires_fresh_long_signal
-                ) ?? true,
+                ) ?? false,
             tp: toNumberOrNull(response.tp),
             sl: toNumberOrNull(response.sl),
         },

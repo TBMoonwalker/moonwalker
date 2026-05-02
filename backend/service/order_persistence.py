@@ -8,6 +8,7 @@ from uuid import uuid4
 import model
 from service.database import run_sqlite_write_with_retry
 from service.replay_candles import archive_replay_candles_for_deal
+from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from tortoise.expressions import F
 from tortoise.transactions import in_transaction
 
@@ -135,11 +136,22 @@ async def _apply_buy_campaign_context(
 
     update_payload = {
         "symbol": symbol,
+        "lifecycle_mode": str(
+            context.get("lifecycle_mode") or TradeLifecycleMode.SIDESTEP_REENTRY.value
+        ),
         "state": str(context.get("state") or "active_long"),
         "started_at": str(context.get("started_at") or ""),
         "last_transition_at": str(context.get("last_transition_at") or ""),
         "current_deal_id": deal_id,
         "tp_percent": float(context.get("tp_percent") or 0.0),
+        "principal_quote": float(context.get("principal_quote") or 0.0),
+        "reserved_quote": float(context.get("reserved_quote") or 0.0),
+        "cumulative_realized_quote": float(
+            context.get("cumulative_realized_quote") or 0.0
+        ),
+        "cumulative_realized_percent": float(
+            context.get("cumulative_realized_percent") or 0.0
+        ),
         "metadata_json": context.get("metadata_json"),
         "cooldown_until": None,
     }
@@ -175,6 +187,13 @@ async def _apply_close_campaign_context(
         "last_exit_reason": context.get("last_exit_reason"),
         "cooldown_until": context.get("cooldown_until"),
         "tp_percent": float(context.get("tp_percent") or 0.0),
+        "reserved_quote": float(context.get("reserved_quote") or 0.0),
+        "cumulative_realized_quote": float(
+            context.get("cumulative_realized_quote") or 0.0
+        ),
+        "cumulative_realized_percent": float(
+            context.get("cumulative_realized_percent") or 0.0
+        ),
         "metadata_json": context.get("metadata_json"),
     }
     sidestep_increment = int(context.get("sidestep_increment") or 0)
@@ -189,6 +208,37 @@ async def _apply_close_campaign_context(
     )
 
 
+def _build_open_trade_lifecycle_defaults(
+    *,
+    campaign_context: dict[str, Any] | None,
+    current_deal_id: str,
+) -> dict[str, Any]:
+    """Return the canonical live open-trade lifecycle fields for a buy leg."""
+    lifecycle_mode = str(
+        (campaign_context or {}).get("lifecycle_mode")
+        or TradeLifecycleMode.CLASSIC_DCA.value
+    )
+    return {
+        "deal_id": current_deal_id,
+        "campaign_id": (
+            (campaign_context or {}).get("campaign_id") if campaign_context else None
+        ),
+        "lifecycle_mode": lifecycle_mode,
+        "exposure_state": TradeExposureState.LONG_EXPOSED.value,
+        "reserved_reentry_quote": 0.0,
+        "waiting_reference_price": 0.0,
+        "waiting_reference_amount": 0.0,
+        "waiting_reference_quote": 0.0,
+        "virtual_waiting_profit": 0.0,
+        "virtual_waiting_profit_percent": 0.0,
+        "last_transition_at": (
+            (campaign_context or {}).get("last_transition_at")
+            if campaign_context
+            else None
+        ),
+    }
+
+
 async def persist_buy_trade(
     symbol: str,
     payload: dict[str, Any],
@@ -200,6 +250,9 @@ async def persist_buy_trade(
 
     async def _persist_buy() -> None:
         async with in_transaction() as conn:
+            existing_open_trade = (
+                await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
+            )
             if create_open_trade:
                 deal_id = str(payload.get("deal_id") or _create_deal_id())
                 history_complete = True
@@ -224,13 +277,39 @@ async def persist_buy_trade(
                 using_db=conn,
             )
             if create_open_trade:
-                await model.OpenTrades.create(
-                    symbol=symbol,
-                    deal_id=deal_id,
-                    campaign_id=campaign_id,
-                    execution_history_complete=history_complete,
-                    using_db=conn,
+                lifecycle_defaults = _build_open_trade_lifecycle_defaults(
+                    campaign_context=(
+                        {
+                            **(campaign_context or {}),
+                            "campaign_id": campaign_id,
+                        }
+                    ),
+                    current_deal_id=deal_id,
                 )
+                if existing_open_trade is None:
+                    await model.OpenTrades.create(
+                        symbol=symbol,
+                        execution_history_complete=history_complete,
+                        **lifecycle_defaults,
+                        using_db=conn,
+                    )
+                else:
+                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
+                        execution_history_complete=history_complete,
+                        sold_amount=0.0,
+                        sold_proceeds=0.0,
+                        unsellable_amount=0.0,
+                        unsellable_reason=None,
+                        unsellable_min_notional=None,
+                        unsellable_estimated_notional=None,
+                        unsellable_since=None,
+                        unsellable_notice_sent=False,
+                        tp_limit_order_id=None,
+                        tp_limit_order_price=None,
+                        tp_limit_order_amount=None,
+                        tp_limit_order_armed_at=None,
+                        **lifecycle_defaults,
+                    )
             elif campaign_id is not None:
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
                     campaign_id=campaign_id,
@@ -269,6 +348,13 @@ async def persist_closed_trade(
                 if campaign_context
                 else payload.get("close_reason")
             )
+            summary_overrides = (
+                campaign_context.get("summary_overrides") if campaign_context else None
+            )
+            if isinstance(summary_overrides, dict):
+                for key, value in summary_overrides.items():
+                    if key in SUMMARY_TRADE_KEYS:
+                        summary_payload[key] = value
             await model.ClosedTrades.create(**summary_payload, using_db=conn)
 
             for sell_execution in payload.get("sell_executions") or []:
@@ -305,6 +391,90 @@ async def persist_closed_trade(
 
     await run_sqlite_write_with_retry(
         _persist_sell, f"persisting sell order for {symbol}"
+    )
+
+
+async def persist_sidestep_transition(
+    symbol: str,
+    payload: dict[str, Any],
+    *,
+    campaign_context: dict[str, Any] | None = None,
+) -> None:
+    """Persist a sidestep sell while keeping the active open-trade mission alive."""
+
+    async def _persist_sidestep() -> None:
+        async with in_transaction() as conn:
+            deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
+            campaign_id = (
+                campaign_context.get("campaign_id")
+                if campaign_context
+                else payload.get("campaign_id")
+            )
+            for sell_execution in payload.get("sell_executions") or []:
+                if not isinstance(sell_execution, dict):
+                    continue
+                if float(sell_execution.get("amount") or 0.0) <= 0:
+                    continue
+                await model.TradeExecutions.create(
+                    **_build_trade_execution_payload(
+                        deal_id,
+                        {
+                            **sell_execution,
+                            "campaign_id": campaign_id,
+                        },
+                        role=str(sell_execution.get("role") or "final_sell"),
+                    ),
+                    using_db=conn,
+                )
+            await archive_replay_candles_for_deal(
+                deal_id,
+                symbol,
+                open_date=payload.get("open_date"),
+                close_date=payload.get("close_date"),
+                conn=conn,
+            )
+            await model.Trades.filter(symbol=symbol).using_db(conn).delete()
+            sold_amount = float(payload.get("amount") or 0.0)
+            sold_quote = sold_amount * float(payload.get("tp_price") or 0.0)
+            await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
+                deal_id=None,
+                campaign_id=campaign_id,
+                execution_history_complete=history_complete,
+                exposure_state=TradeExposureState.FLAT_WAITING_REENTRY.value,
+                amount=0.0,
+                cost=0.0,
+                profit=0.0,
+                profit_percent=0.0,
+                tp_price=0.0,
+                avg_price=0.0,
+                sold_amount=0.0,
+                sold_proceeds=0.0,
+                current_price=float(payload.get("tp_price") or 0.0),
+                reserved_reentry_quote=float(
+                    (campaign_context or {}).get("reserved_quote") or sold_quote
+                ),
+                waiting_reference_price=float(payload.get("tp_price") or 0.0),
+                waiting_reference_amount=sold_amount,
+                waiting_reference_quote=sold_quote,
+                virtual_waiting_profit=0.0,
+                virtual_waiting_profit_percent=0.0,
+                last_transition_at=(
+                    (campaign_context or {}).get("last_transition_at")
+                    or payload.get("close_date")
+                ),
+                tp_limit_order_id=None,
+                tp_limit_order_price=None,
+                tp_limit_order_amount=None,
+                tp_limit_order_armed_at=None,
+            )
+            await _apply_close_campaign_context(
+                conn,
+                campaign_id=str(campaign_id or "").strip() or None,
+                context=campaign_context,
+            )
+
+    await run_sqlite_write_with_retry(
+        _persist_sidestep, f"persisting sidestep transition for {symbol}"
     )
 
 

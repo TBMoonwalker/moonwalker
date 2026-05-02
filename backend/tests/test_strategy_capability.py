@@ -45,9 +45,42 @@ def test_get_configured_strategy_min_history_candles_uses_maximum_requirement() 
     assert required == 200
 
 
+def test_get_configured_strategy_min_history_candles_uses_sidestep_mode_strategies() -> (
+    None
+):
+    required = get_configured_strategy_min_history_candles(
+        {
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "market": "spot",
+            "sidestep_bearish_strategy": "ema_down",
+            "sidestep_reentry_strategy": "ema_swing_reverse",
+            "dca_strategy": "ema_cross",
+            "tp_strategy": "ema_cross",
+        }
+    )
+    assert required == 200
+
+
 def test_get_configured_strategy_history_lookback_days_respects_timeframe() -> None:
     required_days = get_configured_strategy_history_lookback_days(
         {"signal_strategy": "ema_low"},
         "1h",
+    )
+    assert required_days == 17
+
+
+def test_get_configured_strategy_history_lookback_days_uses_sidestep_mode_strategies() -> (
+    None
+):
+    required_days = get_configured_strategy_history_lookback_days(
+        {
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "market": "spot",
+            "sidestep_bearish_strategy": "ema_down",
+            "sidestep_reentry_strategy": "ema_swing_reverse",
+            "dca_strategy": "ema_cross",
+        },
+        "1h",
+        include_signal_strategy=False,
     )
     assert required_days == 17

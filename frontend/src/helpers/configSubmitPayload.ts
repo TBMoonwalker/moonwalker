@@ -56,6 +56,7 @@ export interface ExchangeConfigSection {
 
 export interface DcaConfigSection {
     enabled: boolean
+    trade_lifecycle_mode: string | null
     dynamic: boolean
     strategy: string | null
     timeframe: string | null
@@ -78,6 +79,7 @@ export interface DcaConfigSection {
     trade_safety_order_budget_ratio: number | null
     sidestep_campaign_enabled: boolean
     sidestep_bearish_strategy: string | null
+    sidestep_reentry_strategy: string | null
     sidestep_reentry_cooldown_candles: number | null
     sidestep_reentry_requires_fresh_long_signal: boolean
     tp: number | null
@@ -330,12 +332,20 @@ export function buildConfigSubmitPayload(
             dca.trade_safety_order_budget_ratio ?? 0.95,
             'float',
         ),
+        trade_lifecycle_mode: serializeConfigValue(
+            toNullableConfigString(dca.trade_lifecycle_mode ?? 'classic_dca'),
+            'str',
+        ),
         sidestep_campaign_enabled: serializeConfigValue(
-            dca.sidestep_campaign_enabled ?? false,
+            (dca.trade_lifecycle_mode ?? 'classic_dca') === 'sidestep_reentry',
             'bool',
         ),
         sidestep_bearish_strategy: serializeConfigValue(
             toNullableConfigString(dca.sidestep_bearish_strategy),
+            'str',
+        ),
+        sidestep_reentry_strategy: serializeConfigValue(
+            toNullableConfigString(dca.sidestep_reentry_strategy),
             'str',
         ),
         sidestep_reentry_cooldown_candles: serializeConfigValue(
@@ -343,7 +353,7 @@ export function buildConfigSubmitPayload(
             'int',
         ),
         sidestep_reentry_requires_fresh_long_signal: serializeConfigValue(
-            dca.sidestep_reentry_requires_fresh_long_signal ?? true,
+            false,
             'bool',
         ),
         tp: serializeConfigValue(dca.tp || false, 'float'),

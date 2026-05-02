@@ -6,6 +6,20 @@ from enum import StrEnum
 from typing import Any
 
 
+class TradeLifecycleMode(StrEnum):
+    """Stable persistence values for mutually exclusive trade lifecycles."""
+
+    CLASSIC_DCA = "classic_dca"
+    SIDESTEP_REENTRY = "sidestep_reentry"
+
+
+class TradeExposureState(StrEnum):
+    """Stable persistence values for active trade exposure state."""
+
+    LONG_EXPOSED = "long_exposed"
+    FLAT_WAITING_REENTRY = "flat_waiting_reentry"
+
+
 class SpotCampaignState(StrEnum):
     """Stable persistence values for sidestep campaign state."""
 

@@ -8,6 +8,7 @@ import re
 from typing import Any, Iterable
 
 import helper
+from service.spot_campaign_types import TradeLifecycleMode
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_capability")
 
@@ -40,6 +41,12 @@ MIN_HISTORY_CANDLES_BY_STRATEGY: dict[str, int] = {
 }
 
 _SECONDS_PER_DAY = 24 * 60 * 60
+
+
+def _optional_string(value: Any) -> str | None:
+    """Normalize optional config strings with whitespace trimming."""
+    normalized = str(value or "").strip()
+    return normalized or None
 
 
 def _timeframe_to_seconds(timeframe: str) -> int:
@@ -83,21 +90,64 @@ def get_strategy_history_lookback_days(
     return max(1, math.ceil(lookback_seconds / _SECONDS_PER_DAY))
 
 
+def _configured_strategy_names(
+    config: dict[str, Any],
+    *,
+    include_signal_strategy: bool,
+) -> list[str | None]:
+    """Return configured strategy names for the active lifecycle mode."""
+    raw_mode = _optional_string(config.get("trade_lifecycle_mode"))
+    legacy_sidestep_enabled = bool(config.get("sidestep_campaign_enabled", False))
+    market = (_optional_string(config.get("market")) or "spot").lower()
+    if raw_mode in {
+        TradeLifecycleMode.CLASSIC_DCA.value,
+        TradeLifecycleMode.SIDESTEP_REENTRY.value,
+    }:
+        lifecycle_mode = raw_mode
+    else:
+        lifecycle_mode = (
+            TradeLifecycleMode.SIDESTEP_REENTRY.value
+            if legacy_sidestep_enabled
+            else TradeLifecycleMode.CLASSIC_DCA.value
+        )
+
+    sidestep_mode = (
+        market == "spot" and lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value
+    )
+    strategy_names: list[str | None] = [config.get("tp_strategy")]
+
+    if sidestep_mode:
+        strategy_names.extend(
+            [
+                _optional_string(config.get("sidestep_bearish_strategy")),
+                _optional_string(config.get("sidestep_reentry_strategy"))
+                or _optional_string(config.get("dca_strategy")),
+            ]
+        )
+    else:
+        strategy_names.append(config.get("dca_strategy"))
+
+    if include_signal_strategy:
+        strategy_names.append(config.get("signal_strategy"))
+
+    return strategy_names
+
+
 def get_configured_strategy_min_history_candles(
     config: dict[str, Any],
     *,
     include_signal_strategy: bool = True,
 ) -> int:
     """Return the largest warmup requirement across configured strategies."""
-    strategy_names: list[str | None] = [
-        config.get("dca_strategy"),
-        config.get("tp_strategy"),
-    ]
-    if include_signal_strategy:
-        strategy_names.append(config.get("signal_strategy"))
-
     return max(
-        (get_strategy_min_history_candles(name) for name in strategy_names), default=0
+        (
+            get_strategy_min_history_candles(name)
+            for name in _configured_strategy_names(
+                config,
+                include_signal_strategy=include_signal_strategy,
+            )
+        ),
+        default=0,
     )
 
 
@@ -109,13 +159,6 @@ def get_configured_strategy_history_lookback_days(
     buffer_multiplier: int = 2,
 ) -> int:
     """Return the largest history lookback needed by configured strategies."""
-    strategy_names: list[str | None] = [
-        config.get("dca_strategy"),
-        config.get("tp_strategy"),
-    ]
-    if include_signal_strategy:
-        strategy_names.append(config.get("signal_strategy"))
-
     return max(
         (
             get_strategy_history_lookback_days(
@@ -123,7 +166,10 @@ def get_configured_strategy_history_lookback_days(
                 timeframe,
                 buffer_multiplier=buffer_multiplier,
             )
-            for name in strategy_names
+            for name in _configured_strategy_names(
+                config,
+                include_signal_strategy=include_signal_strategy,
+            )
         ),
         default=0,
     )

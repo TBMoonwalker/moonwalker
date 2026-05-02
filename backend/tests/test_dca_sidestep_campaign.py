@@ -32,6 +32,24 @@ def test_sidestep_campaign_service_only_enables_on_spot_market() -> None:
     )
 
 
+def test_waiting_gate_is_ready_without_fresh_long_signal_dependency() -> None:
+    service = SpotSidestepCampaignService()
+
+    gate_status, gate_detail = service._waiting_gate(
+        {
+            "metadata_json": "{}",
+            "cooldown_until": None,
+        },
+        {
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "market": "spot",
+        },
+    )
+
+    assert gate_status == "ready"
+    assert gate_detail == "Eligible for re-entry."
+
+
 @pytest.mark.asyncio
 async def test_process_ticker_data_uses_bearish_sidestep_exit_before_dca(
     monkeypatch,

@@ -12,10 +12,14 @@ from uuid import uuid4
 import helper
 import model
 from service.config import Config, resolve_timeframe
-from service.config_views import SidestepCampaignConfigView
+from service.config_views import SidestepCampaignConfigView, TradeLifecycleConfigView
 from service.data_timeframes import timeframe_to_seconds
 from service.database import run_sqlite_write_with_retry
-from service.spot_campaign_types import SpotCampaignState, TradeCloseReason
+from service.spot_campaign_types import (
+    SpotCampaignState,
+    TradeCloseReason,
+    TradeLifecycleMode,
+)
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger(
@@ -91,7 +95,7 @@ class CampaignAdmissionBlock:
 
 
 class SpotSidestepCampaignService:
-    """Manage spot sidestep campaigns and flat-waiting re-entry."""
+    """Manage sidestep lifecycle state for active spot missions."""
 
     _instance: SpotSidestepCampaignService | None = None
     _lock = asyncio.Lock()
@@ -126,14 +130,15 @@ class SpotSidestepCampaignService:
         self.on_config_change(config.snapshot())
 
     async def start(self) -> None:
-        """Start the background waiting-campaign re-entry loop."""
-        if self._task is not None and not self._task.done():
-            return
+        """Start the service.
+
+        Re-entry is watcher-owned now, so there is no separate background
+        campaign loop to start here.
+        """
         self._running = True
-        self._task = asyncio.create_task(self._run_loop())
 
     async def shutdown(self) -> None:
-        """Stop the background re-entry loop."""
+        """Stop the service and cancel any legacy background task."""
         self._running = False
         if self._task is None:
             return
@@ -168,15 +173,15 @@ class SpotSidestepCampaignService:
         return TradeCloseReason.TAKE_PROFIT.value
 
     @staticmethod
-    def _campaign_view(config: dict[str, Any] | None) -> SidestepCampaignConfigView:
-        """Return the typed sidestep campaign config view."""
-        return SidestepCampaignConfigView.from_config(config or {})
+    def _campaign_view(config: dict[str, Any] | None) -> TradeLifecycleConfigView:
+        """Return the typed lifecycle-mode config view."""
+        return TradeLifecycleConfigView.from_config(config or {})
 
     @classmethod
     def is_enabled(cls, config: dict[str, Any] | None) -> bool:
         """Return whether sidestep campaigns are enabled."""
         view = cls._campaign_view(config)
-        return view.enabled and view.market == "spot"
+        return view.is_sidestep_mode()
 
     async def _get_orders(self) -> Any:
         """Return the lazily constructed Orders service."""
@@ -249,6 +254,10 @@ class SpotSidestepCampaignService:
         )
         return rows[0] if rows else None
 
+    async def get_campaign_snapshot(self, campaign_id: str) -> dict[str, Any] | None:
+        """Return the latest campaign snapshot for runtime decisions."""
+        return await self._find_campaign_by_id(campaign_id)
+
     async def resolve_buy_context(
         self,
         symbol: str,
@@ -260,6 +269,8 @@ class SpotSidestepCampaignService:
         if not normalized_symbol:
             return {"campaign_id": None}
 
+        lifecycle = TradeLifecycleConfigView.from_config(config)
+
         explicit_campaign_id = str(order.get("campaign_id") or "").strip() or None
         if explicit_campaign_id:
             existing = await self._find_campaign_by_id(explicit_campaign_id)
@@ -267,9 +278,13 @@ class SpotSidestepCampaignService:
                 existing.get("metadata_json") if existing else None
             )
             metadata.pop("last_reentry_error", None)
+            principal_quote = float(
+                (existing or {}).get("principal_quote") or order.get("ordersize") or 0.0
+            )
             return {
                 "campaign_id": explicit_campaign_id,
                 "create_campaign": existing is None,
+                "lifecycle_mode": TradeLifecycleMode.SIDESTEP_REENTRY.value,
                 "state": SpotCampaignState.ACTIVE_LONG.value,
                 "started_at": (
                     existing.get("started_at") if existing else _isoformat(_utc_now())
@@ -277,6 +292,14 @@ class SpotSidestepCampaignService:
                 "last_transition_at": _isoformat(_utc_now()),
                 "tp_percent": float(
                     (existing or {}).get("tp_percent") or config.get("tp") or 0.0
+                ),
+                "principal_quote": principal_quote,
+                "reserved_quote": 0.0,
+                "cumulative_realized_quote": float(
+                    (existing or {}).get("cumulative_realized_quote") or 0.0
+                ),
+                "cumulative_realized_percent": float(
+                    (existing or {}).get("cumulative_realized_percent") or 0.0
                 ),
                 "metadata_json": _serialize_metadata(metadata),
             }
@@ -299,6 +322,9 @@ class SpotSidestepCampaignService:
                 return {"campaign_id": active_campaign["campaign_id"]}
             return {"campaign_id": None}
 
+        if not lifecycle.is_sidestep_mode():
+            return {"campaign_id": None}
+
         existing_campaign = await self._find_symbol_campaign(
             normalized_symbol,
             states=[
@@ -312,6 +338,7 @@ class SpotSidestepCampaignService:
             return {
                 "campaign_id": existing_campaign["campaign_id"],
                 "create_campaign": False,
+                "lifecycle_mode": TradeLifecycleMode.SIDESTEP_REENTRY.value,
                 "state": SpotCampaignState.ACTIVE_LONG.value,
                 "started_at": existing_campaign.get("started_at")
                 or _isoformat(_utc_now()),
@@ -319,19 +346,33 @@ class SpotSidestepCampaignService:
                 "tp_percent": float(
                     existing_campaign.get("tp_percent") or config.get("tp") or 0.0
                 ),
+                "principal_quote": float(
+                    existing_campaign.get("principal_quote")
+                    or order.get("ordersize")
+                    or 0.0
+                ),
+                "reserved_quote": 0.0,
+                "cumulative_realized_quote": float(
+                    existing_campaign.get("cumulative_realized_quote") or 0.0
+                ),
+                "cumulative_realized_percent": float(
+                    existing_campaign.get("cumulative_realized_percent") or 0.0
+                ),
                 "metadata_json": _serialize_metadata(metadata),
             }
-
-        if not self.is_enabled(config):
-            return {"campaign_id": None}
 
         return {
             "campaign_id": str(uuid4()),
             "create_campaign": True,
+            "lifecycle_mode": TradeLifecycleMode.SIDESTEP_REENTRY.value,
             "state": SpotCampaignState.ACTIVE_LONG.value,
             "started_at": _isoformat(_utc_now()),
             "last_transition_at": _isoformat(_utc_now()),
             "tp_percent": float(config.get("tp") or 0.0),
+            "principal_quote": float(order.get("ordersize") or 0.0),
+            "reserved_quote": 0.0,
+            "cumulative_realized_quote": 0.0,
+            "cumulative_realized_percent": 0.0,
             "metadata_json": _serialize_metadata({}),
         }
 
@@ -342,6 +383,7 @@ class SpotSidestepCampaignService:
         config: dict[str, Any],
         *,
         closed_at: datetime,
+        closed_payload: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return campaign transition context for a persisted sell leg."""
         normalized_symbol = _normalize_symbol(symbol)
@@ -371,12 +413,30 @@ class SpotSidestepCampaignService:
         metadata = _parse_metadata(campaign.get("metadata_json"))
         metadata["last_close_reason"] = normalized_reason
         metadata["last_closed_at"] = _isoformat(closed_at)
+        principal_quote = float(campaign.get("principal_quote") or 0.0)
+        realized_profit = float((closed_payload or {}).get("profit") or 0.0)
+        realized_proceeds = float(
+            (closed_payload or {}).get("tp_price") or 0.0
+        ) * float((closed_payload or {}).get("amount") or 0.0)
+        cumulative_realized_quote = float(
+            campaign.get("cumulative_realized_quote") or 0.0
+        )
+        next_cumulative_realized_quote = cumulative_realized_quote + realized_profit
+        next_cumulative_realized_percent = (
+            (next_cumulative_realized_quote / principal_quote) * 100
+            if principal_quote > 0
+            else 0.0
+        )
+        lifecycle_mode = str(
+            campaign.get("lifecycle_mode") or TradeLifecycleMode.SIDESTEP_REENTRY.value
+        )
 
         if normalized_reason == TradeCloseReason.SIDESTEP_EXIT.value:
             metadata["last_exit_at"] = _isoformat(closed_at)
             return {
                 "campaign_id": campaign["campaign_id"],
                 "close_reason": normalized_reason,
+                "lifecycle_mode": lifecycle_mode,
                 "state": SpotCampaignState.FLAT_WAITING_REENTRY.value,
                 "last_transition_at": _isoformat(closed_at),
                 "last_exit_reason": normalized_reason,
@@ -388,6 +448,9 @@ class SpotSidestepCampaignService:
                 "tp_percent": float(
                     campaign.get("tp_percent") or config.get("tp") or 0.0
                 ),
+                "reserved_quote": realized_proceeds,
+                "cumulative_realized_quote": next_cumulative_realized_quote,
+                "cumulative_realized_percent": next_cumulative_realized_percent,
                 "metadata_json": _serialize_metadata(metadata),
             }
 
@@ -401,12 +464,26 @@ class SpotSidestepCampaignService:
         return {
             "campaign_id": campaign["campaign_id"],
             "close_reason": normalized_reason,
+            "lifecycle_mode": lifecycle_mode,
             "state": next_state,
             "last_transition_at": _isoformat(closed_at),
             "last_exit_reason": normalized_reason,
             "cooldown_until": None,
             "sidestep_increment": 0,
             "tp_percent": float(campaign.get("tp_percent") or config.get("tp") or 0.0),
+            "reserved_quote": 0.0,
+            "cumulative_realized_quote": next_cumulative_realized_quote,
+            "cumulative_realized_percent": next_cumulative_realized_percent,
+            "summary_overrides": (
+                {
+                    "profit": next_cumulative_realized_quote,
+                    "profit_percent": next_cumulative_realized_percent,
+                    "cost": principal_quote,
+                    "open_date": campaign.get("started_at"),
+                }
+                if lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value
+                else None
+            ),
             "metadata_json": _serialize_metadata(metadata),
         }
 
@@ -453,6 +530,9 @@ class SpotSidestepCampaignService:
             or None
         )
         last_transition_at = _isoformat(_utc_now())
+        principal_quote = float(
+            trade_data.get("total_cost") or trade_data.get("cost") or 0.0
+        )
 
         async def _attach_campaign() -> None:
             async with in_transaction() as conn:
@@ -460,6 +540,7 @@ class SpotSidestepCampaignService:
                     await model.SpotCampaigns.create(
                         campaign_id=campaign_id,
                         symbol=symbol,
+                        lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
                         state=SpotCampaignState.ACTIVE_LONG.value,
                         started_at=started_at,
                         last_transition_at=last_transition_at,
@@ -468,11 +549,28 @@ class SpotSidestepCampaignService:
                         last_exit_reason=None,
                         cooldown_until=None,
                         tp_percent=float(config.get("tp") or 0.0),
+                        principal_quote=principal_quote,
+                        reserved_quote=0.0,
+                        cumulative_realized_quote=0.0,
+                        cumulative_realized_percent=0.0,
                         metadata_json=_serialize_metadata({}),
                         using_db=conn,
                     )
+                else:
+                    await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(
+                        conn
+                    ).update(
+                        lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                        principal_quote=(
+                            float(campaign.get("principal_quote") or 0.0)
+                            if isinstance(campaign, dict)
+                            and float(campaign.get("principal_quote") or 0.0) > 0
+                            else principal_quote
+                        ),
+                    )
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
                     campaign_id=campaign_id,
+                    lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
                 )
                 await model.Trades.filter(symbol=symbol).using_db(conn).update(
                     campaign_id=campaign_id,
@@ -606,25 +704,6 @@ class SpotSidestepCampaignService:
         if cooldown_until is not None and cooldown_until > now:
             return ("cooldown", "Waiting for re-entry cooldown to expire.")
 
-        signal_context = metadata.get("last_long_signal_context")
-        if not isinstance(signal_context, dict):
-            return ("awaiting_long_signal", "Waiting for a fresh long signal.")
-
-        last_long_signal_at = _parse_datetime(metadata.get("last_long_signal_at"))
-        last_exit_at = _parse_datetime(metadata.get("last_exit_at")) or _parse_datetime(
-            campaign.get("last_transition_at")
-        )
-        view = SidestepCampaignConfigView.from_config(config)
-        if (
-            view.reentry_requires_fresh_long_signal
-            and last_long_signal_at is not None
-            and last_exit_at is not None
-            and last_long_signal_at <= last_exit_at
-        ):
-            return (
-                "awaiting_fresh_long_signal",
-                "Waiting for a long signal newer than the sidestep exit.",
-            )
         return ("ready", "Eligible for re-entry.")
 
     async def get_waiting_campaign_summaries(self) -> list[dict[str, Any]]:
@@ -664,19 +743,63 @@ class SpotSidestepCampaignService:
         if not normalized_campaign_id:
             return False
 
-        updated = await model.SpotCampaigns.filter(
-            campaign_id=normalized_campaign_id,
-            state__in=[
-                SpotCampaignState.ACTIVE_LONG.value,
-                SpotCampaignState.FLAT_WAITING_REENTRY.value,
-            ],
-        ).update(
-            state=SpotCampaignState.STOPPED.value,
-            last_transition_at=_isoformat(_utc_now()),
-            last_exit_reason=TradeCloseReason.MANUAL_STOP.value,
-            cooldown_until=None,
+        async def _stop_campaign() -> bool:
+            async with in_transaction() as conn:
+                campaign = (
+                    await model.SpotCampaigns.filter(
+                        campaign_id=normalized_campaign_id,
+                        state__in=[
+                            SpotCampaignState.ACTIVE_LONG.value,
+                            SpotCampaignState.FLAT_WAITING_REENTRY.value,
+                        ],
+                    )
+                    .using_db(conn)
+                    .first()
+                )
+                if campaign is None:
+                    return False
+
+                now_iso = _isoformat(_utc_now())
+                await model.SpotCampaigns.filter(
+                    campaign_id=normalized_campaign_id
+                ).using_db(conn).update(
+                    state=SpotCampaignState.STOPPED.value,
+                    last_transition_at=now_iso,
+                    last_exit_reason=TradeCloseReason.MANUAL_STOP.value,
+                    cooldown_until=None,
+                    reserved_quote=0.0,
+                )
+
+                await model.ClosedTrades.create(
+                    symbol=campaign.symbol,
+                    deal_id=None,
+                    campaign_id=normalized_campaign_id,
+                    execution_history_complete=False,
+                    so_count=0,
+                    profit=float(campaign.cumulative_realized_quote or 0.0),
+                    profit_percent=float(campaign.cumulative_realized_percent or 0.0),
+                    amount=0.0,
+                    cost=float(campaign.principal_quote or 0.0),
+                    tp_price=0.0,
+                    avg_price=0.0,
+                    open_date=campaign.started_at,
+                    close_date=now_iso,
+                    duration=None,
+                    close_reason=TradeCloseReason.MANUAL_STOP.value,
+                    using_db=conn,
+                )
+                await model.Trades.filter(symbol=campaign.symbol).using_db(
+                    conn
+                ).delete()
+                await model.OpenTrades.filter(symbol=campaign.symbol).using_db(
+                    conn
+                ).delete()
+                return True
+
+        return await run_sqlite_write_with_retry(
+            _stop_campaign,
+            f"stopping sidestep campaign {normalized_campaign_id}",
         )
-        return updated > 0
 
     async def _run_loop(self) -> None:
         """Continuously try re-entry for eligible waiting campaigns."""

@@ -35,10 +35,12 @@ from service.order_persistence import (
     persist_buy_trade,
     persist_closed_trade,
     persist_manual_buy_add,
+    persist_sidestep_transition,
     persist_stopped_trade,
     persist_unsellable_remainder,
 )
 from service.order_requests import normalize_order_symbol, parse_manual_buy_add_request
+from service.spot_campaign_types import TradeCloseReason
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades
@@ -327,12 +329,20 @@ class Orders:
             normalized_close_reason,
             config,
             closed_at=closed_at,
+            closed_payload=close_context["payload"],
         )
-        await persist_closed_trade(
-            order_status["symbol"],
-            close_context["payload"],
-            campaign_context=campaign_context,
-        )
+        if normalized_close_reason == TradeCloseReason.SIDESTEP_EXIT.value:
+            await persist_sidestep_transition(
+                order_status["symbol"],
+                close_context["payload"],
+                campaign_context=campaign_context,
+            )
+        else:
+            await persist_closed_trade(
+                order_status["symbol"],
+                close_context["payload"],
+                campaign_context=campaign_context,
+            )
         await self.trades._clear_order_cache()
         await self.monitoring.notify_trade(
             "trade.sell",

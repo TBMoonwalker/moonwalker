@@ -1,5 +1,6 @@
 """Spot sidestep campaign model."""
 
+from service.spot_campaign_types import TradeLifecycleMode
 from tortoise import fields
 from tortoise.models import Model
 
@@ -10,6 +11,10 @@ class SpotCampaigns(Model):
     id = fields.IntField(primary_key=True)
     campaign_id = fields.CharField(max_length=36, unique=True)
     symbol = fields.CharField(max_length=50)
+    lifecycle_mode = fields.CharField(
+        max_length=32,
+        default=TradeLifecycleMode.SIDESTEP_REENTRY.value,
+    )
     state = fields.CharField(max_length=32)
     started_at = fields.TextField()
     last_transition_at = fields.TextField()
@@ -18,6 +23,10 @@ class SpotCampaigns(Model):
     last_exit_reason = fields.TextField(null=True)
     cooldown_until = fields.TextField(null=True)
     tp_percent = fields.FloatField(default=0.0)
+    principal_quote = fields.FloatField(default=0.0)
+    reserved_quote = fields.FloatField(default=0.0)
+    cumulative_realized_quote = fields.FloatField(default=0.0)
+    cumulative_realized_percent = fields.FloatField(default=0.0)
     metadata_json = fields.TextField(null=True)
 
     class Meta:
