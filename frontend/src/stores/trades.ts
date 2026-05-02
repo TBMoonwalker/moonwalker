@@ -33,6 +33,13 @@ export type OpenTradeRow = {
   waiting_reference_quote?: number
   virtual_waiting_profit?: number
   virtual_waiting_profit_percent?: number
+  campaign_principal_quote?: number
+  campaign_realized_profit?: number
+  campaign_realized_profit_percent?: number
+  campaign_total_profit?: number
+  campaign_total_profit_percent?: number
+  display_profit?: number
+  display_profit_percent?: number
   last_transition_at?: string | null
   key: number
 }
@@ -209,6 +216,15 @@ export const useTradesStore = defineStore('trades', {
         waiting_reference_quote: Number(val.waiting_reference_quote ?? 0),
         virtual_waiting_profit: Number(val.virtual_waiting_profit ?? 0),
         virtual_waiting_profit_percent: Number(val.virtual_waiting_profit_percent ?? 0),
+        campaign_principal_quote: Number(val.campaign_principal_quote ?? 0),
+        campaign_realized_profit: Number(val.campaign_realized_profit ?? 0),
+        campaign_realized_profit_percent: Number(val.campaign_realized_profit_percent ?? 0),
+        campaign_total_profit: Number(val.campaign_total_profit ?? 0),
+        campaign_total_profit_percent: Number(val.campaign_total_profit_percent ?? 0),
+        display_profit: Number(val.display_profit ?? Number(val.profit ?? 0)),
+        display_profit_percent: Number(
+          val.display_profit_percent ?? Number(val.profit_percent ?? 0)
+        ),
         last_transition_at: val.last_transition_at ?? null
       }
     },

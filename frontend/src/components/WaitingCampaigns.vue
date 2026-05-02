@@ -86,7 +86,7 @@ async function handleStopCampaign(rowData: WaitingCampaignRow): Promise<void> {
 }
 
 function rowClasses(rowData: WaitingCampaignRow): string {
-    if (Math.sign(Number(rowData.virtual_waiting_profit_percent ?? 0)) >= 0) {
+    if (Math.sign(Number(rowData.display_profit_percent ?? 0)) >= 0) {
         return 'green'
     }
     return 'red'
@@ -141,11 +141,11 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
     },
     {
         title: 'PNL',
-        key: 'virtual_waiting_profit',
+        key: 'display_profit',
         render: (rowData) => {
             const [, currency] = rowData.symbol.split('/')
-            const profitPercent = `${formatFixed(Number(rowData.virtual_waiting_profit_percent ?? 0))} %`
-            const pnl = `${formatFixed(Number(rowData.virtual_waiting_profit ?? 0))} ${currency}`
+            const profitPercent = `${formatFixed(Number(rowData.display_profit_percent ?? 0))} %`
+            const pnl = `${formatFixed(Number(rowData.display_profit ?? 0))} ${currency}`
             return [
                 h('div', { class: 'profit' }, profitPercent),
                 h(NDivider, { dashed: true }),

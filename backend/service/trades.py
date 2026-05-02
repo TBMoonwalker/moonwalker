@@ -65,6 +65,15 @@ class Trades:
         }
 
     @staticmethod
+    def _float_or_zero(value: Any) -> float:
+        """Return a finite float or zero for partially-populated trade payloads."""
+        try:
+            parsed = float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        return parsed if parsed == parsed else 0.0
+
+    @staticmethod
     def _extract_unsellable_state(
         open_trade: dict[str, Any] | None,
     ) -> UnsellableTradeState:
@@ -97,6 +106,56 @@ class Trades:
                 else None
             ),
         }
+
+    @classmethod
+    def _apply_campaign_profit_fields(
+        cls,
+        row: dict[str, Any],
+        campaign: dict[str, Any] | None,
+    ) -> None:
+        """Attach campaign-wide live PnL fields for UI read models.
+
+        These fields intentionally do not replace the stored `profit` / `cost`
+        accounting values on `OpenTrades`. The dashboard and capital services
+        still rely on those fields as economic truth for the currently exposed
+        leg, while the tables need a mission-level progress view.
+        """
+        is_waiting = (
+            str(row.get("exposure_state") or "")
+            == TradeExposureState.FLAT_WAITING_REENTRY.value
+        )
+        principal_quote = cls._float_or_zero((campaign or {}).get("principal_quote"))
+        realized_profit = cls._float_or_zero(
+            (campaign or {}).get("cumulative_realized_quote")
+        )
+        realized_profit_percent = cls._float_or_zero(
+            (campaign or {}).get("cumulative_realized_percent")
+        )
+        live_delta = cls._float_or_zero(
+            row.get("virtual_waiting_profit") if is_waiting else row.get("profit")
+        )
+        fallback_percent = cls._float_or_zero(
+            row.get("virtual_waiting_profit_percent")
+            if is_waiting
+            else row.get("profit_percent")
+        )
+        total_profit = realized_profit + live_delta
+        total_profit_percent = (
+            (total_profit / principal_quote) * 100 if principal_quote > 0 else 0.0
+        )
+        if principal_quote <= 0:
+            principal_quote = cls._float_or_zero(row.get("cost"))
+            if principal_quote <= 0 and is_waiting:
+                principal_quote = cls._float_or_zero(row.get("waiting_reference_quote"))
+            total_profit_percent = fallback_percent
+
+        row["campaign_principal_quote"] = principal_quote
+        row["campaign_realized_profit"] = realized_profit
+        row["campaign_realized_profit_percent"] = realized_profit_percent
+        row["campaign_total_profit"] = total_profit
+        row["campaign_total_profit_percent"] = total_profit_percent
+        row["display_profit"] = total_profit
+        row["display_profit_percent"] = total_profit_percent
 
     async def _execute_db(
         self,
@@ -236,6 +295,19 @@ class Trades:
             "virtual_waiting_profit_percent": float(
                 open_trade.get("virtual_waiting_profit_percent") or 0.0
             ),
+            "campaign_principal_quote": 0.0,
+            "campaign_realized_profit": 0.0,
+            "campaign_realized_profit_percent": 0.0,
+            "campaign_total_profit": float(
+                open_trade.get("virtual_waiting_profit") or 0.0
+            ),
+            "campaign_total_profit_percent": float(
+                open_trade.get("virtual_waiting_profit_percent") or 0.0
+            ),
+            "display_profit": float(open_trade.get("virtual_waiting_profit") or 0.0),
+            "display_profit_percent": float(
+                open_trade.get("virtual_waiting_profit_percent") or 0.0
+            ),
             "is_unsellable": False,
             "unsellable_reason": None,
             "unsellable_amount": 0.0,
@@ -287,7 +359,14 @@ class Trades:
             if campaign_ids:
                 campaign_rows = await model.SpotCampaigns.filter(
                     campaign_id__in=campaign_ids
-                ).values("campaign_id", "started_at", "sidestep_count")
+                ).values(
+                    "campaign_id",
+                    "started_at",
+                    "sidestep_count",
+                    "principal_quote",
+                    "cumulative_realized_quote",
+                    "cumulative_realized_percent",
+                )
                 campaigns_by_id = {
                     str(row.get("campaign_id") or "").strip(): row
                     for row in campaign_rows
@@ -317,6 +396,7 @@ class Trades:
                 order["sidestep_count"] = int(
                     (campaign or {}).get("sidestep_count") or 0
                 )
+                self._apply_campaign_profit_fields(order, campaign)
             return orders
         except BaseORMException as e:
             # Broad catch to keep open trades endpoint responsive.

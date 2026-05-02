@@ -41,8 +41,18 @@ const tradeActionButtonStyle = {
 }
 
 export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
+    function getDisplayedProfit(rowData: OpenTradeRow): number {
+        return Number(rowData.display_profit ?? rowData.profit ?? 0)
+    }
+
+    function getDisplayedProfitPercent(rowData: OpenTradeRow): number {
+        return Number(
+            rowData.display_profit_percent ?? rowData.profit_percent ?? 0,
+        )
+    }
+
     function rowClasses(row: OpenTradeRow): string {
-        if (Math.sign(row.profit_percent) >= 0) {
+        if (Math.sign(getDisplayedProfitPercent(row)) >= 0) {
             return 'green'
         }
         return 'red'
@@ -127,8 +137,8 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 render: (rowData) => {
                     const [, currency] = splitTradeSymbol(rowData.symbol)
                     const profitPercent =
-                        `${formatFixed(rowData.profit_percent)} %`
-                    const pnl = `${formatFixed(rowData.profit)} ${currency}`
+                        `${formatFixed(getDisplayedProfitPercent(rowData))} %`
+                    const pnl = `${formatFixed(getDisplayedProfit(rowData))} ${currency}`
                     return [
                         h('div', { class: 'profit' }, profitPercent),
                         h(NDivider, { dashed: true }),

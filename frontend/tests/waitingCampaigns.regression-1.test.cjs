@@ -56,8 +56,16 @@ test('waiting sidestep campaigns get their own surface and explicit stop action'
         'expected the waiting campaigns table to surface sidestep cycle metadata for active-flat trades',
     )
     assert.ok(
+        waitingCampaignsSource.includes('display_profit_percent'),
+        'expected waiting sidestep campaigns to render mission-level PnL instead of only the flat-phase delta',
+    )
+    assert.ok(
         openTradeColumnsSource.includes('Re-entered x'),
         'expected active sidestep trades to show a visible re-entry badge in the open-trades table',
+    )
+    assert.ok(
+        openTradeColumnsSource.includes('display_profit_percent'),
+        'expected open sidestep trades to render mission-level PnL instead of only the current leg',
     )
     assert.ok(
         closedTradesSource.includes("title: 'Outcome'"),

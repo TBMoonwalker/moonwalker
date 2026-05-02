@@ -38,6 +38,13 @@ export type OpenTradeRow = {
     baseorder: OrderData
     safetyorder: OrderData[]
     precision: number
+    campaign_principal_quote?: number
+    campaign_realized_profit?: number
+    campaign_realized_profit_percent?: number
+    campaign_total_profit?: number
+    campaign_total_profit_percent?: number
+    display_profit?: number
+    display_profit_percent?: number
     unsellable_amount?: number
     unsellable_reason?: string | null
     unsellable_min_notional?: number | null

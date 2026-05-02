@@ -186,6 +186,8 @@ async def test_get_trades_for_orders_returns_active_flat_waiting_context(
     assert aggregated["exposure_state"] == "flat_waiting_reentry"
     assert aggregated["reserved_reentry_quote"] == 101.5
     assert aggregated["virtual_waiting_profit"] == 6.5
+    assert aggregated["campaign_total_profit"] == 6.5
+    assert aggregated["display_profit_percent"] == 6.4
     assert aggregated["total_amount"] == 0.0
     assert aggregated["total_cost"] == 0.0
 
@@ -290,5 +292,133 @@ async def test_get_open_trades_includes_campaign_metadata_for_sidestep_rows(
     assert len(rows) == 1
     assert rows[0]["campaign_started_at"] == "2026-05-01T08:00:00+00:00"
     assert rows[0]["sidestep_count"] == 2
+    assert rows[0]["campaign_realized_profit"] == 0.0
+    assert rows[0]["campaign_total_profit"] == 0.0
+    assert rows[0]["display_profit_percent"] == 0.0
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_get_open_trades_combines_campaign_realized_and_live_leg_profit(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-live-1",
+        symbol="ETH/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="active_long",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T08:00:00+00:00",
+        current_deal_id="deal-live-1",
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=0.0,
+        cumulative_realized_quote=7.0,
+        cumulative_realized_percent=7.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="ETH/USDT",
+        deal_id="deal-live-1",
+        campaign_id="campaign-live-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="long_exposed",
+        profit=3.0,
+        profit_percent=2.5,
+        cost=96.0,
+        open_date="2026-05-02T09:00:00+00:00",
+    )
+    await model.Trades.create(
+        timestamp="1000",
+        ordersize=96.0,
+        fee=0.0,
+        precision=3,
+        amount=1.0,
+        amount_fee=0.0,
+        price=96.0,
+        symbol="ETH/USDT",
+        orderid="oid-live-1",
+        campaign_id="campaign-live-1",
+        bot="sidestep_ETH/USDT",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        order_count=0,
+        so_percentage=None,
+        direction="long",
+        side="buy",
+    )
+
+    trades = Trades()
+    rows = await trades.get_open_trades()
+
+    assert len(rows) == 1
+    assert rows[0]["campaign_realized_profit"] == 7.0
+    assert rows[0]["campaign_total_profit"] == 10.0
+    assert rows[0]["campaign_total_profit_percent"] == pytest.approx(10.0)
+    assert rows[0]["display_profit"] == 10.0
+    assert rows[0]["display_profit_percent"] == pytest.approx(10.0)
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_get_waiting_trades_combine_campaign_realized_and_virtual_profit(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-waiting-1",
+        symbol="SOL/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="flat_waiting_reentry",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T10:00:00+00:00",
+        current_deal_id="deal-waiting-1",
+        sidestep_count=2,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=96.0,
+        cumulative_realized_quote=4.0,
+        cumulative_realized_percent=4.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="SOL/USDT",
+        deal_id="deal-waiting-1",
+        campaign_id="campaign-waiting-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        current_price=94.0,
+        reserved_reentry_quote=96.0,
+        waiting_reference_price=96.0,
+        waiting_reference_amount=1.0,
+        waiting_reference_quote=96.0,
+        virtual_waiting_profit=6.0,
+        virtual_waiting_profit_percent=6.25,
+        open_date="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T10:00:00+00:00",
+    )
+
+    trades = Trades()
+    rows = await trades.get_waiting_trades()
+
+    assert len(rows) == 1
+    assert rows[0]["campaign_realized_profit"] == 4.0
+    assert rows[0]["campaign_total_profit"] == 10.0
+    assert rows[0]["campaign_total_profit_percent"] == pytest.approx(10.0)
+    assert rows[0]["display_profit"] == 10.0
+    assert rows[0]["display_profit_percent"] == pytest.approx(10.0)
 
     await Tortoise.close_connections()
