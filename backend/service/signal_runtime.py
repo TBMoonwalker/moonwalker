@@ -342,10 +342,16 @@ async def _resolve_runtime_capacity(
     config: dict[str, Any],
     statistic: Statistic,
     autopilot: Autopilot,
+    *,
+    sidestep_campaigns: SpotSidestepCampaignService | None = None,
 ) -> tuple[list[str], int]:
     """Return current active symbols and the effective max-bot limit."""
     max_bots = int(config.get("max_bots", 0) or 0)
     active_symbols = await get_active_open_symbols()
+    if sidestep_campaigns is None:
+        sidestep_campaigns = await SpotSidestepCampaignService.instance()
+    waiting_symbols = await sidestep_campaigns.get_waiting_campaign_symbols()
+    active_symbols = list(dict.fromkeys([*active_symbols, *waiting_symbols]))
     profit = await statistic.get_profit()
     effective_max_bots = profit.get("autopilot_effective_max_bots")
     if effective_max_bots is None and config.get("autopilot", False):
@@ -383,16 +389,17 @@ async def resolve_signal_admission_batch(
         return SignalAdmissionBatch(decisions=[])
 
     async with _PENDING_ADMISSION_LOCK:
+        sidestep_campaigns = await SpotSidestepCampaignService.instance()
         active_symbols, effective_max_bots = await _resolve_runtime_capacity(
             config,
             statistic,
             autopilot,
+            sidestep_campaigns=sidestep_campaigns,
         )
         active_symbol_set = set(active_symbols)
         reserved_symbol_set = set(_PENDING_ADMISSION_SYMBOLS)
         occupied_symbols = active_symbol_set | reserved_symbol_set
         available_slots = max(0, effective_max_bots - len(occupied_symbols))
-        sidestep_campaigns = await SpotSidestepCampaignService.instance()
         campaign_blocks = await sidestep_campaigns.get_admission_blocks(
             normalized_candidates
         )

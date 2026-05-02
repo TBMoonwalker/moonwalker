@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
+from service.spot_campaign_types import NON_TERMINAL_CLOSE_REASON_VALUES
 from tortoise.exceptions import BaseORMException
 from tortoise.expressions import F
 from tortoise.functions import Sum
@@ -239,22 +240,22 @@ class Trades:
             [],
         )
 
+    @staticmethod
+    def _visible_closed_trades_query():
+        """Return the closed-trade query used for terminal user-facing history."""
+        return model.ClosedTrades.exclude(
+            close_reason__in=NON_TERMINAL_CLOSE_REASON_VALUES
+        )
+
     async def get_closed_trades(self, page: int = 0) -> list[dict[str, Any]]:
         """Return paginated closed trades."""
         try:
             size = self.CLOSED_TRADES_PAGE_SIZE
+            query = self._visible_closed_trades_query().order_by("-id")
             if page == 0:
-                orders = (
-                    await model.ClosedTrades.all().order_by("-id").limit(size).values()
-                )
+                orders = await query.limit(size).values()
             else:
-                orders = (
-                    await model.ClosedTrades.all()
-                    .order_by("-id")
-                    .offset(page)
-                    .limit(size)
-                    .values()
-                )
+                orders = await query.offset(page).limit(size).values()
             return orders
         except BaseORMException as e:
             # Broad catch to keep closed trades endpoint responsive.
@@ -279,7 +280,7 @@ class Trades:
     async def get_closed_trades_length(self) -> int:
         """Return the total number of closed trades."""
         return await self._execute_db(
-            model.ClosedTrades.all().count(),
+            self._visible_closed_trades_query().count(),
             "Error getting closed order length.",
             0,
         )

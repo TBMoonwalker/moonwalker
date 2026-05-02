@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
+from typing import Any
 
 
 class SpotCampaignState(StrEnum):
@@ -38,3 +39,12 @@ TERMINAL_CLOSE_REASONS = frozenset(
 )
 
 NON_TERMINAL_CLOSE_REASONS = frozenset({TradeCloseReason.SIDESTEP_EXIT})
+
+NON_TERMINAL_CLOSE_REASON_VALUES = tuple(
+    reason.value for reason in NON_TERMINAL_CLOSE_REASONS
+)
+
+
+def is_non_terminal_close_reason(value: Any) -> bool:
+    """Return whether a close reason represents an ongoing campaign transition."""
+    return str(value or "").strip().lower() in NON_TERMINAL_CLOSE_REASON_VALUES

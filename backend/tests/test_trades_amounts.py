@@ -1,6 +1,8 @@
 import os
 
+import model
 import pytest
+from service.spot_campaign_types import TradeCloseReason
 from service.trades import Trades
 from tortoise import Tortoise
 
@@ -13,8 +15,6 @@ async def test_get_token_amount_from_trades_uses_net_amount(
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
     await Tortoise.generate_schemas()
-
-    import model
 
     await model.Trades.create(
         timestamp="1",
@@ -49,8 +49,6 @@ async def test_get_trades_for_orders_uses_net_amount(tmp_path, monkeypatch) -> N
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
     await Tortoise.generate_schemas()
-
-    import model
 
     await model.Trades.create(
         timestamp="1",
@@ -89,8 +87,6 @@ async def test_get_partial_sell_execution_reads_open_trade_totals(
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
     await Tortoise.generate_schemas()
 
-    import model
-
     await model.OpenTrades.create(
         symbol="ABC/USDT",
         sold_amount=1.25,
@@ -113,8 +109,6 @@ async def test_get_trades_for_orders_uses_unsellable_open_trade_amounts(
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
     await Tortoise.generate_schemas()
-
-    import model
 
     await model.Trades.create(
         timestamp="1",
@@ -156,4 +150,36 @@ async def test_get_trades_for_orders_uses_unsellable_open_trade_amounts(
     assert aggregated["unsellable_reason"] == "minimum_notional"
     assert aggregated["unsellable_min_notional"] == 5.0
     assert aggregated["unsellable_estimated_notional"] == 4.8
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_get_closed_trades_hides_non_terminal_sidestep_legs(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.ClosedTrades.create(
+        symbol="BTC/USDT",
+        deal_id="11111111-1111-1111-1111-111111111111",
+        close_date="2026-05-01 10:00:00",
+        close_reason=TradeCloseReason.SIDESTEP_EXIT.value,
+    )
+    await model.ClosedTrades.create(
+        symbol="ETH/USDT",
+        deal_id="22222222-2222-2222-2222-222222222222",
+        close_date="2026-05-01 11:00:00",
+        close_reason=TradeCloseReason.TAKE_PROFIT.value,
+    )
+
+    trades = Trades()
+    closed_trades = await trades.get_closed_trades()
+    closed_trades_length = await trades.get_closed_trades_length()
+
+    assert [row["symbol"] for row in closed_trades] == ["ETH/USDT"]
+    assert closed_trades_length == 1
+
     await Tortoise.close_connections()

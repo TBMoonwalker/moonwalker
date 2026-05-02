@@ -87,9 +87,32 @@ class _DummyMemoryService:
         }
 
 
+class _DummyCampaignService:
+    def __init__(self) -> None:
+        self.waiting_symbols: list[str] = []
+        self.blocks = {}
+
+    async def get_waiting_campaign_symbols(self) -> list[str]:
+        return list(self.waiting_symbols)
+
+    async def get_admission_blocks(self, _symbols: list[str]):
+        return dict(self.blocks)
+
+
 @pytest.fixture(autouse=True)
 def _clear_signal_runtime_reservations() -> None:
     signal_runtime_module._PENDING_ADMISSION_SYMBOLS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _default_campaign_service(monkeypatch):
+    service = _DummyCampaignService()
+    monkeypatch.setattr(
+        signal_runtime_module.SpotSidestepCampaignService,
+        "instance",
+        staticmethod(_async_result(service)),
+    )
+    return service
 
 
 @pytest.mark.asyncio
@@ -168,6 +191,29 @@ async def test_is_max_bots_reached_ignores_unsellable_open_trade_rows(
     )
 
     assert blocked is False
+
+
+@pytest.mark.asyncio
+async def test_is_max_bots_reached_counts_waiting_campaigns_toward_capacity(
+    monkeypatch,
+    _default_campaign_service,
+) -> None:
+    _DummyOpenTradesModel.rows = [
+        {"symbol": "BTC/USDT", "unsellable_amount": 0.0, "unsellable_reason": None},
+    ]
+    _default_campaign_service.waiting_symbols = ["ETH/USDT"]
+    monkeypatch.setattr(model, "OpenTrades", _DummyOpenTradesModel)
+
+    statistic = types.SimpleNamespace(get_profit=_async_result({}))
+    autopilot = types.SimpleNamespace(resolve_runtime_state=_async_result({}))
+
+    blocked = await is_max_bots_reached(
+        {"max_bots": 2},
+        statistic,
+        autopilot,
+    )
+
+    assert blocked is True
 
 
 @pytest.mark.asyncio
@@ -411,20 +457,18 @@ def _async_result(value):
 @pytest.mark.asyncio
 async def test_resolve_signal_admission_batch_blocks_waiting_campaign_reentry(
     monkeypatch,
+    _default_campaign_service,
 ) -> None:
     _DummyOpenTradesModel.rows = []
     monkeypatch.setattr(model, "OpenTrades", _DummyOpenTradesModel)
-
-    class _DummyCampaignService:
-        async def get_admission_blocks(self, _symbols: list[str]):
-            return {
-                "BTC/USDT": signal_runtime_module.CampaignAdmissionBlock(
-                    symbol="BTC/USDT",
-                    campaign_id="campaign-1",
-                    state="flat_waiting_reentry",
-                    reason_code="skipped_campaign_waiting_reentry",
-                )
-            }
+    _default_campaign_service.blocks = {
+        "BTC/USDT": types.SimpleNamespace(
+            symbol="BTC/USDT",
+            campaign_id="campaign-1",
+            state="flat_waiting_reentry",
+            reason_code="skipped_campaign_waiting_reentry",
+        )
+    }
 
     async def fake_memory_instance():
         return _DummyMemoryService(
@@ -444,11 +488,6 @@ async def test_resolve_signal_admission_batch_blocks_waiting_campaign_reentry(
         signal_runtime_module.AutopilotMemoryService,
         "instance",
         staticmethod(fake_memory_instance),
-    )
-    monkeypatch.setattr(
-        signal_runtime_module.SpotSidestepCampaignService,
-        "instance",
-        staticmethod(_async_result(_DummyCampaignService())),
     )
 
     batch = await resolve_signal_admission_batch(

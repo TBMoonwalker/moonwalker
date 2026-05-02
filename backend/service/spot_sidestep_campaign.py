@@ -571,6 +571,21 @@ class SpotSidestepCampaignService:
             )
         return blocks
 
+    async def get_waiting_campaign_symbols(self) -> list[str]:
+        """Return normalized symbols for campaigns still waiting to re-enter."""
+        rows = await model.SpotCampaigns.filter(
+            state=SpotCampaignState.FLAT_WAITING_REENTRY.value,
+        ).values_list("symbol", flat=True)
+        seen: set[str] = set()
+        waiting_symbols: list[str] = []
+        for row in rows:
+            symbol = _normalize_symbol(row)
+            if not symbol or symbol in seen:
+                continue
+            seen.add(symbol)
+            waiting_symbols.append(symbol)
+        return waiting_symbols
+
     def _waiting_gate(
         self,
         campaign: dict[str, Any],
