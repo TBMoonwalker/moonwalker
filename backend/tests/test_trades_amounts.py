@@ -169,6 +169,12 @@ async def test_get_closed_trades_hides_non_terminal_sidestep_legs(
         close_reason=TradeCloseReason.SIDESTEP_EXIT.value,
     )
     await model.ClosedTrades.create(
+        symbol="SOL/USDT",
+        deal_id="33333333-3333-3333-3333-333333333333",
+        close_date="2026-05-01 10:30:00",
+        close_reason=None,
+    )
+    await model.ClosedTrades.create(
         symbol="ETH/USDT",
         deal_id="22222222-2222-2222-2222-222222222222",
         close_date="2026-05-01 11:00:00",
@@ -179,7 +185,7 @@ async def test_get_closed_trades_hides_non_terminal_sidestep_legs(
     closed_trades = await trades.get_closed_trades()
     closed_trades_length = await trades.get_closed_trades_length()
 
-    assert [row["symbol"] for row in closed_trades] == ["ETH/USDT"]
-    assert closed_trades_length == 1
+    assert [row["symbol"] for row in closed_trades] == ["ETH/USDT", "SOL/USDT"]
+    assert closed_trades_length == 2
 
     await Tortoise.close_connections()

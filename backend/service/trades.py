@@ -243,8 +243,9 @@ class Trades:
     @staticmethod
     def _visible_closed_trades_query():
         """Return the closed-trade query used for terminal user-facing history."""
-        return model.ClosedTrades.exclude(
-            close_reason__in=NON_TERMINAL_CLOSE_REASON_VALUES
+        return model.ClosedTrades.filter(
+            Q(close_reason__isnull=True)
+            | ~Q(close_reason__in=NON_TERMINAL_CLOSE_REASON_VALUES)
         )
 
     async def get_closed_trades(self, page: int = 0) -> list[dict[str, Any]]:
