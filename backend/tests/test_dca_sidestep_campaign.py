@@ -1,6 +1,13 @@
+import os
+from datetime import datetime, timezone
+
+import model
 import pytest
 from service.dca import Dca
+from service.order_persistence import persist_closed_trade
+from service.spot_campaign_types import SpotCampaignState, TradeCloseReason
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
+from tortoise import Tortoise
 
 
 class _DummySidestepCampaignService:
@@ -146,3 +153,132 @@ async def test_process_ticker_data_uses_bearish_sidestep_exit_before_dca(
     assert order["campaign_id"] == "campaign-1"
     assert order["actual_pnl"] == pytest.approx(-5.0)
     assert order["tp_price"] == pytest.approx(110.0)
+
+
+@pytest.mark.asyncio
+async def test_persist_closed_trade_infers_legacy_campaign_principal_quote(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    campaign_id = "campaign-legacy-principal"
+    await model.SpotCampaigns.create(
+        campaign_id=campaign_id,
+        symbol="BTC/USDT",
+        state=SpotCampaignState.ACTIVE_LONG.value,
+        started_at="2026-05-01T00:00:00+00:00",
+        last_transition_at="2026-05-01T00:00:00+00:00",
+        current_deal_id="deal-legacy-1",
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=0.0,
+        reserved_quote=0.0,
+        cumulative_realized_quote=10.0,
+        cumulative_realized_percent=0.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        deal_id="deal-legacy-1",
+        campaign_id=campaign_id,
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="long_exposed",
+        execution_history_complete=True,
+    )
+
+    service = SpotSidestepCampaignService()
+    closed_at = datetime(2026, 5, 2, 12, 0, tzinfo=timezone.utc)
+    payload = {
+        "symbol": "BTC/USDT",
+        "profit": 5.0,
+        "profit_percent": 4.545454545454546,
+        "amount": 1.0,
+        "cost": 110.0,
+        "tp_price": 115.0,
+        "avg_price": 110.0,
+        "open_date": "2026-05-01 00:00:00+00:00",
+        "close_date": "2026-05-02 12:00:00+00:00",
+        "duration": "{}",
+        "close_reason": TradeCloseReason.TAKE_PROFIT.value,
+        "sell_executions": [],
+    }
+
+    context = await service.resolve_close_context(
+        "BTC/USDT",
+        TradeCloseReason.TAKE_PROFIT.value,
+        {"tp": 5.0},
+        closed_at=closed_at,
+        closed_payload=payload,
+    )
+
+    assert context["principal_quote"] == pytest.approx(100.0)
+    assert context["summary_overrides"]["profit_percent"] == pytest.approx(15.0)
+
+    async def _noop_archive(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(
+        "service.order_persistence.archive_replay_candles_for_deal",
+        _noop_archive,
+    )
+    await persist_closed_trade("BTC/USDT", payload, campaign_context=context)
+
+    closed_trade = await model.ClosedTrades.get(symbol="BTC/USDT")
+    assert closed_trade.profit == pytest.approx(15.0)
+    assert closed_trade.profit_percent == pytest.approx(15.0)
+    assert closed_trade.cost == pytest.approx(100.0)
+
+    campaign = await model.SpotCampaigns.get(campaign_id=campaign_id)
+    assert campaign.principal_quote == pytest.approx(100.0)
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_stop_campaign_infers_legacy_waiting_principal_quote(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    campaign_id = "campaign-legacy-stop"
+    await model.SpotCampaigns.create(
+        campaign_id=campaign_id,
+        symbol="ETH/USDT",
+        state=SpotCampaignState.FLAT_WAITING_REENTRY.value,
+        started_at="2026-05-01T00:00:00+00:00",
+        last_transition_at="2026-05-01T06:00:00+00:00",
+        current_deal_id=None,
+        sidestep_count=1,
+        last_exit_reason=TradeCloseReason.SIDESTEP_EXIT.value,
+        cooldown_until=None,
+        tp_percent=5.0,
+        principal_quote=0.0,
+        reserved_quote=110.0,
+        cumulative_realized_quote=10.0,
+        cumulative_realized_percent=0.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="ETH/USDT",
+        campaign_id=campaign_id,
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+    )
+
+    service = SpotSidestepCampaignService()
+    stopped = await service.stop_campaign(campaign_id)
+
+    assert stopped is True
+
+    closed_trade = await model.ClosedTrades.get(symbol="ETH/USDT")
+    assert closed_trade.profit == pytest.approx(10.0)
+    assert closed_trade.profit_percent == pytest.approx(10.0)
+    assert closed_trade.cost == pytest.approx(100.0)
+
+    await Tortoise.close_connections()

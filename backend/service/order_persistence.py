@@ -196,6 +196,8 @@ async def _apply_close_campaign_context(
         ),
         "metadata_json": context.get("metadata_json"),
     }
+    if "principal_quote" in context:
+        update_payload["principal_quote"] = float(context.get("principal_quote") or 0.0)
     sidestep_increment = int(context.get("sidestep_increment") or 0)
     if sidestep_increment > 0:
         await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(conn).update(

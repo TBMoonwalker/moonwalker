@@ -84,6 +84,28 @@ def _normalize_symbol(value: Any) -> str:
     return str(value or "").strip().upper()
 
 
+def _infer_campaign_principal_quote(
+    *,
+    stored_principal_quote: Any,
+    cumulative_realized_quote: Any,
+    current_leg_cost: Any = None,
+    reserved_quote: Any = None,
+) -> float:
+    """Infer the original mission principal for legacy sidestep campaigns."""
+    principal_quote = float(stored_principal_quote or 0.0)
+    if principal_quote > 0:
+        return principal_quote
+
+    realized_quote = float(cumulative_realized_quote or 0.0)
+    for candidate in (current_leg_cost, reserved_quote):
+        fallback_quote = float(candidate or 0.0)
+        inferred_principal = fallback_quote - realized_quote
+        if inferred_principal > 0:
+            return inferred_principal
+
+    return 0.0
+
+
 @dataclass(frozen=True)
 class CampaignAdmissionBlock:
     """Campaign-owned admission state for a symbol."""
@@ -413,14 +435,18 @@ class SpotSidestepCampaignService:
         metadata = _parse_metadata(campaign.get("metadata_json"))
         metadata["last_close_reason"] = normalized_reason
         metadata["last_closed_at"] = _isoformat(closed_at)
-        principal_quote = float(campaign.get("principal_quote") or 0.0)
+        cumulative_realized_quote = float(
+            campaign.get("cumulative_realized_quote") or 0.0
+        )
+        principal_quote = _infer_campaign_principal_quote(
+            stored_principal_quote=campaign.get("principal_quote"),
+            cumulative_realized_quote=cumulative_realized_quote,
+            current_leg_cost=(closed_payload or {}).get("cost"),
+        )
         realized_profit = float((closed_payload or {}).get("profit") or 0.0)
         realized_proceeds = float(
             (closed_payload or {}).get("tp_price") or 0.0
         ) * float((closed_payload or {}).get("amount") or 0.0)
-        cumulative_realized_quote = float(
-            campaign.get("cumulative_realized_quote") or 0.0
-        )
         next_cumulative_realized_quote = cumulative_realized_quote + realized_profit
         next_cumulative_realized_percent = (
             (next_cumulative_realized_quote / principal_quote) * 100
@@ -448,6 +474,7 @@ class SpotSidestepCampaignService:
                 "tp_percent": float(
                     campaign.get("tp_percent") or config.get("tp") or 0.0
                 ),
+                "principal_quote": principal_quote,
                 "reserved_quote": realized_proceeds,
                 "cumulative_realized_quote": next_cumulative_realized_quote,
                 "cumulative_realized_percent": next_cumulative_realized_percent,
@@ -471,6 +498,7 @@ class SpotSidestepCampaignService:
             "cooldown_until": None,
             "sidestep_increment": 0,
             "tp_percent": float(campaign.get("tp_percent") or config.get("tp") or 0.0),
+            "principal_quote": principal_quote,
             "reserved_quote": 0.0,
             "cumulative_realized_quote": next_cumulative_realized_quote,
             "cumulative_realized_percent": next_cumulative_realized_percent,
@@ -760,6 +788,19 @@ class SpotSidestepCampaignService:
                     return False
 
                 now_iso = _isoformat(_utc_now())
+                cumulative_realized_quote = float(
+                    campaign.cumulative_realized_quote or 0.0
+                )
+                principal_quote = _infer_campaign_principal_quote(
+                    stored_principal_quote=campaign.principal_quote,
+                    cumulative_realized_quote=cumulative_realized_quote,
+                    reserved_quote=campaign.reserved_quote,
+                )
+                cumulative_realized_percent = (
+                    (cumulative_realized_quote / principal_quote) * 100
+                    if principal_quote > 0
+                    else float(campaign.cumulative_realized_percent or 0.0)
+                )
                 await model.SpotCampaigns.filter(
                     campaign_id=normalized_campaign_id
                 ).using_db(conn).update(
@@ -767,7 +808,9 @@ class SpotSidestepCampaignService:
                     last_transition_at=now_iso,
                     last_exit_reason=TradeCloseReason.MANUAL_STOP.value,
                     cooldown_until=None,
+                    principal_quote=principal_quote,
                     reserved_quote=0.0,
+                    cumulative_realized_percent=cumulative_realized_percent,
                 )
 
                 await model.ClosedTrades.create(
@@ -776,10 +819,10 @@ class SpotSidestepCampaignService:
                     campaign_id=normalized_campaign_id,
                     execution_history_complete=False,
                     so_count=0,
-                    profit=float(campaign.cumulative_realized_quote or 0.0),
-                    profit_percent=float(campaign.cumulative_realized_percent or 0.0),
+                    profit=cumulative_realized_quote,
+                    profit_percent=cumulative_realized_percent,
                     amount=0.0,
-                    cost=float(campaign.principal_quote or 0.0),
+                    cost=principal_quote,
                     tp_price=0.0,
                     avg_price=0.0,
                     open_date=campaign.started_at,
