@@ -164,6 +164,14 @@ class Orders:
             original_order,
             config,
         )
+        if str(campaign_context.get("campaign_id") or "").strip():
+            logging.info(
+                "Persisting campaign buy for %s: campaign=%s strategy=%s signal=%s.",
+                order_status["symbol"],
+                campaign_context.get("campaign_id"),
+                original_order.get("strategy_name"),
+                original_order.get("signal_name"),
+            )
         await persist_buy_trade(
             order_status["symbol"],
             payload,
@@ -332,6 +340,11 @@ class Orders:
             closed_payload=close_context["payload"],
         )
         if normalized_close_reason == TradeCloseReason.SIDESTEP_EXIT.value:
+            logging.info(
+                "Persisting sidestep transition for %s: campaign=%s -> flat waiting.",
+                order_status["symbol"],
+                campaign_context.get("campaign_id"),
+            )
             await persist_sidestep_transition(
                 order_status["symbol"],
                 close_context["payload"],
@@ -571,6 +584,12 @@ class Orders:
     ) -> None:
         """Create a sell order and persist closed trades."""
         logging.info("Incoming sell order for %s", order["symbol"])
+        if order.get("sell_reason") == TradeCloseReason.SIDESTEP_EXIT.value:
+            logging.info(
+                "Incoming sidestep exit sell for %s: campaign=%s.",
+                order["symbol"],
+                order.get("campaign_id"),
+            )
         sell_lock = self._get_sell_lock(order["symbol"])
         if sell_lock.locked():
             logging.debug(
@@ -806,6 +825,14 @@ class Orders:
         """Create a buy order and persist open trades."""
 
         logging.info("Incoming buy order for %s", order["symbol"])
+        if str(order.get("campaign_id") or "").strip():
+            logging.info(
+                "Incoming campaign buy order for %s: campaign=%s strategy=%s signal=%s.",
+                order["symbol"],
+                order.get("campaign_id"),
+                order.get("strategy_name"),
+                order.get("signal_name"),
+            )
 
         try:
             if bool(order.get("safetyorder")) and not bool(order.get("baseorder")):

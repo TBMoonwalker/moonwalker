@@ -5,8 +5,10 @@ export type OpenTradeRow = {
   symbol: string
   deal_id?: string | null
   campaign_id?: string | null
+  campaign_started_at?: string | null
   lifecycle_mode?: string | null
   exposure_state?: string | null
+  sidestep_count?: number
   execution_history_complete?: boolean
   amount: number | string
   cost: number | string
@@ -183,8 +185,10 @@ export const useTradesStore = defineStore('trades', {
         open_date: String(val.open_date ?? ''),
         deal_id: val.deal_id ?? null,
         campaign_id: val.campaign_id ?? null,
+        campaign_started_at: val.campaign_started_at ?? null,
         lifecycle_mode: val.lifecycle_mode ?? null,
         exposure_state: val.exposure_state ?? null,
+        sidestep_count: Number(val.sidestep_count ?? 0),
         execution_history_complete: Boolean(val.execution_history_complete ?? true),
         safetyorder: Array.isArray(val.safetyorders) ? val.safetyorders : [],
         precision: currentPrecision,

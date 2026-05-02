@@ -20,6 +20,7 @@ import { NDivider } from 'naive-ui/es/divider'
 import { useDialog } from 'naive-ui/es/dialog'
 import { useMessage } from 'naive-ui/es/message'
 import { NSlider } from 'naive-ui/es/slider'
+import { NTag } from 'naive-ui/es/tag'
 import { fetchJson } from '../api/client'
 import { useTradeTableFeed } from '../composables/useTradeTableFeed'
 import {
@@ -97,13 +98,31 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
         key: 'symbol',
         render: (rowData, index) => {
             const [token] = rowData.symbol.split('/')
-            return [
+            const rows = [
                 h('div', `#${index + 1}`),
                 h(NDivider, { dashed: true }),
                 h('div', token),
                 h(NDivider, { dashed: true }),
                 h('div', 'Flat / waiting'),
             ]
+            if (Number(rowData.sidestep_count ?? 0) > 0) {
+                rows.push(h(NDivider, { dashed: true }))
+                rows.push(
+                    h(
+                        NTag,
+                        {
+                            size: 'small',
+                            bordered: false,
+                            type: 'warning',
+                        },
+                        {
+                            default: () =>
+                                `Sidestep x${Number(rowData.sidestep_count ?? 0)}`,
+                        },
+                    ),
+                )
+            }
+            return rows
         },
     },
     {
@@ -198,7 +217,9 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
         key: 'open_date',
         align: 'center',
         render: (rowData) => {
-            const opened = resolveTradeDateTime(rowData.open_date)
+            const opened = resolveTradeDateTime(
+                rowData.campaign_started_at || rowData.open_date,
+            )
             const waitingSince = resolveTradeDateTime(
                 rowData.last_transition_at || rowData.open_date,
             )

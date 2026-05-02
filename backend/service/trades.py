@@ -268,6 +268,11 @@ class Trades:
             symbols = [order["symbol"] for order in orders]
             if not symbols:
                 return []
+            campaign_ids = [
+                str(order.get("campaign_id") or "").strip()
+                for order in orders
+                if str(order.get("campaign_id") or "").strip()
+            ]
 
             baseorders = await model.Trades.filter(
                 Q(baseorder=True), Q(symbol__in=symbols), join_type="AND"
@@ -278,6 +283,16 @@ class Trades:
                 Q(symbol__in=symbols),
                 join_type="AND",
             ).values()
+            campaigns_by_id: dict[str, dict[str, Any]] = {}
+            if campaign_ids:
+                campaign_rows = await model.SpotCampaigns.filter(
+                    campaign_id__in=campaign_ids
+                ).values("campaign_id", "started_at", "sidestep_count")
+                campaigns_by_id = {
+                    str(row.get("campaign_id") or "").strip(): row
+                    for row in campaign_rows
+                    if str(row.get("campaign_id") or "").strip()
+                }
 
             base_by_symbol = {}
             for order in baseorders:
@@ -295,6 +310,13 @@ class Trades:
                 safety = safety_by_symbol.get(order["symbol"])
                 if safety:
                     order["safetyorders"] = safety
+                campaign = campaigns_by_id.get(str(order.get("campaign_id") or ""))
+                order["campaign_started_at"] = (campaign or {}).get(
+                    "started_at"
+                ) or order.get("open_date")
+                order["sidestep_count"] = int(
+                    (campaign or {}).get("sidestep_count") or 0
+                )
             return orders
         except BaseORMException as e:
             # Broad catch to keep open trades endpoint responsive.

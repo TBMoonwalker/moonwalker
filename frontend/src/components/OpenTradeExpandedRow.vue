@@ -3,7 +3,7 @@
         <n-card>
             <n-timeline :horizontal="false">
                 <n-timeline-item
-                    title="Base order"
+                    :title="baseOrderTitle"
                     :content="baseOrderContent"
                     type="info"
                     :time="baseOrderTime"
@@ -31,7 +31,7 @@
         <TradeReplayChart
             :symbol="props.rowData.symbol"
             :precision="Number(props.rowData.precision ?? 0)"
-            :start-timestamp="props.rowData.baseorder.timestamp"
+            :start-timestamp="replayStartTimestamp"
             :min-timeframe="props.minTimeframe"
             :markers="chartMarkers"
             :price-lines="chartPriceLines"
@@ -59,6 +59,9 @@ type OrderData = {
 
 type RowData = {
     symbol: string
+    lifecycle_mode?: string | null
+    sidestep_count?: number
+    campaign_started_at?: string | null
     tp_price: number
     precision: number
     current_price?: number
@@ -79,6 +82,19 @@ const TP_LINE_COLOR = '#B78A2E'
 const safetyOrders = computed(() =>
     Array.isArray(props.rowData.safetyorder) ? props.rowData.safetyorder : [],
 )
+const hasReentered = computed(
+    () =>
+        String(props.rowData.lifecycle_mode ?? '') === 'sidestep_reentry' &&
+        Number(props.rowData.sidestep_count ?? 0) > 0,
+)
+const replayStartTimestamp = computed(() =>
+    hasReentered.value && props.rowData.campaign_started_at
+        ? props.rowData.campaign_started_at
+        : props.rowData.baseorder.timestamp,
+)
+const baseOrderTitle = computed(() =>
+    hasReentered.value ? 'Re-entry buy' : 'Base order',
+)
 
 const baseOrderTime = computed(() => formatTimestamp(props.rowData.baseorder.timestamp))
 const baseOrderContent = computed(
@@ -92,7 +108,7 @@ const chartMarkers = computed(() => [
         position: 'belowBar' as const,
         color: BUY_MARKER_COLOR,
         shape: 'arrowUp' as const,
-        text: 'Buy',
+        text: hasReentered.value ? 'Re-entry' : 'Buy',
     },
     ...safetyOrders.value.map((order) => ({
         timestamp: order.timestamp,

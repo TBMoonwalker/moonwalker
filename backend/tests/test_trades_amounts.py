@@ -228,3 +228,67 @@ async def test_get_closed_trades_hides_non_terminal_sidestep_legs(
     assert closed_trades_length == 2
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_get_open_trades_includes_campaign_metadata_for_sidestep_rows(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-joined-1",
+        symbol="BTC/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="active_long",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T08:00:00+00:00",
+        current_deal_id="deal-joined-1",
+        sidestep_count=2,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=0.0,
+        cumulative_realized_quote=0.0,
+        cumulative_realized_percent=0.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        deal_id="deal-joined-1",
+        campaign_id="campaign-joined-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="long_exposed",
+        open_date="2026-05-02T09:00:00+00:00",
+    )
+    await model.Trades.create(
+        timestamp="1000",
+        ordersize=100.0,
+        fee=0.0,
+        precision=3,
+        amount=1.0,
+        amount_fee=0.0,
+        price=100.0,
+        symbol="BTC/USDT",
+        orderid="oid-joined-1",
+        campaign_id="campaign-joined-1",
+        bot="sidestep_BTC/USDT",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        order_count=0,
+        so_percentage=None,
+        direction="long",
+        side="buy",
+    )
+
+    trades = Trades()
+    rows = await trades.get_open_trades()
+
+    assert len(rows) == 1
+    assert rows[0]["campaign_started_at"] == "2026-05-01T08:00:00+00:00"
+    assert rows[0]["sidestep_count"] == 2
+
+    await Tortoise.close_connections()

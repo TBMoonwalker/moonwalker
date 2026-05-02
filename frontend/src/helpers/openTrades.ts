@@ -20,6 +20,12 @@ export type OrderData = {
 export type OpenTradeRow = {
     id: number
     symbol: string
+    deal_id?: string | null
+    campaign_id?: string | null
+    campaign_started_at?: string | null
+    lifecycle_mode?: string | null
+    exposure_state?: string | null
+    sidestep_count?: number
     amount: number
     cost: number
     profit: number
@@ -36,6 +42,7 @@ export type OpenTradeRow = {
     unsellable_reason?: string | null
     unsellable_min_notional?: number | null
     unsellable_estimated_notional?: number | null
+    last_transition_at?: string | null
 }
 
 export const TIMEFRAME_CHOICES: TimeframeChoice[] = [

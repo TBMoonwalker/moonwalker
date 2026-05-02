@@ -360,6 +360,15 @@ class Dca:
         if order_size <= 0:
             return False
 
+        logging.info(
+            "Sidestep re-entry triggered for %s: campaign=%s reserved_quote=%s "
+            "current_price=%s strategy=%s.",
+            trades["symbol"],
+            trades.get("campaign_id"),
+            order_size,
+            current_price,
+            SidestepCampaignConfigView.from_config(self.config or {}).reentry_strategy,
+        )
         order = {
             "ordersize": order_size,
             "symbol": trades["symbol"],
@@ -379,7 +388,20 @@ class Dca:
             "timeframe": resolve_timeframe(self.config or {}),
             "metadata_json": None,
         }
-        return await self.orders.receive_buy_order(order, self.config or {})
+        success = await self.orders.receive_buy_order(order, self.config or {})
+        if success:
+            logging.info(
+                "Sidestep re-entry buy submitted for %s: campaign=%s.",
+                trades["symbol"],
+                trades.get("campaign_id"),
+            )
+        else:
+            logging.warning(
+                "Sidestep re-entry buy rejected for %s: campaign=%s.",
+                trades["symbol"],
+                trades.get("campaign_id"),
+            )
+        return success
 
     def __tp_strategy(self, symbol: str) -> bool:
         result = False
@@ -1060,6 +1082,15 @@ class Dca:
             return False
 
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
+        logging.info(
+            "Sidestep exit triggered for %s: campaign=%s current_price=%s "
+            "tp_price=%s actual_pnl=%s.",
+            trades["symbol"],
+            trades.get("campaign_id"),
+            current_price,
+            take_profit_price,
+            actual_pnl,
+        )
         order = {
             "symbol": trades["symbol"],
             "direction": trades["direction"],

@@ -11,6 +11,10 @@ const waitingCampaignsSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'WaitingCampaigns.vue'),
     'utf8',
 )
+const openTradeColumnsSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'composables', 'useOpenTradeColumns.ts'),
+    'utf8',
+)
 const closedTradesSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'ClosedTrades.vue'),
     'utf8',
@@ -46,6 +50,14 @@ test('waiting sidestep campaigns get their own surface and explicit stop action'
     assert.ok(
         waitingCampaignsSource.includes('/trades/waiting/stop/${rowData.campaign_id}'),
         'expected the waiting campaigns table to expose a manual stop action',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes('sidestep_count'),
+        'expected the waiting campaigns table to surface sidestep cycle metadata for active-flat trades',
+    )
+    assert.ok(
+        openTradeColumnsSource.includes('Re-entered x'),
+        'expected active sidestep trades to show a visible re-entry badge in the open-trades table',
     )
     assert.ok(
         closedTradesSource.includes("title: 'Outcome'"),

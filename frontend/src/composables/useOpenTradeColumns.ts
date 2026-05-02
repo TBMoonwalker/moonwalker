@@ -4,6 +4,7 @@ import { NButtonGroup } from 'naive-ui/es/button-group'
 import { NDivider } from 'naive-ui/es/divider'
 import { NIcon } from 'naive-ui/es/icon'
 import { NSlider } from 'naive-ui/es/slider'
+import { NTag } from 'naive-ui/es/tag'
 import { NTooltip } from 'naive-ui/es/tooltip'
 import { type DataTableColumns } from 'naive-ui/es/data-table'
 import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
@@ -55,6 +56,17 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         )
     }
 
+    function getReentryLabel(rowData: OpenTradeRow): string | null {
+        const sidestepCount = Number(rowData.sidestep_count ?? 0)
+        if (
+            String(rowData.lifecycle_mode ?? '') !== 'sidestep_reentry' ||
+            sidestepCount <= 0
+        ) {
+            return null
+        }
+        return `Re-entered x${sidestepCount}`
+    }
+
     function columnsTrades(): DataTableColumns<OpenTradeRow> {
         const columns: DataTableColumns<OpenTradeRow> = [
             {
@@ -72,11 +84,27 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 key: 'symbol',
                 render: (rowData, index) => {
                     const [symbol] = splitTradeSymbol(rowData.symbol)
-                    return [
+                    const reentryLabel = getReentryLabel(rowData)
+                    const rows = [
                         h('div', `#${index + 1}`),
                         h(NDivider, { dashed: true }),
                         h('div', symbol),
                     ]
+                    if (reentryLabel) {
+                        rows.push(h(NDivider, { dashed: true }))
+                        rows.push(
+                            h(
+                                NTag,
+                                {
+                                    size: 'small',
+                                    bordered: false,
+                                    type: 'warning',
+                                },
+                                { default: () => reentryLabel },
+                            ),
+                        )
+                    }
+                    return rows
                 },
             },
             {
@@ -218,7 +246,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 align: 'center',
                 render: (rowData) => {
                     const { date, time } = resolveTradeDateTime(
-                        rowData.open_date,
+                        rowData.campaign_started_at || rowData.open_date,
                     )
                     return [
                         h('div', date),
