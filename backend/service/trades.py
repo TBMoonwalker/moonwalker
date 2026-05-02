@@ -13,6 +13,7 @@ from service.spot_campaign_types import (
     NON_TERMINAL_CLOSE_REASON_VALUES,
     TradeExposureState,
 )
+from service.trade_math import parse_date_to_ms
 from tortoise.exceptions import BaseORMException
 from tortoise.expressions import F
 from tortoise.functions import Sum
@@ -156,6 +157,20 @@ class Trades:
         row["campaign_total_profit_percent"] = total_profit_percent
         row["display_profit"] = total_profit
         row["display_profit_percent"] = total_profit_percent
+
+    @staticmethod
+    def _trade_entry_sort_key(row: dict[str, Any]) -> tuple[int, int, int]:
+        """Sort active trades by the entry timestamp shown in the UI."""
+        entry_value = row.get("campaign_started_at") or row.get("open_date")
+        entry_ms = (
+            parse_date_to_ms(str(entry_value).strip())
+            if entry_value is not None
+            else None
+        )
+        row_id = int(row.get("id") or 0)
+        if entry_ms is None:
+            return (1, row_id, row_id)
+        return (0, entry_ms, row_id)
 
     async def _execute_db(
         self,
@@ -397,6 +412,7 @@ class Trades:
                     (campaign or {}).get("sidestep_count") or 0
                 )
                 self._apply_campaign_profit_fields(order, campaign)
+            orders.sort(key=self._trade_entry_sort_key)
             return orders
         except BaseORMException as e:
             # Broad catch to keep open trades endpoint responsive.

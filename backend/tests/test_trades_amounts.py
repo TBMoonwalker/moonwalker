@@ -422,3 +422,92 @@ async def test_get_waiting_trades_combine_campaign_realized_and_virtual_profit(
     assert rows[0]["display_profit_percent"] == pytest.approx(10.0)
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_get_open_trades_sorts_by_campaign_or_trade_entry_time(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-late",
+        symbol="LATE/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="active_long",
+        started_at="2026-05-03T08:00:00+00:00",
+        last_transition_at="2026-05-03T08:00:00+00:00",
+        current_deal_id="deal-late",
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=0.0,
+        cumulative_realized_quote=0.0,
+        cumulative_realized_percent=0.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="LATE/USDT",
+        deal_id="deal-late",
+        campaign_id="campaign-late",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="long_exposed",
+        open_date="2026-05-03T09:00:00+00:00",
+    )
+    await model.Trades.create(
+        timestamp="3000",
+        ordersize=100.0,
+        fee=0.0,
+        precision=3,
+        amount=1.0,
+        amount_fee=0.0,
+        price=100.0,
+        symbol="LATE/USDT",
+        orderid="oid-late",
+        campaign_id="campaign-late",
+        bot="sidestep_LATE/USDT",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        order_count=0,
+        so_percentage=None,
+        direction="long",
+        side="buy",
+    )
+
+    await model.OpenTrades.create(
+        symbol="EARLY/USDT",
+        deal_id="deal-early",
+        lifecycle_mode="classic_dca",
+        exposure_state="long_exposed",
+        open_date="2026-05-01T09:00:00+00:00",
+    )
+    await model.Trades.create(
+        timestamp="1000",
+        ordersize=50.0,
+        fee=0.0,
+        precision=3,
+        amount=1.0,
+        amount_fee=0.0,
+        price=50.0,
+        symbol="EARLY/USDT",
+        orderid="oid-early",
+        bot="dca_EARLY/USDT",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        order_count=0,
+        so_percentage=None,
+        direction="long",
+        side="buy",
+    )
+
+    trades = Trades()
+    rows = await trades.get_open_trades()
+
+    assert [row["symbol"] for row in rows] == ["EARLY/USDT", "LATE/USDT"]
+
+    await Tortoise.close_connections()
