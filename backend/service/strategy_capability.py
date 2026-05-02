@@ -12,11 +12,15 @@ from service.spot_campaign_types import TradeLifecycleMode
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_capability")
 
+HIDDEN_STRATEGY_ALIASES = frozenset({"ema_swing_reverse"})
+
 # Strategy -> indicator methods required by its implementation.
 REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {
     "bbands_cross": ("calculate_bbands_cross",),
     "ema_cross": ("calculate_ema_cross",),
     "ema_down": ("calculate_ema",),
+    "ema20_swing": ("calculate_ema", "get_close_price"),
+    "ema20_swing_reverse": ("calculate_ema", "get_close_price"),
     "ema_low": ("calculate_ema", "get_close_price"),
     "ema_swing": ("calculate_ema", "get_close_price"),
     "ema_swing_reverse": ("calculate_ema", "get_close_price"),
@@ -33,6 +37,8 @@ MIN_HISTORY_CANDLES_BY_STRATEGY: dict[str, int] = {
     "bbands_cross": 50,
     "ema_cross": 22,
     "ema_down": 200,
+    "ema20_swing": 200,
+    "ema20_swing_reverse": 200,
     "ema_low": 200,
     "ema_swing": 200,
     "ema_swing_reverse": 200,
@@ -219,6 +225,8 @@ def filter_supported_strategies(strategy_names: Iterable[str]) -> list[str]:
     """Filter and return only currently supported strategies."""
     supported: list[str] = []
     for name in strategy_names:
+        if name in HIDDEN_STRATEGY_ALIASES:
+            continue
         error = get_strategy_support_error(name)
         if error:
             logging.warning(error)

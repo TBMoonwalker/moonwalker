@@ -381,3 +381,51 @@ test('buildConfigSubmitPayload clears dynamic safety-order buffer for static DCA
         type: 'float',
     })
 })
+
+test('buildConfigSubmitPayload normalizes legacy ema swing reverse strategy ids', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            dca: {
+                enabled: true,
+                trade_lifecycle_mode: 'sidestep_reentry',
+                dynamic: false,
+                strategy: 'ema_swing_reverse',
+                timeframe: '1h',
+                trailing_tp: null,
+                max_bots: 2,
+                bo: 20,
+                sell_order_type: 'market',
+                limit_sell_timeout_sec: 60,
+                limit_sell_fallback_to_market: true,
+                tp_limit_prearm_enabled: false,
+                tp_limit_prearm_margin_percent: 0.25,
+                tp_spike_confirm_enabled: false,
+                tp_spike_confirm_seconds: null,
+                tp_spike_confirm_ticks: null,
+                so: 10,
+                mstc: 3,
+                sos: 1.5,
+                ss: 1.2,
+                os: 1.4,
+                trade_safety_order_budget_ratio: 0.95,
+                sidestep_campaign_enabled: true,
+                sidestep_bearish_strategy: 'ema_swing_reverse',
+                sidestep_reentry_strategy: 'ema_swing_reverse',
+                sidestep_reentry_cooldown_candles: 0,
+                sidestep_reentry_requires_fresh_long_signal: false,
+                tp: 1.8,
+                sl: null,
+            },
+        }),
+    )
+
+    assert.equal(parseField(payload, 'dca_strategy').value, 'ema20_swing_reverse')
+    assert.equal(
+        parseField(payload, 'sidestep_bearish_strategy').value,
+        'ema20_swing_reverse',
+    )
+    assert.equal(
+        parseField(payload, 'sidestep_reentry_strategy').value,
+        'ema20_swing_reverse',
+    )
+})

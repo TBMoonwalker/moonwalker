@@ -174,6 +174,13 @@ export interface BuildConfigSubmitPayloadOptions {
 
 export type ConfigSubmitPayload = Record<string, ConfigUpdatePayload>
 
+function normalizeStrategyName(value: string | null): string | null {
+    if (value === 'ema_swing_reverse') {
+        return 'ema20_swing_reverse'
+    }
+    return value
+}
+
 export function buildConfigSubmitPayload(
     options: BuildConfigSubmitPayloadOptions,
 ): ConfigSubmitPayload {
@@ -281,7 +288,7 @@ export function buildConfigSubmitPayload(
         dca: serializeConfigValue(dca.enabled || false, 'bool'),
         dynamic_dca: serializeConfigValue(dca.dynamic || false, 'bool'),
         dca_strategy: serializeConfigValue(
-            toNullableConfigString(dca.strategy),
+            normalizeStrategyName(toNullableConfigString(dca.strategy)),
             'str',
         ),
         trailing_tp: serializeConfigValue(dca.trailing_tp || false, 'float'),
@@ -341,11 +348,15 @@ export function buildConfigSubmitPayload(
             'bool',
         ),
         sidestep_bearish_strategy: serializeConfigValue(
-            toNullableConfigString(dca.sidestep_bearish_strategy),
+            normalizeStrategyName(
+                toNullableConfigString(dca.sidestep_bearish_strategy),
+            ),
             'str',
         ),
         sidestep_reentry_strategy: serializeConfigValue(
-            toNullableConfigString(dca.sidestep_reentry_strategy),
+            normalizeStrategyName(
+                toNullableConfigString(dca.sidestep_reentry_strategy),
+            ),
             'str',
         ),
         sidestep_reentry_cooldown_candles: serializeConfigValue(

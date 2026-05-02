@@ -9,6 +9,8 @@ from service.strategy_capability import (
 
 def test_supported_strategy_has_no_support_error() -> None:
     assert get_strategy_support_error("ema_cross") is None
+    assert get_strategy_support_error("ema20_swing") is None
+    assert get_strategy_support_error("ema20_swing_reverse") is None
     assert get_strategy_support_error("ema_swing_reverse") is None
 
 
@@ -20,15 +22,27 @@ def test_unsupported_strategy_reports_missing_indicator_methods() -> None:
 
 def test_filter_supported_strategies_removes_unsupported_entries() -> None:
     supported = filter_supported_strategies(
-        ["ema_cross", "bbands_cross", "ichimoku_cross"]
+        [
+            "ema_cross",
+            "ema20_swing",
+            "ema20_swing_reverse",
+            "ema_swing_reverse",
+            "bbands_cross",
+            "ichimoku_cross",
+        ]
     )
     assert "ema_cross" in supported
+    assert "ema20_swing" in supported
+    assert "ema20_swing_reverse" in supported
+    assert "ema_swing_reverse" not in supported
     assert "bbands_cross" not in supported
     assert "ichimoku_cross" not in supported
 
 
 def test_get_strategy_min_history_candles_returns_expected_warmup() -> None:
     assert get_strategy_min_history_candles("ema_cross") == 22
+    assert get_strategy_min_history_candles("ema20_swing") == 200
+    assert get_strategy_min_history_candles("ema20_swing_reverse") == 200
     assert get_strategy_min_history_candles("ema_low") == 200
     assert get_strategy_min_history_candles("ema_swing_reverse") == 200
     assert get_strategy_min_history_candles(None) == 0
@@ -53,7 +67,7 @@ def test_get_configured_strategy_min_history_candles_uses_sidestep_mode_strategi
             "trade_lifecycle_mode": "sidestep_reentry",
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
-            "sidestep_reentry_strategy": "ema_swing_reverse",
+            "sidestep_reentry_strategy": "ema20_swing_reverse",
             "dca_strategy": "ema_cross",
             "tp_strategy": "ema_cross",
         }
@@ -77,7 +91,7 @@ def test_get_configured_strategy_history_lookback_days_uses_sidestep_mode_strate
             "trade_lifecycle_mode": "sidestep_reentry",
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
-            "sidestep_reentry_strategy": "ema_swing_reverse",
+            "sidestep_reentry_strategy": "ema20_swing_reverse",
             "dca_strategy": "ema_cross",
         },
         "1h",

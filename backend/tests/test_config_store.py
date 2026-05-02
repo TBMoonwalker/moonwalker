@@ -362,11 +362,17 @@ def test_config_discovers_runtime_metadata_relative_to_backend_root(
 
     config = Config()
 
-    strategies = config._Config__get_filenames_in_directory("strategies")
+    strategy_files = config._Config__get_filenames_in_directory("strategies")
+    strategies = config._Config__get_strategies()
     signal_plugins = config._Config__get_filenames_in_directory("signals")
 
+    assert "ema20_swing" in strategy_files
+    assert "ema20_swing_reverse" in strategy_files
+    assert "ema_swing_reverse" in strategy_files
+    assert "ema20_swing" in strategies
+    assert "ema20_swing_reverse" in strategies
     assert "ema_swing" in strategies
-    assert "ema_swing_reverse" in strategies
+    assert "ema_swing_reverse" not in strategies
     assert "asap" in signal_plugins
 
 
