@@ -844,6 +844,83 @@ class SpotSidestepCampaignService:
             f"stopping sidestep campaign {normalized_campaign_id}",
         )
 
+    async def activate_campaign(self, campaign_id: str) -> bool:
+        """Re-enter a waiting sidestep campaign immediately by manual override."""
+        normalized_campaign_id = str(campaign_id or "").strip()
+        if not normalized_campaign_id:
+            return False
+
+        campaign = await self._find_campaign_by_id(normalized_campaign_id)
+        if campaign is None:
+            return False
+        if (
+            str(campaign.get("state") or "")
+            != SpotCampaignState.FLAT_WAITING_REENTRY.value
+        ):
+            return False
+
+        symbol = _normalize_symbol(campaign.get("symbol"))
+        if not symbol:
+            return False
+
+        open_trade_rows = (
+            await model.OpenTrades.filter(symbol=symbol)
+            .limit(1)
+            .values("reserved_reentry_quote")
+        )
+        open_trade = open_trade_rows[0] if open_trade_rows else None
+        order_size = float(
+            (open_trade or {}).get("reserved_reentry_quote")
+            or campaign.get("reserved_quote")
+            or float((self.config or {}).get("bo") or 0.0)
+        )
+        if order_size <= 0:
+            logging.warning(
+                "Manual sidestep re-entry skipped for %s: campaign=%s has no reserved quote.",
+                symbol,
+                normalized_campaign_id,
+            )
+            return False
+
+        logging.info(
+            "Manual sidestep re-entry requested for %s: campaign=%s reserved_quote=%s.",
+            symbol,
+            normalized_campaign_id,
+            order_size,
+        )
+        orders = await self._get_orders()
+        order = {
+            "ordersize": order_size,
+            "symbol": symbol,
+            "direction": "long",
+            "botname": f"sidestep_{symbol}",
+            "baseorder": True,
+            "safetyorder": False,
+            "order_count": 0,
+            "ordertype": "market",
+            "so_percentage": None,
+            "side": "buy",
+            "campaign_id": normalized_campaign_id,
+            "signal_name": None,
+            "strategy_name": "manual_reentry",
+            "timeframe": resolve_timeframe(self.config or {}),
+            "metadata_json": None,
+        }
+        success = await orders.receive_buy_order(order, self.config)
+        if success:
+            logging.info(
+                "Manual sidestep re-entry buy submitted for %s: campaign=%s.",
+                symbol,
+                normalized_campaign_id,
+            )
+        else:
+            logging.warning(
+                "Manual sidestep re-entry buy rejected for %s: campaign=%s.",
+                symbol,
+                normalized_campaign_id,
+            )
+        return success
+
     async def _run_loop(self) -> None:
         """Continuously try re-entry for eligible waiting campaigns."""
         while self._running:

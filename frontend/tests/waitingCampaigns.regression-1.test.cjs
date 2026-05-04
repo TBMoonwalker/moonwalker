@@ -38,7 +38,7 @@ const monitoringSummarySource = fs.readFileSync(
     'utf8',
 )
 
-test('waiting sidestep campaigns get their own surface and explicit stop action', () => {
+test('waiting sidestep campaigns get their own surface and explicit waiting actions', () => {
     assert.ok(
         tradesViewSource.includes("name=\"waiting-campaigns\""),
         'expected the trades view to expose a dedicated waiting-campaign tab',
@@ -50,6 +50,14 @@ test('waiting sidestep campaigns get their own surface and explicit stop action'
     assert.ok(
         waitingCampaignsSource.includes('/trades/waiting/stop/${rowData.campaign_id}'),
         'expected the waiting campaigns table to expose a manual stop action',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes('/trades/waiting/activate/${rowData.campaign_id}'),
+        'expected the waiting campaigns table to expose a manual switch-to-active action',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes('Switch to active'),
+        'expected the waiting campaigns table to label the manual re-entry action clearly',
     )
     assert.ok(
         waitingCampaignsSource.includes('sidestep_count'),

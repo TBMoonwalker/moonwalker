@@ -210,6 +210,19 @@ async def waiting_campaign_stop(campaign_id: str) -> Any:
     return json_response({"result": "", "error": "Campaign not found."}, 404)
 
 
+@post(path="/trades/waiting/activate/{campaign_id:str}")
+async def waiting_campaign_activate(campaign_id: str) -> Any:
+    """Force a waiting sidestep campaign back into an active long leg."""
+    sidestep_campaigns = await SpotSidestepCampaignService.instance()
+    activated = await sidestep_campaigns.activate_campaign(campaign_id)
+    if activated:
+        return {"result": "activated"}
+    return json_response(
+        {"result": "", "error": "Campaign activation failed."},
+        409,
+    )
+
+
 route_handlers = [
     open_trades,
     closed_trades,
@@ -221,4 +234,5 @@ route_handlers = [
     closed_trade_delete,
     unsellable_trade_delete,
     waiting_campaign_stop,
+    waiting_campaign_activate,
 ]

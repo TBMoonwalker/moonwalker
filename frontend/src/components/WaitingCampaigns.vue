@@ -85,6 +85,42 @@ async function handleStopCampaign(rowData: WaitingCampaignRow): Promise<void> {
     })
 }
 
+async function handleActivateCampaign(rowData: WaitingCampaignRow): Promise<void> {
+    const campaignId = String(rowData.campaign_id ?? '')
+    if (!campaignId) {
+        message.error(`Missing sidestep campaign id for ${rowData.symbol}.`)
+        return
+    }
+
+    const d = dialog.warning({
+        title: 'Switch to active',
+        content: `Buy back into the waiting sidestep trade for ${rowData.symbol} now?`,
+        positiveText: 'Switch to active',
+        negativeText: 'Cancel',
+        onPositiveClick: async () => {
+            d.loading = true
+            try {
+                const result = await fetchJson<{ result: string }>(
+                    `/trades/waiting/activate/${rowData.campaign_id}`,
+                    { method: 'POST' },
+                )
+                if (result.result === 'activated') {
+                    message.success(
+                        `Switched sidestep trade for ${rowData.symbol} back to active.`,
+                    )
+                    return
+                }
+                message.error(`Failed activating sidestep trade for ${rowData.symbol}.`)
+            } catch (error) {
+                const detail = error instanceof Error ? error.message : 'Unknown error'
+                message.error(
+                    `Failed activating sidestep trade for ${rowData.symbol}: ${detail}`,
+                )
+            }
+        },
+    })
+}
+
 function rowClasses(rowData: WaitingCampaignRow): string {
     if (Math.sign(Number(rowData.display_profit_percent ?? 0)) >= 0) {
         return 'green'
@@ -200,6 +236,15 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
         render: (rowData) =>
             h(NButtonGroup, { size: 'medium', vertical: true }, {
                 default: () => [
+                    h(
+                        NButton,
+                        {
+                            type: 'success',
+                            ghost: true,
+                            onClick: () => handleActivateCampaign(rowData),
+                        },
+                        { default: () => 'Switch to active' },
+                    ),
                     h(
                         NButton,
                         {

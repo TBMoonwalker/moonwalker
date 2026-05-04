@@ -282,3 +282,69 @@ async def test_stop_campaign_infers_legacy_waiting_principal_quote(
     assert closed_trade.cost == pytest.approx(100.0)
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_activate_campaign_submits_manual_reentry_buy(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    campaign_id = "campaign-manual-activate"
+    await model.SpotCampaigns.create(
+        campaign_id=campaign_id,
+        symbol="ETH/USDT",
+        state=SpotCampaignState.FLAT_WAITING_REENTRY.value,
+        started_at="2026-05-01T00:00:00+00:00",
+        last_transition_at="2026-05-01T06:00:00+00:00",
+        current_deal_id=None,
+        sidestep_count=1,
+        last_exit_reason=TradeCloseReason.SIDESTEP_EXIT.value,
+        cooldown_until=None,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=111.0,
+        cumulative_realized_quote=10.0,
+        cumulative_realized_percent=10.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="ETH/USDT",
+        campaign_id=campaign_id,
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        reserved_reentry_quote=112.5,
+    )
+
+    submitted_orders: list[dict[str, object]] = []
+
+    class _FakeOrders:
+        async def receive_buy_order(self, order, config):
+            submitted_orders.append({"order": dict(order), "config": dict(config)})
+            return True
+
+    service = SpotSidestepCampaignService()
+    service.config = {
+        "trade_lifecycle_mode": "sidestep_reentry",
+        "market": "spot",
+        "timeframe": "4h",
+        "bo": 50.0,
+    }
+    service._orders = _FakeOrders()
+
+    activated = await service.activate_campaign(campaign_id)
+
+    assert activated is True
+    assert len(submitted_orders) == 1
+    submitted = submitted_orders[0]["order"]
+    assert submitted["campaign_id"] == campaign_id
+    assert submitted["symbol"] == "ETH/USDT"
+    assert submitted["ordersize"] == pytest.approx(112.5)
+    assert submitted["strategy_name"] == "manual_reentry"
+    assert submitted["side"] == "buy"
+    assert submitted["baseorder"] is True
+
+    await Tortoise.close_connections()
