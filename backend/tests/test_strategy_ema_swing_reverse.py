@@ -3,9 +3,9 @@ import pytest
 from strategies.ema20_swing_reverse import Strategy
 
 
-def _ema20_series(*tail: float) -> pd.Series:
+def _series(*tail: float, fill: float = 12.0) -> pd.Series:
     prefix_length = 24 - len(tail)
-    return pd.Series([12.0] * prefix_length + list(tail))
+    return pd.Series([fill] * prefix_length + list(tail))
 
 
 class _StubIndicators:
@@ -47,7 +47,7 @@ async def _no_op_load(self, _symbol: str) -> tuple[float, float] | None:
 async def _no_op_persist(
     self,
     _symbol: str,
-    _swing_value: float,
+    _close_value: float,
     _ema20_value: float,
 ) -> None:
     return None
@@ -64,75 +64,100 @@ def _install_fake_state_store(
     async def fake_persist(
         self,
         symbol: str,
-        swing_value: float,
+        close_value: float,
         ema20_value: float,
     ) -> None:
-        persisted_store[(symbol, self.timeframe)] = (swing_value, ema20_value)
+        persisted_store[(symbol, self.timeframe)] = (close_value, ema20_value)
 
     monkeypatch.setattr(Strategy, "_load_persisted_state", fake_load)
     monkeypatch.setattr(Strategy, "_persist_previous_state", fake_persist)
     return persisted_store
 
 
-def test_ema20_swing_reverse_history_scan_returns_latest_qualified_swing_state() -> (
-    None
-):
-    ema20_series = pd.Series([12.0, 12.0, 9.8, 10.0, 9.9, 9.6, 9.8, 9.7])
+def _install_fake_ema_builder(monkeypatch, ema_series_values: list[pd.Series]) -> None:
+    def fake_build(_close_series: pd.Series) -> pd.Series:
+        if not ema_series_values:
+            raise AssertionError("No EMA20 test series left")
+        return ema_series_values.pop(0)
 
-    latest_state = Strategy._find_latest_qualified_swing_state_from_series(ema20_series)
+    monkeypatch.setattr(Strategy, "_build_ema20_series", staticmethod(fake_build))
 
-    assert latest_state == (9.8, 9.7)
+
+def test_ema20_swing_reverse_history_scan_returns_latest_qualified_state() -> None:
+    close_series = pd.Series([10.0, 10.0, 9.7, 10.1, 9.5, 10.2, 9.2, 9.1])
+    ema20_series = pd.Series([10.0, 10.0, 9.9, 10.0, 9.7, 9.8, 9.4, 9.5])
+
+    latest_state = Strategy._find_latest_qualified_state_from_series(
+        close_series,
+        ema20_series,
+    )
+
+    assert latest_state == (9.2, 9.4)
 
 
 def test_ema20_swing_reverse_candidate_rejects_missing_numbers() -> None:
-    swing_down, swing_value, ema20_value = Strategy._evaluate_swing_candidate(
-        ema20_now=9.7,
-        ema20_prev=float("nan"),
-        ema20_prev2=9.6,
+    trigger_down, close_value, ema20_value = Strategy._evaluate_trigger_candidate(
+        close_value=9.7,
+        ema20_value=float("nan"),
+        previous_ema20_value=10.0,
     )
 
-    assert swing_down is False
-    assert swing_value is None
+    assert trigger_down is False
+    assert close_value is None
     assert ema20_value is None
 
 
 @pytest.mark.asyncio
-async def test_ema20_swing_reverse_first_swing_only_primes_state(monkeypatch) -> None:
-    monkeypatch.setattr(Strategy, "_load_persisted_state", _no_op_load)
-    monkeypatch.setattr(Strategy, "_persist_previous_state", _no_op_persist)
-    monkeypatch.setattr(
-        Strategy,
-        "_build_ema20_series",
-        staticmethod(lambda close_series: close_series),
-    )
-    strategy = Strategy("4h")
-    strategy.indicators = _StubIndicators(
-        ema20_values=[9.9],
-        close_series_values=[_ema20_series(9.8, 10.0, 9.9)],
-    )
-
-    result = await strategy.run("ERA/USDC", "sell")
-
-    assert result is False
-
-
-@pytest.mark.asyncio
-async def test_ema20_swing_reverse_returns_true_when_ema20_and_swing_drop(
+async def test_ema20_swing_reverse_first_qualifying_candle_only_primes_state(
     monkeypatch,
 ) -> None:
     monkeypatch.setattr(Strategy, "_load_persisted_state", _no_op_load)
     monkeypatch.setattr(Strategy, "_persist_previous_state", _no_op_persist)
     monkeypatch.setattr(
         Strategy,
-        "_build_ema20_series",
-        staticmethod(lambda close_series: close_series),
+        "_bootstrap_previous_state_from_history",
+        lambda self, _close_series: None,
+    )
+    _install_fake_ema_builder(
+        monkeypatch,
+        [_series(10.0, 9.7, 9.6)],
     )
     strategy = Strategy("4h")
     strategy.indicators = _StubIndicators(
-        ema20_values=[9.9, 9.7],
+        ema20_values=[9.6],
+        close_series_values=[_series(10.2, 9.4, 9.3)],
+    )
+
+    result = await strategy.run("ERA/USDC", "sell")
+
+    assert result is False
+    assert strategy._previous_state_by_symbol["ERA/USDC"] == (9.4, 9.7)
+
+
+@pytest.mark.asyncio
+async def test_ema20_swing_reverse_returns_true_for_new_lower_closed_candle_signal(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(Strategy, "_load_persisted_state", _no_op_load)
+    monkeypatch.setattr(Strategy, "_persist_previous_state", _no_op_persist)
+    monkeypatch.setattr(
+        Strategy,
+        "_bootstrap_previous_state_from_history",
+        lambda self, _close_series: None,
+    )
+    _install_fake_ema_builder(
+        monkeypatch,
+        [
+            _series(10.0, 9.7, 9.6),
+            _series(9.8, 9.4, 9.3),
+        ],
+    )
+    strategy = Strategy("4h")
+    strategy.indicators = _StubIndicators(
+        ema20_values=[9.6, 9.3],
         close_series_values=[
-            _ema20_series(9.8, 10.0, 9.9),
-            _ema20_series(9.6, 9.8, 9.7),
+            _series(10.2, 9.4, 9.3),
+            _series(9.9, 9.0, 8.9),
         ],
     )
 
@@ -150,30 +175,29 @@ async def test_ema20_swing_reverse_bootstraps_missing_state_without_trading(
     persisted_store = _install_fake_state_store(monkeypatch)
 
     def fake_bootstrap(self, _close_series) -> tuple[float, float] | None:
-        return (10.0, 9.9)
+        return (9.4, 9.7)
 
     monkeypatch.setattr(
         Strategy,
         "_bootstrap_previous_state_from_history",
         fake_bootstrap,
     )
-    monkeypatch.setattr(
-        Strategy,
-        "_build_ema20_series",
-        staticmethod(lambda close_series: close_series),
+    _install_fake_ema_builder(
+        monkeypatch,
+        [_series(9.8, 9.4, 9.3)],
     )
 
     strategy = Strategy("4h")
     strategy.indicators = _StubIndicators(
-        ema20_values=[9.7],
-        close_series_values=[_ema20_series(9.6, 9.8, 9.7)],
+        ema20_values=[9.3],
+        close_series_values=[_series(9.9, 9.0, 8.9)],
     )
 
     result = await strategy.run("ERA/USDC", "sell")
 
     assert result is False
-    assert strategy._previous_state_by_symbol["ERA/USDC"] == (9.8, 9.7)
-    assert persisted_store[("ERA/USDC", "4h")] == (9.8, 9.7)
+    assert strategy._previous_state_by_symbol["ERA/USDC"] == (9.0, 9.4)
+    assert persisted_store[("ERA/USDC", "4h")] == (9.0, 9.4)
 
 
 @pytest.mark.asyncio
@@ -207,7 +231,7 @@ async def test_ema20_swing_reverse_persist_previous_state_swallows_write_errors(
 
     strategy = Strategy("4h")
 
-    await strategy._persist_previous_state("ERA/USDC", 9.8, 9.7)
+    await strategy._persist_previous_state("ERA/USDC", 9.0, 9.4)
 
 
 @pytest.mark.asyncio
@@ -217,50 +241,64 @@ async def test_ema20_swing_reverse_restart_does_not_retrigger_consumed_signal(
     _install_fake_state_store(monkeypatch)
     monkeypatch.setattr(
         Strategy,
-        "_build_ema20_series",
-        staticmethod(lambda close_series: close_series),
+        "_bootstrap_previous_state_from_history",
+        lambda self, _close_series: None,
+    )
+    _install_fake_ema_builder(
+        monkeypatch,
+        [
+            _series(10.0, 9.7, 9.6),
+            _series(10.0, 9.7, 9.6),
+        ],
     )
 
     first_strategy = Strategy("4h")
     first_strategy.indicators = _StubIndicators(
-        ema20_values=[9.9],
-        close_series_values=[_ema20_series(9.8, 10.0, 9.9)],
+        ema20_values=[9.6],
+        close_series_values=[_series(10.2, 9.4, 9.3)],
     )
     assert await first_strategy.run("ERA/USDC", "sell") is False
 
     restarted_strategy = Strategy("4h")
     restarted_strategy.indicators = _StubIndicators(
-        ema20_values=[9.9],
-        close_series_values=[_ema20_series(9.8, 10.0, 9.9)],
+        ema20_values=[9.6],
+        close_series_values=[_series(10.2, 9.4, 9.3)],
     )
 
     assert await restarted_strategy.run("ERA/USDC", "sell") is False
 
 
 @pytest.mark.asyncio
-async def test_ema20_swing_reverse_restart_uses_persisted_state_for_next_lower_swing(
+async def test_ema20_swing_reverse_restart_uses_persisted_state_for_next_signal(
     monkeypatch,
 ) -> None:
     persisted_store = _install_fake_state_store(monkeypatch)
     monkeypatch.setattr(
         Strategy,
-        "_build_ema20_series",
-        staticmethod(lambda close_series: close_series),
+        "_bootstrap_previous_state_from_history",
+        lambda self, _close_series: None,
+    )
+    _install_fake_ema_builder(
+        monkeypatch,
+        [
+            _series(10.0, 9.7, 9.6),
+            _series(9.8, 9.4, 9.3),
+        ],
     )
 
     first_strategy = Strategy("4h")
     first_strategy.indicators = _StubIndicators(
-        ema20_values=[9.9],
-        close_series_values=[_ema20_series(9.8, 10.0, 9.9)],
+        ema20_values=[9.6],
+        close_series_values=[_series(10.2, 9.4, 9.3)],
     )
     assert await first_strategy.run("ERA/USDC", "sell") is False
-    assert persisted_store[("ERA/USDC", "4h")] == (10.0, 9.9)
+    assert persisted_store[("ERA/USDC", "4h")] == (9.4, 9.7)
 
     restarted_strategy = Strategy("4h")
     restarted_strategy.indicators = _StubIndicators(
-        ema20_values=[9.7],
-        close_series_values=[_ema20_series(9.6, 9.8, 9.7)],
+        ema20_values=[9.3],
+        close_series_values=[_series(9.9, 9.0, 8.9)],
     )
 
     assert await restarted_strategy.run("ERA/USDC", "sell") is True
-    assert persisted_store[("ERA/USDC", "4h")] == (9.8, 9.7)
+    assert persisted_store[("ERA/USDC", "4h")] == (9.0, 9.4)
