@@ -156,6 +156,88 @@ async def test_process_ticker_data_uses_bearish_sidestep_exit_before_dca(
 
 
 @pytest.mark.asyncio
+async def test_process_ticker_data_logs_waiting_statistics_for_flat_sidestep_trade(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    updated_rows: list[dict[str, object]] = []
+    statistic_payloads: list[dict[str, object]] = []
+
+    async def fake_get_trades_for_orders(_symbol: str):
+        return {
+            "symbol": "BTC/USDT",
+            "bot": "asap_BTC/USDT",
+            "campaign_id": "campaign-1",
+            "lifecycle_mode": "sidestep_reentry",
+            "exposure_state": "flat_waiting_reentry",
+            "waiting_reference_amount": 1.0,
+            "waiting_reference_quote": 120.0,
+            "waiting_reference_price": 120.0,
+            "reserved_reentry_quote": 120.0,
+        }
+
+    async def fake_update_open_trades(payload, symbol):
+        updated_rows.append({"payload": dict(payload), "symbol": symbol})
+
+    async def fake_update_statistic_data(payload):
+        statistic_payloads.append(dict(payload))
+
+    async def fail_waiting_reentry(*_args, **_kwargs):
+        return False
+
+    async def fake_get_sidestep_campaigns():
+        return _DummySidestepCampaignService()
+
+    monkeypatch.setattr(
+        dca.trades,
+        "get_trades_for_orders",
+        fake_get_trades_for_orders,
+    )
+    monkeypatch.setattr(dca.trades, "update_open_trades", fake_update_open_trades)
+    monkeypatch.setattr(
+        dca.statistic,
+        "update_statistic_data",
+        fake_update_statistic_data,
+    )
+    monkeypatch.setattr(dca, "_Dca__attempt_waiting_reentry", fail_waiting_reentry)
+    monkeypatch.setattr(dca, "_get_sidestep_campaigns", fake_get_sidestep_campaigns)
+
+    await dca.process_ticker_data(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 100.0}},
+        {
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "market": "spot",
+        },
+    )
+
+    assert len(updated_rows) == 1
+    updated_payload = updated_rows[0]["payload"]
+    assert updated_rows[0]["symbol"] == "BTC/USDT"
+    assert updated_payload["virtual_waiting_profit"] == pytest.approx(20.0)
+    assert updated_payload["virtual_waiting_profit_percent"] == pytest.approx(
+        16.666666666666664
+    )
+
+    assert len(statistic_payloads) == 1
+    statistic_payload = statistic_payloads[0]
+    assert statistic_payload["type"] == "waiting_check"
+    assert statistic_payload["symbol"] == "BTC/USDT"
+    assert statistic_payload["botname"] == "asap_BTC/USDT"
+    assert statistic_payload["current_price"] == pytest.approx(100.0)
+    assert statistic_payload["waiting_reference_price"] == pytest.approx(120.0)
+    assert statistic_payload["waiting_reference_amount"] == pytest.approx(1.0)
+    assert statistic_payload["waiting_reference_quote"] == pytest.approx(120.0)
+    assert statistic_payload["virtual_waiting_profit"] == pytest.approx(20.0)
+    assert statistic_payload["virtual_waiting_profit_percent"] == pytest.approx(
+        16.666666666666664
+    )
+    assert statistic_payload["reserved_reentry_quote"] == pytest.approx(120.0)
+    assert statistic_payload["campaign_id"] == "campaign-1"
+    assert statistic_payload["lifecycle_mode"] == "sidestep_reentry"
+    assert statistic_payload["exposure_state"] == "flat_waiting_reentry"
+
+
+@pytest.mark.asyncio
 async def test_persist_closed_trade_infers_legacy_campaign_principal_quote(
     tmp_path, monkeypatch
 ) -> None:

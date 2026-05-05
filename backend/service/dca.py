@@ -301,6 +301,9 @@ class Dca:
             if waiting_reference_price > 0
             else 0.0
         )
+        reserved_reentry_quote = float(
+            trades.get("reserved_reentry_quote") or waiting_reference_quote
+        )
         await self.trades.update_open_trades(
             {
                 "current_price": current_price,
@@ -309,15 +312,30 @@ class Dca:
                 "waiting_reference_price": waiting_reference_price,
                 "waiting_reference_amount": waiting_reference_amount,
                 "waiting_reference_quote": waiting_reference_quote,
-                "reserved_reentry_quote": float(
-                    trades.get("reserved_reentry_quote") or waiting_reference_quote
-                ),
+                "reserved_reentry_quote": reserved_reentry_quote,
                 "profit": 0.0,
                 "profit_percent": 0.0,
                 "amount": 0.0,
                 "cost": 0.0,
             },
             trades["symbol"],
+        )
+        await self.statistic.update_statistic_data(
+            {
+                "type": "waiting_check",
+                "symbol": trades["symbol"],
+                "botname": trades.get("bot"),
+                "current_price": current_price,
+                "waiting_reference_price": waiting_reference_price,
+                "waiting_reference_amount": waiting_reference_amount,
+                "waiting_reference_quote": waiting_reference_quote,
+                "virtual_waiting_profit": virtual_profit,
+                "virtual_waiting_profit_percent": virtual_profit_percent,
+                "reserved_reentry_quote": reserved_reentry_quote,
+                "campaign_id": trades.get("campaign_id"),
+                "lifecycle_mode": trades.get("lifecycle_mode"),
+                "exposure_state": trades.get("exposure_state"),
+            }
         )
 
     async def __attempt_waiting_reentry(

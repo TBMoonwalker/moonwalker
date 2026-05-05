@@ -467,6 +467,10 @@ class Statistic:
 
     async def update_statistic_data(self, stats: dict[str, Any]) -> None:
         """Update open trade statistics based on recent ticker data."""
+        if stats["type"] == "waiting_check":
+            logging.trace("%s", stats)
+            return
+
         if stats["type"] != "dca_check":
             profit = (
                 stats["current_price"] * stats["total_amount"] - stats["total_cost"]
