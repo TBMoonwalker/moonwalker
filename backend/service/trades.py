@@ -564,14 +564,34 @@ class Trades:
             return 0
 
     async def get_token_amount_from_trades(self, symbol: str) -> float:
-        """Return total token amount for a symbol."""
+        """Return the net remaining token amount for a symbol."""
         try:
             result = (
                 await model.Trades.filter(symbol=symbol)
                 .annotate(total_amount=Sum(F("amount")))
                 .values_list("total_amount", flat=True)
             )
-            return float(result[0] or 0.0)
+            total_amount = float(result[0] or 0.0)
+            open_trade_rows = (
+                await model.OpenTrades.filter(symbol=symbol)
+                .limit(1)
+                .values(
+                    "amount",
+                    "sold_amount",
+                    "unsellable_amount",
+                    "unsellable_reason",
+                )
+            )
+            open_trade = open_trade_rows[0] if open_trade_rows else None
+            if open_trade:
+                unsellable_state = self._extract_unsellable_state(open_trade)
+                if unsellable_state["is_unsellable"]:
+                    return float(open_trade.get("amount") or total_amount)
+
+                partial_sell = self._normalize_partial_sell_execution(open_trade)
+                total_amount -= partial_sell["sold_amount"]
+
+            return max(0.0, total_amount)
         except BaseORMException as e:
             # Broad catch to avoid crashing on database aggregation errors.
             logging.error("Error getting total amount from %s. Cause %s", symbol, e)
