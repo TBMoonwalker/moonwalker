@@ -187,28 +187,6 @@ async def test_init_exchange_uses_demo_without_sandbox_when_dry_run(
 
 
 @pytest.mark.asyncio
-async def test_init_exchange_keeps_live_public_data_when_public_only_dry_run(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    manager = ExchangeClientManager(_DummyLogger(), public_data_only=True)
-    monkeypatch.setattr(
-        "service.exchange_client_manager.ccxt.binance", _ConfigurableExchange
-    )
-
-    exchange = await manager._init_exchange(
-        {
-            "exchange": "binance",
-            "market": "spot",
-            "dry_run": True,
-            "sandbox": True,
-        }
-    )
-
-    assert exchange.demo_enabled is False
-    assert exchange.sandbox_enabled is False
-
-
-@pytest.mark.asyncio
 async def test_init_exchange_uses_sandbox_only_when_not_dry_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

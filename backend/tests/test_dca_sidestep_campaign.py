@@ -238,6 +238,137 @@ async def test_process_ticker_data_logs_waiting_statistics_for_flat_sidestep_tra
 
 
 @pytest.mark.asyncio
+async def test_process_ticker_data_logs_sidestep_gate_without_active_trade(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    debug_calls: list[tuple[object, ...]] = []
+
+    async def fake_get_trades_for_orders(_symbol: str):
+        return None
+
+    monkeypatch.setattr(
+        dca.trades,
+        "get_trades_for_orders",
+        fake_get_trades_for_orders,
+    )
+    monkeypatch.setattr(
+        "service.dca.logging.debug",
+        lambda *args, **kwargs: debug_calls.append(args),
+    )
+
+    await dca.process_ticker_data(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 100.0}},
+        {
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "market": "spot",
+        },
+    )
+
+    assert len(debug_calls) == 1
+    assert debug_calls[0][0] == "Sidestep gate: %s"
+    assert debug_calls[0][1] == {
+        "symbol": "BTC/USDT",
+        "sidestep_gate": "no_active_trade",
+        "source": "watcher_symbol_only",
+    }
+
+
+@pytest.mark.asyncio
+async def test_process_ticker_data_logs_exit_tp_gate_before_bearish_strategy(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    debug_calls: list[tuple[object, ...]] = []
+
+    async def fake_get_trades_for_orders(_symbol: str):
+        return {
+            "timestamp": "1000",
+            "fee": 0.0,
+            "total_cost": 100.0,
+            "total_amount": 1.0,
+            "symbol": "BTC/USDT",
+            "direction": "long",
+            "side": "buy",
+            "bot": "asap_BTC/USDT",
+            "bo_price": 100.0,
+            "current_price": 111.0,
+            "safetyorders": [],
+            "safetyorders_count": 0,
+            "ordertype": "market",
+            "campaign_id": "campaign-1",
+            "lifecycle_mode": "sidestep_reentry",
+            "exposure_state": "long_exposed",
+            "is_unsellable": False,
+        }
+
+    async def fake_get_profit():
+        return {"funds_locked": 100.0}
+
+    async def fake_resolve_trading_policy(_symbol, _funds_locked, _config):
+        return type(
+            "Policy",
+            (),
+            {
+                "take_profit": 10.0,
+                "stop_loss": 50.0,
+                "stop_loss_timeout": 0,
+                "mode": "none",
+                "adaptive_tp_applied": False,
+                "adaptive_reason_code": None,
+                "adaptive_trust_score": None,
+                "baseline_take_profit": 10.0,
+            },
+        )()
+
+    async def fail_sidestep_strategy(_symbol: str) -> bool:
+        raise AssertionError("sidestep strategy should not run above TP")
+
+    async def fake_get_sidestep_campaigns():
+        return _DummySidestepCampaignService()
+
+    async def fake_calculate_tp(*_args, **_kwargs):
+        return None
+
+    monkeypatch.setattr(
+        dca.trades,
+        "get_trades_for_orders",
+        fake_get_trades_for_orders,
+    )
+    monkeypatch.setattr(dca.statistic, "get_profit", fake_get_profit)
+    monkeypatch.setattr(
+        dca.autopilot,
+        "resolve_trading_policy",
+        fake_resolve_trading_policy,
+    )
+    monkeypatch.setattr(dca, "_Dca__sidestep_exit_strategy", fail_sidestep_strategy)
+    monkeypatch.setattr(dca, "_Dca__calculate_tp", fake_calculate_tp)
+    monkeypatch.setattr(dca, "_get_sidestep_campaigns", fake_get_sidestep_campaigns)
+    monkeypatch.setattr(
+        "service.dca.logging.debug",
+        lambda *args, **kwargs: debug_calls.append(args),
+    )
+
+    await dca.process_ticker_data(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 111.0}},
+        {
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "market": "spot",
+            "tp": 10.0,
+        },
+    )
+
+    assert len(debug_calls) == 1
+    assert debug_calls[0][0] == "Sidestep gate: %s"
+    assert debug_calls[0][1] == {
+        "symbol": "BTC/USDT",
+        "sidestep_gate": "exit_tp_gate",
+        "current_price": 111.0,
+        "tp_price": 110.0,
+    }
+
+
+@pytest.mark.asyncio
 async def test_persist_closed_trade_infers_legacy_campaign_principal_quote(
     tmp_path, monkeypatch
 ) -> None:

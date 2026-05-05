@@ -69,7 +69,7 @@ class Data:
 
     def __init__(self, persist_exchange: bool = False) -> None:
         utils = helper.Utils()
-        self.exchange = Exchange(public_data_only=True)
+        self.exchange = Exchange()
         self.utils = utils
         self.persist_exchange = persist_exchange
         self._symbols_cache: TTLCache[str, list[str]] = TTLCache(

@@ -325,7 +325,7 @@ async def test_watcher_reload_coalesces_rapid_config_changes(monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_watcher_reload_keeps_live_market_data_in_dry_run(monkeypatch) -> None:
+async def test_watcher_reload_ignores_sandbox_in_dry_run(monkeypatch) -> None:
     watcher = Watcher()
     calls: list[str] = []
 
@@ -352,4 +352,4 @@ async def test_watcher_reload_keeps_live_market_data_in_dry_run(monkeypatch) -> 
         }
     )
 
-    assert calls == []
+    assert calls == ["demo"]

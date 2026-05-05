@@ -12,9 +12,8 @@ class ExchangeClientManager:
 
     MARKETS_REFRESH_TTL_SECONDS = 300.0
 
-    def __init__(self, logger: Any, *, public_data_only: bool = False):
+    def __init__(self, logger: Any):
         self._logger = logger
-        self._public_data_only = public_data_only
         self.exchange: Any = None
         self._exchange_config: dict[str, Any] | None = None
         self._markets_loaded = False
@@ -107,7 +106,7 @@ class ExchangeClientManager:
                     options["hostname"],
                     config.get("exchange"),
                 )
-            if config.get("dry_run", True) and not self._public_data_only:
+            if config.get("dry_run", True):
                 try:
                     exchange.enableDemoTrading(True)
                     self._logger.info(
@@ -119,12 +118,6 @@ class ExchangeClientManager:
                         "Dry run requires CCXT enableDemoTrading support, but "
                         f"'{config.get('exchange')}' could not enable demo trading."
                     ) from exc
-            elif config.get("dry_run", True) and self._public_data_only:
-                self._logger.info(
-                    "Keeping exchange '%s' on live public market-data endpoints "
-                    "while dry_run is enabled.",
-                    config.get("exchange"),
-                )
             elif config.get("sandbox", False):
                 exchange.set_sandbox_mode(True)
             exchange.enableRateLimit = True

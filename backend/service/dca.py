@@ -9,7 +9,11 @@ import helper
 from service.ath import AthService
 from service.autopilot import Autopilot, ResolvedTradingPolicy
 from service.config import resolve_timeframe
-from service.config_views import DcaRuntimeConfigView, SidestepCampaignConfigView
+from service.config_views import (
+    DcaRuntimeConfigView,
+    SidestepCampaignConfigView,
+    TradeLifecycleConfigView,
+)
 from service.dca_safety_orders import (
     SafetyOrderContext,
     calculate_static_deviations,
@@ -57,6 +61,33 @@ class Dca:
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
         self._pending_tp_confirmations: dict[str, TpConfirmationState] = {}
         self._trailing_tp_peaks: dict[str, float] = {}
+        self._last_sidestep_gate_by_symbol: dict[str, tuple[Any, ...]] = {}
+
+    def __log_sidestep_gate(
+        self,
+        symbol: str,
+        reason: str,
+        **context: Any,
+    ) -> None:
+        """Log sidestep skip/gate reasons once per symbol state change."""
+        normalized_symbol = str(symbol or "").strip()
+        ordered_context = tuple(sorted(context.items()))
+        gate_state = (reason, ordered_context)
+        if self._last_sidestep_gate_by_symbol.get(normalized_symbol) == gate_state:
+            return
+
+        payload = {
+            "symbol": normalized_symbol,
+            "sidestep_gate": reason,
+            **context,
+        }
+        logging.debug("Sidestep gate: %s", payload)
+        self._last_sidestep_gate_by_symbol[normalized_symbol] = gate_state
+
+    def __clear_sidestep_gate(self, symbol: str) -> None:
+        """Forget the last sidestep gate state once evaluation can proceed."""
+        normalized_symbol = str(symbol or "").strip()
+        self._last_sidestep_gate_by_symbol.pop(normalized_symbol, None)
 
     def __get_monotonic_time(self) -> float:
         """Return a monotonic timestamp for TP confirmation timing."""
@@ -347,6 +378,10 @@ class Dca:
         if not self.__is_sidestep_mode(trades) or not self.__is_flat_waiting(trades):
             return False
         if not trades.get("campaign_id"):
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "waiting_missing_campaign",
+            )
             return False
 
         sidestep_campaigns = await self._get_sidestep_campaigns()
@@ -354,6 +389,11 @@ class Dca:
             str(trades.get("campaign_id") or "")
         )
         if campaign is None:
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "waiting_campaign_not_found",
+                campaign_id=str(trades.get("campaign_id") or ""),
+            )
             return False
 
         cooldown_until = campaign.get("cooldown_until")
@@ -363,10 +403,16 @@ class Dca:
                     datetime.fromisoformat(str(cooldown_until).replace("Z", "+00:00"))
                     > datetime.now().astimezone()
                 ):
+                    self.__log_sidestep_gate(
+                        trades["symbol"],
+                        "waiting_cooldown_active",
+                        cooldown_until=str(cooldown_until),
+                    )
                     return False
             except ValueError:
                 pass
 
+        self.__clear_sidestep_gate(trades["symbol"])
         if not await self.__sidestep_reentry_strategy(trades["symbol"]):
             return False
 
@@ -376,6 +422,11 @@ class Dca:
             or float((self.config or {}).get("bo") or 0.0)
         )
         if order_size <= 0:
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "waiting_missing_reserved_quote",
+                campaign_id=str(trades.get("campaign_id") or ""),
+            )
             return False
 
         logging.info(
@@ -1022,7 +1073,18 @@ class Dca:
         # New price action for DCA calculation
         if ticker["type"] == "ticker_price":
             price = ticker["ticker"]["price"]
-            trades = await self.trades.get_trades_for_orders(ticker["ticker"]["symbol"])
+            symbol = str(ticker["ticker"]["symbol"] or "")
+            trades = await self.trades.get_trades_for_orders(symbol)
+            if not trades:
+                if TradeLifecycleConfigView.from_config(
+                    self.config or {}
+                ).is_sidestep_mode():
+                    self.__log_sidestep_gate(
+                        symbol,
+                        "no_active_trade",
+                        source="watcher_symbol_only",
+                    )
+                return
             if trades:
                 runtime_config = self.__runtime_config()
                 sidestep_campaigns = await self._get_sidestep_campaigns()
@@ -1038,6 +1100,7 @@ class Dca:
                         "campaign_id": ensured_campaign_id,
                         "lifecycle_mode": TradeLifecycleMode.SIDESTEP_REENTRY.value,
                     }
+                self.__clear_sidestep_gate(trades["symbol"])
 
                 if self.__is_flat_waiting(trades):
                     await self.__update_waiting_virtual_metrics(trades, price)
@@ -1083,19 +1146,34 @@ class Dca:
         if trades.get("is_unsellable", False):
             return False
         if not trades.get("campaign_id"):
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "active_missing_campaign",
+            )
             return False
 
         total_amount = float(trades.get("total_amount") or 0.0)
         total_cost = float(trades.get("total_cost") or 0.0)
         total_fee = float(trades.get("fee") or 0.0)
         if total_amount <= 0:
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "active_missing_amount",
+            )
             return False
 
         average_buy_price = (total_cost + (total_cost * total_fee)) / total_amount
         take_profit_price = average_buy_price * (1 + (trading_policy.take_profit / 100))
         if current_price >= take_profit_price:
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "exit_tp_gate",
+                current_price=round(float(current_price), 8),
+                tp_price=round(float(take_profit_price), 8),
+            )
             return False
 
+        self.__clear_sidestep_gate(trades["symbol"])
         if not await self.__sidestep_exit_strategy(trades["symbol"]):
             return False
 
