@@ -102,6 +102,47 @@ async def test_get_partial_sell_execution_reads_open_trade_totals(
 
 
 @pytest.mark.asyncio
+async def test_get_token_amount_from_trades_subtracts_partial_sell_totals(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.Trades.create(
+        timestamp="1",
+        ordersize=12.1075,
+        fee=0.001,
+        precision=3,
+        amount=725.0,
+        amount_fee=0.0,
+        price=0.0167,
+        symbol="SENT/USDC",
+        orderid="oid1",
+        bot="bot",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        order_count=0,
+        so_percentage=None,
+        direction="long",
+        side="buy",
+    )
+    await model.OpenTrades.create(
+        symbol="SENT/USDC",
+        sold_amount=608.0,
+        sold_proceeds=10.1536,
+    )
+
+    trades = Trades()
+    total_amount = await trades.get_token_amount_from_trades("SENT/USDC")
+
+    assert total_amount == pytest.approx(117.0)
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_get_trades_for_orders_uses_unsellable_open_trade_amounts(
     tmp_path, monkeypatch
 ) -> None:
