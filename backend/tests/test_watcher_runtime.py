@@ -114,6 +114,67 @@ async def test_refresh_symbol_targets_from_trades_updates_signal_symbols() -> No
 
 
 @pytest.mark.asyncio
+async def test_warmup_active_trade_strategy_history_backfills_insufficient_symbols(
+    monkeypatch,
+) -> None:
+    watcher = Watcher()
+    watcher.config = {
+        "trade_lifecycle_mode": "sidestep_reentry",
+        "market": "spot",
+        "sidestep_bearish_strategy": "ema_down",
+        "sidestep_reentry_strategy": "ema20_swing_reverse",
+        "timeframe": "4h",
+    }
+    history_checks: list[str] = []
+    history_adds: list[tuple[str, int]] = []
+    close_calls: list[str] = []
+
+    async def fake_get_symbols() -> list[str]:
+        return ["BTC/USDC", "ETH/USDC"]
+
+    class FakeData:
+        async def has_sufficient_resampled_history(
+            self,
+            symbol: str,
+            timerange: str,
+            minimum_candles: int,
+        ) -> bool:
+            assert timerange == "4h"
+            assert minimum_candles == 200
+            history_checks.append(symbol)
+            if symbol == "BTC/USDC" and history_checks.count(symbol) == 1:
+                return False
+            return True
+
+        async def add_history_data_for_symbol(
+            self,
+            symbol: str,
+            history_data: int,
+            config: dict[str, object],
+        ) -> bool:
+            history_adds.append((symbol, history_data))
+            assert config["trade_lifecycle_mode"] == "sidestep_reentry"
+            return True
+
+        async def close(self) -> None:
+            close_calls.append("closed")
+
+    watcher.trades.get_symbols = fake_get_symbols
+    monkeypatch.setattr(watcher_module, "Data", FakeData)
+
+    await watcher._warmup_active_trade_strategy_history(
+        watcher.config,
+        timeframe="4h",
+        required_candles=200,
+        required_history_days=67,
+    )
+
+    assert history_adds == [("BTC/USDC", 67)]
+    assert history_checks == ["BTC/USDC", "BTC/USDC", "ETH/USDC"]
+    assert close_calls == ["closed"]
+
+
+@pytest.mark.asyncio
 async def test_shutdown_cleans_up_internal_tasks_and_is_idempotent() -> None:
     watcher = Watcher()
     close_calls: list[str] = []
@@ -132,12 +193,17 @@ async def test_shutdown_cleans_up_internal_tasks_and_is_idempotent() -> None:
     symbol_task = asyncio.create_task(sleep_forever(), name="watch:BTC/USDC")
     reload_task = asyncio.create_task(sleep_forever(), name="watcher:reload")
     btc_warmup_task = asyncio.create_task(sleep_forever(), name="watcher:btc_warmup")
+    strategy_history_warmup_task = asyncio.create_task(
+        sleep_forever(),
+        name="watcher:strategy_history_warmup",
+    )
 
     watcher._consumer_task = consumer_task
     watcher._worker_tasks = [worker_task]
     watcher.symbol_tasks = {"BTC/USDC": symbol_task}
     watcher._reload_task = reload_task
     watcher._btc_warmup_task = btc_warmup_task
+    watcher._strategy_history_warmup_task = strategy_history_warmup_task
     watcher.exchange = FakeExchange()
 
     await watcher.shutdown()
@@ -149,12 +215,14 @@ async def test_shutdown_cleans_up_internal_tasks_and_is_idempotent() -> None:
     assert watcher.symbol_tasks == {}
     assert watcher._reload_task is None
     assert watcher._btc_warmup_task is None
+    assert watcher._strategy_history_warmup_task is None
     assert watcher.exchange is None
     assert consumer_task.cancelled()
     assert worker_task.cancelled()
     assert symbol_task.cancelled()
     assert reload_task.cancelled()
     assert btc_warmup_task.cancelled()
+    assert strategy_history_warmup_task.cancelled()
 
 
 @pytest.mark.asyncio

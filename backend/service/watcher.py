@@ -6,11 +6,15 @@ from typing import Any
 import ccxt.pro as ccxtpro
 import helper
 import model
-from service.config import Config, resolve_history_lookback_days
+from service.config import Config, resolve_history_lookback_days, resolve_timeframe
 from service.config_views import ExchangeConnectionConfigView, WatcherRuntimeConfigView
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
+from service.strategy_capability import (
+    get_configured_strategy_history_lookback_days,
+    get_configured_strategy_min_history_candles,
+)
 from service.trades import Trades
 from service.watcher_queue import (
     pop_pending_dca_payload,
@@ -103,6 +107,7 @@ class Watcher:
         self._pending_reload_config: dict[str, Any] | None = None
         self._btc_warmup_task: asyncio.Task | None = None
         self._btc_warmup_key: tuple[Any, ...] | None = None
+        self._strategy_history_warmup_task: asyncio.Task | None = None
 
     async def init(self) -> None:
         """Initialize the watcher from current configuration."""
@@ -125,6 +130,7 @@ class Watcher:
         runtime_state.mandatory_symbols = self.__get_mandatory_symbols(config)
         self._refresh_symbol_targets_from_current_state()
         self._schedule_btc_pulse_history_warmup(config, watcher_config)
+        self._schedule_active_trade_strategy_history_warmup(config)
 
     async def _drain_exchange_reloads(self) -> None:
         """Serialize watcher exchange reloads and coalesce rapid config bursts."""
@@ -349,6 +355,124 @@ class Watcher:
         except (RuntimeError, TypeError, ValueError) as exc:
             logging.warning("BTC pulse warmup completed with warning: %s", exc)
 
+    async def _await_strategy_history_warmup_if_needed(self) -> None:
+        """Await active-trade history warmup briefly before watcher startup."""
+        if not self._strategy_history_warmup_task:
+            return
+        try:
+            await asyncio.wait_for(self._strategy_history_warmup_task, timeout=25)
+        except asyncio.TimeoutError:
+            logging.warning("Strategy history warmup timed out; continuing startup.")
+        except (RuntimeError, TypeError, ValueError) as exc:
+            logging.warning(
+                "Strategy history warmup completed with warning: %s",
+                exc,
+            )
+
+    def _schedule_active_trade_strategy_history_warmup(
+        self,
+        config: dict[str, Any],
+    ) -> None:
+        """Schedule history backfill for already-active trade symbols if needed."""
+        timeframe = resolve_timeframe(config)
+        required_candles = get_configured_strategy_min_history_candles(
+            config,
+            include_signal_strategy=False,
+        )
+        required_history_days = get_configured_strategy_history_lookback_days(
+            config,
+            timeframe,
+            include_signal_strategy=False,
+        )
+        if required_candles <= 0 or required_history_days <= 0:
+            return
+
+        if (
+            self._strategy_history_warmup_task
+            and not self._strategy_history_warmup_task.done()
+        ):
+            self._strategy_history_warmup_task.cancel()
+
+        config_snapshot = dict(config)
+        self._strategy_history_warmup_task = asyncio.create_task(
+            self._warmup_active_trade_strategy_history(
+                config_snapshot,
+                timeframe=timeframe,
+                required_candles=required_candles,
+                required_history_days=required_history_days,
+            ),
+            name="watcher:strategy_history_warmup",
+        )
+
+    async def _warmup_active_trade_strategy_history(
+        self,
+        config: dict[str, Any],
+        *,
+        timeframe: str,
+        required_candles: int,
+        required_history_days: int,
+    ) -> None:
+        """Ensure active-trade symbols have enough history for strategy evaluation."""
+        data = Data()
+        try:
+            trade_symbols = await self.trades.get_symbols()
+            if not trade_symbols:
+                return
+
+            warmed_symbols = 0
+            still_short_symbols: list[str] = []
+            for symbol in trade_symbols:
+                has_history = await data.has_sufficient_resampled_history(
+                    symbol,
+                    timeframe,
+                    required_candles,
+                )
+                if has_history:
+                    continue
+
+                success = await data.add_history_data_for_symbol(
+                    symbol,
+                    required_history_days,
+                    config,
+                )
+                if success and await data.has_sufficient_resampled_history(
+                    symbol,
+                    timeframe,
+                    required_candles,
+                ):
+                    warmed_symbols += 1
+                    continue
+
+                still_short_symbols.append(symbol)
+
+            if warmed_symbols:
+                logging.info(
+                    "Strategy history warmup completed for %s active symbol(s) "
+                    "(timeframe=%s, required_candles=%s, lookback_days=%s).",
+                    warmed_symbols,
+                    timeframe,
+                    required_candles,
+                    required_history_days,
+                )
+            if still_short_symbols:
+                logging.warning(
+                    "Strategy history warmup remains insufficient for %s "
+                    "(timeframe=%s, required_candles=%s).",
+                    still_short_symbols,
+                    timeframe,
+                    required_candles,
+                )
+        except asyncio.CancelledError:
+            raise
+        except (RuntimeError, TypeError, ValueError) as exc:
+            logging.error(
+                "Active trade strategy history warmup failed: %s",
+                exc,
+                exc_info=True,
+            )
+        finally:
+            await data.close()
+
     # ------------------------------------------------------------------- #
     #                Queue-based symbol updates from app.py               #
     # ------------------------------------------------------------------- #
@@ -488,6 +612,10 @@ class Watcher:
             self._btc_warmup_task = None
             await self._cancel_optional_task(btc_warmup_task)
 
+            strategy_history_warmup_task = self._strategy_history_warmup_task
+            self._strategy_history_warmup_task = None
+            await self._cancel_optional_task(strategy_history_warmup_task)
+
             consumer_task = self._consumer_task
             self._consumer_task = None
             await self._cancel_optional_task(consumer_task)
@@ -520,6 +648,7 @@ class Watcher:
         """Main loop that syncs symbol watchers and restarts them if needed."""
         logging.info("Starting Watcher...")
         await self._await_btc_warmup_if_needed()
+        await self._await_strategy_history_warmup_if_needed()
 
         await self._refresh_symbol_targets_from_trades(notify=False)
 
