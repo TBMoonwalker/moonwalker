@@ -248,20 +248,14 @@ class Watcher:
                     options["hostname"],
                     exchange_config.exchange,
                 )
-            if exchange_config.dry_run:
-                try:
-                    new_exchange.enableDemoTrading(True)
-                    logging.info(
-                        "Enabled CCXT Pro demo trading for exchange '%s'.",
-                        exchange_config.exchange,
-                    )
-                except (AttributeError, NotImplementedError, ccxtpro.BaseError) as exc:
-                    raise ValueError(
-                        "Dry run requires CCXT Pro enableDemoTrading support, but "
-                        f"'{exchange_config.exchange}' could not enable demo trading."
-                    ) from exc
-            elif exchange_config.sandbox:
+            if exchange_config.sandbox and not exchange_config.dry_run:
                 new_exchange.set_sandbox_mode(True)
+            elif exchange_config.dry_run:
+                logging.info(
+                    "Keeping watcher exchange '%s' on live public market-data "
+                    "endpoints while dry_run is enabled.",
+                    exchange_config.exchange,
+                )
             self.exchange = new_exchange
 
     def _schedule_btc_pulse_history_warmup(

@@ -49,11 +49,15 @@ class Exchange:
         self,
         *,
         balance_cache_ttl_seconds: float | None = None,
+        public_data_only: bool = False,
     ) -> None:
         self.utils = helper.Utils()
         self.status = True
         self._last_buy_precheck_result: dict[str, Any] | None = None
-        self._client_manager = ExchangeClientManager(logging)
+        self._client_manager = ExchangeClientManager(
+            logging,
+            public_data_only=public_data_only,
+        )
         self._balance_manager = ExchangeBalanceManager(
             logger=logging,
             balance_cache_ttl_seconds=(
