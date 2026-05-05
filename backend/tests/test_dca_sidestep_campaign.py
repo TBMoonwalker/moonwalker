@@ -561,3 +561,57 @@ async def test_activate_campaign_submits_manual_reentry_buy(
     assert submitted["baseorder"] is True
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_ensure_campaign_for_open_trade_repairs_stale_runtime_state(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-stale-open-trade",
+        symbol="BTC/USDT",
+        lifecycle_mode="classic_dca",
+        state=SpotCampaignState.FLAT_WAITING_REENTRY.value,
+        started_at="2026-05-01T00:00:00+00:00",
+        last_transition_at="2026-05-02T00:00:00+00:00",
+        current_deal_id="deal-stale-1",
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=100.0,
+        cumulative_realized_quote=0.0,
+        cumulative_realized_percent=0.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        deal_id="deal-stale-1",
+        campaign_id="campaign-stale-open-trade",
+        lifecycle_mode="classic_dca",
+        exposure_state="long_exposed",
+        execution_history_complete=True,
+    )
+
+    service = SpotSidestepCampaignService()
+    campaign_id = await service.ensure_campaign_for_open_trade(
+        {"symbol": "BTC/USDT", "deal_id": "deal-stale-1"},
+        {
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "market": "spot",
+        },
+    )
+
+    assert campaign_id == "campaign-stale-open-trade"
+    open_trade = await model.OpenTrades.get(symbol="BTC/USDT")
+    assert open_trade.lifecycle_mode == "sidestep_reentry"
+    assert open_trade.exposure_state == "flat_waiting_reentry"
+
+    campaign = await model.SpotCampaigns.get(campaign_id="campaign-stale-open-trade")
+    assert campaign.lifecycle_mode == "sidestep_reentry"
+
+    await Tortoise.close_connections()

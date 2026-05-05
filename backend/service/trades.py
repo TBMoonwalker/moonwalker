@@ -11,7 +11,9 @@ import model
 from service.database import run_sqlite_write_with_retry
 from service.spot_campaign_types import (
     NON_TERMINAL_CLOSE_REASON_VALUES,
+    SpotCampaignState,
     TradeExposureState,
+    TradeLifecycleMode,
 )
 from service.trade_math import parse_date_to_ms
 from tortoise.exceptions import BaseORMException
@@ -171,6 +173,26 @@ class Trades:
         if entry_ms is None:
             return (1, row_id, row_id)
         return (0, entry_ms, row_id)
+
+    @staticmethod
+    def _derive_campaign_runtime_state(
+        open_trade: dict[str, Any] | None,
+        campaign: dict[str, Any] | None,
+    ) -> tuple[str | None, str | None]:
+        """Resolve lifecycle/exposure from campaign truth when available."""
+        lifecycle_mode = open_trade.get("lifecycle_mode") if open_trade else None
+        exposure_state = open_trade.get("exposure_state") if open_trade else None
+        campaign_lifecycle_mode = str((campaign or {}).get("lifecycle_mode") or "")
+        campaign_state = str((campaign or {}).get("state") or "")
+
+        if campaign_lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
+            lifecycle_mode = campaign_lifecycle_mode
+            if campaign_state == SpotCampaignState.FLAT_WAITING_REENTRY.value:
+                exposure_state = TradeExposureState.FLAT_WAITING_REENTRY.value
+            elif campaign_state == SpotCampaignState.ACTIVE_LONG.value:
+                exposure_state = TradeExposureState.LONG_EXPOSED.value
+
+        return lifecycle_mode, exposure_state
 
     async def _execute_db(
         self,
@@ -793,6 +815,20 @@ class Trades:
             open_trade = opentrades[0] if opentrades else None
             if opentrades:
                 current_price = opentrades[0]["current_price"]
+            campaign = None
+            if open_trade and str(open_trade.get("campaign_id") or "").strip():
+                campaign_rows = (
+                    await model.SpotCampaigns.filter(
+                        campaign_id=str(open_trade.get("campaign_id") or "").strip()
+                    )
+                    .limit(1)
+                    .values("campaign_id", "lifecycle_mode", "state")
+                )
+                campaign = campaign_rows[0] if campaign_rows else None
+            lifecycle_mode, exposure_state = self._derive_campaign_runtime_state(
+                open_trade,
+                campaign,
+            )
 
             baseorder = None
             latest_order = None
@@ -818,11 +854,19 @@ class Trades:
                     safetyorders.append(safetyorder)
 
             if not latest_order:
-                if open_trade and (
-                    str(open_trade.get("exposure_state") or "")
+                if (
+                    open_trade
+                    and str(exposure_state or "")
                     == TradeExposureState.FLAT_WAITING_REENTRY.value
                 ):
-                    return self._build_flat_waiting_trade_data(symbol, open_trade)
+                    return self._build_flat_waiting_trade_data(
+                        symbol,
+                        {
+                            **open_trade,
+                            "lifecycle_mode": lifecycle_mode,
+                            "exposure_state": exposure_state,
+                        },
+                    )
                 return None
             if not baseorder:
                 baseorder = min(trades, key=lambda trade: float(trade["timestamp"]))
@@ -848,12 +892,8 @@ class Trades:
                     if open_trade and open_trade.get("campaign_id") is not None
                     else latest_order.get("campaign_id")
                 ),
-                "lifecycle_mode": (
-                    open_trade.get("lifecycle_mode") if open_trade else None
-                ),
-                "exposure_state": (
-                    open_trade.get("exposure_state") if open_trade else None
-                ),
+                "lifecycle_mode": lifecycle_mode,
+                "exposure_state": exposure_state,
                 "direction": latest_order["direction"],
                 "side": latest_order["side"],
                 "bot": latest_order["bot"],

@@ -195,6 +195,60 @@ async def test_get_trades_for_orders_returns_active_flat_waiting_context(
 
 
 @pytest.mark.asyncio
+async def test_get_trades_for_orders_repairs_waiting_runtime_from_campaign_state(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-waiting-legacy",
+        symbol="BTC/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="flat_waiting_reentry",
+        started_at="2026-05-01T00:00:00+00:00",
+        last_transition_at="2026-05-02T10:00:00+00:00",
+        current_deal_id="deal-legacy-1",
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=101.5,
+        reserved_quote=101.5,
+        cumulative_realized_quote=0.0,
+        cumulative_realized_percent=0.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        campaign_id="campaign-waiting-legacy",
+        lifecycle_mode="classic_dca",
+        exposure_state="long_exposed",
+        current_price=95.0,
+        reserved_reentry_quote=101.5,
+        waiting_reference_price=101.5,
+        waiting_reference_amount=1.0,
+        waiting_reference_quote=101.5,
+        virtual_waiting_profit=6.5,
+        virtual_waiting_profit_percent=6.4,
+        last_transition_at="2026-05-02T10:00:00+00:00",
+    )
+
+    trades = Trades()
+    aggregated = await trades.get_trades_for_orders("BTC/USDT")
+
+    assert aggregated is not None
+    assert aggregated["campaign_id"] == "campaign-waiting-legacy"
+    assert aggregated["lifecycle_mode"] == "sidestep_reentry"
+    assert aggregated["exposure_state"] == "flat_waiting_reentry"
+    assert aggregated["reserved_reentry_quote"] == 101.5
+    assert aggregated["virtual_waiting_profit"] == 6.5
+    assert aggregated["display_profit_percent"] == 6.4
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_get_closed_trades_hides_non_terminal_sidestep_legs(
     tmp_path, monkeypatch
 ) -> None:

@@ -18,6 +18,7 @@ from service.database import run_sqlite_write_with_retry
 from service.spot_campaign_types import (
     SpotCampaignState,
     TradeCloseReason,
+    TradeExposureState,
     TradeLifecycleMode,
 )
 from tortoise.transactions import in_transaction
@@ -82,6 +83,13 @@ def _serialize_metadata(metadata: dict[str, Any]) -> str:
 def _normalize_symbol(value: Any) -> str:
     """Return a normalized uppercase symbol key."""
     return str(value or "").strip().upper()
+
+
+def _exposure_state_for_campaign_state(state: Any) -> str:
+    """Map campaign state to the expected active-trade exposure state."""
+    if str(state or "") == SpotCampaignState.FLAT_WAITING_REENTRY.value:
+        return TradeExposureState.FLAT_WAITING_REENTRY.value
+    return TradeExposureState.LONG_EXPOSED.value
 
 
 def _infer_campaign_principal_quote(
@@ -531,13 +539,49 @@ class SpotSidestepCampaignService:
         existing_open_trade_rows = (
             await model.OpenTrades.filter(symbol=symbol)
             .limit(1)
-            .values("campaign_id", "deal_id", "open_date")
+            .values(
+                "campaign_id",
+                "deal_id",
+                "open_date",
+                "lifecycle_mode",
+                "exposure_state",
+            )
         )
         existing_open_trade = (
             existing_open_trade_rows[0] if existing_open_trade_rows else None
         )
         if existing_open_trade and existing_open_trade.get("campaign_id"):
-            return str(existing_open_trade["campaign_id"])
+            existing_campaign_id = str(existing_open_trade["campaign_id"])
+            existing_campaign = await self._find_campaign_by_id(existing_campaign_id)
+            expected_exposure_state = _exposure_state_for_campaign_state(
+                (existing_campaign or {}).get("state")
+            )
+            expected_lifecycle_mode = TradeLifecycleMode.SIDESTEP_REENTRY.value
+            if (
+                str(existing_open_trade.get("lifecycle_mode") or "")
+                != expected_lifecycle_mode
+                or str(existing_open_trade.get("exposure_state") or "")
+                != expected_exposure_state
+            ):
+                await run_sqlite_write_with_retry(
+                    lambda: model.OpenTrades.filter(symbol=symbol).update(
+                        lifecycle_mode=expected_lifecycle_mode,
+                        exposure_state=expected_exposure_state,
+                    ),
+                    f"repairing sidestep runtime state for {symbol}",
+                )
+            if (
+                existing_campaign
+                and str(existing_campaign.get("lifecycle_mode") or "")
+                != expected_lifecycle_mode
+            ):
+                await run_sqlite_write_with_retry(
+                    lambda: model.SpotCampaigns.filter(
+                        campaign_id=existing_campaign_id
+                    ).update(lifecycle_mode=expected_lifecycle_mode),
+                    f"repairing sidestep campaign lifecycle for {symbol}",
+                )
+            return existing_campaign_id
 
         campaign = await self._find_symbol_campaign(
             symbol,
