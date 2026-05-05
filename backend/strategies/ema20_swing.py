@@ -38,6 +38,13 @@ class Strategy:
         self._last_log_by_symbol: dict[str, dict[str, Any]] = {}
         self._previous_state_by_symbol: dict[str, tuple[float, float]] = {}
 
+    def _emit_debug_state(self, symbol: str, payload: dict[str, Any]) -> None:
+        """Write one structured debug line per symbol state change."""
+        if self._last_log_by_symbol.get(symbol) == payload:
+            return
+        logging.debug("%s", payload)
+        self._last_log_by_symbol[symbol] = payload.copy()
+
     @staticmethod
     def _is_missing_number(value: Any) -> bool:
         """Return True when a numeric value is missing or NaN."""
@@ -216,11 +223,39 @@ class Strategy:
 
         try:
             if ema.get("ema_20") is None:
+                self._emit_debug_state(
+                    symbol,
+                    {
+                        "symbol": symbol,
+                        "reason": "ema20_unavailable",
+                        "creating_order": False,
+                    },
+                )
                 return False
             if close is None:
+                self._emit_debug_state(
+                    symbol,
+                    {
+                        "symbol": symbol,
+                        "reason": "close_series_unavailable",
+                        "ema20(current)": ema.get("ema_20"),
+                        "creating_order": False,
+                    },
+                )
                 return False
             close_series = close.dropna()
             if len(close_series) < 22:
+                self._emit_debug_state(
+                    symbol,
+                    {
+                        "symbol": symbol,
+                        "reason": "insufficient_closed_candles",
+                        "ema20(current)": ema.get("ema_20"),
+                        "available_closed_candles": int(len(close_series)),
+                        "required_closed_candles": 22,
+                        "creating_order": False,
+                    },
+                )
                 return False
 
             ema20_series = self._build_ema20_series(close_series)
@@ -286,9 +321,7 @@ class Strategy:
                 "state_bootstrapped": bootstrapped,
                 "creating_order": result,
             }
-            if self._last_log_by_symbol.get(symbol) != logging_json:
-                logging.debug("%s", logging_json)
-                self._last_log_by_symbol[symbol] = logging_json.copy()
+            self._emit_debug_state(symbol, logging_json)
         except Exception as exc:
             logging.error(
                 "Cannot run EMA20 swing strategy for %s, check indicators.log: %s",

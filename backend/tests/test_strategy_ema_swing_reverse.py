@@ -135,6 +135,29 @@ async def test_ema20_swing_reverse_first_qualifying_candle_only_primes_state(
 
 
 @pytest.mark.asyncio
+async def test_ema20_swing_reverse_logs_skip_reason_for_insufficient_candles(
+    monkeypatch,
+) -> None:
+    strategy = Strategy("4h")
+    strategy.indicators = _StubIndicators(
+        ema20_values=[9.6],
+        close_series_values=[pd.Series([9.9, 9.8, 9.7])],
+    )
+
+    result = await strategy.run("ERA/USDC", "sell")
+
+    assert result is False
+    assert strategy._last_log_by_symbol["ERA/USDC"] == {
+        "symbol": "ERA/USDC",
+        "reason": "insufficient_closed_candles",
+        "ema20(current)": 9.6,
+        "available_closed_candles": 3,
+        "required_closed_candles": 22,
+        "creating_order": False,
+    }
+
+
+@pytest.mark.asyncio
 async def test_ema20_swing_reverse_returns_true_for_new_lower_closed_candle_signal(
     monkeypatch,
 ) -> None:
