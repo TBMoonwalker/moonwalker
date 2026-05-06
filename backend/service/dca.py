@@ -215,6 +215,9 @@ class Dca:
         actual_pnl: float,
     ) -> bool:
         """Place a proactive TP limit order at the exact TP price."""
+        sellable_amount = float(
+            trades.get("sellable_amount") or trades.get("total_amount") or 0.0
+        )
         order = {
             "symbol": trades["symbol"],
             "direction": trades["direction"],
@@ -223,7 +226,7 @@ class Dca:
             "sell_reason": "take_profit_prearm",
             "actual_pnl": actual_pnl,
             "total_cost": trades["total_cost"],
-            "total_amount": trades["total_amount"],
+            "total_amount": sellable_amount,
             "current_price": current_price,
             "limit_price": take_profit_price,
             "tp_price": take_profit_price,
@@ -733,13 +736,16 @@ class Dca:
         if await self.orders.reconcile_tp_limit_order(trades, self.config or {}):
             return
 
+        sellable_amount = float(
+            trades.get("sellable_amount") or trades.get("total_amount") or 0.0
+        )
         has_tp_limit_order = bool(trades.get("tp_limit_order_id"))
         if has_tp_limit_order and (
             not prearm_supported
             or self.__tp_limit_order_outdated(
                 trades,
                 tp_price=take_profit_price,
-                total_amount=float(trades["total_amount"]),
+                total_amount=sellable_amount,
             )
         ):
             canceled = await self.orders.cancel_tp_limit_order(
