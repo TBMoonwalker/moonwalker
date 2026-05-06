@@ -162,8 +162,12 @@ class Trades:
 
     @staticmethod
     def _trade_entry_sort_key(row: dict[str, Any]) -> tuple[int, int, int]:
-        """Sort active trades by the entry timestamp shown in the UI."""
-        entry_value = row.get("campaign_started_at") or row.get("open_date")
+        """Sort trade rows by the timestamp shown in their respective tables."""
+        exposure_state = str(row.get("exposure_state") or "")
+        if exposure_state == TradeExposureState.FLAT_WAITING_REENTRY.value:
+            entry_value = row.get("campaign_started_at") or row.get("open_date")
+        else:
+            entry_value = row.get("open_date") or row.get("campaign_started_at")
         entry_ms = (
             parse_date_to_ms(str(entry_value).strip())
             if entry_value is not None

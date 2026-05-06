@@ -111,6 +111,16 @@ export function splitTradeSymbol(value: string): [string, string] {
     return [symbol, currency]
 }
 
+export function getOpenTradeOpenedAt(
+    rowData: Pick<OpenTradeRow, 'open_date' | 'campaign_started_at'>,
+): string {
+    const openDate = String(rowData.open_date ?? '').trim()
+    if (openDate) {
+        return openDate
+    }
+    return String(rowData.campaign_started_at ?? '').trim()
+}
+
 export function getSafetyOrderCount(rowData: OpenTradeRow): number {
     if (Array.isArray(rowData.safetyorder)) {
         return rowData.safetyorder.length

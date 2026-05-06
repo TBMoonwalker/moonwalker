@@ -520,7 +520,7 @@ async def test_get_waiting_trades_combine_campaign_realized_and_virtual_profit(
 
 
 @pytest.mark.asyncio
-async def test_get_open_trades_sorts_by_campaign_or_trade_entry_time(
+async def test_get_open_trades_sorts_active_rows_by_current_open_date(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
@@ -533,7 +533,7 @@ async def test_get_open_trades_sorts_by_campaign_or_trade_entry_time(
         symbol="LATE/USDT",
         lifecycle_mode="sidestep_reentry",
         state="active_long",
-        started_at="2026-05-03T08:00:00+00:00",
+        started_at="2026-05-01T08:00:00+00:00",
         last_transition_at="2026-05-03T08:00:00+00:00",
         current_deal_id="deal-late",
         sidestep_count=1,
@@ -578,7 +578,7 @@ async def test_get_open_trades_sorts_by_campaign_or_trade_entry_time(
         deal_id="deal-early",
         lifecycle_mode="classic_dca",
         exposure_state="long_exposed",
-        open_date="2026-05-01T09:00:00+00:00",
+        open_date="2026-05-02T09:00:00+00:00",
     )
     await model.Trades.create(
         timestamp="1000",
@@ -604,5 +604,76 @@ async def test_get_open_trades_sorts_by_campaign_or_trade_entry_time(
     rows = await trades.get_open_trades()
 
     assert [row["symbol"] for row in rows] == ["EARLY/USDT", "LATE/USDT"]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_get_waiting_trades_keep_campaign_start_order(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-earlier",
+        symbol="EARLIER/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="flat_waiting_reentry",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-03T08:00:00+00:00",
+        current_deal_id="deal-earlier",
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=96.0,
+        cumulative_realized_quote=0.0,
+        cumulative_realized_percent=0.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="EARLIER/USDT",
+        deal_id="deal-earlier",
+        campaign_id="campaign-earlier",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        open_date="2026-05-03T09:00:00+00:00",
+        last_transition_at="2026-05-03T08:00:00+00:00",
+        waiting_reference_quote=96.0,
+    )
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-later",
+        symbol="LATER/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="flat_waiting_reentry",
+        started_at="2026-05-02T08:00:00+00:00",
+        last_transition_at="2026-05-02T08:00:00+00:00",
+        current_deal_id="deal-later",
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=96.0,
+        cumulative_realized_quote=0.0,
+        cumulative_realized_percent=0.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="LATER/USDT",
+        deal_id="deal-later",
+        campaign_id="campaign-later",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        open_date="2026-05-02T09:00:00+00:00",
+        last_transition_at="2026-05-02T08:00:00+00:00",
+        waiting_reference_quote=96.0,
+    )
+
+    trades = Trades()
+    rows = await trades.get_waiting_trades()
+
+    assert [row["symbol"] for row in rows] == ["EARLIER/USDT", "LATER/USDT"]
 
     await Tortoise.close_connections()

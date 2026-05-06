@@ -16,6 +16,7 @@ import {
     resolveTradeDateTime,
 } from '../helpers/tradeTable'
 import {
+    getOpenTradeOpenedAt,
     getSafetyOrderCount,
     getUnsellableMessage,
     isUnsellableRemainder,
@@ -256,7 +257,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 align: 'center',
                 render: (rowData) => {
                     const { date, time } = resolveTradeDateTime(
-                        rowData.campaign_started_at || rowData.open_date,
+                        getOpenTradeOpenedAt(rowData),
                     )
                     return [
                         h('div', date),

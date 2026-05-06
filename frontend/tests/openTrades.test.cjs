@@ -8,6 +8,7 @@ const {
     calculateSoPercentage,
     formatOrderAmount,
     formatPrice,
+    getOpenTradeOpenedAt,
     getPreviousBuyPrice,
     getSafetyOrderCount,
     getUnsellableMessage,
@@ -123,4 +124,21 @@ test('open trade helpers derive order prices and percentages safely', () => {
     assert.equal(calculateSoPercentage(810, 900), -10)
     assert.equal(formatOrderAmount(12.345), '12.35')
     assert.equal(formatPrice(12.34000000), '12.34')
+})
+
+test('open trade helpers prefer the current open leg timestamp', () => {
+    assert.equal(
+        getOpenTradeOpenedAt({
+            open_date: '2026-05-03T09:00:00+00:00',
+            campaign_started_at: '2026-05-01T08:00:00+00:00',
+        }),
+        '2026-05-03T09:00:00+00:00',
+    )
+    assert.equal(
+        getOpenTradeOpenedAt({
+            open_date: '',
+            campaign_started_at: '2026-05-01T08:00:00+00:00',
+        }),
+        '2026-05-01T08:00:00+00:00',
+    )
 })
