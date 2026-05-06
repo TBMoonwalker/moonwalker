@@ -77,6 +77,7 @@ async def test_get_trades_for_orders_uses_net_amount(tmp_path, monkeypatch) -> N
 
     assert aggregated is not None
     assert aggregated["total_amount"] == 99.0
+    assert aggregated["sellable_amount"] == 99.0
     await Tortoise.close_connections()
 
 
@@ -145,6 +146,52 @@ async def test_get_token_amount_from_trades_subtracts_partial_sell_totals(
     total_amount = await trades.get_token_amount_from_trades("SENT/USDC")
 
     assert total_amount == pytest.approx(117.0)
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_get_trades_for_orders_exposes_remaining_sellable_amount_after_partial_sell(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    import model
+
+    await model.Trades.create(
+        timestamp="1",
+        ordersize=12.1075,
+        fee=0.001,
+        precision=3,
+        amount=88.3,
+        amount_fee=0.0,
+        price=0.1372,
+        symbol="ERA/USDC",
+        orderid="oid1",
+        bot="bot",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        order_count=0,
+        so_percentage=None,
+        direction="long",
+        side="buy",
+    )
+    await model.OpenTrades.create(
+        symbol="ERA/USDC",
+        sold_amount=76.6,
+        sold_proceeds=10.50952,
+    )
+
+    trades = Trades()
+    aggregated = await trades.get_trades_for_orders("ERA/USDC")
+
+    assert aggregated is not None
+    assert aggregated["total_amount"] == pytest.approx(88.3)
+    assert aggregated["sellable_amount"] == pytest.approx(11.7)
+    assert aggregated["total_cost"] == pytest.approx(12.1075)
     await Tortoise.close_connections()
 
 

@@ -10,6 +10,7 @@ def _build_trades() -> dict[str, object]:
         "direction": "long",
         "total_cost": 100.0,
         "total_amount": 1.0,
+        "sellable_amount": 1.0,
         "fee": 0.0,
         "timestamp": 1_742_000_000_000,
         "safetyorders_count": 0,
@@ -211,6 +212,7 @@ async def test_tp_limit_prearm_arms_before_tp_when_near(monkeypatch) -> None:
     assert arm_calls[0]["symbol"] == "XPL/USDC"
     assert arm_calls[0]["limit_price"] == pytest.approx(110.0)
     assert arm_calls[0]["fallback_min_price"] == pytest.approx(110.0)
+    assert arm_calls[0]["total_amount"] == pytest.approx(1.0)
 
 
 @pytest.mark.asyncio
@@ -295,3 +297,64 @@ async def test_tp_limit_prearm_waits_for_existing_order_at_tp(monkeypatch) -> No
 
     assert stat_payloads[-1]["sell"] is False
     assert stat_payloads[-1]["tp_limit_order_armed"] is True
+
+
+@pytest.mark.asyncio
+async def test_tp_limit_prearm_rearms_existing_order_with_remaining_sellable_amount(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    _configure_dca(
+        dca,
+        sell_order_type="limit",
+        tp_spike_confirm_enabled=False,
+        tp_limit_prearm_enabled=True,
+        tp_limit_prearm_margin_percent=0.25,
+    )
+    trades = _build_trades()
+    trades.update(
+        {
+            "total_amount": 1.0,
+            "sellable_amount": 0.4,
+            "tp_limit_order_id": "tp-1",
+            "tp_limit_order_price": 110.0,
+            "tp_limit_order_amount": 1.0,
+        }
+    )
+    cancel_calls: list[str] = []
+    arm_calls: list[dict[str, object]] = []
+
+    async def fake_reconcile_tp_limit_order(_trades, _config) -> bool:
+        return False
+
+    async def fake_cancel_tp_limit_order(symbol, _config) -> bool:
+        cancel_calls.append(symbol)
+        return True
+
+    async def fake_arm_tp_limit_order(order, _config) -> bool:
+        arm_calls.append(order)
+        return True
+
+    async def fake_update_statistic_data(_payload) -> None:
+        return None
+
+    monkeypatch.setattr(
+        dca.orders,
+        "reconcile_tp_limit_order",
+        fake_reconcile_tp_limit_order,
+    )
+    monkeypatch.setattr(
+        dca.orders,
+        "cancel_tp_limit_order",
+        fake_cancel_tp_limit_order,
+    )
+    monkeypatch.setattr(dca.orders, "arm_tp_limit_order", fake_arm_tp_limit_order)
+    monkeypatch.setattr(
+        dca.statistic, "update_statistic_data", fake_update_statistic_data
+    )
+
+    await dca._Dca__calculate_tp(109.8, trades, _build_policy())
+
+    assert cancel_calls == ["XPL/USDC"]
+    assert len(arm_calls) == 1
+    assert arm_calls[0]["total_amount"] == pytest.approx(0.4)

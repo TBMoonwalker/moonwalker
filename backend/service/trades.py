@@ -61,6 +61,35 @@ class Trades:
         }
 
     @staticmethod
+    def _float_or_zero(value: Any) -> float:
+        """Return a finite float or zero for partially-populated trade payloads."""
+        try:
+            parsed = float(value or 0.0)
+        except (TypeError, ValueError):
+            return 0.0
+        return parsed if parsed == parsed else 0.0
+
+    @classmethod
+    def _calculate_sellable_amount(
+        cls,
+        *,
+        total_amount: float,
+        open_trade: dict[str, Any] | None,
+    ) -> float:
+        """Return the currently sellable amount after partial-sell bookkeeping."""
+        if not open_trade:
+            return max(0.0, total_amount)
+
+        unsellable_state = cls._extract_unsellable_state(open_trade)
+        if unsellable_state["is_unsellable"]:
+            return max(
+                0.0, cls._float_or_zero(open_trade.get("amount") or total_amount)
+            )
+
+        partial_sell = cls._normalize_partial_sell_execution(open_trade)
+        return max(0.0, total_amount - partial_sell["sold_amount"])
+
+    @staticmethod
     def _extract_unsellable_state(
         open_trade: dict[str, Any] | None,
     ) -> UnsellableTradeState:
@@ -583,15 +612,10 @@ class Trades:
                 )
             )
             open_trade = open_trade_rows[0] if open_trade_rows else None
-            if open_trade:
-                unsellable_state = self._extract_unsellable_state(open_trade)
-                if unsellable_state["is_unsellable"]:
-                    return float(open_trade.get("amount") or total_amount)
-
-                partial_sell = self._normalize_partial_sell_execution(open_trade)
-                total_amount -= partial_sell["sold_amount"]
-
-            return max(0.0, total_amount)
+            return self._calculate_sellable_amount(
+                total_amount=total_amount,
+                open_trade=open_trade,
+            )
         except BaseORMException as e:
             # Broad catch to avoid crashing on database aggregation errors.
             logging.error("Error getting total amount from %s. Cause %s", symbol, e)
@@ -643,18 +667,24 @@ class Trades:
 
             safetyorders_count = len(safetyorders)
             unsellable_state = self._extract_unsellable_state(open_trade)
+            sellable_amount = self._calculate_sellable_amount(
+                total_amount=total_amount,
+                open_trade=open_trade,
+            )
 
             # For unsellable remnants, OpenTrades carries the authoritative
             # remaining amount/cost after partial close bookkeeping.
             if unsellable_state["is_unsellable"] and open_trade:
                 total_amount = float(open_trade.get("amount") or total_amount)
                 total_cost = float(open_trade.get("cost") or total_cost)
+                sellable_amount = total_amount
 
             trade_data = {
                 "timestamp": latest_order["timestamp"],
                 "fee": latest_order["fee"],
                 "total_cost": total_cost,
                 "total_amount": total_amount,
+                "sellable_amount": sellable_amount,
                 "symbol": latest_order["symbol"],
                 "direction": latest_order["direction"],
                 "side": latest_order["side"],
