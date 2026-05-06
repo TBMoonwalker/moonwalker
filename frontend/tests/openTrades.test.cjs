@@ -126,11 +126,20 @@ test('open trade helpers derive order prices and percentages safely', () => {
     assert.equal(formatPrice(12.34000000), '12.34')
 })
 
-test('open trade helpers prefer the current open leg timestamp', () => {
+test('open trade helpers keep the original opened-at timestamp per lifecycle', () => {
     assert.equal(
         getOpenTradeOpenedAt({
             open_date: '2026-05-03T09:00:00+00:00',
             campaign_started_at: '2026-05-01T08:00:00+00:00',
+            lifecycle_mode: 'sidestep_reentry',
+        }),
+        '2026-05-01T08:00:00+00:00',
+    )
+    assert.equal(
+        getOpenTradeOpenedAt({
+            open_date: '2026-05-03T09:00:00+00:00',
+            campaign_started_at: '2026-05-01T08:00:00+00:00',
+            lifecycle_mode: 'classic_dca',
         }),
         '2026-05-03T09:00:00+00:00',
     )
@@ -138,6 +147,7 @@ test('open trade helpers prefer the current open leg timestamp', () => {
         getOpenTradeOpenedAt({
             open_date: '',
             campaign_started_at: '2026-05-01T08:00:00+00:00',
+            lifecycle_mode: 'sidestep_reentry',
         }),
         '2026-05-01T08:00:00+00:00',
     )

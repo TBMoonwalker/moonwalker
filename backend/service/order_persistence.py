@@ -7,8 +7,10 @@ from uuid import uuid4
 
 import model
 from service.database import run_sqlite_write_with_retry
+from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
 from service.replay_candles import archive_replay_candles_for_deal
 from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
+from service.trade_math import parse_date_to_ms
 from tortoise.expressions import F
 from tortoise.transactions import in_transaction
 
@@ -241,6 +243,84 @@ def _build_open_trade_lifecycle_defaults(
     }
 
 
+def _normalize_preserved_open_date(value: Any) -> str | None:
+    """Return a stored open date only when it is already parseable."""
+    normalized = str(value or "").strip()
+    if not normalized:
+        return None
+    return normalized if parse_date_to_ms(normalized) is not None else None
+
+
+def _resolve_open_trade_buy_open_date(
+    payload: dict[str, Any],
+    *,
+    existing_open_trade: Any | None,
+    campaign_context: dict[str, Any] | None,
+) -> str | None:
+    """Return the stable original open date for a buy-backed open trade row."""
+    lifecycle_mode = str(
+        (campaign_context or {}).get("lifecycle_mode")
+        or getattr(existing_open_trade, "lifecycle_mode", "")
+        or TradeLifecycleMode.CLASSIC_DCA.value
+    )
+    campaign_started_at = _normalize_preserved_open_date(
+        (campaign_context or {}).get("started_at")
+    )
+    existing_open_date = _normalize_preserved_open_date(
+        getattr(existing_open_trade, "open_date", None)
+    )
+
+    if lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
+        if campaign_started_at:
+            return campaign_started_at
+        if existing_open_date:
+            return existing_open_date
+    elif existing_open_date:
+        return existing_open_date
+
+    timestamp_raw = payload.get("timestamp")
+    if timestamp_raw is None:
+        return None
+    try:
+        return format_trade_datetime(trade_datetime_from_ms(float(timestamp_raw)))
+    except (TypeError, ValueError):
+        normalized_timestamp = str(timestamp_raw).strip()
+        return normalized_timestamp or None
+
+
+def _build_open_trade_buy_defaults(
+    payload: dict[str, Any],
+    *,
+    existing_open_trade: Any | None,
+    campaign_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return immediate open-trade summary fields for a newly filled buy leg."""
+    amount = float(payload.get("amount") or 0.0)
+    cost = float(payload.get("ordersize") or 0.0)
+    avg_price = (
+        (cost / amount)
+        if amount > 0 and cost > 0
+        else float(payload.get("price") or 0.0)
+    )
+    current_price = float(payload.get("price") or 0.0)
+    open_date_value = _resolve_open_trade_buy_open_date(
+        payload,
+        existing_open_trade=existing_open_trade,
+        campaign_context=campaign_context,
+    )
+
+    return {
+        "so_count": 0,
+        "profit": 0.0,
+        "profit_percent": 0.0,
+        "amount": amount,
+        "cost": cost,
+        "current_price": current_price,
+        "avg_price": avg_price,
+        "open_date": open_date_value,
+    }
+
+
 async def persist_buy_trade(
     symbol: str,
     payload: dict[str, Any],
@@ -288,16 +368,23 @@ async def persist_buy_trade(
                     ),
                     current_deal_id=deal_id,
                 )
+                buy_defaults = _build_open_trade_buy_defaults(
+                    payload,
+                    existing_open_trade=existing_open_trade,
+                    campaign_context=campaign_context,
+                )
                 if existing_open_trade is None:
                     await model.OpenTrades.create(
                         symbol=symbol,
                         execution_history_complete=history_complete,
+                        **buy_defaults,
                         **lifecycle_defaults,
                         using_db=conn,
                     )
                 else:
                     await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
                         execution_history_complete=history_complete,
+                        **buy_defaults,
                         sold_amount=0.0,
                         sold_proceeds=0.0,
                         unsellable_amount=0.0,

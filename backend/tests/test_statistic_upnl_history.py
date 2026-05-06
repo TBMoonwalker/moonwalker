@@ -235,6 +235,7 @@ async def test_update_statistic_data_uses_fallback_when_base_order_missing() -> 
         captured["symbol"] = symbol
 
     statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.get_open_trades_by_symbol = lambda _symbol: _async_return([])
     statistic.trades.update_open_trades = fake_update_open_trades
 
     stats = {
@@ -253,7 +254,8 @@ async def test_update_statistic_data_uses_fallback_when_base_order_missing() -> 
     assert captured["symbol"] == "BTC/USDC"
     payload = captured["payload"]
     assert isinstance(payload, dict)
-    assert float(payload["open_date"]) > 1_000_000_000_000
+    assert isinstance(payload["open_date"], str)
+    assert "+" in payload["open_date"]
 
 
 @pytest.mark.asyncio
@@ -271,6 +273,7 @@ async def test_update_statistic_data_updates_open_trade_during_tp_sell() -> None
         captured["symbol"] = symbol
 
     statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.get_open_trades_by_symbol = lambda _symbol: _async_return([])
     statistic.trades.update_open_trades = fake_update_open_trades
 
     stats = {
@@ -292,7 +295,68 @@ async def test_update_statistic_data_updates_open_trade_during_tp_sell() -> None
     assert payload["current_price"] == 25.0
     assert payload["profit"] == 25.0
     assert payload["profit_percent"] == 25.0
-    assert float(payload["open_date"]) == 1_700_000_000_000.0
+    assert payload["open_date"] == "2023-11-14 22:13:20+00:00"
+
+
+class _DummySpotCampaignsFilter:
+    def limit(self, _value: int) -> "_DummySpotCampaignsFilter":
+        return self
+
+    async def values(self, *_fields: str) -> list[dict[str, object]]:
+        return [{"started_at": "2023-11-10 10:00:00+00:00"}]
+
+
+@pytest.mark.asyncio
+async def test_update_statistic_data_preserves_sidestep_campaign_started_at(
+    monkeypatch,
+) -> None:
+    statistic = Statistic()
+    captured: dict[str, object] = {}
+
+    async def fake_get_trade_by_ordertype(
+        symbol: str, baseorder: bool = False
+    ) -> list[dict[str, object]]:
+        return [{"timestamp": 1_700_000_000_000}]
+
+    async def fake_update_open_trades(payload: dict[str, object], symbol: str) -> None:
+        captured["payload"] = payload
+        captured["symbol"] = symbol
+
+    statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.get_open_trades_by_symbol = lambda _symbol: _async_return(
+        [
+            {
+                "symbol": "BTC/USDC",
+                "lifecycle_mode": "sidestep_reentry",
+                "campaign_id": "campaign-1",
+                "open_date": "2023-11-14 22:13:20+00:00",
+            }
+        ]
+    )
+    statistic.trades.update_open_trades = fake_update_open_trades
+    monkeypatch.setattr(
+        model.SpotCampaigns,
+        "filter",
+        lambda **_kwargs: _DummySpotCampaignsFilter(),
+    )
+
+    stats = {
+        "type": "tp_check",
+        "symbol": "BTC/USDC",
+        "total_amount": 5.0,
+        "total_cost": 100.0,
+        "current_price": 25.0,
+        "tp_price": 24.0,
+        "avg_price": 20.0,
+        "actual_pnl": 25.0,
+        "sell": False,
+    }
+    await statistic.update_statistic_data(stats)
+
+    assert captured["symbol"] == "BTC/USDC"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["open_date"] == "2023-11-10 10:00:00+00:00"
 
 
 @pytest.mark.asyncio
@@ -411,3 +475,10 @@ def _async_autopilot_state(value):
         return value
 
     return _inner
+
+
+def _async_return(value):
+    async def _inner(*_args, **_kwargs):
+        return value
+
+    return _inner()

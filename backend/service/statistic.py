@@ -13,6 +13,8 @@ from service.capital_budget import CapitalBudgetService
 from service.config import Config
 from service.database import run_sqlite_write_with_retry
 from service.green_phase import AVAILABLE_QUOTE_UNSET
+from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
+from service.spot_campaign_types import TradeLifecycleMode
 from service.trades import Trades
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
@@ -511,6 +513,37 @@ class Statistic:
             else:
                 logging.trace("%s", stats)
 
+            open_trade_rows = await self.trades.get_open_trades_by_symbol(
+                stats["symbol"]
+            )
+            open_trade = open_trade_rows[0] if open_trade_rows else {}
+            open_date_value = format_trade_datetime(
+                trade_datetime_from_ms(float(open_timestamp))
+            )
+            lifecycle_mode = str(open_trade.get("lifecycle_mode") or "")
+            if lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
+                campaign_id = str(open_trade.get("campaign_id") or "").strip()
+                if campaign_id:
+                    campaign_rows = (
+                        await model.SpotCampaigns.filter(campaign_id=campaign_id)
+                        .limit(1)
+                        .values("started_at")
+                    )
+                    started_at = str(
+                        (campaign_rows[0] if campaign_rows else {}).get("started_at")
+                        or ""
+                    ).strip()
+                    if started_at:
+                        open_date_value = started_at
+                if not str(open_date_value).strip():
+                    preserved_open_date = str(open_trade.get("open_date") or "").strip()
+                    if preserved_open_date:
+                        open_date_value = preserved_open_date
+            else:
+                preserved_open_date = str(open_trade.get("open_date") or "").strip()
+                if preserved_open_date:
+                    open_date_value = preserved_open_date
+
             # Update open trade statistics
             payload = {
                 "profit": profit,
@@ -520,6 +553,6 @@ class Statistic:
                 "current_price": stats["current_price"],
                 "tp_price": stats["tp_price"],
                 "avg_price": stats["avg_price"],
-                "open_date": open_timestamp,
+                "open_date": open_date_value,
             }
             await self.trades.update_open_trades(payload, stats["symbol"])

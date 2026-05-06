@@ -520,7 +520,7 @@ async def test_get_waiting_trades_combine_campaign_realized_and_virtual_profit(
 
 
 @pytest.mark.asyncio
-async def test_get_open_trades_sorts_active_rows_by_current_open_date(
+async def test_get_open_trades_sorts_sidestep_rows_by_original_open_date(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
@@ -603,7 +603,7 @@ async def test_get_open_trades_sorts_active_rows_by_current_open_date(
     trades = Trades()
     rows = await trades.get_open_trades()
 
-    assert [row["symbol"] for row in rows] == ["EARLY/USDT", "LATE/USDT"]
+    assert [row["symbol"] for row in rows] == ["LATE/USDT", "EARLY/USDT"]
 
     await Tortoise.close_connections()
 
