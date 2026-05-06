@@ -28,6 +28,25 @@ class _FakeMarketExchange:
         return {}
 
 
+class _FakeDustExchange:
+    def amount_to_precision(self, _symbol: str, amount: float) -> str:
+        return str(int(float(amount)))
+
+    def market(self, _symbol: str) -> dict:
+        return {
+            "limits": {"cost": {"min": 5.0}},
+            "info": {
+                "filters": [
+                    {
+                        "filterType": "MIN_NOTIONAL",
+                        "minNotional": "5",
+                        "applyToMarket": True,
+                    }
+                ]
+            },
+        }
+
+
 @pytest.mark.asyncio
 async def test_create_spot_sell_uses_limit_when_enabled(monkeypatch) -> None:
     exchange = Exchange()
@@ -358,3 +377,50 @@ async def test_market_fallback_guard_uses_live_price_lookup(monkeypatch) -> None
     )
 
     assert allowed is True
+
+
+@pytest.mark.asyncio
+async def test_build_spot_sell_order_status_returns_unsellable_partial_for_precision_dust(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    exchange.exchange = _FakeDustExchange()
+
+    async def fake_parse_order_status(_order, *, order_check_range_seconds: int):
+        assert order_check_range_seconds == 300
+        return {
+            "timestamp": 1_778_054_614_151,
+            "total_amount": 25.0,
+            "amount": 25.0,
+            "price": 0.4414,
+            "orderid": "17850679",
+            "symbol": "TWT/USDC",
+            "side": "sell",
+            "base_fee": 0.011035,
+            "ordersize": 11.035,
+        }
+
+    monkeypatch.setattr(
+        exchange, "_Exchange__parse_order_status", fake_parse_order_status
+    )
+
+    status = await exchange.build_spot_sell_order_status(
+        {
+            "symbol": "TWT/USDC",
+            "ordertype": "limit",
+            "total_amount": 25.0,
+            "requested_total_amount": 25.9753,
+            "total_cost": 11.3412,
+            "actual_pnl": 0.0,
+            "current_price": 0.4414,
+        },
+        {},
+    )
+
+    assert status is not None
+    assert status["type"] == "partial_sell"
+    assert status["partial_filled_amount"] == pytest.approx(25.0)
+    assert status["remaining_amount"] == pytest.approx(0.9753)
+    assert status["unsellable"] is True
+    assert status["unsellable_reason"] == "amount_precision"
+    assert status["partial_proceeds"] == pytest.approx(11.035)

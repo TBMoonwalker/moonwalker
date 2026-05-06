@@ -307,6 +307,9 @@ class Orders:
             "ordertype": str(exchange_status.get("type") or "limit"),
             "amount": amount,
             "total_amount": amount,
+            "requested_total_amount": float(
+                trades.get("sellable_amount") or trades.get("total_amount") or amount
+            ),
             "price": fallback_price,
             "cost": cost,
             "timestamp": timestamp,
@@ -397,6 +400,15 @@ class Orders:
                     )
                     return False
                 if not self._is_sold_check_status(order_status):
+                    if self._is_partial_sell_status(order_status):
+                        await self.__handle_partial_sell_status(order_status, config)
+                        await self.trades.clear_tp_limit_order(symbol)
+                        logging.info(
+                            "Processed partial proactive TP limit fill for %s from order %s.",
+                            symbol,
+                            order_id,
+                        )
+                        return True
                     logging.error(
                         "Filled proactive TP limit order %s for %s returned "
                         "unsupported status: %s",
@@ -479,6 +491,9 @@ class Orders:
                     )
                     if order_status and self._is_sold_check_status(order_status):
                         await self._finalize_completed_sell(order_status, config)
+                    elif order_status and self._is_partial_sell_status(order_status):
+                        await self.__handle_partial_sell_status(order_status, config)
+                        await self.trades.clear_tp_limit_order(symbol)
                 return False
             if exchange_status is None:
                 logging.warning(
@@ -616,6 +631,7 @@ class Orders:
                 order["total_amount"] = await self.trades.get_token_amount_from_trades(
                     order["symbol"]
                 )
+                order["requested_total_amount"] = float(order["total_amount"] or 0.0)
 
                 # 1. Create exchange order
                 order_status = await self.exchange.create_spot_sell(order, config)

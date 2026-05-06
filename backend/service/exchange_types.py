@@ -13,6 +13,7 @@ class ExchangeOrderPayload(TypedDict, total=False):
     campaign_id: str | None
     amount: float | str
     total_amount: float
+    requested_total_amount: float
     total_cost: float
     actual_pnl: float
     ordersize: float

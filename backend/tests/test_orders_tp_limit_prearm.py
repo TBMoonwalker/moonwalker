@@ -199,3 +199,94 @@ async def test_cancel_tp_limit_order_persists_partial_fill() -> None:
         }
     ]
     assert fake_trades.cleared_symbols == ["XPL/USDC"]
+
+
+@pytest.mark.asyncio
+async def test_reconcile_tp_limit_order_handles_unsellable_partial_fill(
+    monkeypatch,
+) -> None:
+    orders = Orders()
+    fake_exchange = _FakeExchange()
+    fake_exchange.fetch_status = {
+        "id": "tp-limit-1",
+        "symbol": "TWT/USDC",
+        "status": "filled",
+        "filled": 25.0,
+        "amount": 25.0,
+    }
+    fake_trades = _FakeTrades()
+
+    async def fake_get_trades_for_orders(symbol: str) -> dict[str, Any]:
+        return {
+            "symbol": symbol,
+            "tp_limit_order_id": "tp-limit-1",
+            "total_cost": 11.3412,
+            "fee": 0.001,
+            "total_amount": 25.9753,
+            "sellable_amount": 25.9753,
+            "tp_limit_order_price": 0.4414,
+            "tp_limit_order_amount": 25.0,
+            "current_price": 0.4414,
+        }
+
+    fake_trades.get_trades_for_orders = fake_get_trades_for_orders  # type: ignore[assignment]
+    orders.exchange = fake_exchange  # type: ignore[assignment]
+    orders.trades = fake_trades  # type: ignore[assignment]
+
+    async def fake_build_spot_sell_order_status(
+        _payload: dict[str, Any],
+        _config: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "type": "partial_sell",
+            "symbol": "TWT/USDC",
+            "partial_filled_amount": 25.0,
+            "partial_avg_price": 0.4414,
+            "partial_proceeds": 11.035,
+            "remaining_amount": 0.9753,
+            "unsellable": True,
+            "unsellable_reason": "amount_precision",
+        }
+
+    handled: list[dict[str, Any]] = []
+
+    async def fake_handle_partial(
+        order_status: dict[str, Any],
+        _config: dict[str, Any],
+    ) -> None:
+        handled.append(order_status)
+
+    fake_exchange.build_spot_sell_order_status = fake_build_spot_sell_order_status  # type: ignore[attr-defined]
+    monkeypatch.setattr(
+        orders, "_Orders__handle_partial_sell_status", fake_handle_partial
+    )
+
+    reconciled = await orders.reconcile_tp_limit_order(
+        {
+            "symbol": "TWT/USDC",
+            "tp_limit_order_id": "tp-limit-1",
+            "total_cost": 11.3412,
+            "fee": 0.001,
+            "total_amount": 25.9753,
+            "sellable_amount": 25.9753,
+            "tp_limit_order_price": 0.4414,
+            "tp_limit_order_amount": 25.0,
+            "current_price": 0.4414,
+        },
+        {},
+    )
+
+    assert reconciled is True
+    assert handled == [
+        {
+            "type": "partial_sell",
+            "symbol": "TWT/USDC",
+            "partial_filled_amount": 25.0,
+            "partial_avg_price": 0.4414,
+            "partial_proceeds": 11.035,
+            "remaining_amount": 0.9753,
+            "unsellable": True,
+            "unsellable_reason": "amount_precision",
+        }
+    ]
+    assert fake_trades.cleared_symbols == ["TWT/USDC"]

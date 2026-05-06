@@ -31,7 +31,10 @@ from service.exchange_risk import (
     resolve_required_buy_quote,
 )
 from service.exchange_sell_manager import ExchangeSellManager
-from service.exchange_sell_status import finalize_sell_order_status
+from service.exchange_sell_status import (
+    build_partial_sell_status,
+    finalize_sell_order_status,
+)
 from service.exchange_types import ExchangeOrderPayload, ParsedOrderStatus
 from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
 
@@ -866,11 +869,88 @@ class Exchange:
             )
             return None
 
-        return finalize_sell_order_status(
+        finalized_status = finalize_sell_order_status(
             order_status,
             total_cost=float(order["total_cost"]),
             actual_pnl=order["actual_pnl"],
         )
+        requested_amount = float(
+            order.get("requested_total_amount") or order.get("total_amount") or 0.0
+        )
+        sold_amount = float(finalized_status.get("total_amount") or 0.0)
+        remaining_amount = max(0.0, requested_amount - sold_amount)
+        if remaining_amount <= 1e-12:
+            return finalized_status
+
+        symbol = str(finalized_status.get("symbol") or order.get("symbol") or "")
+        reference_price = float(
+            finalized_status.get("price") or order.get("current_price") or 0.0
+        )
+        (
+            unsellable,
+            unsellable_reason,
+            unsellable_min_notional,
+            unsellable_estimated_notional,
+        ) = self.__classify_sell_remainder(
+            symbol=symbol,
+            remaining_amount=remaining_amount,
+            reference_price=reference_price,
+            is_market_order=str(order.get("ordertype") or "").lower() != "limit",
+        )
+        return build_partial_sell_status(
+            symbol=symbol,
+            partial_amount=sold_amount,
+            partial_avg_price=reference_price,
+            remaining_amount=remaining_amount,
+            executions=list(finalized_status.get("executions") or []),
+            unsellable=unsellable,
+            unsellable_reason=unsellable_reason,
+            unsellable_min_notional=unsellable_min_notional,
+            unsellable_estimated_notional=unsellable_estimated_notional,
+        )
+
+    def __classify_sell_remainder(
+        self,
+        *,
+        symbol: str,
+        remaining_amount: float,
+        reference_price: float,
+        is_market_order: bool,
+    ) -> tuple[bool, str | None, float | None, float | None]:
+        """Return whether a sell remainder is immediately unsellable."""
+        if remaining_amount <= 0 or self.exchange is None:
+            return False, None, None, None
+
+        try:
+            precision_sellable_amount = float(
+                self.exchange.amount_to_precision(symbol, remaining_amount)
+            )
+        except (ccxt.BaseError, TypeError, ValueError):
+            precision_sellable_amount = remaining_amount
+
+        estimated_notional = (
+            remaining_amount * reference_price if reference_price > 0 else None
+        )
+        if precision_sellable_amount <= 0:
+            return True, "amount_precision", None, estimated_notional
+
+        below_min_notional, min_notional, normalized_estimated_notional = (
+            self.__is_notional_below_minimum(
+                symbol,
+                precision_sellable_amount,
+                reference_price,
+                is_market_order=is_market_order,
+            )
+        )
+        if below_min_notional:
+            return (
+                True,
+                "minimum_notional",
+                min_notional,
+                normalized_estimated_notional,
+            )
+
+        return False, None, None, estimated_notional
 
     async def build_spot_sell_order_status(
         self,
