@@ -478,6 +478,7 @@ class Statistic:
                 stats["current_price"] * stats["total_amount"] - stats["total_cost"]
             )
             open_timestamp = datetime.timestamp(datetime.now()) * 1000
+            has_base_order_timestamp = False
 
             base_order = await self.trades.get_trade_by_ordertype(
                 stats["symbol"], baseorder=True
@@ -486,6 +487,7 @@ class Statistic:
             try:
                 if base_order and base_order[0].get("timestamp") is not None:
                     open_timestamp = float(base_order[0]["timestamp"])
+                    has_base_order_timestamp = True
                 else:
                     logging.debug(
                         "Did not find base-order timestamp for %s; using current time.",
@@ -541,7 +543,7 @@ class Statistic:
                         open_date_value = preserved_open_date
             else:
                 preserved_open_date = str(open_trade.get("open_date") or "").strip()
-                if preserved_open_date:
+                if preserved_open_date and not has_base_order_timestamp:
                     open_date_value = preserved_open_date
 
             # Update open trade statistics

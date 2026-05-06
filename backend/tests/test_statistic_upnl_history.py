@@ -360,6 +360,53 @@ async def test_update_statistic_data_preserves_sidestep_campaign_started_at(
 
 
 @pytest.mark.asyncio
+async def test_update_statistic_data_repairs_classic_open_date_from_base_order() -> (
+    None
+):
+    statistic = Statistic()
+    captured: dict[str, object] = {}
+
+    async def fake_get_trade_by_ordertype(
+        symbol: str, baseorder: bool = False
+    ) -> list[dict[str, object]]:
+        return [{"timestamp": 1_700_000_000_000}]
+
+    async def fake_update_open_trades(payload: dict[str, object], symbol: str) -> None:
+        captured["payload"] = payload
+        captured["symbol"] = symbol
+
+    statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.get_open_trades_by_symbol = lambda _symbol: _async_return(
+        [
+            {
+                "symbol": "BTC/USDC",
+                "lifecycle_mode": "classic_dca",
+                "open_date": "1700000000000.0",
+            }
+        ]
+    )
+    statistic.trades.update_open_trades = fake_update_open_trades
+
+    stats = {
+        "type": "tp_check",
+        "symbol": "BTC/USDC",
+        "total_amount": 5.0,
+        "total_cost": 100.0,
+        "current_price": 25.0,
+        "tp_price": 24.0,
+        "avg_price": 20.0,
+        "actual_pnl": 25.0,
+        "sell": False,
+    }
+    await statistic.update_statistic_data(stats)
+
+    assert captured["symbol"] == "BTC/USDC"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["open_date"] == "2023-11-14 22:13:20+00:00"
+
+
+@pytest.mark.asyncio
 async def test_get_profit_for_dashboard_uses_available_quote_override(
     monkeypatch,
 ) -> None:

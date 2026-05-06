@@ -9,6 +9,7 @@ from uuid import UUID, uuid4
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
+from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
 from service.spot_campaign_types import (
     NON_TERMINAL_CLOSE_REASON_VALUES,
     SpotCampaignState,
@@ -177,6 +178,41 @@ class Trades:
         if entry_ms is None:
             return (1, row_id, row_id)
         return (0, entry_ms, row_id)
+
+    @staticmethod
+    def _format_timestamp_ms(timestamp_raw: Any) -> str | None:
+        """Format a Unix millisecond timestamp as a stable trade date string."""
+        try:
+            return format_trade_datetime(trade_datetime_from_ms(float(timestamp_raw)))
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _resolve_display_open_date(
+        cls,
+        *,
+        order: dict[str, Any],
+        campaign: dict[str, Any] | None,
+        baseorder: dict[str, Any] | None,
+    ) -> str | None:
+        """Return the original trade date to display and sort by."""
+        lifecycle_mode = str(order.get("lifecycle_mode") or "")
+        if lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
+            campaign_started_at = str((campaign or {}).get("started_at") or "").strip()
+            if campaign_started_at:
+                return campaign_started_at
+            open_date = str(order.get("open_date") or "").strip()
+            if open_date:
+                return open_date
+            return cls._format_timestamp_ms((baseorder or {}).get("timestamp"))
+
+        baseorder_open_date = cls._format_timestamp_ms(
+            (baseorder or {}).get("timestamp")
+        )
+        if baseorder_open_date:
+            return baseorder_open_date
+        open_date = str(order.get("open_date") or "").strip()
+        return open_date or None
 
     @staticmethod
     def _derive_campaign_runtime_state(
@@ -431,9 +467,16 @@ class Trades:
                 if safety:
                     order["safetyorders"] = safety
                 campaign = campaigns_by_id.get(str(order.get("campaign_id") or ""))
-                order["campaign_started_at"] = (campaign or {}).get(
-                    "started_at"
-                ) or order.get("open_date")
+                display_open_date = self._resolve_display_open_date(
+                    order=order,
+                    campaign=campaign,
+                    baseorder=baseorder,
+                )
+                order["open_date"] = display_open_date
+                order["campaign_started_at"] = (
+                    str((campaign or {}).get("started_at") or "").strip()
+                    or display_open_date
+                )
                 order["sidestep_count"] = int(
                     (campaign or {}).get("sidestep_count") or 0
                 )

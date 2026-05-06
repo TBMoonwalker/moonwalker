@@ -553,7 +553,7 @@ async def test_get_open_trades_sorts_sidestep_rows_by_original_open_date(
         open_date="2026-05-03T09:00:00+00:00",
     )
     await model.Trades.create(
-        timestamp="3000",
+        timestamp="1777798800000",
         ordersize=100.0,
         fee=0.0,
         precision=3,
@@ -581,7 +581,7 @@ async def test_get_open_trades_sorts_sidestep_rows_by_original_open_date(
         open_date="2026-05-02T09:00:00+00:00",
     )
     await model.Trades.create(
-        timestamp="1000",
+        timestamp="1777712400000",
         ordersize=50.0,
         fee=0.0,
         precision=3,
@@ -675,5 +675,50 @@ async def test_get_waiting_trades_keep_campaign_start_order(
     rows = await trades.get_waiting_trades()
 
     assert [row["symbol"] for row in rows] == ["EARLIER/USDT", "LATER/USDT"]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_get_open_trades_repairs_legacy_classic_open_date_from_baseorder(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.OpenTrades.create(
+        symbol="LEGACY/USDT",
+        deal_id="deal-legacy",
+        lifecycle_mode="classic_dca",
+        exposure_state="long_exposed",
+        open_date="1700000000000.0",
+    )
+    await model.Trades.create(
+        timestamp="1700000000000",
+        ordersize=50.0,
+        fee=0.0,
+        precision=3,
+        amount=1.0,
+        amount_fee=0.0,
+        price=50.0,
+        symbol="LEGACY/USDT",
+        orderid="oid-legacy",
+        bot="dca_LEGACY/USDT",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        order_count=0,
+        so_percentage=None,
+        direction="long",
+        side="buy",
+    )
+
+    trades = Trades()
+    rows = await trades.get_open_trades()
+
+    assert len(rows) == 1
+    assert rows[0]["open_date"] == "2023-11-14 22:13:20+00:00"
 
     await Tortoise.close_connections()
