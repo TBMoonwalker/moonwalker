@@ -131,7 +131,7 @@ async def test_ema20_swing_first_qualifying_candle_only_primes_state(
     result = await strategy.run("ERA/USDC", "buy")
 
     assert result is False
-    assert strategy._previous_state_by_symbol["ERA/USDC"] == (10.6, 10.3)
+    assert strategy._previous_state_by_symbol["ERA/USDC"] == (10.7, 10.4)
 
 
 @pytest.mark.asyncio
@@ -219,8 +219,8 @@ async def test_ema20_swing_bootstraps_missing_state_without_trading(
     result = await strategy.run("ERA/USDC", "buy")
 
     assert result is False
-    assert strategy._previous_state_by_symbol["ERA/USDC"] == (11.0, 10.7)
-    assert persisted_store[("ERA/USDC", "4h")] == (11.0, 10.7)
+    assert strategy._previous_state_by_symbol["ERA/USDC"] == (11.2, 10.8)
+    assert persisted_store[("ERA/USDC", "4h")] == (11.2, 10.8)
 
 
 @pytest.mark.asyncio
@@ -315,7 +315,7 @@ async def test_ema20_swing_restart_uses_persisted_state_for_next_signal(
         close_series_values=[_series(9.8, 10.6, 10.7)],
     )
     assert await first_strategy.run("ERA/USDC", "buy") is False
-    assert persisted_store[("ERA/USDC", "4h")] == (10.6, 10.3)
+    assert persisted_store[("ERA/USDC", "4h")] == (10.7, 10.4)
 
     restarted_strategy = Strategy("4h")
     restarted_strategy.indicators = _StubIndicators(
@@ -324,4 +324,35 @@ async def test_ema20_swing_restart_uses_persisted_state_for_next_signal(
     )
 
     assert await restarted_strategy.run("ERA/USDC", "buy") is True
-    assert persisted_store[("ERA/USDC", "4h")] == (11.0, 10.7)
+    assert persisted_store[("ERA/USDC", "4h")] == (11.2, 10.8)
+
+
+@pytest.mark.asyncio
+async def test_ema20_swing_uses_latest_closed_candle_at_boundary(
+    monkeypatch,
+) -> None:
+    persisted_store = _install_fake_state_store(monkeypatch)
+    persisted_store[("BTC/USDC", "4h")] = (79000.0, 80450.0)
+    monkeypatch.setattr(
+        Strategy,
+        "_bootstrap_previous_state_from_history",
+        lambda self, _close_series: None,
+    )
+    _install_fake_ema_builder(
+        monkeypatch,
+        [_series(80640.0, 80650.0, 80693.0, fill=79000.0)],
+    )
+
+    strategy = Strategy("4h")
+    strategy.indicators = _StubIndicators(
+        ema20_values=[80693.0],
+        close_series_values=[_series(80580.0, 80620.0, 80867.0, fill=79000.0)],
+    )
+
+    result = await strategy.run("BTC/USDC", "buy")
+
+    assert result is True
+    assert strategy._previous_state_by_symbol["BTC/USDC"] == (80867.0, 80693.0)
+    assert strategy._last_log_by_symbol["BTC/USDC"]["creating_order"] is True
+    assert strategy._last_log_by_symbol["BTC/USDC"]["closed_above_ema20"] is True
+    assert strategy._last_log_by_symbol["BTC/USDC"]["ema20_rising"] is True

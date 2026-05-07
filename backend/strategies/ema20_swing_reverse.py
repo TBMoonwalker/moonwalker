@@ -81,7 +81,7 @@ class Strategy:
     ) -> tuple[float, float] | None:
         """Return the latest qualifying closed-candle state from history."""
         latest_state: tuple[float, float] | None = None
-        for idx in range(1, len(close_series) - 1):
+        for idx in range(1, len(close_series)):
             trigger_down, close_value, ema20_value = cls._evaluate_trigger_candidate(
                 close_value=close_series.iloc[idx],
                 ema20_value=ema20_series.iloc[idx],
@@ -262,11 +262,11 @@ class Strategy:
                 return False
 
             ema20_series = self._build_ema20_series(close_series)
-            trigger_down, current_close_value, current_ema20 = (
+            trigger_down, latest_closed_value, latest_closed_ema20 = (
                 self._evaluate_trigger_candidate(
-                    close_value=close_series.iloc[-2],
-                    ema20_value=ema20_series.iloc[-2],
-                    previous_ema20_value=ema20_series.iloc[-3],
+                    close_value=close_series.iloc[-1],
+                    ema20_value=ema20_series.iloc[-1],
+                    previous_ema20_value=ema20_series.iloc[-2],
                 )
             )
             previous_state, bootstrapped = await self._resolve_previous_state(
@@ -278,8 +278,8 @@ class Strategy:
 
             if (
                 trigger_down
-                and current_close_value is not None
-                and current_ema20 is not None
+                and latest_closed_value is not None
+                and latest_closed_ema20 is not None
             ):
                 if (
                     previous_state is not None
@@ -288,40 +288,42 @@ class Strategy:
                     and previous_ema20 is not None
                 ):
                     result = (
-                        current_close_value != previous_close_value
-                        or current_ema20 != previous_ema20
+                        latest_closed_value != previous_close_value
+                        or latest_closed_ema20 != previous_ema20
                     )
-                if previous_state != (current_close_value, current_ema20):
+                if previous_state != (latest_closed_value, latest_closed_ema20):
                     await self._remember_previous_state(
                         symbol,
-                        current_close_value,
-                        current_ema20,
+                        latest_closed_value,
+                        latest_closed_ema20,
                     )
 
             logging_json = {
                 "symbol": symbol,
-                "close(closed/current)": (
+                "close(previous_closed/latest_closed)": (
                     f"{close_series.iloc[-2]} / {close_series.iloc[-1]}"
                 ),
-                "ema20(closed/current)": f"{ema20_series.iloc[-2]} / {ema['ema_20']}",
-                "ema20(previous_closed)": ema20_series.iloc[-3],
-                "trigger_close(current)": (
-                    current_close_value if trigger_down else None
+                "ema20(previous_closed/latest_closed)": (
+                    f"{ema20_series.iloc[-2]} / {ema['ema_20']}"
+                ),
+                "ema20(previous_closed)": ema20_series.iloc[-2],
+                "trigger_close(latest_closed)": (
+                    latest_closed_value if trigger_down else None
                 ),
                 "trigger_close(previous)": previous_close_value,
-                "ema20(closed)": current_ema20,
+                "ema20(closed)": latest_closed_ema20,
                 "ema20(previous_trigger)": previous_ema20,
                 "ema20_falling": (
                     None
-                    if self._is_missing_number(ema20_series.iloc[-2])
-                    or self._is_missing_number(ema20_series.iloc[-3])
-                    else float(ema20_series.iloc[-2]) < float(ema20_series.iloc[-3])
+                    if self._is_missing_number(ema20_series.iloc[-1])
+                    or self._is_missing_number(ema20_series.iloc[-2])
+                    else float(ema20_series.iloc[-1]) < float(ema20_series.iloc[-2])
                 ),
                 "closed_below_ema20": (
                     None
-                    if self._is_missing_number(close_series.iloc[-2])
-                    or self._is_missing_number(ema20_series.iloc[-2])
-                    else float(close_series.iloc[-2]) < float(ema20_series.iloc[-2])
+                    if self._is_missing_number(close_series.iloc[-1])
+                    or self._is_missing_number(ema20_series.iloc[-1])
+                    else float(close_series.iloc[-1]) < float(ema20_series.iloc[-1])
                 ),
                 "state_bootstrapped": bootstrapped,
                 "creating_order": result,
