@@ -129,7 +129,7 @@ async def test_profit_overall_counts_waiting_sidestep_mission_progress(
         sidestep_count=1,
         tp_percent=5.0,
         principal_quote=100.0,
-        reserved_quote=96.0,
+        reserved_quote=104.0,
         cumulative_realized_quote=4.0,
         cumulative_realized_percent=4.0,
         metadata_json="{}",
@@ -141,8 +141,8 @@ async def test_profit_overall_counts_waiting_sidestep_mission_progress(
         exposure_state="flat_waiting_reentry",
         profit=0.0,
         cost=0.0,
-        reserved_reentry_quote=96.0,
-        waiting_reference_quote=96.0,
+        reserved_reentry_quote=104.0,
+        waiting_reference_quote=104.0,
         virtual_waiting_profit=6.0,
         virtual_waiting_profit_percent=6.25,
     )
@@ -164,7 +164,7 @@ async def test_profit_overall_counts_waiting_sidestep_mission_progress(
 
     assert data["upnl"] == 6.0
     assert data["profit_overall"] == 10.0
-    assert data["funds_locked"] == 0.0
+    assert data["funds_locked"] == 96.0
 
     await Tortoise.close_connections()
 
@@ -246,7 +246,7 @@ async def test_dashboard_waiting_sidestep_keeps_reserve_out_of_funds_locked(
         sidestep_count=1,
         tp_percent=5.0,
         principal_quote=100.0,
-        reserved_quote=96.0,
+        reserved_quote=104.0,
         cumulative_realized_quote=4.0,
         cumulative_realized_percent=4.0,
         metadata_json="{}",
@@ -258,8 +258,8 @@ async def test_dashboard_waiting_sidestep_keeps_reserve_out_of_funds_locked(
         exposure_state="flat_waiting_reentry",
         profit=0.0,
         cost=0.0,
-        reserved_reentry_quote=96.0,
-        waiting_reference_quote=96.0,
+        reserved_reentry_quote=104.0,
+        waiting_reference_quote=104.0,
         virtual_waiting_profit=6.0,
         virtual_waiting_profit_percent=6.25,
     )
@@ -306,10 +306,10 @@ async def test_dashboard_waiting_sidestep_keeps_reserve_out_of_funds_locked(
 
     assert data["upnl"] == 6.0
     assert data["profit_overall"] == 10.0
-    assert data["funds_locked"] == 0.0
+    assert data["funds_locked"] == 96.0
     assert data["capital_funds_locked"] == 0.0
-    assert data["capital_open_trade_reserve"] == 96.0
-    assert captured["funds_locked"] == 0.0
+    assert data["capital_open_trade_reserve"] == 104.0
+    assert captured["funds_locked"] == 96.0
 
     await Tortoise.close_connections()
 

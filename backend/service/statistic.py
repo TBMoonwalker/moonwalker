@@ -123,6 +123,7 @@ class Statistic:
                 "profit",
                 "cost",
                 "virtual_waiting_profit",
+                "waiting_reference_quote",
             )
             if not open_trade_rows:
                 return 0.0, 0.0, 0.0
@@ -132,15 +133,22 @@ class Statistic:
                 for row in open_trade_rows
                 if str(row.get("campaign_id") or "").strip()
             ]
-            realized_by_campaign: dict[str, float] = {}
+            campaign_metrics: dict[str, dict[str, float]] = {}
             if campaign_ids:
                 campaign_rows = await model.SpotCampaigns.filter(
                     campaign_id__in=campaign_ids
-                ).values("campaign_id", "cumulative_realized_quote")
-                realized_by_campaign = {
-                    str(row.get("campaign_id") or "").strip(): float(
-                        row.get("cumulative_realized_quote") or 0.0
-                    )
+                ).values(
+                    "campaign_id",
+                    "cumulative_realized_quote",
+                    "principal_quote",
+                )
+                campaign_metrics = {
+                    str(row.get("campaign_id") or "").strip(): {
+                        "realized_profit": float(
+                            row.get("cumulative_realized_quote") or 0.0
+                        ),
+                        "principal_quote": float(row.get("principal_quote") or 0.0),
+                    }
                     for row in campaign_rows
                     if str(row.get("campaign_id") or "").strip()
                 }
@@ -150,18 +158,26 @@ class Statistic:
             sidestep_realized_profit = 0.0
             counted_campaigns: set[str] = set()
             for row in open_trade_rows:
+                campaign_id = str(row.get("campaign_id") or "").strip()
+                campaign_metric = campaign_metrics.get(campaign_id, {})
+                realized_profit = float(campaign_metric.get("realized_profit") or 0.0)
+                principal_quote = float(campaign_metric.get("principal_quote") or 0.0)
                 exposure_state = str(row.get("exposure_state") or "").strip()
                 if exposure_state == TradeExposureState.FLAT_WAITING_REENTRY.value:
                     upnl_value += float(row.get("virtual_waiting_profit") or 0.0)
+                    if principal_quote <= 0:
+                        principal_quote = max(
+                            0.0,
+                            float(row.get("waiting_reference_quote") or 0.0)
+                            - realized_profit,
+                        )
+                    funds_locked += max(0.0, principal_quote - realized_profit)
                 else:
                     upnl_value += float(row.get("profit") or 0.0)
                     funds_locked += float(row.get("cost") or 0.0)
 
-                campaign_id = str(row.get("campaign_id") or "").strip()
                 if campaign_id and campaign_id not in counted_campaigns:
-                    sidestep_realized_profit += float(
-                        realized_by_campaign.get(campaign_id) or 0.0
-                    )
+                    sidestep_realized_profit += realized_profit
                     counted_campaigns.add(campaign_id)
 
             return (
