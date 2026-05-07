@@ -164,7 +164,7 @@ async def test_profit_overall_counts_waiting_sidestep_mission_progress(
 
     assert data["upnl"] == 6.0
     assert data["profit_overall"] == 10.0
-    assert data["funds_locked"] == 96.0
+    assert data["funds_locked"] == 100.0
 
     await Tortoise.close_connections()
 
@@ -306,10 +306,10 @@ async def test_dashboard_waiting_sidestep_keeps_reserve_out_of_funds_locked(
 
     assert data["upnl"] == 6.0
     assert data["profit_overall"] == 10.0
-    assert data["funds_locked"] == 96.0
+    assert data["funds_locked"] == 100.0
     assert data["capital_funds_locked"] == 0.0
     assert data["capital_open_trade_reserve"] == 104.0
-    assert captured["funds_locked"] == 96.0
+    assert captured["funds_locked"] == 100.0
 
     await Tortoise.close_connections()
 

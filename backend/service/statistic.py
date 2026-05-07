@@ -171,7 +171,7 @@ class Statistic:
                             float(row.get("waiting_reference_quote") or 0.0)
                             - realized_profit,
                         )
-                    funds_locked += max(0.0, principal_quote - realized_profit)
+                    funds_locked += max(0.0, principal_quote)
                 else:
                     upnl_value += float(row.get("profit") or 0.0)
                     funds_locked += float(row.get("cost") or 0.0)
