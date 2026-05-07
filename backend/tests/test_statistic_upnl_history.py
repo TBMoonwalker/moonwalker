@@ -164,7 +164,7 @@ async def test_profit_overall_counts_waiting_sidestep_mission_progress(
 
     assert data["upnl"] == 6.0
     assert data["profit_overall"] == 10.0
-    assert data["funds_locked"] == 96.0
+    assert data["funds_locked"] == 0.0
 
     await Tortoise.close_connections()
 
@@ -222,6 +222,94 @@ async def test_profit_overall_counts_realized_sidestep_profit_on_active_leg(
     assert data["upnl"] == 3.0
     assert data["profit_overall"] == 10.0
     assert data["funds_locked"] == 96.0
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_waiting_sidestep_keeps_reserve_out_of_funds_locked(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-dashboard-1",
+        symbol="BTC/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="flat_waiting_reentry",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T10:00:00+00:00",
+        current_deal_id=None,
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=96.0,
+        cumulative_realized_quote=4.0,
+        cumulative_realized_percent=4.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        campaign_id="campaign-dashboard-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        profit=0.0,
+        cost=0.0,
+        reserved_reentry_quote=96.0,
+        waiting_reference_quote=96.0,
+        virtual_waiting_profit=6.0,
+        virtual_waiting_profit_percent=6.25,
+    )
+
+    statistic = Statistic()
+    captured: dict[str, float] = {}
+
+    async def fake_resolve_runtime_state(
+        funds_locked: float,
+        config: dict[str, object],
+        *,
+        available_quote: float | None | object,
+    ) -> dict[str, object]:
+        captured["funds_locked"] = funds_locked
+        return {
+            "mode": "low",
+            "effective_max_bots": 5,
+            "green_phase_detected": False,
+            "green_phase_active": False,
+            "green_phase_extra_deals": 0,
+            "green_phase_strength": 0.0,
+            "green_phase_block_reason": None,
+            "green_phase_ramp_ready": False,
+        }
+
+    async def fake_config_instance():
+        return types.SimpleNamespace(
+            snapshot=lambda: {
+                "autopilot": True,
+                "capital_max_fund": 1000.0,
+                "capital_reserve_safety_orders": False,
+                "dynamic_dca": False,
+            }
+        )
+
+    monkeypatch.setattr(
+        statistic.autopilot,
+        "resolve_runtime_state",
+        fake_resolve_runtime_state,
+    )
+    monkeypatch.setattr(Config, "instance", staticmethod(fake_config_instance))
+
+    data = await statistic.get_profit_for_dashboard(500.0)
+
+    assert data["upnl"] == 6.0
+    assert data["profit_overall"] == 10.0
+    assert data["funds_locked"] == 0.0
+    assert data["capital_funds_locked"] == 0.0
+    assert data["capital_open_trade_reserve"] == 96.0
+    assert captured["funds_locked"] == 0.0
 
     await Tortoise.close_connections()
 

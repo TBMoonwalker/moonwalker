@@ -123,7 +123,6 @@ class Statistic:
                 "profit",
                 "cost",
                 "virtual_waiting_profit",
-                "reserved_reentry_quote",
             )
             if not open_trade_rows:
                 return 0.0, 0.0, 0.0
@@ -154,7 +153,6 @@ class Statistic:
                 exposure_state = str(row.get("exposure_state") or "").strip()
                 if exposure_state == TradeExposureState.FLAT_WAITING_REENTRY.value:
                     upnl_value += float(row.get("virtual_waiting_profit") or 0.0)
-                    funds_locked += float(row.get("reserved_reentry_quote") or 0.0)
                 else:
                     upnl_value += float(row.get("profit") or 0.0)
                     funds_locked += float(row.get("cost") or 0.0)
