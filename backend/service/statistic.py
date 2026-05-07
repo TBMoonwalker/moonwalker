@@ -14,7 +14,7 @@ from service.config import Config
 from service.database import run_sqlite_write_with_retry
 from service.green_phase import AVAILABLE_QUOTE_UNSET
 from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
-from service.spot_campaign_types import TradeLifecycleMode
+from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from service.trades import Trades
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
@@ -109,6 +109,71 @@ class Statistic:
         except BaseORMException as exc:
             logging.error(error_message, exc)
             return []
+
+    async def _get_open_trade_profit_snapshot(self) -> tuple[float, float, float]:
+        """Return sidestep-aware open-mission totals.
+
+        Returns:
+            A tuple of `(upnl, sidestep_realized_profit, funds_locked)`.
+        """
+        try:
+            open_trade_rows = await model.OpenTrades.all().values(
+                "campaign_id",
+                "exposure_state",
+                "profit",
+                "cost",
+                "virtual_waiting_profit",
+                "reserved_reentry_quote",
+            )
+            if not open_trade_rows:
+                return 0.0, 0.0, 0.0
+
+            campaign_ids = [
+                str(row.get("campaign_id") or "").strip()
+                for row in open_trade_rows
+                if str(row.get("campaign_id") or "").strip()
+            ]
+            realized_by_campaign: dict[str, float] = {}
+            if campaign_ids:
+                campaign_rows = await model.SpotCampaigns.filter(
+                    campaign_id__in=campaign_ids
+                ).values("campaign_id", "cumulative_realized_quote")
+                realized_by_campaign = {
+                    str(row.get("campaign_id") or "").strip(): float(
+                        row.get("cumulative_realized_quote") or 0.0
+                    )
+                    for row in campaign_rows
+                    if str(row.get("campaign_id") or "").strip()
+                }
+
+            upnl_value = 0.0
+            funds_locked = 0.0
+            sidestep_realized_profit = 0.0
+            counted_campaigns: set[str] = set()
+            for row in open_trade_rows:
+                exposure_state = str(row.get("exposure_state") or "").strip()
+                if exposure_state == TradeExposureState.FLAT_WAITING_REENTRY.value:
+                    upnl_value += float(row.get("virtual_waiting_profit") or 0.0)
+                    funds_locked += float(row.get("reserved_reentry_quote") or 0.0)
+                else:
+                    upnl_value += float(row.get("profit") or 0.0)
+                    funds_locked += float(row.get("cost") or 0.0)
+
+                campaign_id = str(row.get("campaign_id") or "").strip()
+                if campaign_id and campaign_id not in counted_campaigns:
+                    sidestep_realized_profit += float(
+                        realized_by_campaign.get(campaign_id) or 0.0
+                    )
+                    counted_campaigns.add(campaign_id)
+
+            return (
+                float(upnl_value),
+                float(sidestep_realized_profit),
+                float(funds_locked),
+            )
+        except BaseORMException as exc:
+            logging.error("Error getting sidestep-aware open-trade snapshot: %s", exc)
+            return 0.0, 0.0, 0.0
 
     @staticmethod
     def _resample_profit_data_sync(
@@ -244,20 +309,11 @@ class Statistic:
             datetime.now() + timedelta(days=(0 - datetime.now().weekday()))
         ).date()
 
-        upnl_task = self._get_sum_value(
-            model.OpenTrades,
-            "profit",
-            "Error getting losses: %s",
-        )
+        open_trade_snapshot_task = self._get_open_trade_profit_snapshot()
         closed_profit_task = self._get_sum_value(
             model.ClosedTrades,
             "profit",
             "Error getting profit: %s",
-        )
-        funds_locked_task = self._get_sum_value(
-            model.OpenTrades,
-            "cost",
-            "Error getting funds: %s",
         )
         profit_week_task = self._get_profit_rows_since(
             begin_week,
@@ -265,20 +321,19 @@ class Statistic:
         )
 
         (
-            upnl_value,
+            open_trade_snapshot,
             closed_profit,
-            funds_locked,
             profit_week_rows,
         ) = await asyncio.gather(
-            upnl_task,
+            open_trade_snapshot_task,
             closed_profit_task,
-            funds_locked_task,
             profit_week_task,
         )
+        upnl_value, sidestep_realized_profit, funds_locked = open_trade_snapshot
 
         profit_data["upnl"] = upnl_value
-        profit_data["profit_overall"] = closed_profit + float(
-            profit_data["upnl"] or 0.0
+        profit_data["profit_overall"] = (
+            closed_profit + sidestep_realized_profit + float(profit_data["upnl"] or 0.0)
         )
         profit_data["funds_locked"] = funds_locked
         profit_data["profit_week"] = self._group_profit_rows_by_date(profit_week_rows)

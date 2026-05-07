@@ -110,6 +110,123 @@ async def test_profit_overall_uses_upnl_when_no_closed_trades(
 
 
 @pytest.mark.asyncio
+async def test_profit_overall_counts_waiting_sidestep_mission_progress(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-waiting-1",
+        symbol="BTC/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="flat_waiting_reentry",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T10:00:00+00:00",
+        current_deal_id=None,
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=96.0,
+        cumulative_realized_quote=4.0,
+        cumulative_realized_percent=4.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        campaign_id="campaign-waiting-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        profit=0.0,
+        cost=0.0,
+        reserved_reentry_quote=96.0,
+        waiting_reference_quote=96.0,
+        virtual_waiting_profit=6.0,
+        virtual_waiting_profit_percent=6.25,
+    )
+
+    statistic = Statistic()
+    statistic.autopilot.resolve_runtime_state = _async_autopilot_state(
+        {
+            "mode": "low",
+            "effective_max_bots": 5,
+            "green_phase_detected": False,
+            "green_phase_active": False,
+            "green_phase_extra_deals": 0,
+            "green_phase_strength": 0.0,
+            "green_phase_block_reason": None,
+            "green_phase_ramp_ready": False,
+        }
+    )
+    data = await statistic.get_profit()
+
+    assert data["upnl"] == 6.0
+    assert data["profit_overall"] == 10.0
+    assert data["funds_locked"] == 96.0
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_profit_overall_counts_realized_sidestep_profit_on_active_leg(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-live-1",
+        symbol="ETH/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="active_long",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T08:00:00+00:00",
+        current_deal_id="deal-live-1",
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=0.0,
+        cumulative_realized_quote=7.0,
+        cumulative_realized_percent=7.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="ETH/USDT",
+        campaign_id="campaign-live-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="long_exposed",
+        profit=3.0,
+        profit_percent=2.5,
+        cost=96.0,
+    )
+
+    statistic = Statistic()
+    statistic.autopilot.resolve_runtime_state = _async_autopilot_state(
+        {
+            "mode": "low",
+            "effective_max_bots": 5,
+            "green_phase_detected": False,
+            "green_phase_active": False,
+            "green_phase_extra_deals": 0,
+            "green_phase_strength": 0.0,
+            "green_phase_block_reason": None,
+            "green_phase_ramp_ready": False,
+        }
+    )
+    data = await statistic.get_profit()
+
+    assert data["upnl"] == 3.0
+    assert data["profit_overall"] == 10.0
+    assert data["funds_locked"] == 96.0
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
