@@ -5,6 +5,7 @@ from typing import Any
 import ccxt.async_support as ccxt
 from service.exchange_contexts import LimitSellPlacementContext
 from service.exchange_limit_sell import build_market_fallback_status
+from service.exchange_sell_status import build_partial_sell_status
 from service.exchange_types import ExchangeOrderPayload
 
 
@@ -53,7 +54,32 @@ class ExchangeLimitOrderManager:
             return None
 
         resolved_symbol, amount_value = sell_amount
-        amount = exchange.amount_to_precision(resolved_symbol, amount_value)
+        try:
+            amount = exchange.amount_to_precision(resolved_symbol, amount_value)
+        except (ccxt.BaseError, TypeError, ValueError) as exc:
+            reference_price = float(
+                order.get("limit_price") or order.get("current_price") or 0.0
+            )
+            estimated_notional = (
+                float(amount_value) * reference_price if reference_price > 0 else None
+            )
+            self._logger.info(
+                "Skipping limit sell for %s: amount %s is below exchange "
+                "precision and cannot be placed (%s). Marking the remainder as "
+                "unsellable.",
+                resolved_symbol,
+                amount_value,
+                exc,
+            )
+            return build_partial_sell_status(
+                symbol=resolved_symbol,
+                partial_amount=0.0,
+                partial_avg_price=0.0,
+                remaining_amount=float(amount_value),
+                unsellable=True,
+                unsellable_reason="amount_precision",
+                unsellable_estimated_notional=estimated_notional,
+            )
         limit_price = await self.resolve_limit_sell_price(
             order=order,
             resolved_symbol=resolved_symbol,
