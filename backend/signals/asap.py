@@ -280,6 +280,8 @@ class SignalPlugin:
                     symbol,
                     required_history_days,
                     self.config,
+                    success_timeframe=strategy_timeframe,
+                    success_minimum_candles=required_candles,
                 ):
                     logging.error(
                         "Not trading %s because history add failed. Please check "

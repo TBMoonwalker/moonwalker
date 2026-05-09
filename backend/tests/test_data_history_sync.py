@@ -318,3 +318,75 @@ async def test_history_sync_accepts_complete_window_since_first_available_candle
     assert [int(float(row)) for row in rows] == [3000, 4000]
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_history_sync_accepts_strategy_warmup_when_full_window_has_gap(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    import model
+
+    data = Data()
+    fetch_calls: list[int] = []
+
+    async def fake_get_history_for_symbol(
+        config: dict, symbol: str, timeframe: str, limit: int = 1, since: int = 0
+    ):
+        fetch_calls.append(int(since))
+        return [
+            _make_candle(1000, 1.5),
+            _make_candle(3000, 3.5),
+            _make_candle(4000, 4.5),
+            _make_candle(5000, 5.5),
+        ]
+
+    async def fake_close() -> None:
+        return None
+
+    async def fake_get_resampled_history_candle_count(
+        _symbol: str,
+        _timerange: str,
+        minimum_candles: int,
+    ) -> int:
+        assert minimum_candles == 4
+        return 4
+
+    monkeypatch.setattr(
+        data_module,
+        "resolve_required_history_window",
+        lambda history_data, timeframe, since_ms=None: (1000, 5000, 1000),
+    )
+    data.exchange = types.SimpleNamespace(
+        get_history_for_symbol=fake_get_history_for_symbol,
+        close=fake_close,
+    )
+    monkeypatch.setattr(
+        data,
+        "get_resampled_history_candle_count",
+        fake_get_resampled_history_candle_count,
+    )
+
+    success = await data.add_history_data_for_symbol(
+        symbol="BTC/USDC",
+        history_data=1,
+        config={"timeframe": "1s"},
+        success_timeframe="1s",
+        success_minimum_candles=4,
+    )
+
+    rows = (
+        await model.Tickers.filter(symbol="BTC/USDC")
+        .order_by("timestamp")
+        .values_list("timestamp", flat=True)
+    )
+
+    assert success is True
+    assert fetch_calls == [1000]
+    assert [int(float(row)) for row in rows] == [1000, 3000, 4000, 5000]
+
+    await Tortoise.close_connections()

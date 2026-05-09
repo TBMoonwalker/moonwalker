@@ -443,6 +443,8 @@ class SignalPlugin:
                     symbol_full,
                     history_data,
                     self.config,
+                    success_timeframe=self._strategy_timeframe,
+                    success_minimum_candles=self._required_history_candles,
                 )
                 if not success:
                     logging.error(

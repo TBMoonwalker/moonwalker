@@ -151,6 +151,7 @@ async def test_warmup_active_trade_strategy_history_backfills_insufficient_symbo
             symbol: str,
             history_data: int,
             config: dict[str, object],
+            **_kwargs,
         ) -> bool:
             history_adds.append((symbol, history_data))
             assert config["trade_lifecycle_mode"] == "sidestep_reentry"

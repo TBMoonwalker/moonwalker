@@ -434,6 +434,8 @@ class Watcher:
                     symbol,
                     required_history_days,
                     config,
+                    success_timeframe=timeframe,
+                    success_minimum_candles=required_candles,
                 )
                 if success and await data.has_sufficient_resampled_history(
                     symbol,
