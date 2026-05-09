@@ -373,6 +373,94 @@ async def test_get_closed_trades_hides_non_terminal_sidestep_legs(
 
 
 @pytest.mark.asyncio
+async def test_get_trade_executions_replays_full_sidestep_campaign_history(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    first_deal_id = "11111111-1111-1111-1111-111111111111"
+    second_deal_id = "22222222-2222-2222-2222-222222222222"
+    campaign_id = "campaign-replay-joined"
+
+    await model.SpotCampaigns.create(
+        campaign_id=campaign_id,
+        symbol="BTC/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="completed_tp",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-03T08:00:00+00:00",
+        current_deal_id=None,
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=0.0,
+        cumulative_realized_quote=15.0,
+        cumulative_realized_percent=15.0,
+        metadata_json="{}",
+    )
+    await model.TradeExecutions.create(
+        deal_id=first_deal_id,
+        campaign_id=campaign_id,
+        symbol="BTC/USDT",
+        side="buy",
+        role="base_order",
+        timestamp="1000",
+        price=100.0,
+        amount=1.0,
+        ordersize=100.0,
+    )
+    await model.TradeExecutions.create(
+        deal_id=first_deal_id,
+        campaign_id=campaign_id,
+        symbol="BTC/USDT",
+        side="sell",
+        role="final_sell",
+        timestamp="2000",
+        price=108.0,
+        amount=1.0,
+        ordersize=108.0,
+    )
+    await model.TradeExecutions.create(
+        deal_id=second_deal_id,
+        campaign_id=campaign_id,
+        symbol="BTC/USDT",
+        side="buy",
+        role="base_order",
+        timestamp="3000",
+        price=102.0,
+        amount=1.0,
+        ordersize=102.0,
+    )
+    await model.TradeExecutions.create(
+        deal_id=second_deal_id,
+        campaign_id=campaign_id,
+        symbol="BTC/USDT",
+        side="sell",
+        role="final_sell",
+        timestamp="4000",
+        price=107.0,
+        amount=1.0,
+        ordersize=107.0,
+    )
+
+    trades = Trades()
+    executions = await trades.get_trade_executions(second_deal_id)
+
+    assert [row["deal_id"] for row in executions] == [
+        first_deal_id,
+        first_deal_id,
+        second_deal_id,
+        second_deal_id,
+    ]
+    assert [row["timestamp"] for row in executions] == ["1000", "2000", "3000", "4000"]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_get_open_trades_includes_campaign_metadata_for_sidestep_rows(
     tmp_path, monkeypatch
 ) -> None:

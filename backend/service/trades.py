@@ -547,11 +547,21 @@ class Trades:
             return []
 
     async def get_trade_executions(self, deal_id: str) -> list[dict[str, Any]]:
-        """Return execution rows for one deal in chronological order."""
+        """Return execution rows for one deal or one sidestep campaign."""
         try:
             normalized_deal_id = str(UUID(str(deal_id)))
         except (TypeError, ValueError):
             return []
+
+        campaign_id = await self._resolve_execution_campaign_id(normalized_deal_id)
+        if campaign_id:
+            return await self._execute_db(
+                model.TradeExecutions.filter(campaign_id=campaign_id)
+                .order_by("timestamp", "id")
+                .values(),
+                f"Error getting trade executions for sidestep campaign {campaign_id}.",
+                [],
+            )
 
         return await self._execute_db(
             model.TradeExecutions.filter(deal_id=normalized_deal_id)
@@ -560,6 +570,51 @@ class Trades:
             f"Error getting trade executions for {normalized_deal_id}.",
             [],
         )
+
+    async def _resolve_execution_campaign_id(
+        self,
+        normalized_deal_id: str,
+    ) -> str | None:
+        """Return a sidestep campaign id when replay should span multiple deal legs."""
+        execution_rows = await self._execute_db(
+            model.TradeExecutions.filter(deal_id=normalized_deal_id)
+            .limit(1)
+            .values("campaign_id"),
+            f"Error looking up execution campaign for {normalized_deal_id}.",
+            [],
+        )
+        execution = execution_rows[0] if execution_rows else None
+        campaign_id = str((execution or {}).get("campaign_id") or "").strip()
+        if not campaign_id:
+            return None
+
+        campaign_rows = await self._execute_db(
+            model.SpotCampaigns.filter(campaign_id=campaign_id)
+            .limit(1)
+            .values("lifecycle_mode"),
+            f"Error loading sidestep campaign metadata for {campaign_id}.",
+            [],
+        )
+        campaign = campaign_rows[0] if campaign_rows else None
+        if (
+            str((campaign or {}).get("lifecycle_mode") or "")
+            == TradeLifecycleMode.SIDESTEP_REENTRY.value
+        ):
+            return campaign_id
+
+        campaign_execution_rows = await self._execute_db(
+            model.TradeExecutions.filter(campaign_id=campaign_id).values("deal_id"),
+            f"Error enumerating execution deals for campaign {campaign_id}.",
+            [],
+        )
+        distinct_deal_ids = {
+            str(row.get("deal_id") or "").strip()
+            for row in campaign_execution_rows
+            if str(row.get("deal_id") or "").strip()
+        }
+        if len(distinct_deal_ids) > 1:
+            return campaign_id
+        return None
 
     async def get_closed_trades_length(self) -> int:
         """Return the total number of closed trades."""
