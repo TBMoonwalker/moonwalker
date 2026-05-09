@@ -23,6 +23,7 @@
             </div>
         </n-card>
         <TradeReplayChart
+            v-if="chartReady"
             :symbol="props.rowData.symbol"
             :precision="Number(props.rowData.precision ?? 0)"
             :start-timestamp="replayStartTimestamp"
@@ -93,6 +94,10 @@ const safetyOrders = computed(() =>
 const isSidestepLifecycle = computed(
     () => String(props.rowData.lifecycle_mode ?? '') === 'sidestep_reentry',
 )
+const requiresExecutionHistory = computed(
+    () => isSidestepLifecycle.value && Boolean(props.rowData.deal_id),
+)
+const executionHistoryResolved = ref(!requiresExecutionHistory.value)
 const hasReentered = computed(
     () =>
         isSidestepLifecycle.value &&
@@ -105,6 +110,9 @@ const sortedExecutions = computed(() =>
 )
 const useExecutionHistory = computed(
     () => isSidestepLifecycle.value && sortedExecutions.value.length > 0,
+)
+const chartReady = computed(
+    () => !requiresExecutionHistory.value || executionHistoryResolved.value,
 )
 const replayStartTimestamp = computed(() =>
     useExecutionHistory.value
@@ -405,7 +413,8 @@ function emitAddOrderManually(): void {
 }
 
 async function loadExecutions(): Promise<void> {
-    if (!isSidestepLifecycle.value || !props.rowData.deal_id) {
+    if (!requiresExecutionHistory.value) {
+        executionHistoryResolved.value = true
         return
     }
     try {
@@ -415,6 +424,8 @@ async function loadExecutions(): Promise<void> {
         executions.value = Array.isArray(response.result) ? response.result : []
     } catch (_error) {
         executions.value = []
+    } finally {
+        executionHistoryResolved.value = true
     }
 }
 
