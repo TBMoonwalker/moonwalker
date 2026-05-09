@@ -55,3 +55,21 @@ def test_resolve_required_history_window_aligns_to_closed_candle_boundaries() ->
     assert required_until == int(
         datetime(2024, 1, 1, 11, 0, tzinfo=timezone.utc).timestamp() * 1000
     )
+
+
+def test_resolve_required_history_window_anchors_weekly_to_monday() -> None:
+    now = datetime(2026, 5, 9, 5, 45, tzinfo=timezone.utc)
+
+    required_since, required_until, timeframe_ms = resolve_required_history_window(
+        history_data=2800,
+        timeframe="1w",
+        now=now,
+    )
+
+    assert timeframe_ms == 604_800_000
+    assert required_since == int(
+        datetime(2018, 9, 10, 0, 0, tzinfo=timezone.utc).timestamp() * 1000
+    )
+    assert required_until == int(
+        datetime(2026, 4, 27, 0, 0, tzinfo=timezone.utc).timestamp() * 1000
+    )

@@ -149,13 +149,13 @@ def test_resample_ohlcv_data_uses_fixed_duration_weekly_buckets() -> None:
     assert resampled is not None
     assert list(resampled["timestamp"]) == list(
         pd.to_datetime(
-            ["2024-01-04T00:00:00Z", "2024-01-11T00:00:00Z"],
+            ["2024-01-01T00:00:00Z", "2024-01-08T00:00:00Z"],
             utc=True,
         )
     )
-    assert list(resampled["open"]) == [1.0, 8.0]
-    assert list(resampled["close"]) == [7.1, 8.1]
-    assert list(resampled["volume"]) == [280.0, 80.0]
+    assert list(resampled["open"]) == [1.0, 5.0]
+    assert list(resampled["close"]) == [4.1, 8.1]
+    assert list(resampled["volume"]) == [100.0, 260.0]
 
 
 @pytest.mark.asyncio

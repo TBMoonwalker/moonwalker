@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 import pandas as pd
+from service.data_timeframes import timeframe_bucket_origin_milliseconds
 
 
 def rows_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
@@ -138,11 +139,18 @@ def resample_ohlcv_data(ohlcv: pd.DataFrame, timerange: str) -> pd.DataFrame | N
         elif unit == "d":
             resample_rule = pd.Timedelta(days=interval)
         else:
-            # Use fixed-duration 7-day windows anchored to the Unix epoch so
-            # weekly charts align with stored exchange timestamps and replay
-            # marker normalization throughout the app.
+            # Use fixed-duration 7-day windows anchored to Monday 00:00 UTC so
+            # weekly charts align with exchange weekly candle timestamps and the
+            # history sync window math.
             resample_rule = pd.Timedelta(days=interval * 7)
-        resample_kwargs["origin"] = "epoch"
+        if unit == "w":
+            resample_kwargs["origin"] = pd.Timestamp(
+                timeframe_bucket_origin_milliseconds(normalized_timerange),
+                unit="ms",
+                tz="UTC",
+            )
+        else:
+            resample_kwargs["origin"] = "epoch"
 
     df_resample = df.resample(resample_rule, **resample_kwargs).agg(
         {
