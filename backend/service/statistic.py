@@ -124,6 +124,7 @@ class Statistic:
                 "cost",
                 "virtual_waiting_profit",
                 "waiting_reference_quote",
+                "reserved_reentry_quote",
             )
             if not open_trade_rows:
                 return 0.0, 0.0, 0.0
@@ -140,14 +141,12 @@ class Statistic:
                 ).values(
                     "campaign_id",
                     "cumulative_realized_quote",
-                    "principal_quote",
                 )
                 campaign_metrics = {
                     str(row.get("campaign_id") or "").strip(): {
                         "realized_profit": float(
                             row.get("cumulative_realized_quote") or 0.0
                         ),
-                        "principal_quote": float(row.get("principal_quote") or 0.0),
                     }
                     for row in campaign_rows
                     if str(row.get("campaign_id") or "").strip()
@@ -161,20 +160,19 @@ class Statistic:
                 campaign_id = str(row.get("campaign_id") or "").strip()
                 campaign_metric = campaign_metrics.get(campaign_id, {})
                 realized_profit = float(campaign_metric.get("realized_profit") or 0.0)
-                principal_quote = float(campaign_metric.get("principal_quote") or 0.0)
                 exposure_state = str(row.get("exposure_state") or "").strip()
                 if exposure_state == TradeExposureState.FLAT_WAITING_REENTRY.value:
                     upnl_value += float(row.get("virtual_waiting_profit") or 0.0)
-                    if principal_quote <= 0:
-                        principal_quote = max(
-                            0.0,
-                            float(row.get("waiting_reference_quote") or 0.0)
-                            - realized_profit,
-                        )
-                    funds_locked += max(0.0, principal_quote)
+                    committed_quote = max(
+                        0.0,
+                        float(row.get("reserved_reentry_quote") or 0.0)
+                        or float(row.get("waiting_reference_quote") or 0.0),
+                    )
+                    funds_locked += max(0.0, committed_quote - realized_profit)
                 else:
                     upnl_value += float(row.get("profit") or 0.0)
-                    funds_locked += float(row.get("cost") or 0.0)
+                    committed_quote = float(row.get("cost") or 0.0)
+                    funds_locked += max(0.0, committed_quote - realized_profit)
 
                 if campaign_id and campaign_id not in counted_campaigns:
                     sidestep_realized_profit += realized_profit

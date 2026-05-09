@@ -1,6 +1,6 @@
 import os
 import types
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import model
 import pytest
@@ -190,8 +190,8 @@ async def test_profit_overall_counts_realized_sidestep_profit_on_active_leg(
         tp_percent=5.0,
         principal_quote=100.0,
         reserved_quote=0.0,
-        cumulative_realized_quote=7.0,
-        cumulative_realized_percent=7.0,
+        cumulative_realized_quote=4.0,
+        cumulative_realized_percent=4.0,
         metadata_json="{}",
     )
     await model.OpenTrades.create(
@@ -200,8 +200,8 @@ async def test_profit_overall_counts_realized_sidestep_profit_on_active_leg(
         lifecycle_mode="sidestep_reentry",
         exposure_state="long_exposed",
         profit=3.0,
-        profit_percent=2.5,
-        cost=96.0,
+        profit_percent=2.88,
+        cost=104.0,
     )
 
     statistic = Statistic()
@@ -220,8 +220,8 @@ async def test_profit_overall_counts_realized_sidestep_profit_on_active_leg(
     data = await statistic.get_profit()
 
     assert data["upnl"] == 3.0
-    assert data["profit_overall"] == 10.0
-    assert data["funds_locked"] == 96.0
+    assert data["profit_overall"] == 7.0
+    assert data["funds_locked"] == 100.0
 
     await Tortoise.close_connections()
 
@@ -321,7 +321,7 @@ async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch) -> No
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
     await Tortoise.generate_schemas()
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     await model.UpnlHistory.create(
         timestamp=now - timedelta(hours=2),
         upnl=1.0,
