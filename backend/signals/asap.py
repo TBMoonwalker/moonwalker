@@ -2,7 +2,8 @@
 
 import asyncio
 import importlib
-from typing import Any, Optional
+from dataclasses import dataclass
+from typing import Any
 
 import helper
 import httpx
@@ -34,6 +35,14 @@ from tenacity import retry, wait_fixed
 from tortoise.exceptions import BaseORMException
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "asap")
+
+
+@dataclass(frozen=True)
+class SymbolSelectionResult:
+    """Resolved ASAP symbol selection for one scheduler cycle."""
+
+    symbols: tuple[str, ...]
+    reason_code: str
 
 
 class SignalPlugin:
@@ -201,8 +210,13 @@ class SignalPlugin:
 
     @helper.async_ttl_cache(maxsize=1024, ttl=900)
     async def __get_new_symbol_list(
-        self, running_symbols: tuple[str, ...]
-    ) -> Optional[list[str]]:
+        self,
+        running_symbols: tuple[str, ...],
+        symbol_list_config: str | None,
+        strategy_timeframe: str,
+        required_history_days: int,
+        required_history_candles: int,
+    ) -> SymbolSelectionResult:
         """Get the list of new symbols to trade.
 
         Retrieves the symbol list from configuration, ensures history data exists
@@ -210,48 +224,113 @@ class SignalPlugin:
 
         Args:
             running_symbols: Tuple of currently running trade symbols
+            symbol_list_config: Raw configured symbol list value
+            strategy_timeframe: Configured strategy timeframe
+            required_history_days: History lookback window in days
+            required_history_candles: Required candle warmup for the strategy
 
         Returns:
-            List of symbols to trade, or None if no symbol list configured
+            A resolved symbol selection result for the current loop
         """
-        # New symbols
-        symbol_list = self.config.get("symbol_list", None)
-        if symbol_list:
-            if "http" in symbol_list:
-                symbol_list = await self.__fetch_symbol_list_from_url(symbol_list)
-            else:
-                symbol_list = symbol_list.split(",")
+        if not symbol_list_config:
+            logging.error(
+                "ASAP has no symbol list configured. Set the 'symbol_list' value "
+                "in the app configuration."
+            )
+            return SymbolSelectionResult(symbols=tuple(), reason_code="missing_config")
 
-            logging.debug("Fetched symbol list: %s", symbol_list)
+        if "http" in symbol_list_config:
+            symbol_list = await self.__fetch_symbol_list_from_url(symbol_list_config)
+        else:
+            symbol_list = [
+                symbol.strip()
+                for symbol in symbol_list_config.split(",")
+                if symbol.strip()
+            ]
 
-            eligible_symbols: list[str] = []
-            # Add history data for indicators
-            for symbol in symbol_list:
-                if symbol not in running_symbols:
-                    required_candles = max(1, self._required_history_candles)
-                    if not await self.data.has_sufficient_resampled_history(
+        if not symbol_list:
+            logging.error(
+                "ASAP 'symbol_list' is configured but empty. Add at least one "
+                "trading pair."
+            )
+            return SymbolSelectionResult(
+                symbols=tuple(),
+                reason_code="empty_config",
+            )
+
+        logging.debug("Fetched symbol list: %s", symbol_list)
+
+        eligible_symbols: list[str] = []
+        already_running_symbols: list[str] = []
+        history_blocked_symbols: list[str] = []
+        required_candles = max(1, required_history_candles)
+
+        # Add history data for indicators
+        for symbol in symbol_list:
+            if symbol in running_symbols:
+                already_running_symbols.append(symbol)
+                continue
+
+            if not await self.data.has_sufficient_resampled_history(
+                symbol,
+                strategy_timeframe,
+                required_candles,
+            ):
+                if not await self.data.add_history_data_for_symbol(
+                    symbol,
+                    required_history_days,
+                    self.config,
+                ):
+                    logging.error(
+                        "Not trading %s because history add failed. Please check "
+                        "data.log.",
                         symbol,
-                        self._strategy_timeframe,
-                        required_candles,
-                    ):
-                        if not await self.data.add_history_data_for_symbol(
-                            symbol,
-                            self._required_history_days,
-                            self.config,
-                        ):
-                            logging.error(
-                                "Not trading %s because history add failed. Please "
-                                "check data.log.",
-                                symbol,
-                            )
-                            continue
-                        if not await self.__has_sufficient_strategy_history(symbol):
-                            continue
-                eligible_symbols.append(symbol)
-            logging.debug("Running symbols: %s", running_symbols)
-            logging.debug("New symbols: %s", eligible_symbols)
-            return eligible_symbols
-        return symbol_list
+                    )
+                    history_blocked_symbols.append(symbol)
+                    continue
+                if not await self.__has_sufficient_strategy_history(symbol):
+                    history_blocked_symbols.append(symbol)
+                    continue
+
+            eligible_symbols.append(symbol)
+
+        logging.debug("Running symbols: %s", running_symbols)
+        logging.debug("New symbols: %s", eligible_symbols)
+
+        if eligible_symbols:
+            return SymbolSelectionResult(
+                symbols=tuple(eligible_symbols),
+                reason_code="ready",
+            )
+
+        if history_blocked_symbols:
+            logging.warning(
+                "ASAP has no new eligible symbols. %s configured symbol(s) are "
+                "already running and %s symbol(s) still need %s %s candle(s) of "
+                "history warmup.",
+                len(already_running_symbols),
+                len(history_blocked_symbols),
+                required_candles,
+                strategy_timeframe,
+            )
+            return SymbolSelectionResult(
+                symbols=tuple(),
+                reason_code="insufficient_history",
+            )
+
+        if already_running_symbols:
+            logging.debug(
+                "ASAP has no new symbols to start. All %s configured symbol(s) "
+                "are already running.",
+                len(already_running_symbols),
+            )
+            return SymbolSelectionResult(
+                symbols=tuple(),
+                reason_code="already_running",
+            )
+
+        logging.debug("ASAP symbol list resolved to no new symbols.")
+        return SymbolSelectionResult(symbols=tuple(), reason_code="no_candidates")
 
     @retry(wait=wait_fixed(3))
     async def __check_entry_point(self, symbol: str) -> bool:
@@ -394,10 +473,16 @@ class SignalPlugin:
             if not max_bots:
                 self._max_bots_blocked = False
                 running_symbols = tuple(await get_active_open_symbols())
-                symbol_list = await self.__get_new_symbol_list(running_symbols)
-                if symbol_list:
+                symbol_selection = await self.__get_new_symbol_list(
+                    running_symbols,
+                    self.config.get("symbol_list", None),
+                    self._strategy_timeframe,
+                    self._required_history_days,
+                    self._required_history_candles,
+                )
+                if symbol_selection.symbols:
                     candidate_symbols: list[str] = []
-                    for symbol in symbol_list:
+                    for symbol in symbol_selection.symbols:
                         signal = await self.__check_entry_point(symbol)
                         # Slow down on many symbols at once
                         await asyncio.sleep(1)
@@ -480,10 +565,6 @@ class SignalPlugin:
                             await asyncio.sleep(1)
                     finally:
                         await admission_batch.release()
-                else:
-                    logging.error(
-                        "No symbol list found - please add it with the 'symbol_list' attribute in config.ini."
-                    )
             else:
                 self.__log_max_bots_waiting()
             await asyncio.sleep(5)
