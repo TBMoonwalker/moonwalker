@@ -190,18 +190,25 @@ def _find_live_activation_blockers(
     return blockers
 
 
-def _is_live_activation_attempt(raw_value: Any) -> bool:
-    """Return whether the payload tries to disable dry run through a generic path."""
+def _is_dry_run_enabled(raw_value: Any) -> bool:
+    """Return whether a raw config value resolves to dry-run mode."""
     normalized = _extract_config_update_value(raw_value)
-    return str(normalized).strip().lower() in {"false", "0", "no", "off"}
+    if isinstance(normalized, str):
+        return normalized.strip().lower() not in {"false", "0", "no", "off", ""}
+    return bool(normalized)
 
 
-def _validate_live_activation_boundary(updates: dict[str, Any]) -> str | None:
+def _validate_live_activation_boundary(
+    config: Config,
+    updates: dict[str, Any],
+) -> str | None:
     """Return an error when generic config updates try to switch the system live."""
     raw_value = updates.get(LIVE_ACTIVATION_KEY)
     if raw_value is None:
         return None
-    if _is_live_activation_attempt(raw_value):
+    current_dry_run = _is_dry_run_enabled(config.get(LIVE_ACTIVATION_KEY, True))
+    requested_dry_run = _is_dry_run_enabled(raw_value)
+    if current_dry_run and not requested_dry_run:
         return LIVE_ACTIVATION_DENIED_MESSAGE
     return None
 
@@ -333,7 +340,7 @@ async def _validate_config_updates(
         if error_message:
             return _config_update_conflict(error_message)
 
-    error_message = _validate_live_activation_boundary(updates)
+    error_message = _validate_live_activation_boundary(config, updates)
     if error_message:
         return _config_update_conflict(error_message)
 

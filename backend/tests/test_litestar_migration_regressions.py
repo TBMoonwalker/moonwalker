@@ -368,6 +368,33 @@ def test_config_multiple_rejects_generic_live_activation(monkeypatch) -> None:
     assert service.last_batch is None
 
 
+def test_config_multiple_allows_generic_save_when_live_trading_is_active(
+    monkeypatch,
+) -> None:
+    """Generic saves should work after live activation is already active."""
+    service = _DummyConfigService()
+    service._cache.update({"dry_run": False, "monitoring_enabled": False})
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {
+        "dry_run": {"value": False, "type": "bool"},
+        "monitoring_enabled": {"value": True, "type": "bool"},
+    }
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 201
+    assert response.json() == {"message": "Config updated"}
+    assert service.last_batch == payload
+
+
 def test_config_multiple_blocks_switch_to_csv_signal_when_open_trades_exist(
     monkeypatch,
 ) -> None:
