@@ -634,6 +634,20 @@ async def persist_unsellable_remainder(
     )
 
 
+async def persist_unsellable_remainder_archive(payload: dict[str, Any]) -> None:
+    """Persist an unsellable remainder without mutating active campaign state."""
+
+    async def _persist_unsellable_archive() -> None:
+        async with in_transaction() as conn:
+            await model.UnsellableTrades.create(**payload, using_db=conn)
+
+    symbol = str(payload.get("symbol") or "").strip() or "unknown"
+    await run_sqlite_write_with_retry(
+        _persist_unsellable_archive,
+        f"persisting unsellable remainder archive for {symbol}",
+    )
+
+
 async def persist_stopped_trade(
     symbol: str,
     *,

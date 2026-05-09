@@ -38,6 +38,7 @@ from service.order_persistence import (
     persist_sidestep_transition,
     persist_stopped_trade,
     persist_unsellable_remainder,
+    persist_unsellable_remainder_archive,
 )
 from service.order_requests import normalize_order_symbol, parse_manual_buy_add_request
 from service.spot_campaign_types import TradeCloseReason
@@ -645,6 +646,16 @@ class Orders:
                     return
 
                 if self._is_partial_sell_status(order_status):
+                    if (
+                        order_status.get("close_reason") is None
+                        and order.get("sell_reason") is not None
+                    ):
+                        order_status["close_reason"] = str(order["sell_reason"])
+                    if (
+                        order_status.get("campaign_id") is None
+                        and order.get("campaign_id") is not None
+                    ):
+                        order_status["campaign_id"] = str(order["campaign_id"])
                     await self.__handle_partial_sell_status(order_status, config)
                     return
 
@@ -704,6 +715,8 @@ class Orders:
         if not snapshot.symbol:
             return
 
+        closed_at = self.__resolve_partial_sell_closed_at(order_status)
+
         open_trade_rows = await self.trades.get_open_trades_by_symbol(snapshot.symbol)
         open_trade = open_trade_rows[0] if open_trade_rows else None
         so_count = await self.__resolve_so_count(snapshot.symbol)
@@ -717,7 +730,58 @@ class Orders:
             open_trade=open_trade,
             so_count=so_count,
             open_timestamp_ms=open_timestamp,
+            closed_at=closed_at,
+            unsellable_since=closed_at.isoformat(),
         )
+
+        normalized_close_reason = SpotSidestepCampaignService.normalize_close_reason(
+            order_status.get("close_reason")
+        )
+
+        if (
+            normalized_close_reason == TradeCloseReason.SIDESTEP_EXIT.value
+            and context.closed_trade_payload is not None
+        ):
+            sidestep_campaigns = await self._get_sidestep_campaigns()
+            sidestep_payload = {
+                **context.closed_trade_payload,
+                "close_reason": normalized_close_reason,
+                "sell_executions": list(snapshot.partial_executions),
+            }
+            campaign_context = await sidestep_campaigns.resolve_close_context(
+                snapshot.symbol,
+                normalized_close_reason,
+                config,
+                closed_at=closed_at,
+                closed_payload=sidestep_payload,
+            )
+            logging.info(
+                "Persisting sidestep transition for %s with unsellable remainder: campaign=%s -> flat waiting.",
+                snapshot.symbol,
+                campaign_context.get("campaign_id"),
+            )
+            await persist_sidestep_transition(
+                snapshot.symbol,
+                sidestep_payload,
+                campaign_context=campaign_context,
+            )
+            await persist_unsellable_remainder_archive(context.unsellable_payload)
+            await self.trades._clear_order_cache()
+            if not context.already_notified:
+                await self.monitoring.notify_trade(
+                    "trade.unsellable_notional",
+                    context.monitor_payload,
+                    config,
+                )
+            logging.warning(
+                "Marked %s remainder as unsellable (reason=%s, remaining=%s, min_notional=%s, estimated_notional=%s).",
+                context.symbol,
+                context.reason,
+                context.remaining_amount,
+                context.min_notional,
+                context.estimated_notional,
+            )
+            return
 
         if context.partial_amount > 0:
             await self.trades.add_partial_sell_execution(
@@ -734,6 +798,7 @@ class Orders:
             snapshot.symbol,
             context.unsellable_payload,
         )
+        await self.trades._clear_order_cache()
 
         if not context.already_notified:
             await self.monitoring.notify_trade(
@@ -749,6 +814,21 @@ class Orders:
             context.min_notional,
             context.estimated_notional,
         )
+
+    @staticmethod
+    def __resolve_partial_sell_closed_at(
+        order_status: PartialSellStatus,
+    ) -> datetime:
+        """Return the best-effort close timestamp for a partial sell status."""
+        for execution in order_status.get("executions", []) or []:
+            raw_timestamp = execution.get("timestamp")
+            if raw_timestamp in (None, ""):
+                continue
+            try:
+                return trade_datetime_from_ms(float(raw_timestamp))
+            except (TypeError, ValueError):
+                continue
+        return datetime.now(timezone.utc)
 
     async def __calculate_closed_trade_stats(
         self, order_status: SoldCheckStatus

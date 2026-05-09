@@ -97,6 +97,8 @@ class PartialSellStatus(TypedDict, total=False):
 
     type: str
     symbol: str
+    campaign_id: str | None
+    close_reason: str | None
     partial_filled_amount: float
     partial_avg_price: float
     partial_proceeds: float
