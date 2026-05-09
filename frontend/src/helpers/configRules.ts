@@ -33,6 +33,26 @@ interface BuildConfigRulesOptions {
     submitAttempted: Ref<boolean>
 }
 
+function getTradeLifecycleMode(dca: Ref<DcaRulesState>): string {
+    return dca.value.trade_lifecycle_mode ?? 'classic_dca'
+}
+
+function isClassicDcaMode(dca: Ref<DcaRulesState>): boolean {
+    return getTradeLifecycleMode(dca) !== 'sidestep_reentry'
+}
+
+function isSpotMarket(exchange: Ref<ExchangeRulesState>): boolean {
+    return String(exchange.value.market || 'spot').trim().toLowerCase() === 'spot'
+}
+
+function isSpotSidestepMode(options: BuildConfigRulesOptions): boolean {
+    return (
+        options.dca.value.enabled &&
+        getTradeLifecycleMode(options.dca) === 'sidestep_reentry' &&
+        isSpotMarket(options.exchange)
+    )
+}
+
 function createDcaFieldValidator(
     dca: Ref<DcaRulesState>,
     fieldLabel: string,
@@ -241,29 +261,35 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
         so: {
             validator: dcaFieldValidator(
                 'safety order amount',
-                () => !options.dca.value.dynamic,
+                () => isClassicDcaMode(options.dca) && !options.dca.value.dynamic,
             ),
             trigger: ['submit'],
         },
         mstc: {
-            validator: dcaFieldValidator('max safety order count'),
+            validator: dcaFieldValidator(
+                'max safety order count',
+                () => isClassicDcaMode(options.dca),
+            ),
             trigger: ['submit'],
         },
         sos: {
-            validator: dcaFieldValidator('price deviation'),
+            validator: dcaFieldValidator(
+                'price deviation',
+                () => isClassicDcaMode(options.dca),
+            ),
             trigger: ['submit'],
         },
         ss: {
             validator: dcaFieldValidator(
                 'step scale',
-                () => !options.dca.value.dynamic,
+                () => isClassicDcaMode(options.dca) && !options.dca.value.dynamic,
             ),
             trigger: ['submit'],
         },
         os: {
             validator: dcaFieldValidator(
                 'volume scale',
-                () => !options.dca.value.dynamic,
+                () => isClassicDcaMode(options.dca) && !options.dca.value.dynamic,
             ),
             trigger: ['submit'],
         },
@@ -273,15 +299,7 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
         },
         sidestep_bearish_strategy: {
             validator: (_rule: FormItemRule, value: unknown) => {
-                if (
-                    !options.submitAttempted.value ||
-                    !options.dca.value.enabled ||
-                    (options.dca.value.trade_lifecycle_mode ?? 'classic_dca') !==
-                        'sidestep_reentry' ||
-                    String(options.exchange.value.market || 'spot')
-                        .trim()
-                        .toLowerCase() !== 'spot'
-                ) {
+                if (!options.submitAttempted.value || !isSpotSidestepMode(options)) {
                     return true
                 }
                 if (value === null || value === undefined) {
@@ -296,15 +314,7 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
         },
         sidestep_reentry_strategy: {
             validator: (_rule: FormItemRule, value: unknown) => {
-                if (
-                    !options.submitAttempted.value ||
-                    !options.dca.value.enabled ||
-                    (options.dca.value.trade_lifecycle_mode ?? 'classic_dca') !==
-                        'sidestep_reentry' ||
-                    String(options.exchange.value.market || 'spot')
-                        .trim()
-                        .toLowerCase() !== 'spot'
-                ) {
+                if (!options.submitAttempted.value || !isSpotSidestepMode(options)) {
                     return true
                 }
                 if (value === null || value === undefined) {

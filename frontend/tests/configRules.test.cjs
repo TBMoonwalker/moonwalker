@@ -152,6 +152,71 @@ test('config rules only require manual DCA fields when needed', () => {
         requiredContext.rules.so.validator({}, null).message,
         'Please add safety order amount',
     )
+
+    const sidestepContext = createRuleContext({
+        dca: {
+            value: {
+                dynamic: false,
+                enabled: true,
+                trade_lifecycle_mode: 'sidestep_reentry',
+            },
+        },
+    })
+    assert.equal(sidestepContext.rules.so.validator({}, null), true)
+    assert.equal(sidestepContext.rules.mstc.validator({}, null), true)
+    assert.equal(sidestepContext.rules.sos.validator({}, null), true)
+    assert.equal(sidestepContext.rules.ss.validator({}, null), true)
+    assert.equal(sidestepContext.rules.os.validator({}, null), true)
+})
+
+test('config rules require sidestep strategies only for spot sidestep mode', () => {
+    const sidestepContext = createRuleContext({
+        dca: {
+            value: {
+                dynamic: false,
+                enabled: true,
+                trade_lifecycle_mode: 'sidestep_reentry',
+            },
+        },
+        exchange: {
+            value: {
+                market: 'spot',
+            },
+        },
+    })
+
+    assert.equal(
+        sidestepContext.rules.sidestep_bearish_strategy.validator({}, null).message,
+        'Please select bearish sidestep strategy',
+    )
+    assert.equal(
+        sidestepContext.rules.sidestep_reentry_strategy.validator({}, null).message,
+        'Please select sidestep re-entry strategy',
+    )
+
+    const futuresContext = createRuleContext({
+        dca: {
+            value: {
+                dynamic: false,
+                enabled: true,
+                trade_lifecycle_mode: 'sidestep_reentry',
+            },
+        },
+        exchange: {
+            value: {
+                market: 'future',
+            },
+        },
+    })
+
+    assert.equal(
+        futuresContext.rules.sidestep_bearish_strategy.validator({}, null),
+        true,
+    )
+    assert.equal(
+        futuresContext.rules.sidestep_reentry_strategy.validator({}, null),
+        true,
+    )
 })
 
 test('config rules require a positive global max fund after submit', () => {

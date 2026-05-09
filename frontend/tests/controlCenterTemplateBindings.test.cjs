@@ -934,6 +934,7 @@ test('control center delegates setup mode presentation to dedicated components',
         '<template #exchange>',
         '<template #signal>',
         '<template #dca>',
+        ':market="exchange.market"',
         '<template #capital>',
         '<template #monitoring>',
     ]

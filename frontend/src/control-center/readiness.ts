@@ -34,6 +34,25 @@ function hasPositiveNumber(value: unknown): boolean {
     return Number.isFinite(numericValue) && numericValue > 0
 }
 
+function getTradeLifecycleMode(config: SharedConfigPayload): string {
+    return String(config.trade_lifecycle_mode ?? 'classic_dca')
+        .trim()
+        .toLowerCase()
+}
+
+function isSpotMarket(config: SharedConfigPayload): boolean {
+    return String(config.market ?? 'spot').trim().toLowerCase() === 'spot'
+}
+
+function resolveSidestepReentryStrategy(
+    config: SharedConfigPayload,
+): unknown {
+    if (hasRequiredValue(config.sidestep_reentry_strategy)) {
+        return config.sidestep_reentry_strategy
+    }
+    return config.dca_strategy
+}
+
 function collectAlwaysRequiredBlockers(
     config: SharedConfigPayload,
 ): ControlCenterBlocker[] {
@@ -72,6 +91,35 @@ function collectAlwaysRequiredBlockers(
 function collectDcaBlockers(config: SharedConfigPayload): ControlCenterBlocker[] {
     if (!Boolean(config.dca)) {
         return []
+    }
+
+    if (
+        getTradeLifecycleMode(config) === 'sidestep_reentry' &&
+        isSpotMarket(config)
+    ) {
+        const blockers: ControlCenterBlocker[] = []
+
+        if (!hasRequiredValue(config.sidestep_bearish_strategy)) {
+            blockers.push(
+                resolveControlCenterBlocker(
+                    'sidestep_bearish_strategy',
+                    'Choose the bearish strategy that should move a live trade into flat sidestep mode.',
+                    'Bearish sidestep strategy missing',
+                ),
+            )
+        }
+
+        if (!hasRequiredValue(resolveSidestepReentryStrategy(config))) {
+            blockers.push(
+                resolveControlCenterBlocker(
+                    'sidestep_reentry_strategy',
+                    'Choose the re-entry strategy that should buy back into flat sidestep trades.',
+                    'Sidestep re-entry strategy missing',
+                ),
+            )
+        }
+
+        return blockers
     }
 
     const requiredKeys: Array<[string, string, string]> = Boolean(config.dynamic_dca)
@@ -123,7 +171,15 @@ function collectDcaBlockers(config: SharedConfigPayload): ControlCenterBlocker[]
 }
 
 function countConfiguredEssentials(config: SharedConfigPayload): number {
-    const keys = ['timezone', 'exchange', 'signal', 'timeframe', 'key', 'secret', 'currency']
+    const keys = [
+        'timezone',
+        'exchange',
+        'signal',
+        'timeframe',
+        'key',
+        'secret',
+        'currency',
+    ]
     return keys.reduce(
         (count, key) => count + (hasRequiredValue(config[key]) ? 1 : 0),
         0,

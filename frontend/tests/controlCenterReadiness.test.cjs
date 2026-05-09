@@ -58,6 +58,30 @@ test('deriveControlCenterReadiness distinguishes partial setup from healthy setu
     assert.equal(readyReadiness.nextMode, 'overview')
 })
 
+test('deriveControlCenterReadiness requires sidestep strategies instead of classic DCA ladders', () => {
+    const readiness = deriveControlCenterReadiness({
+        ...createReadyConfig(),
+        dca: true,
+        dynamic_dca: false,
+        trade_lifecycle_mode: 'sidestep_reentry',
+        market: 'spot',
+        so: null,
+        mstc: null,
+        sos: null,
+        ss: null,
+        os: null,
+        sidestep_bearish_strategy: '',
+        sidestep_reentry_strategy: '',
+    })
+
+    assert.equal(readiness.complete, false)
+    assert.deepEqual(
+        readiness.blockers.map((blocker) => blocker.key),
+        ['sidestep_bearish_strategy', 'sidestep_reentry_strategy'],
+    )
+    assert.equal(readiness.nextTarget, 'dca')
+})
+
 test('deriveControlCenterViewState adapts to rescue and post-action success states', () => {
     const readiness = deriveControlCenterReadiness(createReadyConfig())
 

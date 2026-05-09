@@ -596,6 +596,110 @@ def test_live_activation_endpoint_blocks_missing_global_max_fund(monkeypatch) ->
     assert service.last_single is None
 
 
+def test_live_activation_endpoint_uses_sidestep_blockers_instead_of_classic_dca(
+    monkeypatch,
+) -> None:
+    """Sidestep mode should require sidestep strategies, not classic DCA ladders."""
+    service = _DummyConfigService()
+    service._cache.update(
+        {
+            "dry_run": True,
+            "timezone": "Europe/Vienna",
+            "signal": "asap",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "key": "api-key",
+            "secret": "api-secret",
+            "currency": "USDT",
+            "market": "spot",
+            "max_bots": 2,
+            "bo": 20,
+            "tp": 1.5,
+            "capital_max_fund": 250,
+            "history_lookback_time": "180d",
+            "symbol_list": "BTC/USDT",
+            "dca": True,
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "sidestep_bearish_strategy": "",
+            "sidestep_reentry_strategy": "",
+        }
+    )
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.activate_live_trading])
+    with TestClient(app=app) as client:
+        response = client.post("/config/live/activate", json={"confirm": True})
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["error"] == "Live activation blocked until setup is complete."
+    assert payload["blockers"] == [
+        {
+            "key": "sidestep_bearish_strategy",
+            "message": "Choose a bearish sidestep strategy.",
+        },
+        {
+            "key": "sidestep_reentry_strategy",
+            "message": "Choose a sidestep re-entry strategy.",
+        },
+    ]
+    assert service.last_single is None
+
+
+def test_live_activation_endpoint_allows_ready_sidestep_without_classic_dca_keys(
+    monkeypatch,
+) -> None:
+    """Sidestep mode should not require classic DCA ladder values."""
+    service = _DummyConfigService()
+    service._cache.update(
+        {
+            "dry_run": True,
+            "timezone": "Europe/Vienna",
+            "signal": "asap",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "key": "api-key",
+            "secret": "api-secret",
+            "currency": "USDT",
+            "market": "spot",
+            "max_bots": 2,
+            "bo": 20,
+            "tp": 1.5,
+            "capital_max_fund": 250,
+            "history_lookback_time": "180d",
+            "symbol_list": "BTC/USDT",
+            "dca": True,
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "sidestep_bearish_strategy": "ema_down",
+            "sidestep_reentry_strategy": "ema_low",
+        }
+    )
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.activate_live_trading])
+    with TestClient(app=app) as client:
+        response = client.post("/config/live/activate", json={"confirm": True})
+
+    assert response.status_code == 201
+    assert response.json()["message"] == "Live trading activated."
+    assert service.last_single == (
+        "dry_run",
+        {"value": False, "type": "bool"},
+    )
+
+
 def test_live_activation_endpoint_switches_dry_run_off(monkeypatch) -> None:
     """Dedicated live activation should persist dry_run=false when ready."""
     service = _DummyConfigService()
