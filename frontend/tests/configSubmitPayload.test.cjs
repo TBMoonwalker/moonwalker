@@ -382,6 +382,30 @@ test('buildConfigSubmitPayload clears dynamic safety-order buffer for static DCA
     })
 })
 
+test('buildConfigSubmitPayload derives the weekly history default from timeframe', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            exchange: {
+                name: 'binance',
+                timeframe: '1w',
+                key: 'key',
+                secret: 'secret',
+                exchange_hostname: 'api.exchange.test',
+                dry_run: true,
+                currency: 'usdt',
+                market: 'spot',
+                watcher_ohlcv: false,
+            },
+            indicator: {
+                upnl_housekeeping_interval: 7,
+                history_lookback_time: null,
+            },
+        }),
+    )
+
+    assert.equal(parseField(payload, 'history_lookback_time').value, '5y')
+})
+
 test('buildConfigSubmitPayload normalizes legacy ema swing reverse strategy ids', () => {
     const payload = buildConfigSubmitPayload(
         createBaseOptions({

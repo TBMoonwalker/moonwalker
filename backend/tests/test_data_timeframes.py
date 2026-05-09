@@ -11,12 +11,14 @@ from service.data_timeframes import (
 def test_timeframe_to_seconds_supports_min_alias_and_invalid_fallback() -> None:
     assert timeframe_to_seconds("15min") == 900
     assert timeframe_to_seconds("4h") == 14_400
+    assert timeframe_to_seconds("1w") == 604_800
     assert timeframe_to_seconds("invalid") == 60
 
 
 def test_timeframe_to_milliseconds_scales_seconds() -> None:
     assert timeframe_to_milliseconds("1m") == 60_000
     assert timeframe_to_milliseconds("1d") == 86_400_000
+    assert timeframe_to_milliseconds("1w") == 604_800_000
 
 
 def test_calculate_min_candle_date_applies_lookback_buffer() -> None:

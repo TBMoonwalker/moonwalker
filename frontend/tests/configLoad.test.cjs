@@ -163,6 +163,18 @@ test('buildLoadedConfigState defaults safety-order reserve to disabled', () => {
     assert.equal(state.capital.reserve_safety_orders, false)
 })
 
+test('buildLoadedConfigState derives the weekly history default from timeframe', () => {
+    const state = buildLoadedConfigState(
+        {
+            timeframe: '1w',
+            history_lookback_time: '',
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(state.indicator.history_lookback_time, '5y')
+})
+
 test('buildLoadedConfigState reads legacy entry stretch multiplier', () => {
     const state = buildLoadedConfigState(
         {

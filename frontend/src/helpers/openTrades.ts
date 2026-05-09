@@ -60,6 +60,7 @@ export const TIMEFRAME_CHOICES: TimeframeChoice[] = [
     { timerange: '60min', seconds: 60 * 60 },
     { timerange: '4h', seconds: 4 * 60 * 60 },
     { timerange: '1D', seconds: 24 * 60 * 60 },
+    { timerange: '1W', seconds: 7 * 24 * 60 * 60 },
 ]
 
 export const DEFAULT_MIN_TIMEFRAME = TIMEFRAME_CHOICES[2]
@@ -71,7 +72,7 @@ export function parseTimeframeSeconds(
         'min',
         'm',
     )
-    const match = normalized.match(/^(\d+)([mhd])$/)
+    const match = normalized.match(/^(\d+)([mhdw])$/)
     if (!match) {
         return null
     }
@@ -88,6 +89,9 @@ export function parseTimeframeSeconds(
     }
     if (unit === 'd') {
         return value * 24 * 60 * 60
+    }
+    if (unit === 'w') {
+        return value * 7 * 24 * 60 * 60
     }
     return null
 }

@@ -5,6 +5,7 @@ const { loadFrontendModule } = require('./helpers/loadFrontendModule.cjs')
 
 const {
     DEFAULT_MIN_TIMEFRAME,
+    TIMEFRAME_CHOICES,
     calculateSoPercentage,
     formatOrderAmount,
     formatPrice,
@@ -20,6 +21,7 @@ test('parseTimeframeSeconds normalizes supported units', () => {
     assert.equal(parseTimeframeSeconds('5min'), 300)
     assert.equal(parseTimeframeSeconds('4h'), 14400)
     assert.equal(parseTimeframeSeconds('1D'), 86400)
+    assert.equal(parseTimeframeSeconds('1W'), 604800)
     assert.equal(parseTimeframeSeconds('bad-value'), null)
 })
 
@@ -32,6 +34,14 @@ test('resolveMinTimeframe falls back and rounds up to supported choices', () => 
     assert.deepEqual(resolveMinTimeframe('9h'), {
         timerange: '1D',
         seconds: 24 * 60 * 60,
+    })
+    assert.deepEqual(resolveMinTimeframe('2d'), {
+        timerange: '1W',
+        seconds: 7 * 24 * 60 * 60,
+    })
+    assert.deepEqual(TIMEFRAME_CHOICES[TIMEFRAME_CHOICES.length - 1], {
+        timerange: '1W',
+        seconds: 7 * 24 * 60 * 60,
     })
 })
 

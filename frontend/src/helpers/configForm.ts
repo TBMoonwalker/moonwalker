@@ -62,6 +62,9 @@ export function getDefaultHistoryLookbackByTimeframe(
     if (normalized === '1d') {
         return '3y'
     }
+    if (normalized === '1w') {
+        return '5y'
+    }
     return '90d'
 }
 

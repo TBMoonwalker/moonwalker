@@ -30,6 +30,7 @@ const TIMERANGE_OPTIONS: StringSelectOption[] = [
     { label: '1h', value: '1h' },
     { label: '4h', value: '4h' },
     { label: '1d', value: '1d' },
+    { label: '1w', value: '1w' },
 ]
 
 const HISTORY_LOOKBACK_OPTIONS: StringSelectOption[] = [
@@ -38,6 +39,7 @@ const HISTORY_LOOKBACK_OPTIONS: StringSelectOption[] = [
     { label: '180 days (1h default)', value: '180d' },
     { label: '1 year (4h default)', value: '1y' },
     { label: '3 years (1d default)', value: '3y' },
+    { label: '5 years (1w default)', value: '5y' },
 ]
 
 const EXCHANGE_OPTIONS: StringSelectOption[] = [

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pandas as pd
@@ -123,12 +124,27 @@ def resample_ohlcv_data(ohlcv: pd.DataFrame, timerange: str) -> pd.DataFrame | N
     )
     df = df.set_index("timestamp")
 
-    normalized_timerange = timerange
-    if "m" in normalized_timerange:
-        interval, _ = normalized_timerange.split("m")
-        normalized_timerange = f"{interval}Min"
+    normalized_timerange = str(timerange or "").strip().lower().replace("min", "m")
+    resample_rule: str | pd.Timedelta = normalized_timerange
+    resample_kwargs: dict[str, Any] = {}
+    match = re.fullmatch(r"(\d+)\s*([mhdw])", normalized_timerange)
+    if match:
+        interval = max(1, int(match.group(1)))
+        unit = match.group(2)
+        if unit == "m":
+            resample_rule = pd.Timedelta(minutes=interval)
+        elif unit == "h":
+            resample_rule = pd.Timedelta(hours=interval)
+        elif unit == "d":
+            resample_rule = pd.Timedelta(days=interval)
+        else:
+            # Use fixed-duration 7-day windows anchored to the Unix epoch so
+            # weekly charts align with stored exchange timestamps and replay
+            # marker normalization throughout the app.
+            resample_rule = pd.Timedelta(days=interval * 7)
+        resample_kwargs["origin"] = "epoch"
 
-    df_resample = df.resample(normalized_timerange).agg(
+    df_resample = df.resample(resample_rule, **resample_kwargs).agg(
         {
             "open": "first",
             "high": "max",

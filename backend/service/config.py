@@ -32,6 +32,7 @@ HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
     "1h": "180d",
     "4h": "1y",
     "1d": "3y",
+    "1w": "5y",
 }
 
 HISTORY_LOOKBACK_UNIT_TO_DAYS = {
