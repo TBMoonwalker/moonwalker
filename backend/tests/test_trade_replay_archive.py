@@ -799,3 +799,109 @@ async def test_delete_closed_trade_cascades_archived_replay_candles(
     assert await model.TradeReplayCandles.filter(deal_id=deal_id).count() == 0
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_delete_all_unsellable_trades_cascades_only_detached_history(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _init_test_db(tmp_path, monkeypatch)
+
+    import model
+
+    detached_deal_id = "44444444-4444-4444-4444-444444444444"
+    linked_deal_id = "55555555-5555-5555-5555-555555555555"
+
+    await model.UnsellableTrades.create(
+        symbol="DETACHED/USDT",
+        deal_id=detached_deal_id,
+        execution_history_complete=True,
+        amount=0.01,
+        cost=0.02,
+        current_price=2.0,
+        avg_price=2.0,
+        open_date="120000",
+        unsellable_reason="minimum_notional",
+    )
+    await model.TradeExecutions.create(
+        deal_id=detached_deal_id,
+        symbol="DETACHED/USDT",
+        side="sell",
+        role="final_sell",
+        timestamp="180000",
+        price=2.0,
+        amount=0.01,
+        ordersize=0.02,
+        fee=0.0,
+    )
+    await model.TradeReplayCandles.create(
+        deal_id=detached_deal_id,
+        symbol="DETACHED/USDT",
+        timestamp="150000",
+        open=2.0,
+        high=2.1,
+        low=1.9,
+        close=2.0,
+        volume=10.0,
+    )
+
+    await model.UnsellableTrades.create(
+        symbol="LINKED/USDT",
+        deal_id=linked_deal_id,
+        execution_history_complete=True,
+        amount=0.02,
+        cost=0.04,
+        current_price=2.0,
+        avg_price=2.0,
+        open_date="240000",
+        unsellable_reason="minimum_notional",
+    )
+    await model.ClosedTrades.create(
+        symbol="LINKED/USDT",
+        deal_id=linked_deal_id,
+        execution_history_complete=True,
+        so_count=0,
+        profit=1.0,
+        profit_percent=10.0,
+        amount=1.0,
+        cost=10.0,
+        tp_price=11.0,
+        avg_price=10.0,
+        open_date="120000",
+        close_date="240000",
+        duration="{}",
+    )
+    await model.TradeExecutions.create(
+        deal_id=linked_deal_id,
+        symbol="LINKED/USDT",
+        side="sell",
+        role="final_sell",
+        timestamp="240000",
+        price=11.0,
+        amount=1.0,
+        ordersize=11.0,
+        fee=0.0,
+    )
+    await model.TradeReplayCandles.create(
+        deal_id=linked_deal_id,
+        symbol="LINKED/USDT",
+        timestamp="180000",
+        open=10.0,
+        high=11.0,
+        low=9.5,
+        close=10.5,
+        volume=10.0,
+    )
+
+    deleted = await Trades().delete_all_unsellable_trades()
+
+    assert deleted == 2
+    assert await model.UnsellableTrades.all().count() == 0
+    assert await model.TradeExecutions.filter(deal_id=detached_deal_id).count() == 0
+    assert await model.TradeReplayCandles.filter(deal_id=detached_deal_id).count() == 0
+    assert await model.TradeExecutions.filter(deal_id=linked_deal_id).count() == 1
+    assert await model.TradeReplayCandles.filter(deal_id=linked_deal_id).count() == 1
+    assert await model.ClosedTrades.filter(deal_id=linked_deal_id).count() == 1
+
+    await Tortoise.close_connections()

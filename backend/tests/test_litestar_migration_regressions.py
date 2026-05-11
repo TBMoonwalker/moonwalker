@@ -178,7 +178,7 @@ def test_monitoring_logs_endpoint_returns_source_metadata(monkeypatch) -> None:
     with TestClient(app=app) as client:
         response = client.get("/monitoring/logs")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json() == {
         "sources": [
             {"source": "watcher", "label": "Watcher", "available": True},
@@ -209,7 +209,7 @@ def test_monitoring_logs_endpoint_returns_log_batches(monkeypatch) -> None:
     with TestClient(app=app) as client:
         response = client.get("/monitoring/logs/watcher?cursor=64&limit=100")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.json() == {
         "source": "watcher",
         "label": "Watcher",
@@ -268,7 +268,7 @@ def test_monitoring_logs_download_endpoint_returns_attachment(
     with TestClient(app=app) as client:
         response = client.get("/monitoring/logs/watcher/download")
 
-    assert response.status_code == 200
+    assert response.status_code == 201
     assert response.text == "2026-03-19 - INFO - watcher : started\n"
     assert response.headers["content-type"].startswith("text/plain")
     assert (
@@ -1118,3 +1118,28 @@ def test_order_mutations_require_post(monkeypatch) -> None:
         ("buy", ("btc-usdt", "10")),
         ("stop", ("btc-usdt",)),
     ]
+
+
+def test_bulk_unsellable_resolution_requires_post(monkeypatch) -> None:
+    """Bulk unsellable resolution should stay POST-only and return a count."""
+    captured_calls: list[str] = []
+
+    async def _fake_delete_all() -> int | None:
+        captured_calls.append("delete_all")
+        return 3
+
+    monkeypatch.setattr(
+        trades_controller.trades,
+        "delete_all_unsellable_trades",
+        _fake_delete_all,
+    )
+
+    app = Litestar(route_handlers=[trades_controller.unsellable_trades_delete_all])
+
+    with TestClient(app=app) as client:
+        assert client.get("/trades/unsellable/delete/all").status_code == 405
+        response = client.post("/trades/unsellable/delete/all")
+
+    assert response.status_code == 201
+    assert response.json() == {"result": "deleted", "count": 3}
+    assert captured_calls == ["delete_all"]

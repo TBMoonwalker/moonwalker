@@ -633,6 +633,55 @@ class Trades:
         )
         return deleted_count > 0
 
+    async def delete_all_unsellable_trades(self) -> int | None:
+        """Delete all unsellable trades and orphaned execution history."""
+
+        async def _delete_all_summaries() -> int:
+            async with in_transaction() as conn:
+                summary_rows = (
+                    await model.UnsellableTrades.all().using_db(conn).values("deal_id")
+                )
+                if not summary_rows:
+                    return 0
+
+                deleted_count = (
+                    await model.UnsellableTrades.all().using_db(conn).delete()
+                )
+                deal_ids: set[str] = set()
+                for row in summary_rows:
+                    deal_id = str(row.get("deal_id") or "").strip()
+                    if deal_id:
+                        deal_ids.add(deal_id)
+
+                for deal_id in deal_ids:
+                    linked_rows = (
+                        await model.ClosedTrades.filter(deal_id=deal_id)
+                        .using_db(conn)
+                        .count()
+                    )
+                    linked_rows += (
+                        await model.UnsellableTrades.filter(deal_id=deal_id)
+                        .using_db(conn)
+                        .count()
+                    )
+                    if linked_rows == 0:
+                        await model.TradeReplayCandles.filter(
+                            deal_id=deal_id,
+                        ).using_db(conn).delete()
+                        await model.TradeExecutions.filter(
+                            deal_id=deal_id,
+                        ).using_db(conn).delete()
+                return deleted_count
+
+        try:
+            return await run_sqlite_write_with_retry(
+                _delete_all_summaries,
+                "deleting all unsellable trades",
+            )
+        except BaseORMException as exc:
+            self._log_db_error("Error deleting all unsellable trades.", exc)
+            return None
+
     async def update_open_trades(self, payload: dict[str, Any], symbol: str) -> None:
         """Update open trades for a symbol."""
         if await self.get_open_trades_by_symbol(symbol):

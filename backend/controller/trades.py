@@ -200,6 +200,18 @@ async def unsellable_trade_delete(trade_id: str) -> Any:
     return json_response({"result": "", "error": "Trade not found."}, 404)
 
 
+@post(path="/trades/unsellable/delete/all")
+async def unsellable_trades_delete_all() -> Any:
+    """Delete all unsellable trades after manual cleanup."""
+    deleted_count = await trades.delete_all_unsellable_trades()
+    if deleted_count is None:
+        return json_response(
+            {"result": "", "error": "Failed deleting unsellable trades."},
+            500,
+        )
+    return {"result": "deleted", "count": deleted_count}
+
+
 @post(path="/trades/waiting/stop/{campaign_id:str}")
 async def waiting_campaign_stop(campaign_id: str) -> Any:
     """Stop a waiting sidestep campaign manually."""
@@ -231,6 +243,7 @@ route_handlers = [
     closed_trades_length,
     closed_trades_pagination,
     trade_executions,
+    unsellable_trades_delete_all,
     closed_trade_delete,
     unsellable_trade_delete,
     waiting_campaign_stop,
