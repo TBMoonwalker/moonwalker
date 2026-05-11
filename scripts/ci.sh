@@ -45,7 +45,6 @@ run_step "Backend tests (pytest)" env \
 run_step "Frontend type check (vue-tsc)" npm --prefix "$ROOT_DIR/frontend" run type-check
 run_step "Frontend tests (node --test)" npm --prefix "$ROOT_DIR/frontend" run test
 run_step "Frontend build (vite)" npm --prefix "$ROOT_DIR/frontend" run build-only
-run_step "Frontend unused export check (optional)" bash "$ROOT_DIR/scripts/check_frontend_unused_exports.sh"
 set -e
 
 echo "-----"

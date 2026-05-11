@@ -89,11 +89,7 @@ class _DummyMemoryService:
 
 class _DummyCampaignService:
     def __init__(self) -> None:
-        self.waiting_symbols: list[str] = []
         self.blocks = {}
-
-    async def get_waiting_campaign_symbols(self) -> list[str]:
-        return list(self.waiting_symbols)
 
     async def get_admission_blocks(self, _symbols: list[str]):
         return dict(self.blocks)

@@ -1020,6 +1020,35 @@ def test_closed_trades_websocket_disconnect_is_not_logged_as_error(
     assert errors == []
 
 
+def test_waiting_campaigns_websocket_disconnect_is_not_logged_as_error(
+    monkeypatch,
+) -> None:
+    """Expected waiting-campaign WebSocket disconnect should not log errors."""
+    errors: list[tuple[Any, ...]] = []
+
+    async def _fake_waiting_trades() -> list[dict[str, Any]]:
+        return [{"campaign_id": "campaign-1", "symbol": "BTC/USDT"}]
+
+    monkeypatch.setattr(
+        trades_controller,
+        "_get_waiting_campaigns_cached",
+        _fake_waiting_trades,
+    )
+    monkeypatch.setattr(
+        trades_controller.logging, "error", lambda *args, **kwargs: errors.append(args)
+    )
+
+    app = Litestar(route_handlers=[trades_controller.waiting_campaigns])
+    with TestClient(app=app) as client:
+        with client.websocket_connect("/trades/waiting") as socket:
+            payload = json.loads(socket.receive_text())
+            assert payload == [{"campaign_id": "campaign-1", "symbol": "BTC/USDT"}]
+
+    time.sleep(0.05)
+
+    assert errors == []
+
+
 def test_statistics_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> None:
     """Expected WebSocket disconnect should not trigger error logging."""
     errors: list[tuple[Any, ...]] = []

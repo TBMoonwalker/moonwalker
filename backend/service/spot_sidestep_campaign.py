@@ -46,22 +46,6 @@ def _isoformat(value: datetime) -> str:
     return _ensure_utc(value).isoformat()
 
 
-def _parse_datetime(value: Any) -> datetime | None:
-    """Best-effort parse of timestamp-like values."""
-    if isinstance(value, datetime):
-        return _ensure_utc(value)
-    if not isinstance(value, str):
-        return None
-
-    normalized = value.strip()
-    if not normalized:
-        return None
-    try:
-        return _ensure_utc(datetime.fromisoformat(normalized.replace("Z", "+00:00")))
-    except ValueError:
-        return None
-
-
 def _parse_metadata(raw_value: Any) -> dict[str, Any]:
     """Return parsed campaign metadata with a dict fallback."""
     if isinstance(raw_value, dict):
@@ -130,19 +114,11 @@ class SpotSidestepCampaignService:
     _instance: SpotSidestepCampaignService | None = None
     _lock = asyncio.Lock()
 
-    REENTRY_LOOP_SECONDS = 5.0
-    IDLE_LOOP_SECONDS = 5.0
-    REENTRY_RETRY_SECONDS = 30.0
-
     def __init__(self) -> None:
         """Initialize runtime state and lazy collaborators."""
         self.config: dict[str, Any] = {}
-        self._task: asyncio.Task[None] | None = None
-        self._running = False
         self._watcher_queue: asyncio.Queue[Any] | None = None
         self._orders: Any | None = None
-        self._autopilot: Any | None = None
-        self._statistic: Any | None = None
 
     @classmethod
     async def instance(cls) -> "SpotSidestepCampaignService":
@@ -165,16 +141,11 @@ class SpotSidestepCampaignService:
         Re-entry is watcher-owned now, so there is no separate background
         campaign loop to start here.
         """
-        self._running = True
+        return
 
     async def shutdown(self) -> None:
-        """Stop the service and cancel any legacy background task."""
-        self._running = False
-        if self._task is None:
-            return
-        self._task.cancel()
-        await asyncio.gather(self._task, return_exceptions=True)
-        self._task = None
+        """Release transient runtime references."""
+        self._watcher_queue = None
 
     def bind_watcher_queue(self, watcher_queue: asyncio.Queue[Any]) -> None:
         """Attach the shared watcher queue used for re-entry symbols."""
@@ -220,22 +191,6 @@ class SpotSidestepCampaignService:
 
             self._orders = Orders()
         return self._orders
-
-    async def _get_autopilot(self) -> Any:
-        """Return the lazily constructed Autopilot service."""
-        if self._autopilot is None:
-            from service.autopilot import Autopilot
-
-            self._autopilot = Autopilot()
-        return self._autopilot
-
-    async def _get_statistic(self) -> Any:
-        """Return the lazily constructed Statistic service."""
-        if self._statistic is None:
-            from service.statistic import Statistic
-
-            self._statistic = Statistic()
-        return self._statistic
 
     @staticmethod
     def _resolve_cooldown_until(
@@ -741,74 +696,6 @@ class SpotSidestepCampaignService:
             )
         return blocks
 
-    async def get_waiting_campaign_symbols(self) -> list[str]:
-        """Return normalized symbols for campaigns still waiting to re-enter."""
-        rows = await model.SpotCampaigns.filter(
-            state=SpotCampaignState.FLAT_WAITING_REENTRY.value,
-        ).values_list("symbol", flat=True)
-        seen: set[str] = set()
-        waiting_symbols: list[str] = []
-        for row in rows:
-            symbol = _normalize_symbol(row)
-            if not symbol or symbol in seen:
-                continue
-            seen.add(symbol)
-            waiting_symbols.append(symbol)
-        return waiting_symbols
-
-    def _waiting_gate(
-        self,
-        campaign: dict[str, Any],
-        config: dict[str, Any],
-    ) -> tuple[str, str]:
-        """Return gate status and detail for a waiting campaign."""
-        metadata = _parse_metadata(campaign.get("metadata_json"))
-        now = _utc_now()
-
-        last_attempt_at = _parse_datetime(metadata.get("last_reentry_attempt_at"))
-        if (
-            last_attempt_at is not None
-            and (now - last_attempt_at).total_seconds() < self.REENTRY_RETRY_SECONDS
-        ):
-            return ("retry_backoff", "Waiting before the next re-entry attempt.")
-
-        cooldown_until = _parse_datetime(campaign.get("cooldown_until"))
-        if cooldown_until is not None and cooldown_until > now:
-            return ("cooldown", "Waiting for re-entry cooldown to expire.")
-
-        return ("ready", "Eligible for re-entry.")
-
-    async def get_waiting_campaign_summaries(self) -> list[dict[str, Any]]:
-        """Return compact waiting-campaign summaries for dashboard display."""
-        rows = (
-            await model.SpotCampaigns.filter(
-                state=SpotCampaignState.FLAT_WAITING_REENTRY.value,
-            )
-            .order_by("symbol", "-last_transition_at")
-            .values()
-        )
-
-        summaries: list[dict[str, Any]] = []
-        for row in rows:
-            gate_status, gate_detail = self._waiting_gate(row, self.config)
-            metadata = _parse_metadata(row.get("metadata_json"))
-            summaries.append(
-                {
-                    "campaign_id": row["campaign_id"],
-                    "symbol": row["symbol"],
-                    "state": row["state"],
-                    "sidestep_count": int(row.get("sidestep_count") or 0),
-                    "last_exit_reason": row.get("last_exit_reason"),
-                    "cooldown_until": row.get("cooldown_until"),
-                    "last_transition_at": row.get("last_transition_at"),
-                    "tp_percent": float(row.get("tp_percent") or 0.0),
-                    "gate_status": gate_status,
-                    "gate_detail": gate_detail,
-                    "last_long_signal_at": metadata.get("last_long_signal_at"),
-                }
-            )
-        return summaries
-
     async def stop_campaign(self, campaign_id: str) -> bool:
         """Stop a waiting or active campaign manually."""
         normalized_campaign_id = str(campaign_id or "").strip()
@@ -964,117 +851,3 @@ class SpotSidestepCampaignService:
                 normalized_campaign_id,
             )
         return success
-
-    async def _run_loop(self) -> None:
-        """Continuously try re-entry for eligible waiting campaigns."""
-        while self._running:
-            interval = self.IDLE_LOOP_SECONDS
-            try:
-                if self.is_enabled(self.config):
-                    await self._process_waiting_reentries()
-                    interval = self.REENTRY_LOOP_SECONDS
-            except Exception as exc:  # noqa: BLE001 - keep loop alive.
-                logging.error(
-                    "Sidestep campaign refresh failed: %s", exc, exc_info=True
-                )
-            await asyncio.sleep(interval)
-
-    async def _process_waiting_reentries(self) -> None:
-        """Re-enter eligible waiting campaigns from recorded long signals."""
-        waiting_campaigns = (
-            await model.SpotCampaigns.filter(
-                state=SpotCampaignState.FLAT_WAITING_REENTRY.value,
-            )
-            .order_by("last_transition_at")
-            .values()
-        )
-
-        for campaign in waiting_campaigns:
-            gate_status, _gate_detail = self._waiting_gate(campaign, self.config)
-            if gate_status != "ready":
-                continue
-            await self._attempt_reentry(campaign)
-
-    async def _attempt_reentry(self, campaign: dict[str, Any]) -> None:
-        """Attempt one sidestep re-entry buy for a waiting campaign."""
-        symbol = _normalize_symbol(campaign.get("symbol"))
-        if not symbol:
-            return
-
-        existing_open = await model.OpenTrades.filter(symbol=symbol).exists()
-        if existing_open:
-            return
-
-        metadata = _parse_metadata(campaign.get("metadata_json"))
-        signal_context = metadata.get("last_long_signal_context")
-        if not isinstance(signal_context, dict):
-            return
-
-        statistic = await self._get_statistic()
-        autopilot = await self._get_autopilot()
-        from service.signal_runtime import resolve_signal_entry_orders
-
-        entry_orders = await resolve_signal_entry_orders(
-            self.config,
-            statistic,
-            autopilot,
-            [symbol],
-            signal_name=(
-                str(signal_context.get("signal_name"))
-                if signal_context.get("signal_name") is not None
-                else None
-            ),
-            strategy_name=(
-                str(signal_context.get("strategy_name"))
-                if signal_context.get("strategy_name") is not None
-                else None
-            ),
-            timeframe=(
-                str(signal_context.get("timeframe"))
-                if signal_context.get("timeframe") is not None
-                else resolve_timeframe(self.config)
-            ),
-        )
-        entry_order = entry_orders.get(symbol)
-        if entry_order is None:
-            return
-
-        metadata["last_reentry_attempt_at"] = _isoformat(_utc_now())
-        await model.SpotCampaigns.filter(campaign_id=campaign["campaign_id"]).update(
-            metadata_json=_serialize_metadata(metadata),
-        )
-
-        if self._watcher_queue is not None:
-            await self._watcher_queue.put([symbol])
-
-        order = {
-            "ordersize": entry_order.order_size,
-            "symbol": symbol,
-            "direction": "long",
-            "botname": f"sidestep_{symbol}",
-            "baseorder": True,
-            "safetyorder": False,
-            "order_count": 0,
-            "ordertype": "market",
-            "so_percentage": None,
-            "side": "buy",
-            "campaign_id": campaign["campaign_id"],
-            "signal_name": entry_order.signal_name,
-            "strategy_name": entry_order.strategy_name,
-            "timeframe": entry_order.timeframe,
-            "metadata_json": entry_order.metadata_json,
-            "baseline_order_size": entry_order.baseline_order_size,
-            "entry_size_applied": entry_order.entry_size_applied,
-            "entry_size_reason_code": entry_order.reason_code,
-            "entry_size_fallback_applied": False,
-            "entry_size_fallback_reason": None,
-        }
-        orders = await self._get_orders()
-        success = await orders.receive_buy_order(order, self.config)
-        if success:
-            return
-
-        metadata["last_reentry_error"] = "buy_rejected"
-        await model.SpotCampaigns.filter(campaign_id=campaign["campaign_id"]).update(
-            metadata_json=_serialize_metadata(metadata),
-        )

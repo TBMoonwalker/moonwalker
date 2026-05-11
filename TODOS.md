@@ -55,6 +55,75 @@ surfaces.
 `close_reason` policy updates, and the waiting-campaign/read-model foundations
 landing first.
 
+### Centralize lifecycle normalization across backend and frontend config seams
+
+**What:** Replace the duplicated `trade_lifecycle_mode` /
+`sidestep_campaign_enabled` normalization spread across backend and frontend
+helpers with one canonical mapping path per side.
+
+**Why:** The current compatibility logic is repeated across config loading,
+submit payloads, and validation helpers, so every lifecycle change pays a
+multi-file drift tax.
+
+**Pros:** Lowers the chance of backend/frontend disagreement, makes
+compatibility behavior easier to reason about, and reinforces
+`trade_lifecycle_mode` as the canonical operator-facing key.
+
+**Cons:** Crosses both backend and frontend config plumbing, so it is wider
+than a release-safe cleanup and needs careful regression coverage for old
+snapshots and payloads.
+
+**Context:** If picked up later, start from the typed lifecycle view in
+`backend/service/config_views.py`, then simplify the matching normalization in
+frontend config load and submit helpers.
+
+**Depends on / blocked by:** Depends on the release-safe sidestep cleanup and
+docs alignment landing first so the canonical key is already established.
+
+### Untangle order-persistence ownership between Orders, Trades, and order_persistence
+
+**What:** Stop splitting trade and order write responsibility across
+`Orders`, `Trades`, and `order_persistence`, including private cache
+invalidation calls such as `Trades._clear_order_cache()`.
+
+**Why:** This is the strongest hidden-coupling seam in the execution path and
+makes buy or sell persistence changes harder to reason about safely.
+
+**Pros:** Clarifies write ownership, reduces private cross-service reach-in,
+and makes future execution-path changes safer to test and review.
+
+**Cons:** Touches sensitive buy and sell persistence paths, so the eventual
+refactor is invasive and needs strong regression coverage around cache
+invalidation and execution history.
+
+**Context:** If picked up later, map the current write flow through
+`backend/service/orders.py`, `backend/service/trades.py`, and
+`backend/service/order_persistence.py` before choosing the final ownership seam.
+
+**Depends on / blocked by:** Best done after the current release-safe cleanup,
+when execution-path behavior is otherwise stable enough for a focused refactor.
+
+### Deduplicate the EMA20 swing and reverse strategy pair
+
+**What:** Extract the shared logic behind `ema20_swing.py` and
+`ema20_swing_reverse.py`, and do the same for their mirrored tests.
+
+**Why:** Any behavior fix for that strategy pair currently has to be applied in
+four places, which increases maintenance cost and drift risk.
+
+**Pros:** Aligns with the repo's DRY preference, cuts copy-paste maintenance,
+and makes future strategy fixes less error-prone.
+
+**Cons:** Needs careful design so the shared seam stays explicit instead of
+turning into a clever abstraction that hides the directional differences.
+
+**Context:** If picked up later, compare both runtime modules and both test
+files side by side first, then extract only the truly shared mechanics and keep
+the direction-specific behavior obvious.
+
+**Depends on / blocked by:** No hard prerequisite, but best kept separate from
+sidestep cleanup so strategy refactors do not blur release-focused changes.
+
 ## Completed
 
 ### Reduce Control Center overview card nesting
