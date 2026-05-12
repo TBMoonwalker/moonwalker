@@ -1,0 +1,853 @@
+"""Spot sidestep campaign runtime and persistence helpers."""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from uuid import uuid4
+
+import helper
+import model
+from service.config import Config, resolve_timeframe
+from service.config_views import SidestepCampaignConfigView, TradeLifecycleConfigView
+from service.data_timeframes import timeframe_to_seconds
+from service.database import run_sqlite_write_with_retry
+from service.spot_campaign_types import (
+    SpotCampaignState,
+    TradeCloseReason,
+    TradeExposureState,
+    TradeLifecycleMode,
+)
+from tortoise.transactions import in_transaction
+
+logging = helper.LoggerFactory.get_logger(
+    "logs/spot_sidestep_campaign.log",
+    "spot_sidestep_campaign",
+)
+
+
+def _utc_now() -> datetime:
+    """Return a timezone-aware UTC timestamp."""
+    return datetime.now(timezone.utc)
+
+
+def _ensure_utc(value: datetime) -> datetime:
+    """Normalize a datetime into UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _isoformat(value: datetime) -> str:
+    """Return a stable UTC ISO timestamp."""
+    return _ensure_utc(value).isoformat()
+
+
+def _parse_metadata(raw_value: Any) -> dict[str, Any]:
+    """Return parsed campaign metadata with a dict fallback."""
+    if isinstance(raw_value, dict):
+        return dict(raw_value)
+    if not isinstance(raw_value, str) or not raw_value.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_value)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _serialize_metadata(metadata: dict[str, Any]) -> str:
+    """Return compact deterministic metadata JSON."""
+    return json.dumps(metadata, sort_keys=True)
+
+
+def _normalize_symbol(value: Any) -> str:
+    """Return a normalized uppercase symbol key."""
+    return str(value or "").strip().upper()
+
+
+def _exposure_state_for_campaign_state(state: Any) -> str:
+    """Map campaign state to the expected active-trade exposure state."""
+    if str(state or "") == SpotCampaignState.FLAT_WAITING_REENTRY.value:
+        return TradeExposureState.FLAT_WAITING_REENTRY.value
+    return TradeExposureState.LONG_EXPOSED.value
+
+
+def _infer_campaign_principal_quote(
+    *,
+    stored_principal_quote: Any,
+    cumulative_realized_quote: Any,
+    current_leg_cost: Any = None,
+    reserved_quote: Any = None,
+) -> float:
+    """Infer the original mission principal for legacy sidestep campaigns."""
+    principal_quote = float(stored_principal_quote or 0.0)
+    if principal_quote > 0:
+        return principal_quote
+
+    realized_quote = float(cumulative_realized_quote or 0.0)
+    for candidate in (current_leg_cost, reserved_quote):
+        fallback_quote = float(candidate or 0.0)
+        inferred_principal = fallback_quote - realized_quote
+        if inferred_principal > 0:
+            return inferred_principal
+
+    return 0.0
+
+
+@dataclass(frozen=True)
+class CampaignAdmissionBlock:
+    """Campaign-owned admission state for a symbol."""
+
+    symbol: str
+    campaign_id: str
+    state: str
+    reason_code: str
+
+
+class SpotSidestepCampaignService:
+    """Manage sidestep lifecycle state for active spot missions."""
+
+    _instance: SpotSidestepCampaignService | None = None
+    _lock = asyncio.Lock()
+
+    def __init__(self) -> None:
+        """Initialize runtime state and lazy collaborators."""
+        self.config: dict[str, Any] = {}
+        self._watcher_queue: asyncio.Queue[Any] | None = None
+        self._orders: Any | None = None
+
+    @classmethod
+    async def instance(cls) -> "SpotSidestepCampaignService":
+        """Return the shared sidestep campaign service instance."""
+        async with cls._lock:
+            if cls._instance is None:
+                cls._instance = cls()
+                await cls._instance.init()
+            return cls._instance
+
+    async def init(self) -> None:
+        """Subscribe to config changes and warm the initial snapshot."""
+        config = await Config.instance()
+        config.subscribe(self.on_config_change)
+        self.on_config_change(config.snapshot())
+
+    async def start(self) -> None:
+        """Start the service.
+
+        Re-entry is watcher-owned now, so there is no separate background
+        campaign loop to start here.
+        """
+        return
+
+    async def shutdown(self) -> None:
+        """Release transient runtime references."""
+        self._watcher_queue = None
+
+    def bind_watcher_queue(self, watcher_queue: asyncio.Queue[Any]) -> None:
+        """Attach the shared watcher queue used for re-entry symbols."""
+        self._watcher_queue = watcher_queue
+
+    def on_config_change(self, config: dict[str, Any]) -> None:
+        """Cache the latest config snapshot."""
+        self.config = config
+
+    @staticmethod
+    def normalize_close_reason(value: Any) -> str:
+        """Return a stable close-reason persistence value."""
+        normalized = str(value or "").strip().lower()
+        if normalized == TradeCloseReason.TRAILING_TAKE_PROFIT.value:
+            return TradeCloseReason.TRAILING_TAKE_PROFIT.value
+        if normalized == TradeCloseReason.STOP_LOSS.value:
+            return TradeCloseReason.STOP_LOSS.value
+        if normalized == TradeCloseReason.AUTOPILOT_TIMEOUT.value:
+            return TradeCloseReason.AUTOPILOT_TIMEOUT.value
+        if normalized == TradeCloseReason.SIDESTEP_EXIT.value:
+            return TradeCloseReason.SIDESTEP_EXIT.value
+        if normalized == TradeCloseReason.MANUAL_STOP.value:
+            return TradeCloseReason.MANUAL_STOP.value
+        if normalized == TradeCloseReason.MANUAL_SELL.value:
+            return TradeCloseReason.MANUAL_SELL.value
+        return TradeCloseReason.TAKE_PROFIT.value
+
+    @staticmethod
+    def _campaign_view(config: dict[str, Any] | None) -> TradeLifecycleConfigView:
+        """Return the typed lifecycle-mode config view."""
+        return TradeLifecycleConfigView.from_config(config or {})
+
+    @classmethod
+    def is_enabled(cls, config: dict[str, Any] | None) -> bool:
+        """Return whether sidestep campaigns are enabled."""
+        view = cls._campaign_view(config)
+        return view.is_sidestep_mode()
+
+    async def _get_orders(self) -> Any:
+        """Return the lazily constructed Orders service."""
+        if self._orders is None:
+            from service.orders import Orders
+
+            self._orders = Orders()
+        return self._orders
+
+    @staticmethod
+    def _resolve_cooldown_until(
+        *,
+        closed_at: datetime,
+        config: dict[str, Any],
+    ) -> str | None:
+        """Return the re-entry cooldown boundary for a sidestep exit."""
+        view = SidestepCampaignConfigView.from_config(config)
+        candles = int(view.reentry_cooldown_candles)
+        if candles <= 0:
+            return None
+
+        timeframe_seconds = max(1, timeframe_to_seconds(resolve_timeframe(config)))
+        cooldown = _ensure_utc(closed_at) + timedelta(
+            seconds=timeframe_seconds * candles
+        )
+        return _isoformat(cooldown)
+
+    async def _find_symbol_campaign(
+        self,
+        symbol: str,
+        *,
+        states: list[str] | None = None,
+    ) -> dict[str, Any] | None:
+        """Return the most recent campaign row for a symbol and optional states."""
+        normalized_symbol = _normalize_symbol(symbol)
+        if not normalized_symbol:
+            return None
+
+        query = model.SpotCampaigns.filter(symbol=normalized_symbol)
+        if states:
+            query = query.filter(state__in=states)
+        rows = await query.order_by("-last_transition_at", "-id").limit(1).values()
+        return rows[0] if rows else None
+
+    async def _find_campaign_by_id(self, campaign_id: str) -> dict[str, Any] | None:
+        """Return one campaign row by its stable campaign id."""
+        normalized_campaign_id = str(campaign_id or "").strip()
+        if not normalized_campaign_id:
+            return None
+        rows = (
+            await model.SpotCampaigns.filter(campaign_id=normalized_campaign_id)
+            .limit(1)
+            .values()
+        )
+        return rows[0] if rows else None
+
+    async def get_campaign_snapshot(self, campaign_id: str) -> dict[str, Any] | None:
+        """Return the latest campaign snapshot for runtime decisions."""
+        return await self._find_campaign_by_id(campaign_id)
+
+    async def resolve_buy_context(
+        self,
+        symbol: str,
+        order: dict[str, Any],
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return campaign context for a persisted buy leg."""
+        normalized_symbol = _normalize_symbol(symbol)
+        if not normalized_symbol:
+            return {"campaign_id": None}
+
+        lifecycle = TradeLifecycleConfigView.from_config(config)
+
+        explicit_campaign_id = str(order.get("campaign_id") or "").strip() or None
+        if explicit_campaign_id:
+            existing = await self._find_campaign_by_id(explicit_campaign_id)
+            metadata = _parse_metadata(
+                existing.get("metadata_json") if existing else None
+            )
+            metadata.pop("last_reentry_error", None)
+            principal_quote = float(
+                (existing or {}).get("principal_quote") or order.get("ordersize") or 0.0
+            )
+            return {
+                "campaign_id": explicit_campaign_id,
+                "create_campaign": existing is None,
+                "lifecycle_mode": TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                "state": SpotCampaignState.ACTIVE_LONG.value,
+                "started_at": (
+                    existing.get("started_at") if existing else _isoformat(_utc_now())
+                ),
+                "last_transition_at": _isoformat(_utc_now()),
+                "tp_percent": float(
+                    (existing or {}).get("tp_percent") or config.get("tp") or 0.0
+                ),
+                "principal_quote": principal_quote,
+                "reserved_quote": 0.0,
+                "cumulative_realized_quote": float(
+                    (existing or {}).get("cumulative_realized_quote") or 0.0
+                ),
+                "cumulative_realized_percent": float(
+                    (existing or {}).get("cumulative_realized_percent") or 0.0
+                ),
+                "metadata_json": _serialize_metadata(metadata),
+            }
+
+        if bool(order.get("safetyorder")) and not bool(order.get("baseorder")):
+            open_trade_rows = (
+                await model.OpenTrades.filter(symbol=normalized_symbol)
+                .limit(1)
+                .values("campaign_id")
+            )
+            open_trade = open_trade_rows[0] if open_trade_rows else None
+            campaign_id = str((open_trade or {}).get("campaign_id") or "").strip()
+            if campaign_id:
+                return {"campaign_id": campaign_id}
+            active_campaign = await self._find_symbol_campaign(
+                normalized_symbol,
+                states=[SpotCampaignState.ACTIVE_LONG.value],
+            )
+            if active_campaign:
+                return {"campaign_id": active_campaign["campaign_id"]}
+            return {"campaign_id": None}
+
+        if not lifecycle.is_sidestep_mode():
+            return {"campaign_id": None}
+
+        existing_campaign = await self._find_symbol_campaign(
+            normalized_symbol,
+            states=[
+                SpotCampaignState.ACTIVE_LONG.value,
+                SpotCampaignState.FLAT_WAITING_REENTRY.value,
+            ],
+        )
+        if existing_campaign:
+            metadata = _parse_metadata(existing_campaign.get("metadata_json"))
+            metadata.pop("last_reentry_error", None)
+            return {
+                "campaign_id": existing_campaign["campaign_id"],
+                "create_campaign": False,
+                "lifecycle_mode": TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                "state": SpotCampaignState.ACTIVE_LONG.value,
+                "started_at": existing_campaign.get("started_at")
+                or _isoformat(_utc_now()),
+                "last_transition_at": _isoformat(_utc_now()),
+                "tp_percent": float(
+                    existing_campaign.get("tp_percent") or config.get("tp") or 0.0
+                ),
+                "principal_quote": float(
+                    existing_campaign.get("principal_quote")
+                    or order.get("ordersize")
+                    or 0.0
+                ),
+                "reserved_quote": 0.0,
+                "cumulative_realized_quote": float(
+                    existing_campaign.get("cumulative_realized_quote") or 0.0
+                ),
+                "cumulative_realized_percent": float(
+                    existing_campaign.get("cumulative_realized_percent") or 0.0
+                ),
+                "metadata_json": _serialize_metadata(metadata),
+            }
+
+        return {
+            "campaign_id": str(uuid4()),
+            "create_campaign": True,
+            "lifecycle_mode": TradeLifecycleMode.SIDESTEP_REENTRY.value,
+            "state": SpotCampaignState.ACTIVE_LONG.value,
+            "started_at": _isoformat(_utc_now()),
+            "last_transition_at": _isoformat(_utc_now()),
+            "tp_percent": float(config.get("tp") or 0.0),
+            "principal_quote": float(order.get("ordersize") or 0.0),
+            "reserved_quote": 0.0,
+            "cumulative_realized_quote": 0.0,
+            "cumulative_realized_percent": 0.0,
+            "metadata_json": _serialize_metadata({}),
+        }
+
+    async def resolve_close_context(
+        self,
+        symbol: str,
+        close_reason: str,
+        config: dict[str, Any],
+        *,
+        closed_at: datetime,
+        closed_payload: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Return campaign transition context for a persisted sell leg."""
+        normalized_symbol = _normalize_symbol(symbol)
+        if not normalized_symbol:
+            return {"campaign_id": None, "close_reason": close_reason}
+
+        open_trade_rows = (
+            await model.OpenTrades.filter(symbol=normalized_symbol)
+            .limit(1)
+            .values("campaign_id")
+        )
+        open_trade = open_trade_rows[0] if open_trade_rows else None
+        campaign_id = str((open_trade or {}).get("campaign_id") or "").strip()
+        campaign = None
+        if campaign_id:
+            campaign = await self._find_campaign_by_id(campaign_id)
+        if campaign is None:
+            campaign = await self._find_symbol_campaign(normalized_symbol)
+
+        normalized_reason = self.normalize_close_reason(close_reason)
+        if campaign is None:
+            return {
+                "campaign_id": None,
+                "close_reason": normalized_reason,
+            }
+
+        metadata = _parse_metadata(campaign.get("metadata_json"))
+        metadata["last_close_reason"] = normalized_reason
+        metadata["last_closed_at"] = _isoformat(closed_at)
+        cumulative_realized_quote = float(
+            campaign.get("cumulative_realized_quote") or 0.0
+        )
+        principal_quote = _infer_campaign_principal_quote(
+            stored_principal_quote=campaign.get("principal_quote"),
+            cumulative_realized_quote=cumulative_realized_quote,
+            current_leg_cost=(closed_payload or {}).get("cost"),
+        )
+        realized_profit = float((closed_payload or {}).get("profit") or 0.0)
+        realized_proceeds = float(
+            (closed_payload or {}).get("tp_price") or 0.0
+        ) * float((closed_payload or {}).get("amount") or 0.0)
+        next_cumulative_realized_quote = cumulative_realized_quote + realized_profit
+        next_cumulative_realized_percent = (
+            (next_cumulative_realized_quote / principal_quote) * 100
+            if principal_quote > 0
+            else 0.0
+        )
+        lifecycle_mode = str(
+            campaign.get("lifecycle_mode") or TradeLifecycleMode.SIDESTEP_REENTRY.value
+        )
+
+        if normalized_reason == TradeCloseReason.SIDESTEP_EXIT.value:
+            metadata["last_exit_at"] = _isoformat(closed_at)
+            return {
+                "campaign_id": campaign["campaign_id"],
+                "close_reason": normalized_reason,
+                "lifecycle_mode": lifecycle_mode,
+                "state": SpotCampaignState.FLAT_WAITING_REENTRY.value,
+                "last_transition_at": _isoformat(closed_at),
+                "last_exit_reason": normalized_reason,
+                "cooldown_until": self._resolve_cooldown_until(
+                    closed_at=closed_at,
+                    config=config,
+                ),
+                "sidestep_increment": 1,
+                "tp_percent": float(
+                    campaign.get("tp_percent") or config.get("tp") or 0.0
+                ),
+                "principal_quote": principal_quote,
+                "reserved_quote": realized_proceeds,
+                "cumulative_realized_quote": next_cumulative_realized_quote,
+                "cumulative_realized_percent": next_cumulative_realized_percent,
+                "metadata_json": _serialize_metadata(metadata),
+            }
+
+        next_state = SpotCampaignState.STOPPED.value
+        if normalized_reason in {
+            TradeCloseReason.TAKE_PROFIT.value,
+            TradeCloseReason.TRAILING_TAKE_PROFIT.value,
+        }:
+            next_state = SpotCampaignState.COMPLETED_TP.value
+
+        return {
+            "campaign_id": campaign["campaign_id"],
+            "close_reason": normalized_reason,
+            "lifecycle_mode": lifecycle_mode,
+            "state": next_state,
+            "last_transition_at": _isoformat(closed_at),
+            "last_exit_reason": normalized_reason,
+            "cooldown_until": None,
+            "sidestep_increment": 0,
+            "tp_percent": float(campaign.get("tp_percent") or config.get("tp") or 0.0),
+            "principal_quote": principal_quote,
+            "reserved_quote": 0.0,
+            "cumulative_realized_quote": next_cumulative_realized_quote,
+            "cumulative_realized_percent": next_cumulative_realized_percent,
+            "summary_overrides": (
+                {
+                    "profit": next_cumulative_realized_quote,
+                    "profit_percent": next_cumulative_realized_percent,
+                    "cost": principal_quote,
+                    "open_date": campaign.get("started_at"),
+                }
+                if lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value
+                else None
+            ),
+            "metadata_json": _serialize_metadata(metadata),
+        }
+
+    async def ensure_campaign_for_open_trade(
+        self,
+        trade_data: dict[str, Any],
+        config: dict[str, Any],
+    ) -> str | None:
+        """Attach a campaign to an already-open trade when sidestep becomes enabled."""
+        if not self.is_enabled(config):
+            return None
+
+        symbol = _normalize_symbol(trade_data.get("symbol"))
+        if not symbol:
+            return None
+
+        existing_open_trade_rows = (
+            await model.OpenTrades.filter(symbol=symbol)
+            .limit(1)
+            .values(
+                "campaign_id",
+                "deal_id",
+                "open_date",
+                "lifecycle_mode",
+                "exposure_state",
+            )
+        )
+        existing_open_trade = (
+            existing_open_trade_rows[0] if existing_open_trade_rows else None
+        )
+        if existing_open_trade and existing_open_trade.get("campaign_id"):
+            existing_campaign_id = str(existing_open_trade["campaign_id"])
+            existing_campaign = await self._find_campaign_by_id(existing_campaign_id)
+            expected_exposure_state = _exposure_state_for_campaign_state(
+                (existing_campaign or {}).get("state")
+            )
+            expected_lifecycle_mode = TradeLifecycleMode.SIDESTEP_REENTRY.value
+            if (
+                str(existing_open_trade.get("lifecycle_mode") or "")
+                != expected_lifecycle_mode
+                or str(existing_open_trade.get("exposure_state") or "")
+                != expected_exposure_state
+            ):
+                await run_sqlite_write_with_retry(
+                    lambda: model.OpenTrades.filter(symbol=symbol).update(
+                        lifecycle_mode=expected_lifecycle_mode,
+                        exposure_state=expected_exposure_state,
+                    ),
+                    f"repairing sidestep runtime state for {symbol}",
+                )
+            if (
+                existing_campaign
+                and str(existing_campaign.get("lifecycle_mode") or "")
+                != expected_lifecycle_mode
+            ):
+                await run_sqlite_write_with_retry(
+                    lambda: model.SpotCampaigns.filter(
+                        campaign_id=existing_campaign_id
+                    ).update(lifecycle_mode=expected_lifecycle_mode),
+                    f"repairing sidestep campaign lifecycle for {symbol}",
+                )
+            return existing_campaign_id
+
+        campaign = await self._find_symbol_campaign(
+            symbol,
+            states=[SpotCampaignState.ACTIVE_LONG.value],
+        )
+        campaign_id = str((campaign or {}).get("campaign_id") or uuid4())
+        started_at = str(
+            (existing_open_trade or {}).get("open_date")
+            or trade_data.get("open_date")
+            or _isoformat(_utc_now())
+        )
+        deal_id = (
+            str(
+                (existing_open_trade or {}).get("deal_id")
+                or trade_data.get("deal_id")
+                or ""
+            ).strip()
+            or None
+        )
+        last_transition_at = _isoformat(_utc_now())
+        principal_quote = float(
+            trade_data.get("total_cost") or trade_data.get("cost") or 0.0
+        )
+
+        async def _attach_campaign() -> None:
+            async with in_transaction() as conn:
+                if campaign is None:
+                    await model.SpotCampaigns.create(
+                        campaign_id=campaign_id,
+                        symbol=symbol,
+                        lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                        state=SpotCampaignState.ACTIVE_LONG.value,
+                        started_at=started_at,
+                        last_transition_at=last_transition_at,
+                        current_deal_id=deal_id,
+                        sidestep_count=0,
+                        last_exit_reason=None,
+                        cooldown_until=None,
+                        tp_percent=float(config.get("tp") or 0.0),
+                        principal_quote=principal_quote,
+                        reserved_quote=0.0,
+                        cumulative_realized_quote=0.0,
+                        cumulative_realized_percent=0.0,
+                        metadata_json=_serialize_metadata({}),
+                        using_db=conn,
+                    )
+                else:
+                    await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(
+                        conn
+                    ).update(
+                        lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                        principal_quote=(
+                            float(campaign.get("principal_quote") or 0.0)
+                            if isinstance(campaign, dict)
+                            and float(campaign.get("principal_quote") or 0.0) > 0
+                            else principal_quote
+                        ),
+                    )
+                await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
+                    campaign_id=campaign_id,
+                    lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                )
+                await model.Trades.filter(symbol=symbol).using_db(conn).update(
+                    campaign_id=campaign_id,
+                )
+                if deal_id:
+                    await model.TradeExecutions.filter(deal_id=deal_id).using_db(
+                        conn
+                    ).update(campaign_id=campaign_id)
+
+        await run_sqlite_write_with_retry(
+            _attach_campaign,
+            f"attaching sidestep campaign for {symbol}",
+        )
+        return campaign_id
+
+    async def record_long_signal(
+        self,
+        symbol: str,
+        *,
+        signal_name: str | None,
+        strategy_name: str | None,
+        timeframe: str | None,
+        metadata_json: str | None,
+        source: str,
+    ) -> None:
+        """Persist the latest fresh long signal for a waiting campaign."""
+        normalized_symbol = _normalize_symbol(symbol)
+        campaign = await self._find_symbol_campaign(
+            normalized_symbol,
+            states=[SpotCampaignState.FLAT_WAITING_REENTRY.value],
+        )
+        if campaign is None:
+            return
+
+        signal_timestamp = _isoformat(_utc_now())
+        metadata = _parse_metadata(campaign.get("metadata_json"))
+        metadata["last_long_signal_at"] = signal_timestamp
+        metadata["last_long_signal_context"] = {
+            "signal_name": signal_name,
+            "strategy_name": strategy_name,
+            "timeframe": timeframe,
+            "metadata_json": metadata_json,
+            "source": source,
+        }
+
+        await model.SpotCampaigns.filter(campaign_id=campaign["campaign_id"]).update(
+            metadata_json=_serialize_metadata(metadata),
+            last_transition_at=str(
+                campaign.get("last_transition_at") or signal_timestamp
+            ),
+        )
+
+    async def get_admission_blocks(
+        self,
+        symbols: list[str],
+    ) -> dict[str, CampaignAdmissionBlock]:
+        """Return campaign-owned admission blocks for the given symbols."""
+        normalized_symbols = [
+            normalized
+            for normalized in {_normalize_symbol(symbol) for symbol in symbols}
+            if normalized
+        ]
+        if not normalized_symbols:
+            return {}
+
+        rows = await model.SpotCampaigns.filter(
+            symbol__in=normalized_symbols,
+            state__in=[
+                SpotCampaignState.ACTIVE_LONG.value,
+                SpotCampaignState.FLAT_WAITING_REENTRY.value,
+            ],
+        ).values("symbol", "campaign_id", "state", "last_transition_at")
+
+        latest_by_symbol: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            symbol = _normalize_symbol(row.get("symbol"))
+            previous = latest_by_symbol.get(symbol)
+            if previous is None or str(row.get("last_transition_at") or "") > str(
+                previous.get("last_transition_at") or ""
+            ):
+                latest_by_symbol[symbol] = row
+
+        blocks: dict[str, CampaignAdmissionBlock] = {}
+        for symbol, row in latest_by_symbol.items():
+            state = str(row.get("state") or "")
+            reason_code = (
+                "skipped_campaign_waiting_reentry"
+                if state == SpotCampaignState.FLAT_WAITING_REENTRY.value
+                else "skipped_campaign_active_long"
+            )
+            blocks[symbol] = CampaignAdmissionBlock(
+                symbol=symbol,
+                campaign_id=str(row.get("campaign_id") or ""),
+                state=state,
+                reason_code=reason_code,
+            )
+        return blocks
+
+    async def stop_campaign(self, campaign_id: str) -> bool:
+        """Stop a waiting or active campaign manually."""
+        normalized_campaign_id = str(campaign_id or "").strip()
+        if not normalized_campaign_id:
+            return False
+
+        async def _stop_campaign() -> bool:
+            async with in_transaction() as conn:
+                campaign = (
+                    await model.SpotCampaigns.filter(
+                        campaign_id=normalized_campaign_id,
+                        state__in=[
+                            SpotCampaignState.ACTIVE_LONG.value,
+                            SpotCampaignState.FLAT_WAITING_REENTRY.value,
+                        ],
+                    )
+                    .using_db(conn)
+                    .first()
+                )
+                if campaign is None:
+                    return False
+
+                now_iso = _isoformat(_utc_now())
+                cumulative_realized_quote = float(
+                    campaign.cumulative_realized_quote or 0.0
+                )
+                principal_quote = _infer_campaign_principal_quote(
+                    stored_principal_quote=campaign.principal_quote,
+                    cumulative_realized_quote=cumulative_realized_quote,
+                    reserved_quote=campaign.reserved_quote,
+                )
+                cumulative_realized_percent = (
+                    (cumulative_realized_quote / principal_quote) * 100
+                    if principal_quote > 0
+                    else float(campaign.cumulative_realized_percent or 0.0)
+                )
+                await model.SpotCampaigns.filter(
+                    campaign_id=normalized_campaign_id
+                ).using_db(conn).update(
+                    state=SpotCampaignState.STOPPED.value,
+                    last_transition_at=now_iso,
+                    last_exit_reason=TradeCloseReason.MANUAL_STOP.value,
+                    cooldown_until=None,
+                    principal_quote=principal_quote,
+                    reserved_quote=0.0,
+                    cumulative_realized_percent=cumulative_realized_percent,
+                )
+
+                await model.ClosedTrades.create(
+                    symbol=campaign.symbol,
+                    deal_id=None,
+                    campaign_id=normalized_campaign_id,
+                    execution_history_complete=False,
+                    so_count=0,
+                    profit=cumulative_realized_quote,
+                    profit_percent=cumulative_realized_percent,
+                    amount=0.0,
+                    cost=principal_quote,
+                    tp_price=0.0,
+                    avg_price=0.0,
+                    open_date=campaign.started_at,
+                    close_date=now_iso,
+                    duration=None,
+                    close_reason=TradeCloseReason.MANUAL_STOP.value,
+                    using_db=conn,
+                )
+                await model.Trades.filter(symbol=campaign.symbol).using_db(
+                    conn
+                ).delete()
+                await model.OpenTrades.filter(symbol=campaign.symbol).using_db(
+                    conn
+                ).delete()
+                return True
+
+        return await run_sqlite_write_with_retry(
+            _stop_campaign,
+            f"stopping sidestep campaign {normalized_campaign_id}",
+        )
+
+    async def activate_campaign(self, campaign_id: str) -> bool:
+        """Re-enter a waiting sidestep campaign immediately by manual override."""
+        normalized_campaign_id = str(campaign_id or "").strip()
+        if not normalized_campaign_id:
+            return False
+
+        campaign = await self._find_campaign_by_id(normalized_campaign_id)
+        if campaign is None:
+            return False
+        if (
+            str(campaign.get("state") or "")
+            != SpotCampaignState.FLAT_WAITING_REENTRY.value
+        ):
+            return False
+
+        symbol = _normalize_symbol(campaign.get("symbol"))
+        if not symbol:
+            return False
+
+        open_trade_rows = (
+            await model.OpenTrades.filter(symbol=symbol)
+            .limit(1)
+            .values("reserved_reentry_quote")
+        )
+        open_trade = open_trade_rows[0] if open_trade_rows else None
+        order_size = float(
+            (open_trade or {}).get("reserved_reentry_quote")
+            or campaign.get("reserved_quote")
+            or float((self.config or {}).get("bo") or 0.0)
+        )
+        if order_size <= 0:
+            logging.warning(
+                "Manual sidestep re-entry skipped for %s: campaign=%s has no reserved quote.",
+                symbol,
+                normalized_campaign_id,
+            )
+            return False
+
+        logging.info(
+            "Manual sidestep re-entry requested for %s: campaign=%s reserved_quote=%s.",
+            symbol,
+            normalized_campaign_id,
+            order_size,
+        )
+        orders = await self._get_orders()
+        order = {
+            "ordersize": order_size,
+            "symbol": symbol,
+            "direction": "long",
+            "botname": f"sidestep_{symbol}",
+            "baseorder": True,
+            "safetyorder": False,
+            "order_count": 0,
+            "ordertype": "market",
+            "so_percentage": None,
+            "side": "buy",
+            "campaign_id": normalized_campaign_id,
+            "signal_name": None,
+            "strategy_name": "manual_reentry",
+            "timeframe": resolve_timeframe(self.config or {}),
+            "metadata_json": None,
+        }
+        success = await orders.receive_buy_order(order, self.config)
+        if success:
+            logging.info(
+                "Manual sidestep re-entry buy submitted for %s: campaign=%s.",
+                symbol,
+                normalized_campaign_id,
+            )
+        else:
+            logging.warning(
+                "Manual sidestep re-entry buy rejected for %s: campaign=%s.",
+                symbol,
+                normalized_campaign_id,
+            )
+        return success

@@ -27,6 +27,7 @@ def test_build_manual_sell_order_intent_returns_expected_payload() -> None:
         "actual_pnl": 4.0,
         "total_cost": 25000.0,
         "current_price": 26000.0,
+        "sell_reason": "manual_sell",
     }
 
 

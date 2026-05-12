@@ -21,6 +21,8 @@ from service.green_phase_logic import (
     to_float,
     to_int,
 )
+from service.spot_campaign_types import TradeCloseReason
+from tortoise.expressions import Q
 
 logging = helper.LoggerFactory.get_logger("logs/green_phase.log", "green_phase")
 AVAILABLE_QUOTE_UNSET = object()
@@ -134,7 +136,10 @@ class GreenPhaseService:
 
         now = datetime.now(timezone.utc)
         rows = (
-            await model.ClosedTrades.all()
+            await model.ClosedTrades.filter(
+                Q(close_reason__isnull=True)
+                | ~Q(close_reason__in=[TradeCloseReason.SIDESTEP_EXIT.value])
+            )
             .order_by("-id")
             .limit(self.MAX_ANALYSIS_ROWS)
             .values_list("close_date", "profit")

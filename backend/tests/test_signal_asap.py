@@ -5,7 +5,7 @@ from typing import Any
 import pytest
 import signals.asap as asap_module
 from service.signal_runtime import SignalAdmissionBatch, SignalAdmissionDecision
-from signals.asap import SignalPlugin
+from signals.asap import SignalPlugin, SymbolSelectionResult
 
 
 @pytest.mark.asyncio
@@ -26,8 +26,11 @@ async def test_asap_run_uses_shared_admission_batch(monkeypatch) -> None:
     async def fake_check_max_bots() -> None:
         return False
 
-    async def fake_get_new_symbol_list(_) -> None:
-        return ["ETH/USDT", "BTC/USDT"]
+    async def fake_get_new_symbol_list(*_args) -> SymbolSelectionResult:
+        return SymbolSelectionResult(
+            symbols=("ETH/USDT", "BTC/USDT"),
+            reason_code="ready",
+        )
 
     async def fake_check_entry_point(_symbol) -> None:
         return True
@@ -116,6 +119,13 @@ async def test_asap_run_uses_shared_admission_batch(monkeypatch) -> None:
         "resolve_signal_entry_orders",
         fake_resolve_signal_entry_orders,
     )
+    monkeypatch.setattr(
+        asap_module,
+        "SpotSidestepCampaignService",
+        types.SimpleNamespace(
+            instance=_async_value(types.SimpleNamespace(record_long_signal=_async_noop))
+        ),
+    )
 
     orders = []
 
@@ -144,6 +154,17 @@ def _async_symbols(symbols: list[str]):
     return _inner
 
 
+def _async_value(value):
+    async def _inner(*_args, **_kwargs):
+        return value
+
+    return _inner
+
+
+async def _async_noop(*_args, **_kwargs) -> None:
+    return None
+
+
 @pytest.mark.asyncio
 async def test_asap_skips_symbols_with_insufficient_history(monkeypatch) -> None:
     watcher_queue = asyncio.Queue()
@@ -168,9 +189,16 @@ async def test_asap_skips_symbols_with_insufficient_history(monkeypatch) -> None
         get_resampled_history_candle_count=fake_get_resampled_history_candle_count,
     )
 
-    symbols = await plugin._SignalPlugin__get_new_symbol_list(tuple())
+    result = await plugin._SignalPlugin__get_new_symbol_list(
+        tuple(),
+        plugin.config.get("symbol_list"),
+        plugin._strategy_timeframe,
+        plugin._required_history_days,
+        plugin._required_history_candles,
+    )
 
-    assert symbols == []
+    assert result.symbols == tuple()
+    assert result.reason_code == "insufficient_history"
     assert watcher_queue.empty() is True
 
 
@@ -216,3 +244,67 @@ async def test_asap_fetches_symbol_list_with_async_http_client(monkeypatch) -> N
     assert result == ["BTC/USDT", "ETH/USDT"]
     assert captured["url"] == "https://example.invalid/pairs"
     assert captured["timeout"] == 10.0
+
+
+@pytest.mark.asyncio
+async def test_asap_missing_symbol_list_logs_app_config_message(monkeypatch) -> None:
+    watcher_queue = asyncio.Queue()
+    plugin = SignalPlugin(watcher_queue)
+    plugin.config = {}
+    captured: list[str] = []
+
+    def fake_error(message: str, *args: object) -> None:
+        captured.append(message % args if args else message)
+
+    monkeypatch.setattr(asap_module.logging, "error", fake_error)
+
+    result = await plugin._SignalPlugin__get_new_symbol_list(
+        tuple(),
+        plugin.config.get("symbol_list"),
+        "1m",
+        30,
+        200,
+    )
+
+    assert result.symbols == tuple()
+    assert result.reason_code == "missing_config"
+    assert len(captured) == 1
+    assert "config.ini" not in captured[0]
+    assert "app configuration" in captured[0]
+
+
+@pytest.mark.asyncio
+async def test_asap_run_does_not_log_stale_config_ini_message(monkeypatch) -> None:
+    watcher_queue = asyncio.Queue()
+    plugin = SignalPlugin(watcher_queue)
+    captured: list[str] = []
+
+    async def fake_sleep(seconds: int) -> None:
+        if seconds == 5:
+            plugin.status = False
+
+    async def fake_check_max_bots() -> None:
+        return False
+
+    async def fake_get_new_symbol_list(*_args) -> SymbolSelectionResult:
+        return SymbolSelectionResult(
+            symbols=tuple(),
+            reason_code="insufficient_history",
+        )
+
+    def fake_error(message: str, *args: object) -> None:
+        captured.append(message % args if args else message)
+
+    monkeypatch.setattr(asap_module.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(asap_module, "get_active_open_symbols", _async_symbols([]))
+    monkeypatch.setattr(plugin, "_SignalPlugin__check_max_bots", fake_check_max_bots)
+    monkeypatch.setattr(
+        plugin,
+        "_SignalPlugin__get_new_symbol_list",
+        fake_get_new_symbol_list,
+    )
+    monkeypatch.setattr(asap_module.logging, "error", fake_error)
+
+    await plugin.run({"bo": 10})
+
+    assert captured == []

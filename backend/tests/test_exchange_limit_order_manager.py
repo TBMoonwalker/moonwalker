@@ -1,5 +1,6 @@
 """Tests for exchange limit order manager."""
 
+import ccxt.async_support as ccxt
 import pytest
 from service.exchange_contexts import LimitSellPlacementContext
 from service.exchange_limit_order_manager import ExchangeLimitOrderManager
@@ -40,6 +41,13 @@ class _DummyExchange:
     ) -> dict[str, object]:
         self.create_order_calls += 1
         return {"id": "limit-1"}
+
+
+class _WholeUnitExchange(_DummyExchange):
+    def amount_to_precision(self, symbol: str, _amount: float) -> str:
+        raise ccxt.InvalidOrder(
+            f"binance amount of {symbol} must be greater than minimum amount precision of 1"
+        )
 
 
 @pytest.mark.asyncio
@@ -160,6 +168,70 @@ async def test_create_spot_limit_sell_returns_market_fallback_when_below_notiona
         "remaining_amount": 0.01,
         "partial_filled_amount": 0.0,
         "partial_avg_price": 0.0,
+    }
+    assert exchange.create_order_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_create_spot_limit_sell_marks_precision_dust_unsellable() -> None:
+    exchange = _WholeUnitExchange()
+    manager = ExchangeLimitOrderManager(_DummyLogger(), get_exchange=lambda: exchange)
+
+    async def fake_ensure_exchange(_config: dict[str, object]) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
+    async def fake_resolve_sell_amount(
+        _symbol: str,
+        _requested_amount: float,
+    ) -> tuple[str, float]:
+        return "GUN/USDC", 0.5
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        raise AssertionError("precision dust should short-circuit before price lookup")
+
+    async def fake_handle_limit_sell_fill(
+        _sell_order: dict[str, object],
+        _resolved_symbol: str,
+        _config: dict[str, object],
+        _original_order: dict[str, object],
+    ) -> dict[str, object] | None:
+        raise AssertionError("fill handling should not run for precision dust")
+
+    status = await manager.create_spot_limit_sell(
+        order={"symbol": "GUN/USDC", "total_amount": 0.5, "current_price": 0.2},
+        config={},
+        context=LimitSellPlacementContext(
+            ensure_exchange=fake_ensure_exchange,
+            ensure_markets_loaded=fake_ensure_markets_loaded,
+            resolve_symbol=fake_resolve_symbol,
+            resolve_sell_amount=fake_resolve_sell_amount,
+            is_notional_below_minimum=lambda _symbol, _amount, _price: (
+                False,
+                None,
+                0.0,
+            ),
+            get_price_for_symbol=fake_get_price_for_symbol,
+            handle_limit_sell_fill=fake_handle_limit_sell_fill,
+        ),
+    )
+
+    assert status == {
+        "type": "partial_sell",
+        "symbol": "GUN/USDC",
+        "partial_filled_amount": 0.0,
+        "partial_avg_price": 0.0,
+        "partial_proceeds": 0.0,
+        "remaining_amount": 0.5,
+        "unsellable": True,
+        "unsellable_reason": "amount_precision",
+        "unsellable_min_notional": None,
+        "unsellable_estimated_notional": pytest.approx(0.1),
     }
     assert exchange.create_order_calls == 0
 

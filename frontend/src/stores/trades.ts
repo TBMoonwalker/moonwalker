@@ -4,6 +4,11 @@ export type OpenTradeRow = {
   id: number
   symbol: string
   deal_id?: string | null
+  campaign_id?: string | null
+  campaign_started_at?: string | null
+  lifecycle_mode?: string | null
+  exposure_state?: string | null
+  sidestep_count?: number
   execution_history_complete?: boolean
   amount: number | string
   cost: number | string
@@ -22,6 +27,20 @@ export type OpenTradeRow = {
   unsellable_min_notional?: number | null
   unsellable_estimated_notional?: number | null
   unsellable_since?: string | null
+  reserved_reentry_quote?: number
+  waiting_reference_price?: number
+  waiting_reference_amount?: number
+  waiting_reference_quote?: number
+  virtual_waiting_profit?: number
+  virtual_waiting_profit_percent?: number
+  campaign_principal_quote?: number
+  campaign_realized_profit?: number
+  campaign_realized_profit_percent?: number
+  campaign_total_profit?: number
+  campaign_total_profit_percent?: number
+  display_profit?: number
+  display_profit_percent?: number
+  last_transition_at?: string | null
   key: number
 }
 
@@ -29,6 +48,7 @@ export type ClosedTradeRow = {
   id: number
   symbol: string
   deal_id?: string | null
+  campaign_id?: string | null
   execution_history_complete: boolean
   amount: number | string
   cost: number | string
@@ -40,9 +60,12 @@ export type ClosedTradeRow = {
   open_date: string
   duration: string
   close_date: string
+  close_reason?: string | null
   precision: number
   key: number
 }
+
+export type WaitingCampaignRow = OpenTradeRow
 
 export type UnsellableTradeRow = {
   id: number
@@ -135,55 +158,78 @@ export const useTradesStore = defineStore('trades', {
   state: () => ({
     openTrades: [] as OpenTradeRow[],
     closedTrades: [] as ClosedTradeRow[],
-    unsellableTrades: [] as UnsellableTradeRow[]
+    unsellableTrades: [] as UnsellableTradeRow[],
+    waitingCampaigns: [] as WaitingCampaignRow[]
   }),
   actions: {
-    setOpenTrades(raw: any[]) {
-      this.openTrades = raw.map((val: any) => {
-        const amountPrecision = isFloat(val.amount)
-          ? val.amount.toString().split('.')[1].length
-          : 0
-        const costPrecision = isFloat(val.cost)
-          ? val.cost.toString().split('.')[1].length
-          : 0
-        const tpPrecision = isFloat(val.tp_price)
-          ? val.tp_price.toString().split('.')[1].length
-          : 0
-        const avgPrecision = isFloat(val.avg_price)
-          ? val.avg_price.toString().split('.')[1].length
-          : 0
-        const currentPrecision = isFloat(val.current_price)
-          ? val.current_price.toString().split('.')[1].length
-          : 0
+    normalizeOpenTradeRow(val: any) {
+      const amountPrecision = isFloat(val.amount)
+        ? val.amount.toString().split('.')[1].length
+        : 0
+      const costPrecision = isFloat(val.cost)
+        ? val.cost.toString().split('.')[1].length
+        : 0
+      const tpPrecision = isFloat(val.tp_price)
+        ? val.tp_price.toString().split('.')[1].length
+        : 0
+      const avgPrecision = isFloat(val.avg_price)
+        ? val.avg_price.toString().split('.')[1].length
+        : 0
+      const currentPrecision = isFloat(val.current_price)
+        ? val.current_price.toString().split('.')[1].length
+        : 0
 
-        return {
-          ...val,
-          cost: val.cost.toFixed(costPrecision),
-          profit: val.profit.toFixed(2),
-          amount: val.amount.toFixed(amountPrecision),
-          current_price: val.current_price.toFixed(currentPrecision),
-          tp_price: val.tp_price.toFixed(tpPrecision),
-          avg_price: val.avg_price.toFixed(avgPrecision),
-          so_count: Array.isArray(val.safetyorders) ? val.safetyorders.length : val.so_count,
-          key: val.id,
-          open_date: String(val.open_date ?? ''),
-          deal_id: val.deal_id ?? null,
-          execution_history_complete: Boolean(val.execution_history_complete ?? true),
-          safetyorder: val.safetyorders,
-          precision: currentPrecision,
-          unsellable_amount: Number(val.unsellable_amount ?? 0),
-          unsellable_reason: val.unsellable_reason ?? null,
-          unsellable_min_notional:
-            val.unsellable_min_notional === null || val.unsellable_min_notional === undefined
-              ? null
-              : Number(val.unsellable_min_notional),
-          unsellable_estimated_notional:
-            val.unsellable_estimated_notional === null || val.unsellable_estimated_notional === undefined
-              ? null
-              : Number(val.unsellable_estimated_notional),
-          unsellable_since: val.unsellable_since ?? null
-        }
-      })
+      return {
+        ...val,
+        cost: Number(val.cost ?? 0).toFixed(costPrecision),
+        profit: Number(val.profit ?? 0).toFixed(2),
+        amount: Number(val.amount ?? 0).toFixed(amountPrecision),
+        current_price: Number(val.current_price ?? 0).toFixed(currentPrecision),
+        tp_price: Number(val.tp_price ?? 0).toFixed(tpPrecision),
+        avg_price: Number(val.avg_price ?? 0).toFixed(avgPrecision),
+        so_count: Array.isArray(val.safetyorders) ? val.safetyorders.length : Number(val.so_count ?? 0),
+        key: Number(val.id ?? 0),
+        open_date: String(val.open_date ?? ''),
+        deal_id: val.deal_id ?? null,
+        campaign_id: val.campaign_id ?? null,
+        campaign_started_at: val.campaign_started_at ?? null,
+        lifecycle_mode: val.lifecycle_mode ?? null,
+        exposure_state: val.exposure_state ?? null,
+        sidestep_count: Number(val.sidestep_count ?? 0),
+        execution_history_complete: Boolean(val.execution_history_complete ?? true),
+        safetyorder: Array.isArray(val.safetyorders) ? val.safetyorders : [],
+        precision: currentPrecision,
+        unsellable_amount: Number(val.unsellable_amount ?? 0),
+        unsellable_reason: val.unsellable_reason ?? null,
+        unsellable_min_notional:
+          val.unsellable_min_notional === null || val.unsellable_min_notional === undefined
+            ? null
+            : Number(val.unsellable_min_notional),
+        unsellable_estimated_notional:
+          val.unsellable_estimated_notional === null || val.unsellable_estimated_notional === undefined
+            ? null
+            : Number(val.unsellable_estimated_notional),
+        unsellable_since: val.unsellable_since ?? null,
+        reserved_reentry_quote: Number(val.reserved_reentry_quote ?? 0),
+        waiting_reference_price: Number(val.waiting_reference_price ?? 0),
+        waiting_reference_amount: Number(val.waiting_reference_amount ?? 0),
+        waiting_reference_quote: Number(val.waiting_reference_quote ?? 0),
+        virtual_waiting_profit: Number(val.virtual_waiting_profit ?? 0),
+        virtual_waiting_profit_percent: Number(val.virtual_waiting_profit_percent ?? 0),
+        campaign_principal_quote: Number(val.campaign_principal_quote ?? 0),
+        campaign_realized_profit: Number(val.campaign_realized_profit ?? 0),
+        campaign_realized_profit_percent: Number(val.campaign_realized_profit_percent ?? 0),
+        campaign_total_profit: Number(val.campaign_total_profit ?? 0),
+        campaign_total_profit_percent: Number(val.campaign_total_profit_percent ?? 0),
+        display_profit: Number(val.display_profit ?? Number(val.profit ?? 0)),
+        display_profit_percent: Number(
+          val.display_profit_percent ?? Number(val.profit_percent ?? 0)
+        ),
+        last_transition_at: val.last_transition_at ?? null
+      }
+    },
+    setOpenTrades(raw: any[]) {
+      this.openTrades = raw.map((val: any) => this.normalizeOpenTradeRow(val))
     },
     setClosedTrades(raw: any[]) {
       this.closedTrades = raw.map((val: any) => {
@@ -209,7 +255,9 @@ export const useTradesStore = defineStore('trades', {
           close_date: String(val.close_date ?? ''),
           duration: formatDuration(val.duration),
           deal_id: val.deal_id ?? null,
+          campaign_id: val.campaign_id ?? null,
           execution_history_complete: Boolean(val.execution_history_complete ?? false),
+          close_reason: val.close_reason ?? null,
           precision: Math.max(tpPrecision, avgPrecision)
         }
       })
@@ -243,6 +291,9 @@ export const useTradesStore = defineStore('trades', {
           unsellable_since: val.unsellable_since ?? null
         }
       })
+    },
+    setWaitingCampaigns(raw: any[]) {
+      this.waitingCampaigns = raw.map((val: any) => this.normalizeOpenTradeRow(val))
     }
   }
 })

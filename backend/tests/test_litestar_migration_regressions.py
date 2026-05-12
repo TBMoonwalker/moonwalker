@@ -368,6 +368,33 @@ def test_config_multiple_rejects_generic_live_activation(monkeypatch) -> None:
     assert service.last_batch is None
 
 
+def test_config_multiple_allows_generic_save_when_live_trading_is_active(
+    monkeypatch,
+) -> None:
+    """Generic saves should work after live activation is already active."""
+    service = _DummyConfigService()
+    service._cache.update({"dry_run": False, "monitoring_enabled": False})
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {
+        "dry_run": {"value": False, "type": "bool"},
+        "monitoring_enabled": {"value": True, "type": "bool"},
+    }
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 201
+    assert response.json() == {"message": "Config updated"}
+    assert service.last_batch == payload
+
+
 def test_config_multiple_blocks_switch_to_csv_signal_when_open_trades_exist(
     monkeypatch,
 ) -> None:
@@ -594,6 +621,110 @@ def test_live_activation_endpoint_blocks_missing_global_max_fund(monkeypatch) ->
         "message": "Set a positive global max fund.",
     } in payload["blockers"]
     assert service.last_single is None
+
+
+def test_live_activation_endpoint_uses_sidestep_blockers_instead_of_classic_dca(
+    monkeypatch,
+) -> None:
+    """Sidestep mode should require sidestep strategies, not classic DCA ladders."""
+    service = _DummyConfigService()
+    service._cache.update(
+        {
+            "dry_run": True,
+            "timezone": "Europe/Vienna",
+            "signal": "asap",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "key": "api-key",
+            "secret": "api-secret",
+            "currency": "USDT",
+            "market": "spot",
+            "max_bots": 2,
+            "bo": 20,
+            "tp": 1.5,
+            "capital_max_fund": 250,
+            "history_lookback_time": "180d",
+            "symbol_list": "BTC/USDT",
+            "dca": True,
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "sidestep_bearish_strategy": "",
+            "sidestep_reentry_strategy": "",
+        }
+    )
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.activate_live_trading])
+    with TestClient(app=app) as client:
+        response = client.post("/config/live/activate", json={"confirm": True})
+
+    assert response.status_code == 409
+    payload = response.json()
+    assert payload["error"] == "Live activation blocked until setup is complete."
+    assert payload["blockers"] == [
+        {
+            "key": "sidestep_bearish_strategy",
+            "message": "Choose a bearish sidestep strategy.",
+        },
+        {
+            "key": "sidestep_reentry_strategy",
+            "message": "Choose a sidestep re-entry strategy.",
+        },
+    ]
+    assert service.last_single is None
+
+
+def test_live_activation_endpoint_allows_ready_sidestep_without_classic_dca_keys(
+    monkeypatch,
+) -> None:
+    """Sidestep mode should not require classic DCA ladder values."""
+    service = _DummyConfigService()
+    service._cache.update(
+        {
+            "dry_run": True,
+            "timezone": "Europe/Vienna",
+            "signal": "asap",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "key": "api-key",
+            "secret": "api-secret",
+            "currency": "USDT",
+            "market": "spot",
+            "max_bots": 2,
+            "bo": 20,
+            "tp": 1.5,
+            "capital_max_fund": 250,
+            "history_lookback_time": "180d",
+            "symbol_list": "BTC/USDT",
+            "dca": True,
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "sidestep_bearish_strategy": "ema_down",
+            "sidestep_reentry_strategy": "ema_low",
+        }
+    )
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.activate_live_trading])
+    with TestClient(app=app) as client:
+        response = client.post("/config/live/activate", json={"confirm": True})
+
+    assert response.status_code == 201
+    assert response.json()["message"] == "Live trading activated."
+    assert service.last_single == (
+        "dry_run",
+        {"value": False, "type": "bool"},
+    )
 
 
 def test_live_activation_endpoint_switches_dry_run_off(monkeypatch) -> None:
@@ -889,6 +1020,35 @@ def test_closed_trades_websocket_disconnect_is_not_logged_as_error(
     assert errors == []
 
 
+def test_waiting_campaigns_websocket_disconnect_is_not_logged_as_error(
+    monkeypatch,
+) -> None:
+    """Expected waiting-campaign WebSocket disconnect should not log errors."""
+    errors: list[tuple[Any, ...]] = []
+
+    async def _fake_waiting_trades() -> list[dict[str, Any]]:
+        return [{"campaign_id": "campaign-1", "symbol": "BTC/USDT"}]
+
+    monkeypatch.setattr(
+        trades_controller,
+        "_get_waiting_campaigns_cached",
+        _fake_waiting_trades,
+    )
+    monkeypatch.setattr(
+        trades_controller.logging, "error", lambda *args, **kwargs: errors.append(args)
+    )
+
+    app = Litestar(route_handlers=[trades_controller.waiting_campaigns])
+    with TestClient(app=app) as client:
+        with client.websocket_connect("/trades/waiting") as socket:
+            payload = json.loads(socket.receive_text())
+            assert payload == [{"campaign_id": "campaign-1", "symbol": "BTC/USDT"}]
+
+    time.sleep(0.05)
+
+    assert errors == []
+
+
 def test_statistics_websocket_disconnect_is_not_logged_as_error(monkeypatch) -> None:
     """Expected WebSocket disconnect should not trigger error logging."""
     errors: list[tuple[Any, ...]] = []
@@ -987,3 +1147,28 @@ def test_order_mutations_require_post(monkeypatch) -> None:
         ("buy", ("btc-usdt", "10")),
         ("stop", ("btc-usdt",)),
     ]
+
+
+def test_bulk_unsellable_resolution_requires_post(monkeypatch) -> None:
+    """Bulk unsellable resolution should stay POST-only and return a count."""
+    captured_calls: list[str] = []
+
+    async def _fake_delete_all() -> int | None:
+        captured_calls.append("delete_all")
+        return 3
+
+    monkeypatch.setattr(
+        trades_controller.trades,
+        "delete_all_unsellable_trades",
+        _fake_delete_all,
+    )
+
+    app = Litestar(route_handlers=[trades_controller.unsellable_trades_delete_all])
+
+    with TestClient(app=app) as client:
+        assert client.get("/trades/unsellable/delete/all").status_code == 405
+        response = client.post("/trades/unsellable/delete/all")
+
+    assert response.status_code == 201
+    assert response.json() == {"result": "deleted", "count": 3}
+    assert captured_calls == ["delete_all"]

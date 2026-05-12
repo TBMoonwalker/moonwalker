@@ -375,8 +375,19 @@ class Data:
         history_data: int,
         config: dict[str, Any],
         since_ms: int | None = None,
+        success_timeframe: str | None = None,
+        success_minimum_candles: int = 0,
     ) -> bool:
-        """Ensure required history exists for a symbol without deleting stored data."""
+        """Ensure required history exists for a symbol without deleting stored data.
+
+        Args:
+            symbol: Trading pair to backfill
+            history_data: Day-based history window to request
+            config: Runtime config snapshot
+            since_ms: Optional explicit lower bound for the history request
+            success_timeframe: Optional timeframe for partial-success validation
+            success_minimum_candles: Minimum closed candles required for partial success
+        """
         try:
             required_since, required_until, timeframe_ms = (
                 resolve_required_history_window(
@@ -437,6 +448,24 @@ class Data:
                 )
                 return True
 
+            if success_timeframe and success_minimum_candles > 0:
+                available_candles = await self.get_resampled_history_candle_count(
+                    symbol,
+                    success_timeframe,
+                    success_minimum_candles,
+                )
+                if available_candles >= success_minimum_candles:
+                    logging.info(
+                        "History for %s remains incomplete for the requested "
+                        "window, but strategy warmup is satisfied with %s/%s %s "
+                        "candle(s) after boundary sync.",
+                        symbol,
+                        available_candles,
+                        success_minimum_candles,
+                        success_timeframe,
+                    )
+                    return True
+
             logging.info(
                 "History for %s is still incomplete after boundary sync. "
                 "Retrying full-window refill without deleting local candles.",
@@ -469,6 +498,24 @@ class Data:
                     sync_state.earliest_available_timestamp,
                 )
                 return True
+
+            if success_timeframe and success_minimum_candles > 0:
+                available_candles = await self.get_resampled_history_candle_count(
+                    symbol,
+                    success_timeframe,
+                    success_minimum_candles,
+                )
+                if available_candles >= success_minimum_candles:
+                    logging.info(
+                        "History for %s remains incomplete for the requested "
+                        "window, but strategy warmup is satisfied with %s/%s %s "
+                        "candle(s) after refill.",
+                        symbol,
+                        available_candles,
+                        success_minimum_candles,
+                        success_timeframe,
+                    )
+                    return True
 
             missing_count = sync_state.missing_count(window)
             logging.error(

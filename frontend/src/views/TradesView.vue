@@ -6,6 +6,7 @@ import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
 
 const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
+const WaitingCampaigns = defineAsyncComponent(() => import('../components/WaitingCampaigns.vue'))
 const ClosedTrades = defineAsyncComponent(() => import('../components/ClosedTrades.vue'))
 const UnsellableTrades = defineAsyncComponent(() => import('../components/UnsellableTrades.vue'))
 const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
@@ -13,6 +14,8 @@ const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'
 
 const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
 const unsellableTradesState = storeToRefs(unsellableTradesStore)
+const waitingCampaignsStore = useWebSocketDataStore('waitingCampaigns')
+const waitingCampaignsState = storeToRefs(waitingCampaignsStore)
 const viewportWidth = ref(window.innerWidth)
 const isMobile = computed(() => viewportWidth.value < 768)
 const tabPadding = computed(() => (isMobile.value ? 12 : 20))
@@ -20,6 +23,9 @@ const activeProfitTab = ref('profit-overall')
 const activeTradesTab = ref('open-trades')
 const unsellableTradesCount = computed(() =>
   Array.isArray(unsellableTradesState.data.value) ? unsellableTradesState.data.value.length : 0
+)
+const waitingCampaignsCount = computed(() =>
+  Array.isArray(waitingCampaignsState.data.value) ? waitingCampaignsState.data.value.length : 0
 )
 
 function handleResize() {
@@ -84,6 +90,15 @@ onUnmounted(() => {
         >
           <n-tab-pane name="open-trades" tab="Open Trades">
             <OpenTrades v-if="activeTradesTab === 'open-trades'" />
+          </n-tab-pane>
+          <n-tab-pane name="waiting-campaigns">
+            <template #tab>
+              <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': waitingCampaignsCount > 0 }">
+                <span>Waiting</span>
+                <span v-if="waitingCampaignsCount > 0" class="trade-tab-count">{{ waitingCampaignsCount }}</span>
+              </span>
+            </template>
+            <WaitingCampaigns v-if="activeTradesTab === 'waiting-campaigns'" />
           </n-tab-pane>
           <n-tab-pane name="unsellable-trades">
             <template #tab>

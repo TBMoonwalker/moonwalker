@@ -25,6 +25,20 @@ Use `/control-center` as the supported dashboard configuration entry path.
 For signal-plugin-specific payloads and examples, see [signals.md](signals.md).
 For backup/restore and related config endpoints, see [api.md](api.md).
 
+## Trade Lifecycle Mode
+`trade_lifecycle_mode` is the canonical operator-facing lifecycle control.
+Supported values are:
+
+- `classic_dca`: Standard DCA lifecycle.
+- `sidestep_reentry`: Spot-only sidestep campaigns that can sell a bearish leg,
+  keep the mission in a waiting state, and later re-enter that same campaign.
+
+If `market` is not `spot`, sidestep mode is treated as disabled.
+
+`sidestep_campaign_enabled` is retained only as a legacy compatibility mirror
+for older snapshots and API payloads. New config writes, docs, and operator
+workflows should use `trade_lifecycle_mode`.
+
 ## Configuration Reference
 All supported configuration keys are listed below. Keys marked "(advanced)"
 are not exposed in the UI and must be set via the API.
@@ -58,7 +72,13 @@ are not exposed in the UI and must be set via the API.
 | `order_check_range` | `int` | Seconds for post-order trade lookup (advanced). | `5` |
 | `dca` | `bool` | Enable DCA. | `true` |
 | `dynamic_dca` | `bool` | Enable dynamic DCA. | `false` |
+| `trade_lifecycle_mode` | `string` | Canonical lifecycle mode for trade execution. Supported values are `classic_dca` and `sidestep_reentry`. Sidestep mode is active only when `market = spot`. | `classic_dca` |
+| `sidestep_campaign_enabled` | `bool` | Legacy compatibility mirror for older snapshots and API payloads. Do not use for new config writes; use `trade_lifecycle_mode` instead. | `false` |
 | `dca_strategy` | `string` | Strategy for dynamic DCA. | `ema_swing` |
+| `sidestep_bearish_strategy` | `string` | Bearish exit strategy used when `trade_lifecycle_mode = sidestep_reentry`. | `ema_down` |
+| `sidestep_reentry_strategy` | `string` | Optional re-entry strategy for waiting sidestep campaigns. Falls back to `dca_strategy` when empty. | `ema_swing` |
+| `sidestep_reentry_cooldown_candles` | `int` | Minimum number of candles to wait before a sidestep campaign may re-enter again. | `0` |
+| `sidestep_reentry_requires_fresh_long_signal` | `bool` | Require a fresh long signal before a waiting sidestep campaign may re-enter (advanced). | `false` |
 | `tp_strategy` | `string` | Strategy for take-profit checks (advanced). | `ema_cross` |
 | `trailing_tp` | `float` | Trailing TP deviation (percent). | `0.5` |
 | `max_bots` | `int` | Max concurrent bots. | `3` |
@@ -220,6 +240,18 @@ base order of 12, that normal range is 5. The multiplier stretches that range:
 
 The final order still has to pass the global capital-budget check. Safety-order
 reserve math stays based on the configured DCA ladder, not this multiplier.
+
+## Sidestep Re-entry Behavior
+
+When `trade_lifecycle_mode = sidestep_reentry` on spot markets:
+
+- Moonwalker can close a bearish leg without treating the campaign as fully
+  finished.
+- The campaign remains visible in the waiting view until it is manually
+  stopped, manually reactivated, or re-entered through the runtime.
+- Waiting-campaign dashboard data comes from the trade read model exposed at
+  `/trades/waiting`, while `SpotSidestepCampaignService` owns the campaign
+  mutations behind manual stop and activate actions.
 
 ## Autopilot Green Phase
 

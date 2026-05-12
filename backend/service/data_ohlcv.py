@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import pandas as pd
+from service.data_timeframes import timeframe_bucket_origin_milliseconds
 
 
 def rows_to_dataframe(rows: list[dict[str, Any]]) -> pd.DataFrame:
@@ -123,12 +125,34 @@ def resample_ohlcv_data(ohlcv: pd.DataFrame, timerange: str) -> pd.DataFrame | N
     )
     df = df.set_index("timestamp")
 
-    normalized_timerange = timerange
-    if "m" in normalized_timerange:
-        interval, _ = normalized_timerange.split("m")
-        normalized_timerange = f"{interval}Min"
+    normalized_timerange = str(timerange or "").strip().lower().replace("min", "m")
+    resample_rule: str | pd.Timedelta = normalized_timerange
+    resample_kwargs: dict[str, Any] = {}
+    match = re.fullmatch(r"(\d+)\s*([mhdw])", normalized_timerange)
+    if match:
+        interval = max(1, int(match.group(1)))
+        unit = match.group(2)
+        if unit == "m":
+            resample_rule = pd.Timedelta(minutes=interval)
+        elif unit == "h":
+            resample_rule = pd.Timedelta(hours=interval)
+        elif unit == "d":
+            resample_rule = pd.Timedelta(days=interval)
+        else:
+            # Use fixed-duration 7-day windows anchored to Monday 00:00 UTC so
+            # weekly charts align with exchange weekly candle timestamps and the
+            # history sync window math.
+            resample_rule = pd.Timedelta(days=interval * 7)
+        if unit == "w":
+            resample_kwargs["origin"] = pd.Timestamp(
+                timeframe_bucket_origin_milliseconds(normalized_timerange),
+                unit="ms",
+                tz="UTC",
+            )
+        else:
+            resample_kwargs["origin"] = "epoch"
 
-    df_resample = df.resample(normalized_timerange).agg(
+    df_resample = df.resample(resample_rule, **resample_kwargs).agg(
         {
             "open": "first",
             "high": "max",

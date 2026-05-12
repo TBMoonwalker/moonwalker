@@ -1,5 +1,6 @@
 """Open trade model."""
 
+from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from tortoise import fields
 from tortoise.models import Model
 
@@ -9,6 +10,15 @@ class OpenTrades(Model):
 
     symbol = fields.CharField(max_length=50, unique=True)
     deal_id = fields.CharField(max_length=36, null=True, unique=True)
+    campaign_id = fields.CharField(max_length=36, null=True)
+    lifecycle_mode = fields.CharField(
+        max_length=32,
+        default=TradeLifecycleMode.CLASSIC_DCA.value,
+    )
+    exposure_state = fields.CharField(
+        max_length=32,
+        default=TradeExposureState.LONG_EXPOSED.value,
+    )
     execution_history_complete = fields.BooleanField(default=True)
     so_count = fields.IntField(default=0)
     profit = fields.FloatField(default=0.0)
@@ -31,10 +41,20 @@ class OpenTrades(Model):
     tp_limit_order_price = fields.FloatField(null=True)
     tp_limit_order_amount = fields.FloatField(null=True)
     tp_limit_order_armed_at = fields.TextField(null=True)
+    reserved_reentry_quote = fields.FloatField(default=0.0)
+    waiting_reference_price = fields.FloatField(default=0.0)
+    waiting_reference_amount = fields.FloatField(default=0.0)
+    waiting_reference_quote = fields.FloatField(default=0.0)
+    virtual_waiting_profit = fields.FloatField(default=0.0)
+    virtual_waiting_profit_percent = fields.FloatField(default=0.0)
+    last_transition_at = fields.TextField(null=True)
 
     def __dict__(self):
         return (
             f"'symbol': {self.symbol}, 'deal_id': {self.deal_id}, "
+            f"'campaign_id': {self.campaign_id}, "
+            f"'lifecycle_mode': {self.lifecycle_mode}, "
+            f"'exposure_state': {self.exposure_state}, "
             f"'execution_history_complete': {self.execution_history_complete}, "
             f"'so_count': {self.so_count}, "
             f"'profit': {self.profit}, 'profit_percent': {self.profit_percent}, "
@@ -50,5 +70,12 @@ class OpenTrades(Model):
             f"'tp_limit_order_id': {self.tp_limit_order_id}, "
             f"'tp_limit_order_price': {self.tp_limit_order_price}, "
             f"'tp_limit_order_amount': {self.tp_limit_order_amount}, "
-            f"'tp_limit_order_armed_at': {self.tp_limit_order_armed_at}"
+            f"'tp_limit_order_armed_at': {self.tp_limit_order_armed_at}, "
+            f"'reserved_reentry_quote': {self.reserved_reentry_quote}, "
+            f"'waiting_reference_price': {self.waiting_reference_price}, "
+            f"'waiting_reference_amount': {self.waiting_reference_amount}, "
+            f"'waiting_reference_quote': {self.waiting_reference_quote}, "
+            f"'virtual_waiting_profit': {self.virtual_waiting_profit}, "
+            f"'virtual_waiting_profit_percent': {self.virtual_waiting_profit_percent}, "
+            f"'last_transition_at': {self.last_transition_at}"
         )

@@ -1,5 +1,7 @@
 import pandas as pd
 import pytest
+from strategies.ema20_swing import Strategy as Ema20SwingStrategy
+from strategies.ema20_swing_reverse import Strategy as Ema20SwingReverseStrategy
 from strategies.ema_down import Strategy as EmaDownStrategy
 from strategies.ema_low import Strategy as EmaLowStrategy
 
@@ -55,3 +57,35 @@ async def test_ema_down_returns_false_when_ema_values_are_missing() -> None:
     strategy.indicators = _MissingEmaIndicators()
 
     assert await strategy.run("NIGHT/USDC", "buy") is False
+
+
+@pytest.mark.asyncio
+async def test_ema20_swing_returns_false_when_history_is_insufficient() -> None:
+    strategy = Ema20SwingStrategy("4h")
+    strategy.indicators = _ShortCloseIndicators()
+
+    assert await strategy.run("NIGHT/USDC", "buy") is False
+
+
+@pytest.mark.asyncio
+async def test_ema20_swing_returns_false_when_ema_values_are_missing() -> None:
+    strategy = Ema20SwingStrategy("4h")
+    strategy.indicators = _MissingEmaIndicators()
+
+    assert await strategy.run("NIGHT/USDC", "buy") is False
+
+
+@pytest.mark.asyncio
+async def test_ema20_swing_reverse_returns_false_when_history_is_insufficient() -> None:
+    strategy = Ema20SwingReverseStrategy("4h")
+    strategy.indicators = _ShortCloseIndicators()
+
+    assert await strategy.run("NIGHT/USDC", "sell") is False
+
+
+@pytest.mark.asyncio
+async def test_ema20_swing_reverse_returns_false_when_ema_values_are_missing() -> None:
+    strategy = Ema20SwingReverseStrategy("4h")
+    strategy.indicators = _MissingEmaIndicators()
+
+    assert await strategy.run("NIGHT/USDC", "sell") is False

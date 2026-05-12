@@ -1,5 +1,5 @@
 <template>
-    <n-card title="DCA settings">
+    <n-card title="Trade lifecycle settings">
         <n-form
             ref="formRef"
             :model="dca"
@@ -15,7 +15,16 @@
             </n-form-item>
 
             <template v-if="dca.enabled">
+                <!-- sidestep_campaign_enabled remains persisted as a legacy compatibility flag -->
+                <n-form-item label="Lifecycle mode" path="trade_lifecycle_mode">
+                    <n-select
+                        v-model:value="dca.trade_lifecycle_mode"
+                        placeholder="Select"
+                        :options="lifecycleModeOptions"
+                    />
+                </n-form-item>
                 <n-form-item
+                    v-if="isClassicDcaMode"
                     label="Dynamic DCA"
                     path="dynamic_dca"
                     label-placement="left"
@@ -23,7 +32,7 @@
                     <n-checkbox v-model:checked="dca.dynamic" />
                 </n-form-item>
                 <n-form-item
-                    v-if="dca.dynamic"
+                    v-if="isClassicDcaMode && dca.dynamic"
                     label="Dynamic DCA strategy"
                     path="strategy.0"
                 >
@@ -134,31 +143,35 @@
                 </template>
             </template>
             <n-form-item
-                v-if="dca.enabled && !dca.dynamic"
+                v-if="dca.enabled && isClassicDcaMode && !dca.dynamic"
                 label="Safety order amount"
                 path="so"
             >
                 <n-input-number v-model:value="dca.so" placeholder="SO" />
             </n-form-item>
-            <n-form-item v-if="dca.enabled" label="Max safety order count" path="mstc">
+            <n-form-item
+                v-if="dca.enabled && isClassicDcaMode"
+                label="Max safety order count"
+                path="mstc"
+            >
                 <n-input-number v-model:value="dca.mstc" placeholder="MSTC" />
             </n-form-item>
             <n-form-item
-                v-if="dca.enabled"
+                v-if="dca.enabled && isClassicDcaMode"
                 label="Price deviation for first safety order"
                 path="sos"
             >
                 <n-input-number v-model:value="dca.sos" placeholder="SOS" />
             </n-form-item>
             <n-form-item
-                v-if="dca.enabled && !dca.dynamic"
+                v-if="dca.enabled && isClassicDcaMode && !dca.dynamic"
                 label="Safety order step scale"
                 path="ss"
             >
                 <n-input-number v-model:value="dca.ss" placeholder="SS" />
             </n-form-item>
             <n-form-item
-                v-if="dca.enabled && !dca.dynamic"
+                v-if="dca.enabled && isClassicDcaMode && !dca.dynamic"
                 label="Safety order volume scale"
                 path="os"
             >
@@ -168,7 +181,7 @@
                 <n-input-number v-model:value="dca.sl" placeholder="SL" />
             </n-form-item>
             <n-form-item
-                v-if="dca.enabled && dca.dynamic"
+                v-if="dca.enabled && isClassicDcaMode && dca.dynamic"
                 label="Safety order budget ratio"
                 path="trade_safety_order_budget_ratio"
             >
@@ -180,6 +193,60 @@
                     placeholder="0.95"
                 />
             </n-form-item>
+            <template v-if="dca.enabled">
+                <n-alert
+                    v-if="showSidestepSpotOnlyNotice"
+                    class="sidestep-campaign-note"
+                    type="info"
+                    :bordered="false"
+                >
+                    Spot sidestep campaigns only run when the exchange market is set
+                    to spot. You can keep these settings configured here, but the
+                    service stays inactive on non-spot markets.
+                </n-alert>
+                <n-alert
+                    v-if="isSidestepMode"
+                    class="sidestep-campaign-note"
+                    type="info"
+                    :bordered="false"
+                >
+                    Sidestep mode keeps the trade active after selling. It waits
+                    flat, tracks a virtual short-style PNL while price falls, and
+                    re-enters from the watcher using its own re-entry strategy.
+                </n-alert>
+                <template v-if="isSidestepMode">
+                    <n-form-item
+                        label="Bearish sidestep strategy"
+                        path="sidestep_bearish_strategy"
+                    >
+                        <n-select
+                            v-model:value="dca.sidestep_bearish_strategy"
+                            placeholder="Select"
+                            :options="strategyOptions"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Sidestep re-entry strategy"
+                        path="sidestep_reentry_strategy"
+                    >
+                        <n-select
+                            v-model:value="dca.sidestep_reentry_strategy"
+                            placeholder="Select"
+                            :options="strategyOptions"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Re-entry cooldown (candles)"
+                        path="sidestep_reentry_cooldown_candles"
+                    >
+                        <n-input-number
+                            v-model:value="dca.sidestep_reentry_cooldown_candles"
+                            :min="0"
+                            placeholder="0"
+                        />
+                    </n-form-item>
+                </template>
+            </template>
         </n-form>
     </n-card>
 </template>
@@ -191,6 +258,7 @@ import type { DcaModel, StringSelectOption } from '../../config-editor/types'
 
 const props = defineProps<{
     dca: DcaModel
+    market: string | null
     rules: FormRules
     sellOrderTypeOptions: StringSelectOption[]
     showAdvancedGeneral: boolean
@@ -198,6 +266,16 @@ const props = defineProps<{
 }>()
 
 const formRef = ref<FormInst | null>(null)
+const lifecycleModeOptions: StringSelectOption[] = [
+    { label: 'Classic DCA', value: 'classic_dca' },
+    { label: 'Sidestep Re-entry', value: 'sidestep_reentry' },
+]
+const isClassicDcaMode = computed(
+    () => (props.dca.trade_lifecycle_mode ?? 'classic_dca') === 'classic_dca'
+)
+const isSidestepMode = computed(
+    () => (props.dca.trade_lifecycle_mode ?? 'classic_dca') === 'sidestep_reentry'
+)
 const tpLimitPrearmConflictNames = computed(() => {
     if (!props.dca.tp_limit_prearm_enabled) {
         return []
@@ -229,6 +307,12 @@ const tpLimitPrearmConflictWarningText = computed(() => {
               }`
     return `TP limit pre-arm does not support ${conflictList}. Disable ${conflictList} before using pre-armed limit exits.`
 })
+const normalizedMarket = computed(() =>
+    String(props.market || 'spot').trim().toLowerCase(),
+)
+const showSidestepSpotOnlyNotice = computed(
+    () => props.dca.enabled && normalizedMarket.value !== 'spot',
+)
 
 async function validate(): Promise<boolean> {
     if (!formRef.value) {
@@ -246,6 +330,10 @@ defineExpose({
 
 <style scoped>
 .tp-limit-prearm-warning {
+    margin-bottom: 18px;
+}
+
+.sidestep-campaign-note {
     margin-bottom: 18px;
 }
 </style>

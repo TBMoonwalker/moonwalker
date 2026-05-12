@@ -123,6 +123,41 @@ def test_resample_ohlcv_data_returns_expected_closed_candle_frame() -> None:
     assert list(resampled["volume"]) == [10.0, 50.0]
 
 
+def test_resample_ohlcv_data_uses_fixed_duration_weekly_buckets() -> None:
+    frame = pd.DataFrame(
+        {
+            "timestamp": [
+                1_704_326_400_000,
+                1_704_412_800_000,
+                1_704_499_200_000,
+                1_704_585_600_000,
+                1_704_672_000_000,
+                1_704_758_400_000,
+                1_704_844_800_000,
+                1_704_931_200_000,
+            ],
+            "open": [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            "high": [1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5, 8.5],
+            "low": [0.5, 1.5, 2.5, 3.5, 4.5, 5.5, 6.5, 7.5],
+            "close": [1.1, 2.1, 3.1, 4.1, 5.1, 6.1, 7.1, 8.1],
+            "volume": [10.0, 20.0, 30.0, 40.0, 50.0, 60.0, 70.0, 80.0],
+        }
+    )
+
+    resampled = resample_ohlcv_data(frame, "1W")
+
+    assert resampled is not None
+    assert list(resampled["timestamp"]) == list(
+        pd.to_datetime(
+            ["2024-01-01T00:00:00Z", "2024-01-08T00:00:00Z"],
+            utc=True,
+        )
+    )
+    assert list(resampled["open"]) == [1.0, 5.0]
+    assert list(resampled["close"]) == [4.1, 8.1]
+    assert list(resampled["volume"]) == [100.0, 260.0]
+
+
 @pytest.mark.asyncio
 async def test_get_ohlcv_for_pair_merges_stored_rows_with_live_candle(
     monkeypatch: pytest.MonkeyPatch,

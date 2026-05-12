@@ -5,9 +5,11 @@ const { loadFrontendModule } = require('./helpers/loadFrontendModule.cjs')
 
 const {
     DEFAULT_MIN_TIMEFRAME,
+    TIMEFRAME_CHOICES,
     calculateSoPercentage,
     formatOrderAmount,
     formatPrice,
+    getOpenTradeOpenedAt,
     getPreviousBuyPrice,
     getSafetyOrderCount,
     getUnsellableMessage,
@@ -19,6 +21,7 @@ test('parseTimeframeSeconds normalizes supported units', () => {
     assert.equal(parseTimeframeSeconds('5min'), 300)
     assert.equal(parseTimeframeSeconds('4h'), 14400)
     assert.equal(parseTimeframeSeconds('1D'), 86400)
+    assert.equal(parseTimeframeSeconds('1W'), 604800)
     assert.equal(parseTimeframeSeconds('bad-value'), null)
 })
 
@@ -31,6 +34,14 @@ test('resolveMinTimeframe falls back and rounds up to supported choices', () => 
     assert.deepEqual(resolveMinTimeframe('9h'), {
         timerange: '1D',
         seconds: 24 * 60 * 60,
+    })
+    assert.deepEqual(resolveMinTimeframe('2d'), {
+        timerange: '1W',
+        seconds: 7 * 24 * 60 * 60,
+    })
+    assert.deepEqual(TIMEFRAME_CHOICES[TIMEFRAME_CHOICES.length - 1], {
+        timerange: '1W',
+        seconds: 7 * 24 * 60 * 60,
     })
 })
 
@@ -123,4 +134,31 @@ test('open trade helpers derive order prices and percentages safely', () => {
     assert.equal(calculateSoPercentage(810, 900), -10)
     assert.equal(formatOrderAmount(12.345), '12.35')
     assert.equal(formatPrice(12.34000000), '12.34')
+})
+
+test('open trade helpers keep the original opened-at timestamp per lifecycle', () => {
+    assert.equal(
+        getOpenTradeOpenedAt({
+            open_date: '2026-05-03T09:00:00+00:00',
+            campaign_started_at: '2026-05-01T08:00:00+00:00',
+            lifecycle_mode: 'sidestep_reentry',
+        }),
+        '2026-05-01T08:00:00+00:00',
+    )
+    assert.equal(
+        getOpenTradeOpenedAt({
+            open_date: '2026-05-03T09:00:00+00:00',
+            campaign_started_at: '2026-05-01T08:00:00+00:00',
+            lifecycle_mode: 'classic_dca',
+        }),
+        '2026-05-03T09:00:00+00:00',
+    )
+    assert.equal(
+        getOpenTradeOpenedAt({
+            open_date: '',
+            campaign_started_at: '2026-05-01T08:00:00+00:00',
+            lifecycle_mode: 'sidestep_reentry',
+        }),
+        '2026-05-01T08:00:00+00:00',
+    )
 })

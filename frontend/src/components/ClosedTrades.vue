@@ -114,6 +114,27 @@ function renderExpandIcon() {
     )
 }
 
+function formatCloseReason(reason: string | null | undefined): string {
+    switch (reason) {
+        case 'sidestep_exit':
+            return 'Sidestep exit'
+        case 'trailing_take_profit':
+            return 'Trailing TP'
+        case 'take_profit':
+            return 'Take profit'
+        case 'manual_sell':
+            return 'Manual sell'
+        case 'manual_stop':
+            return 'Manual stop'
+        case 'stop_loss':
+            return 'Stop loss'
+        case 'autopilot_timeout':
+            return 'Autopilot timeout'
+        default:
+            return 'Take profit'
+    }
+}
+
 const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
     const columns: DataTableColumns<ClosedTradeRow> = [
         {
@@ -169,6 +190,11 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             align: 'center'
         },
         {
+            title: 'Outcome',
+            key: 'close_reason',
+            render: (rowData) => formatCloseReason(rowData.close_reason),
+        },
+        {
             title: 'Duration',
             key: 'duration'
         },
@@ -221,6 +247,7 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
                 "amount",
                 "profit",
                 "profit_percent",
+                "close_reason",
                 "so_count",
                 "close_date",
                 "action",

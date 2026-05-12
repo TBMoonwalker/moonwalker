@@ -1,6 +1,6 @@
 import os
 import types
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import model
 import pytest
@@ -110,13 +110,218 @@ async def test_profit_overall_uses_upnl_when_no_closed_trades(
 
 
 @pytest.mark.asyncio
+async def test_profit_overall_counts_waiting_sidestep_mission_progress(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-waiting-1",
+        symbol="BTC/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="flat_waiting_reentry",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T10:00:00+00:00",
+        current_deal_id=None,
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=104.0,
+        cumulative_realized_quote=4.0,
+        cumulative_realized_percent=4.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        campaign_id="campaign-waiting-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        profit=0.0,
+        cost=0.0,
+        reserved_reentry_quote=104.0,
+        waiting_reference_quote=104.0,
+        virtual_waiting_profit=6.0,
+        virtual_waiting_profit_percent=6.25,
+    )
+
+    statistic = Statistic()
+    statistic.autopilot.resolve_runtime_state = _async_autopilot_state(
+        {
+            "mode": "low",
+            "effective_max_bots": 5,
+            "green_phase_detected": False,
+            "green_phase_active": False,
+            "green_phase_extra_deals": 0,
+            "green_phase_strength": 0.0,
+            "green_phase_block_reason": None,
+            "green_phase_ramp_ready": False,
+        }
+    )
+    data = await statistic.get_profit()
+
+    assert data["upnl"] == 6.0
+    assert data["profit_overall"] == 10.0
+    assert data["funds_locked"] == 100.0
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_profit_overall_counts_realized_sidestep_profit_on_active_leg(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-live-1",
+        symbol="ETH/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="active_long",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T08:00:00+00:00",
+        current_deal_id="deal-live-1",
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=0.0,
+        cumulative_realized_quote=4.0,
+        cumulative_realized_percent=4.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="ETH/USDT",
+        campaign_id="campaign-live-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="long_exposed",
+        profit=3.0,
+        profit_percent=2.88,
+        cost=104.0,
+    )
+
+    statistic = Statistic()
+    statistic.autopilot.resolve_runtime_state = _async_autopilot_state(
+        {
+            "mode": "low",
+            "effective_max_bots": 5,
+            "green_phase_detected": False,
+            "green_phase_active": False,
+            "green_phase_extra_deals": 0,
+            "green_phase_strength": 0.0,
+            "green_phase_block_reason": None,
+            "green_phase_ramp_ready": False,
+        }
+    )
+    data = await statistic.get_profit()
+
+    assert data["upnl"] == 3.0
+    assert data["profit_overall"] == 7.0
+    assert data["funds_locked"] == 100.0
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_dashboard_waiting_sidestep_keeps_reserve_out_of_funds_locked(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-dashboard-1",
+        symbol="BTC/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="flat_waiting_reentry",
+        started_at="2026-05-01T08:00:00+00:00",
+        last_transition_at="2026-05-02T10:00:00+00:00",
+        current_deal_id=None,
+        sidestep_count=1,
+        tp_percent=5.0,
+        principal_quote=100.0,
+        reserved_quote=104.0,
+        cumulative_realized_quote=4.0,
+        cumulative_realized_percent=4.0,
+        metadata_json="{}",
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        campaign_id="campaign-dashboard-1",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        profit=0.0,
+        cost=0.0,
+        reserved_reentry_quote=104.0,
+        waiting_reference_quote=104.0,
+        virtual_waiting_profit=6.0,
+        virtual_waiting_profit_percent=6.25,
+    )
+
+    statistic = Statistic()
+    captured: dict[str, float] = {}
+
+    async def fake_resolve_runtime_state(
+        funds_locked: float,
+        config: dict[str, object],
+        *,
+        available_quote: float | None | object,
+    ) -> dict[str, object]:
+        captured["funds_locked"] = funds_locked
+        return {
+            "mode": "low",
+            "effective_max_bots": 5,
+            "green_phase_detected": False,
+            "green_phase_active": False,
+            "green_phase_extra_deals": 0,
+            "green_phase_strength": 0.0,
+            "green_phase_block_reason": None,
+            "green_phase_ramp_ready": False,
+        }
+
+    async def fake_config_instance():
+        return types.SimpleNamespace(
+            snapshot=lambda: {
+                "autopilot": True,
+                "capital_max_fund": 1000.0,
+                "capital_reserve_safety_orders": False,
+                "dynamic_dca": False,
+            }
+        )
+
+    monkeypatch.setattr(
+        statistic.autopilot,
+        "resolve_runtime_state",
+        fake_resolve_runtime_state,
+    )
+    monkeypatch.setattr(Config, "instance", staticmethod(fake_config_instance))
+
+    data = await statistic.get_profit_for_dashboard(500.0)
+
+    assert data["upnl"] == 6.0
+    assert data["profit_overall"] == 10.0
+    assert data["funds_locked"] == 100.0
+    assert data["capital_funds_locked"] == 0.0
+    assert data["capital_open_trade_reserve"] == 104.0
+    assert captured["funds_locked"] == 100.0
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
     await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
     await Tortoise.generate_schemas()
 
-    now = datetime.utcnow()
+    now = datetime.now(UTC)
     await model.UpnlHistory.create(
         timestamp=now - timedelta(hours=2),
         upnl=1.0,
@@ -235,6 +440,7 @@ async def test_update_statistic_data_uses_fallback_when_base_order_missing() -> 
         captured["symbol"] = symbol
 
     statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.get_open_trades_by_symbol = lambda _symbol: _async_return([])
     statistic.trades.update_open_trades = fake_update_open_trades
 
     stats = {
@@ -253,7 +459,8 @@ async def test_update_statistic_data_uses_fallback_when_base_order_missing() -> 
     assert captured["symbol"] == "BTC/USDC"
     payload = captured["payload"]
     assert isinstance(payload, dict)
-    assert float(payload["open_date"]) > 1_000_000_000_000
+    assert isinstance(payload["open_date"], str)
+    assert "+" in payload["open_date"]
 
 
 @pytest.mark.asyncio
@@ -271,6 +478,7 @@ async def test_update_statistic_data_updates_open_trade_during_tp_sell() -> None
         captured["symbol"] = symbol
 
     statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.get_open_trades_by_symbol = lambda _symbol: _async_return([])
     statistic.trades.update_open_trades = fake_update_open_trades
 
     stats = {
@@ -292,7 +500,115 @@ async def test_update_statistic_data_updates_open_trade_during_tp_sell() -> None
     assert payload["current_price"] == 25.0
     assert payload["profit"] == 25.0
     assert payload["profit_percent"] == 25.0
-    assert float(payload["open_date"]) == 1_700_000_000_000.0
+    assert payload["open_date"] == "2023-11-14 22:13:20+00:00"
+
+
+class _DummySpotCampaignsFilter:
+    def limit(self, _value: int) -> "_DummySpotCampaignsFilter":
+        return self
+
+    async def values(self, *_fields: str) -> list[dict[str, object]]:
+        return [{"started_at": "2023-11-10 10:00:00+00:00"}]
+
+
+@pytest.mark.asyncio
+async def test_update_statistic_data_preserves_sidestep_campaign_started_at(
+    monkeypatch,
+) -> None:
+    statistic = Statistic()
+    captured: dict[str, object] = {}
+
+    async def fake_get_trade_by_ordertype(
+        symbol: str, baseorder: bool = False
+    ) -> list[dict[str, object]]:
+        return [{"timestamp": 1_700_000_000_000}]
+
+    async def fake_update_open_trades(payload: dict[str, object], symbol: str) -> None:
+        captured["payload"] = payload
+        captured["symbol"] = symbol
+
+    statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.get_open_trades_by_symbol = lambda _symbol: _async_return(
+        [
+            {
+                "symbol": "BTC/USDC",
+                "lifecycle_mode": "sidestep_reentry",
+                "campaign_id": "campaign-1",
+                "open_date": "2023-11-14 22:13:20+00:00",
+            }
+        ]
+    )
+    statistic.trades.update_open_trades = fake_update_open_trades
+    monkeypatch.setattr(
+        model.SpotCampaigns,
+        "filter",
+        lambda **_kwargs: _DummySpotCampaignsFilter(),
+    )
+
+    stats = {
+        "type": "tp_check",
+        "symbol": "BTC/USDC",
+        "total_amount": 5.0,
+        "total_cost": 100.0,
+        "current_price": 25.0,
+        "tp_price": 24.0,
+        "avg_price": 20.0,
+        "actual_pnl": 25.0,
+        "sell": False,
+    }
+    await statistic.update_statistic_data(stats)
+
+    assert captured["symbol"] == "BTC/USDC"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["open_date"] == "2023-11-10 10:00:00+00:00"
+
+
+@pytest.mark.asyncio
+async def test_update_statistic_data_repairs_classic_open_date_from_base_order() -> (
+    None
+):
+    statistic = Statistic()
+    captured: dict[str, object] = {}
+
+    async def fake_get_trade_by_ordertype(
+        symbol: str, baseorder: bool = False
+    ) -> list[dict[str, object]]:
+        return [{"timestamp": 1_700_000_000_000}]
+
+    async def fake_update_open_trades(payload: dict[str, object], symbol: str) -> None:
+        captured["payload"] = payload
+        captured["symbol"] = symbol
+
+    statistic.trades.get_trade_by_ordertype = fake_get_trade_by_ordertype
+    statistic.trades.get_open_trades_by_symbol = lambda _symbol: _async_return(
+        [
+            {
+                "symbol": "BTC/USDC",
+                "lifecycle_mode": "classic_dca",
+                "open_date": "1700000000000.0",
+            }
+        ]
+    )
+    statistic.trades.update_open_trades = fake_update_open_trades
+
+    stats = {
+        "type": "tp_check",
+        "symbol": "BTC/USDC",
+        "total_amount": 5.0,
+        "total_cost": 100.0,
+        "current_price": 25.0,
+        "tp_price": 24.0,
+        "avg_price": 20.0,
+        "actual_pnl": 25.0,
+        "sell": False,
+    }
+    await statistic.update_statistic_data(stats)
+
+    assert captured["symbol"] == "BTC/USDC"
+    payload = captured["payload"]
+    assert isinstance(payload, dict)
+    assert payload["open_date"] == "2023-11-14 22:13:20+00:00"
 
 
 @pytest.mark.asyncio
@@ -411,3 +727,10 @@ def _async_autopilot_state(value):
         return value
 
     return _inner
+
+
+def _async_return(value):
+    async def _inner(*_args, **_kwargs):
+        return value
+
+    return _inner()

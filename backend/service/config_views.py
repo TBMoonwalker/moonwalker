@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from service.config import resolve_timeframe
+from service.spot_campaign_types import TradeLifecycleMode
 
 
 def _optional_string(value: Any) -> str | None:
@@ -107,6 +108,99 @@ class SignalPluginConfigView:
     def from_config(cls, config: dict[str, Any]) -> "SignalPluginConfigView":
         """Build a typed signal-plugin selection from the raw config snapshot."""
         return cls(signal_name=_optional_string(config.get("signal")))
+
+
+@dataclass(frozen=True)
+class TradeLifecycleConfigView:
+    """Typed lifecycle-mode settings derived from the config snapshot."""
+
+    mode: str
+    market: str
+    enabled: bool
+    bearish_exit_strategy: str | None
+    reentry_strategy: str | None
+    reentry_cooldown_candles: int
+    base_order_amount: float
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "TradeLifecycleConfigView":
+        """Build normalized lifecycle-mode settings from raw config."""
+        raw_mode = _optional_string(config.get("trade_lifecycle_mode"))
+        legacy_sidestep_enabled = bool(config.get("sidestep_campaign_enabled", False))
+        if raw_mode in {
+            TradeLifecycleMode.CLASSIC_DCA.value,
+            TradeLifecycleMode.SIDESTEP_REENTRY.value,
+        }:
+            mode = raw_mode
+        else:
+            mode = (
+                TradeLifecycleMode.SIDESTEP_REENTRY.value
+                if legacy_sidestep_enabled
+                else TradeLifecycleMode.CLASSIC_DCA.value
+            )
+
+        reentry_strategy = _optional_string(config.get("sidestep_reentry_strategy"))
+        if reentry_strategy is None:
+            reentry_strategy = _optional_string(config.get("dca_strategy"))
+
+        return cls(
+            mode=mode,
+            market=_optional_string(config.get("market")) or "spot",
+            enabled=(mode == TradeLifecycleMode.SIDESTEP_REENTRY.value),
+            bearish_exit_strategy=_optional_string(
+                config.get("sidestep_bearish_strategy")
+            ),
+            reentry_strategy=reentry_strategy,
+            reentry_cooldown_candles=max(
+                0,
+                _int_config_default_only(
+                    config.get("sidestep_reentry_cooldown_candles"),
+                    default=0,
+                ),
+            ),
+            base_order_amount=max(
+                0.0,
+                _float_config_default_only(
+                    config.get("bo", 0.0),
+                    default=0.0,
+                ),
+            ),
+        )
+
+    def is_sidestep_mode(self) -> bool:
+        """Return whether sidestep mode is fully enabled for the current market."""
+        return (
+            self.enabled
+            and self.market == "spot"
+            and self.mode == TradeLifecycleMode.SIDESTEP_REENTRY.value
+        )
+
+
+@dataclass(frozen=True)
+class SidestepCampaignConfigView:
+    """Backward-compatible sidestep settings view for existing call sites."""
+
+    enabled: bool
+    market: str
+    bearish_strategy: str | None
+    reentry_strategy: str | None
+    reentry_cooldown_candles: int
+    reentry_requires_fresh_long_signal: bool
+
+    @classmethod
+    def from_config(cls, config: dict[str, Any]) -> "SidestepCampaignConfigView":
+        """Build normalized sidestep campaign settings from raw config."""
+        lifecycle = TradeLifecycleConfigView.from_config(config)
+        return cls(
+            enabled=lifecycle.enabled,
+            market=lifecycle.market,
+            bearish_strategy=lifecycle.bearish_exit_strategy,
+            reentry_strategy=lifecycle.reentry_strategy,
+            reentry_cooldown_candles=lifecycle.reentry_cooldown_candles,
+            reentry_requires_fresh_long_signal=bool(
+                config.get("sidestep_reentry_requires_fresh_long_signal", False)
+            ),
+        )
 
 
 @dataclass(frozen=True)

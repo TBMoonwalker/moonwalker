@@ -1,6 +1,7 @@
 from service.config_views import (
     DcaRuntimeConfigView,
     ExchangeConnectionConfigView,
+    SidestepCampaignConfigView,
     SignalPluginConfigView,
     WatcherRuntimeConfigView,
 )
@@ -57,6 +58,24 @@ def test_watcher_runtime_config_view_reuses_exchange_connection_settings() -> No
     assert config.exchange_connection.dry_run is True
     assert config.exchange_connection.sandbox is False
     assert config.exchange_connection.exchange_hostname == "demo.exchange.test"
+
+
+def test_sidestep_campaign_config_view_normalizes_market_and_values() -> None:
+    config = SidestepCampaignConfigView.from_config(
+        {
+            "sidestep_campaign_enabled": True,
+            "market": "  future  ",
+            "sidestep_bearish_strategy": "  ema_down  ",
+            "sidestep_reentry_cooldown_candles": "3",
+            "sidestep_reentry_requires_fresh_long_signal": False,
+        }
+    )
+
+    assert config.enabled is True
+    assert config.market == "future"
+    assert config.bearish_strategy == "ema_down"
+    assert config.reentry_cooldown_candles == 3
+    assert config.reentry_requires_fresh_long_signal is False
 
 
 def test_dca_runtime_config_view_applies_tp_confirmation_defaults() -> None:

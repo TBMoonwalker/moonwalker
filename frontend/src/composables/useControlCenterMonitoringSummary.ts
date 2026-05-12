@@ -22,11 +22,13 @@ export function useControlCenterMonitoringSummary() {
     const openTradesStore = useWebSocketDataStore('openTrades')
     const closedTradesStore = useWebSocketDataStore('closedTrades')
     const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
+    const waitingCampaignsStore = useWebSocketDataStore('waitingCampaigns')
     const statisticsStore = useWebSocketDataStore('statistics')
 
     const openTradesState = storeToRefs(openTradesStore)
     const closedTradesState = storeToRefs(closedTradesStore)
     const unsellableTradesState = storeToRefs(unsellableTradesStore)
+    const waitingCampaignsState = storeToRefs(waitingCampaignsStore)
     const statisticsState = storeToRefs(statisticsStore)
 
     const streams = computed<ControlCenterMonitoringStreamSummary[]>(() => [
@@ -57,6 +59,13 @@ export function useControlCenterMonitoringSummary() {
             status: statisticsState.status.value,
             hasReceivedData: statisticsState.hasReceivedData.value,
             reconnectCount: statisticsState.reconnectCount.value,
+        },
+        {
+            key: 'waiting-campaigns',
+            label: 'Waiting campaigns',
+            status: waitingCampaignsState.status.value,
+            hasReceivedData: waitingCampaignsState.hasReceivedData.value,
+            reconnectCount: waitingCampaignsState.reconnectCount.value,
         },
     ])
 
@@ -155,7 +164,7 @@ export function useControlCenterMonitoringSummary() {
         if (waitingStream.value) {
             return `${waitingStream.value.label} is the only stream still waiting for its first payload.`
         }
-        return 'All four realtime streams are open and receiving data.'
+        return `All ${totalStreams.value} realtime streams are open and receiving data.`
     })
 
     return {

@@ -3,6 +3,22 @@ from service.monitoring import MonitoringService
 from service.orders import Orders
 
 
+class _FakeSidestepCampaignService:
+    async def resolve_buy_context(self, _symbol, _order, _config) -> dict:
+        return {}
+
+    async def resolve_close_context(
+        self,
+        _symbol,
+        _close_reason,
+        _config,
+        *,
+        closed_at,
+        closed_payload,
+    ) -> dict:
+        return {}
+
+
 @pytest.mark.asyncio
 async def test_monitoring_service_skips_when_disabled(monkeypatch) -> None:
     service = MonitoringService()
@@ -142,6 +158,7 @@ def test_resolve_telegram_entity_username() -> None:
 async def test_orders_buy_triggers_monitoring_notification(monkeypatch) -> None:
     try:
         orders = Orders()
+        orders.sidestep_campaigns = _FakeSidestepCampaignService()
         notify_calls = []
 
         async def fake_run_sqlite(func, *args, **kwargs) -> None:
@@ -218,6 +235,7 @@ async def test_orders_buy_triggers_monitoring_notification(monkeypatch) -> None:
 async def test_orders_sell_triggers_monitoring_notification(monkeypatch) -> None:
     try:
         orders = Orders()
+        orders.sidestep_campaigns = _FakeSidestepCampaignService()
         notify_calls = []
 
         async def fake_run_sqlite(func, *args, **kwargs) -> None:

@@ -54,6 +54,10 @@ def _async_result(value):
     return _inner
 
 
+async def _async_noop(*_args, **_kwargs) -> None:
+    return None
+
+
 def _entry_order_decisions(
     symbol: str = "BTC/USDT",
     *,
@@ -184,6 +188,15 @@ async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
         "resolve_signal_entry_orders",
         fake_resolve_signal_entry_orders,
     )
+    monkeypatch.setattr(
+        sym_module,
+        "SpotSidestepCampaignService",
+        types.SimpleNamespace(
+            instance=_async_result(
+                types.SimpleNamespace(record_long_signal=_async_noop)
+            )
+        ),
+    )
 
     async def fake_get_profit() -> None:
         return {
@@ -304,6 +317,15 @@ async def test_sym_signals_idle_timeout_does_not_force_immediate_reconnect(
         sym_module,
         "resolve_signal_entry_orders",
         _async_result(_entry_order_decisions()),
+    )
+    monkeypatch.setattr(
+        sym_module,
+        "SpotSidestepCampaignService",
+        types.SimpleNamespace(
+            instance=_async_result(
+                types.SimpleNamespace(record_long_signal=_async_noop)
+            )
+        ),
     )
 
     orders = []
@@ -474,6 +496,15 @@ async def test_sym_signals_error_event_logs_payload_and_uses_backoff(
         "resolve_signal_entry_orders",
         _async_result(_entry_order_decisions()),
     )
+    monkeypatch.setattr(
+        sym_module,
+        "SpotSidestepCampaignService",
+        types.SimpleNamespace(
+            instance=_async_result(
+                types.SimpleNamespace(record_long_signal=_async_noop)
+            )
+        ),
+    )
 
     orders = []
 
@@ -536,6 +567,15 @@ async def test_sym_signals_skips_buy_when_history_remains_insufficient(
         sym_module,
         "resolve_signal_entry_orders",
         _async_result(_entry_order_decisions()),
+    )
+    monkeypatch.setattr(
+        sym_module,
+        "SpotSidestepCampaignService",
+        types.SimpleNamespace(
+            instance=_async_result(
+                types.SimpleNamespace(record_long_signal=_async_noop)
+            )
+        ),
     )
 
     orders = []

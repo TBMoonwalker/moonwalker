@@ -23,6 +23,7 @@ from service.signal_runtime import (
     resolve_signal_entry_orders,
     update_waiting_log_state,
 )
+from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
 from service.strategy_capability import (
     get_configured_strategy_history_lookback_days,
@@ -404,6 +405,16 @@ class SignalPlugin:
         if not (is_entry_signal and token_old_enough):
             return
 
+        sidestep_campaigns = await SpotSidestepCampaignService.instance()
+        await sidestep_campaigns.record_long_signal(
+            symbol_full,
+            signal_name=f"sym_signals:{event.get('signal_name_id')}",
+            strategy_name=None,
+            timeframe=self._strategy_timeframe,
+            metadata_json=None,
+            source="sym_signals",
+        )
+
         running_symbols = await get_active_open_symbols()
         if symbol_full.upper() in running_symbols:
             return
@@ -432,6 +443,8 @@ class SignalPlugin:
                     symbol_full,
                     history_data,
                     self.config,
+                    success_timeframe=self._strategy_timeframe,
+                    success_minimum_candles=self._required_history_candles,
                 )
                 if not success:
                     logging.error(

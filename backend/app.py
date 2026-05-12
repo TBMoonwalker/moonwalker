@@ -21,6 +21,7 @@ from service.green_phase import GreenPhaseService
 from service.housekeeper import Housekeeper
 from service.redis import redis_client, start_redis, stop_redis
 from service.signal import Signal
+from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.watcher import Watcher
 
 
@@ -36,6 +37,7 @@ class RuntimeState:
     housekeeper: Housekeeper | None = None
     green_phase_service: GreenPhaseService | None = None
     autopilot_memory_service: AutopilotMemoryService | None = None
+    sidestep_campaign_service: SpotSidestepCampaignService | None = None
     signal_plugin: Signal | None = None
     background_tasks: list[asyncio.Task[Any]] = field(default_factory=list)
 
@@ -64,6 +66,14 @@ async def startup() -> None:
 
     runtime_state.autopilot_memory_service = await AutopilotMemoryService.instance()
     await runtime_state.autopilot_memory_service.start()
+
+    runtime_state.sidestep_campaign_service = (
+        await SpotSidestepCampaignService.instance()
+    )
+    runtime_state.sidestep_campaign_service.bind_watcher_queue(
+        runtime_state.watcher_queue
+    )
+    await runtime_state.sidestep_campaign_service.start()
 
     runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
     await runtime_state.database.run_with_context(runtime_state.signal_plugin.init)
@@ -114,6 +124,8 @@ async def shutdown() -> None:
         await runtime_state.green_phase_service.shutdown()
     if runtime_state.autopilot_memory_service is not None:
         await runtime_state.autopilot_memory_service.shutdown()
+    if runtime_state.sidestep_campaign_service is not None:
+        await runtime_state.sidestep_campaign_service.shutdown()
     if runtime_state.database is not None:
         await runtime_state.database.shutdown()
 

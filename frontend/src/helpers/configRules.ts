@@ -4,6 +4,12 @@ import type { Ref } from 'vue'
 interface DcaRulesState {
     dynamic: boolean
     enabled: boolean
+    sidestep_campaign_enabled: boolean
+    trade_lifecycle_mode?: string | null
+}
+
+interface ExchangeRulesState {
+    market: string | null
 }
 
 interface SignalRulesState {
@@ -18,12 +24,33 @@ interface SignalRulesState {
 
 interface BuildConfigRulesOptions {
     dca: Ref<DcaRulesState>
+    exchange: Ref<ExchangeRulesState>
     getAsapMissingFieldsLabel: () => string
     isAsapExchangeReady: () => boolean
     isCurrencyConfigured: () => boolean
     isUrlInput: (value: string | null) => boolean
     signal: Ref<SignalRulesState>
     submitAttempted: Ref<boolean>
+}
+
+function getTradeLifecycleMode(dca: Ref<DcaRulesState>): string {
+    return dca.value.trade_lifecycle_mode ?? 'classic_dca'
+}
+
+function isClassicDcaMode(dca: Ref<DcaRulesState>): boolean {
+    return getTradeLifecycleMode(dca) !== 'sidestep_reentry'
+}
+
+function isSpotMarket(exchange: Ref<ExchangeRulesState>): boolean {
+    return String(exchange.value.market || 'spot').trim().toLowerCase() === 'spot'
+}
+
+function isSpotSidestepMode(options: BuildConfigRulesOptions): boolean {
+    return (
+        options.dca.value.enabled &&
+        getTradeLifecycleMode(options.dca) === 'sidestep_reentry' &&
+        isSpotMarket(options.exchange)
+    )
 }
 
 function createDcaFieldValidator(
@@ -234,34 +261,70 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
         so: {
             validator: dcaFieldValidator(
                 'safety order amount',
-                () => !options.dca.value.dynamic,
+                () => isClassicDcaMode(options.dca) && !options.dca.value.dynamic,
             ),
             trigger: ['submit'],
         },
         mstc: {
-            validator: dcaFieldValidator('max safety order count'),
+            validator: dcaFieldValidator(
+                'max safety order count',
+                () => isClassicDcaMode(options.dca),
+            ),
             trigger: ['submit'],
         },
         sos: {
-            validator: dcaFieldValidator('price deviation'),
+            validator: dcaFieldValidator(
+                'price deviation',
+                () => isClassicDcaMode(options.dca),
+            ),
             trigger: ['submit'],
         },
         ss: {
             validator: dcaFieldValidator(
                 'step scale',
-                () => !options.dca.value.dynamic,
+                () => isClassicDcaMode(options.dca) && !options.dca.value.dynamic,
             ),
             trigger: ['submit'],
         },
         os: {
             validator: dcaFieldValidator(
                 'volume scale',
-                () => !options.dca.value.dynamic,
+                () => isClassicDcaMode(options.dca) && !options.dca.value.dynamic,
             ),
             trigger: ['submit'],
         },
         tp: {
             validator: requiredAfterSubmit('Please add tp'),
+            trigger: ['submit', 'change'],
+        },
+        sidestep_bearish_strategy: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (!options.submitAttempted.value || !isSpotSidestepMode(options)) {
+                    return true
+                }
+                if (value === null || value === undefined) {
+                    return new Error('Please select bearish sidestep strategy')
+                }
+                if (typeof value === 'string' && value.trim().length === 0) {
+                    return new Error('Please select bearish sidestep strategy')
+                }
+                return true
+            },
+            trigger: ['submit', 'change'],
+        },
+        sidestep_reentry_strategy: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (!options.submitAttempted.value || !isSpotSidestepMode(options)) {
+                    return true
+                }
+                if (value === null || value === undefined) {
+                    return new Error('Please select sidestep re-entry strategy')
+                }
+                if (typeof value === 'string' && value.trim().length === 0) {
+                    return new Error('Please select sidestep re-entry strategy')
+                }
+                return true
+            },
             trigger: ['submit', 'change'],
         },
         max_fund: {

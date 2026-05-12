@@ -88,10 +88,12 @@ const buyExecutions = computed(() =>
     sortedExecutions.value.filter((execution) => execution.side === 'buy'),
 )
 
+const sellExecutions = computed(() =>
+    sortedExecutions.value.filter((execution) => execution.side === 'sell'),
+)
+
 const finalSellExecution = computed(() => {
-    const sells = sortedExecutions.value.filter(
-        (execution) => execution.side === 'sell',
-    )
+    const sells = sellExecutions.value
     return sells.length > 0 ? sells[sells.length - 1] : null
 })
 
@@ -132,11 +134,25 @@ const timelineEmptyText = computed(() => {
 const timelineItems = computed<TimelineItem[]>(() =>
     sortedExecutions.value.map((execution, index) => {
         const isBuy = execution.side === 'buy'
+        const buyIndex = countExecutionsUntil(
+            sortedExecutions.value,
+            index,
+            (candidate) => candidate.side === 'buy',
+        )
+        const baseOrderIndex = countExecutionsUntil(
+            sortedExecutions.value,
+            index,
+            (candidate) =>
+                candidate.side === 'buy' && candidate.role === 'base_order',
+        )
+        const sellIndex = countExecutionsUntil(
+            sortedExecutions.value,
+            index,
+            (candidate) => candidate.side === 'sell',
+        )
         const title = isBuy
-            ? getBuyTitle(execution, index)
-            : execution.role === 'final_sell'
-              ? 'Final sell'
-              : 'Partial sell'
+            ? getBuyTitle(execution, buyIndex, baseOrderIndex)
+            : getSellTitle(execution, sellIndex, sellExecutions.value.length)
         const content = [
             `Order size: ${formatQuoteAmount(execution.ordersize)}`,
             `Amount: ${formatAssetAmount(execution.amount)}`,
@@ -162,13 +178,67 @@ const timelineItems = computed<TimelineItem[]>(() =>
 )
 
 const chartMarkers = computed(() => {
-    const markers = buyExecutions.value.map((execution) => ({
-        timestamp: execution.timestamp,
-        position: 'belowBar' as const,
-        color: BUY_MARKER_COLOR,
-        shape: 'arrowUp' as const,
-        text: 'Buy',
-    }))
+    const markers: Array<{
+        timestamp: string | number
+        position:
+            | 'aboveBar'
+            | 'belowBar'
+            | 'inBar'
+            | 'atPriceTop'
+            | 'atPriceBottom'
+            | 'atPriceMiddle'
+        color: string
+        shape: 'arrowUp' | 'arrowDown' | 'circle'
+        text: string
+        price?: number
+    }> = []
+
+    sortedExecutions.value.forEach((execution, index) => {
+        if (execution.side === 'buy') {
+            const baseOrderIndex = countExecutionsUntil(
+                sortedExecutions.value,
+                index,
+                (candidate) =>
+                    candidate.side === 'buy' && candidate.role === 'base_order',
+            )
+            markers.push({
+                timestamp: execution.timestamp,
+                position: 'belowBar' as const,
+                color: BUY_MARKER_COLOR,
+                shape: 'arrowUp' as const,
+                text:
+                    execution.role === 'base_order' && baseOrderIndex > 1
+                        ? 'Re-entry'
+                        : 'Buy',
+            })
+            return
+        }
+
+        const sellIndex = countExecutionsUntil(
+            sortedExecutions.value,
+            index,
+            (candidate) => candidate.side === 'sell',
+        )
+        if (sellIndex >= sellExecutions.value.length) {
+            return
+        }
+
+        const sellPrice = Number(execution.price)
+        const hasExactSellPrice = Number.isFinite(sellPrice) && sellPrice > 0
+        markers.push({
+            timestamp: execution.timestamp,
+            position: hasExactSellPrice
+                ? ('atPriceMiddle' as const)
+                : ('aboveBar' as const),
+            ...(hasExactSellPrice
+                ? { price: sellPrice }
+                : {}),
+            color: sellColor.value,
+            shape: 'arrowDown' as const,
+            text: 'Exit',
+        })
+    })
+
     if (finalSellExecution.value) {
         const finalSellPrice = Number(finalSellExecution.value.price)
         const hasExactFinalSellPrice =
@@ -186,16 +256,52 @@ const chartMarkers = computed(() => {
             text: 'Sell',
         })
     }
+
     return markers
 })
 
 const chartPriceLines = computed(() => {
-    const lines = buyExecutions.value.map((execution, index) => ({
-        price: Number(execution.price),
-        color: BUY_LINE_COLOR,
-        lineStyle: 2 as const,
-        title: execution.role === 'base_order' ? 'BO' : `SO${index}`,
-    }))
+    const lines: Array<{
+        price: number
+        color: string
+        lineStyle: 0 | 1 | 2 | 3 | 4
+        title: string
+    }> = []
+
+    buyExecutions.value.forEach((execution, index) => {
+        const price = Number(execution.price)
+        if (!Number.isFinite(price) || price <= 0) {
+            return
+        }
+        const buyIndex = countExecutionsUntil(
+            buyExecutions.value,
+            index,
+            () => true,
+        )
+        const baseOrderIndex = countExecutionsUntil(
+            buyExecutions.value,
+            index,
+            (candidate) => candidate.role === 'base_order',
+        )
+        lines.push({
+            price,
+            color: BUY_LINE_COLOR,
+            lineStyle: 2 as const,
+            title: getBuyLineTitle(execution, buyIndex, baseOrderIndex),
+        })
+    })
+
+    sellExecutions.value.slice(0, -1).forEach((execution, index) => {
+        const sellPrice = Number(execution.price)
+        if (Number.isFinite(sellPrice) && sellPrice > 0) {
+            lines.push({
+                price: sellPrice,
+                color: sellColor.value,
+                lineStyle: 3 as const,
+                title: getSellLineTitle(index + 1, sellExecutions.value.length),
+            })
+        }
+    })
     if (finalSellExecution.value) {
         const finalSellPrice = Number(finalSellExecution.value.price)
         if (Number.isFinite(finalSellPrice) && finalSellPrice > 0) {
@@ -210,15 +316,84 @@ const chartPriceLines = computed(() => {
     return lines
 })
 
-function getBuyTitle(execution: TradeExecutionRow, index: number): string {
-    if (execution.role === 'base_order' || index === 0) {
-        return 'Base order'
+function countExecutionsUntil(
+    executionsToCount: TradeExecutionRow[],
+    endIndex: number,
+    matcher: (execution: TradeExecutionRow) => boolean,
+): number {
+    let count = 0
+    for (let index = 0; index <= endIndex; index += 1) {
+        if (matcher(executionsToCount[index])) {
+            count += 1
+        }
+    }
+    return count
+}
+
+function getBuyTitle(
+    execution: TradeExecutionRow,
+    buyIndex: number,
+    baseOrderIndex: number,
+): string {
+    if (execution.role === 'manual_buy') {
+        return 'Manual buy'
+    }
+    if (execution.role === 'base_order') {
+        if (baseOrderIndex <= 1) {
+            return 'Base order'
+        }
+        return `Re-entry buy ${baseOrderIndex - 1}`
     }
     const orderCount = Number(execution.order_count)
     if (Number.isFinite(orderCount) && orderCount > 0) {
         return `Safety order ${orderCount}`
     }
-    return `Safety order ${index}`
+    if (buyIndex <= 1) {
+        return 'Base order'
+    }
+    return `Safety order ${buyIndex - 1}`
+}
+
+function getSellTitle(
+    execution: TradeExecutionRow,
+    sellIndex: number,
+    totalSellCount: number,
+): string {
+    if (execution.role === 'partial_sell') {
+        return 'Partial sell'
+    }
+    if (sellIndex < totalSellCount) {
+        return `Sidestep exit ${sellIndex}`
+    }
+    if (totalSellCount > 1) {
+        return 'Final sell'
+    }
+    return 'Sell'
+}
+
+function getBuyLineTitle(
+    execution: TradeExecutionRow,
+    buyIndex: number,
+    baseOrderIndex: number,
+): string {
+    if (execution.role === 'manual_buy') {
+        return 'MANUAL'
+    }
+    if (execution.role === 'base_order') {
+        return baseOrderIndex <= 1 ? 'BO' : `RE${baseOrderIndex - 1}`
+    }
+    const orderCount = Number(execution.order_count)
+    if (Number.isFinite(orderCount) && orderCount > 0) {
+        return `SO${orderCount}`
+    }
+    return `SO${Math.max(1, buyIndex - 1)}`
+}
+
+function getSellLineTitle(sellIndex: number, totalSellCount: number): string {
+    if (sellIndex < totalSellCount) {
+        return `EXIT${sellIndex}`
+    }
+    return totalSellCount > 1 ? 'SELL' : 'SELL'
 }
 
 function toNumberOrZero(value: unknown): number {

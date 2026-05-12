@@ -1,14 +1,19 @@
+import os
 import sqlite3
 
+import model
 import pytest
 from service.database import (
     Database,
     _build_sqlite_corruption_message,
     _extract_added_column_names,
     _extract_corrupted_index_name,
+    _extract_corrupted_index_names,
+    _integrity_check_is_clean,
     _plan_additive_column_statements,
 )
 from service.sqlite_timestamps import coerce_timestamp_like_to_ms
+from tortoise import Tortoise
 
 
 async def _noop(*_args, **_kwargs) -> None:
@@ -29,6 +34,65 @@ class _FakeConnection:
         if self._error is not None:
             raise self._error
         return len(self._rows), self._rows
+
+
+@pytest.mark.asyncio
+async def test_backfill_legacy_campaign_closed_trade_percentages_repairs_zero_cost_rows(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.ClosedTrades.create(
+        symbol="BTC/USDT",
+        deal_id="deal-legacy-closed-1",
+        campaign_id="campaign-legacy-closed-1",
+        execution_history_complete=True,
+        so_count=0,
+        profit=15.0,
+        profit_percent=0.0,
+        amount=1.0,
+        cost=0.0,
+        tp_price=115.0,
+        avg_price=110.0,
+        open_date="2026-05-01 00:00:00+00:00",
+        close_date="2026-05-02 12:00:00+00:00",
+        duration="{}",
+        close_reason="take_profit",
+    )
+    await model.ClosedTrades.create(
+        symbol="ETH/USDT",
+        deal_id="deal-small-profit-1",
+        campaign_id="campaign-small-profit-1",
+        execution_history_complete=True,
+        so_count=0,
+        profit=0.01,
+        profit_percent=0.0,
+        amount=0.0,
+        cost=100.0,
+        tp_price=0.0,
+        avg_price=100.0,
+        open_date="2026-05-01 00:00:00+00:00",
+        close_date="2026-05-02 12:00:00+00:00",
+        duration="{}",
+        close_reason="take_profit",
+    )
+
+    database = Database()
+    database.db_url = f"sqlite://{db_path}"
+    await database._backfill_legacy_campaign_closed_trade_percentages()
+
+    repaired = await model.ClosedTrades.get(deal_id="deal-legacy-closed-1")
+    assert repaired.cost == pytest.approx(100.0)
+    assert repaired.profit_percent == pytest.approx(15.0)
+
+    untouched = await model.ClosedTrades.get(deal_id="deal-small-profit-1")
+    assert untouched.cost == pytest.approx(100.0)
+    assert untouched.profit_percent == pytest.approx(0.0)
+
+    await Tortoise.close_connections()
 
 
 @pytest.mark.parametrize(
@@ -56,6 +120,24 @@ def test_extract_corrupted_index_name_detects_index_only_corruption(
     expected: str | None,
 ) -> None:
     assert _extract_corrupted_index_name(messages) == expected
+
+
+def test_extract_corrupted_index_names_detects_multi_index_corruption() -> None:
+    assert _extract_corrupted_index_names(
+        [
+            "row 1 missing from index idx_trades_campaign_id",
+            "row 2 missing from index idx_tradeexecutions_campaign_id",
+        ]
+    ) == [
+        "idx_tradeexecutions_campaign_id",
+        "idx_trades_campaign_id",
+    ]
+
+
+def test_integrity_check_is_clean_only_for_ok_messages() -> None:
+    assert _integrity_check_is_clean(["ok"]) is True
+    assert _integrity_check_is_clean([]) is False
+    assert _integrity_check_is_clean(["row 1 missing from index idx_trades"]) is False
 
 
 def test_plan_additive_column_statements_skips_existing_columns() -> None:
@@ -101,6 +183,21 @@ def test_build_sqlite_corruption_message_falls_back_to_generic_guidance() -> Non
         "and restore from a known-good backup or recover the "
         "database before restarting."
     )
+
+
+def test_build_sqlite_corruption_message_uses_full_reindex_for_multi_index_damage() -> (
+    None
+):
+    message = _build_sqlite_corruption_message(
+        "/tmp/broken.sqlite",
+        [
+            "row 1 missing from index idx_trades_campaign_id",
+            "row 2 missing from index idx_tradeexecutions_campaign_id",
+        ],
+    )
+
+    assert "SQLite index corruption detected in /tmp/broken.sqlite" in message
+    assert "REINDEX; PRAGMA integrity_check;" in message
 
 
 @pytest.mark.parametrize(
@@ -151,6 +248,21 @@ async def test_run_sqlite_integrity_check_returns_trimmed_messages(
 
 
 @pytest.mark.asyncio
+async def test_run_sqlite_integrity_check_returns_ok_for_healthy_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    database.db_url = "sqlite:///tmp/healthy.sqlite"
+
+    monkeypatch.setattr(
+        "service.database.Tortoise.get_connection",
+        lambda *_args, **_kwargs: _FakeConnection(rows=[("ok",)]),
+    )
+
+    assert await database._run_sqlite_integrity_check() == ["ok"]
+
+
+@pytest.mark.asyncio
 async def test_run_sqlite_integrity_check_returns_empty_when_query_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -187,6 +299,7 @@ async def test_database_init_surfaces_actionable_sqlite_corruption(
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
+    monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_malformed)
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", _noop)
     monkeypatch.setattr(Database, "_run_sqlite_integrity_check", _noop)
@@ -217,6 +330,7 @@ async def test_database_init_reraises_non_corruption_failures(
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
+    monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_generic)
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", _noop)
 
@@ -250,6 +364,7 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
+    monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_malformed)
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", _noop)
     monkeypatch.setattr(Database, "_run_sqlite_integrity_check", fake_integrity_check)
@@ -305,7 +420,17 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
     )
     monkeypatch.setattr(Database, "_ensure_indexes", _record("ensure_indexes"))
     monkeypatch.setattr(
+        Database,
+        "_repair_index_only_corruption_if_needed",
+        _record("repair_index_only_corruption_if_needed"),
+    )
+    monkeypatch.setattr(
         Database, "_backfill_trade_ledger_rows", _record("backfill_trade_ledger_rows")
+    )
+    monkeypatch.setattr(
+        Database,
+        "_backfill_legacy_campaign_closed_trade_percentages",
+        _record("backfill_legacy_campaign_closed_trade_percentages"),
     )
 
     await database.init()
@@ -318,8 +443,60 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "ensure_trade_ledger_columns",
         "ensure_upnl_history_columns",
         "ensure_indexes",
+        "repair_index_only_corruption_if_needed",
         "backfill_trade_ledger_rows",
+        "backfill_legacy_campaign_closed_trade_percentages",
     ]
+
+
+@pytest.mark.asyncio
+async def test_repair_index_only_corruption_reindexes_until_integrity_is_clean(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    database.db_url = "sqlite:///tmp/broken.sqlite"
+    integrity_runs = iter(
+        [
+            [
+                "row 1 missing from index idx_trades_campaign_id",
+                "row 2 missing from index idx_tradeexecutions_campaign_id",
+            ],
+            ["ok"],
+        ]
+    )
+    calls: list[str] = []
+
+    async def fake_integrity_check(*_args, **_kwargs) -> list[str]:
+        calls.append("integrity_check")
+        return next(integrity_runs)
+
+    async def fake_reindex(*_args, **_kwargs) -> None:
+        calls.append("reindex")
+
+    monkeypatch.setattr(Database, "_run_sqlite_integrity_check", fake_integrity_check)
+    monkeypatch.setattr(Database, "_reindex_sqlite_database", fake_reindex)
+
+    await database._repair_index_only_corruption_if_needed()
+
+    assert calls == ["integrity_check", "reindex", "integrity_check"]
+
+
+@pytest.mark.asyncio
+async def test_repair_index_only_corruption_raises_for_generic_damage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    database.db_url = "sqlite:///tmp/broken.sqlite"
+
+    async def fake_integrity_check(*_args, **_kwargs) -> list[str]:
+        return ["*** in database main ***\nPage 5 is never used"]
+
+    monkeypatch.setattr(Database, "_run_sqlite_integrity_check", fake_integrity_check)
+
+    with pytest.raises(
+        RuntimeError, match="SQLite corruption detected in /tmp/broken.sqlite"
+    ):
+        await database._repair_index_only_corruption_if_needed()
 
 
 @pytest.mark.asyncio

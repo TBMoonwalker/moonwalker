@@ -16,6 +16,7 @@ from service.config import (
     build_removed_config_key_message,
     is_removed_config_key,
 )
+from service.config_views import TradeLifecycleConfigView
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
@@ -122,24 +123,41 @@ def _find_live_activation_blockers(
 
     dca_enabled = bool(config_snapshot.get("dca"))
     if dca_enabled:
-        dynamic_dca_enabled = bool(config_snapshot.get("dynamic_dca"))
-        dca_required_keys = (
-            [
-                ("mstc", "Set max safety order count."),
-                ("sos", "Set the first safety order deviation."),
-            ]
-            if dynamic_dca_enabled
-            else [
-                ("so", "Set the safety order amount."),
-                ("mstc", "Set max safety order count."),
-                ("sos", "Set the first safety order deviation."),
-                ("ss", "Set the safety order step scale."),
-                ("os", "Set the safety order volume scale."),
-            ]
-        )
-        for key, message in dca_required_keys:
-            if not _has_required_value(config_snapshot.get(key)):
-                blockers.append({"key": key, "message": message})
+        lifecycle = TradeLifecycleConfigView.from_config(config_snapshot)
+        if lifecycle.is_sidestep_mode():
+            if not _has_required_value(lifecycle.bearish_exit_strategy):
+                blockers.append(
+                    {
+                        "key": "sidestep_bearish_strategy",
+                        "message": "Choose a bearish sidestep strategy.",
+                    }
+                )
+            if not _has_required_value(lifecycle.reentry_strategy):
+                blockers.append(
+                    {
+                        "key": "sidestep_reentry_strategy",
+                        "message": "Choose a sidestep re-entry strategy.",
+                    }
+                )
+        else:
+            dynamic_dca_enabled = bool(config_snapshot.get("dynamic_dca"))
+            dca_required_keys = (
+                [
+                    ("mstc", "Set max safety order count."),
+                    ("sos", "Set the first safety order deviation."),
+                ]
+                if dynamic_dca_enabled
+                else [
+                    ("so", "Set the safety order amount."),
+                    ("mstc", "Set max safety order count."),
+                    ("sos", "Set the first safety order deviation."),
+                    ("ss", "Set the safety order step scale."),
+                    ("os", "Set the safety order volume scale."),
+                ]
+            )
+            for key, message in dca_required_keys:
+                if not _has_required_value(config_snapshot.get(key)):
+                    blockers.append({"key": key, "message": message})
 
     signal_name = str(config_snapshot.get("signal", "") or "").strip().lower()
     signal_settings = _parse_signal_settings(config_snapshot.get("signal_settings"))
@@ -172,18 +190,25 @@ def _find_live_activation_blockers(
     return blockers
 
 
-def _is_live_activation_attempt(raw_value: Any) -> bool:
-    """Return whether the payload tries to disable dry run through a generic path."""
+def _is_dry_run_enabled(raw_value: Any) -> bool:
+    """Return whether a raw config value resolves to dry-run mode."""
     normalized = _extract_config_update_value(raw_value)
-    return str(normalized).strip().lower() in {"false", "0", "no", "off"}
+    if isinstance(normalized, str):
+        return normalized.strip().lower() not in {"false", "0", "no", "off", ""}
+    return bool(normalized)
 
 
-def _validate_live_activation_boundary(updates: dict[str, Any]) -> str | None:
+def _validate_live_activation_boundary(
+    config: Config,
+    updates: dict[str, Any],
+) -> str | None:
     """Return an error when generic config updates try to switch the system live."""
     raw_value = updates.get(LIVE_ACTIVATION_KEY)
     if raw_value is None:
         return None
-    if _is_live_activation_attempt(raw_value):
+    current_dry_run = _is_dry_run_enabled(config.get(LIVE_ACTIVATION_KEY, True))
+    requested_dry_run = _is_dry_run_enabled(raw_value)
+    if current_dry_run and not requested_dry_run:
         return LIVE_ACTIVATION_DENIED_MESSAGE
     return None
 
@@ -315,7 +340,7 @@ async def _validate_config_updates(
         if error_message:
             return _config_update_conflict(error_message)
 
-    error_message = _validate_live_activation_boundary(updates)
+    error_message = _validate_live_activation_boundary(config, updates)
     if error_message:
         return _config_update_conflict(error_message)
 

@@ -5,6 +5,8 @@ from __future__ import annotations
 import re
 from datetime import datetime, timedelta, timezone
 
+_WEEKLY_BUCKET_ORIGIN = datetime(1970, 1, 5, tzinfo=timezone.utc)
+
 
 def timeframe_to_seconds(timerange: str) -> int:
     """Convert timeframe notation to seconds."""
@@ -33,6 +35,46 @@ def timeframe_to_milliseconds(timerange: str) -> int:
     return timeframe_to_seconds(timerange) * 1000
 
 
+def timeframe_bucket_origin_milliseconds(timerange: str) -> int:
+    """Return the bucket origin in milliseconds for the timeframe."""
+    normalized = str(timerange or "").strip().lower().replace("min", "m")
+    match = re.fullmatch(r"(\d+)\s*([mhdw])", normalized)
+    if not match:
+        return 0
+
+    if match.group(2) == "w":
+        return int(_WEEKLY_BUCKET_ORIGIN.timestamp() * 1000)
+    return 0
+
+
+def align_timestamp_to_bucket_floor(
+    timestamp_ms: int,
+    timeframe_ms: int,
+    origin_ms: int = 0,
+) -> int:
+    """Align a timestamp down to the active timeframe bucket boundary."""
+    if timeframe_ms <= 0:
+        return int(timestamp_ms)
+
+    delta = int(timestamp_ms) - int(origin_ms)
+    return ((delta // timeframe_ms) * timeframe_ms) + int(origin_ms)
+
+
+def align_timestamp_to_bucket_ceil(
+    timestamp_ms: int,
+    timeframe_ms: int,
+    origin_ms: int = 0,
+) -> int:
+    """Align a timestamp up to the next active timeframe bucket boundary."""
+    if timeframe_ms <= 0:
+        return int(timestamp_ms)
+
+    delta = int(timestamp_ms) - int(origin_ms)
+    return (((delta + timeframe_ms - 1) // timeframe_ms) * timeframe_ms) + int(
+        origin_ms
+    )
+
+
 def calculate_min_candle_date(
     *,
     timerange: str,
@@ -58,9 +100,14 @@ def resolve_required_history_window(
 ) -> tuple[int, int, int]:
     """Return normalized required history window and timeframe size."""
     timeframe_ms = max(1, timeframe_to_milliseconds(timeframe))
+    origin_ms = timeframe_bucket_origin_milliseconds(timeframe)
     now_dt = now or datetime.now(timezone.utc)
     now_ms = int(now_dt.timestamp() * 1000)
-    current_candle_start = now_ms - (now_ms % timeframe_ms)
+    current_candle_start = align_timestamp_to_bucket_floor(
+        now_ms,
+        timeframe_ms,
+        origin_ms,
+    )
     required_until = max(0, current_candle_start - timeframe_ms)
     requested_since = (
         int(since_ms)
@@ -69,7 +116,11 @@ def resolve_required_history_window(
     )
     required_since = max(
         0,
-        ((requested_since + timeframe_ms - 1) // timeframe_ms) * timeframe_ms,
+        align_timestamp_to_bucket_ceil(
+            requested_since,
+            timeframe_ms,
+            origin_ms,
+        ),
     )
     if required_since > required_until:
         required_since = required_until

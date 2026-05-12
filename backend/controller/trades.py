@@ -9,6 +9,7 @@ import helper
 from controller.responses import json_response
 from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
+from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trades import Trades
 from service.websocket_fanout import WebSocketFanout
 
@@ -35,6 +36,11 @@ async def _get_unsellable_trades_cached() -> list[dict[str, Any]]:
     return await trades.get_unsellable_trades()
 
 
+@helper.async_ttl_cache(maxsize=1, ttl=2)
+async def _get_waiting_campaigns_cached() -> list[dict[str, Any]]:
+    return await trades.get_waiting_trades()
+
+
 async def _build_open_trades_payload() -> str:
     """Build serialized payload for open-trades stream."""
     output = await _get_open_trades_cached()
@@ -50,6 +56,12 @@ async def _build_closed_trades_payload() -> str:
 async def _build_unsellable_trades_payload() -> str:
     """Build serialized payload for unsellable-trades stream."""
     output = await _get_unsellable_trades_cached()
+    return _json_dumps(output)
+
+
+async def _build_waiting_campaigns_payload() -> str:
+    """Build serialized payload for waiting-campaigns stream."""
+    output = await _get_waiting_campaigns_cached()
     return _json_dumps(output)
 
 
@@ -71,6 +83,12 @@ _unsellable_trades_fanout = WebSocketFanout(
     producer=_build_unsellable_trades_payload,
     logger=logging,
 )
+_waiting_campaigns_fanout = WebSocketFanout(
+    name="waiting_campaigns",
+    interval_seconds=5,
+    producer=_build_waiting_campaigns_payload,
+    logger=logging,
+)
 
 
 async def start_websocket_fanout() -> None:
@@ -78,6 +96,7 @@ async def start_websocket_fanout() -> None:
     await _open_trades_fanout.start()
     await _closed_trades_fanout.start()
     await _unsellable_trades_fanout.start()
+    await _waiting_campaigns_fanout.start()
 
 
 async def stop_websocket_fanout() -> None:
@@ -85,6 +104,7 @@ async def stop_websocket_fanout() -> None:
     await _open_trades_fanout.stop()
     await _closed_trades_fanout.stop()
     await _unsellable_trades_fanout.stop()
+    await _waiting_campaigns_fanout.stop()
 
 
 @websocket_stream(path="/trades/open", warn_on_data_discard=False)
@@ -117,6 +137,17 @@ async def unsellable_trades() -> AsyncGenerator[str, None]:
             yield output
     except (asyncio.CancelledError, WebSocketDisconnect):
         logging.info("Client disconnected from unsellable trades WebSocket")
+        return
+
+
+@websocket_stream(path="/trades/waiting", warn_on_data_discard=False)
+async def waiting_campaigns() -> AsyncGenerator[str, None]:
+    """WebSocket endpoint for streaming waiting-campaign summaries."""
+    try:
+        async for output in _waiting_campaigns_fanout.subscribe():
+            yield output
+    except (asyncio.CancelledError, WebSocketDisconnect):
+        logging.info("Client disconnected from waiting campaigns WebSocket")
         return
 
 
@@ -169,13 +200,52 @@ async def unsellable_trade_delete(trade_id: str) -> Any:
     return json_response({"result": "", "error": "Trade not found."}, 404)
 
 
+@post(path="/trades/unsellable/delete/all")
+async def unsellable_trades_delete_all() -> Any:
+    """Delete all unsellable trades after manual cleanup."""
+    deleted_count = await trades.delete_all_unsellable_trades()
+    if deleted_count is None:
+        return json_response(
+            {"result": "", "error": "Failed deleting unsellable trades."},
+            500,
+        )
+    return {"result": "deleted", "count": deleted_count}
+
+
+@post(path="/trades/waiting/stop/{campaign_id:str}")
+async def waiting_campaign_stop(campaign_id: str) -> Any:
+    """Stop a waiting sidestep campaign manually."""
+    sidestep_campaigns = await SpotSidestepCampaignService.instance()
+    stopped = await sidestep_campaigns.stop_campaign(campaign_id)
+    if stopped:
+        return {"result": "stopped"}
+    return json_response({"result": "", "error": "Campaign not found."}, 404)
+
+
+@post(path="/trades/waiting/activate/{campaign_id:str}")
+async def waiting_campaign_activate(campaign_id: str) -> Any:
+    """Force a waiting sidestep campaign back into an active long leg."""
+    sidestep_campaigns = await SpotSidestepCampaignService.instance()
+    activated = await sidestep_campaigns.activate_campaign(campaign_id)
+    if activated:
+        return {"result": "activated"}
+    return json_response(
+        {"result": "", "error": "Campaign activation failed."},
+        409,
+    )
+
+
 route_handlers = [
     open_trades,
     closed_trades,
     unsellable_trades,
+    waiting_campaigns,
     closed_trades_length,
     closed_trades_pagination,
     trade_executions,
+    unsellable_trades_delete_all,
     closed_trade_delete,
     unsellable_trade_delete,
+    waiting_campaign_stop,
+    waiting_campaign_activate,
 ]

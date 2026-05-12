@@ -30,3 +30,4 @@ def test_resolve_history_lookback_days_uses_timeframe_defaults() -> None:
     assert resolve_history_lookback_days({"timeframe": "1h"}) == 180
     assert resolve_history_lookback_days({"timeframe": "4h"}) == 365
     assert resolve_history_lookback_days({"timeframe": "1d"}) == 1095
+    assert resolve_history_lookback_days({"timeframe": "1w"}) == 1825

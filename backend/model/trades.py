@@ -17,6 +17,7 @@ class Trades(Model):
     price = fields.FloatField()
     symbol = fields.TextField()
     deal_id = fields.CharField(max_length=36, null=True)
+    campaign_id = fields.CharField(max_length=36, null=True)
     orderid = fields.TextField()
     bot = fields.TextField()
     ordertype = fields.TextField()
@@ -32,9 +33,10 @@ class Trades(Model):
         indexes = (
             ("symbol",),
             ("deal_id", "timestamp"),
+            ("campaign_id", "timestamp"),
             ("symbol", "baseorder"),
             ("symbol", "safetyorder", "baseorder"),
         )
 
     def __dict__(self):
-        return f"'id': {self.id}, 'timestamp': {self.timestamp}, 'ordersize': {self.ordersize}, 'amount': {self.ordersize}, 'price': {self.price}, 'symbol': {self.symbol}, 'deal_id': {self.deal_id}, 'orderid': {self.orderid}, 'bot': {self.bot}, 'ordertype': {self.ordertype}, 'baseorder': {self.baseorder}, 'safetyorder': {self.safetyorder}, 'direction': {self.direction}, 'side': {self.side}"
+        return f"'id': {self.id}, 'timestamp': {self.timestamp}, 'ordersize': {self.ordersize}, 'amount': {self.ordersize}, 'price': {self.price}, 'symbol': {self.symbol}, 'deal_id': {self.deal_id}, 'campaign_id': {self.campaign_id}, 'orderid': {self.orderid}, 'bot': {self.bot}, 'ordertype': {self.ordertype}, 'baseorder': {self.baseorder}, 'safetyorder': {self.safetyorder}, 'direction': {self.direction}, 'side': {self.side}"

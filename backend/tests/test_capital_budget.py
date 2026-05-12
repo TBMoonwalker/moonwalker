@@ -235,6 +235,44 @@ def test_open_trade_reserve_is_zero_when_safety_reserve_is_disabled() -> None:
     assert reserve == 0.0
 
 
+def test_waiting_sidestep_trade_reserve_counts_even_without_safety_reserve() -> None:
+    reserve = capital_budget_logic.estimate_open_trade_reserve(
+        {
+            "capital_reserve_safety_orders": False,
+            "dynamic_dca": False,
+        },
+        [
+            {
+                "symbol": "BTC/USDT",
+                "exposure_state": "flat_waiting_reentry",
+                "reserved_reentry_quote": 150.0,
+            }
+        ],
+    )
+
+    assert reserve == 150.0
+
+
+def test_reentry_buy_consumes_existing_waiting_reserve_credit() -> None:
+    order_quote, required_quote = (
+        capital_budget_logic.calculate_order_budget_requirement(
+            {
+                "capital_max_fund": 10_000,
+                "capital_reserve_safety_orders": False,
+            },
+            {
+                "symbol": "BTC/USDT",
+                "ordersize": 100.0,
+                "baseorder": True,
+                "capital_reserved_credit": 100.0,
+            },
+        )
+    )
+
+    assert order_quote == 100.0
+    assert required_quote == 0.0
+
+
 @pytest.mark.asyncio
 async def test_runtime_state_does_not_subtract_reserve_when_disabled(
     tmp_path,

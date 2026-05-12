@@ -49,6 +49,7 @@ class _DummyTradeExecutionsModel:
 
 class _DummyOpenTradeRow:
     deal_id = "618a4d43-8e8b-48bf-81cd-c56a31af9388"
+    campaign_id = None
     execution_history_complete = True
 
 

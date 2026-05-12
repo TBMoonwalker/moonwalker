@@ -71,17 +71,25 @@ def main() -> int:
     service_dir = backend_dir / "service"
 
     sys.path.insert(0, str(backend_dir))
-    from service.strategy_capability import REQUIRED_INDICATOR_METHODS
+    from service.strategy_capability import (
+        HIDDEN_STRATEGY_ALIASES,
+        REQUIRED_INDICATOR_METHODS,
+    )
 
     errors: list[str] = []
+    hidden_aliases = set(HIDDEN_STRATEGY_ALIASES)
 
     strategy_files = sorted(
         p
         for p in strategy_dir.glob("*.py")
-        if p.name != "__init__.py" and "__pycache__" not in p.parts
+        if (
+            p.name != "__init__.py"
+            and "__pycache__" not in p.parts
+            and p.stem not in hidden_aliases
+        )
     )
     strategy_names = {p.stem for p in strategy_files}
-    mapped_names = set(REQUIRED_INDICATOR_METHODS.keys())
+    mapped_names = set(REQUIRED_INDICATOR_METHODS.keys()) - hidden_aliases
 
     for strategy_name in sorted(strategy_names):
         if strategy_name not in REQUIRED_INDICATOR_METHODS:

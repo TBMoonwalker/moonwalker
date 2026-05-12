@@ -53,6 +53,12 @@ def _resolve_sqlite_db_path(db_url: str) -> str:
 
 def _extract_corrupted_index_name(messages: list[str]) -> str | None:
     """Return the damaged SQLite index name when integrity_check is index-only."""
+    index_names = _extract_corrupted_index_names(messages)
+    return index_names[0] if index_names and len(index_names) == 1 else None
+
+
+def _extract_corrupted_index_names(messages: list[str]) -> list[str] | None:
+    """Return damaged SQLite index names when integrity_check is index-only."""
     if not messages:
         return None
 
@@ -72,7 +78,14 @@ def _extract_corrupted_index_name(messages: list[str]) -> str | None:
         if not matched:
             return None
 
-    return next(iter(index_names)) if len(index_names) == 1 else None
+    return sorted(index_names) if index_names else None
+
+
+def _integrity_check_is_clean(messages: list[str]) -> bool:
+    """Return True when integrity_check reported a healthy database."""
+    if not messages:
+        return False
+    return all(str(message).strip().lower() == "ok" for message in messages)
 
 
 def _plan_additive_column_statements(
@@ -105,6 +118,16 @@ def _build_sqlite_corruption_message(
     integrity_messages: list[str],
 ) -> str:
     """Return operator guidance for detected SQLite corruption."""
+    corrupted_index_names = _extract_corrupted_index_names(integrity_messages)
+    if corrupted_index_names and len(corrupted_index_names) > 1:
+        return (
+            f"SQLite index corruption detected in {db_path} "
+            f"({', '.join(corrupted_index_names)}). Moonwalker cannot safely continue. "
+            f"First try `sqlite3 {db_path} 'REINDEX; PRAGMA integrity_check;'`. "
+            "If integrity_check still reports errors, restore from "
+            "a known-good backup or recover the database before restarting."
+        )
+
     corrupted_index_name = _extract_corrupted_index_name(integrity_messages)
     if corrupted_index_name:
         return (
@@ -238,6 +261,11 @@ class Database:
             ("tickers", "idx_tickers_timestamp", ("timestamp",)),
             ("trades", "idx_trades_symbol", ("symbol",)),
             ("trades", "idx_trades_deal_id_timestamp", ("deal_id", "timestamp")),
+            (
+                "trades",
+                "idx_trades_campaign_id_timestamp",
+                ("campaign_id", "timestamp"),
+            ),
             ("trades", "idx_trades_symbol_baseorder", ("symbol", "baseorder")),
             (
                 "trades",
@@ -246,9 +274,20 @@ class Database:
             ),
             ("closedtrades", "idx_closedtrades_close_date", ("close_date",)),
             (
+                "closedtrades",
+                "idx_closedtrades_campaign_id_close_date",
+                ("campaign_id", "close_date"),
+            ),
+            ("closedtrades", "idx_closedtrades_close_reason", ("close_reason",)),
+            (
                 "tradeexecutions",
                 "idx_tradeexecutions_deal_time",
                 ("deal_id", "timestamp"),
+            ),
+            (
+                "tradeexecutions",
+                "idx_tradeexecutions_campaign_time",
+                ("campaign_id", "timestamp"),
             ),
             (
                 "tradeexecutions",
@@ -256,6 +295,33 @@ class Database:
                 ("symbol", "timestamp"),
             ),
             ("tradeexecutions", "idx_tradeexecutions_side_role", ("side", "role")),
+            ("spotcampaigns", "idx_spotcampaigns_symbol", ("symbol",)),
+            ("spotcampaigns", "idx_spotcampaigns_state_symbol", ("state", "symbol")),
+            (
+                "spotcampaigns",
+                "idx_spotcampaigns_current_deal_id",
+                ("current_deal_id",),
+            ),
+            (
+                "spotcampaigns",
+                "idx_spotcampaigns_last_transition_at",
+                ("last_transition_at",),
+            ),
+            (
+                "opentrades",
+                "idx_opentrades_exposure_state_symbol",
+                ("exposure_state", "symbol"),
+            ),
+            (
+                "opentrades",
+                "idx_opentrades_lifecycle_mode",
+                ("lifecycle_mode",),
+            ),
+            (
+                "spotcampaigns",
+                "idx_spotcampaigns_lifecycle_state_symbol",
+                ("lifecycle_mode", "state", "symbol"),
+            ),
             (
                 "tradereplaycandles",
                 "idx_tradereplaycandles_deal_time",
@@ -282,6 +348,7 @@ class Database:
         desired_unique_indexes: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             ("opentrades", "uidx_opentrades_deal_id", ("deal_id",)),
             ("closedtrades", "uidx_closedtrades_deal_id", ("deal_id",)),
+            ("spotcampaigns", "uidx_spotcampaigns_campaign_id", ("campaign_id",)),
             ("unsellabletrades", "uidx_unsellabletrades_deal_id", ("deal_id",)),
         )
         existing_signatures: set[tuple[str, tuple[str, ...]]] = set()
@@ -333,18 +400,50 @@ class Database:
 
         connection = Tortoise.get_connection("default")
         table_columns = {
-            "trades": (("deal_id", "TEXT NULL"),),
+            "trades": (
+                ("deal_id", "TEXT NULL"),
+                ("campaign_id", "TEXT NULL"),
+            ),
+            "tradeexecutions": (("campaign_id", "TEXT NULL"),),
             "opentrades": (
                 ("deal_id", "TEXT NULL"),
+                ("campaign_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 1"),
+                (
+                    "lifecycle_mode",
+                    "TEXT NOT NULL DEFAULT 'classic_dca'",
+                ),
+                (
+                    "exposure_state",
+                    "TEXT NOT NULL DEFAULT 'long_exposed'",
+                ),
+                ("reserved_reentry_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("waiting_reference_price", "REAL NOT NULL DEFAULT 0.0"),
+                ("waiting_reference_amount", "REAL NOT NULL DEFAULT 0.0"),
+                ("waiting_reference_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("virtual_waiting_profit", "REAL NOT NULL DEFAULT 0.0"),
+                ("virtual_waiting_profit_percent", "REAL NOT NULL DEFAULT 0.0"),
+                ("last_transition_at", "TEXT NULL"),
             ),
             "closedtrades": (
                 ("deal_id", "TEXT NULL"),
+                ("campaign_id", "TEXT NULL"),
+                ("close_reason", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
             ),
             "unsellabletrades": (
                 ("deal_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
+            ),
+            "spotcampaigns": (
+                (
+                    "lifecycle_mode",
+                    "TEXT NOT NULL DEFAULT 'sidestep_reentry'",
+                ),
+                ("principal_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("reserved_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("cumulative_realized_quote", "REAL NOT NULL DEFAULT 0.0"),
+                ("cumulative_realized_percent", "REAL NOT NULL DEFAULT 0.0"),
             ),
         }
 
@@ -464,6 +563,54 @@ class Database:
                 )
                 existing_signatures.add(signature)
 
+    async def _backfill_legacy_campaign_closed_trade_percentages(self) -> None:
+        """Repair legacy campaign close summaries that lost principal quote."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        candidate_rows = await model.ClosedTrades.all().values(
+            "id",
+            "campaign_id",
+            "profit",
+            "profit_percent",
+            "cost",
+            "amount",
+            "tp_price",
+        )
+        repaired_count = 0
+        for row in candidate_rows:
+            campaign_id = str(row.get("campaign_id") or "").strip()
+            if not campaign_id:
+                continue
+
+            stored_profit_percent = float(row.get("profit_percent") or 0.0)
+            stored_cost = float(row.get("cost") or 0.0)
+            if abs(stored_profit_percent) > 1e-12 or stored_cost > 0:
+                continue
+
+            amount = float(row.get("amount") or 0.0)
+            sell_price = float(row.get("tp_price") or 0.0)
+            profit = float(row.get("profit") or 0.0)
+            if amount <= 0 or sell_price <= 0 or abs(profit) <= 1e-12:
+                continue
+
+            inferred_principal_quote = (amount * sell_price) - profit
+            if inferred_principal_quote <= 0:
+                continue
+
+            inferred_profit_percent = (profit / inferred_principal_quote) * 100
+            await model.ClosedTrades.filter(id=row["id"]).update(
+                cost=inferred_principal_quote,
+                profit_percent=inferred_profit_percent,
+            )
+            repaired_count += 1
+
+        if repaired_count > 0:
+            logging.info(
+                "Repaired %s legacy campaign closed-trade percentage rows.",
+                repaired_count,
+            )
+
     async def _backfill_trade_replay_candles(self) -> None:
         """Backfill per-deal replay candles for existing closed trades."""
         if not self.db_url.startswith("sqlite://"):
@@ -562,6 +709,48 @@ class Database:
 
         return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
 
+    async def _reindex_sqlite_database(self) -> None:
+        """Rebuild all indexes for the active SQLite database."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        await connection.execute_query("REINDEX")
+
+    async def _repair_index_only_corruption_if_needed(self) -> None:
+        """Repair index-only SQLite corruption before runtime services start."""
+        integrity_messages = await self._run_sqlite_integrity_check()
+        if not integrity_messages:
+            return
+        if _integrity_check_is_clean(integrity_messages):
+            return
+
+        corrupted_index_names = _extract_corrupted_index_names(integrity_messages)
+        if corrupted_index_names is None:
+            db_path = _resolve_sqlite_db_path(self.db_url)
+            message = _build_sqlite_corruption_message(db_path, integrity_messages)
+            logging.error(message)
+            raise RuntimeError(message)
+
+        logging.warning(
+            "SQLite index-only corruption detected in %s for indexes: %s. "
+            "Attempting automatic REINDEX before startup continues.",
+            _resolve_sqlite_db_path(self.db_url),
+            ", ".join(corrupted_index_names),
+        )
+        await self._reindex_sqlite_database()
+        repaired_messages = await self._run_sqlite_integrity_check()
+        if _integrity_check_is_clean(repaired_messages):
+            logging.warning(
+                "SQLite index corruption repaired successfully via REINDEX."
+            )
+            return
+
+        db_path = _resolve_sqlite_db_path(self.db_url)
+        message = _build_sqlite_corruption_message(db_path, repaired_messages)
+        logging.error(message)
+        raise RuntimeError(message)
+
     async def _run_schema_init_steps(self) -> None:
         """Run additive schema and index maintenance for existing databases."""
         await self._ensure_open_trades_columns()
@@ -572,6 +761,7 @@ class Database:
     async def _run_backfill_init_steps(self) -> None:
         """Run init-time backfills required before the runtime starts."""
         await self._backfill_trade_ledger_rows()
+        await self._backfill_legacy_campaign_closed_trade_percentages()
 
     async def init(self) -> None:
         """Initialize the database connection and generate schemas.
@@ -594,6 +784,7 @@ class Database:
             # Generate the schema
             await Tortoise.generate_schemas()
             await self._run_schema_init_steps()
+            await self._repair_index_only_corruption_if_needed()
             await self._run_backfill_init_steps()
             logging.info("Database initialized successfully")
         except Exception as exc:  # noqa: BLE001 - Catch all exceptions during init

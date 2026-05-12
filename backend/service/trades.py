@@ -9,6 +9,14 @@ from uuid import UUID, uuid4
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
+from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
+from service.spot_campaign_types import (
+    NON_TERMINAL_CLOSE_REASON_VALUES,
+    SpotCampaignState,
+    TradeExposureState,
+    TradeLifecycleMode,
+)
+from service.trade_math import parse_date_to_ms
 from tortoise.exceptions import BaseORMException
 from tortoise.expressions import F
 from tortoise.functions import Sum
@@ -123,6 +131,129 @@ class Trades:
             ),
         }
 
+    @classmethod
+    def _apply_campaign_profit_fields(
+        cls,
+        row: dict[str, Any],
+        campaign: dict[str, Any] | None,
+    ) -> None:
+        """Attach campaign-wide live PnL fields for UI read models.
+
+        These fields intentionally do not replace the stored `profit` / `cost`
+        accounting values on `OpenTrades`. The dashboard and capital services
+        still rely on those fields as economic truth for the currently exposed
+        leg, while the tables need a mission-level progress view.
+        """
+        is_waiting = (
+            str(row.get("exposure_state") or "")
+            == TradeExposureState.FLAT_WAITING_REENTRY.value
+        )
+        principal_quote = cls._float_or_zero((campaign or {}).get("principal_quote"))
+        realized_profit = cls._float_or_zero(
+            (campaign or {}).get("cumulative_realized_quote")
+        )
+        realized_profit_percent = cls._float_or_zero(
+            (campaign or {}).get("cumulative_realized_percent")
+        )
+        live_delta = cls._float_or_zero(
+            row.get("virtual_waiting_profit") if is_waiting else row.get("profit")
+        )
+        fallback_percent = cls._float_or_zero(
+            row.get("virtual_waiting_profit_percent")
+            if is_waiting
+            else row.get("profit_percent")
+        )
+        total_profit = realized_profit + live_delta
+        total_profit_percent = (
+            (total_profit / principal_quote) * 100 if principal_quote > 0 else 0.0
+        )
+        if principal_quote <= 0:
+            principal_quote = cls._float_or_zero(row.get("cost"))
+            if principal_quote <= 0 and is_waiting:
+                principal_quote = cls._float_or_zero(row.get("waiting_reference_quote"))
+            total_profit_percent = fallback_percent
+
+        row["campaign_principal_quote"] = principal_quote
+        row["campaign_realized_profit"] = realized_profit
+        row["campaign_realized_profit_percent"] = realized_profit_percent
+        row["campaign_total_profit"] = total_profit
+        row["campaign_total_profit_percent"] = total_profit_percent
+        row["display_profit"] = total_profit
+        row["display_profit_percent"] = total_profit_percent
+
+    @staticmethod
+    def _trade_entry_sort_key(row: dict[str, Any]) -> tuple[int, int, int]:
+        """Sort trade rows by the timestamp shown in their respective tables."""
+        lifecycle_mode = str(row.get("lifecycle_mode") or "")
+        if lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
+            entry_value = row.get("campaign_started_at") or row.get("open_date")
+        else:
+            entry_value = row.get("open_date") or row.get("campaign_started_at")
+        entry_ms = (
+            parse_date_to_ms(str(entry_value).strip())
+            if entry_value is not None
+            else None
+        )
+        row_id = int(row.get("id") or 0)
+        if entry_ms is None:
+            return (1, row_id, row_id)
+        return (0, entry_ms, row_id)
+
+    @staticmethod
+    def _format_timestamp_ms(timestamp_raw: Any) -> str | None:
+        """Format a Unix millisecond timestamp as a stable trade date string."""
+        try:
+            return format_trade_datetime(trade_datetime_from_ms(float(timestamp_raw)))
+        except (TypeError, ValueError):
+            return None
+
+    @classmethod
+    def _resolve_display_open_date(
+        cls,
+        *,
+        order: dict[str, Any],
+        campaign: dict[str, Any] | None,
+        baseorder: dict[str, Any] | None,
+    ) -> str | None:
+        """Return the original trade date to display and sort by."""
+        lifecycle_mode = str(order.get("lifecycle_mode") or "")
+        if lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
+            campaign_started_at = str((campaign or {}).get("started_at") or "").strip()
+            if campaign_started_at:
+                return campaign_started_at
+            open_date = str(order.get("open_date") or "").strip()
+            if open_date:
+                return open_date
+            return cls._format_timestamp_ms((baseorder or {}).get("timestamp"))
+
+        baseorder_open_date = cls._format_timestamp_ms(
+            (baseorder or {}).get("timestamp")
+        )
+        if baseorder_open_date:
+            return baseorder_open_date
+        open_date = str(order.get("open_date") or "").strip()
+        return open_date or None
+
+    @staticmethod
+    def _derive_campaign_runtime_state(
+        open_trade: dict[str, Any] | None,
+        campaign: dict[str, Any] | None,
+    ) -> tuple[str | None, str | None]:
+        """Resolve lifecycle/exposure from campaign truth when available."""
+        lifecycle_mode = open_trade.get("lifecycle_mode") if open_trade else None
+        exposure_state = open_trade.get("exposure_state") if open_trade else None
+        campaign_lifecycle_mode = str((campaign or {}).get("lifecycle_mode") or "")
+        campaign_state = str((campaign or {}).get("state") or "")
+
+        if campaign_lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
+            lifecycle_mode = campaign_lifecycle_mode
+            if campaign_state == SpotCampaignState.FLAT_WAITING_REENTRY.value:
+                exposure_state = TradeExposureState.FLAT_WAITING_REENTRY.value
+            elif campaign_state == SpotCampaignState.ACTIVE_LONG.value:
+                exposure_state = TradeExposureState.LONG_EXPOSED.value
+
+        return lifecycle_mode, exposure_state
+
     async def _execute_db(
         self,
         operation: Awaitable[T],
@@ -208,14 +339,94 @@ class Trades:
             [],
         )
 
-    async def get_open_trades(self) -> list[dict[str, Any]]:
+    @staticmethod
+    def _build_flat_waiting_trade_data(
+        symbol: str,
+        open_trade: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Return active-flat trade context when no live exposure legs exist."""
+        transition_timestamp = str(
+            open_trade.get("last_transition_at")
+            or open_trade.get("open_date")
+            or datetime.now(timezone.utc).timestamp() * 1000
+        )
+        return {
+            "timestamp": transition_timestamp,
+            "fee": 0.0,
+            "total_cost": 0.0,
+            "total_amount": 0.0,
+            "sellable_amount": 0.0,
+            "symbol": symbol,
+            "deal_id": open_trade.get("deal_id"),
+            "campaign_id": open_trade.get("campaign_id"),
+            "lifecycle_mode": open_trade.get("lifecycle_mode"),
+            "exposure_state": open_trade.get("exposure_state"),
+            "direction": "long",
+            "side": "buy",
+            "bot": f"sidestep_{symbol}",
+            "bo_price": 0.0,
+            "current_price": float(open_trade.get("current_price") or 0.0),
+            "safetyorders": [],
+            "safetyorders_count": 0,
+            "ordertype": "market",
+            "open_date": open_trade.get("open_date"),
+            "last_transition_at": open_trade.get("last_transition_at"),
+            "tp_limit_order_id": None,
+            "tp_limit_order_price": None,
+            "tp_limit_order_amount": None,
+            "tp_limit_order_armed_at": None,
+            "reserved_reentry_quote": float(
+                open_trade.get("reserved_reentry_quote") or 0.0
+            ),
+            "waiting_reference_price": float(
+                open_trade.get("waiting_reference_price") or 0.0
+            ),
+            "waiting_reference_amount": float(
+                open_trade.get("waiting_reference_amount") or 0.0
+            ),
+            "waiting_reference_quote": float(
+                open_trade.get("waiting_reference_quote") or 0.0
+            ),
+            "virtual_waiting_profit": float(
+                open_trade.get("virtual_waiting_profit") or 0.0
+            ),
+            "virtual_waiting_profit_percent": float(
+                open_trade.get("virtual_waiting_profit_percent") or 0.0
+            ),
+            "campaign_principal_quote": 0.0,
+            "campaign_realized_profit": 0.0,
+            "campaign_realized_profit_percent": 0.0,
+            "campaign_total_profit": float(
+                open_trade.get("virtual_waiting_profit") or 0.0
+            ),
+            "campaign_total_profit_percent": float(
+                open_trade.get("virtual_waiting_profit_percent") or 0.0
+            ),
+            "display_profit": float(open_trade.get("virtual_waiting_profit") or 0.0),
+            "display_profit_percent": float(
+                open_trade.get("virtual_waiting_profit_percent") or 0.0
+            ),
+            "is_unsellable": False,
+            "unsellable_reason": None,
+            "unsellable_amount": 0.0,
+            "unsellable_min_notional": None,
+            "unsellable_estimated_notional": None,
+        }
+
+    async def get_open_trades(
+        self,
+        *,
+        exposure_state: str = TradeExposureState.LONG_EXPOSED.value,
+    ) -> list[dict[str, Any]]:
         """
         Gives back the open orders including all base
         and safetyorders
         """
 
         try:
-            orders = await model.OpenTrades.all().values()
+            orders = await model.OpenTrades.filter(
+                exposure_state=exposure_state
+            ).values()
             orders = [
                 order
                 for order in orders
@@ -227,6 +438,11 @@ class Trades:
             symbols = [order["symbol"] for order in orders]
             if not symbols:
                 return []
+            campaign_ids = [
+                str(order.get("campaign_id") or "").strip()
+                for order in orders
+                if str(order.get("campaign_id") or "").strip()
+            ]
 
             baseorders = await model.Trades.filter(
                 Q(baseorder=True), Q(symbol__in=symbols), join_type="AND"
@@ -237,6 +453,23 @@ class Trades:
                 Q(symbol__in=symbols),
                 join_type="AND",
             ).values()
+            campaigns_by_id: dict[str, dict[str, Any]] = {}
+            if campaign_ids:
+                campaign_rows = await model.SpotCampaigns.filter(
+                    campaign_id__in=campaign_ids
+                ).values(
+                    "campaign_id",
+                    "started_at",
+                    "sidestep_count",
+                    "principal_quote",
+                    "cumulative_realized_quote",
+                    "cumulative_realized_percent",
+                )
+                campaigns_by_id = {
+                    str(row.get("campaign_id") or "").strip(): row
+                    for row in campaign_rows
+                    if str(row.get("campaign_id") or "").strip()
+                }
 
             base_by_symbol = {}
             for order in baseorders:
@@ -254,11 +487,33 @@ class Trades:
                 safety = safety_by_symbol.get(order["symbol"])
                 if safety:
                     order["safetyorders"] = safety
+                campaign = campaigns_by_id.get(str(order.get("campaign_id") or ""))
+                display_open_date = self._resolve_display_open_date(
+                    order=order,
+                    campaign=campaign,
+                    baseorder=baseorder,
+                )
+                order["open_date"] = display_open_date
+                order["campaign_started_at"] = (
+                    str((campaign or {}).get("started_at") or "").strip()
+                    or display_open_date
+                )
+                order["sidestep_count"] = int(
+                    (campaign or {}).get("sidestep_count") or 0
+                )
+                self._apply_campaign_profit_fields(order, campaign)
+            orders.sort(key=self._trade_entry_sort_key)
             return orders
         except BaseORMException as e:
             # Broad catch to keep open trades endpoint responsive.
             logging.error("Error getting open orders. Cause: %s", e)
             return []
+
+    async def get_waiting_trades(self) -> list[dict[str, Any]]:
+        """Return active-flat sidestep rows using the shared open-trade shape."""
+        return await self.get_open_trades(
+            exposure_state=TradeExposureState.FLAT_WAITING_REENTRY.value
+        )
 
     async def get_unsellable_trades(self) -> list[dict[str, Any]]:
         """Return archived unsellable trade remnants."""
@@ -268,22 +523,23 @@ class Trades:
             [],
         )
 
+    @staticmethod
+    def _visible_closed_trades_query():
+        """Return the closed-trade query used for terminal user-facing history."""
+        return model.ClosedTrades.filter(
+            Q(close_reason__isnull=True)
+            | ~Q(close_reason__in=NON_TERMINAL_CLOSE_REASON_VALUES)
+        )
+
     async def get_closed_trades(self, page: int = 0) -> list[dict[str, Any]]:
         """Return paginated closed trades."""
         try:
             size = self.CLOSED_TRADES_PAGE_SIZE
+            query = self._visible_closed_trades_query().order_by("-id")
             if page == 0:
-                orders = (
-                    await model.ClosedTrades.all().order_by("-id").limit(size).values()
-                )
+                orders = await query.limit(size).values()
             else:
-                orders = (
-                    await model.ClosedTrades.all()
-                    .order_by("-id")
-                    .offset(page)
-                    .limit(size)
-                    .values()
-                )
+                orders = await query.offset(page).limit(size).values()
             return orders
         except BaseORMException as e:
             # Broad catch to keep closed trades endpoint responsive.
@@ -291,11 +547,21 @@ class Trades:
             return []
 
     async def get_trade_executions(self, deal_id: str) -> list[dict[str, Any]]:
-        """Return execution rows for one deal in chronological order."""
+        """Return execution rows for one deal or one sidestep campaign."""
         try:
             normalized_deal_id = str(UUID(str(deal_id)))
         except (TypeError, ValueError):
             return []
+
+        campaign_id = await self._resolve_execution_campaign_id(normalized_deal_id)
+        if campaign_id:
+            return await self._execute_db(
+                model.TradeExecutions.filter(campaign_id=campaign_id)
+                .order_by("timestamp", "id")
+                .values(),
+                f"Error getting trade executions for sidestep campaign {campaign_id}.",
+                [],
+            )
 
         return await self._execute_db(
             model.TradeExecutions.filter(deal_id=normalized_deal_id)
@@ -305,10 +571,55 @@ class Trades:
             [],
         )
 
+    async def _resolve_execution_campaign_id(
+        self,
+        normalized_deal_id: str,
+    ) -> str | None:
+        """Return a sidestep campaign id when replay should span multiple deal legs."""
+        execution_rows = await self._execute_db(
+            model.TradeExecutions.filter(deal_id=normalized_deal_id)
+            .limit(1)
+            .values("campaign_id"),
+            f"Error looking up execution campaign for {normalized_deal_id}.",
+            [],
+        )
+        execution = execution_rows[0] if execution_rows else None
+        campaign_id = str((execution or {}).get("campaign_id") or "").strip()
+        if not campaign_id:
+            return None
+
+        campaign_rows = await self._execute_db(
+            model.SpotCampaigns.filter(campaign_id=campaign_id)
+            .limit(1)
+            .values("lifecycle_mode"),
+            f"Error loading sidestep campaign metadata for {campaign_id}.",
+            [],
+        )
+        campaign = campaign_rows[0] if campaign_rows else None
+        if (
+            str((campaign or {}).get("lifecycle_mode") or "")
+            == TradeLifecycleMode.SIDESTEP_REENTRY.value
+        ):
+            return campaign_id
+
+        campaign_execution_rows = await self._execute_db(
+            model.TradeExecutions.filter(campaign_id=campaign_id).values("deal_id"),
+            f"Error enumerating execution deals for campaign {campaign_id}.",
+            [],
+        )
+        distinct_deal_ids = {
+            str(row.get("deal_id") or "").strip()
+            for row in campaign_execution_rows
+            if str(row.get("deal_id") or "").strip()
+        }
+        if len(distinct_deal_ids) > 1:
+            return campaign_id
+        return None
+
     async def get_closed_trades_length(self) -> int:
         """Return the total number of closed trades."""
         return await self._execute_db(
-            model.ClosedTrades.all().count(),
+            self._visible_closed_trades_query().count(),
             "Error getting closed order length.",
             0,
         )
@@ -321,6 +632,55 @@ class Trades:
             f"Error deleting unsellable trade {trade_id}.",
         )
         return deleted_count > 0
+
+    async def delete_all_unsellable_trades(self) -> int | None:
+        """Delete all unsellable trades and orphaned execution history."""
+
+        async def _delete_all_summaries() -> int:
+            async with in_transaction() as conn:
+                summary_rows = (
+                    await model.UnsellableTrades.all().using_db(conn).values("deal_id")
+                )
+                if not summary_rows:
+                    return 0
+
+                deleted_count = (
+                    await model.UnsellableTrades.all().using_db(conn).delete()
+                )
+                deal_ids: set[str] = set()
+                for row in summary_rows:
+                    deal_id = str(row.get("deal_id") or "").strip()
+                    if deal_id:
+                        deal_ids.add(deal_id)
+
+                for deal_id in deal_ids:
+                    linked_rows = (
+                        await model.ClosedTrades.filter(deal_id=deal_id)
+                        .using_db(conn)
+                        .count()
+                    )
+                    linked_rows += (
+                        await model.UnsellableTrades.filter(deal_id=deal_id)
+                        .using_db(conn)
+                        .count()
+                    )
+                    if linked_rows == 0:
+                        await model.TradeReplayCandles.filter(
+                            deal_id=deal_id,
+                        ).using_db(conn).delete()
+                        await model.TradeExecutions.filter(
+                            deal_id=deal_id,
+                        ).using_db(conn).delete()
+                return deleted_count
+
+        try:
+            return await run_sqlite_write_with_retry(
+                _delete_all_summaries,
+                "deleting all unsellable trades",
+            )
+        except BaseORMException as exc:
+            self._log_db_error("Error deleting all unsellable trades.", exc)
+            return None
 
     async def update_open_trades(self, payload: dict[str, Any], symbol: str) -> None:
         """Update open trades for a symbol."""
@@ -403,6 +763,11 @@ class Trades:
                     return
 
                 deal_id = open_trade.deal_id or str(uuid4())
+                campaign_id = (
+                    str(open_trade.campaign_id).strip()
+                    if open_trade.campaign_id
+                    else None
+                )
                 history_complete = bool(open_trade.execution_history_complete) and bool(
                     execution_rows
                 )
@@ -434,6 +799,7 @@ class Trades:
                         continue
                     await model.TradeExecutions.create(
                         deal_id=deal_id,
+                        campaign_id=campaign_id,
                         symbol=str(execution.get("symbol") or symbol),
                         side=str(execution.get("side") or "sell"),
                         role=str(execution.get("role") or "partial_sell"),
@@ -636,6 +1002,20 @@ class Trades:
             open_trade = opentrades[0] if opentrades else None
             if opentrades:
                 current_price = opentrades[0]["current_price"]
+            campaign = None
+            if open_trade and str(open_trade.get("campaign_id") or "").strip():
+                campaign_rows = (
+                    await model.SpotCampaigns.filter(
+                        campaign_id=str(open_trade.get("campaign_id") or "").strip()
+                    )
+                    .limit(1)
+                    .values("campaign_id", "lifecycle_mode", "state")
+                )
+                campaign = campaign_rows[0] if campaign_rows else None
+            lifecycle_mode, exposure_state = self._derive_campaign_runtime_state(
+                open_trade,
+                campaign,
+            )
 
             baseorder = None
             latest_order = None
@@ -661,6 +1041,19 @@ class Trades:
                     safetyorders.append(safetyorder)
 
             if not latest_order:
+                if (
+                    open_trade
+                    and str(exposure_state or "")
+                    == TradeExposureState.FLAT_WAITING_REENTRY.value
+                ):
+                    return self._build_flat_waiting_trade_data(
+                        symbol,
+                        {
+                            **open_trade,
+                            "lifecycle_mode": lifecycle_mode,
+                            "exposure_state": exposure_state,
+                        },
+                    )
                 return None
             if not baseorder:
                 baseorder = min(trades, key=lambda trade: float(trade["timestamp"]))
@@ -686,6 +1079,14 @@ class Trades:
                 "total_amount": total_amount,
                 "sellable_amount": sellable_amount,
                 "symbol": latest_order["symbol"],
+                "deal_id": latest_order.get("deal_id"),
+                "campaign_id": (
+                    open_trade.get("campaign_id")
+                    if open_trade and open_trade.get("campaign_id") is not None
+                    else latest_order.get("campaign_id")
+                ),
+                "lifecycle_mode": lifecycle_mode,
+                "exposure_state": exposure_state,
                 "direction": latest_order["direction"],
                 "side": latest_order["side"],
                 "bot": latest_order["bot"],
@@ -694,6 +1095,7 @@ class Trades:
                 "safetyorders": safetyorders,
                 "safetyorders_count": safetyorders_count,
                 "ordertype": baseorder["ordertype"],
+                "open_date": open_trade.get("open_date") if open_trade else None,
                 "tp_limit_order_id": (
                     open_trade.get("tp_limit_order_id") if open_trade else None
                 ),
@@ -706,9 +1108,41 @@ class Trades:
                 "tp_limit_order_armed_at": (
                     open_trade.get("tp_limit_order_armed_at") if open_trade else None
                 ),
+                "last_transition_at": (
+                    open_trade.get("last_transition_at") if open_trade else None
+                ),
+                "reserved_reentry_quote": (
+                    float(open_trade.get("reserved_reentry_quote") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "waiting_reference_price": (
+                    float(open_trade.get("waiting_reference_price") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "waiting_reference_amount": (
+                    float(open_trade.get("waiting_reference_amount") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "waiting_reference_quote": (
+                    float(open_trade.get("waiting_reference_quote") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "virtual_waiting_profit": (
+                    float(open_trade.get("virtual_waiting_profit") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "virtual_waiting_profit_percent": (
+                    float(open_trade.get("virtual_waiting_profit_percent") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
                 **unsellable_state,
             }
-
             return trade_data
         except BaseORMException:
             # Broad catch to return None when trade aggregation fails.
@@ -716,8 +1150,22 @@ class Trades:
 
     async def get_symbols(self) -> list[str]:
         """Return distinct trade symbols."""
-        return await self._execute_db(
-            model.Trades.all().distinct().values_list("symbol", flat=True),
+        rows = await self._execute_db(
+            model.OpenTrades.all().values(
+                "symbol",
+                "unsellable_amount",
+                "unsellable_reason",
+            ),
             "Error getting trade symbols.",
             [],
         )
+        symbols: list[str] = []
+        for row in rows:
+            if float(row.get("unsellable_amount") or 0.0) > 0 and row.get(
+                "unsellable_reason"
+            ):
+                continue
+            symbol = str(row.get("symbol") or "").strip()
+            if symbol:
+                symbols.append(symbol)
+        return symbols

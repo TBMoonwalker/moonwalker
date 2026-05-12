@@ -122,6 +122,7 @@ const themeOverrides = computed(() => {
 const open_trade_store = useWebSocketDataStore("openTrades")
 const closed_trade_store = useWebSocketDataStore("closedTrades")
 const unsellable_trade_store = useWebSocketDataStore("unsellableTrades")
+const waiting_campaign_store = useWebSocketDataStore("waitingCampaigns")
 const statistics_store = useWebSocketDataStore("statistics")
 const wsWatchdogEnabled = ref(DEFAULT_WS_WATCHDOG_ENABLED)
 const wsHealthcheckIntervalMs = ref(DEFAULT_WS_HEALTHCHECK_INTERVAL_MS)
@@ -260,6 +261,11 @@ const managedSockets = [
   'unsellableTrades',
   buildWsUrl('/trades/unsellable'),
   unsellable_trade_store,
+  ),
+  createManagedSocket(
+  'waitingCampaigns',
+  buildWsUrl('/trades/waiting'),
+  waiting_campaign_store,
   ),
   createManagedSocket(
   'statistics',

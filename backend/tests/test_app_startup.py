@@ -97,6 +97,23 @@ class _FakeAutopilotMemoryFactory:
         return _FakeAutopilotMemoryService()
 
 
+class _FakeSidestepCampaignService:
+    def bind_watcher_queue(self, _queue) -> None:
+        return None
+
+    async def start(self) -> None:
+        return None
+
+    async def shutdown(self) -> None:
+        return None
+
+
+class _FakeSidestepCampaignFactory:
+    @staticmethod
+    async def instance() -> _FakeSidestepCampaignService:
+        return _FakeSidestepCampaignService()
+
+
 async def _noop_async(*_args, **_kwargs) -> None:
     return None
 
@@ -118,6 +135,11 @@ async def test_startup_schedules_replay_backfill_as_background_task(
         app_module,
         "AutopilotMemoryService",
         _FakeAutopilotMemoryFactory,
+    )
+    monkeypatch.setattr(
+        app_module,
+        "SpotSidestepCampaignService",
+        _FakeSidestepCampaignFactory,
     )
     monkeypatch.setattr(app_module, "Signal", _FakeSignal)
     monkeypatch.setattr(

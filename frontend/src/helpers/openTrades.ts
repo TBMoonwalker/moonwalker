@@ -20,6 +20,12 @@ export type OrderData = {
 export type OpenTradeRow = {
     id: number
     symbol: string
+    deal_id?: string | null
+    campaign_id?: string | null
+    campaign_started_at?: string | null
+    lifecycle_mode?: string | null
+    exposure_state?: string | null
+    sidestep_count?: number
     amount: number
     cost: number
     profit: number
@@ -32,10 +38,18 @@ export type OpenTradeRow = {
     baseorder: OrderData
     safetyorder: OrderData[]
     precision: number
+    campaign_principal_quote?: number
+    campaign_realized_profit?: number
+    campaign_realized_profit_percent?: number
+    campaign_total_profit?: number
+    campaign_total_profit_percent?: number
+    display_profit?: number
+    display_profit_percent?: number
     unsellable_amount?: number
     unsellable_reason?: string | null
     unsellable_min_notional?: number | null
     unsellable_estimated_notional?: number | null
+    last_transition_at?: string | null
 }
 
 export const TIMEFRAME_CHOICES: TimeframeChoice[] = [
@@ -46,6 +60,7 @@ export const TIMEFRAME_CHOICES: TimeframeChoice[] = [
     { timerange: '60min', seconds: 60 * 60 },
     { timerange: '4h', seconds: 4 * 60 * 60 },
     { timerange: '1D', seconds: 24 * 60 * 60 },
+    { timerange: '1W', seconds: 7 * 24 * 60 * 60 },
 ]
 
 export const DEFAULT_MIN_TIMEFRAME = TIMEFRAME_CHOICES[2]
@@ -57,7 +72,7 @@ export function parseTimeframeSeconds(
         'min',
         'm',
     )
-    const match = normalized.match(/^(\d+)([mhd])$/)
+    const match = normalized.match(/^(\d+)([mhdw])$/)
     if (!match) {
         return null
     }
@@ -74,6 +89,9 @@ export function parseTimeframeSeconds(
     }
     if (unit === 'd') {
         return value * 24 * 60 * 60
+    }
+    if (unit === 'w') {
+        return value * 7 * 24 * 60 * 60
     }
     return null
 }
@@ -95,6 +113,27 @@ export function resolveMinTimeframe(
 export function splitTradeSymbol(value: string): [string, string] {
     const [symbol = '', currency = ''] = String(value).split('/')
     return [symbol, currency]
+}
+
+export function getOpenTradeOpenedAt(
+    rowData: Pick<
+        OpenTradeRow,
+        'open_date' | 'campaign_started_at' | 'lifecycle_mode'
+    >,
+): string {
+    const lifecycleMode = String(rowData.lifecycle_mode ?? '').trim()
+    const openDate = String(rowData.open_date ?? '').trim()
+    const campaignStartedAt = String(rowData.campaign_started_at ?? '').trim()
+    if (lifecycleMode === 'sidestep_reentry') {
+        if (campaignStartedAt) {
+            return campaignStartedAt
+        }
+        return openDate
+    }
+    if (openDate) {
+        return openDate
+    }
+    return campaignStartedAt
 }
 
 export function getSafetyOrderCount(rowData: OpenTradeRow): number {

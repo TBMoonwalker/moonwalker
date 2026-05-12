@@ -9,7 +9,11 @@ import helper
 from service.ath import AthService
 from service.autopilot import Autopilot, ResolvedTradingPolicy
 from service.config import resolve_timeframe
-from service.config_views import DcaRuntimeConfigView
+from service.config_views import (
+    DcaRuntimeConfigView,
+    SidestepCampaignConfigView,
+    TradeLifecycleConfigView,
+)
 from service.dca_safety_orders import (
     SafetyOrderContext,
     calculate_static_deviations,
@@ -26,6 +30,11 @@ from service.dca_tp_state import (
 from service.exchange import Exchange
 from service.indicators import Indicators
 from service.orders import Orders
+from service.spot_campaign_types import (
+    TradeExposureState,
+    TradeLifecycleMode,
+)
+from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
 from service.strategy_capability import ensure_strategy_supported
 from service.trades import Trades
@@ -47,14 +56,48 @@ class Dca:
         self.statistic = Statistic()
         self.trades = Trades()
         self.utils = helper.Utils()
+        self.sidestep_campaigns: SpotSidestepCampaignService | None = None
         self.config: dict[str, Any] | None = None
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
         self._pending_tp_confirmations: dict[str, TpConfirmationState] = {}
         self._trailing_tp_peaks: dict[str, float] = {}
+        self._last_sidestep_gate_by_symbol: dict[str, tuple[Any, ...]] = {}
+
+    def __log_sidestep_gate(
+        self,
+        symbol: str,
+        reason: str,
+        **context: Any,
+    ) -> None:
+        """Log sidestep skip/gate reasons once per symbol state change."""
+        normalized_symbol = str(symbol or "").strip()
+        ordered_context = tuple(sorted(context.items()))
+        gate_state = (reason, ordered_context)
+        if self._last_sidestep_gate_by_symbol.get(normalized_symbol) == gate_state:
+            return
+
+        payload = {
+            "symbol": normalized_symbol,
+            "sidestep_gate": reason,
+            **context,
+        }
+        logging.debug("Sidestep gate: %s", payload)
+        self._last_sidestep_gate_by_symbol[normalized_symbol] = gate_state
+
+    def __clear_sidestep_gate(self, symbol: str) -> None:
+        """Forget the last sidestep gate state once evaluation can proceed."""
+        normalized_symbol = str(symbol or "").strip()
+        self._last_sidestep_gate_by_symbol.pop(normalized_symbol, None)
 
     def __get_monotonic_time(self) -> float:
         """Return a monotonic timestamp for TP confirmation timing."""
         return asyncio.get_running_loop().time()
+
+    async def _get_sidestep_campaigns(self) -> SpotSidestepCampaignService:
+        """Return the shared sidestep campaign service instance."""
+        if self.sidestep_campaigns is None:
+            self.sidestep_campaigns = await SpotSidestepCampaignService.instance()
+        return self.sidestep_campaigns
 
     def __runtime_config(self) -> DcaRuntimeConfigView:
         """Return the typed DCA runtime settings for the current config snapshot."""
@@ -218,6 +261,219 @@ class Dca:
                     payload_changed = current_payload != previous_payload
 
         return result, payload_changed
+
+    async def __sidestep_exit_strategy(self, symbol: str) -> bool:
+        """Return whether the configured bearish sidestep strategy wants to exit."""
+        sidestep_campaigns = await self._get_sidestep_campaigns()
+        if not sidestep_campaigns.is_enabled(self.config):
+            return False
+
+        bearish_strategy_name = str(
+            (self.config or {}).get("sidestep_bearish_strategy") or ""
+        ).strip()
+        if not bearish_strategy_name:
+            return False
+
+        strategy_timeframe = resolve_timeframe(self.config or {})
+        sidestep_strategy_plugin = self.__get_strategy_plugin(
+            bearish_strategy_name,
+            strategy_timeframe,
+            "sidestep_exit",
+        )
+        return bool(await sidestep_strategy_plugin.run(symbol, "sell"))
+
+    async def __sidestep_reentry_strategy(self, symbol: str) -> bool:
+        """Return whether the configured sidestep re-entry strategy wants to rebuy."""
+        sidestep_campaigns = await self._get_sidestep_campaigns()
+        if not sidestep_campaigns.is_enabled(self.config):
+            return False
+
+        reentry_strategy_name = SidestepCampaignConfigView.from_config(
+            self.config or {}
+        ).reentry_strategy
+        if not reentry_strategy_name:
+            return False
+
+        strategy_timeframe = resolve_timeframe(self.config or {})
+        reentry_strategy_plugin = self.__get_strategy_plugin(
+            reentry_strategy_name,
+            strategy_timeframe,
+            "sidestep_reentry",
+        )
+        return bool(await reentry_strategy_plugin.run(symbol, "buy"))
+
+    @staticmethod
+    def __is_sidestep_mode(trades: dict[str, Any]) -> bool:
+        """Return whether the active trade is running in sidestep mode."""
+        return (
+            str(trades.get("lifecycle_mode") or "")
+            == TradeLifecycleMode.SIDESTEP_REENTRY.value
+        )
+
+    @staticmethod
+    def __is_flat_waiting(trades: dict[str, Any]) -> bool:
+        """Return whether the active trade is alive but currently flat."""
+        return (
+            str(trades.get("exposure_state") or "")
+            == TradeExposureState.FLAT_WAITING_REENTRY.value
+        )
+
+    async def __update_waiting_virtual_metrics(
+        self,
+        trades: dict[str, Any],
+        current_price: float,
+    ) -> None:
+        """Persist virtual sidestep waiting metrics for the active-flat mission."""
+        waiting_reference_amount = float(trades.get("waiting_reference_amount") or 0.0)
+        waiting_reference_quote = float(trades.get("waiting_reference_quote") or 0.0)
+        waiting_reference_price = float(trades.get("waiting_reference_price") or 0.0)
+        virtual_profit = waiting_reference_quote - (
+            current_price * waiting_reference_amount
+        )
+        virtual_profit_percent = (
+            ((waiting_reference_price - current_price) / waiting_reference_price) * 100
+            if waiting_reference_price > 0
+            else 0.0
+        )
+        reserved_reentry_quote = float(
+            trades.get("reserved_reentry_quote") or waiting_reference_quote
+        )
+        await self.trades.update_open_trades(
+            {
+                "current_price": current_price,
+                "virtual_waiting_profit": virtual_profit,
+                "virtual_waiting_profit_percent": virtual_profit_percent,
+                "waiting_reference_price": waiting_reference_price,
+                "waiting_reference_amount": waiting_reference_amount,
+                "waiting_reference_quote": waiting_reference_quote,
+                "reserved_reentry_quote": reserved_reentry_quote,
+                "profit": 0.0,
+                "profit_percent": 0.0,
+                "amount": 0.0,
+                "cost": 0.0,
+            },
+            trades["symbol"],
+        )
+        await self.statistic.update_statistic_data(
+            {
+                "type": "waiting_check",
+                "symbol": trades["symbol"],
+                "botname": trades.get("bot"),
+                "current_price": current_price,
+                "waiting_reference_price": waiting_reference_price,
+                "waiting_reference_amount": waiting_reference_amount,
+                "waiting_reference_quote": waiting_reference_quote,
+                "virtual_waiting_profit": virtual_profit,
+                "virtual_waiting_profit_percent": virtual_profit_percent,
+                "reserved_reentry_quote": reserved_reentry_quote,
+                "campaign_id": trades.get("campaign_id"),
+                "lifecycle_mode": trades.get("lifecycle_mode"),
+                "exposure_state": trades.get("exposure_state"),
+            }
+        )
+
+    async def __attempt_waiting_reentry(
+        self,
+        trades: dict[str, Any],
+        current_price: float,
+    ) -> bool:
+        """Place a sidestep re-entry buy from the watcher-owned lifecycle loop."""
+        if not self.__is_sidestep_mode(trades) or not self.__is_flat_waiting(trades):
+            return False
+        if not trades.get("campaign_id"):
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "waiting_missing_campaign",
+            )
+            return False
+
+        sidestep_campaigns = await self._get_sidestep_campaigns()
+        campaign = await sidestep_campaigns.get_campaign_snapshot(
+            str(trades.get("campaign_id") or "")
+        )
+        if campaign is None:
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "waiting_campaign_not_found",
+                campaign_id=str(trades.get("campaign_id") or ""),
+            )
+            return False
+
+        cooldown_until = campaign.get("cooldown_until")
+        if cooldown_until:
+            try:
+                if (
+                    datetime.fromisoformat(str(cooldown_until).replace("Z", "+00:00"))
+                    > datetime.now().astimezone()
+                ):
+                    self.__log_sidestep_gate(
+                        trades["symbol"],
+                        "waiting_cooldown_active",
+                        cooldown_until=str(cooldown_until),
+                    )
+                    return False
+            except ValueError:
+                pass
+
+        self.__clear_sidestep_gate(trades["symbol"])
+        if not await self.__sidestep_reentry_strategy(trades["symbol"]):
+            return False
+
+        order_size = float(
+            trades.get("reserved_reentry_quote")
+            or campaign.get("reserved_quote")
+            or float((self.config or {}).get("bo") or 0.0)
+        )
+        if order_size <= 0:
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "waiting_missing_reserved_quote",
+                campaign_id=str(trades.get("campaign_id") or ""),
+            )
+            return False
+
+        logging.info(
+            "Sidestep re-entry triggered for %s: campaign=%s reserved_quote=%s "
+            "current_price=%s strategy=%s.",
+            trades["symbol"],
+            trades.get("campaign_id"),
+            order_size,
+            current_price,
+            SidestepCampaignConfigView.from_config(self.config or {}).reentry_strategy,
+        )
+        order = {
+            "ordersize": order_size,
+            "symbol": trades["symbol"],
+            "direction": "long",
+            "botname": str(trades.get("bot") or f"sidestep_{trades['symbol']}"),
+            "baseorder": True,
+            "safetyorder": False,
+            "order_count": 0,
+            "ordertype": "market",
+            "so_percentage": None,
+            "side": "buy",
+            "campaign_id": trades.get("campaign_id"),
+            "signal_name": None,
+            "strategy_name": SidestepCampaignConfigView.from_config(
+                self.config or {}
+            ).reentry_strategy,
+            "timeframe": resolve_timeframe(self.config or {}),
+            "metadata_json": None,
+        }
+        success = await self.orders.receive_buy_order(order, self.config or {})
+        if success:
+            logging.info(
+                "Sidestep re-entry buy submitted for %s: campaign=%s.",
+                trades["symbol"],
+                trades.get("campaign_id"),
+            )
+        else:
+            logging.warning(
+                "Sidestep re-entry buy rejected for %s: campaign=%s.",
+                trades["symbol"],
+                trades.get("campaign_id"),
+            )
+        return success
 
     def __tp_strategy(self, symbol: str) -> bool:
         result = False
@@ -404,6 +660,26 @@ class Dca:
 
         # Calculate TP/SL
         take_profit_price = average_buy_price * (1 + (trading_policy.take_profit / 100))
+        if self.__is_sidestep_mode(trades) and trades.get("campaign_id"):
+            sidestep_campaigns = await self._get_sidestep_campaigns()
+            campaign = await sidestep_campaigns.get_campaign_snapshot(
+                str(trades.get("campaign_id") or "")
+            )
+            if campaign is not None:
+                principal_quote = float(campaign.get("principal_quote") or total_cost)
+                cumulative_realized_quote = float(
+                    campaign.get("cumulative_realized_quote") or 0.0
+                )
+                tp_target_percent = float(
+                    campaign.get("tp_percent") or trading_policy.take_profit or 0.0
+                )
+                required_unrealized_quote = (
+                    principal_quote * (tp_target_percent / 100.0)
+                ) - cumulative_realized_quote
+                if trades["total_amount"] > 0:
+                    take_profit_price = (
+                        required_unrealized_quote + total_cost
+                    ) / trades["total_amount"]
         stop_loss_price = average_buy_price * (1 - (trading_policy.stop_loss / 100))
         tp_reached = not is_unsellable and current_price >= take_profit_price
         prearm_supported = self.__tp_limit_prearm_supported(
@@ -803,9 +1079,39 @@ class Dca:
         # New price action for DCA calculation
         if ticker["type"] == "ticker_price":
             price = ticker["ticker"]["price"]
-            trades = await self.trades.get_trades_for_orders(ticker["ticker"]["symbol"])
+            symbol = str(ticker["ticker"]["symbol"] or "")
+            trades = await self.trades.get_trades_for_orders(symbol)
+            if not trades:
+                if TradeLifecycleConfigView.from_config(
+                    self.config or {}
+                ).is_sidestep_mode():
+                    self.__log_sidestep_gate(
+                        symbol,
+                        "no_active_trade",
+                        source="watcher_symbol_only",
+                    )
+                return
             if trades:
                 runtime_config = self.__runtime_config()
+                sidestep_campaigns = await self._get_sidestep_campaigns()
+                ensured_campaign_id = (
+                    await sidestep_campaigns.ensure_campaign_for_open_trade(
+                        trades,
+                        self.config or {},
+                    )
+                )
+                if ensured_campaign_id and not trades.get("campaign_id"):
+                    trades = {
+                        **trades,
+                        "campaign_id": ensured_campaign_id,
+                        "lifecycle_mode": TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                    }
+                self.__clear_sidestep_gate(trades["symbol"])
+
+                if self.__is_flat_waiting(trades):
+                    await self.__update_waiting_virtual_metrics(trades, price)
+                    await self.__attempt_waiting_reentry(trades, price)
+                    return
 
                 # Check Autopilot
                 profit = await self.statistic.get_profit()
@@ -815,14 +1121,92 @@ class Dca:
                     self.config,
                 )
 
-                # Check DCA (only when DCA is enabled)
-                if runtime_config.dca_enabled and not trades.get(
-                    "is_unsellable", False
+                if await self.__should_sidestep_exit(trades, price, trading_policy):
+                    return
+
+                # Check DCA (classic lifecycle only)
+                if (
+                    runtime_config.dca_enabled
+                    and not trades.get("is_unsellable", False)
+                    and not self.__is_sidestep_mode(trades)
                 ):
                     await self.__calculate_dca(price, trades)
 
                 # Check TP
                 await self.__calculate_tp(price, trades, trading_policy)
+
+    async def __should_sidestep_exit(
+        self,
+        trades: dict[str, Any],
+        current_price: float,
+        trading_policy: ResolvedTradingPolicy,
+    ) -> bool:
+        """Sell early into flat-waiting mode when the bearish sidestep says so."""
+        sidestep_campaigns = await self._get_sidestep_campaigns()
+        if not sidestep_campaigns.is_enabled(self.config):
+            return False
+        if not self.__is_sidestep_mode(trades):
+            return False
+        if self.__is_flat_waiting(trades):
+            return False
+        if trades.get("is_unsellable", False):
+            return False
+        if not trades.get("campaign_id"):
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "active_missing_campaign",
+            )
+            return False
+
+        total_amount = float(trades.get("total_amount") or 0.0)
+        total_cost = float(trades.get("total_cost") or 0.0)
+        total_fee = float(trades.get("fee") or 0.0)
+        if total_amount <= 0:
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "active_missing_amount",
+            )
+            return False
+
+        average_buy_price = (total_cost + (total_cost * total_fee)) / total_amount
+        take_profit_price = average_buy_price * (1 + (trading_policy.take_profit / 100))
+        if current_price >= take_profit_price:
+            self.__log_sidestep_gate(
+                trades["symbol"],
+                "exit_tp_gate",
+                current_price=round(float(current_price), 8),
+                tp_price=round(float(take_profit_price), 8),
+            )
+            return False
+
+        self.__clear_sidestep_gate(trades["symbol"])
+        if not await self.__sidestep_exit_strategy(trades["symbol"]):
+            return False
+
+        actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
+        logging.info(
+            "Sidestep exit triggered for %s: campaign=%s current_price=%s "
+            "tp_price=%s actual_pnl=%s.",
+            trades["symbol"],
+            trades.get("campaign_id"),
+            current_price,
+            take_profit_price,
+            actual_pnl,
+        )
+        order = {
+            "symbol": trades["symbol"],
+            "direction": trades["direction"],
+            "side": "sell",
+            "type_sell": "order_sell",
+            "sell_reason": "sidestep_exit",
+            "actual_pnl": actual_pnl,
+            "total_cost": trades["total_cost"],
+            "current_price": current_price,
+            "tp_price": take_profit_price,
+            "campaign_id": trades.get("campaign_id"),
+        }
+        await self.orders.receive_sell_order(order, self.config or {})
+        return True
 
     async def __evaluate_dynamic_dca_trigger(
         self,

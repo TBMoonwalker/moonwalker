@@ -166,6 +166,7 @@ const emit = defineEmits<{
             <ConfigDcaSection
                 :ref="dcaFormRef"
                 :dca="dca"
+                :market="exchange.market"
                 :rules="rules"
                 :sell-order-type-options="sellOrderTypeOptions"
                 :show-advanced-general="setupShowsAdvancedFields"

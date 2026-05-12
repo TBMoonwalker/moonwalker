@@ -1,14 +1,30 @@
 <template>
-    <n-data-table
-        remote
-        ref="table"
-        :columns="columns_unsellable_trades"
-        :data="unsellable_trades || []"
-        :loading="isTableLoading"
-        :row-class-name="row_classes"
-        :locale="{ emptyText: tableEmptyText }"
-        aria-label="Unsellable trades table"
-    />
+    <div class="unsellable-trades">
+        <div class="unsellable-trades-toolbar">
+            <div class="unsellable-trades-summary">
+                {{ unsellableTradesSummary }}
+            </div>
+            <n-button
+                size="small"
+                type="warning"
+                ghost
+                :disabled="unsellableTradesCount === 0"
+                @click="handleResolveAllUnsellableTrades"
+            >
+                Resolve all
+            </n-button>
+        </div>
+        <n-data-table
+            remote
+            ref="table"
+            :columns="columns_unsellable_trades"
+            :data="unsellable_trades || []"
+            :loading="isTableLoading"
+            :row-class-name="row_classes"
+            :locale="{ emptyText: tableEmptyText }"
+            aria-label="Unsellable trades table"
+        />
+    </div>
 </template>
 
 <script setup lang="ts">
@@ -25,49 +41,71 @@ import {
     formatFixed,
     resolveTradeDateTime,
 } from '../helpers/tradeTable'
-import { useTradesStore } from '../stores/trades'
+import {
+    useTradesStore,
+    type UnsellableTradeRow,
+} from '../stores/trades'
+import { useWebSocketDataStore } from '../stores/websocket'
 
 const trades_store = useTradesStore()
+const unsellable_trades_socket_store = useWebSocketDataStore('unsellableTrades')
 const { isMobile, isTablet } = useViewport()
 const dialog = useDialog()
 const message = useMessage()
-
-type RowData = {
-    id: number
-    symbol: string
-    amount: number
-    cost: number
-    profit: number
-    profit_percent: number
-    so_count: number
-    current_price: number
-    avg_price: number
-    open_date: string
-    unsellable_reason?: string | null
-    unsellable_min_notional?: number | null
-    unsellable_estimated_notional?: number | null
-    unsellable_since?: string | null
-}
 
 const {
     rows: unsellable_trades,
     isTableLoading,
     tableEmptyText,
-} = useTradeTableFeed<RowData>({
+} = useTradeTableFeed<UnsellableTradeRow>({
     websocketId: 'unsellableTrades',
     waitingText: 'Waiting for live unsellable trades...',
     emptyText: 'No unsellable trades',
     normalizeRows: (rawRows) => {
         trades_store.setUnsellableTrades(rawRows as any[])
-        return trades_store.unsellableTrades as RowData[]
+        return trades_store.unsellableTrades as UnsellableTradeRow[]
     },
 })
 
-function row_classes(_row: RowData) {
+const unsellableTradesCount = computed(() => unsellable_trades.value.length)
+const unsellableTradesSummary = computed(() => {
+    const count = unsellableTradesCount.value
+    if (count === 0) {
+        return 'No unsellable trades'
+    }
+    if (count === 1) {
+        return '1 unsellable trade is waiting for manual cleanup'
+    }
+    return `${count} unsellable trades are waiting for manual cleanup`
+})
+
+function row_classes(_row: UnsellableTradeRow) {
     return 'orange'
 }
 
-function getStateLabel(rowData: RowData): string {
+function toUnsellableSocketRow(
+    rowData: UnsellableTradeRow,
+): Record<string, unknown> {
+    return {
+        ...rowData,
+        id: Number(rowData.id),
+        amount: Number(rowData.amount),
+        cost: Number(rowData.cost),
+        profit: Number(rowData.profit),
+        profit_percent: Number(rowData.profit_percent),
+        so_count: Number(rowData.so_count),
+        current_price: Number(rowData.current_price),
+        avg_price: Number(rowData.avg_price),
+    }
+}
+
+function syncUnsellableRows(nextRows: UnsellableTradeRow[]): void {
+    unsellable_trades_socket_store.setRaw(
+        JSON.stringify(nextRows.map(toUnsellableSocketRow)),
+    )
+}
+
+function getStateLabel(rowData: UnsellableTradeRow): string {
     const reason = String(rowData.unsellable_reason ?? 'unknown').replaceAll('_', ' ')
     if (reason === 'minimum notional') {
         return 'Below minimum notional'
@@ -75,7 +113,7 @@ function getStateLabel(rowData: RowData): string {
     return reason
 }
 
-function getStateDetail(rowData: RowData): string {
+function getStateDetail(rowData: UnsellableTradeRow): string {
     const details: string[] = [getStateLabel(rowData)]
     if (rowData.unsellable_estimated_notional !== null && rowData.unsellable_estimated_notional !== undefined) {
         details.push(`est. ${formatFixed(rowData.unsellable_estimated_notional)}`)
@@ -86,7 +124,42 @@ function getStateDetail(rowData: RowData): string {
     return details.join(' | ')
 }
 
-async function handleResolveUnsellableTrade(rowData: RowData): Promise<void> {
+async function handleResolveAllUnsellableTrades(): Promise<void> {
+    const count = unsellableTradesCount.value
+    if (count === 0) {
+        message.info('No unsellable trades to resolve.')
+        return
+    }
+
+    const d = dialog.warning({
+        title: 'Resolve all unsellable trades',
+        content: `Remove all ${count} unsellable trades from the list after manual exchange cleanup?`,
+        positiveText: 'Resolve all',
+        negativeText: 'Cancel',
+        onPositiveClick: async () => {
+            d.loading = true
+            try {
+                const result = await fetchJson<{ result: string; count: number }>(
+                    '/trades/unsellable/delete/all',
+                    { method: 'POST' },
+                )
+                if (result.result === 'deleted') {
+                    syncUnsellableRows([])
+                    message.success(`Resolved ${result.count} unsellable trades.`)
+                    return
+                }
+                message.error('Failed resolving all unsellable trades.')
+            } catch (error) {
+                const detail = error instanceof Error ? error.message : 'Unknown error'
+                message.error(`Failed resolving all unsellable trades: ${detail}`)
+            }
+        },
+    })
+}
+
+async function handleResolveUnsellableTrade(
+    rowData: UnsellableTradeRow,
+): Promise<void> {
     const d = dialog.warning({
         title: 'Resolve unsellable trade',
         content: `Remove ${rowData.symbol} from the unsellable list after manual exchange cleanup?`,
@@ -100,6 +173,11 @@ async function handleResolveUnsellableTrade(rowData: RowData): Promise<void> {
                     { method: 'POST' }
                 )
                 if (result.result === 'deleted') {
+                    syncUnsellableRows(
+                        unsellable_trades.value.filter(
+                            (trade) => Number(trade.id) !== Number(rowData.id),
+                        ),
+                    )
                     message.success(`Resolved ${rowData.symbol}.`)
                     return
                 }
@@ -112,8 +190,8 @@ async function handleResolveUnsellableTrade(rowData: RowData): Promise<void> {
     })
 }
 
-const columns_trades = (): DataTableColumns<RowData> => {
-    const columns: DataTableColumns<RowData> = [
+const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
+    const columns: DataTableColumns<UnsellableTradeRow> = [
         {
             title: '#',
             key: 'key',
@@ -214,3 +292,38 @@ const columns_trades = (): DataTableColumns<RowData> => {
 
 const columns_unsellable_trades = computed(() => columns_trades())
 </script>
+
+<style scoped>
+.unsellable-trades {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.unsellable-trades-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 16px 16px 0;
+}
+
+.unsellable-trades-summary {
+    color: inherit;
+    font-size: 14px;
+    line-height: 1.4;
+    opacity: 0.82;
+}
+
+@media (max-width: 768px) {
+    .unsellable-trades-toolbar {
+        flex-direction: column;
+        align-items: stretch;
+        padding: 12px 12px 0;
+    }
+
+    .unsellable-trades-summary {
+        font-size: 13px;
+    }
+}
+</style>

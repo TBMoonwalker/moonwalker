@@ -82,6 +82,18 @@ function toFiniteNumber(value: number | string | null | undefined): number | nul
     return Number.isFinite(parsed) ? parsed : null
 }
 
+function toTimestampMs(value: number | string | null | undefined): number | null {
+    if (value === null || value === undefined) {
+        return null
+    }
+    const numeric = Number(value)
+    if (Number.isFinite(numeric)) {
+        return numeric
+    }
+    const parsed = Date.parse(String(value))
+    return Number.isFinite(parsed) ? parsed : null
+}
+
 function normalizeCandleRows(payload: unknown): Array<Record<string, number>> {
     return Array.isArray(payload) ? payload : []
 }
@@ -112,7 +124,11 @@ function normalizeMarkerTime(
     seconds: number,
     localOffsetSeconds: number,
 ): number | null {
-    let normalized = Math.trunc(Number(timestamp) / 1000)
+    const timestampMs = toTimestampMs(timestamp)
+    if (timestampMs === null) {
+        return null
+    }
+    let normalized = Math.trunc(timestampMs / 1000)
     if (!Number.isFinite(normalized)) {
         return null
     }
@@ -125,7 +141,11 @@ function normalizeExactMarkerTime(
     timestamp: number | string,
     localOffsetSeconds: number,
 ): number | null {
-    const normalized = Math.trunc(Number(timestamp) / 1000)
+    const timestampMs = toTimestampMs(timestamp)
+    if (timestampMs === null) {
+        return null
+    }
+    const normalized = Math.trunc(timestampMs / 1000)
     if (!Number.isFinite(normalized)) {
         return null
     }
@@ -137,12 +157,12 @@ async function initChart(): Promise<void> {
         return
     }
 
-    const beginTimestamp = toFiniteNumber(props.startTimestamp)
+    const beginTimestamp = toTimestampMs(props.startTimestamp)
     if (beginTimestamp === null) {
         return
     }
 
-    const endTimestamp = toFiniteNumber(props.endTimestamp)
+    const endTimestamp = toTimestampMs(props.endTimestamp)
     const [symbol, currency] = splitTradeSymbol(props.symbol)
     const precision = createDecimal(props.precision)
     const timeframe = selectTimeframe()
