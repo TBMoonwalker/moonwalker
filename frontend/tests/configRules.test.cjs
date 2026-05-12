@@ -219,6 +219,29 @@ test('config rules require sidestep strategies only for spot sidestep mode', () 
     )
 })
 
+test('config rules honor the legacy sidestep flag when canonical mode is absent', () => {
+    const legacyContext = createRuleContext({
+        dca: {
+            value: {
+                dynamic: false,
+                enabled: true,
+                sidestep_campaign_enabled: true,
+            },
+        },
+        exchange: {
+            value: {
+                market: 'spot',
+            },
+        },
+    })
+
+    assert.equal(legacyContext.rules.so.validator({}, null), true)
+    assert.equal(
+        legacyContext.rules.sidestep_bearish_strategy.validator({}, null).message,
+        'Please select bearish sidestep strategy',
+    )
+})
+
 test('config rules require a positive global max fund after submit', () => {
     const missingContext = createRuleContext()
     assert.equal(

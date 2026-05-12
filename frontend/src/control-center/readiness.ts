@@ -1,6 +1,7 @@
 import { resolveControlCenterBlocker } from './blockers'
 import { deriveSignalModeBlockers } from './signalMode'
 import { getTaskPresentation } from './taskRegistry'
+import { normalizeTradeLifecycleMode } from '../helpers/tradeLifecycle'
 import type {
     ControlCenterBlocker,
     ControlCenterMode,
@@ -35,9 +36,10 @@ function hasPositiveNumber(value: unknown): boolean {
 }
 
 function getTradeLifecycleMode(config: SharedConfigPayload): string {
-    return String(config.trade_lifecycle_mode ?? 'classic_dca')
-        .trim()
-        .toLowerCase()
+    return normalizeTradeLifecycleMode(
+        config.trade_lifecycle_mode,
+        config.sidestep_campaign_enabled,
+    )
 }
 
 function isSpotMarket(config: SharedConfigPayload): boolean {

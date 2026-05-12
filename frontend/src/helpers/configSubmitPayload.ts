@@ -7,6 +7,10 @@ import {
     serializeConfigValue,
     toNullableConfigString,
 } from './configForm'
+import {
+    deriveLegacySidestepEnabled,
+    normalizeTradeLifecycleMode,
+} from './tradeLifecycle'
 
 export interface GeneralConfigSection {
     timezone: string | null
@@ -198,6 +202,10 @@ export function buildConfigSubmitPayload(
     } = options
 
     const quoteCurrency = String(exchange.currency || 'USDT').toUpperCase()
+    const tradeLifecycleMode = normalizeTradeLifecycleMode(
+        dca.trade_lifecycle_mode,
+        dca.sidestep_campaign_enabled,
+    )
     const normalizedSymbolList =
         signal.signal === 'asap'
             ? normalizePairEntries(
@@ -340,11 +348,14 @@ export function buildConfigSubmitPayload(
             'float',
         ),
         trade_lifecycle_mode: serializeConfigValue(
-            toNullableConfigString(dca.trade_lifecycle_mode ?? 'classic_dca'),
+            tradeLifecycleMode,
             'str',
         ),
         sidestep_campaign_enabled: serializeConfigValue(
-            (dca.trade_lifecycle_mode ?? 'classic_dca') === 'sidestep_reentry',
+            deriveLegacySidestepEnabled(
+                tradeLifecycleMode,
+                dca.sidestep_campaign_enabled,
+            ),
             'bool',
         ),
         sidestep_bearish_strategy: serializeConfigValue(

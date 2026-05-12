@@ -225,3 +225,15 @@ test('buildLoadedConfigState normalizes legacy ema swing reverse strategy ids', 
     assert.equal(state.dca.sidestep_reentry_strategy, 'ema20_swing_reverse')
     assert.equal(state.dca.sidestep_bearish_strategy, 'ema20_swing_reverse')
 })
+
+test('buildLoadedConfigState falls back to the legacy sidestep flag when needed', () => {
+    const state = buildLoadedConfigState(
+        {
+            sidestep_campaign_enabled: 'true',
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(state.dca.trade_lifecycle_mode, 'sidestep_reentry')
+    assert.equal(state.dca.sidestep_campaign_enabled, true)
+})

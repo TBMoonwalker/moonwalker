@@ -5,6 +5,10 @@ import {
     parseVolumeLimitToNumber,
     toTokenOnlyEntries,
 } from './configForm'
+import {
+    deriveLegacySidestepEnabled,
+    normalizeTradeLifecycleMode,
+} from './tradeLifecycle'
 import type {
     AutopilotConfigSection,
     CapitalConfigSection,
@@ -165,6 +169,10 @@ export function buildLoadedConfigState(
     }
     const dcaEnabled = parseBooleanString(response.dca) ?? false
     const dynamicDca = parseBooleanString(response.dynamic_dca) ?? false
+    const tradeLifecycleMode = normalizeTradeLifecycleMode(
+        response.trade_lifecycle_mode,
+        response.sidestep_campaign_enabled,
+    )
 
     return {
         general,
@@ -215,11 +223,7 @@ export function buildLoadedConfigState(
         exchange,
         dca: {
             enabled: dcaEnabled,
-            trade_lifecycle_mode:
-                toNullableString(response.trade_lifecycle_mode) ??
-                ((parseBooleanString(response.sidestep_campaign_enabled) ?? false)
-                    ? 'sidestep_reentry'
-                    : 'classic_dca'),
+            trade_lifecycle_mode: tradeLifecycleMode,
             dynamic: dynamicDca,
             strategy: normalizeStrategyName(toNullableString(response.dca_strategy)),
             timeframe,
@@ -250,8 +254,10 @@ export function buildLoadedConfigState(
             os: toNumberOrNull(response.os),
             trade_safety_order_budget_ratio:
                 toNumberOrNull(response.trade_safety_order_budget_ratio) ?? 0.95,
-            sidestep_campaign_enabled:
-                parseBooleanString(response.sidestep_campaign_enabled) ?? false,
+            sidestep_campaign_enabled: deriveLegacySidestepEnabled(
+                tradeLifecycleMode,
+                response.sidestep_campaign_enabled,
+            ),
             sidestep_bearish_strategy: normalizeStrategyName(
                 toNullableString(response.sidestep_bearish_strategy),
             ),

@@ -255,6 +255,10 @@
 import { computed, ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
 import type { DcaModel, StringSelectOption } from '../../config-editor/types'
+import {
+    isClassicTradeLifecycleMode,
+    isSidestepTradeLifecycleMode,
+} from '../../helpers/tradeLifecycle'
 
 const props = defineProps<{
     dca: DcaModel
@@ -271,10 +275,18 @@ const lifecycleModeOptions: StringSelectOption[] = [
     { label: 'Sidestep Re-entry', value: 'sidestep_reentry' },
 ]
 const isClassicDcaMode = computed(
-    () => (props.dca.trade_lifecycle_mode ?? 'classic_dca') === 'classic_dca'
+    () =>
+        isClassicTradeLifecycleMode(
+            props.dca.trade_lifecycle_mode,
+            props.dca.sidestep_campaign_enabled,
+        ),
 )
 const isSidestepMode = computed(
-    () => (props.dca.trade_lifecycle_mode ?? 'classic_dca') === 'sidestep_reentry'
+    () =>
+        isSidestepTradeLifecycleMode(
+            props.dca.trade_lifecycle_mode,
+            props.dca.sidestep_campaign_enabled,
+        ),
 )
 const tpLimitPrearmConflictNames = computed(() => {
     if (!props.dca.tp_limit_prearm_enabled) {

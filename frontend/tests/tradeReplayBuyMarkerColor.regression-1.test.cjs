@@ -51,6 +51,10 @@ test('trade replay buy markers use the chart bullish green', () => {
         'expected re-entered sidestep trades to label the current leg as a re-entry buy',
     )
     assert.ok(
+        closedTradeExpandedRowSource.includes('Campaign summary:'),
+        'expected closed sidestep replays to expose a compact campaign summary above the timeline',
+    )
+    assert.ok(
         tradeReplayChartSource.includes('Date.parse(String(value))'),
         'expected replay charts to parse campaign timestamp strings when anchoring sidestep mission history',
     )

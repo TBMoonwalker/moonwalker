@@ -1,5 +1,9 @@
 import type { FormItemRule, FormRules } from 'naive-ui/es/form'
 import type { Ref } from 'vue'
+import {
+    isClassicTradeLifecycleMode,
+    isSidestepTradeLifecycleMode,
+} from './tradeLifecycle'
 
 interface DcaRulesState {
     dynamic: boolean
@@ -33,12 +37,11 @@ interface BuildConfigRulesOptions {
     submitAttempted: Ref<boolean>
 }
 
-function getTradeLifecycleMode(dca: Ref<DcaRulesState>): string {
-    return dca.value.trade_lifecycle_mode ?? 'classic_dca'
-}
-
 function isClassicDcaMode(dca: Ref<DcaRulesState>): boolean {
-    return getTradeLifecycleMode(dca) !== 'sidestep_reentry'
+    return isClassicTradeLifecycleMode(
+        dca.value.trade_lifecycle_mode,
+        dca.value.sidestep_campaign_enabled,
+    )
 }
 
 function isSpotMarket(exchange: Ref<ExchangeRulesState>): boolean {
@@ -48,7 +51,10 @@ function isSpotMarket(exchange: Ref<ExchangeRulesState>): boolean {
 function isSpotSidestepMode(options: BuildConfigRulesOptions): boolean {
     return (
         options.dca.value.enabled &&
-        getTradeLifecycleMode(options.dca) === 'sidestep_reentry' &&
+        isSidestepTradeLifecycleMode(
+            options.dca.value.trade_lifecycle_mode,
+            options.dca.value.sidestep_campaign_enabled,
+        ) &&
         isSpotMarket(options.exchange)
     )
 }

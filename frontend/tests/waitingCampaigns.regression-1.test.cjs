@@ -64,6 +64,18 @@ test('waiting sidestep campaigns get their own surface and explicit waiting acti
         'expected the waiting campaigns table to surface sidestep cycle metadata for active-flat trades',
     )
     assert.ok(
+        waitingCampaignsSource.includes('cooldown_until'),
+        'expected the waiting campaigns table to surface cooldown timing for waiting campaigns',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes('last_exit_reason'),
+        'expected the waiting campaigns table to surface the last exit reason for waiting campaigns',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes('reentry_status'),
+        'expected the waiting campaigns table to surface human-readable re-entry status text',
+    )
+    assert.ok(
         waitingCampaignsSource.includes('display_profit_percent'),
         'expected waiting sidestep campaigns to render mission-level PnL instead of only the flat-phase delta',
     )

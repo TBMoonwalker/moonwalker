@@ -8,7 +8,7 @@ import re
 from typing import Any, Iterable
 
 import helper
-from service.spot_campaign_types import TradeLifecycleMode
+from service.trade_lifecycle_config import TradeLifecycleConfigView
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_capability")
 
@@ -47,12 +47,6 @@ MIN_HISTORY_CANDLES_BY_STRATEGY: dict[str, int] = {
 }
 
 _SECONDS_PER_DAY = 24 * 60 * 60
-
-
-def _optional_string(value: Any) -> str | None:
-    """Normalize optional config strings with whitespace trimming."""
-    normalized = str(value or "").strip()
-    return normalized or None
 
 
 def _timeframe_to_seconds(timeframe: str) -> int:
@@ -102,32 +96,15 @@ def _configured_strategy_names(
     include_signal_strategy: bool,
 ) -> list[str | None]:
     """Return configured strategy names for the active lifecycle mode."""
-    raw_mode = _optional_string(config.get("trade_lifecycle_mode"))
-    legacy_sidestep_enabled = bool(config.get("sidestep_campaign_enabled", False))
-    market = (_optional_string(config.get("market")) or "spot").lower()
-    if raw_mode in {
-        TradeLifecycleMode.CLASSIC_DCA.value,
-        TradeLifecycleMode.SIDESTEP_REENTRY.value,
-    }:
-        lifecycle_mode = raw_mode
-    else:
-        lifecycle_mode = (
-            TradeLifecycleMode.SIDESTEP_REENTRY.value
-            if legacy_sidestep_enabled
-            else TradeLifecycleMode.CLASSIC_DCA.value
-        )
-
-    sidestep_mode = (
-        market == "spot" and lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value
-    )
+    lifecycle = TradeLifecycleConfigView.from_config(config)
+    sidestep_mode = lifecycle.is_sidestep_mode()
     strategy_names: list[str | None] = [config.get("tp_strategy")]
 
     if sidestep_mode:
         strategy_names.extend(
             [
-                _optional_string(config.get("sidestep_bearish_strategy")),
-                _optional_string(config.get("sidestep_reentry_strategy"))
-                or _optional_string(config.get("dca_strategy")),
+                lifecycle.bearish_exit_strategy,
+                lifecycle.reentry_strategy,
             ]
         )
     else:

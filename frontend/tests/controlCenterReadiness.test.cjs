@@ -82,6 +82,30 @@ test('deriveControlCenterReadiness requires sidestep strategies instead of class
     assert.equal(readiness.nextTarget, 'dca')
 })
 
+test('deriveControlCenterReadiness honors the canonical lifecycle mode over the legacy sidestep flag', () => {
+    const readiness = deriveControlCenterReadiness({
+        ...createReadyConfig(),
+        dca: true,
+        dynamic_dca: false,
+        trade_lifecycle_mode: 'classic_dca',
+        sidestep_campaign_enabled: true,
+        market: 'spot',
+        so: null,
+        mstc: null,
+        sos: null,
+        ss: null,
+        os: null,
+        sidestep_bearish_strategy: '',
+        sidestep_reentry_strategy: '',
+    })
+
+    assert.equal(readiness.complete, false)
+    assert.deepEqual(
+        readiness.blockers.map((blocker) => blocker.key),
+        ['so', 'mstc', 'sos', 'ss', 'os'],
+    )
+})
+
 test('deriveControlCenterViewState adapts to rescue and post-action success states', () => {
     const readiness = deriveControlCenterReadiness(createReadyConfig())
 

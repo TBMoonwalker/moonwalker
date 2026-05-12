@@ -81,6 +81,7 @@ function createBaseOptions(overrides = {}) {
         },
         dca: {
             enabled: true,
+            trade_lifecycle_mode: 'classic_dca',
             dynamic: false,
             strategy: 'ema_cross',
             timeframe: '1h',
@@ -99,6 +100,11 @@ function createBaseOptions(overrides = {}) {
             ss: 1.2,
             os: 1.4,
             trade_safety_order_budget_ratio: 0.95,
+            sidestep_campaign_enabled: false,
+            sidestep_bearish_strategy: null,
+            sidestep_reentry_strategy: null,
+            sidestep_reentry_cooldown_candles: 0,
+            sidestep_reentry_requires_fresh_long_signal: false,
             tp: 1.8,
             sl: null,
         },
@@ -452,4 +458,45 @@ test('buildConfigSubmitPayload normalizes legacy ema swing reverse strategy ids'
         parseField(payload, 'sidestep_reentry_strategy').value,
         'ema20_swing_reverse',
     )
+})
+
+test('buildConfigSubmitPayload keeps the canonical lifecycle mode authoritative', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            dca: {
+                enabled: true,
+                trade_lifecycle_mode: 'classic_dca',
+                dynamic: false,
+                strategy: 'ema_cross',
+                timeframe: '1h',
+                trailing_tp: null,
+                max_bots: 2,
+                bo: 20,
+                sell_order_type: 'market',
+                limit_sell_timeout_sec: 60,
+                limit_sell_fallback_to_market: true,
+                tp_limit_prearm_enabled: false,
+                tp_limit_prearm_margin_percent: 0.25,
+                tp_spike_confirm_enabled: false,
+                tp_spike_confirm_seconds: null,
+                tp_spike_confirm_ticks: null,
+                so: 10,
+                mstc: 3,
+                sos: 1.5,
+                ss: 1.2,
+                os: 1.4,
+                trade_safety_order_budget_ratio: 0.95,
+                sidestep_campaign_enabled: true,
+                sidestep_bearish_strategy: 'ema_down',
+                sidestep_reentry_strategy: 'ema20_swing',
+                sidestep_reentry_cooldown_candles: 0,
+                sidestep_reentry_requires_fresh_long_signal: false,
+                tp: 1.8,
+                sl: null,
+            },
+        }),
+    )
+
+    assert.equal(parseField(payload, 'trade_lifecycle_mode').value, 'classic_dca')
+    assert.equal(parseField(payload, 'sidestep_campaign_enabled').value, false)
 })
