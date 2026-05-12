@@ -23,25 +23,7 @@ async def test_housekeeper_deletes_only_old_inactive_symbol_rows(
     old_timestamp_ms = str(int((now - timedelta(days=20)).timestamp() * 1000))
     recent_timestamp_ms = str(int((now - timedelta(days=1)).timestamp() * 1000))
 
-    await model.Trades.create(
-        timestamp="1",
-        ordersize=10.0,
-        fee=0.001,
-        precision=3,
-        amount=1.0,
-        amount_fee=0.0,
-        price=10.0,
-        symbol="ACTIVE/USDT",
-        orderid="oid1",
-        bot="bot",
-        ordertype="market",
-        baseorder=True,
-        safetyorder=False,
-        order_count=0,
-        so_percentage=None,
-        direction="long",
-        side="buy",
-    )
+    await model.OpenTrades.create(symbol="ACTIVE/USDT")
 
     await model.Tickers.create(
         timestamp=old_timestamp_ms,

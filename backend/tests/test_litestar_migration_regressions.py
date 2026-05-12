@@ -178,7 +178,7 @@ def test_monitoring_logs_endpoint_returns_source_metadata(monkeypatch) -> None:
     with TestClient(app=app) as client:
         response = client.get("/monitoring/logs")
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     assert response.json() == {
         "sources": [
             {"source": "watcher", "label": "Watcher", "available": True},
@@ -209,7 +209,7 @@ def test_monitoring_logs_endpoint_returns_log_batches(monkeypatch) -> None:
     with TestClient(app=app) as client:
         response = client.get("/monitoring/logs/watcher?cursor=64&limit=100")
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     assert response.json() == {
         "source": "watcher",
         "label": "Watcher",
@@ -268,7 +268,7 @@ def test_monitoring_logs_download_endpoint_returns_attachment(
     with TestClient(app=app) as client:
         response = client.get("/monitoring/logs/watcher/download")
 
-    assert response.status_code == 201
+    assert response.status_code == 200
     assert response.text == "2026-03-19 - INFO - watcher : started\n"
     assert response.headers["content-type"].startswith("text/plain")
     assert (
