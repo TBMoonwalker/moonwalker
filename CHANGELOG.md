@@ -2,6 +2,28 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- Make `trade_mode` the canonical operator-facing trade lifecycle setting, with
+  `dynamic_dca` and `sidestep` as the only supported dashboard modes.
+- Keep `trade_lifecycle_mode`, `dynamic_dca`, and
+  `sidestep_campaign_enabled` as one-bridge-release compatibility mirrors while
+  the backend and frontend normalize around `trade_mode`.
+- Block live trade-mode switches when open trades or waiting sidestep campaigns
+  still exist, and surface the same structured migration or restore errors in
+  the Control Center restore review flow.
+
+### Fixed
+
+- Preserve inactive mode settings across trade-mode switches, saves, reloads,
+  and restores so switching away from sidestep or dynamic DCA does not erase
+  the hidden configuration for the other mode.
+- Remove stale `Trade lifecycle` terminology from Control Center setup copy and
+  top-level docs so operators see the shipped `trade_mode` language
+  consistently.
+
 ## [1.4.0.0] - 2026-04-28
 
 ### Breaking Changes
