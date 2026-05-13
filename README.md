@@ -11,16 +11,16 @@ signal-driven entries and dynamic DCA management. It also includes an
 Autopilot Memory cockpit that surfaces favored and cooling symbols, suggested
 base orders, and plain-language trust signals in the Control Center.
 
-## Trade Lifecycle Modes
-- `trade_lifecycle_mode` is the canonical lifecycle setting for operators and
-  config writes. Use `classic_dca` for the standard DCA lifecycle and
-  `sidestep_reentry` for spot-only sidestep campaigns.
-- In `sidestep_reentry`, Moonwalker can exit a bearish spot leg, keep the
-  campaign in a waiting state, and later re-enter that same campaign instead of
-  treating it as a brand-new trade.
-- `sidestep_campaign_enabled` remains accepted only as a legacy compatibility
-  mirror for older snapshots and API payloads. New writes and docs should use
-  `trade_lifecycle_mode`.
+## Trade Modes
+- `trade_mode` is the canonical operator-facing trade setting for config writes
+  and dashboard flows. Supported values are `dynamic_dca` and `sidestep`.
+- In `sidestep`, Moonwalker can exit a bearish spot leg, keep the campaign in a
+  waiting state, and later re-enter that same campaign instead of treating it
+  as a brand-new trade.
+- Moonwalker still reads and writes the legacy compatibility mirrors
+  `trade_lifecycle_mode`, `dynamic_dca`, and `sidestep_campaign_enabled` for
+  one bridge release, but new docs and operator workflows should use
+  `trade_mode`.
 
 ## Disclaimer
 **Moonwalker is meant to be used for educational purposes only. Use with real funds at your own risk**

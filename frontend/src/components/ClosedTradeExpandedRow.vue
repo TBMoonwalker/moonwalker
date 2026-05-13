@@ -18,6 +18,14 @@
             >
                 {{ loadError }}
             </n-alert>
+            <n-alert
+                v-if="missionSummaryText"
+                type="info"
+                :bordered="false"
+                class="replay-notice"
+            >
+                {{ missionSummaryText }}
+            </n-alert>
             <n-timeline v-if="timelineItems.length > 0" :horizontal="false">
                 <n-timeline-item
                     v-for="item in timelineItems"
@@ -100,6 +108,30 @@ const finalSellExecution = computed(() => {
 const showPartialReplayNotice = computed(
     () => Boolean(props.rowData.deal_id) && !props.rowData.execution_history_complete,
 )
+
+const sidestepExitCount = computed(() =>
+    Math.max(0, sellExecutions.value.length - 1),
+)
+
+const reentryBuyCount = computed(() =>
+    Math.max(
+        0,
+        buyExecutions.value.filter((execution) => execution.role === 'base_order')
+            .length - 1,
+    ),
+)
+
+const missionSummaryText = computed(() => {
+    if (sidestepExitCount.value <= 0 && reentryBuyCount.value <= 0) {
+        return ''
+    }
+    return [
+        'Campaign summary:',
+        `${sidestepExitCount.value} sidestep exit${sidestepExitCount.value === 1 ? '' : 's'}`,
+        `${reentryBuyCount.value} re-entry bu${reentryBuyCount.value === 1 ? 'y' : 'ys'}`,
+        `Final outcome ${formatPercent(props.rowData.profit_percent)}`,
+    ].join(' | ')
+})
 
 const startTimestamp = computed(
     () => buyExecutions.value[0]?.timestamp ?? props.rowData.open_date,

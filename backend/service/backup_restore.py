@@ -11,11 +11,16 @@ import model
 from service.config import (
     Config,
     build_removed_config_key_message,
+    deserialize_config_value,
     is_removed_config_key,
     resolve_history_lookback_days,
 )
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
+from service.trade_lifecycle_config import (
+    build_invalid_backup_shape_error,
+    resolve_trade_mode_config,
+)
 from tortoise import fields
 from tortoise.transactions import in_transaction
 
@@ -72,11 +77,18 @@ class BackupService:
     ) -> dict[str, Any]:
         """Restore config-only or full backup payloads."""
         config_rows = self._validate_config_rows(backup_payload.get("config"))
+        candidate_config = self._build_config_snapshot(config_rows)
+        resolve_trade_mode_config(
+            candidate_config,
+            source="restore",
+            require_explicit_sidestep_reentry=True,
+        )
         trade_data = backup_payload.get("trade_data")
         if restore_trade_data:
             if not isinstance(trade_data, dict):
-                raise ValueError(
-                    "Full restore requires a backup that includes trade data."
+                raise build_invalid_backup_shape_error(
+                    message="Full restore requires a backup that includes trade data.",
+                    safe_fields={"restore_trade_data": restore_trade_data},
                 )
             validated_trade_data = self._validate_trade_data(trade_data)
         else:
@@ -153,16 +165,25 @@ class BackupService:
     def _validate_config_rows(raw_rows: Any) -> list[dict[str, Any]]:
         """Validate and normalize backup config rows."""
         if not isinstance(raw_rows, list):
-            raise ValueError("Backup does not contain valid config rows.")
+            raise build_invalid_backup_shape_error(
+                message="Backup does not contain valid config rows.",
+                safe_fields={"config_type": type(raw_rows).__name__},
+            )
 
         normalized_rows: list[dict[str, Any]] = []
         for raw_row in raw_rows:
             if not isinstance(raw_row, dict):
-                raise ValueError("Backup config rows must be objects.")
+                raise build_invalid_backup_shape_error(
+                    message="Backup config rows must be objects.",
+                    safe_fields={"row_type": type(raw_row).__name__},
+                )
             key = str(raw_row.get("key") or "").strip()
             value_type = str(raw_row.get("value_type") or "").strip()
             if not key or not value_type:
-                raise ValueError("Backup config rows must include key and value_type.")
+                raise build_invalid_backup_shape_error(
+                    message="Backup config rows must include key and value_type.",
+                    safe_fields={"key": key or None, "value_type": value_type or None},
+                )
             if is_removed_config_key(key):
                 raise ValueError(build_removed_config_key_message(key))
             normalized_rows.append(
@@ -183,18 +204,40 @@ class BackupService:
         for table_name in TRADE_TABLE_MODELS:
             raw_rows = raw_trade_data.get(table_name, [])
             if not isinstance(raw_rows, list):
-                raise ValueError(
-                    f"Backup trade data for '{table_name}' must be a list."
+                raise build_invalid_backup_shape_error(
+                    message=f"Backup trade data for '{table_name}' must be a list.",
+                    safe_fields={
+                        "table_name": table_name,
+                        "value_type": type(raw_rows).__name__,
+                    },
                 )
             normalized_rows: list[dict[str, Any]] = []
             for raw_row in raw_rows:
                 if not isinstance(raw_row, dict):
-                    raise ValueError(
-                        f"Backup trade data for '{table_name}' must contain objects."
+                    raise build_invalid_backup_shape_error(
+                        message=(
+                            f"Backup trade data for '{table_name}' must contain "
+                            "objects."
+                        ),
+                        safe_fields={
+                            "table_name": table_name,
+                            "row_type": type(raw_row).__name__,
+                        },
                     )
                 normalized_rows.append(dict(raw_row))
             validated[table_name] = normalized_rows
         return validated
+
+    @staticmethod
+    def _build_config_snapshot(config_rows: list[dict[str, Any]]) -> dict[str, Any]:
+        """Build a typed config snapshot from validated backup rows."""
+        snapshot: dict[str, Any] = {}
+        for row in config_rows:
+            snapshot[row["key"]] = deserialize_config_value(
+                row.get("value"),
+                row["value_type"],
+            )
+        return snapshot
 
     @staticmethod
     def _deserialize_row(model_class: type, row: dict[str, Any]) -> dict[str, Any]:

@@ -5,6 +5,7 @@ import {
     buildLoadedConfigState,
     type ConfigLoadDefaults,
     type LoadedSignalConfigSection,
+    type TradeModeSwitchGuardState,
 } from '../helpers/configLoad'
 import type { OperationResult } from '../control-center/operationResults'
 import type {
@@ -36,6 +37,7 @@ interface UseConfigLoadFlowOptions {
     autopilot: Ref<AutopilotConfigSection>
     monitoring: Ref<MonitoringConfigSection>
     indicator: Ref<IndicatorConfigSection>
+    tradeModeSwitchGuard: Ref<TradeModeSwitchGuardState>
     showAdvancedGeneral: Ref<boolean>
     isLoading: Ref<boolean>
     message: MessageApiLike
@@ -82,6 +84,10 @@ export function useConfigLoadFlow(options: UseConfigLoadFlowOptions) {
             Object.assign(options.autopilot.value, loadedConfig.autopilot)
             Object.assign(options.monitoring.value, loadedConfig.monitoring)
             Object.assign(options.indicator.value, loadedConfig.indicator)
+            Object.assign(
+                options.tradeModeSwitchGuard.value,
+                loadedConfig.tradeModeSwitchGuard,
+            )
             options.showAdvancedGeneral.value = loadedConfig.showAdvancedGeneral
 
             await options.onAfterLoad?.()

@@ -11,6 +11,7 @@ const props = defineProps<{
     configTrustState: ControlCenterConfigTrustState
     formattedTrustTimestamp: string | null
     readiness: ControlCenterReadiness
+    tradeModeLabel: string
 }>()
 
 const emit = defineEmits<{
@@ -73,6 +74,8 @@ const latestSavedLabel = computed(
 const tradingPostureLabel = computed(() =>
     props.readiness.dryRun ? 'Dry run' : 'Live',
 )
+
+const tradeModeValue = computed(() => props.tradeModeLabel)
 
 const snapshotLabel = computed(() => {
     if (props.configTrustState.kind === 'checking') {
@@ -148,6 +151,10 @@ const alertTitle = computed(() => {
                 <div class="metric-chip">
                     <span class="metric-label">Trading posture</span>
                     <strong class="metric-value">{{ tradingPostureLabel }}</strong>
+                </div>
+                <div class="metric-chip">
+                    <span class="metric-label">Trade mode</span>
+                    <strong class="metric-value">{{ tradeModeValue }}</strong>
                 </div>
                 <div class="metric-chip">
                     <span class="metric-label">Latest saved</span>

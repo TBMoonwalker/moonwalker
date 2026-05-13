@@ -10,11 +10,17 @@ const {
 
 test('deriveGuidedFocusTarget maps targets to stable workspace anchors', () => {
     const signalTarget = deriveGuidedFocusTarget('signal')
+    const dcaTarget = deriveGuidedFocusTarget('dca')
 
     assert.deepEqual(signalTarget, {
         announcement: 'Signal source opened.',
         sectionId: 'control-center-signal',
         title: 'Signal source',
+    })
+    assert.deepEqual(dcaTarget, {
+        announcement: 'Trade modes opened.',
+        sectionId: 'control-center-dca',
+        title: 'Trade modes',
     })
 })
 

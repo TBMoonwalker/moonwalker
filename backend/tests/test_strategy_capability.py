@@ -75,6 +75,25 @@ def test_get_configured_strategy_min_history_candles_uses_sidestep_mode_strategi
     assert required == 200
 
 
+def test_get_configured_strategy_min_history_candles_respects_canonical_mode_over_legacy_flag() -> (
+    None
+):
+    required = get_configured_strategy_min_history_candles(
+        {
+            "trade_mode": "dynamic_dca",
+            "trade_lifecycle_mode": "classic_dca",
+            "dynamic_dca": True,
+            "sidestep_campaign_enabled": True,
+            "market": "spot",
+            "sidestep_bearish_strategy": "ema_down",
+            "sidestep_reentry_strategy": "ema20_swing_reverse",
+            "dca_strategy": "ema_cross",
+            "tp_strategy": "ema_cross",
+        }
+    )
+    assert required == 22
+
+
 def test_get_configured_strategy_history_lookback_days_respects_timeframe() -> None:
     required_days = get_configured_strategy_history_lookback_days(
         {"signal_strategy": "ema_low"},

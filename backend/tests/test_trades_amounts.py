@@ -281,6 +281,61 @@ async def test_get_trades_for_orders_returns_active_flat_waiting_context(
 
 
 @pytest.mark.asyncio
+async def test_get_waiting_trades_surfaces_campaign_status_fields(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    await model.SpotCampaigns.create(
+        campaign_id="campaign-waiting-status",
+        symbol="BTC/USDT",
+        lifecycle_mode="sidestep_reentry",
+        state="flat_waiting_reentry",
+        started_at="2026-05-01T00:00:00+00:00",
+        last_transition_at="2026-05-02T10:00:00+00:00",
+        current_deal_id=None,
+        sidestep_count=2,
+        last_exit_reason=TradeCloseReason.SIDESTEP_EXIT.value,
+        cooldown_until="2099-05-02T12:00:00+00:00",
+        tp_percent=5.0,
+        principal_quote=101.5,
+        reserved_quote=101.5,
+        cumulative_realized_quote=4.0,
+        cumulative_realized_percent=3.94,
+        metadata_json='{"last_long_signal_at":"2026-05-02T11:00:00+00:00"}',
+    )
+    await model.OpenTrades.create(
+        symbol="BTC/USDT",
+        campaign_id="campaign-waiting-status",
+        lifecycle_mode="sidestep_reentry",
+        exposure_state="flat_waiting_reentry",
+        current_price=95.0,
+        reserved_reentry_quote=101.5,
+        waiting_reference_price=101.5,
+        waiting_reference_amount=1.0,
+        waiting_reference_quote=101.5,
+        virtual_waiting_profit=6.5,
+        virtual_waiting_profit_percent=6.4,
+        last_transition_at="2026-05-02T10:00:00+00:00",
+    )
+
+    trades = Trades()
+    waiting_rows = await trades.get_waiting_trades()
+
+    assert len(waiting_rows) == 1
+    waiting_row = waiting_rows[0]
+    assert waiting_row["last_exit_reason"] == TradeCloseReason.SIDESTEP_EXIT.value
+    assert waiting_row["cooldown_until"] == "2099-05-02T12:00:00+00:00"
+    assert waiting_row["last_long_signal_at"] == "2026-05-02T11:00:00+00:00"
+    assert waiting_row["reentry_status"] == "Cooldown active"
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_get_trades_for_orders_repairs_waiting_runtime_from_campaign_state(
     tmp_path, monkeypatch
 ) -> None:

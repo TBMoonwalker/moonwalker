@@ -1,15 +1,20 @@
 """Trade persistence and retrieval helpers."""
 
+import json
 import os
 from collections.abc import Awaitable, Iterable
 from datetime import datetime, timezone
 from typing import Any, TypedDict, TypeVar
-from uuid import UUID, uuid4
+from uuid import UUID
 
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
 from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
+from service.order_persistence import (
+    persist_closed_trade_summary,
+    persist_partial_sell_execution,
+)
 from service.spot_campaign_types import (
     NON_TERMINAL_CLOSE_REASON_VALUES,
     SpotCampaignState,
@@ -207,6 +212,65 @@ class Trades:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _parse_campaign_metadata(metadata_raw: Any) -> dict[str, Any]:
+        """Return campaign metadata as a dict for additive UI read models."""
+        if isinstance(metadata_raw, dict):
+            return metadata_raw
+        if metadata_raw in (None, ""):
+            return {}
+        try:
+            parsed = json.loads(str(metadata_raw))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+
+    @staticmethod
+    def _is_active_cooldown(cooldown_until: Any) -> bool:
+        """Return whether a cooldown timestamp is still in the future."""
+        normalized = str(cooldown_until or "").strip()
+        if not normalized:
+            return False
+        try:
+            cooldown_at = datetime.fromisoformat(normalized.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return cooldown_at > datetime.now().astimezone()
+
+    @classmethod
+    def _apply_waiting_campaign_status_fields(
+        cls,
+        row: dict[str, Any],
+        campaign: dict[str, Any] | None,
+    ) -> None:
+        """Attach additive waiting-campaign status fields for operator clarity."""
+        metadata = cls._parse_campaign_metadata((campaign or {}).get("metadata_json"))
+        cooldown_until = (
+            str((campaign or {}).get("cooldown_until") or "").strip() or None
+        )
+        last_exit_reason = (
+            str((campaign or {}).get("last_exit_reason") or "").strip() or None
+        )
+        last_long_signal_at = (
+            str(metadata.get("last_long_signal_at") or "").strip() or None
+        )
+        last_reentry_error = (
+            str(metadata.get("last_reentry_error") or "").strip() or None
+        )
+
+        reentry_status = "Watching for re-entry signal"
+        if cls._is_active_cooldown(cooldown_until):
+            reentry_status = "Cooldown active"
+        elif last_reentry_error:
+            reentry_status = "Retrying after re-entry error"
+        elif last_long_signal_at:
+            reentry_status = "Fresh long signal recorded"
+
+        row["cooldown_until"] = cooldown_until
+        row["last_exit_reason"] = last_exit_reason
+        row["last_long_signal_at"] = last_long_signal_at
+        row["reentry_status"] = reentry_status
+
     @classmethod
     def _resolve_display_open_date(
         cls,
@@ -288,6 +352,10 @@ class Trades:
         cache_clear = getattr(self.get_trades_for_orders, "cache_clear", None)
         if cache_clear is not None:
             await cache_clear()
+
+    async def invalidate_trade_caches(self) -> None:
+        """Public cache invalidation seam for open-position mutations."""
+        await self._clear_order_cache()
 
     @helper.async_ttl_cache(maxsize=1024, ttl=60)
     async def get_trade_by_ordertype(
@@ -406,6 +474,10 @@ class Trades:
             "display_profit_percent": float(
                 open_trade.get("virtual_waiting_profit_percent") or 0.0
             ),
+            "cooldown_until": None,
+            "last_exit_reason": None,
+            "last_long_signal_at": None,
+            "reentry_status": "Watching for re-entry signal",
             "is_unsellable": False,
             "unsellable_reason": None,
             "unsellable_amount": 0.0,
@@ -461,9 +533,12 @@ class Trades:
                     "campaign_id",
                     "started_at",
                     "sidestep_count",
+                    "last_exit_reason",
+                    "cooldown_until",
                     "principal_quote",
                     "cumulative_realized_quote",
                     "cumulative_realized_percent",
+                    "metadata_json",
                 )
                 campaigns_by_id = {
                     str(row.get("campaign_id") or "").strip(): row
@@ -502,6 +577,11 @@ class Trades:
                     (campaign or {}).get("sidestep_count") or 0
                 )
                 self._apply_campaign_profit_fields(order, campaign)
+                if (
+                    str(order.get("exposure_state") or "")
+                    == TradeExposureState.FLAT_WAITING_REENTRY.value
+                ):
+                    self._apply_waiting_campaign_status_fields(order, campaign)
             orders.sort(key=self._trade_entry_sort_key)
             return orders
         except BaseORMException as e:
@@ -747,109 +827,12 @@ class Trades:
         sold_proceeds: float,
         sell_executions: Iterable[dict[str, Any]] | None = None,
     ) -> None:
-        """Accumulate partial sell totals and append partial sell execution rows."""
-        execution_rows = [
-            execution
-            for execution in (sell_executions or [])
-            if isinstance(execution, dict)
-        ]
-
-        async def _update_partial_sell_execution() -> None:
-            async with in_transaction() as conn:
-                open_trade = (
-                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
-                )
-                if open_trade is None:
-                    return
-
-                deal_id = open_trade.deal_id or str(uuid4())
-                campaign_id = (
-                    str(open_trade.campaign_id).strip()
-                    if open_trade.campaign_id
-                    else None
-                )
-                history_complete = bool(open_trade.execution_history_complete) and bool(
-                    execution_rows
-                )
-                await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
-                    deal_id=deal_id,
-                    execution_history_complete=history_complete,
-                    sold_amount=F("sold_amount") + float(sold_amount),
-                    sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
-                )
-
-                ledger_rows = execution_rows or [
-                    {
-                        "symbol": symbol,
-                        "side": "sell",
-                        "role": "partial_sell",
-                        "timestamp": "",
-                        "price": (
-                            float(sold_proceeds) / float(sold_amount)
-                            if float(sold_amount) > 0
-                            else 0.0
-                        ),
-                        "amount": float(sold_amount),
-                        "ordersize": float(sold_proceeds),
-                        "fee": 0.0,
-                    }
-                ]
-                for execution in ledger_rows:
-                    if float(execution.get("amount") or 0.0) <= 0:
-                        continue
-                    await model.TradeExecutions.create(
-                        deal_id=deal_id,
-                        campaign_id=campaign_id,
-                        symbol=str(execution.get("symbol") or symbol),
-                        side=str(execution.get("side") or "sell"),
-                        role=str(execution.get("role") or "partial_sell"),
-                        timestamp=str(execution.get("timestamp") or ""),
-                        price=float(execution.get("price") or 0.0),
-                        amount=float(execution.get("amount") or 0.0),
-                        ordersize=float(execution.get("ordersize") or 0.0),
-                        fee=float(execution.get("fee") or 0.0),
-                        order_id=(
-                            str(execution.get("order_id"))
-                            if execution.get("order_id") is not None
-                            else None
-                        ),
-                        order_type=(
-                            str(execution.get("order_type"))
-                            if execution.get("order_type") is not None
-                            else None
-                        ),
-                        order_count=execution.get("order_count"),
-                        so_percentage=(
-                            float(execution["so_percentage"])
-                            if execution.get("so_percentage") is not None
-                            else None
-                        ),
-                        signal_name=(
-                            str(execution.get("signal_name"))
-                            if execution.get("signal_name") is not None
-                            else None
-                        ),
-                        strategy_name=(
-                            str(execution.get("strategy_name"))
-                            if execution.get("strategy_name") is not None
-                            else None
-                        ),
-                        timeframe=(
-                            str(execution.get("timeframe"))
-                            if execution.get("timeframe") is not None
-                            else None
-                        ),
-                        metadata_json=(
-                            str(execution.get("metadata_json"))
-                            if execution.get("metadata_json") is not None
-                            else None
-                        ),
-                        using_db=conn,
-                    )
-
-        await run_sqlite_write_with_retry(
-            _update_partial_sell_execution,
-            f"updating partial sell execution for {symbol}",
+        """Delegate partial sell persistence to the shared write layer."""
+        await persist_partial_sell_execution(
+            symbol,
+            sold_amount,
+            sold_proceeds,
+            sell_executions,
         )
 
     async def get_partial_sell_execution(self, symbol: str) -> tuple[float, float]:
@@ -889,11 +872,8 @@ class Trades:
             self._log_db_error(f"Error deleting open trades for {symbol}.", exc)
 
     async def create_closed_trades(self, payload: dict[str, Any]) -> None:
-        """Create a closed trade entry."""
-        await self._write_db(
-            model.ClosedTrades.create(**payload),
-            "Error creating closed trade.",
-        )
+        """Delegate detached closed-trade summary persistence to the write layer."""
+        await persist_closed_trade_summary(payload)
 
     async def create_unsellable_trade(self, payload: dict[str, Any]) -> None:
         """Create an archived unsellable trade entry."""
@@ -1009,7 +989,14 @@ class Trades:
                         campaign_id=str(open_trade.get("campaign_id") or "").strip()
                     )
                     .limit(1)
-                    .values("campaign_id", "lifecycle_mode", "state")
+                    .values(
+                        "campaign_id",
+                        "lifecycle_mode",
+                        "state",
+                        "last_exit_reason",
+                        "cooldown_until",
+                        "metadata_json",
+                    )
                 )
                 campaign = campaign_rows[0] if campaign_rows else None
             lifecycle_mode, exposure_state = self._derive_campaign_runtime_state(
@@ -1143,6 +1130,11 @@ class Trades:
                 ),
                 **unsellable_state,
             }
+            if (
+                str(trade_data.get("exposure_state") or "")
+                == TradeExposureState.FLAT_WAITING_REENTRY.value
+            ):
+                self._apply_waiting_campaign_status_fields(trade_data, campaign)
             return trade_data
         except BaseORMException:
             # Broad catch to return None when trade aggregation fails.

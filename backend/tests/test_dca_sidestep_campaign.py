@@ -257,6 +257,62 @@ async def test_process_ticker_data_logs_sidestep_gate_without_active_trade(
 
 
 @pytest.mark.asyncio
+async def test_attempt_waiting_reentry_uses_reserved_quote_from_waiting_trade(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    submitted_orders: list[dict[str, object]] = []
+
+    class _CampaignService:
+        async def get_campaign_snapshot(self, _campaign_id: str):
+            return {
+                "campaign_id": "campaign-1",
+                "reserved_quote": 50.0,
+                "cooldown_until": None,
+            }
+
+    async def fake_get_sidestep_campaigns():
+        return _CampaignService()
+
+    async def fake_reentry_strategy(_symbol: str) -> bool:
+        return True
+
+    async def fake_receive_buy_order(order, _config):
+        submitted_orders.append(dict(order))
+        return True
+
+    monkeypatch.setattr(dca, "_get_sidestep_campaigns", fake_get_sidestep_campaigns)
+    monkeypatch.setattr(dca, "_Dca__sidestep_reentry_strategy", fake_reentry_strategy)
+    monkeypatch.setattr(dca.orders, "receive_buy_order", fake_receive_buy_order)
+
+    dca.config = {
+        "trade_lifecycle_mode": "sidestep_reentry",
+        "market": "spot",
+        "sidestep_reentry_strategy": "ema20_swing",
+        "timeframe": "4h",
+        "bo": 25.0,
+    }
+
+    success = await dca._Dca__attempt_waiting_reentry(
+        {
+            "symbol": "ETH/USDT",
+            "bot": "sidestep_ETH/USDT",
+            "campaign_id": "campaign-1",
+            "lifecycle_mode": "sidestep_reentry",
+            "exposure_state": "flat_waiting_reentry",
+            "reserved_reentry_quote": 112.5,
+        },
+        current_price=100.0,
+    )
+
+    assert success is True
+    assert len(submitted_orders) == 1
+    assert submitted_orders[0]["ordersize"] == pytest.approx(112.5)
+    assert submitted_orders[0]["campaign_id"] == "campaign-1"
+    assert submitted_orders[0]["strategy_name"] == "ema20_swing"
+
+
+@pytest.mark.asyncio
 async def test_process_ticker_data_logs_exit_tp_gate_before_bearish_strategy(
     monkeypatch,
 ) -> None:

@@ -128,6 +128,40 @@ function rowClasses(rowData: WaitingCampaignRow): string {
     return 'red'
 }
 
+function formatCloseReason(reason: string | null | undefined): string {
+    switch (String(reason ?? '').trim().toLowerCase()) {
+        case 'sidestep_exit':
+            return 'Sidestep exit'
+        case 'manual_stop':
+            return 'Manual stop'
+        case 'take_profit':
+            return 'Take profit'
+        case 'trailing_take_profit':
+            return 'Trailing take profit'
+        case 'stop_loss':
+            return 'Stop loss'
+        case 'manual_sell':
+            return 'Manual sell'
+        default:
+            return 'Unknown'
+    }
+}
+
+function resolveReentryStatusType(
+    rowData: WaitingCampaignRow,
+): 'default' | 'info' | 'success' | 'warning' {
+    switch (rowData.reentry_status) {
+        case 'Cooldown active':
+            return 'warning'
+        case 'Fresh long signal recorded':
+            return 'success'
+        case 'Retrying after re-entry error':
+            return 'info'
+        default:
+            return 'default'
+    }
+}
+
 const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
     {
         title: 'Symbol',
@@ -226,6 +260,48 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
                     `Now ${formatFixed(currentPrice)} / Exit ${formatFixed(referencePrice)}`,
                 ),
             ]
+        },
+        align: 'center',
+    },
+    {
+        title: 'Status',
+        key: 'reentry_status',
+        render: (rowData) => {
+            const status = rowData.reentry_status ?? 'Watching for re-entry signal'
+            const statusRows = [
+                h(
+                    NTag,
+                    {
+                        size: 'small',
+                        bordered: false,
+                        type: resolveReentryStatusType(rowData),
+                    },
+                    {
+                        default: () => status,
+                    },
+                ),
+                h(NDivider, { dashed: true }),
+                h('div', `Last exit: ${formatCloseReason(rowData.last_exit_reason)}`),
+            ]
+
+            if (
+                status === 'Cooldown active' &&
+                rowData.cooldown_until
+            ) {
+                const cooldown = resolveTradeDateTime(rowData.cooldown_until)
+                statusRows.push(h(NDivider, { dashed: true }))
+                statusRows.push(
+                    h('div', `Cooldown until ${cooldown.date} ${cooldown.time}`),
+                )
+            } else if (rowData.last_long_signal_at) {
+                const lastSignal = resolveTradeDateTime(rowData.last_long_signal_at)
+                statusRows.push(h(NDivider, { dashed: true }))
+                statusRows.push(
+                    h('div', `Last long signal ${lastSignal.date} ${lastSignal.time}`),
+                )
+            }
+
+            return statusRows
         },
         align: 'center',
     },

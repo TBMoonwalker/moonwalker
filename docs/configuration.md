@@ -25,19 +25,21 @@ Use `/control-center` as the supported dashboard configuration entry path.
 For signal-plugin-specific payloads and examples, see [signals.md](signals.md).
 For backup/restore and related config endpoints, see [api.md](api.md).
 
-## Trade Lifecycle Mode
-`trade_lifecycle_mode` is the canonical operator-facing lifecycle control.
-Supported values are:
+## Trade Modes
+`trade_mode` is the canonical operator-facing lifecycle control. Supported
+values are:
 
-- `classic_dca`: Standard DCA lifecycle.
-- `sidestep_reentry`: Spot-only sidestep campaigns that can sell a bearish leg,
-  keep the mission in a waiting state, and later re-enter that same campaign.
+- `dynamic_dca`: Standard DCA lifecycle with dynamic safety-order behavior.
+- `sidestep`: Spot-only sidestep campaigns that can sell a bearish leg, keep
+  the mission in a waiting state, and later re-enter that same campaign.
 
-If `market` is not `spot`, sidestep mode is treated as disabled.
+If `market` is not `spot`, sidestep can remain configured but the sidestep
+runtime stays inactive.
 
-`sidestep_campaign_enabled` is retained only as a legacy compatibility mirror
-for older snapshots and API payloads. New config writes, docs, and operator
-workflows should use `trade_lifecycle_mode`.
+Moonwalker still reads and writes the legacy compatibility mirrors
+`trade_lifecycle_mode`, `dynamic_dca`, and `sidestep_campaign_enabled` for one
+bridge release so older snapshots and clients can survive the cutover. New
+config writes, docs, and operator workflows should use `trade_mode`.
 
 ## Configuration Reference
 All supported configuration keys are listed below. Keys marked "(advanced)"
@@ -71,12 +73,13 @@ are not exposed in the UI and must be set via the API.
 | `sandbox` | `bool` | Enable exchange sandbox mode (advanced). | `false` |
 | `order_check_range` | `int` | Seconds for post-order trade lookup (advanced). | `5` |
 | `dca` | `bool` | Enable DCA. | `true` |
-| `dynamic_dca` | `bool` | Enable dynamic DCA. | `false` |
-| `trade_lifecycle_mode` | `string` | Canonical lifecycle mode for trade execution. Supported values are `classic_dca` and `sidestep_reentry`. Sidestep mode is active only when `market = spot`. | `classic_dca` |
-| `sidestep_campaign_enabled` | `bool` | Legacy compatibility mirror for older snapshots and API payloads. Do not use for new config writes; use `trade_lifecycle_mode` instead. | `false` |
+| `trade_mode` | `string` | Canonical trade mode for operator-facing config. Supported values are `dynamic_dca` and `sidestep`. | `dynamic_dca` |
+| `dynamic_dca` | `bool` | Legacy compatibility mirror derived from `trade_mode`. `true` means `trade_mode = dynamic_dca`. Do not use for new config writes. | `true` |
+| `trade_lifecycle_mode` | `string` | Legacy compatibility mirror derived from `trade_mode`. `classic_dca` maps to `dynamic_dca`; `sidestep_reentry` maps to `sidestep`. Do not use for new config writes. | `classic_dca` |
+| `sidestep_campaign_enabled` | `bool` | Legacy compatibility mirror derived from `trade_mode`. `true` means `trade_mode = sidestep`. Do not use for new config writes. | `false` |
 | `dca_strategy` | `string` | Strategy for dynamic DCA. | `ema_swing` |
-| `sidestep_bearish_strategy` | `string` | Bearish exit strategy used when `trade_lifecycle_mode = sidestep_reentry`. | `ema_down` |
-| `sidestep_reentry_strategy` | `string` | Optional re-entry strategy for waiting sidestep campaigns. Falls back to `dca_strategy` when empty. | `ema_swing` |
+| `sidestep_bearish_strategy` | `string` | Bearish exit strategy used when `trade_mode = sidestep`. | `ema_down` |
+| `sidestep_reentry_strategy` | `string` | Required for new sidestep saves and restores. Legacy startup snapshots may still fall back to `dca_strategy` until they are re-saved from a current client. | `ema_swing` |
 | `sidestep_reentry_cooldown_candles` | `int` | Minimum number of candles to wait before a sidestep campaign may re-enter again. | `0` |
 | `sidestep_reentry_requires_fresh_long_signal` | `bool` | Require a fresh long signal before a waiting sidestep campaign may re-enter (advanced). | `false` |
 | `tp_strategy` | `string` | Strategy for take-profit checks (advanced). | `ema_cross` |
@@ -117,7 +120,7 @@ are not exposed in the UI and must be set via the API.
 | `pair_age` | `int` | Minimum pair age in days (advanced). | `30` |
 | `capital_max_fund` | `float` | Global hard capital limit for all live buy paths. New buys fail closed when this is missing or `<= 0` in the runtime config. | `0` |
 | `capital_reserve_safety_orders` | `bool` | Reserve estimated future safety-order budget when admitting base orders and checking the hard limit. | `false` |
-| `capital_budget_buffer_pct` | `float` | Optional extra capital-budget buffer for dynamic safety-order requirements. Static DCA always uses `0`. Whole-percent UI values such as `50` and API ratio values such as `0.5` both mean 50%. | `0` |
+| `capital_budget_buffer_pct` | `float` | Optional extra capital-budget buffer for dynamic safety-order requirements. Sidestep mode always uses `0`. Whole-percent UI values such as `50` and API ratio values such as `0.5` both mean 50%. | `0` |
 | `autopilot` | `bool` | Enable autopilot mode. | `false` |
 | `autopilot_symbol_entry_sizing_enabled` | `bool` | Allow fresh non-neutral Autopilot memory to override new-entry base order size per symbol. When disabled, suggested base orders remain advisory only. | `false` |
 | `autopilot_profit_stretch_enabled` | `bool` | Allow Autopilot to stretch the effective capital limit above `capital_max_fund` using realized closed profit. | `false` |
@@ -178,8 +181,9 @@ then-current global budget.
 
 `capital_budget_buffer_pct` is only available for dynamic DCA. It adds extra
 headroom to dynamic safety-order budget checks where future safety-order sizes
-can vary. Static DCA already has a configured `so`/`os`/`mstc` ladder, so
-Moonwalker treats the buffer as `0` whenever `dynamic_dca` is disabled.
+can vary. Sidestep mode does not use the dynamic safety-order ladder, so
+Moonwalker treats the buffer as `0` whenever `trade_mode` is not
+`dynamic_dca`.
 
 Autopilot can optionally stretch the effective limit above the global principal
 limit using realized closed profit:
@@ -243,7 +247,7 @@ reserve math stays based on the configured DCA ladder, not this multiplier.
 
 ## Sidestep Re-entry Behavior
 
-When `trade_lifecycle_mode = sidestep_reentry` on spot markets:
+When `trade_mode = sidestep` on spot markets:
 
 - Moonwalker can close a bearish leg without treating the campaign as fully
   finished.

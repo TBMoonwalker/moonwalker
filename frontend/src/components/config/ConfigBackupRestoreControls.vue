@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
+
 type BackupRestoreMode = 'config' | 'full'
 
 withDefaults(
@@ -7,6 +9,7 @@ withDefaults(
         bindBackupFileInput: (element: Element | null) => void
         hasSelectedBackupPayload: boolean
         restoreLoading: boolean
+        restoreReview?: RestoreReviewState | null
         selectedBackupConfigCount: number
         selectedBackupFileName: string | null
         selectedBackupHasTradeData: boolean
@@ -57,6 +60,18 @@ const emit = defineEmits<{
         Loaded backup with {{ selectedBackupConfigCount }} config keys<span v-if="selectedBackupHasTradeData"> and trade data</span>.
     </n-text>
 
+    <n-alert
+        v-if="restoreReview"
+        type="warning"
+        :bordered="false"
+        :title="`Restore review: ${restoreReview.code}`"
+    >
+        <div>{{ restoreReview.message }}</div>
+        <div v-if="restoreReview.nextAction" class="restore-review-next-action">
+            {{ restoreReview.nextAction }}
+        </div>
+    </n-alert>
+
     <n-flex align="center" :wrap="true" :size="[12, 12]">
         <n-button
             :class="actionButtonClass || undefined"
@@ -87,5 +102,9 @@ const emit = defineEmits<{
 
 .backup-file-name {
     font-size: 14px;
+}
+
+.restore-review-next-action {
+    margin-top: 6px;
 }
 </style>

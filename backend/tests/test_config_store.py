@@ -4,6 +4,7 @@ import pytest
 import service.config as config_module
 from service.config import Config
 from service.config_persistence import should_persist_config_value
+from service.trade_lifecycle_config import TradeModeConfigError
 from tortoise import Tortoise
 
 
@@ -351,6 +352,119 @@ async def test_config_load_all_clears_removed_keys(tmp_path, monkeypatch) -> Non
     await config.load_all()
 
     assert config.get("timezone") is None
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_config_load_all_accepts_legacy_dynamic_dca_rows(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    import model
+
+    await model.AppConfig.create(
+        key="trade_lifecycle_mode",
+        value="classic_dca",
+        value_type="str",
+    )
+    await model.AppConfig.create(
+        key="dynamic_dca",
+        value=True,
+        value_type="bool",
+    )
+
+    config = Config()
+    await config.load_all()
+
+    assert config.get("trade_mode") == "dynamic_dca"
+    assert config.snapshot()["dynamic_dca"] is True
+    assert config.snapshot()["trade_lifecycle_mode"] == "classic_dca"
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_config_load_all_rejects_deprecated_static_mode(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    import model
+
+    await model.AppConfig.create(
+        key="trade_lifecycle_mode",
+        value="classic_dca",
+        value_type="str",
+    )
+
+    config = Config()
+    with pytest.raises(TradeModeConfigError, match="Static DCA mode"):
+        await config.load_all()
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_config_batch_set_rejects_invalid_trade_mode_snapshot_atomically(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    import model
+
+    config = Config()
+    await config.batch_set(
+        {
+            "trade_mode": {"value": "dynamic_dca", "type": "str"},
+            "trade_lifecycle_mode": {"value": "classic_dca", "type": "str"},
+            "dynamic_dca": {"value": True, "type": "bool"},
+            "sidestep_campaign_enabled": {"value": False, "type": "bool"},
+        }
+    )
+
+    with pytest.raises(
+        TradeModeConfigError,
+        match="Sidestep mode requires an explicit sidestep_reentry_strategy",
+    ):
+        await config.batch_set(
+            {
+                "trade_mode": {"value": "sidestep", "type": "str"},
+                "trade_lifecycle_mode": {
+                    "value": "sidestep_reentry",
+                    "type": "str",
+                },
+                "dynamic_dca": {"value": False, "type": "bool"},
+                "sidestep_campaign_enabled": {"value": True, "type": "bool"},
+            }
+        )
+
+    assert config.get("trade_mode") == "dynamic_dca"
+    persisted_rows = {
+        row.key: row.value for row in await model.AppConfig.all().order_by("key")
+    }
+    assert persisted_rows == {
+        "dynamic_dca": "True",
+        "sidestep_campaign_enabled": "False",
+        "trade_lifecycle_mode": "classic_dca",
+        "trade_mode": "dynamic_dca",
+    }
 
     await Tortoise.close_connections()
 

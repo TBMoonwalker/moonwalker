@@ -41,6 +41,10 @@ export type OpenTradeRow = {
   display_profit?: number
   display_profit_percent?: number
   last_transition_at?: string | null
+  last_exit_reason?: string | null
+  cooldown_until?: string | null
+  reentry_status?: string | null
+  last_long_signal_at?: string | null
   key: number
 }
 
@@ -225,7 +229,11 @@ export const useTradesStore = defineStore('trades', {
         display_profit_percent: Number(
           val.display_profit_percent ?? Number(val.profit_percent ?? 0)
         ),
-        last_transition_at: val.last_transition_at ?? null
+        last_transition_at: val.last_transition_at ?? null,
+        last_exit_reason: val.last_exit_reason ?? null,
+        cooldown_until: val.cooldown_until ?? null,
+        reentry_status: val.reentry_status ?? null,
+        last_long_signal_at: val.last_long_signal_at ?? null
       }
     },
     setOpenTrades(raw: any[]) {

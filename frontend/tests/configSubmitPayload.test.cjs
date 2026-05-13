@@ -81,7 +81,7 @@ function createBaseOptions(overrides = {}) {
         },
         dca: {
             enabled: true,
-            dynamic: false,
+            trade_mode: 'dynamic_dca',
             strategy: 'ema_cross',
             timeframe: '1h',
             trailing_tp: null,
@@ -90,6 +90,8 @@ function createBaseOptions(overrides = {}) {
             sell_order_type: 'market',
             limit_sell_timeout_sec: 60,
             limit_sell_fallback_to_market: true,
+            tp_limit_prearm_enabled: false,
+            tp_limit_prearm_margin_percent: 0.25,
             tp_spike_confirm_enabled: false,
             tp_spike_confirm_seconds: null,
             tp_spike_confirm_ticks: null,
@@ -99,6 +101,10 @@ function createBaseOptions(overrides = {}) {
             ss: 1.2,
             os: 1.4,
             trade_safety_order_budget_ratio: 0.95,
+            sidestep_bearish_strategy: null,
+            sidestep_reentry_strategy: null,
+            sidestep_reentry_cooldown_candles: 0,
+            sidestep_reentry_requires_fresh_long_signal: false,
             tp: 1.8,
             sl: null,
         },
@@ -189,7 +195,7 @@ test(
                 },
                 dca: {
                     enabled: true,
-                    dynamic: true,
+                    trade_mode: 'dynamic_dca',
                     strategy: 'ema_cross',
                     timeframe: '1h',
                     trailing_tp: null,
@@ -198,6 +204,8 @@ test(
                     sell_order_type: 'market',
                     limit_sell_timeout_sec: 60,
                     limit_sell_fallback_to_market: true,
+                    tp_limit_prearm_enabled: false,
+                    tp_limit_prearm_margin_percent: 0.25,
                     tp_spike_confirm_enabled: false,
                     tp_spike_confirm_seconds: null,
                     tp_spike_confirm_ticks: null,
@@ -229,7 +237,11 @@ test(
         assert.equal('filter' in payload, false)
         assert.equal(parseField(payload, 'history_lookback_time').value, '180d')
         assert.equal(parseField(payload, 'pair_denylist').value, 'BTC/USDT,ETH/USDT')
-        assert.equal(parseField(payload, 'os').value, false)
+        assert.equal(parseField(payload, 'trade_mode').value, 'dynamic_dca')
+        assert.equal(parseField(payload, 'dynamic_dca').value, true)
+        assert.equal(parseField(payload, 'trade_lifecycle_mode').value, 'classic_dca')
+        assert.equal(parseField(payload, 'sidestep_campaign_enabled').value, false)
+        assert.equal(parseField(payload, 'os').value, 1.4)
         assert.equal(
             parseField(payload, 'autopilot_symbol_entry_sizing_enabled').value,
             false,
@@ -280,7 +292,7 @@ test('buildConfigSubmitPayload persists configured capital budget and stretch se
         createBaseOptions({
             dca: {
                 enabled: true,
-                dynamic: true,
+                trade_mode: 'dynamic_dca',
             },
             capital: {
                 max_fund: 250,
@@ -365,9 +377,13 @@ test('buildConfigSubmitPayload persists configured capital budget and stretch se
     )
 })
 
-test('buildConfigSubmitPayload clears dynamic safety-order buffer for static DCA', () => {
+test('buildConfigSubmitPayload clears dynamic safety-order buffer for sidestep mode', () => {
     const payload = buildConfigSubmitPayload(
         createBaseOptions({
+            dca: {
+                enabled: true,
+                trade_mode: 'sidestep',
+            },
             capital: {
                 max_fund: 250,
                 reserve_safety_orders: true,
@@ -411,8 +427,7 @@ test('buildConfigSubmitPayload normalizes legacy ema swing reverse strategy ids'
         createBaseOptions({
             dca: {
                 enabled: true,
-                trade_lifecycle_mode: 'sidestep_reentry',
-                dynamic: false,
+                trade_mode: 'sidestep',
                 strategy: 'ema_swing_reverse',
                 timeframe: '1h',
                 trailing_tp: null,
@@ -432,7 +447,6 @@ test('buildConfigSubmitPayload normalizes legacy ema swing reverse strategy ids'
                 ss: 1.2,
                 os: 1.4,
                 trade_safety_order_budget_ratio: 0.95,
-                sidestep_campaign_enabled: true,
                 sidestep_bearish_strategy: 'ema_swing_reverse',
                 sidestep_reentry_strategy: 'ema_swing_reverse',
                 sidestep_reentry_cooldown_candles: 0,
@@ -451,5 +465,91 @@ test('buildConfigSubmitPayload normalizes legacy ema swing reverse strategy ids'
     assert.equal(
         parseField(payload, 'sidestep_reentry_strategy').value,
         'ema20_swing_reverse',
+    )
+})
+
+test('buildConfigSubmitPayload derives legacy mirrors from the canonical trade mode', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            dca: {
+                enabled: true,
+                trade_mode: 'dynamic_dca',
+                strategy: 'ema_cross',
+                timeframe: '1h',
+                trailing_tp: null,
+                max_bots: 2,
+                bo: 20,
+                sell_order_type: 'market',
+                limit_sell_timeout_sec: 60,
+                limit_sell_fallback_to_market: true,
+                tp_limit_prearm_enabled: false,
+                tp_limit_prearm_margin_percent: 0.25,
+                tp_spike_confirm_enabled: false,
+                tp_spike_confirm_seconds: null,
+                tp_spike_confirm_ticks: null,
+                so: 10,
+                mstc: 3,
+                sos: 1.5,
+                ss: 1.2,
+                os: 1.4,
+                trade_safety_order_budget_ratio: 0.95,
+                sidestep_bearish_strategy: 'ema_down',
+                sidestep_reentry_strategy: 'ema20_swing',
+                sidestep_reentry_cooldown_candles: 0,
+                sidestep_reentry_requires_fresh_long_signal: false,
+                tp: 1.8,
+                sl: null,
+            },
+        }),
+    )
+
+    assert.equal(parseField(payload, 'trade_mode').value, 'dynamic_dca')
+    assert.equal(parseField(payload, 'dynamic_dca').value, true)
+    assert.equal(parseField(payload, 'trade_lifecycle_mode').value, 'classic_dca')
+    assert.equal(parseField(payload, 'sidestep_campaign_enabled').value, false)
+})
+
+test('buildConfigSubmitPayload derives sidestep compatibility mirrors from canonical mode', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            dca: {
+                enabled: true,
+                trade_mode: 'sidestep',
+                strategy: 'ema_cross',
+                timeframe: '1h',
+                trailing_tp: null,
+                max_bots: 2,
+                bo: 20,
+                sell_order_type: 'market',
+                limit_sell_timeout_sec: 60,
+                limit_sell_fallback_to_market: true,
+                tp_limit_prearm_enabled: false,
+                tp_limit_prearm_margin_percent: 0.25,
+                tp_spike_confirm_enabled: false,
+                tp_spike_confirm_seconds: null,
+                tp_spike_confirm_ticks: null,
+                so: 10,
+                mstc: 3,
+                sos: 1.5,
+                ss: 1.2,
+                os: 1.4,
+                trade_safety_order_budget_ratio: 0.95,
+                sidestep_bearish_strategy: 'ema_down',
+                sidestep_reentry_strategy: 'ema20_swing',
+                sidestep_reentry_cooldown_candles: 0,
+                sidestep_reentry_requires_fresh_long_signal: true,
+                tp: 1.8,
+                sl: null,
+            },
+        }),
+    )
+
+    assert.equal(parseField(payload, 'trade_mode').value, 'sidestep')
+    assert.equal(parseField(payload, 'dynamic_dca').value, false)
+    assert.equal(parseField(payload, 'trade_lifecycle_mode').value, 'sidestep_reentry')
+    assert.equal(parseField(payload, 'sidestep_campaign_enabled').value, true)
+    assert.equal(
+        parseField(payload, 'sidestep_reentry_requires_fresh_long_signal').value,
+        true,
     )
 })

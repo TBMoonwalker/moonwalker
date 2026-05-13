@@ -5,6 +5,7 @@ import type {
     SignalEditorModel,
     StringSelectOption,
 } from '../config-editor/types'
+import type { TradeModeSwitchGuardState } from '../helpers/configLoad'
 import { getAllTimeZones } from '../helpers/timezone'
 import type {
     AutopilotConfigSection,
@@ -18,6 +19,7 @@ import type {
     MonitoringConfigSection,
     SignalConfigSection,
 } from '../helpers/configSubmitPayload'
+import { TRADE_MODE_DYNAMIC_DCA } from '../helpers/tradeLifecycle'
 
 interface UseConfigPageStateOptions {
     defaults: ConfigSubmitPayloadDefaults
@@ -187,8 +189,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
 
     const dca = ref<DcaConfigSection>({
         enabled: false,
-        trade_lifecycle_mode: 'classic_dca',
-        dynamic: false,
+        trade_mode: TRADE_MODE_DYNAMIC_DCA,
         strategy: null,
         timeframe: null,
         trailing_tp: null,
@@ -208,13 +209,20 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         ss: null,
         os: null,
         trade_safety_order_budget_ratio: 0.95,
-        sidestep_campaign_enabled: false,
         sidestep_bearish_strategy: null,
         sidestep_reentry_strategy: null,
         sidestep_reentry_cooldown_candles: 0,
         sidestep_reentry_requires_fresh_long_signal: false,
         tp: null,
         sl: null,
+    })
+    const tradeModeSwitchGuard = ref<TradeModeSwitchGuardState>({
+        blocked: false,
+        can_switch: true,
+        current_trade_mode: TRADE_MODE_DYNAMIC_DCA,
+        message: null,
+        open_trade_count: 0,
+        waiting_campaign_count: 0,
     })
 
     const capital = ref<CapitalConfigSection>({
@@ -311,6 +319,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         signal,
         symsignals: SYM_SIGNAL_OPTIONS,
         timerange: TIMERANGE_OPTIONS,
+        tradeModeSwitchGuard,
         timezone,
     }
 }

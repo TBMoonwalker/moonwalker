@@ -13,6 +13,8 @@ import type {
     SignalEditorModel,
     StringSelectOption,
 } from '../../config-editor/types'
+import type { TradeModeSwitchGuardState } from '../../helpers/configLoad'
+import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
 import type {
     ControlCenterTarget,
     ControlCenterTaskPresentation,
@@ -65,6 +67,7 @@ defineProps<{
     monitoringTestLoading: boolean
     readinessFirstRun: boolean
     restoreLoading: boolean
+    restoreReview: RestoreReviewState | null
     rules: FormRules
     selectedBackupConfigCount: number
     selectedBackupFileName: string | null
@@ -80,6 +83,7 @@ defineProps<{
     signalFormRef?: VNodeRef
     symsignals: MixedSelectOption[]
     timerange: StringSelectOption[]
+    tradeModeSwitchGuard: TradeModeSwitchGuardState
     timezone: StringSelectOption[]
 }>()
 
@@ -105,6 +109,7 @@ const emit = defineEmits<{
         :is-setup-task-expanded="isSetupTaskExpanded"
         :readiness-first-run="readinessFirstRun"
         :restore-loading="restoreLoading"
+        :restore-review="restoreReview"
         :selected-backup-config-count="selectedBackupConfigCount"
         :selected-backup-file-name="selectedBackupFileName"
         :selected-backup-has-trade-data="selectedBackupHasTradeData"
@@ -171,6 +176,7 @@ const emit = defineEmits<{
                 :sell-order-type-options="sellOrderTypeOptions"
                 :show-advanced-general="setupShowsAdvancedFields"
                 :strategy-options="signal.strategy_plugins"
+                :trade-mode-switch-guard="tradeModeSwitchGuard"
             />
         </template>
 
@@ -178,7 +184,9 @@ const emit = defineEmits<{
             <ConfigCapitalSection
                 :ref="capitalFormRef"
                 :capital="capital"
-                :dynamic-dca-enabled="dca.enabled && dca.dynamic"
+                :dynamic-dca-enabled="
+                    dca.enabled && dca.trade_mode === 'dynamic_dca'
+                "
                 :rules="rules"
             />
         </template>

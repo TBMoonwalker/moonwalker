@@ -22,6 +22,7 @@ defineProps<{
     formattedTrustTimestamp: string | null
     liveActivationRef?: (element: Element | null) => void
     readiness: ControlCenterReadiness
+    tradeModeLabel: string
     visibleBlockers: ControlCenterBlocker[]
 }>()
 
@@ -118,6 +119,7 @@ const emit = defineEmits<{
                                         formattedTrustTimestamp
                                     "
                                     :readiness="readiness"
+                                    :trade-mode-label="tradeModeLabel"
                                     @activate-live="emit('activate-live')"
                                     @open-config="emit('open-config')"
                                 />

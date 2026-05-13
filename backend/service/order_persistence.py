@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from typing import Any
 from uuid import uuid4
 
@@ -609,6 +610,92 @@ async def persist_manual_buy_add(
 
     await run_sqlite_write_with_retry(
         _persist_manual_buy, f"persisting manual buy add for {symbol}"
+    )
+
+
+async def persist_partial_sell_execution(
+    symbol: str,
+    sold_amount: float,
+    sold_proceeds: float,
+    sell_executions: Iterable[dict[str, Any]] | None = None,
+) -> None:
+    """Accumulate partial sell totals and append execution rows."""
+    execution_rows = [
+        execution
+        for execution in (sell_executions or [])
+        if isinstance(execution, dict)
+    ]
+
+    async def _persist_partial_sell_execution() -> None:
+        async with in_transaction() as conn:
+            open_trade = (
+                await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
+            )
+            if open_trade is None:
+                return
+
+            deal_id = open_trade.deal_id or _create_deal_id()
+            campaign_id = (
+                str(open_trade.campaign_id).strip() if open_trade.campaign_id else None
+            )
+            history_complete = bool(open_trade.execution_history_complete) and bool(
+                execution_rows
+            )
+            await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
+                deal_id=deal_id,
+                execution_history_complete=history_complete,
+                sold_amount=F("sold_amount") + float(sold_amount),
+                sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
+            )
+
+            ledger_rows = execution_rows or [
+                {
+                    "symbol": symbol,
+                    "side": "sell",
+                    "role": "partial_sell",
+                    "timestamp": "",
+                    "price": (
+                        float(sold_proceeds) / float(sold_amount)
+                        if float(sold_amount) > 0
+                        else 0.0
+                    ),
+                    "amount": float(sold_amount),
+                    "ordersize": float(sold_proceeds),
+                    "fee": 0.0,
+                }
+            ]
+            for execution in ledger_rows:
+                if float(execution.get("amount") or 0.0) <= 0:
+                    continue
+                await model.TradeExecutions.create(
+                    **_build_trade_execution_payload(
+                        deal_id,
+                        {
+                            **execution,
+                            "campaign_id": campaign_id,
+                        },
+                        role=str(execution.get("role") or "partial_sell"),
+                    ),
+                    using_db=conn,
+                )
+
+    await run_sqlite_write_with_retry(
+        _persist_partial_sell_execution,
+        f"updating partial sell execution for {symbol}",
+    )
+
+
+async def persist_closed_trade_summary(payload: dict[str, Any]) -> None:
+    """Persist a detached closed-trade summary row without mutating open state."""
+
+    async def _persist_closed_trade_summary() -> None:
+        async with in_transaction() as conn:
+            await model.ClosedTrades.create(**payload, using_db=conn)
+
+    symbol = str(payload.get("symbol") or "").strip() or "unknown"
+    await run_sqlite_write_with_retry(
+        _persist_closed_trade_summary,
+        f"persisting detached closed trade summary for {symbol}",
     )
 
 

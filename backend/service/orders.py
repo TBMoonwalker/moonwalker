@@ -34,7 +34,9 @@ from service.order_payloads import (
 from service.order_persistence import (
     persist_buy_trade,
     persist_closed_trade,
+    persist_closed_trade_summary,
     persist_manual_buy_add,
+    persist_partial_sell_execution,
     persist_sidestep_transition,
     persist_stopped_trade,
     persist_unsellable_remainder,
@@ -251,7 +253,7 @@ class Orders:
             return
         proceeds = float(exchange_status.get("cost") or filled_amount * average_price)
         timestamp = exchange_status.get("timestamp")
-        await self.trades.add_partial_sell_execution(
+        await persist_partial_sell_execution(
             symbol,
             filled_amount,
             proceeds,
@@ -360,7 +362,7 @@ class Orders:
                 close_context["payload"],
                 campaign_context=campaign_context,
             )
-        await self.trades._clear_order_cache()
+        await self.trades.invalidate_trade_caches()
         await self.monitoring.notify_trade(
             "trade.sell",
             close_context["monitor_payload"],
@@ -693,12 +695,13 @@ class Orders:
         partial_amount = float(order_status.get("partial_filled_amount") or 0.0)
         partial_proceeds = float(order_status.get("partial_proceeds") or 0.0)
         if partial_amount > 0:
-            await self.trades.add_partial_sell_execution(
+            await persist_partial_sell_execution(
                 order_status["symbol"],
                 partial_amount,
                 partial_proceeds,
                 order_status.get("executions"),
             )
+            await self.trades.invalidate_trade_caches()
             logging.info(
                 "Persisted partial sell execution for %s: amount=%s proceeds=%s remaining=%s",
                 order_status["symbol"],
@@ -766,7 +769,7 @@ class Orders:
                 campaign_context=campaign_context,
             )
             await persist_unsellable_remainder_archive(context.unsellable_payload)
-            await self.trades._clear_order_cache()
+            await self.trades.invalidate_trade_caches()
             if not context.already_notified:
                 await self.monitoring.notify_trade(
                     "trade.unsellable_notional",
@@ -784,7 +787,7 @@ class Orders:
             return
 
         if context.partial_amount > 0:
-            await self.trades.add_partial_sell_execution(
+            await persist_partial_sell_execution(
                 snapshot.symbol,
                 context.partial_amount,
                 context.partial_proceeds,
@@ -792,13 +795,13 @@ class Orders:
             )
 
         if context.closed_trade_payload is not None:
-            await self.trades.create_closed_trades(context.closed_trade_payload)
+            await persist_closed_trade_summary(context.closed_trade_payload)
 
         await persist_unsellable_remainder(
             snapshot.symbol,
             context.unsellable_payload,
         )
-        await self.trades._clear_order_cache()
+        await self.trades.invalidate_trade_caches()
 
         if not context.already_notified:
             await self.monitoring.notify_trade(
@@ -1090,7 +1093,7 @@ class Orders:
             trade_payload,
             open_trade_payload,
         )
-        await self.trades._clear_order_cache()
+        await self.trades.invalidate_trade_caches()
         return {
             "symbol": normalized_symbol,
             "timestamp": request.timestamp_ms,
@@ -1151,7 +1154,7 @@ class Orders:
                 closed_at=datetime.now(timezone.utc),
             )
             await persist_stopped_trade(symbol, campaign_context=campaign_context)
-            await self.trades._clear_order_cache()
+            await self.trades.invalidate_trade_caches()
             return True
         except (
             ConfigurationError,

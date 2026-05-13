@@ -43,6 +43,9 @@ class _DummyConfigService:
     def snapshot(self) -> dict[str, Any]:
         return dict(self._cache)
 
+    def raw_snapshot(self) -> dict[str, Any]:
+        return dict(self._cache)
+
 
 class _DummyOpenTradesCount:
     """OpenTrades stub exposing count() through all()."""
@@ -55,6 +58,16 @@ class _DummyOpenTradesCount:
 
     async def count(self) -> int:
         return self.count_value
+
+
+class _DummySidestepCampaignService:
+    """Sidestep campaign guard stub exposing a waiting-campaign count."""
+
+    waiting_count = 0
+
+    @staticmethod
+    async def count_waiting_campaigns() -> int:
+        return _DummySidestepCampaignService.waiting_count
 
 
 class _DummyAppConfigQuery:
@@ -417,6 +430,55 @@ def test_config_multiple_blocks_switch_to_csv_signal_when_open_trades_exist(
 
     assert response.status_code == 409
     assert "csv_signal" in response.json().get("error", "")
+    assert service.last_batch is None
+
+
+def test_config_multiple_blocks_trade_mode_switch_when_runtime_activity_exists(
+    monkeypatch,
+) -> None:
+    """Trade mode changes should be blocked while trades or waiting campaigns exist."""
+    service = _DummyConfigService()
+    service._cache.update(
+        {
+            "trade_mode": "dynamic_dca",
+            "trade_lifecycle_mode": "classic_dca",
+            "dynamic_dca": True,
+            "sidestep_campaign_enabled": False,
+        }
+    )
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+    _DummyOpenTradesCount.count_value = 1
+    _DummySidestepCampaignService.waiting_count = 2
+    monkeypatch.setattr(config_controller, "OpenTrades", _DummyOpenTradesCount)
+    monkeypatch.setattr(
+        config_controller,
+        "SpotSidestepCampaignService",
+        _DummySidestepCampaignService,
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {
+        "trade_mode": {"value": "sidestep", "type": "str"},
+        "sidestep_reentry_strategy": {"value": "ema_low", "type": "str"},
+    }
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["migration_error"]["code"] == "blocked_live_mode_switch"
+    assert body["migration_error"]["safe_fields"] == {
+        "current_trade_mode": "dynamic_dca",
+        "requested_trade_mode": "sidestep",
+        "open_trade_count": 1,
+        "waiting_campaign_count": 2,
+    }
     assert service.last_batch is None
 
 
@@ -809,8 +871,24 @@ def test_config_route_handlers_expose_freshness_and_live_activation(
         config_controller.Config, "instance", classmethod(_fake_instance)
     )
     monkeypatch.setattr(config_controller, "AppConfig", _DummyAppConfigModel)
+    _DummyOpenTradesCount.count_value = 0
+    _DummySidestepCampaignService.waiting_count = 0
+    monkeypatch.setattr(config_controller, "OpenTrades", _DummyOpenTradesCount)
+    monkeypatch.setattr(
+        config_controller,
+        "SpotSidestepCampaignService",
+        _DummySidestepCampaignService,
+    )
     expected_config_snapshot = {
         **service.snapshot(),
+        "trade_mode_switch_guard": {
+            "current_trade_mode": "dynamic_dca",
+            "blocked": False,
+            "can_switch": True,
+            "open_trade_count": 0,
+            "waiting_campaign_count": 0,
+            "message": None,
+        },
         "config_updated_at": freshness_timestamp.isoformat(),
     }
 

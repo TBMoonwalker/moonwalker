@@ -184,6 +184,13 @@ class SpotSidestepCampaignService:
         view = cls._campaign_view(config)
         return view.is_sidestep_mode()
 
+    @staticmethod
+    async def count_waiting_campaigns() -> int:
+        """Return a cheap count of waiting sidestep campaigns."""
+        return await model.SpotCampaigns.filter(
+            state=SpotCampaignState.FLAT_WAITING_REENTRY.value
+        ).count()
+
     async def _get_orders(self) -> Any:
         """Return the lazily constructed Orders service."""
         if self._orders is None:

@@ -61,6 +61,7 @@ class _FakeTrades:
         self.persisted_order: dict[str, Any] | None = None
         self.cleared_symbols: list[str] = []
         self.partial_fills: list[dict[str, Any]] = []
+        self.invalidated = 0
 
     async def set_tp_limit_order(
         self,
@@ -112,6 +113,9 @@ class _FakeTrades:
             }
         )
 
+    async def invalidate_trade_caches(self) -> None:
+        self.invalidated += 1
+
 
 @pytest.mark.asyncio
 async def test_arm_tp_limit_order_places_and_persists_order() -> None:
@@ -157,7 +161,9 @@ async def test_cancel_tp_limit_order_clears_persisted_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_tp_limit_order_persists_partial_fill() -> None:
+async def test_cancel_tp_limit_order_persists_partial_fill(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     orders = Orders()
     fake_exchange = _FakeExchange()
     fake_exchange.cancel_status = {
@@ -173,11 +179,32 @@ async def test_cancel_tp_limit_order_persists_partial_fill() -> None:
     fake_trades = _FakeTrades()
     orders.exchange = fake_exchange  # type: ignore[assignment]
     orders.trades = fake_trades  # type: ignore[assignment]
+    persisted_partials: list[dict[str, Any]] = []
+
+    async def fake_persist_partial_sell_execution(
+        symbol: str,
+        sold_amount: float,
+        sold_proceeds: float,
+        sell_executions: list[dict[str, Any]],
+    ) -> None:
+        persisted_partials.append(
+            {
+                "symbol": symbol,
+                "sold_amount": sold_amount,
+                "sold_proceeds": sold_proceeds,
+                "sell_executions": sell_executions,
+            }
+        )
+
+    monkeypatch.setattr(
+        "service.orders.persist_partial_sell_execution",
+        fake_persist_partial_sell_execution,
+    )
 
     canceled = await orders.cancel_tp_limit_order("XPL/USDC", {})
 
     assert canceled is True
-    assert fake_trades.partial_fills == [
+    assert persisted_partials == [
         {
             "symbol": "XPL/USDC",
             "sold_amount": 0.4,

@@ -7,6 +7,14 @@ import {
     serializeConfigValue,
     toNullableConfigString,
 } from './configForm'
+import {
+    deriveLegacyDynamicDcaEnabled,
+    deriveLegacySidestepEnabled,
+    deriveLegacyTradeLifecycleMode,
+    isDynamicTradeMode,
+    isSidestepTradeMode,
+    normalizeTradeMode,
+} from './tradeLifecycle'
 
 export interface GeneralConfigSection {
     timezone: string | null
@@ -56,8 +64,7 @@ export interface ExchangeConfigSection {
 
 export interface DcaConfigSection {
     enabled: boolean
-    trade_lifecycle_mode: string | null
-    dynamic: boolean
+    trade_mode: string | null
     strategy: string | null
     timeframe: string | null
     trailing_tp: number | null
@@ -77,7 +84,6 @@ export interface DcaConfigSection {
     ss: number | null
     os: number | null
     trade_safety_order_budget_ratio: number | null
-    sidestep_campaign_enabled: boolean
     sidestep_bearish_strategy: string | null
     sidestep_reentry_strategy: string | null
     sidestep_reentry_cooldown_candles: number | null
@@ -198,6 +204,7 @@ export function buildConfigSubmitPayload(
     } = options
 
     const quoteCurrency = String(exchange.currency || 'USDT').toUpperCase()
+    const tradeMode = normalizeTradeMode(dca.trade_mode)
     const normalizedSymbolList =
         signal.signal === 'asap'
             ? normalizePairEntries(
@@ -209,7 +216,9 @@ export function buildConfigSubmitPayload(
             : null
     const normalizedDenyList = normalizePairEntries(filter.denylist, quoteCurrency)
     const capitalBudgetBufferPct =
-        dca.enabled && dca.dynamic ? (capital.budget_buffer_pct ?? 0) : 0
+        dca.enabled && isDynamicTradeMode(tradeMode)
+            ? (capital.budget_buffer_pct ?? 0)
+            : 0
 
     return {
         timezone: serializeConfigValue(
@@ -286,7 +295,11 @@ export function buildConfigSubmitPayload(
         market: serializeConfigValue(toNullableConfigString(exchange.market), 'str'),
         watcher_ohlcv: serializeConfigValue(exchange.watcher_ohlcv || false, 'bool'),
         dca: serializeConfigValue(dca.enabled || false, 'bool'),
-        dynamic_dca: serializeConfigValue(dca.dynamic || false, 'bool'),
+        trade_mode: serializeConfigValue(tradeMode, 'str'),
+        dynamic_dca: serializeConfigValue(
+            deriveLegacyDynamicDcaEnabled(tradeMode),
+            'bool',
+        ),
         dca_strategy: serializeConfigValue(
             normalizeStrategyName(toNullableConfigString(dca.strategy)),
             'str',
@@ -331,20 +344,17 @@ export function buildConfigSubmitPayload(
         mstc: serializeConfigValue(dca.mstc || false, 'int'),
         sos: serializeConfigValue(dca.sos || false, 'float'),
         ss: serializeConfigValue(dca.ss || false, 'float'),
-        os: serializeConfigValue(
-            dca.dynamic ? false : (dca.os || false),
-            'float',
-        ),
+        os: serializeConfigValue(dca.os || false, 'float'),
         trade_safety_order_budget_ratio: serializeConfigValue(
             dca.trade_safety_order_budget_ratio ?? 0.95,
             'float',
         ),
         trade_lifecycle_mode: serializeConfigValue(
-            toNullableConfigString(dca.trade_lifecycle_mode ?? 'classic_dca'),
+            deriveLegacyTradeLifecycleMode(tradeMode),
             'str',
         ),
         sidestep_campaign_enabled: serializeConfigValue(
-            (dca.trade_lifecycle_mode ?? 'classic_dca') === 'sidestep_reentry',
+            deriveLegacySidestepEnabled(tradeMode),
             'bool',
         ),
         sidestep_bearish_strategy: serializeConfigValue(
@@ -364,7 +374,7 @@ export function buildConfigSubmitPayload(
             'int',
         ),
         sidestep_reentry_requires_fresh_long_signal: serializeConfigValue(
-            false,
+            dca.sidestep_reentry_requires_fresh_long_signal ?? false,
             'bool',
         ),
         tp: serializeConfigValue(dca.tp || false, 'float'),
