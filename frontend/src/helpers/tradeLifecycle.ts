@@ -65,9 +65,7 @@ export function normalizeTradeMode(
     ) {
         return TRADE_MODE_SIDESTEP
     }
-    return parseBooleanFlag(dynamicDca)
-        ? TRADE_MODE_DYNAMIC_DCA
-        : TRADE_MODE_DYNAMIC_DCA
+    return TRADE_MODE_DYNAMIC_DCA
 }
 
 export function deriveLegacyTradeLifecycleMode(

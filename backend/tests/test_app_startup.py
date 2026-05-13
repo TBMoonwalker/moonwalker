@@ -97,21 +97,12 @@ class _FakeAutopilotMemoryFactory:
         return _FakeAutopilotMemoryService()
 
 
-class _FakeSidestepCampaignService:
-    def bind_watcher_queue(self, _queue) -> None:
-        return None
-
-    async def start(self) -> None:
-        return None
-
-    async def shutdown(self) -> None:
-        return None
-
-
-class _FakeSidestepCampaignFactory:
+class _FailIfUsedSidestepCampaignFactory:
     @staticmethod
-    async def instance() -> _FakeSidestepCampaignService:
-        return _FakeSidestepCampaignService()
+    async def instance():
+        raise AssertionError(
+            "startup should not initialize sidestep campaign boot hooks"
+        )
 
 
 async def _noop_async(*_args, **_kwargs) -> None:
@@ -139,7 +130,8 @@ async def test_startup_schedules_replay_backfill_as_background_task(
     monkeypatch.setattr(
         app_module,
         "SpotSidestepCampaignService",
-        _FakeSidestepCampaignFactory,
+        _FailIfUsedSidestepCampaignFactory,
+        raising=False,
     )
     monkeypatch.setattr(app_module, "Signal", _FakeSignal)
     monkeypatch.setattr(
@@ -168,5 +160,6 @@ async def test_startup_schedules_replay_backfill_as_background_task(
 
     assert len(app_module.runtime_state.background_tasks) == 4
     assert "backfill_trade_replay_candles_if_needed" in fake_database.run_calls
+    assert not hasattr(app_module.runtime_state, "sidestep_campaign_service")
 
     await app_module.shutdown()
