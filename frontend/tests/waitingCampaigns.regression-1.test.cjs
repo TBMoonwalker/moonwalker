@@ -92,8 +92,12 @@ test('waiting sidestep campaigns get their own surface and explicit waiting acti
         'expected closed trades to label tactical sidestep exits separately from terminal outcomes',
     )
     assert.ok(
-        configDcaSectionSource.includes('sidestep_campaign_enabled'),
-        'expected the DCA config section to expose the sidestep campaign toggle',
+        configDcaSectionSource.includes('label="Trade mode"'),
+        'expected the DCA config section to expose the canonical trade mode chooser',
+    )
+    assert.ok(
+        configDcaSectionSource.includes('TRADE_MODE_SIDESTEP'),
+        'expected the DCA config section to expose sidestep as an operator-facing trade mode',
     )
     assert.ok(
         configDcaSectionSource.includes('sidestep_bearish_strategy'),

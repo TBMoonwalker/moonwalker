@@ -8,8 +8,11 @@ from typing import Any
 from service.config import resolve_timeframe
 from service.trade_lifecycle_config import (
     TradeLifecycleConfigView,
+    derive_legacy_dynamic_dca_enabled,
     derive_legacy_sidestep_enabled,
     normalize_trade_lifecycle_mode,
+    normalize_trade_mode,
+    resolve_trade_mode_config,
 )
 
 __all__ = [
@@ -19,8 +22,10 @@ __all__ = [
     "SignalPluginConfigView",
     "TradeLifecycleConfigView",
     "WatcherRuntimeConfigView",
+    "derive_legacy_dynamic_dca_enabled",
     "derive_legacy_sidestep_enabled",
     "normalize_trade_lifecycle_mode",
+    "normalize_trade_mode",
 ]
 
 
@@ -212,6 +217,7 @@ class DcaRuntimeConfigView:
             )
             or "1h"
         ).strip()
+        trade_mode = resolve_trade_mode_config(config, source="runtime")
         return cls(
             tp_spike_confirm_enabled=bool(
                 config.get("tp_spike_confirm_enabled", False)
@@ -267,7 +273,7 @@ class DcaRuntimeConfigView:
                 default=0,
                 falsey_fallback=0,
             ),
-            dynamic_dca=bool(config.get("dynamic_dca", False)),
+            dynamic_dca=trade_mode.dynamic_dca_enabled,
             safety_order_volume_scale=_float_config_value(
                 config,
                 "os",

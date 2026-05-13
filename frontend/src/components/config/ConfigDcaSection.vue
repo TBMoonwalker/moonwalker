@@ -1,5 +1,5 @@
 <template>
-    <n-card title="Trade lifecycle settings">
+    <n-card title="Trade modes">
         <n-form
             ref="formRef"
             :model="dca"
@@ -15,24 +15,31 @@
             </n-form-item>
 
             <template v-if="dca.enabled">
-                <!-- sidestep_campaign_enabled remains persisted as a legacy compatibility flag -->
-                <n-form-item label="Lifecycle mode" path="trade_lifecycle_mode">
-                    <n-select
-                        v-model:value="dca.trade_lifecycle_mode"
-                        placeholder="Select"
-                        :options="lifecycleModeOptions"
-                    />
+                <n-form-item label="Trade mode" path="trade_mode">
+                    <n-radio-group
+                        v-model:value="dca.trade_mode"
+                        class="trade-mode-group"
+                    >
+                        <n-radio-button
+                            v-for="option in tradeModeOptions"
+                            :key="option.value"
+                            :value="option.value"
+                            :disabled="isTradeModeOptionDisabled(option.value)"
+                        >
+                            {{ option.label }}
+                        </n-radio-button>
+                    </n-radio-group>
                 </n-form-item>
-                <n-form-item
-                    v-if="isClassicDcaMode"
-                    label="Dynamic DCA"
-                    path="dynamic_dca"
-                    label-placement="left"
+                <n-alert
+                    v-if="tradeModeSwitchNotice"
+                    class="trade-mode-guard-note"
+                    type="warning"
+                    :bordered="false"
                 >
-                    <n-checkbox v-model:checked="dca.dynamic" />
-                </n-form-item>
+                    {{ tradeModeSwitchNotice }}
+                </n-alert>
                 <n-form-item
-                    v-if="isClassicDcaMode && dca.dynamic"
+                    v-if="isDynamicDcaMode"
                     label="Dynamic DCA strategy"
                     path="strategy.0"
                 >
@@ -143,45 +150,24 @@
                 </template>
             </template>
             <n-form-item
-                v-if="dca.enabled && isClassicDcaMode && !dca.dynamic"
-                label="Safety order amount"
-                path="so"
-            >
-                <n-input-number v-model:value="dca.so" placeholder="SO" />
-            </n-form-item>
-            <n-form-item
-                v-if="dca.enabled && isClassicDcaMode"
+                v-if="dca.enabled && isDynamicDcaMode"
                 label="Max safety order count"
                 path="mstc"
             >
                 <n-input-number v-model:value="dca.mstc" placeholder="MSTC" />
             </n-form-item>
             <n-form-item
-                v-if="dca.enabled && isClassicDcaMode"
+                v-if="dca.enabled && isDynamicDcaMode"
                 label="Price deviation for first safety order"
                 path="sos"
             >
                 <n-input-number v-model:value="dca.sos" placeholder="SOS" />
             </n-form-item>
-            <n-form-item
-                v-if="dca.enabled && isClassicDcaMode && !dca.dynamic"
-                label="Safety order step scale"
-                path="ss"
-            >
-                <n-input-number v-model:value="dca.ss" placeholder="SS" />
-            </n-form-item>
-            <n-form-item
-                v-if="dca.enabled && isClassicDcaMode && !dca.dynamic"
-                label="Safety order volume scale"
-                path="os"
-            >
-                <n-input-number v-model:value="dca.os" placeholder="OS" />
-            </n-form-item>
             <n-form-item label="Stop loss percentage" path="sl">
                 <n-input-number v-model:value="dca.sl" placeholder="SL" />
             </n-form-item>
             <n-form-item
-                v-if="dca.enabled && isClassicDcaMode && dca.dynamic"
+                v-if="dca.enabled && isDynamicDcaMode"
                 label="Safety order budget ratio"
                 path="trade_safety_order_budget_ratio"
             >
@@ -255,9 +241,12 @@
 import { computed, ref } from 'vue'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
 import type { DcaModel, StringSelectOption } from '../../config-editor/types'
+import type { TradeModeSwitchGuardState } from '../../helpers/configLoad'
 import {
-    isClassicTradeLifecycleMode,
-    isSidestepTradeLifecycleMode,
+    TRADE_MODE_DYNAMIC_DCA,
+    TRADE_MODE_SIDESTEP,
+    isDynamicTradeMode,
+    isSidestepTradeMode,
 } from '../../helpers/tradeLifecycle'
 
 const props = defineProps<{
@@ -267,27 +256,39 @@ const props = defineProps<{
     sellOrderTypeOptions: StringSelectOption[]
     showAdvancedGeneral: boolean
     strategyOptions: StringSelectOption[]
+    tradeModeSwitchGuard: TradeModeSwitchGuardState
 }>()
 
 const formRef = ref<FormInst | null>(null)
-const lifecycleModeOptions: StringSelectOption[] = [
-    { label: 'Classic DCA', value: 'classic_dca' },
-    { label: 'Sidestep Re-entry', value: 'sidestep_reentry' },
+const tradeModeOptions: StringSelectOption[] = [
+    { label: 'Dynamic DCA', value: TRADE_MODE_DYNAMIC_DCA },
+    { label: 'Sidestep', value: TRADE_MODE_SIDESTEP },
 ]
-const isClassicDcaMode = computed(
-    () =>
-        isClassicTradeLifecycleMode(
-            props.dca.trade_lifecycle_mode,
-            props.dca.sidestep_campaign_enabled,
-        ),
+const isDynamicDcaMode = computed(
+    () => isDynamicTradeMode(props.dca.trade_mode),
 )
 const isSidestepMode = computed(
-    () =>
-        isSidestepTradeLifecycleMode(
-            props.dca.trade_lifecycle_mode,
-            props.dca.sidestep_campaign_enabled,
-        ),
+    () => isSidestepTradeMode(props.dca.trade_mode),
 )
+const tradeModeSwitchNotice = computed(() => {
+    if (!props.tradeModeSwitchGuard?.blocked) {
+        return null
+    }
+    const details: string[] = []
+    if (props.tradeModeSwitchGuard.open_trade_count > 0) {
+        details.push(
+            `${props.tradeModeSwitchGuard.open_trade_count} open trade(s)`,
+        )
+    }
+    if (props.tradeModeSwitchGuard.waiting_campaign_count > 0) {
+        details.push(
+            `${props.tradeModeSwitchGuard.waiting_campaign_count} waiting sidestep campaign(s)`,
+        )
+    }
+    const detailText =
+        details.length > 0 ? ` Current blockers: ${details.join(', ')}.` : ''
+    return `${props.tradeModeSwitchGuard.message || 'Trade mode switching is temporarily locked.'}${detailText}`
+})
 const tpLimitPrearmConflictNames = computed(() => {
     if (!props.dca.tp_limit_prearm_enabled) {
         return []
@@ -323,8 +324,19 @@ const normalizedMarket = computed(() =>
     String(props.market || 'spot').trim().toLowerCase(),
 )
 const showSidestepSpotOnlyNotice = computed(
-    () => props.dca.enabled && normalizedMarket.value !== 'spot',
+    () =>
+        props.dca.enabled &&
+        isSidestepMode.value &&
+        normalizedMarket.value !== 'spot',
 )
+
+function isTradeModeOptionDisabled(value: string): boolean {
+    return Boolean(
+        props.tradeModeSwitchGuard?.blocked &&
+            props.tradeModeSwitchGuard.current_trade_mode &&
+            props.tradeModeSwitchGuard.current_trade_mode !== value,
+    )
+}
 
 async function validate(): Promise<boolean> {
     if (!formRef.value) {
@@ -346,6 +358,16 @@ defineExpose({
 }
 
 .sidestep-campaign-note {
+    margin-bottom: 18px;
+}
+
+.trade-mode-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.trade-mode-guard-note {
     margin-bottom: 18px;
 }
 </style>

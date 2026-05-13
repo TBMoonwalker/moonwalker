@@ -194,6 +194,7 @@ export function useConfigEditorAssembly(
         autopilot: pageState.autopilot,
         monitoring: pageState.monitoring,
         indicator: pageState.indicator,
+        tradeModeSwitchGuard: pageState.tradeModeSwitchGuard,
         showAdvancedGeneral,
         isLoading,
         message: options.message,

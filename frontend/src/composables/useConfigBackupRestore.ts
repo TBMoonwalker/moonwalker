@@ -23,6 +23,25 @@ type RestoreResponse = {
     result?: RestoreSummary
 }
 
+type RestoreMigrationError = {
+    code?: string
+    message?: string
+    next_action?: string
+    safe_fields?: Record<string, unknown>
+}
+
+type RestoreErrorResponse = {
+    error?: string
+    message?: string
+    migration_error?: RestoreMigrationError
+}
+
+export interface RestoreReviewState {
+    code: string
+    message: string
+    nextAction: string | null
+}
+
 interface MessageApiLike {
     error: (message: string) => void
     success: (message: string) => void
@@ -58,6 +77,30 @@ function downloadTextFile(filename: string, content: string): void {
     window.URL.revokeObjectURL(url)
 }
 
+function buildRestoreReview(error: unknown): RestoreReviewState | null {
+    if (!axios.isAxiosError<RestoreErrorResponse>(error)) {
+        return null
+    }
+    const payload = error.response?.data?.migration_error
+    if (!payload || typeof payload !== 'object') {
+        return null
+    }
+    const message = String(
+        payload.message ||
+            error.response?.data?.message ||
+            error.response?.data?.error ||
+            'Restore review required.',
+    )
+    return {
+        code: String(payload.code || 'restore_review'),
+        message,
+        nextAction:
+            payload.next_action != null
+                ? String(payload.next_action)
+                : null,
+    }
+}
+
 export function useConfigBackupRestore(
     options: UseConfigBackupRestoreOptions,
 ) {
@@ -67,6 +110,7 @@ export function useConfigBackupRestore(
     const backupFileInputRef = shallowRef<HTMLInputElement | null>(null)
     const selectedBackupFileName = ref<string | null>(null)
     const selectedBackupPayload = ref<BackupPayload | null>(null)
+    const restoreReview = ref<RestoreReviewState | null>(null)
 
     const selectedBackupHasTradeData = computed(() =>
         Boolean(
@@ -94,6 +138,7 @@ export function useConfigBackupRestore(
     function clearSelectedBackup(): void {
         selectedBackupFileName.value = null
         selectedBackupPayload.value = null
+        restoreReview.value = null
         if (backupFileInputRef.value) {
             backupFileInputRef.value.value = ''
         }
@@ -160,6 +205,7 @@ export function useConfigBackupRestore(
             }
             selectedBackupFileName.value = selectedFile.name
             selectedBackupPayload.value = parsed
+            restoreReview.value = null
             options.message.success(`Loaded backup ${selectedFile.name}`)
         } catch (error) {
             clearSelectedBackup()
@@ -225,6 +271,7 @@ export function useConfigBackupRestore(
         }
 
         restoreLoading.value = true
+        restoreReview.value = null
         try {
             const response = await axios.post<RestoreResponse>(
                 options.apiUrl('/config/backup/restore'),
@@ -260,6 +307,7 @@ export function useConfigBackupRestore(
                 }
             }
         } catch (error) {
+            restoreReview.value = buildRestoreReview(error)
             const message = extractApiErrorMessage(
                 error,
                 'Backup restore failed.',
@@ -268,7 +316,7 @@ export function useConfigBackupRestore(
                 options.message.error(message)
             }
             return {
-                status: 'error',
+                status: restoreReview.value ? 'blocked' : 'error',
                 message,
             }
         } finally {
@@ -286,6 +334,7 @@ export function useConfigBackupRestore(
         handleBackupFileSelected,
         handleRestoreBackup,
         openBackupFilePicker,
+        restoreReview,
         restoreLoading,
         selectedBackupConfigCount,
         selectedBackupFileName,

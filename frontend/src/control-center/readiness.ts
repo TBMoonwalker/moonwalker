@@ -1,7 +1,7 @@
 import { resolveControlCenterBlocker } from './blockers'
 import { deriveSignalModeBlockers } from './signalMode'
 import { getTaskPresentation } from './taskRegistry'
-import { normalizeTradeLifecycleMode } from '../helpers/tradeLifecycle'
+import { isDynamicTradeMode, isSidestepTradeMode, normalizeTradeMode } from '../helpers/tradeLifecycle'
 import type {
     ControlCenterBlocker,
     ControlCenterMode,
@@ -35,9 +35,11 @@ function hasPositiveNumber(value: unknown): boolean {
     return Number.isFinite(numericValue) && numericValue > 0
 }
 
-function getTradeLifecycleMode(config: SharedConfigPayload): string {
-    return normalizeTradeLifecycleMode(
+function getTradeMode(config: SharedConfigPayload): string {
+    return normalizeTradeMode(
+        config.trade_mode,
         config.trade_lifecycle_mode,
+        config.dynamic_dca,
         config.sidestep_campaign_enabled,
     )
 }
@@ -49,10 +51,7 @@ function isSpotMarket(config: SharedConfigPayload): boolean {
 function resolveSidestepReentryStrategy(
     config: SharedConfigPayload,
 ): unknown {
-    if (hasRequiredValue(config.sidestep_reentry_strategy)) {
-        return config.sidestep_reentry_strategy
-    }
-    return config.dca_strategy
+    return config.sidestep_reentry_strategy
 }
 
 function collectAlwaysRequiredBlockers(
@@ -96,7 +95,7 @@ function collectDcaBlockers(config: SharedConfigPayload): ControlCenterBlocker[]
     }
 
     if (
-        getTradeLifecycleMode(config) === 'sidestep_reentry' &&
+        isSidestepTradeMode(getTradeMode(config)) &&
         isSpotMarket(config)
     ) {
         const blockers: ControlCenterBlocker[] = []
@@ -124,7 +123,9 @@ function collectDcaBlockers(config: SharedConfigPayload): ControlCenterBlocker[]
         return blockers
     }
 
-    const requiredKeys: Array<[string, string, string]> = Boolean(config.dynamic_dca)
+    const requiredKeys: Array<[string, string, string]> = isDynamicTradeMode(
+        getTradeMode(config),
+    )
         ? [
               [
                   'mstc',

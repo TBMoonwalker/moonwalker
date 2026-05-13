@@ -62,8 +62,7 @@ test('deriveControlCenterReadiness requires sidestep strategies instead of class
     const readiness = deriveControlCenterReadiness({
         ...createReadyConfig(),
         dca: true,
-        dynamic_dca: false,
-        trade_lifecycle_mode: 'sidestep_reentry',
+        trade_mode: 'sidestep',
         market: 'spot',
         so: null,
         mstc: null,
@@ -82,12 +81,11 @@ test('deriveControlCenterReadiness requires sidestep strategies instead of class
     assert.equal(readiness.nextTarget, 'dca')
 })
 
-test('deriveControlCenterReadiness honors the canonical lifecycle mode over the legacy sidestep flag', () => {
+test('deriveControlCenterReadiness honors canonical trade_mode over legacy sidestep mirrors', () => {
     const readiness = deriveControlCenterReadiness({
         ...createReadyConfig(),
         dca: true,
-        dynamic_dca: false,
-        trade_lifecycle_mode: 'classic_dca',
+        trade_mode: 'dynamic_dca',
         sidestep_campaign_enabled: true,
         market: 'spot',
         so: null,
@@ -102,7 +100,7 @@ test('deriveControlCenterReadiness honors the canonical lifecycle mode over the 
     assert.equal(readiness.complete, false)
     assert.deepEqual(
         readiness.blockers.map((blocker) => blocker.key),
-        ['so', 'mstc', 'sos', 'ss', 'os'],
+        ['mstc', 'sos'],
     )
 })
 

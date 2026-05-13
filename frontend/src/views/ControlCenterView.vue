@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import axios from 'axios'
-import { nextTick, ref } from 'vue'
+import { computed, nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
 
@@ -31,6 +31,7 @@ import { useAutopilotMemoryFeed } from '../composables/useAutopilotMemoryFeed'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
 import { serializeConfigValue } from '../helpers/configForm'
+import { normalizeTradeMode } from '../helpers/tradeLifecycle'
 
 const route = useRoute()
 const router = useRouter()
@@ -98,6 +99,7 @@ const {
     monitoringTestLoading,
     openBackupFilePicker,
     restoreLoading,
+    restoreReview,
     rules,
     saveState,
     sellOrderTypeOptions,
@@ -111,6 +113,7 @@ const {
     symsignals,
     testMonitoringTelegram,
     timerange,
+    tradeModeSwitchGuard,
     timezone,
 } = useConfigEditorAssembly({
     backupRestore: {
@@ -188,6 +191,15 @@ const {
     requestedTarget: () => route.query.target,
     snapshotStore: configSnapshotStore,
     transitionIntent,
+})
+const tradeModeLabel = computed(() => {
+    const tradeMode = normalizeTradeMode(
+        configSnapshotStore.snapshot.value?.trade_mode,
+        configSnapshotStore.snapshot.value?.trade_lifecycle_mode,
+        configSnapshotStore.snapshot.value?.dynamic_dca,
+        configSnapshotStore.snapshot.value?.sidestep_campaign_enabled,
+    )
+    return tradeMode === 'sidestep' ? 'Sidestep' : 'Dynamic DCA'
 })
 const { refreshWorkspaceFromSnapshot } = useControlCenterWorkspaceRefresh({
     fetchDefaultValues,
@@ -443,6 +455,7 @@ async function handleToggleAutopilot(): Promise<void> {
                     :formatted-trust-timestamp="formattedTrustTimestamp"
                     :live-activation-ref="bindTargetElement('live-activation')"
                     :readiness="readiness"
+                    :trade-mode-label="tradeModeLabel"
                     :visible-blockers="visibleBlockers"
                     @activate-live="handleActivateLiveTrading"
                     @open-config="handleModeSelect('setup')"
@@ -485,6 +498,7 @@ async function handleToggleAutopilot(): Promise<void> {
                     :monitoring-test-loading="monitoringTestLoading"
                     :readiness-first-run="readiness.firstRun"
                     :restore-loading="restoreLoading"
+                    :restore-review="restoreReview"
                     :rules="rules"
                     :selected-backup-config-count="selectedBackupConfigCount"
                     :selected-backup-file-name="selectedBackupFileName"
@@ -500,6 +514,7 @@ async function handleToggleAutopilot(): Promise<void> {
                     :signal-form-ref="signalFormRef"
                     :symsignals="symsignals"
                     :timerange="timerange"
+                    :trade-mode-switch-guard="tradeModeSwitchGuard"
                     :timezone="timezone"
                     @backup-file-selected="handleBackupFileSelected"
                     @clear-selected-backup="clearSelectedBackup"
@@ -548,6 +563,7 @@ async function handleToggleAutopilot(): Promise<void> {
                     :has-selected-backup-payload="!!selectedBackupPayload"
                     :monitoring-test-loading="monitoringTestLoading"
                     :restore-loading="restoreLoading"
+                    :restore-review="restoreReview"
                     :selected-backup-config-count="selectedBackupConfigCount"
                     :selected-backup-file-name="selectedBackupFileName"
                     :selected-backup-has-trade-data="selectedBackupHasTradeData"

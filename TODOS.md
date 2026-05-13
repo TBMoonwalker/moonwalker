@@ -2,129 +2,84 @@
 
 ## Deferred
 
-### Prioritize eligible waiting campaigns over brand-new symbols when capacity is constrained
+### Extend sidestep campaign analytics beyond grouped replay polish
 
-**What:** Prefer an eligible `flat_waiting_reentry` campaign over a brand-new
-symbol when capital or bot-slot admission is scarce.
+**What:** If operators later need deeper reporting, add a campaign-first
+analytics surface or read model that rolls up cumulative PnL, time-in-mission,
+and leg sequencing across one sidestep campaign.
 
-**Why:** The approved sidestep design treats re-entry as part of one ongoing
-campaign, but v1 intentionally makes waiting campaigns compete normally for
-capacity. That keeps the first release simpler, yet it can still leave a
-sidestepped symbol stranded while fresh symbols consume the available slots.
+**Why:** Grouped replay, waiting-campaign status, and compact campaign summary
+copy now cover the release-safe operator story, but they still stop short of a
+dedicated campaign analytics view.
 
-**Pros:** Preserves the operator mental model that one campaign stays alive
-until TP, improves continuity after tactical exits, and makes future
-campaign-aware ranking feel more intentional.
-
-**Cons:** Adds scheduling policy on top of the already-more-complex campaign
-lifecycle and interacts with the shared admission guard plus campaign-owned
-re-entry rules.
-
-**Context:** If this lands later, the likely implementation seams are the
-shared admission flow in `backend/service/signal_runtime.py` and the future
-campaign summary/admission read model.
-
-**Depends on / blocked by:** Depends on v1 `SpotCampaigns`, the shared
-campaign-aware admission guard, and the waiting-campaign summary read model
-shipping first.
-
-### Add campaign-level analytics and grouped history for sidestep missions
-
-**What:** Add campaign-level analytics and grouped history so operators can see
-the cumulative PnL and leg sequence for one sidestep campaign, not only the
-individual leg closes.
-
-**Why:** The approved v1 keeps lifecycle truth and `ClosedTrades` semantics
-clean, but it still reports leg summaries first. That is enough to ship safely,
-yet it makes multi-leg campaigns harder to evaluate as one mission.
-
-**Pros:** Improves operator trust in the campaign model, makes performance of a
-multi-leg sidestep easier to understand, and creates a cleaner base for future
-reporting or Autopilot features.
+**Pros:** Could improve campaign-level evaluation, make long multi-leg missions
+easier to compare, and create a clearer base for future reporting or
+Autopilot-facing summaries.
 
 **Cons:** Adds reporting and read-model complexity on top of the already
-cross-cutting persistence changes, and it is not required for the core v1
-lifecycle to work.
+cross-cutting sidestep persistence model, and it is not required for the
+current operator workflow.
 
-**Context:** If this is picked up later, the likely seams are the future
-`SpotCampaigns` read model, `backend/service/statistic.py`,
-`backend/service/data.py`, and the closed-trades / waiting-campaign frontend
-surfaces.
+**Context:** If this is picked up later, start from the shipped grouped replay
+and waiting-campaign status surfaces before deciding whether a new read model is
+actually warranted.
 
-**Depends on / blocked by:** Depends on v1 `campaign_id` propagation,
-`close_reason` policy updates, and the waiting-campaign/read-model foundations
-landing first.
+**Depends on / blocked by:** Only worth doing if operator feedback shows the
+current grouped replay and waiting-campaign context are still insufficient.
+
+## Completed
 
 ### Centralize lifecycle normalization across backend and frontend config seams
 
-**What:** Replace the duplicated `trade_lifecycle_mode` /
-`sidestep_campaign_enabled` normalization spread across backend and frontend
-helpers with one canonical mapping path per side.
+**Completed:** Unreleased (2026-05-12)
 
-**Why:** The current compatibility logic is repeated across config loading,
-submit payloads, and validation helpers, so every lifecycle change pays a
-multi-file drift tax.
+**What shipped:** Added one canonical lifecycle normalization seam on each
+side, made `trade_lifecycle_mode` the operator-facing source of truth, kept
+`sidestep_campaign_enabled` as a derived compatibility mirror, routed backend
+capability checks and frontend config load, submit, readiness, and validation
+through the shared helpers, and added regression coverage for legacy
+boolean-only snapshots plus canonical-mode round trips.
 
-**Pros:** Lowers the chance of backend/frontend disagreement, makes
-compatibility behavior easier to reason about, and reinforces
-`trade_lifecycle_mode` as the canonical operator-facing key.
+### Confirm waiting sidestep campaigns keep owning capacity while flat
 
-**Cons:** Crosses both backend and frontend config plumbing, so it is wider
-than a release-safe cleanup and needs careful regression coverage for old
-snapshots and payloads.
+**Completed:** Unreleased (2026-05-12)
 
-**Context:** If picked up later, start from the typed lifecycle view in
-`backend/service/config_views.py`, then simplify the matching normalization in
-frontend config load and submit helpers.
+**What shipped:** Kept the chosen campaign-ownership policy instead of adding a
+second scheduler, verified that flat waiting campaigns continue to preserve
+their reserved slot and capital semantics, covered watcher re-entry and manual
+activate paths with regression tests, and closed the old
+"prioritize waiting campaigns over new symbols" follow-up as an
+audit-and-validation item rather than new ranking behavior.
 
-**Depends on / blocked by:** Depends on the release-safe sidestep cleanup and
-docs alignment landing first so the canonical key is already established.
+### Polish waiting-campaign status and grouped sidestep mission history
+
+**Completed:** Unreleased (2026-05-12)
+
+**What shipped:** Added explicit waiting-campaign cooldown, last-exit, and
+re-entry status fields to the existing payloads and UI, kept the main closed
+trades table terminal-first, and added grouped mission summary context to
+sidestep replay so operators can read campaign progression without a new
+analytics service or DB table.
 
 ### Untangle order-persistence ownership between Orders, Trades, and order_persistence
 
-**What:** Stop splitting trade and order write responsibility across
-`Orders`, `Trades`, and `order_persistence`, including private cache
-invalidation calls such as `Trades._clear_order_cache()`.
+**Completed:** Unreleased (2026-05-12)
 
-**Why:** This is the strongest hidden-coupling seam in the execution path and
-makes buy or sell persistence changes harder to reason about safely.
-
-**Pros:** Clarifies write ownership, reduces private cross-service reach-in,
-and makes future execution-path changes safer to test and review.
-
-**Cons:** Touches sensitive buy and sell persistence paths, so the eventual
-refactor is invasive and needs strong regression coverage around cache
-invalidation and execution history.
-
-**Context:** If picked up later, map the current write flow through
-`backend/service/orders.py`, `backend/service/trades.py`, and
-`backend/service/order_persistence.py` before choosing the final ownership seam.
-
-**Depends on / blocked by:** Best done after the current release-safe cleanup,
-when execution-path behavior is otherwise stable enough for a focused refactor.
+**What shipped:** Moved sell-side lifecycle writes behind
+`order_persistence`, replaced external calls to private trade-cache
+invalidation with a public seam, preserved the read/query role of `Trades`,
+and added regression coverage around partial sells, terminal closes, manual
+adds, stop handling, and related execution flows.
 
 ### Deduplicate the EMA20 swing and reverse strategy pair
 
-**What:** Extract the shared logic behind `ema20_swing.py` and
-`ema20_swing_reverse.py`, and do the same for their mirrored tests.
+**Completed:** Unreleased (2026-05-12)
 
-**Why:** Any behavior fix for that strategy pair currently has to be applied in
-four places, which increases maintenance cost and drift risk.
-
-**Pros:** Aligns with the repo's DRY preference, cuts copy-paste maintenance,
-and makes future strategy fixes less error-prone.
-
-**Cons:** Needs careful design so the shared seam stays explicit instead of
-turning into a clever abstraction that hides the directional differences.
-
-**Context:** If picked up later, compare both runtime modules and both test
-files side by side first, then extract only the truly shared mechanics and keep
-the direction-specific behavior obvious.
-
-**Depends on / blocked by:** No hard prerequisite, but best kept separate from
-sidestep cleanup so strategy refactors do not blur release-focused changes.
-
-## Completed
+**What shipped:** Extracted the shared EMA20 swing runtime and persistence
+skeleton into one shared core, kept the public bullish and reverse strategy
+modules stable, preserved separate persisted state namespaces, and collapsed
+the mirrored strategy tests into a shared parameterized suite plus
+direction-specific assertions.
 
 ### Reduce Control Center overview card nesting
 

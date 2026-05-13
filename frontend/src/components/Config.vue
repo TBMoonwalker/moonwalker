@@ -52,12 +52,13 @@
             :sell-order-type-options="sellOrderTypeOptions"
             :show-advanced-general="showAdvancedGeneral"
             :strategy-options="signal.strategy_plugins"
+            :trade-mode-switch-guard="tradeModeSwitchGuard"
         />
 
         <ConfigCapitalSection
             ref="capitalFormRef"
             :capital="capital"
-            :dynamic-dca-enabled="dca.enabled && dca.dynamic"
+            :dynamic-dca-enabled="dca.enabled && dca.trade_mode === 'dynamic_dca'"
             :rules="rules"
         />
 
@@ -105,6 +106,7 @@
                     :bind-backup-file-input="bindBackupFileInput"
                     :has-selected-backup-payload="!!selectedBackupPayload"
                     :restore-loading="restoreLoading"
+                    :restore-review="restoreReview"
                     :selected-backup-config-count="selectedBackupConfigCount"
                     :selected-backup-file-name="selectedBackupFileName"
                     :selected-backup-has-trade-data="selectedBackupHasTradeData"
@@ -205,6 +207,7 @@ const {
     monitoringTestLoading,
     openBackupFilePicker,
     restoreLoading,
+    restoreReview,
     rules,
     saveBannerMessage,
     saveBannerTitle,
@@ -222,6 +225,7 @@ const {
     symsignals,
     testMonitoringTelegram,
     timerange,
+    tradeModeSwitchGuard,
     timezone,
 } = useConfigEditorAssembly({
     message,

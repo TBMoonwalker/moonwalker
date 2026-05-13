@@ -80,7 +80,9 @@ def test_get_configured_strategy_min_history_candles_respects_canonical_mode_ove
 ):
     required = get_configured_strategy_min_history_candles(
         {
+            "trade_mode": "dynamic_dca",
             "trade_lifecycle_mode": "classic_dca",
+            "dynamic_dca": True,
             "sidestep_campaign_enabled": True,
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",

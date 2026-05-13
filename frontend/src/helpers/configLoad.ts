@@ -6,8 +6,8 @@ import {
     toTokenOnlyEntries,
 } from './configForm'
 import {
-    deriveLegacySidestepEnabled,
-    normalizeTradeLifecycleMode,
+    isDynamicTradeMode,
+    normalizeTradeMode,
 } from './tradeLifecycle'
 import type {
     AutopilotConfigSection,
@@ -74,6 +74,16 @@ export interface LoadedConfigState {
     monitoring: MonitoringConfigSection
     showAdvancedGeneral: boolean
     signal: LoadedSignalConfigSection
+    tradeModeSwitchGuard: TradeModeSwitchGuardState
+}
+
+export interface TradeModeSwitchGuardState {
+    blocked: boolean
+    can_switch: boolean
+    current_trade_mode: string | null
+    message: string | null
+    open_trade_count: number
+    waiting_campaign_count: number
 }
 
 function toNullableString(value: unknown): string | null {
@@ -109,6 +119,44 @@ function toConfigOptions(values: unknown): ConfigOption[] {
             label: value,
             value,
         }))
+}
+
+function buildTradeModeSwitchGuard(
+    response: ConfigApiResponse,
+): TradeModeSwitchGuardState {
+    const rawGuard = response.trade_mode_switch_guard
+    if (!rawGuard || typeof rawGuard !== 'object') {
+        return {
+            blocked: false,
+            can_switch: true,
+            current_trade_mode: normalizeTradeMode(
+                response.trade_mode,
+                response.trade_lifecycle_mode,
+                response.dynamic_dca,
+                response.sidestep_campaign_enabled,
+            ),
+            message: null,
+            open_trade_count: 0,
+            waiting_campaign_count: 0,
+        }
+    }
+
+    return {
+        blocked: parseBooleanString(rawGuard.blocked) ?? false,
+        can_switch: parseBooleanString(rawGuard.can_switch) ?? true,
+        current_trade_mode:
+            toNullableString(rawGuard.current_trade_mode) ??
+            normalizeTradeMode(
+                response.trade_mode,
+                response.trade_lifecycle_mode,
+                response.dynamic_dca,
+                response.sidestep_campaign_enabled,
+            ),
+        message: toNullableString(rawGuard.message),
+        open_trade_count: toNumberOrNull(rawGuard.open_trade_count) ?? 0,
+        waiting_campaign_count:
+            toNumberOrNull(rawGuard.waiting_campaign_count) ?? 0,
+    }
 }
 
 export function buildLoadedConfigState(
@@ -168,11 +216,14 @@ export function buildLoadedConfigState(
         watcher_ohlcv: parseBooleanString(response.watcher_ohlcv) ?? false,
     }
     const dcaEnabled = parseBooleanString(response.dca) ?? false
-    const dynamicDca = parseBooleanString(response.dynamic_dca) ?? false
-    const tradeLifecycleMode = normalizeTradeLifecycleMode(
+    const tradeMode = normalizeTradeMode(
+        response.trade_mode,
         response.trade_lifecycle_mode,
+        response.dynamic_dca,
         response.sidestep_campaign_enabled,
     )
+    const dynamicDca = isDynamicTradeMode(tradeMode)
+    const tradeModeSwitchGuard = buildTradeModeSwitchGuard(response)
 
     return {
         general,
@@ -223,8 +274,7 @@ export function buildLoadedConfigState(
         exchange,
         dca: {
             enabled: dcaEnabled,
-            trade_lifecycle_mode: tradeLifecycleMode,
-            dynamic: dynamicDca,
+            trade_mode: tradeMode,
             strategy: normalizeStrategyName(toNullableString(response.dca_strategy)),
             timeframe,
             trailing_tp: toNumberOrNull(response.trailing_tp),
@@ -254,17 +304,12 @@ export function buildLoadedConfigState(
             os: toNumberOrNull(response.os),
             trade_safety_order_budget_ratio:
                 toNumberOrNull(response.trade_safety_order_budget_ratio) ?? 0.95,
-            sidestep_campaign_enabled: deriveLegacySidestepEnabled(
-                tradeLifecycleMode,
-                response.sidestep_campaign_enabled,
-            ),
             sidestep_bearish_strategy: normalizeStrategyName(
                 toNullableString(response.sidestep_bearish_strategy),
             ),
-            sidestep_reentry_strategy:
-                normalizeStrategyName(
-                    toNullableString(response.sidestep_reentry_strategy),
-                ) ?? normalizeStrategyName(toNullableString(response.dca_strategy)),
+            sidestep_reentry_strategy: normalizeStrategyName(
+                toNullableString(response.sidestep_reentry_strategy),
+            ),
             sidestep_reentry_cooldown_candles:
                 toNumberOrNull(response.sidestep_reentry_cooldown_candles) ?? 0,
             sidestep_reentry_requires_fresh_long_signal:
@@ -274,6 +319,7 @@ export function buildLoadedConfigState(
             tp: toNumberOrNull(response.tp),
             sl: toNumberOrNull(response.sl),
         },
+        tradeModeSwitchGuard,
         capital: {
             max_fund: toNumberOrNull(response.capital_max_fund),
             reserve_safety_orders:

@@ -34,8 +34,8 @@ const TASKS: readonly ControlCenterTaskPresentation[] = [
     },
     {
         target: 'dca',
-        title: 'Trade lifecycle',
-        summary: 'Choose classic DCA or sidestep re-entry behavior and tune its runtime.',
+        title: 'Trade modes',
+        summary: 'Choose Dynamic DCA or Sidestep behavior and tune its runtime.',
         defaultMode: 'setup',
         modes: ['setup', 'advanced'],
         sectionId: 'control-center-dca',
@@ -139,6 +139,7 @@ const KEY_TARGETS: Record<string, ControlCenterTarget> = {
     volume: 'filter',
     btc_pulse: 'filter',
     dca: 'dca',
+    trade_mode: 'dca',
     dynamic_dca: 'dca',
     dca_strategy: 'dca',
     trade_lifecycle_mode: 'dca',

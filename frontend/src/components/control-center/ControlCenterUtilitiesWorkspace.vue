@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
 import ConfigBackupDownloadControls from '../config/ConfigBackupDownloadControls.vue'
 import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'
 
@@ -15,6 +16,7 @@ defineProps<{
     hasSelectedBackupPayload: boolean
     monitoringTestLoading: boolean
     restoreLoading: boolean
+    restoreReview: RestoreReviewState | null
     selectedBackupConfigCount: number
     selectedBackupFileName: string | null
     selectedBackupHasTradeData: boolean
@@ -62,6 +64,7 @@ const emit = defineEmits<{
                     :bind-backup-file-input="bindBackupFileInput"
                     :has-selected-backup-payload="hasSelectedBackupPayload"
                     :restore-loading="restoreLoading"
+                    :restore-review="restoreReview"
                     :selected-backup-config-count="selectedBackupConfigCount"
                     :selected-backup-file-name="selectedBackupFileName"
                     :selected-backup-has-trade-data="selectedBackupHasTradeData"

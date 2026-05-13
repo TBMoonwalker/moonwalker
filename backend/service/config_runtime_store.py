@@ -64,6 +64,10 @@ class ConfigRuntimeStore:
         """Replace derived runtime metadata with a defensive copy."""
         self._metadata = copy.deepcopy(dict(metadata))
 
+    def entries(self) -> list[ConfigEntry]:
+        """Return a defensive copy of persisted runtime entries."""
+        return copy.deepcopy(list(self._entries.values()))
+
     def get(
         self,
         key: str,

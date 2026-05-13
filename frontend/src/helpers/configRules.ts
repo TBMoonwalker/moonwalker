@@ -1,15 +1,13 @@
 import type { FormItemRule, FormRules } from 'naive-ui/es/form'
 import type { Ref } from 'vue'
 import {
-    isClassicTradeLifecycleMode,
-    isSidestepTradeLifecycleMode,
+    isDynamicTradeMode,
+    isSidestepTradeMode,
 } from './tradeLifecycle'
 
 interface DcaRulesState {
-    dynamic: boolean
     enabled: boolean
-    sidestep_campaign_enabled: boolean
-    trade_lifecycle_mode?: string | null
+    trade_mode?: string | null
 }
 
 interface ExchangeRulesState {
@@ -37,11 +35,8 @@ interface BuildConfigRulesOptions {
     submitAttempted: Ref<boolean>
 }
 
-function isClassicDcaMode(dca: Ref<DcaRulesState>): boolean {
-    return isClassicTradeLifecycleMode(
-        dca.value.trade_lifecycle_mode,
-        dca.value.sidestep_campaign_enabled,
-    )
+function isDynamicDcaMode(dca: Ref<DcaRulesState>): boolean {
+    return isDynamicTradeMode(dca.value.trade_mode)
 }
 
 function isSpotMarket(exchange: Ref<ExchangeRulesState>): boolean {
@@ -51,10 +46,7 @@ function isSpotMarket(exchange: Ref<ExchangeRulesState>): boolean {
 function isSpotSidestepMode(options: BuildConfigRulesOptions): boolean {
     return (
         options.dca.value.enabled &&
-        isSidestepTradeLifecycleMode(
-            options.dca.value.trade_lifecycle_mode,
-            options.dca.value.sidestep_campaign_enabled,
-        ) &&
+        isSidestepTradeMode(options.dca.value.trade_mode) &&
         isSpotMarket(options.exchange)
     )
 }
@@ -267,35 +259,35 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
         so: {
             validator: dcaFieldValidator(
                 'safety order amount',
-                () => isClassicDcaMode(options.dca) && !options.dca.value.dynamic,
+                () => false,
             ),
             trigger: ['submit'],
         },
         mstc: {
             validator: dcaFieldValidator(
                 'max safety order count',
-                () => isClassicDcaMode(options.dca),
+                () => isDynamicDcaMode(options.dca),
             ),
             trigger: ['submit'],
         },
         sos: {
             validator: dcaFieldValidator(
                 'price deviation',
-                () => isClassicDcaMode(options.dca),
+                () => isDynamicDcaMode(options.dca),
             ),
             trigger: ['submit'],
         },
         ss: {
             validator: dcaFieldValidator(
                 'step scale',
-                () => isClassicDcaMode(options.dca) && !options.dca.value.dynamic,
+                () => false,
             ),
             trigger: ['submit'],
         },
         os: {
             validator: dcaFieldValidator(
                 'volume scale',
-                () => isClassicDcaMode(options.dca) && !options.dca.value.dynamic,
+                () => false,
             ),
             trigger: ['submit'],
         },

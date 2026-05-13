@@ -4,6 +4,7 @@ import type {
     ControlCenterTarget,
     ControlCenterTaskPresentation,
 } from '../../control-center/types'
+import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
 import ControlCenterSetupEntryGate from './ControlCenterSetupEntryGate.vue'
 import ControlCenterSetupProgressGrid from './ControlCenterSetupProgressGrid.vue'
 import ControlCenterSetupRestoreFlow from './ControlCenterSetupRestoreFlow.vue'
@@ -29,6 +30,7 @@ defineProps<{
     isSetupTaskExpanded: (target: ControlCenterTarget) => boolean
     readinessFirstRun: boolean
     restoreLoading: boolean
+    restoreReview: RestoreReviewState | null
     selectedBackupConfigCount: number
     selectedBackupFileName: string | null
     selectedBackupHasTradeData: boolean
@@ -62,6 +64,7 @@ const emit = defineEmits<{
             :bind-backup-file-input="bindBackupFileInput"
             :has-selected-backup-payload="hasSelectedBackupPayload"
             :restore-loading="restoreLoading"
+            :restore-review="restoreReview"
             :selected-backup-config-count="selectedBackupConfigCount"
             :selected-backup-file-name="selectedBackupFileName"
             :selected-backup-has-trade-data="selectedBackupHasTradeData"

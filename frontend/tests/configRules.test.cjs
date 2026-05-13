@@ -9,8 +9,13 @@ function createRuleContext(overrides = {}) {
     const state = {
         dca: {
             value: {
-                dynamic: false,
                 enabled: true,
+                trade_mode: 'dynamic_dca',
+            },
+        },
+        exchange: {
+            value: {
+                market: 'spot',
             },
         },
         signal: {
@@ -126,39 +131,40 @@ test('config rules gate CSV validation by mode and submit state', () => {
     assert.equal(untouchedContext.rules.signal.validator({}, null), true)
 })
 
-test('config rules only require manual DCA fields when needed', () => {
+test('config rules require only dynamic DCA fields in dynamic mode', () => {
     const disabledContext = createRuleContext({
         dca: {
             value: {
-                dynamic: false,
                 enabled: false,
+                trade_mode: 'dynamic_dca',
             },
         },
     })
-    assert.equal(disabledContext.rules.so.validator({}, null), true)
+    assert.equal(disabledContext.rules.mstc.validator({}, null), true)
+    assert.equal(disabledContext.rules.sos.validator({}, null), true)
 
     const dynamicContext = createRuleContext({
         dca: {
             value: {
-                dynamic: true,
                 enabled: true,
+                trade_mode: 'dynamic_dca',
             },
         },
     })
-    assert.equal(dynamicContext.rules.so.validator({}, null), true)
-
-    const requiredContext = createRuleContext()
     assert.equal(
-        requiredContext.rules.so.validator({}, null).message,
-        'Please add safety order amount',
+        dynamicContext.rules.mstc.validator({}, null).message,
+        'Please add max safety order count',
+    )
+    assert.equal(
+        dynamicContext.rules.sos.validator({}, null).message,
+        'Please add price deviation',
     )
 
     const sidestepContext = createRuleContext({
         dca: {
             value: {
-                dynamic: false,
                 enabled: true,
-                trade_lifecycle_mode: 'sidestep_reentry',
+                trade_mode: 'sidestep',
             },
         },
     })
@@ -173,9 +179,8 @@ test('config rules require sidestep strategies only for spot sidestep mode', () 
     const sidestepContext = createRuleContext({
         dca: {
             value: {
-                dynamic: false,
                 enabled: true,
-                trade_lifecycle_mode: 'sidestep_reentry',
+                trade_mode: 'sidestep',
             },
         },
         exchange: {
@@ -197,9 +202,8 @@ test('config rules require sidestep strategies only for spot sidestep mode', () 
     const futuresContext = createRuleContext({
         dca: {
             value: {
-                dynamic: false,
                 enabled: true,
-                trade_lifecycle_mode: 'sidestep_reentry',
+                trade_mode: 'sidestep',
             },
         },
         exchange: {
@@ -219,27 +223,19 @@ test('config rules require sidestep strategies only for spot sidestep mode', () 
     )
 })
 
-test('config rules honor the legacy sidestep flag when canonical mode is absent', () => {
-    const legacyContext = createRuleContext({
+test('config rules do not require retired ladder fields in canonical dynamic mode', () => {
+    const dynamicContext = createRuleContext({
         dca: {
             value: {
-                dynamic: false,
                 enabled: true,
-                sidestep_campaign_enabled: true,
-            },
-        },
-        exchange: {
-            value: {
-                market: 'spot',
+                trade_mode: 'dynamic_dca',
             },
         },
     })
 
-    assert.equal(legacyContext.rules.so.validator({}, null), true)
-    assert.equal(
-        legacyContext.rules.sidestep_bearish_strategy.validator({}, null).message,
-        'Please select bearish sidestep strategy',
-    )
+    assert.equal(dynamicContext.rules.so.validator({}, null), true)
+    assert.equal(dynamicContext.rules.ss.validator({}, null), true)
+    assert.equal(dynamicContext.rules.os.validator({}, null), true)
 })
 
 test('config rules require a positive global max fund after submit', () => {

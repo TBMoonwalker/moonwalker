@@ -97,7 +97,7 @@ test(
     },
 )
 
-test('buildLoadedConfigState clears dynamic safety-order buffer for static DCA', () => {
+test('buildLoadedConfigState keeps dynamic mode canonical and preserves the dynamic buffer', () => {
     const state = buildLoadedConfigState(
         {
             dca: 'true',
@@ -108,8 +108,8 @@ test('buildLoadedConfigState clears dynamic safety-order buffer for static DCA',
         createLoadDefaults(),
     )
 
-    assert.equal(state.dca.dynamic, false)
-    assert.equal(state.capital.budget_buffer_pct, 0)
+    assert.equal(state.dca.trade_mode, 'dynamic_dca')
+    assert.equal(state.capital.budget_buffer_pct, 50)
 })
 
 test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () => {
@@ -234,6 +234,32 @@ test('buildLoadedConfigState falls back to the legacy sidestep flag when needed'
         createLoadDefaults(),
     )
 
-    assert.equal(state.dca.trade_lifecycle_mode, 'sidestep_reentry')
-    assert.equal(state.dca.sidestep_campaign_enabled, true)
+    assert.equal(state.dca.trade_mode, 'sidestep')
+    assert.equal(state.tradeModeSwitchGuard.current_trade_mode, 'sidestep')
+})
+
+test('buildLoadedConfigState reads the trade mode switch guard payload', () => {
+    const state = buildLoadedConfigState(
+        {
+            trade_mode: 'sidestep',
+            trade_mode_switch_guard: {
+                blocked: 'true',
+                can_switch: 'false',
+                current_trade_mode: 'sidestep',
+                message: 'Mode switching is locked while trades are active.',
+                open_trade_count: '2',
+                waiting_campaign_count: '1',
+            },
+        },
+        createLoadDefaults(),
+    )
+
+    assert.deepEqual(state.tradeModeSwitchGuard, {
+        blocked: true,
+        can_switch: false,
+        current_trade_mode: 'sidestep',
+        message: 'Mode switching is locked while trades are active.',
+        open_trade_count: 2,
+        waiting_campaign_count: 1,
+    })
 })

@@ -18,6 +18,11 @@ from service.config_runtime_store import (
 )
 from service.redis import CONFIG_CHANNEL, redis_client
 from service.strategy_capability import filter_supported_strategies
+from service.trade_lifecycle_config import (
+    TRADE_MODE_COMPATIBILITY_KEYS,
+    resolve_trade_mode_config,
+)
+from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
@@ -43,8 +48,6 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 }
 
 DEFAULT_CONFIG_VALUES = {
-    "trade_lifecycle_mode": "classic_dca",
-    "sidestep_campaign_enabled": False,
     "sidestep_bearish_strategy": "",
     "sidestep_reentry_strategy": "",
     "sidestep_reentry_cooldown_candles": 0,
@@ -147,6 +150,39 @@ def resolve_history_lookback_days(
     return default_days or 90
 
 
+def deserialize_config_value(value: Any, value_type: str) -> Any:
+    """Convert a serialized config value into its typed runtime representation."""
+    if value_type == "int":
+        try:
+            if isinstance(value, bool):
+                return int(value)
+            normalized = str(value).strip().lower()
+            if normalized in {"false", "none", "null", ""}:
+                return 0
+            return int(value)
+        except (TypeError, ValueError):
+            logging.warning("Invalid int config value '%s'. Falling back to 0.", value)
+            return 0
+    if value_type == "float":
+        try:
+            if isinstance(value, bool):
+                return float(value)
+            normalized = str(value).strip().lower()
+            if normalized in {"false", "none", "null", ""}:
+                return 0.0
+            return float(value)
+        except (TypeError, ValueError):
+            logging.warning(
+                "Invalid float config value '%s'. Falling back to 0.0.", value
+            )
+            return 0.0
+    if value_type == "bool":
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    return value
+
+
 class Config:
     """Configuration management class that handles loading, storing, and subscribing to configuration changes.
 
@@ -200,6 +236,11 @@ class Config:
             if is_removed_config_key(row.key):
                 continue
             entries.append(self.__build_entry(row.key, row.value, row.value_type))
+        self.__validate_trade_mode_snapshot(
+            self.__build_snapshot_from_entries(entries),
+            source="startup",
+            require_explicit_sidestep_reentry=False,
+        )
         self._store.replace_entries(entries)
         self.__refresh_runtime_metadata()
 
@@ -210,19 +251,26 @@ class Config:
             return
 
         rows = await AppConfig.filter(key__in=normalized_keys)
+        next_entries = {entry.key: entry for entry in self._store.entries()}
         loaded_keys = set()
         for row in rows:
             if is_removed_config_key(row.key):
                 continue
-            self._store.upsert_entry(
-                self.__build_entry(row.key, row.value, row.value_type)
+            next_entries[row.key] = self.__build_entry(
+                row.key, row.value, row.value_type
             )
             loaded_keys.add(row.key)
 
         for key in normalized_keys:
             if key not in loaded_keys:
-                self._store.remove_entry(key)
+                next_entries.pop(key, None)
 
+        self.__validate_trade_mode_snapshot(
+            self.__build_snapshot_from_entries(next_entries.values()),
+            source="startup",
+            require_explicit_sidestep_reentry=False,
+        )
+        self._store.replace_entries(next_entries.values())
         self.__refresh_runtime_metadata()
 
     def __refresh_runtime_metadata(self) -> None:
@@ -233,49 +281,6 @@ class Config:
                 "signal_plugins": self.__get_signal_plugins(),
             }
         )
-
-    def __set_type(self, value: str, type: str) -> Any:
-        """Convert a string value to its appropriate Python type based on the type specification.
-
-        Args:
-            value: The string value to convert
-            type: The type specification ("int", "float", "bool", or any other string for str)
-
-        Returns:
-            The converted value in the appropriate Python type
-        """
-        if type == "int":
-            try:
-                if isinstance(value, bool):
-                    return int(value)
-                normalized = str(value).strip().lower()
-                if normalized in {"false", "none", "null", ""}:
-                    return 0
-                return int(value)
-            except (TypeError, ValueError):
-                logging.warning(
-                    "Invalid int config value '%s'. Falling back to 0.", value
-                )
-                return 0
-        elif type == "float":
-            try:
-                if isinstance(value, bool):
-                    return float(value)
-                normalized = str(value).strip().lower()
-                if normalized in {"false", "none", "null", ""}:
-                    return 0.0
-                return float(value)
-            except (TypeError, ValueError):
-                logging.warning(
-                    "Invalid float config value '%s'. Falling back to 0.0.", value
-                )
-                return 0.0
-        elif type == "bool":
-            if isinstance(value, bool):
-                return value
-            return str(value).strip().lower() in {"1", "true", "yes", "on"}
-        else:
-            return value
 
     def __serialize_value_for_storage(self, value: Any, value_type: str) -> Any:
         """Serialize values before storing in AppConfig.
@@ -289,7 +294,14 @@ class Config:
 
     def snapshot(self) -> dict[str, Any]:
         """Return a defensive copy of the current config state."""
-        return self._store.snapshot(defaults=DEFAULT_CONFIG_VALUES)
+        snapshot = self.__raw_snapshot()
+        trade_mode_state = resolve_trade_mode_config(snapshot, source="runtime")
+        snapshot.update(trade_mode_state.compatibility_values())
+        return snapshot
+
+    def raw_snapshot(self) -> dict[str, Any]:
+        """Return the config state before derived trade-mode compatibility fields."""
+        return self.__raw_snapshot()
 
     def __notify_subscribers(self) -> None:
         """Notify local subscribers that cache values changed."""
@@ -321,6 +333,45 @@ class Config:
         except Exception as exc:  # noqa: BLE001 - Keep local updates working.
             logging.warning("Failed to publish config change for '%s': %s", keys, exc)
 
+    def __raw_snapshot(self) -> dict[str, Any]:
+        """Return the runtime snapshot before derived trade-mode compatibility."""
+        return self._store.snapshot(defaults=DEFAULT_CONFIG_VALUES)
+
+    def __build_snapshot_from_entries(
+        self, entries: list[ConfigEntry] | Any
+    ) -> dict[str, Any]:
+        """Build a raw config snapshot from typed persisted entries."""
+        snapshot = dict(DEFAULT_CONFIG_VALUES)
+        for entry in entries:
+            snapshot[entry.key] = entry.value
+        return snapshot
+
+    def __build_candidate_snapshot(
+        self, actions: list[ConfigUpdateAction]
+    ) -> dict[str, Any]:
+        """Apply pending config actions to the raw runtime snapshot."""
+        snapshot = self.__raw_snapshot()
+        for action in actions:
+            if action.persist:
+                snapshot[action.key] = action.runtime_value
+            else:
+                snapshot.pop(action.key, None)
+        return snapshot
+
+    def __validate_trade_mode_snapshot(
+        self,
+        snapshot: dict[str, Any],
+        *,
+        source: str,
+        require_explicit_sidestep_reentry: bool,
+    ) -> None:
+        """Validate the candidate trade-mode snapshot before it reaches runtime."""
+        resolve_trade_mode_config(
+            snapshot,
+            source=source,
+            require_explicit_sidestep_reentry=require_explicit_sidestep_reentry,
+        )
+
     def __parse_update_payload(self, payload: Any) -> dict[str, Any]:
         """Normalize update payloads from API clients."""
         if not isinstance(payload, dict):
@@ -339,7 +390,7 @@ class Config:
         return ConfigEntry(
             key=key,
             value_type=value_type,
-            value=self.__set_type(serialized_value, value_type),
+            value=deserialize_config_value(serialized_value, value_type),
         )
 
     def __build_update_action(
@@ -368,7 +419,7 @@ class Config:
             value_type=value_type,
             persist=True,
             serialized_value=serialized_value,
-            runtime_value=self.__set_type(serialized_value, value_type),
+            runtime_value=deserialize_config_value(serialized_value, value_type),
         )
 
     def __assert_supported_key(self, key: str) -> None:
@@ -405,6 +456,8 @@ class Config:
         Returns:
             The configuration value or default if key not found
         """
+        if key in TRADE_MODE_COMPATIBILITY_KEYS:
+            return self.snapshot().get(key, default)
         return self._store.get(key, defaults=DEFAULT_CONFIG_VALUES, default=default)
 
     async def set(self, key: str, value: Any) -> bool:
@@ -418,23 +471,30 @@ class Config:
             True if the operation succeeded
         """
         action = self.__build_update_action(key, value)
-        if not action.persist:
-            changed = await self.__clear_key(key)
-            if changed:
-                self.__notify_subscribers()
-                await self.__publish_change([key])
-            return True
-
-        await AppConfig.update_or_create(
-            key=key,
-            defaults={
-                "value": action.serialized_value,
-                "value_type": action.value_type,
-            },
+        self.__validate_trade_mode_snapshot(
+            self.__build_candidate_snapshot([action]),
+            source="save",
+            require_explicit_sidestep_reentry=True,
         )
+
+        async with in_transaction() as conn:
+            if action.persist:
+                await AppConfig.update_or_create(
+                    using_db=conn,
+                    key=key,
+                    defaults={
+                        "value": action.serialized_value,
+                        "value_type": action.value_type,
+                    },
+                )
+            else:
+                await AppConfig.filter(key=key).using_db(conn).delete()
+
         entry = action.to_entry()
         if entry is not None:
             self._store.upsert_entry(entry)
+        else:
+            self._store.remove_entry(key)
         self.__notify_subscribers()
         # Notify all subscribers across processes (best effort)
         await self.__publish_change([key])
@@ -450,33 +510,38 @@ class Config:
         Returns:
             True if the operation succeeded
         """
-        for key in updates:
-            self.__assert_supported_key(key)
-
-        changed_keys: list[str] = []
+        actions: list[ConfigUpdateAction] = []
         for key, raw_value in updates.items():
-            try:
-                action = self.__build_update_action(key, raw_value)
-            except (TypeError, ValueError, KeyError) as exc:
-                logging.warning(
-                    "Skipping invalid config payload for '%s': %s", key, exc
-                )
-                continue
+            self.__assert_supported_key(key)
+            actions.append(self.__build_update_action(key, raw_value))
 
-            if action.persist:
-                await AppConfig.update_or_create(
-                    key=key,
-                    defaults={
-                        "value": action.serialized_value,
-                        "value_type": action.value_type,
-                    },
-                )
-                entry = action.to_entry()
-                if entry is not None:
-                    self._store.upsert_entry(entry)
-                changed_keys.append(key)
-            elif await self.__clear_key(key):
-                changed_keys.append(key)
+        self.__validate_trade_mode_snapshot(
+            self.__build_candidate_snapshot(actions),
+            source="save",
+            require_explicit_sidestep_reentry=True,
+        )
+
+        async with in_transaction() as conn:
+            for action in actions:
+                if action.persist:
+                    await AppConfig.update_or_create(
+                        using_db=conn,
+                        key=action.key,
+                        defaults={
+                            "value": action.serialized_value,
+                            "value_type": action.value_type,
+                        },
+                    )
+                else:
+                    await AppConfig.filter(key=action.key).using_db(conn).delete()
+
+        changed_keys = [action.key for action in actions]
+        for action in actions:
+            entry = action.to_entry()
+            if entry is not None:
+                self._store.upsert_entry(entry)
+            else:
+                self._store.remove_entry(action.key)
 
         if changed_keys:
             self.__notify_subscribers()

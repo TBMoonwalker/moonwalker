@@ -16,7 +16,16 @@ from service.config import (
     build_removed_config_key_message,
     is_removed_config_key,
 )
+from service.config_persistence import should_persist_config_value
 from service.config_views import TradeLifecycleConfigView
+from service.spot_sidestep_campaign import SpotSidestepCampaignService
+from service.trade_lifecycle_config import (
+    TRADE_MODE_COMPATIBILITY_KEYS,
+    TradeModeConfigError,
+    TradeModeSwitchGuard,
+    build_blocked_live_mode_switch_error,
+    resolve_trade_mode_config,
+)
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
@@ -87,6 +96,152 @@ def _get_config_snapshot(config: Config) -> dict[str, Any]:
     if callable(snapshot):
         return snapshot()
     return {}
+
+
+def _get_raw_config_snapshot(config: Config) -> dict[str, Any]:
+    """Return the persisted config snapshot without derived trade-mode fields."""
+    raw_snapshot = getattr(config, "raw_snapshot", None)
+    if callable(raw_snapshot):
+        return raw_snapshot()
+    return _get_config_snapshot(config)
+
+
+def _trade_mode_update_payload(value: Any) -> dict[str, Any]:
+    """Return the typed config payload for canonical trade-mode compatibility writes."""
+    return {
+        "value": value,
+        "type": "bool" if isinstance(value, bool) else "str",
+    }
+
+
+def _merge_config_snapshot_with_updates(
+    config_snapshot: dict[str, Any],
+    updates: ConfigUpdateMap,
+) -> dict[str, Any]:
+    """Return the candidate config snapshot after applying typed API updates."""
+    merged = dict(config_snapshot)
+    for key, raw_value in updates.items():
+        value_type = str(raw_value.get("type", "")).strip()
+        value = _extract_config_update_value(raw_value)
+        if should_persist_config_value(value_type, value):
+            merged[key] = value
+        else:
+            merged.pop(key, None)
+    return merged
+
+
+def _updates_touch_trade_mode(updates: ConfigUpdateMap) -> bool:
+    """Return whether the request mutates any trade-mode compatibility field."""
+    return any(key in TRADE_MODE_COMPATIBILITY_KEYS for key in updates)
+
+
+def _requested_trade_mode_snapshot(
+    config_snapshot: dict[str, Any],
+    updates: ConfigUpdateMap,
+) -> dict[str, Any]:
+    """Return the mode-resolution snapshot after discarding stale untouched mirrors."""
+    merged_snapshot = _merge_config_snapshot_with_updates(config_snapshot, updates)
+    legacy_keys = {
+        "trade_lifecycle_mode",
+        "dynamic_dca",
+        "sidestep_campaign_enabled",
+    }
+    if "trade_mode" in updates:
+        for key in legacy_keys - updates.keys():
+            merged_snapshot.pop(key, None)
+    if "trade_mode" not in updates and any(key in updates for key in legacy_keys):
+        merged_snapshot.pop("trade_mode", None)
+    return merged_snapshot
+
+
+async def _get_trade_mode_switch_guard(
+    config_snapshot: dict[str, Any],
+    *,
+    strict: bool = True,
+) -> TradeModeSwitchGuard:
+    """Return lightweight runtime guard data for trade-mode switch UX."""
+    current_trade_mode = resolve_trade_mode_config(
+        config_snapshot,
+        source="runtime",
+        require_explicit_sidestep_reentry=False,
+    ).trade_mode
+    try:
+        open_trade_count = await OpenTrades.all().count()
+        waiting_campaign_count = (
+            await SpotSidestepCampaignService.count_waiting_campaigns()
+        )
+    except Exception:  # noqa: BLE001 - keep snapshot reads resilient.
+        if strict:
+            raise
+        logging.warning(
+            "Falling back to an unlocked trade-mode guard after a runtime guard read failed.",
+            exc_info=True,
+        )
+        open_trade_count = 0
+        waiting_campaign_count = 0
+    blocked = open_trade_count > 0 or waiting_campaign_count > 0
+    message = None
+    if blocked:
+        message = (
+            "Close open trades and clear waiting sidestep campaigns before "
+            "switching trade modes."
+        )
+    return TradeModeSwitchGuard(
+        current_trade_mode=current_trade_mode,
+        blocked=blocked,
+        open_trade_count=open_trade_count,
+        waiting_campaign_count=waiting_campaign_count,
+        message=message,
+    )
+
+
+async def _prepare_trade_mode_updates(
+    config_snapshot: dict[str, Any],
+    updates: ConfigUpdateMap,
+) -> ConfigUpdateMap:
+    """Normalize mode-related config updates into canonical + bridge writes."""
+    prepared_updates = dict(updates)
+    if not _updates_touch_trade_mode(prepared_updates):
+        return prepared_updates
+
+    merged_snapshot = _requested_trade_mode_snapshot(config_snapshot, prepared_updates)
+    current_trade_mode = resolve_trade_mode_config(
+        config_snapshot,
+        source="runtime",
+        require_explicit_sidestep_reentry=False,
+    ).trade_mode
+    requested_trade_mode = resolve_trade_mode_config(
+        merged_snapshot,
+        source="save",
+        require_explicit_sidestep_reentry=False,
+        allow_canonical_without_legacy=True,
+    ).trade_mode
+
+    if requested_trade_mode != current_trade_mode:
+        guard = await _get_trade_mode_switch_guard(config_snapshot, strict=True)
+        if guard.blocked:
+            raise build_blocked_live_mode_switch_error(
+                source="save",
+                current_trade_mode=current_trade_mode,
+                requested_trade_mode=requested_trade_mode,
+                open_trade_count=guard.open_trade_count,
+                waiting_campaign_count=guard.waiting_campaign_count,
+            )
+
+    prepared_updates.update(
+        {
+            key: _trade_mode_update_payload(value)
+            for key, value in resolve_trade_mode_config(
+                merged_snapshot,
+                source="save",
+                require_explicit_sidestep_reentry=False,
+                allow_canonical_without_legacy=True,
+            )
+            .compatibility_values()
+            .items()
+        }
+    )
+    return prepared_updates
 
 
 def _find_live_activation_blockers(
@@ -246,8 +401,10 @@ async def _validate_csv_signal_switch(
     return None
 
 
-def _config_update_conflict(message: str) -> Any:
+def _config_update_conflict(message: str | TradeModeConfigError) -> Any:
     """Return the shared conflict response shape for config update failures."""
+    if isinstance(message, TradeModeConfigError):
+        return json_response(message.to_response_body(), message.status_code)
     return json_response({"error": message, "message": message}, 409)
 
 
@@ -329,22 +486,33 @@ async def _parse_batch_config_update_request(
 async def _validate_config_updates(
     config: Config,
     updates: ConfigUpdateMap,
-) -> Any | None:
+) -> tuple[ConfigUpdateMap | None, Any | None]:
     """Validate shared config update invariants before persistence."""
     error_message = _validate_removed_config_keys(updates)
     if error_message:
-        return _config_update_conflict(error_message)
+        return None, _config_update_conflict(error_message)
 
-    if "signal" in updates:
-        error_message = await _validate_csv_signal_switch(config, updates["signal"])
+    try:
+        prepared_updates = await _prepare_trade_mode_updates(
+            _get_raw_config_snapshot(config),
+            updates,
+        )
+    except TradeModeConfigError as exc:
+        return None, _config_update_conflict(exc)
+
+    if "signal" in prepared_updates:
+        error_message = await _validate_csv_signal_switch(
+            config,
+            prepared_updates["signal"],
+        )
         if error_message:
-            return _config_update_conflict(error_message)
+            return None, _config_update_conflict(error_message)
 
-    error_message = _validate_live_activation_boundary(config, updates)
+    error_message = _validate_live_activation_boundary(config, prepared_updates)
     if error_message:
-        return _config_update_conflict(error_message)
+        return None, _config_update_conflict(error_message)
 
-    return None
+    return prepared_updates, None
 
 
 @get(path="/config/all")
@@ -356,6 +524,9 @@ async def get_config() -> Any:
     """
     config = await Config.instance()
     snapshot = config.snapshot()
+    snapshot["trade_mode_switch_guard"] = (
+        await _get_trade_mode_switch_guard(snapshot, strict=False)
+    ).to_dict()
     snapshot["config_updated_at"] = await _get_latest_config_updated_at()
     return snapshot
 
@@ -416,13 +587,18 @@ async def update_config_key(key: str, request: Request[Any, Any, Any]) -> Any:
     value = updates[key]
 
     config = await Config.instance()
-    validation_error = await _validate_config_updates(config, updates)
-    if validation_error is not None:
+    prepared_updates, validation_error = await _validate_config_updates(config, updates)
+    if validation_error is not None or prepared_updates is None:
         return validation_error
 
     # Save to DB and trigger Pub/Sub
     try:
-        success = await config.set(key, value)
+        if len(prepared_updates) == 1 and key in prepared_updates:
+            success = await config.set(key, prepared_updates[key])
+        else:
+            success = await config.batch_set(prepared_updates)
+    except TradeModeConfigError as exc:
+        return _config_update_conflict(exc)
     except ValueError as exc:
         return _config_update_conflict(str(exc))
     if success:
@@ -449,12 +625,14 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
         return error_response
 
     config = await Config.instance()
-    validation_error = await _validate_config_updates(config, updates)
-    if validation_error is not None:
+    prepared_updates, validation_error = await _validate_config_updates(config, updates)
+    if validation_error is not None or prepared_updates is None:
         return validation_error
 
     try:
-        success = await config.batch_set(updates)
+        success = await config.batch_set(prepared_updates)
+    except TradeModeConfigError as exc:
+        return _config_update_conflict(exc)
     except ValueError as exc:
         return _config_update_conflict(str(exc))
 
@@ -551,6 +729,8 @@ async def restore_backup(request: Request[Any, Any, Any]) -> Any:
             backup_payload,
             restore_trade_data=restore_trade_data,
         )
+    except TradeModeConfigError as exc:
+        return json_response(exc.to_response_body(), exc.status_code)
     except ValueError as exc:
         return json_response({"error": str(exc)}, 400)
     except Exception as exc:  # noqa: BLE001 - surface restore failures to UI.
