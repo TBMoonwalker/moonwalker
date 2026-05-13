@@ -132,7 +132,6 @@ function buildTradeModeSwitchGuard(
             current_trade_mode: normalizeTradeMode(
                 response.trade_mode,
                 response.trade_lifecycle_mode,
-                response.dynamic_dca,
                 response.sidestep_campaign_enabled,
             ),
             message: null,
@@ -149,7 +148,6 @@ function buildTradeModeSwitchGuard(
             normalizeTradeMode(
                 response.trade_mode,
                 response.trade_lifecycle_mode,
-                response.dynamic_dca,
                 response.sidestep_campaign_enabled,
             ),
         message: toNullableString(rawGuard.message),
@@ -219,7 +217,6 @@ export function buildLoadedConfigState(
     const tradeMode = normalizeTradeMode(
         response.trade_mode,
         response.trade_lifecycle_mode,
-        response.dynamic_dca,
         response.sidestep_campaign_enabled,
     )
     const dynamicDca = isDynamicTradeMode(tradeMode)

@@ -331,7 +331,12 @@ class Config:
         try:
             await redis_client.publish(CONFIG_CHANNEL, message)
         except Exception as exc:  # noqa: BLE001 - Keep local updates working.
-            logging.warning("Failed to publish config change for '%s': %s", keys, exc)
+            logging.warning(
+                "Failed to publish config change for '%s': %s",
+                keys,
+                exc,
+                exc_info=True,
+            )
 
     def __raw_snapshot(self) -> dict[str, Any]:
         """Return the runtime snapshot before derived trade-mode compatibility."""

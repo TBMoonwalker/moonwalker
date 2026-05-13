@@ -518,6 +518,76 @@ async def test_background_replay_backfill_runs_after_startup(
 
 
 @pytest.mark.asyncio
+async def test_background_replay_backfill_allows_missing_archive_exchange_repair(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    import model
+    import service.database as database_module
+
+    captured_kwargs: list[dict[str, object]] = []
+
+    async def fake_archive_replay_candles_for_deal(
+        deal_id: str,
+        symbol: str,
+        *,
+        open_date,
+        close_date,
+        allow_missing_archive_exchange_repair: bool = False,
+        conn=None,
+    ) -> int:
+        captured_kwargs.append(
+            {
+                "deal_id": deal_id,
+                "symbol": symbol,
+                "open_date": open_date,
+                "close_date": close_date,
+                "allow_missing_archive_exchange_repair": (
+                    allow_missing_archive_exchange_repair
+                ),
+                "conn": conn,
+            }
+        )
+        return 4
+
+    monkeypatch.setattr(
+        database_module,
+        "archive_replay_candles_for_deal",
+        fake_archive_replay_candles_for_deal,
+    )
+
+    await model.ClosedTrades.create(
+        symbol="ABC/USDT",
+        deal_id="6f6f6f6f-6666-4444-8888-666666666666",
+        open_date="0",
+        close_date="43200000",
+    )
+
+    database = Database()
+    database.db_url = f"sqlite://{db_path}"
+
+    await database._backfill_trade_replay_candles()
+
+    assert captured_kwargs == [
+        {
+            "deal_id": "6f6f6f6f-6666-4444-8888-666666666666",
+            "symbol": "ABC/USDT",
+            "open_date": "0",
+            "close_date": "43200000",
+            "allow_missing_archive_exchange_repair": True,
+            "conn": None,
+        }
+    ]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_background_replay_backfill_does_not_raise_on_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -196,7 +196,6 @@ const tradeModeLabel = computed(() => {
     const tradeMode = normalizeTradeMode(
         configSnapshotStore.snapshot.value?.trade_mode,
         configSnapshotStore.snapshot.value?.trade_lifecycle_mode,
-        configSnapshotStore.snapshot.value?.dynamic_dca,
         configSnapshotStore.snapshot.value?.sidestep_campaign_enabled,
     )
     return tradeMode === 'sidestep' ? 'Sidestep' : 'Dynamic DCA'

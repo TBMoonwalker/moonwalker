@@ -47,7 +47,6 @@ export function normalizeTradeLifecycleMode(
 export function normalizeTradeMode(
     tradeMode: unknown,
     tradeLifecycleMode: unknown = null,
-    dynamicDca: unknown = false,
     legacySidestepEnabled: unknown = false,
 ): TradeMode {
     const normalized = String(tradeMode ?? '').trim().toLowerCase()
@@ -104,14 +103,12 @@ export function deriveLegacySidestepEnabled(
 export function isDynamicTradeMode(
     tradeMode: unknown,
     tradeLifecycleMode: unknown = null,
-    dynamicDca: unknown = false,
     legacySidestepEnabled: unknown = false,
 ): boolean {
     return (
         normalizeTradeMode(
             tradeMode,
             tradeLifecycleMode,
-            dynamicDca,
             legacySidestepEnabled,
         ) === TRADE_MODE_DYNAMIC_DCA
     )
@@ -120,14 +117,12 @@ export function isDynamicTradeMode(
 export function isSidestepTradeMode(
     tradeMode: unknown,
     tradeLifecycleMode: unknown = null,
-    dynamicDca: unknown = false,
     legacySidestepEnabled: unknown = false,
 ): boolean {
     return (
         normalizeTradeMode(
             tradeMode,
             tradeLifecycleMode,
-            dynamicDca,
             legacySidestepEnabled,
         ) === TRADE_MODE_SIDESTEP
     )

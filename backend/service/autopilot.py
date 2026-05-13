@@ -239,6 +239,7 @@ class Autopilot:
             logging.warning(
                 "Autopilot memory summary unavailable: %s",
                 exc,
+                exc_info=True,
             )
             memory_summary = {
                 "status": "stale",
@@ -357,6 +358,7 @@ class Autopilot:
                 "Autopilot memory policy unavailable for %s: %s",
                 symbol,
                 exc,
+                exc_info=True,
             )
             memory_policy = {
                 "apply_tp": False,

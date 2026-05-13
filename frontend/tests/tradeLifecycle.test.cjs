@@ -14,38 +14,30 @@ test('normalizeTradeMode prefers the canonical trade_mode over legacy mirrors', 
         normalizeTradeMode(
             TRADE_MODE_DYNAMIC_DCA,
             'sidestep_reentry',
-            false,
             true,
         ),
         TRADE_MODE_DYNAMIC_DCA,
     )
 
     assert.equal(
-        normalizeTradeMode(TRADE_MODE_SIDESTEP, 'classic_dca', true, false),
+        normalizeTradeMode(TRADE_MODE_SIDESTEP, 'classic_dca', false),
         TRADE_MODE_SIDESTEP,
     )
 })
 
 test('normalizeTradeMode falls back to sidestep when legacy sidestep evidence exists', () => {
     assert.equal(
-        normalizeTradeMode(null, 'sidestep_reentry', false, false),
+        normalizeTradeMode(null, 'sidestep_reentry', false),
         TRADE_MODE_SIDESTEP,
     )
 
     assert.equal(
-        normalizeTradeMode(null, null, false, true),
+        normalizeTradeMode(null, null, true),
         TRADE_MODE_SIDESTEP,
     )
 })
 
 test('normalizeTradeMode defaults to dynamic_dca when no sidestep evidence exists', () => {
-    assert.equal(
-        normalizeTradeMode(null, null, false, false),
-        TRADE_MODE_DYNAMIC_DCA,
-    )
-
-    assert.equal(
-        normalizeTradeMode(null, null, true, false),
-        TRADE_MODE_DYNAMIC_DCA,
-    )
+    assert.equal(normalizeTradeMode(null, null, false), TRADE_MODE_DYNAMIC_DCA)
+    assert.equal(normalizeTradeMode(null, null), TRADE_MODE_DYNAMIC_DCA)
 })

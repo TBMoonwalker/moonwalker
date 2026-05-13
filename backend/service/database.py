@@ -612,7 +612,7 @@ class Database:
             )
 
     async def _backfill_trade_replay_candles(self) -> None:
-        """Backfill per-deal replay candles for existing closed trades."""
+        """Backfill or repair per-deal replay candles for existing closed trades."""
         if not self.db_url.startswith("sqlite://"):
             return
 
@@ -632,6 +632,7 @@ class Database:
                 symbol,
                 open_date=closed_row.get("open_date"),
                 close_date=closed_row.get("close_date"),
+                allow_missing_archive_exchange_repair=True,
             )
 
     async def _ensure_open_trades_columns(self) -> None:

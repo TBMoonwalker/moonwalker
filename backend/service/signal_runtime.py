@@ -404,7 +404,11 @@ async def resolve_signal_admission_batch(
                 enabled=bool(config.get("autopilot", False)),
             )
         except Exception as exc:  # noqa: BLE001 - fail open to stable fallback.
-            logging.warning("Autopilot memory admission unavailable: %s", exc)
+            logging.warning(
+                "Autopilot memory admission unavailable: %s",
+                exc,
+                exc_info=True,
+            )
             admission_profiles = {
                 symbol: _fallback_admission_profile(
                     symbol,
