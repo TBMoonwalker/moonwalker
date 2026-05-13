@@ -31,7 +31,6 @@ class RuntimeState:
     redis_proc: subprocess.Popen[bytes] | None = None
     watcher_queue: asyncio.Queue[Any] | None = None
     database: Database | None = None
-    conf: Config | None = None
     watcher: Watcher | None = None
     housekeeper: Housekeeper | None = None
     green_phase_service: GreenPhaseService | None = None
@@ -51,7 +50,7 @@ async def startup() -> None:
     runtime_state.database = Database()
     await runtime_state.database.init()
 
-    runtime_state.conf = await runtime_state.database.run_with_context(Config.instance)
+    await runtime_state.database.run_with_context(Config.instance)
 
     runtime_state.watcher = Watcher()
     await runtime_state.watcher.init()

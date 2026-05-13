@@ -342,8 +342,6 @@ async def _resolve_runtime_capacity(
     config: dict[str, Any],
     statistic: Statistic,
     autopilot: Autopilot,
-    *,
-    sidestep_campaigns: SpotSidestepCampaignService | None = None,
 ) -> tuple[list[str], int]:
     """Return current active symbols and the effective max-bot limit."""
     max_bots = int(config.get("max_bots", 0) or 0)
@@ -390,7 +388,6 @@ async def resolve_signal_admission_batch(
             config,
             statistic,
             autopilot,
-            sidestep_campaigns=sidestep_campaigns,
         )
         active_symbol_set = set(active_symbols)
         reserved_symbol_set = set(_PENDING_ADMISSION_SYMBOLS)
