@@ -238,9 +238,9 @@ test(
         assert.equal(parseField(payload, 'history_lookback_time').value, '180d')
         assert.equal(parseField(payload, 'pair_denylist').value, 'BTC/USDT,ETH/USDT')
         assert.equal(parseField(payload, 'trade_mode').value, 'dynamic_dca')
-        assert.equal(parseField(payload, 'dynamic_dca').value, true)
-        assert.equal(parseField(payload, 'trade_lifecycle_mode').value, 'classic_dca')
-        assert.equal(parseField(payload, 'sidestep_campaign_enabled').value, false)
+        assert.equal('dynamic_dca' in payload, false)
+        assert.equal('trade_lifecycle_mode' in payload, false)
+        assert.equal('sidestep_campaign_enabled' in payload, false)
         assert.equal(parseField(payload, 'os').value, 1.4)
         assert.equal(
             parseField(payload, 'autopilot_symbol_entry_sizing_enabled').value,
@@ -468,7 +468,7 @@ test('buildConfigSubmitPayload normalizes legacy ema swing reverse strategy ids'
     )
 })
 
-test('buildConfigSubmitPayload derives legacy mirrors from the canonical trade mode', () => {
+test('buildConfigSubmitPayload persists only the canonical trade mode field', () => {
     const payload = buildConfigSubmitPayload(
         createBaseOptions({
             dca: {
@@ -504,12 +504,12 @@ test('buildConfigSubmitPayload derives legacy mirrors from the canonical trade m
     )
 
     assert.equal(parseField(payload, 'trade_mode').value, 'dynamic_dca')
-    assert.equal(parseField(payload, 'dynamic_dca').value, true)
-    assert.equal(parseField(payload, 'trade_lifecycle_mode').value, 'classic_dca')
-    assert.equal(parseField(payload, 'sidestep_campaign_enabled').value, false)
+    assert.equal('dynamic_dca' in payload, false)
+    assert.equal('trade_lifecycle_mode' in payload, false)
+    assert.equal('sidestep_campaign_enabled' in payload, false)
 })
 
-test('buildConfigSubmitPayload derives sidestep compatibility mirrors from canonical mode', () => {
+test('buildConfigSubmitPayload keeps sidestep canonical without compatibility mirrors', () => {
     const payload = buildConfigSubmitPayload(
         createBaseOptions({
             dca: {
@@ -545,9 +545,9 @@ test('buildConfigSubmitPayload derives sidestep compatibility mirrors from canon
     )
 
     assert.equal(parseField(payload, 'trade_mode').value, 'sidestep')
-    assert.equal(parseField(payload, 'dynamic_dca').value, false)
-    assert.equal(parseField(payload, 'trade_lifecycle_mode').value, 'sidestep_reentry')
-    assert.equal(parseField(payload, 'sidestep_campaign_enabled').value, true)
+    assert.equal('dynamic_dca' in payload, false)
+    assert.equal('trade_lifecycle_mode' in payload, false)
+    assert.equal('sidestep_campaign_enabled' in payload, false)
     assert.equal(
         parseField(payload, 'sidestep_reentry_requires_fresh_long_signal').value,
         true,

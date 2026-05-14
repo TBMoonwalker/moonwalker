@@ -81,12 +81,11 @@ test('deriveControlCenterReadiness requires sidestep strategies instead of class
     assert.equal(readiness.nextTarget, 'dca')
 })
 
-test('deriveControlCenterReadiness honors canonical trade_mode over legacy sidestep mirrors', () => {
+test('deriveControlCenterReadiness uses canonical dynamic_dca blockers when trade_mode is dynamic', () => {
     const readiness = deriveControlCenterReadiness({
         ...createReadyConfig(),
         dca: true,
         trade_mode: 'dynamic_dca',
-        sidestep_campaign_enabled: true,
         market: 'spot',
         so: null,
         mstc: null,

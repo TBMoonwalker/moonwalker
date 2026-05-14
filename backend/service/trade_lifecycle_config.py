@@ -30,6 +30,10 @@ class TradeModeConfigErrorCode(StrEnum):
 TRADE_MODE_COMPATIBILITY_KEYS = frozenset(
     {
         "trade_mode",
+    }
+)
+TRADE_MODE_LEGACY_KEYS = frozenset(
+    {
         "trade_lifecycle_mode",
         "dynamic_dca",
         "sidestep_campaign_enabled",
@@ -38,6 +42,7 @@ TRADE_MODE_COMPATIBILITY_KEYS = frozenset(
 TRADE_MODE_VALIDATION_KEYS = frozenset(
     {
         *TRADE_MODE_COMPATIBILITY_KEYS,
+        *TRADE_MODE_LEGACY_KEYS,
         "sidestep_reentry_strategy",
         "dca_strategy",
     }
@@ -335,25 +340,15 @@ class TradeModeSwitchGuard:
 
 @dataclass(frozen=True)
 class TradeModeConfigState:
-    """Normalized canonical and compatibility trade-mode settings."""
+    """Normalized canonical and derived trade-mode settings."""
 
     trade_mode: str
     lifecycle_mode: str
     dynamic_dca_enabled: bool
     sidestep_enabled: bool
     market: str
-    uses_canonical_trade_mode: bool
     explicit_reentry_strategy: str | None
     effective_reentry_strategy: str | None
-
-    def compatibility_values(self) -> dict[str, Any]:
-        """Return canonical and bridge-release compatibility config fields."""
-        return {
-            "trade_mode": self.trade_mode,
-            "trade_lifecycle_mode": self.lifecycle_mode,
-            "dynamic_dca": self.dynamic_dca_enabled,
-            "sidestep_campaign_enabled": self.sidestep_enabled,
-        }
 
 
 def resolve_trade_mode_config(
@@ -361,7 +356,6 @@ def resolve_trade_mode_config(
     *,
     source: str,
     require_explicit_sidestep_reentry: bool = False,
-    allow_canonical_without_legacy: bool = False,
 ) -> TradeModeConfigState:
     """Resolve canonical trade mode from canonical and legacy config fields."""
     raw_trade_mode = _optional_string(config.get("trade_mode"))
@@ -394,9 +388,7 @@ def resolve_trade_mode_config(
                 message=f"Unsupported trade_mode '{raw_trade_mode}'.",
                 safe_fields={"trade_mode": raw_trade_mode},
             )
-        if raw_trade_mode != legacy_trade_mode and (
-            has_legacy_mode_evidence or not allow_canonical_without_legacy
-        ):
+        if raw_trade_mode != legacy_trade_mode and has_legacy_mode_evidence:
             raise build_canonical_legacy_contradiction_error(
                 source=source,
                 safe_fields={
@@ -441,7 +433,6 @@ def resolve_trade_mode_config(
         dynamic_dca_enabled=trade_mode == TradeMode.DYNAMIC_DCA.value,
         sidestep_enabled=trade_mode == TradeMode.SIDESTEP.value,
         market=_optional_string(config.get("market")) or "spot",
-        uses_canonical_trade_mode=raw_trade_mode is not None,
         explicit_reentry_strategy=explicit_reentry_strategy,
         effective_reentry_strategy=effective_reentry_strategy,
     )
@@ -452,19 +443,30 @@ def normalize_trade_mode(config: dict[str, Any]) -> str:
     return resolve_trade_mode_config(config, source="runtime").trade_mode
 
 
-def normalize_trade_lifecycle_mode(config: dict[str, Any]) -> str:
-    """Return the canonical lifecycle mode for mixed legacy/current config rows."""
-    return resolve_trade_mode_config(config, source="runtime").lifecycle_mode
+def is_dynamic_dca_enabled(config: dict[str, Any]) -> bool:
+    """Return whether runtime math should treat the config as dynamic DCA.
 
+    This helper is intentionally lenient. Validation paths should call
+    `resolve_trade_mode_config()` directly so deprecated static configs still fail
+    loudly at save, restore, or startup boundaries.
+    """
+    raw_trade_mode = _optional_string(config.get("trade_mode"))
+    if raw_trade_mode == TradeMode.DYNAMIC_DCA.value:
+        return True
+    if raw_trade_mode == TradeMode.SIDESTEP.value:
+        return False
 
-def derive_legacy_sidestep_enabled(config: dict[str, Any]) -> bool:
-    """Return the compatibility sidestep flag derived from lifecycle mode."""
-    return resolve_trade_mode_config(config, source="runtime").sidestep_enabled
+    raw_lifecycle_mode = _optional_string(config.get("trade_lifecycle_mode"))
+    if raw_lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
+        return False
+    if raw_lifecycle_mode == TradeLifecycleMode.CLASSIC_DCA.value:
+        return _bool_config_value(config.get("dynamic_dca", False))
 
-
-def derive_legacy_dynamic_dca_enabled(config: dict[str, Any]) -> bool:
-    """Return the compatibility dynamic-dca flag derived from trade mode."""
-    return resolve_trade_mode_config(config, source="runtime").dynamic_dca_enabled
+    if _has_explicit_value(config, "dynamic_dca"):
+        return _bool_config_value(config.get("dynamic_dca", False))
+    if _bool_config_value(config.get("sidestep_campaign_enabled", False)):
+        return False
+    return True
 
 
 def _int_config_default_only(value: Any, *, default: int) -> int:

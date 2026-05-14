@@ -6,9 +6,6 @@ from service.config_views import (
     SignalPluginConfigView,
     TradeLifecycleConfigView,
     WatcherRuntimeConfigView,
-    derive_legacy_dynamic_dca_enabled,
-    derive_legacy_sidestep_enabled,
-    normalize_trade_lifecycle_mode,
     normalize_trade_mode,
 )
 from service.trade_lifecycle_config import (
@@ -106,26 +103,30 @@ def test_trade_lifecycle_config_view_prefers_canonical_mode() -> None:
     assert config.enabled is False
     assert normalize_trade_mode({"trade_mode": "dynamic_dca"}) == "dynamic_dca"
     assert (
-        normalize_trade_lifecycle_mode(
+        resolve_trade_mode_config(
             {
                 "trade_mode": "dynamic_dca",
-                "trade_lifecycle_mode": "classic_dca",
-                "dynamic_dca": True,
-            }
-        )
+            },
+            source="runtime",
+        ).lifecycle_mode
         == "classic_dca"
     )
     assert (
-        derive_legacy_sidestep_enabled(
+        resolve_trade_mode_config(
             {
                 "trade_mode": "dynamic_dca",
-                "trade_lifecycle_mode": "classic_dca",
-                "dynamic_dca": True,
-            }
-        )
+            },
+            source="runtime",
+        ).sidestep_enabled
         is False
     )
-    assert derive_legacy_dynamic_dca_enabled({"trade_mode": "dynamic_dca"}) is True
+    assert (
+        resolve_trade_mode_config(
+            {"trade_mode": "dynamic_dca"},
+            source="runtime",
+        ).dynamic_dca_enabled
+        is True
+    )
 
 
 def test_trade_lifecycle_config_view_falls_back_to_legacy_sidestep_flag() -> None:
@@ -142,10 +143,19 @@ def test_trade_lifecycle_config_view_falls_back_to_legacy_sidestep_flag() -> Non
     assert config.enabled is True
     assert config.reentry_strategy == "ema20_swing"
     assert (
-        normalize_trade_lifecycle_mode({"sidestep_campaign_enabled": True})
+        resolve_trade_mode_config(
+            {"sidestep_campaign_enabled": True},
+            source="startup",
+        ).lifecycle_mode
         == "sidestep_reentry"
     )
-    assert derive_legacy_sidestep_enabled({"sidestep_campaign_enabled": True}) is True
+    assert (
+        resolve_trade_mode_config(
+            {"sidestep_campaign_enabled": True},
+            source="startup",
+        ).sidestep_enabled
+        is True
+    )
 
 
 def test_trade_lifecycle_config_view_parses_legacy_boolean_strings() -> None:
@@ -160,7 +170,10 @@ def test_trade_lifecycle_config_view_parses_legacy_boolean_strings() -> None:
     assert config.mode == "classic_dca"
     assert config.enabled is False
     assert (
-        normalize_trade_lifecycle_mode({"sidestep_campaign_enabled": "true"})
+        resolve_trade_mode_config(
+            {"sidestep_campaign_enabled": "true"},
+            source="startup",
+        ).lifecycle_mode
         == "sidestep_reentry"
     )
 

@@ -8,11 +8,7 @@ import {
     toNullableConfigString,
 } from './configForm'
 import {
-    deriveLegacyDynamicDcaEnabled,
-    deriveLegacySidestepEnabled,
-    deriveLegacyTradeLifecycleMode,
     isDynamicTradeMode,
-    isSidestepTradeMode,
     normalizeTradeMode,
 } from './tradeLifecycle'
 
@@ -296,10 +292,6 @@ export function buildConfigSubmitPayload(
         watcher_ohlcv: serializeConfigValue(exchange.watcher_ohlcv || false, 'bool'),
         dca: serializeConfigValue(dca.enabled || false, 'bool'),
         trade_mode: serializeConfigValue(tradeMode, 'str'),
-        dynamic_dca: serializeConfigValue(
-            deriveLegacyDynamicDcaEnabled(tradeMode),
-            'bool',
-        ),
         dca_strategy: serializeConfigValue(
             normalizeStrategyName(toNullableConfigString(dca.strategy)),
             'str',
@@ -348,14 +340,6 @@ export function buildConfigSubmitPayload(
         trade_safety_order_budget_ratio: serializeConfigValue(
             dca.trade_safety_order_budget_ratio ?? 0.95,
             'float',
-        ),
-        trade_lifecycle_mode: serializeConfigValue(
-            deriveLegacyTradeLifecycleMode(tradeMode),
-            'str',
-        ),
-        sidestep_campaign_enabled: serializeConfigValue(
-            deriveLegacySidestepEnabled(tradeMode),
-            'bool',
         ),
         sidestep_bearish_strategy: serializeConfigValue(
             normalizeStrategyName(

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from service.spot_campaign_types import TradeExposureState
+from service.trade_lifecycle_config import is_dynamic_dca_enabled
 
 EPSILON = 1e-12
 
@@ -137,7 +138,7 @@ def build_capital_budget_settings(
         if "capital_budget_buffer_pct" in config
         else config.get("buy_fund_buffer_pct")
     )
-    dynamic_dca = to_bool(config.get("dynamic_dca"), default=False)
+    dynamic_dca = is_dynamic_dca_enabled(config)
     buffer_pct = normalize_buffer_pct(buffer_value) if dynamic_dca else 0.0
     return CapitalBudgetSettings(
         configured=has_capital_budget_config(config),
@@ -202,7 +203,7 @@ def estimate_remaining_trade_reserve(
     if remaining_orders <= 0:
         return 0.0
 
-    if to_bool(config.get("dynamic_dca"), default=False):
+    if is_dynamic_dca_enabled(config):
         unit_cost = (
             max(0.0, float(base_order_size))
             if base_order_size is not None

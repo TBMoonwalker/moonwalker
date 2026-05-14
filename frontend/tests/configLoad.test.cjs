@@ -50,7 +50,7 @@ test(
                 ws_reconnect_debounce_ms: '7000',
                 exchange_hostname: 'api.exchange.test',
                 dca: 'true',
-                dynamic_dca: 'true',
+                trade_mode: 'dynamic_dca',
                 capital_max_fund: '250',
                 capital_reserve_safety_orders: 'false',
                 capital_budget_buffer_pct: '0.02',
@@ -101,7 +101,7 @@ test('buildLoadedConfigState keeps dynamic mode canonical and preserves the dyna
     const state = buildLoadedConfigState(
         {
             dca: 'true',
-            dynamic_dca: 'false',
+            trade_mode: 'dynamic_dca',
             capital_budget_buffer_pct: '50',
             timeframe: '1h',
         },
@@ -226,10 +226,10 @@ test('buildLoadedConfigState normalizes legacy ema swing reverse strategy ids', 
     assert.equal(state.dca.sidestep_bearish_strategy, 'ema20_swing_reverse')
 })
 
-test('buildLoadedConfigState falls back to the legacy sidestep flag when needed', () => {
+test('buildLoadedConfigState reads the canonical sidestep trade_mode', () => {
     const state = buildLoadedConfigState(
         {
-            sidestep_campaign_enabled: 'true',
+            trade_mode: 'sidestep',
         },
         createLoadDefaults(),
     )

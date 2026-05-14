@@ -194,11 +194,7 @@ const {
     transitionIntent,
 })
 const tradeModeLabel = computed(() => {
-    const tradeMode = normalizeTradeMode(
-        configSnapshotStore.snapshot.value?.trade_mode,
-        configSnapshotStore.snapshot.value?.trade_lifecycle_mode,
-        configSnapshotStore.snapshot.value?.sidestep_campaign_enabled,
-    )
+    const tradeMode = normalizeTradeMode(configSnapshotStore.snapshot.value?.trade_mode)
     return tradeMode === 'sidestep' ? 'Sidestep' : 'Dynamic DCA'
 })
 const { refreshWorkspaceFromSnapshot } = useControlCenterWorkspaceRefresh({

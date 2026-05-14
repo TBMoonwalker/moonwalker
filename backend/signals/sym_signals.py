@@ -436,7 +436,7 @@ class SignalPlugin:
 
         try:
             if (
-                self.config.get("dynamic_dca", False)
+                self.config.get("trade_mode") == "dynamic_dca"
                 or self._required_history_candles > 0
             ):
                 success = await self.data.add_history_data_for_symbol(

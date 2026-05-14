@@ -22,6 +22,7 @@ from service.green_phase_logic import (
     to_int,
 )
 from service.spot_campaign_types import TradeCloseReason
+from service.trade_lifecycle_config import is_dynamic_dca_enabled
 from tortoise.expressions import Q
 
 logging = helper.LoggerFactory.get_logger("logs/green_phase.log", "green_phase")
@@ -260,7 +261,7 @@ class GreenPhaseService:
         if remaining_orders <= 0:
             return 0.0
 
-        dynamic_dca = bool(config.get("dynamic_dca"))
+        dynamic_dca = is_dynamic_dca_enabled(config)
         base_order_size = max(0.0, to_float(config.get("bo"), 0.0))
         if dynamic_dca:
             return round(base_order_size * remaining_orders, 8)

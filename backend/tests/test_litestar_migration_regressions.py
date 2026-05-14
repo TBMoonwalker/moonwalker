@@ -441,9 +441,6 @@ def test_config_multiple_blocks_trade_mode_switch_when_runtime_activity_exists(
     service._cache.update(
         {
             "trade_mode": "dynamic_dca",
-            "trade_lifecycle_mode": "classic_dca",
-            "dynamic_dca": True,
-            "sidestep_campaign_enabled": False,
         }
     )
 
@@ -478,6 +475,36 @@ def test_config_multiple_blocks_trade_mode_switch_when_runtime_activity_exists(
         "requested_trade_mode": "sidestep",
         "open_trade_count": 1,
         "waiting_campaign_count": 2,
+    }
+    assert service.last_batch is None
+
+
+def test_config_multiple_rejects_removed_trade_mode_bridge_keys(monkeypatch) -> None:
+    """Legacy trade-mode bridge keys must be rejected at the API boundary."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {"dynamic_dca": {"value": True, "type": "bool"}}
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": (
+            "Config key 'dynamic_dca' is no longer supported. "
+            "Use 'trade_mode' instead."
+        ),
+        "message": (
+            "Config key 'dynamic_dca' is no longer supported. "
+            "Use 'trade_mode' instead."
+        ),
     }
     assert service.last_batch is None
 
@@ -708,7 +735,7 @@ def test_live_activation_endpoint_uses_sidestep_blockers_instead_of_classic_dca(
             "history_lookback_time": "180d",
             "symbol_list": "BTC/USDT",
             "dca": True,
-            "trade_lifecycle_mode": "sidestep_reentry",
+            "trade_mode": "sidestep",
             "sidestep_bearish_strategy": "",
             "sidestep_reentry_strategy": "",
         }
@@ -764,7 +791,7 @@ def test_live_activation_endpoint_allows_ready_sidestep_without_classic_dca_keys
             "history_lookback_time": "180d",
             "symbol_list": "BTC/USDT",
             "dca": True,
-            "trade_lifecycle_mode": "sidestep_reentry",
+            "trade_mode": "sidestep",
             "sidestep_bearish_strategy": "ema_down",
             "sidestep_reentry_strategy": "ema_low",
         }
