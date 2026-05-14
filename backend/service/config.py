@@ -50,6 +50,7 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 }
 
 DEFAULT_CONFIG_VALUES = {
+    "trading_paused": False,
     "sidestep_bearish_strategy": "",
     "sidestep_reentry_strategy": "",
     "sidestep_reentry_cooldown_candles": 0,

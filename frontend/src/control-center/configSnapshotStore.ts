@@ -31,6 +31,7 @@ const LOCAL_CONFIG_CHANGE_ORIGINS = [
     'save',
     'restore',
     'live_activation',
+    'trading_pause',
 ] as const
 
 const snapshot = shallowRef<SharedConfigPayload | null>(null)

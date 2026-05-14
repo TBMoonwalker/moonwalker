@@ -3,39 +3,61 @@
         size="small"
         remote
         :columns="columns"
-        :data="waiting_campaigns || []"
+        :data="displayed_waiting_campaigns || []"
         :loading="isTableLoading"
         :row-class-name="rowClasses"
         :locale="{ emptyText: tableEmptyText }"
         aria-label="Waiting sidestep trades table"
+        @update:sorter="handleSorterChange"
     />
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed, h, ref } from 'vue'
+import { EllipsisHorizontal } from '@vicons/ionicons5'
 import { NButton } from 'naive-ui/es/button'
 import { NButtonGroup } from 'naive-ui/es/button-group'
 import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
 import { NDivider } from 'naive-ui/es/divider'
+import { NDropdown } from 'naive-ui/es/dropdown'
 import { useDialog } from 'naive-ui/es/dialog'
+import { NIcon } from 'naive-ui/es/icon'
 import { useMessage } from 'naive-ui/es/message'
 import { NSlider } from 'naive-ui/es/slider'
 import { NTag } from 'naive-ui/es/tag'
 import { fetchJson } from '../api/client'
+import { useMissionPauseActions } from '../composables/useMissionPauseActions'
 import { useTradeTableFeed } from '../composables/useTradeTableFeed'
+import { useViewport } from '../composables/useViewport'
 import {
     formatAssetAmount,
     formatFixed,
+    resolveTradeTableColumnOrder,
     resolveTradeDateTime,
+    resolveTradeTableSortState,
+    sortTradeRows,
+    type TradeTableSortState,
 } from '../helpers/tradeTable'
+import { getOpenTradeOpenedAt } from '../helpers/openTrades'
 import {
     useTradesStore,
     type WaitingCampaignRow,
 } from '../stores/trades'
 
+const props = withDefaults(
+    defineProps<{
+        globalTradingPaused?: boolean
+    }>(),
+    {
+        globalTradingPaused: false,
+    },
+)
+
 const trades_store = useTradesStore()
 const dialog = useDialog()
 const message = useMessage()
+const { isMobile, isTablet } = useViewport()
+const sortState = ref<TradeTableSortState | null>(null)
 
 const {
     rows: waiting_campaigns,
@@ -50,6 +72,42 @@ const {
         return trades_store.waitingCampaigns as WaitingCampaignRow[]
     },
 })
+const displayed_waiting_campaigns = computed(() =>
+    sortTradeRows(waiting_campaigns.value, sortState.value, {
+        symbol: { kind: 'text', value: (row) => row.symbol },
+        waiting_reference_quote: {
+            kind: 'number',
+            value: (row) => row.waiting_reference_quote,
+        },
+        display_profit_percent: {
+            kind: 'number',
+            value: (row) => row.display_profit_percent,
+        },
+        reentry_status: {
+            kind: 'text',
+            value: (row) =>
+                row.automation_paused
+                    ? 'automation_paused'
+                    : row.reentry_status ?? '',
+        },
+        open_date: {
+            kind: 'date',
+            value: (row) => getOpenTradeOpenedAt(row),
+        },
+    }),
+)
+const {
+    handlePauseMission,
+    handleResumeMission,
+    isMissionActionLoading,
+    missionActionErrors,
+} = useMissionPauseActions({
+    message,
+})
+
+function isReentryBlocked(rowData: WaitingCampaignRow): boolean {
+    return Boolean(rowData.automation_paused) || Boolean(props.globalTradingPaused)
+}
 
 async function handleStopCampaign(rowData: WaitingCampaignRow): Promise<void> {
     const campaignId = String(rowData.campaign_id ?? '')
@@ -86,6 +144,15 @@ async function handleStopCampaign(rowData: WaitingCampaignRow): Promise<void> {
 }
 
 async function handleActivateCampaign(rowData: WaitingCampaignRow): Promise<void> {
+    if (isReentryBlocked(rowData)) {
+        message.error(
+            props.globalTradingPaused
+                ? 'Moonwalker is paused for new exposure.'
+                : `Automation is paused for ${rowData.symbol}.`,
+        )
+        return
+    }
+
     const campaignId = String(rowData.campaign_id ?? '')
     if (!campaignId) {
         message.error(`Missing sidestep campaign id for ${rowData.symbol}.`)
@@ -150,6 +217,9 @@ function formatCloseReason(reason: string | null | undefined): string {
 function resolveReentryStatusType(
     rowData: WaitingCampaignRow,
 ): 'default' | 'info' | 'success' | 'warning' {
+    if (rowData.automation_paused) {
+        return 'warning'
+    }
     switch (rowData.reentry_status) {
         case 'Cooldown active':
             return 'warning'
@@ -160,6 +230,10 @@ function resolveReentryStatusType(
         default:
             return 'default'
     }
+}
+
+function handleSorterChange(sorter: unknown): void {
+    sortState.value = resolveTradeTableSortState(sorter)
 }
 
 const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
@@ -192,8 +266,26 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
                     ),
                 )
             }
+            if (rowData.automation_paused) {
+                rows.push(h(NDivider, { dashed: true }))
+                rows.push(
+                    h(
+                        NTag,
+                        {
+                            size: 'small',
+                            bordered: false,
+                            type: 'warning',
+                        },
+                        {
+                            default: () => 'Automation paused',
+                        },
+                    ),
+                )
+            }
             return rows
         },
+        sorter: true,
+        sortOrder: resolveTradeTableColumnOrder(sortState.value, 'symbol'),
     },
     {
         title: 'Cost',
@@ -208,10 +300,15 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
                 h('div', reserve),
             ]
         },
+        sorter: true,
+        sortOrder: resolveTradeTableColumnOrder(
+            sortState.value,
+            'waiting_reference_quote',
+        ),
     },
     {
         title: 'PNL',
-        key: 'display_profit',
+        key: 'display_profit_percent',
         render: (rowData) => {
             const [, currency] = rowData.symbol.split('/')
             const profitPercent = `${formatFixed(Number(rowData.display_profit_percent ?? 0))} %`
@@ -222,6 +319,11 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
                 h('div', pnl),
             ]
         },
+        sorter: true,
+        sortOrder: resolveTradeTableColumnOrder(
+            sortState.value,
+            'display_profit_percent',
+        ),
     },
     {
         title: 'Re-entry',
@@ -267,7 +369,9 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
         title: 'Status',
         key: 'reentry_status',
         render: (rowData) => {
-            const status = rowData.reentry_status ?? 'Watching for re-entry signal'
+            const status = rowData.automation_paused
+                ? 'Automation paused'
+                : rowData.reentry_status ?? 'Watching for re-entry signal'
             const statusRows = [
                 h(
                     NTag,
@@ -304,34 +408,146 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
             return statusRows
         },
         align: 'center',
+        sorter: true,
+        sortOrder: resolveTradeTableColumnOrder(
+            sortState.value,
+            'reentry_status',
+        ),
     },
     {
         title: 'Action',
         key: 'action',
         align: 'center',
-        render: (rowData) =>
-            h(NButtonGroup, { size: 'medium', vertical: true }, {
-                default: () => [
+        render: (rowData) => {
+            const actionError =
+                missionActionErrors[String(rowData.symbol)] ?? null
+            const pauseAction = rowData.automation_paused
+                ? () => handleResumeMission(rowData.symbol)
+                : () => handlePauseMission(rowData.symbol)
+            const pauseLabel = rowData.automation_paused
+                ? 'Resume automation'
+                : 'Pause automation'
+            const pauseLoading = isMissionActionLoading(
+                rowData.symbol,
+                rowData.automation_paused ? 'resume' : 'pause',
+            )
+            const desktopActions = h(
+                NButtonGroup,
+                { size: 'medium', vertical: true },
+                {
+                    default: () => [
+                        h(
+                            NButton,
+                            {
+                                type: 'success',
+                                ghost: true,
+                                disabled: isReentryBlocked(rowData),
+                                onClick: () => handleActivateCampaign(rowData),
+                            },
+                            { default: () => 'Switch to active' },
+                        ),
+                        h(
+                            NButton,
+                            {
+                                type: 'warning',
+                                ghost: !rowData.automation_paused,
+                                loading: pauseLoading,
+                                onClick: pauseAction,
+                            },
+                            { default: () => pauseLabel },
+                        ),
+                        h(
+                            NButton,
+                            {
+                                type: 'warning',
+                                ghost: true,
+                                onClick: () => handleStopCampaign(rowData),
+                            },
+                            { default: () => 'Stop' },
+                        ),
+                    ],
+                },
+            )
+            const compactActions = h(
+                'div',
+                {
+                    style: 'display:flex; justify-content:center; gap:8px;',
+                },
+                [
                     h(
                         NButton,
                         {
                             type: 'success',
                             ghost: true,
+                            disabled: isReentryBlocked(rowData),
                             onClick: () => handleActivateCampaign(rowData),
                         },
                         { default: () => 'Switch to active' },
                     ),
                     h(
-                        NButton,
+                        NDropdown,
                         {
-                            type: 'warning',
-                            ghost: true,
-                            onClick: () => handleStopCampaign(rowData),
+                            trigger: 'click',
+                            options: [
+                                {
+                                    key: rowData.automation_paused
+                                        ? 'resume'
+                                        : 'pause',
+                                    label: pauseLabel,
+                                },
+                                {
+                                    key: 'stop',
+                                    label: 'Stop',
+                                },
+                            ],
+                            onSelect: (key: string | number) => {
+                                if (key === 'stop') {
+                                    void handleStopCampaign(rowData)
+                                    return
+                                }
+                                void pauseAction()
+                            },
                         },
-                        { default: () => 'Stop' },
+                        {
+                            default: () =>
+                                h(
+                                    NButton,
+                                    {
+                                        ghost: true,
+                                    },
+                                    {
+                                        icon: () =>
+                                            h(
+                                                NIcon,
+                                                { size: 18 },
+                                                {
+                                                    default: () =>
+                                                        h(EllipsisHorizontal),
+                                                },
+                                            ),
+                                        default: () => 'More',
+                                    },
+                                ),
+                        },
                     ),
                 ],
-            }),
+            )
+
+            return [
+                isMobile.value || isTablet.value
+                    ? compactActions
+                    : desktopActions,
+                actionError
+                    ? h(
+                          'div',
+                          {
+                              style: 'margin-top:8px; max-width:220px; font-size:12px; color:#B4443F; text-wrap:pretty;',
+                          },
+                          actionError,
+                      )
+                    : null,
+            ]
+        },
     },
     {
         title: 'Opened',
@@ -350,6 +566,8 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
                 h('div', waitingSince.time),
             ]
         },
+        sorter: true,
+        sortOrder: resolveTradeTableColumnOrder(sortState.value, 'open_date'),
     },
 ])
 </script>

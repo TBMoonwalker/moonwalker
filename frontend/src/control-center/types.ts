@@ -36,6 +36,7 @@ export type ControlCenterConfigChangeOrigin =
     | 'save'
     | 'restore'
     | 'live_activation'
+    | 'trading_pause'
     | 'external_invalidation'
 
 export type ControlCenterConfigTrustKind =
@@ -86,7 +87,13 @@ export interface ControlCenterReadiness {
 }
 
 export interface ControlCenterTransitionIntent {
-    kind: 'save' | 'activate_live' | 'restore' | 'retry' | 'fix_this'
+    kind:
+        | 'save'
+        | 'activate_live'
+        | 'toggle_trading_pause'
+        | 'restore'
+        | 'retry'
+        | 'fix_this'
     status: 'success' | 'error' | 'blocked' | 'pending'
     message: string
     at: number

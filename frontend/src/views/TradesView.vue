@@ -4,6 +4,7 @@ import Statistics from '@/components/Statistics.vue'
 import { AlertCircleOutline } from '@vicons/ionicons5'
 import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
+import { useTradingPauseStatus } from '@/composables/useTradingPauseStatus'
 
 const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
 const WaitingCampaigns = defineAsyncComponent(() => import('../components/WaitingCampaigns.vue'))
@@ -17,6 +18,7 @@ const unsellableTradesState = storeToRefs(unsellableTradesStore)
 const waitingCampaignsStore = useWebSocketDataStore('waitingCampaigns')
 const waitingCampaignsState = storeToRefs(waitingCampaignsStore)
 const viewportWidth = ref(window.innerWidth)
+const { tradingPaused } = useTradingPauseStatus()
 const isMobile = computed(() => viewportWidth.value < 768)
 const tabPadding = computed(() => (isMobile.value ? 12 : 20))
 const activeProfitTab = ref('profit-overall')
@@ -51,6 +53,27 @@ onUnmounted(() => {
         <n-flex class="page-header trades-header" vertical :size="12">
           <div class="header-statistics">
             <Statistics />
+          </div>
+          <div
+            class="trading-pause-strip"
+            :class="{
+              'trading-pause-strip-active': tradingPaused,
+            }"
+            aria-live="polite"
+          >
+            <n-tag
+              :type="tradingPaused ? 'warning' : 'success'"
+              :bordered="false"
+            >
+              {{ tradingPaused ? 'Moonwalker paused' : 'Moonwalker open' }}
+            </n-tag>
+            <span class="trading-pause-copy">
+              {{
+                tradingPaused
+                  ? 'New trades and re-entries are paused. Existing exits can keep running.'
+                  : 'New trades and re-entries are currently allowed.'
+              }}
+            </span>
           </div>
         </n-flex>
       </n-card>
@@ -89,7 +112,10 @@ onUnmounted(() => {
           :tabs-padding="tabPadding"
         >
           <n-tab-pane name="open-trades" tab="Open Trades">
-            <OpenTrades v-if="activeTradesTab === 'open-trades'" />
+            <OpenTrades
+              v-if="activeTradesTab === 'open-trades'"
+              :global-trading-paused="tradingPaused"
+            />
           </n-tab-pane>
           <n-tab-pane name="waiting-campaigns">
             <template #tab>
@@ -98,7 +124,10 @@ onUnmounted(() => {
                 <span v-if="waitingCampaignsCount > 0" class="trade-tab-count">{{ waitingCampaignsCount }}</span>
               </span>
             </template>
-            <WaitingCampaigns v-if="activeTradesTab === 'waiting-campaigns'" />
+            <WaitingCampaigns
+              v-if="activeTradesTab === 'waiting-campaigns'"
+              :global-trading-paused="tradingPaused"
+            />
           </n-tab-pane>
           <n-tab-pane name="unsellable-trades">
             <template #tab>
@@ -151,6 +180,27 @@ onUnmounted(() => {
   width: 100%;
 }
 
+.trading-pause-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid rgba(29, 92, 73, 0.12);
+  border-radius: 10px;
+  background: rgba(29, 92, 73, 0.05);
+}
+
+.trading-pause-strip-active {
+  border-color: rgba(183, 138, 46, 0.24);
+  background: rgba(183, 138, 46, 0.08);
+}
+
+.trading-pause-copy {
+  color: var(--mw-color-text-secondary);
+  font-size: 0.92rem;
+}
+
 .trade-tab-label {
   display: inline-flex;
   align-items: center;
@@ -173,6 +223,10 @@ onUnmounted(() => {
 
   .trades-header {
     align-items: flex-start;
+  }
+
+  .trading-pause-strip {
+    width: 100%;
   }
 }
 </style>

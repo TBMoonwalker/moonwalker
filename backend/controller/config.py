@@ -29,6 +29,7 @@ from service.trade_lifecycle_config import (
     build_blocked_live_mode_switch_error,
     resolve_trade_mode_config,
 )
+from service.trading_controls import GLOBAL_TRADING_PAUSED_KEY
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
@@ -688,6 +689,100 @@ async def activate_live_trading(request: Request[Any, Any, Any]) -> Any:
     }
 
 
+async def _read_confirm_flag(
+    request: Request[Any, Any, Any],
+) -> tuple[bool | None, Any]:
+    """Return the explicit confirm flag or a shaped error response."""
+    try:
+        data = await request.json()
+    except SerializationException:
+        data = {}
+
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return None, json_response({"error": "Payload must be a JSON object"}, 400)
+
+    confirm = bool(data.get("confirm", False))
+    if not confirm:
+        return None, json_response(
+            {
+                "error": "This action requires an explicit confirm flag.",
+                "message": "This action requires an explicit confirm flag.",
+            },
+            400,
+        )
+    return True, None
+
+
+@post(path="/config/trading/pause")
+async def pause_trading(request: Request[Any, Any, Any]) -> Any:
+    """Pause Moonwalker for new exposure while existing exits continue."""
+    _, error_response = await _read_confirm_flag(request)
+    if error_response is not None:
+        return error_response
+
+    config = await Config.instance()
+    if bool(config.get(GLOBAL_TRADING_PAUSED_KEY, False)):
+        return {
+            "message": "Moonwalker is already paused for new exposure.",
+            "status": "already_paused",
+            "trading_paused": True,
+        }
+
+    success = await config.set(
+        GLOBAL_TRADING_PAUSED_KEY,
+        {"value": True, "type": "bool"},
+    )
+    if not success:
+        logging.error("Global trading pause failed during config persistence.")
+        return json_response(
+            {"error": "Trading pause failed - check config.log"},
+            400,
+        )
+
+    logging.info("Moonwalker paused for new exposure.")
+    return {
+        "message": "Moonwalker paused for new exposure.",
+        "status": "paused",
+        "trading_paused": True,
+    }
+
+
+@post(path="/config/trading/resume")
+async def resume_trading(request: Request[Any, Any, Any]) -> Any:
+    """Resume Moonwalker so new exposure is allowed again."""
+    _, error_response = await _read_confirm_flag(request)
+    if error_response is not None:
+        return error_response
+
+    config = await Config.instance()
+    if not bool(config.get(GLOBAL_TRADING_PAUSED_KEY, False)):
+        return {
+            "message": "Moonwalker is already accepting new exposure.",
+            "status": "already_resumed",
+            "trading_paused": False,
+        }
+
+    success = await config.set(
+        GLOBAL_TRADING_PAUSED_KEY,
+        {"value": False, "type": "bool"},
+    )
+    if not success:
+        logging.error("Global trading resume failed during config persistence.")
+        return json_response(
+            {"error": "Trading resume failed - check config.log"},
+            400,
+        )
+
+    logging.info("Moonwalker resumed for new exposure.")
+    return {
+        "message": "Moonwalker resumed for new exposure.",
+        "status": "resumed",
+        "trading_paused": False,
+    }
+
+
 @post(path="/config/backup/restore")
 async def restore_backup(request: Request[Any, Any, Any]) -> Any:
     """Restore config-only or full backup payloads."""
@@ -732,5 +827,7 @@ route_handlers = [
     update_config_key,
     update_multiple_config_keys,
     activate_live_trading,
+    pause_trading,
+    resume_trading,
     restore_backup,
 ]

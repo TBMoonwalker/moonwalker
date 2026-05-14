@@ -22,6 +22,8 @@ defineProps<{
     formattedTrustTimestamp: string | null
     liveActivationRef?: (element: Element | null) => void
     readiness: ControlCenterReadiness
+    tradingPauseLoading: boolean
+    tradingPaused: boolean
     tradeModeLabel: string
     visibleBlockers: ControlCenterBlocker[]
 }>()
@@ -31,6 +33,7 @@ const emit = defineEmits<{
     'open-config': []
     'open-monitoring': []
     'select-target': [target: ControlCenterTarget]
+    'toggle-trading-pause': []
     'toggle-autopilot': []
     'tune-autopilot': []
 }>()
@@ -94,6 +97,11 @@ const emit = defineEmits<{
                         :config-trust-state="configTrustState"
                         :formatted-trust-timestamp="formattedTrustTimestamp"
                         :readiness="readiness"
+                        :trading-pause-loading="tradingPauseLoading"
+                        :trading-paused="tradingPaused"
+                        @toggle-trading-pause="
+                            emit('toggle-trading-pause')
+                        "
                     />
 
                     <section class="systems-workspace">

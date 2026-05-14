@@ -296,6 +296,7 @@ async def test_database_init_surfaces_actionable_sqlite_corruption(
     monkeypatch.setattr("service.database.Tortoise.generate_schemas", _noop)
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
+    monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
@@ -327,6 +328,7 @@ async def test_database_init_reraises_non_corruption_failures(
     monkeypatch.setattr("service.database.Tortoise.generate_schemas", _noop)
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
+    monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
@@ -361,6 +363,7 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
     monkeypatch.setattr("service.database.Tortoise.generate_schemas", _noop)
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
+    monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
@@ -413,6 +416,11 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         Database, "_ensure_open_trades_columns", _record("ensure_open_trades_columns")
     )
     monkeypatch.setattr(
+        Database,
+        "_ensure_spot_campaign_columns",
+        _record("ensure_spot_campaign_columns"),
+    )
+    monkeypatch.setattr(
         Database, "_ensure_trade_ledger_columns", _record("ensure_trade_ledger_columns")
     )
     monkeypatch.setattr(
@@ -440,6 +448,7 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "apply_pragmas",
         "generate_schemas",
         "ensure_open_trades_columns",
+        "ensure_spot_campaign_columns",
         "ensure_trade_ledger_columns",
         "ensure_upnl_history_columns",
         "ensure_indexes",

@@ -197,6 +197,9 @@ const tradeModeLabel = computed(() => {
     const tradeMode = normalizeTradeMode(configSnapshotStore.snapshot.value?.trade_mode)
     return tradeMode === 'sidestep' ? 'Sidestep' : 'Dynamic DCA'
 })
+const tradingPaused = computed(
+    () => Boolean(configSnapshotStore.snapshot.value?.trading_paused),
+)
 const { refreshWorkspaceFromSnapshot } = useControlCenterWorkspaceRefresh({
     fetchDefaultValues,
     loadRescueMessage,
@@ -223,10 +226,13 @@ const {
     handleActivateLiveTrading,
     handleDetectedExternalConfigChange,
     handleReloadAfterStalePrompt,
+    handleToggleTradingPause,
+    tradingPauseLoading,
 } = useControlCenterRuntimeActions({
     announce,
     apiUrl: buildMoonwalkerApiUrl,
     hasUnsavedChanges,
+    isTradingPaused: tradingPaused,
     isDirty,
     navigateToControlCenter,
     normalizeBlockers: normalizeControlCenterBlockers,
@@ -451,12 +457,15 @@ async function handleToggleAutopilot(): Promise<void> {
                     :formatted-trust-timestamp="formattedTrustTimestamp"
                     :live-activation-ref="bindTargetElement('live-activation')"
                     :readiness="readiness"
+                    :trading-pause-loading="tradingPauseLoading"
+                    :trading-paused="tradingPaused"
                     :trade-mode-label="tradeModeLabel"
                     :visible-blockers="visibleBlockers"
                     @activate-live="handleActivateLiveTrading"
                     @open-config="handleModeSelect('setup')"
                     @open-monitoring="openMonitoringPage"
                     @select-target="guideToTarget"
+                    @toggle-trading-pause="handleToggleTradingPause"
                     @toggle-autopilot="handleToggleAutopilot"
                     @tune-autopilot="openAutopilotAdvanced"
                 />

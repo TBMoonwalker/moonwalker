@@ -13,6 +13,7 @@ from service.autopilot_memory import AutopilotMemoryService, SymbolAdmissionProf
 from service.config import resolve_timeframe
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
+from service.trading_controls import is_global_trading_paused
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal_runtime")
 
@@ -381,6 +382,22 @@ async def resolve_signal_admission_batch(
     normalized_candidates = _dedupe_candidate_symbols(candidate_symbols)
     if not normalized_candidates:
         return SignalAdmissionBatch(decisions=[])
+    if is_global_trading_paused(config):
+        return SignalAdmissionBatch(
+            decisions=[
+                SignalAdmissionDecision(
+                    symbol=symbol,
+                    admitted=False,
+                    reason_code="skipped_global_pause",
+                    memory_status="neutral",
+                    trust_direction="neutral",
+                    trust_score=None,
+                    available_slots=0,
+                    competing_candidates=0,
+                )
+                for symbol in normalized_candidates
+            ]
+        )
 
     async with _PENDING_ADMISSION_LOCK:
         sidestep_campaigns = await SpotSidestepCampaignService.instance()

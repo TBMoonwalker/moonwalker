@@ -3,6 +3,20 @@ import { formatTradingViewDateParts } from './date'
 const TIMEZONELESS_TRADE_DATETIME_PATTERN =
     /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,6}))?)?$/
 
+export type TradeTableSortOrder = 'ascend' | 'descend'
+
+export type TradeTableSortState = {
+    columnKey: string
+    order: TradeTableSortOrder
+}
+
+export type TradeTableSortValueKind = 'number' | 'date' | 'text'
+
+export type TradeTableSortResolver<T> = {
+    kind: TradeTableSortValueKind
+    value: (row: T) => unknown
+}
+
 export function formatFixed(value: unknown, decimals = 2): string {
     const parsed = Number(value)
     if (!Number.isFinite(parsed)) {
@@ -46,6 +60,123 @@ function parseTimezoneLessTradeDate(value: string): Date | null {
         milliseconds,
     )
     return Number.isNaN(parsed.getTime()) ? null : parsed
+}
+
+function normalizeTradeTableSortOrder(rawValue: unknown): TradeTableSortOrder | null {
+    return rawValue === 'ascend' || rawValue === 'descend' ? rawValue : null
+}
+
+function normalizeTradeTableSortKey(rawValue: unknown): string | null {
+    if (typeof rawValue !== 'string' && typeof rawValue !== 'number') {
+        return null
+    }
+    const normalized = String(rawValue).trim()
+    return normalized ? normalized : null
+}
+
+export function resolveTradeTableSortState(
+    sorter: unknown,
+): TradeTableSortState | null {
+    const candidate = Array.isArray(sorter) ? sorter[0] : sorter
+    if (!candidate || typeof candidate !== 'object') {
+        return null
+    }
+
+    const sortCandidate = candidate as {
+        columnKey?: unknown
+        order?: unknown
+    }
+    const columnKey = normalizeTradeTableSortKey(sortCandidate.columnKey)
+    const order = normalizeTradeTableSortOrder(sortCandidate.order)
+    if (!columnKey || !order) {
+        return null
+    }
+    return { columnKey, order }
+}
+
+export function resolveTradeTableColumnOrder(
+    sortState: TradeTableSortState | null,
+    columnKey: string,
+): TradeTableSortOrder | false {
+    if (!sortState || sortState.columnKey !== columnKey) {
+        return false
+    }
+    return sortState.order
+}
+
+export function resolveTradeSortTimestamp(value: unknown): number | null {
+    if (value instanceof Date) {
+        const time = value.getTime()
+        return Number.isNaN(time) ? null : time
+    }
+    const normalized = String(value ?? '').trim()
+    if (!normalized) {
+        return null
+    }
+
+    const timezoneLessTradeDate = parseTimezoneLessTradeDate(normalized)
+    if (timezoneLessTradeDate) {
+        return timezoneLessTradeDate.getTime()
+    }
+
+    const parsed = Date.parse(normalized)
+    return Number.isFinite(parsed) ? parsed : null
+}
+
+function normalizeTradeTableSortValue(
+    value: unknown,
+    kind: TradeTableSortValueKind,
+): number | string | null {
+    if (kind === 'number') {
+        const parsed = Number(value)
+        return Number.isFinite(parsed) ? parsed : null
+    }
+    if (kind === 'date') {
+        return resolveTradeSortTimestamp(value)
+    }
+    const normalized = String(value ?? '').trim()
+    return normalized ? normalized.toLowerCase() : null
+}
+
+export function sortTradeRows<T>(
+    rows: T[],
+    sortState: TradeTableSortState | null,
+    resolvers: Record<string, TradeTableSortResolver<T>>,
+): T[] {
+    if (!sortState) {
+        return rows
+    }
+
+    const resolver = resolvers[sortState.columnKey]
+    if (!resolver) {
+        return rows
+    }
+
+    const direction = sortState.order === 'ascend' ? 1 : -1
+    return [...rows].sort((leftRow, rightRow) => {
+        const leftValue = normalizeTradeTableSortValue(
+            resolver.value(leftRow),
+            resolver.kind,
+        )
+        const rightValue = normalizeTradeTableSortValue(
+            resolver.value(rightRow),
+            resolver.kind,
+        )
+
+        if (leftValue === null && rightValue === null) {
+            return 0
+        }
+        if (leftValue === null) {
+            return 1
+        }
+        if (rightValue === null) {
+            return -1
+        }
+        if (typeof leftValue === 'number' && typeof rightValue === 'number') {
+            return (leftValue - rightValue) * direction
+        }
+        return leftValue.localeCompare(rightValue) * direction
+    })
 }
 
 export function resolveTradeDateTime(value: string): { date: string; time: string } {

@@ -18,17 +18,18 @@
             remote
             ref="table"
             :columns="columns_unsellable_trades"
-            :data="unsellable_trades || []"
+            :data="displayed_unsellable_trades || []"
             :loading="isTableLoading"
             :row-class-name="row_classes"
             :locale="{ emptyText: tableEmptyText }"
             aria-label="Unsellable trades table"
+            @update:sorter="handleSorterChange"
         />
     </div>
 </template>
 
 <script setup lang="ts">
-import { computed, h } from 'vue'
+import { computed, h, ref } from 'vue'
 import { NButton } from 'naive-ui/es/button'
 import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
 import { useDialog } from 'naive-ui/es/dialog'
@@ -39,7 +40,11 @@ import { useViewport } from '../composables/useViewport'
 import {
     formatAssetAmount,
     formatFixed,
+    resolveTradeTableColumnOrder,
     resolveTradeDateTime,
+    resolveTradeTableSortState,
+    sortTradeRows,
+    type TradeTableSortState,
 } from '../helpers/tradeTable'
 import {
     useTradesStore,
@@ -52,6 +57,7 @@ const unsellable_trades_socket_store = useWebSocketDataStore('unsellableTrades')
 const { isMobile, isTablet } = useViewport()
 const dialog = useDialog()
 const message = useMessage()
+const sortState = ref<TradeTableSortState | null>(null)
 
 const {
     rows: unsellable_trades,
@@ -66,6 +72,24 @@ const {
         return trades_store.unsellableTrades as UnsellableTradeRow[]
     },
 })
+const displayed_unsellable_trades = computed(() =>
+    sortTradeRows(unsellable_trades.value, sortState.value, {
+        id: { kind: 'number', value: (row) => row.id },
+        symbol: { kind: 'text', value: (row) => row.symbol },
+        amount: { kind: 'number', value: (row) => row.amount },
+        cost: { kind: 'number', value: (row) => row.cost },
+        profit_percent: { kind: 'number', value: (row) => row.profit_percent },
+        unsellable_reason: {
+            kind: 'text',
+            value: (row) => row.unsellable_reason ?? '',
+        },
+        open_date: { kind: 'date', value: (row) => row.open_date },
+        unsellable_since: {
+            kind: 'date',
+            value: (row) => row.unsellable_since ?? '',
+        },
+    }),
+)
 
 const unsellableTradesCount = computed(() => unsellable_trades.value.length)
 const unsellableTradesSummary = computed(() => {
@@ -122,6 +146,10 @@ function getStateDetail(rowData: UnsellableTradeRow): string {
         details.push(`min ${formatFixed(rowData.unsellable_min_notional)}`)
     }
     return details.join(' | ')
+}
+
+function handleSorterChange(sorter: unknown): void {
+    sortState.value = resolveTradeTableSortState(sorter)
 }
 
 async function handleResolveAllUnsellableTrades(): Promise<void> {
@@ -194,32 +222,49 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
     const columns: DataTableColumns<UnsellableTradeRow> = [
         {
             title: '#',
-            key: 'key',
-            defaultSortOrder: 'ascend'
+            key: 'id',
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'id'),
         },
         {
             title: 'Pair',
             key: 'symbol',
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'symbol'),
         },
         {
             title: 'Amount',
             key: 'amount',
             render: (rowData) => formatAssetAmount(rowData.amount),
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'amount'),
         },
         {
             title: 'Cost',
             key: 'cost',
             render: (rowData) => formatFixed(rowData.cost),
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'cost'),
         },
         {
             title: 'PNL %',
             key: 'profit_percent',
             render: (rowData) => `${formatFixed(rowData.profit_percent)} %`,
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'profit_percent',
+            ),
         },
         {
             title: 'State',
             key: 'unsellable_reason',
             render: (rowData) => getStateDetail(rowData),
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'unsellable_reason',
+            ),
         },
         {
             title: 'Opened',
@@ -231,6 +276,11 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
                     h('div', time),
                 ]
             },
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'open_date',
+            ),
         },
         {
             title: 'Flagged',
@@ -242,6 +292,11 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
                     h('div', time),
                 ]
             },
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'unsellable_since',
+            ),
         },
         {
             title: 'Action',

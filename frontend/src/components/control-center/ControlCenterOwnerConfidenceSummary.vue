@@ -20,6 +20,12 @@ const props = defineProps<{
     configTrustState: ControlCenterConfigTrustState
     formattedTrustTimestamp: string | null
     readiness: ControlCenterReadiness
+    tradingPauseLoading: boolean
+    tradingPaused: boolean
+}>()
+
+const emit = defineEmits<{
+    'toggle-trading-pause': []
 }>()
 
 const monitoring = useControlCenterMonitoringSummary()
@@ -129,6 +135,19 @@ const liveDataDetail = computed(() => {
     }
     return monitoring.statusBody.value
 })
+
+const entryFlowValue = computed(() => (props.tradingPaused ? 'Paused' : 'Open'))
+
+const entryFlowDetail = computed(() => {
+    if (props.tradingPaused) {
+        return 'New trades and re-entries are paused while existing exits keep running.'
+    }
+    return 'Moonwalker can accept new trades and sidestep re-entries.'
+})
+
+const toggleTradingPauseLabel = computed(() =>
+    props.tradingPaused ? 'Resume Moonwalker' : 'Pause Moonwalker',
+)
 
 const confidenceLevel = computed<'high' | 'guarded' | 'low'>(() => {
     if (
@@ -246,6 +265,11 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
         value: liveDataValue.value,
         detail: liveDataDetail.value,
     },
+    {
+        label: 'New entries',
+        value: entryFlowValue.value,
+        detail: entryFlowDetail.value,
+    },
 ])
 </script>
 
@@ -263,6 +287,36 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
                 <p class="confidence-summary">
                     {{ confidenceBody }}
                 </p>
+                <div class="pause-control">
+                    <div class="pause-control-copy">
+                        <span class="pause-control-label">Trading posture</span>
+                        <div class="pause-control-row">
+                            <n-tag
+                                class="pause-state-tag"
+                                :type="tradingPaused ? 'warning' : 'success'"
+                                :bordered="false"
+                            >
+                                {{
+                                    tradingPaused
+                                        ? 'New exposure paused'
+                                        : 'New exposure open'
+                                }}
+                            </n-tag>
+                            <span class="pause-control-detail">
+                                {{ entryFlowDetail }}
+                            </span>
+                        </div>
+                    </div>
+                    <n-button
+                        class="pause-control-button"
+                        secondary
+                        :type="tradingPaused ? 'warning' : 'primary'"
+                        :loading="tradingPauseLoading"
+                        @click="emit('toggle-trading-pause')"
+                    >
+                        {{ toggleTradingPauseLabel }}
+                    </n-button>
+                </div>
             </div>
 
             <div class="confidence-evidence-grid">
@@ -304,6 +358,50 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
     min-width: 0;
 }
 
+.pause-control {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-top: 4px;
+    padding: 12px 14px;
+    border: 1px solid rgba(183, 138, 46, 0.24);
+    border-radius: 10px;
+    background: rgba(183, 138, 46, 0.08);
+}
+
+.pause-control-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-width: 0;
+}
+
+.pause-control-label {
+    color: var(--mw-color-text-muted);
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.pause-control-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+}
+
+.pause-control-detail {
+    color: var(--mw-color-text-secondary);
+    font-size: 0.92rem;
+}
+
+.pause-control-button {
+    min-height: 44px;
+}
+
 .confidence-kicker-row {
     display: flex;
     flex-wrap: wrap;
@@ -340,7 +438,7 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
 .confidence-evidence-grid {
     display: grid;
     gap: 12px 16px;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .evidence-chip {
@@ -384,9 +482,21 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
     .confidence-shell {
         grid-template-columns: 1fr;
     }
+
+    .confidence-evidence-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 
 @media (max-width: 640px) {
+    .pause-control {
+        align-items: stretch;
+    }
+
+    .pause-control-button {
+        width: 100%;
+    }
+
     .confidence-evidence-grid {
         grid-template-columns: 1fr;
     }

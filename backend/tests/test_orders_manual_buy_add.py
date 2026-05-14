@@ -207,3 +207,42 @@ async def test_receive_manual_buy_add_rejects_older_date(monkeypatch) -> None:
             amount_raw=0.5,
             config={},
         )
+
+
+@pytest.mark.asyncio
+async def test_receive_manual_buy_add_rejects_paused_mission(monkeypatch) -> None:
+    orders = Orders()
+
+    async def fake_get_open_trades_by_symbol(_symbol: str) -> list[dict[str, Any]]:
+        return [{"symbol": "BTC/USDC", "so_count": 0, "amount": 0.5, "cost": 50.0}]
+
+    async def fake_get_trades_by_symbol(_symbol: str) -> list[dict[str, Any]]:
+        return [{"timestamp": "5000000", "price": 100.0, "baseorder": True}]
+
+    async def fake_get_trades_for_orders(_symbol: str) -> dict[str, Any]:
+        return {
+            "symbol": "BTC/USDC",
+            "automation_paused": True,
+            "safetyorders_count": 0,
+        }
+
+    monkeypatch.setattr(
+        orders.trades,
+        "get_open_trades_by_symbol",
+        fake_get_open_trades_by_symbol,
+    )
+    monkeypatch.setattr(
+        orders.trades, "get_trades_by_symbol", fake_get_trades_by_symbol
+    )
+    monkeypatch.setattr(
+        orders.trades, "get_trades_for_orders", fake_get_trades_for_orders
+    )
+
+    with pytest.raises(ValueError, match="Automation is paused for BTC/USDC"):
+        await orders.receive_manual_buy_add(
+            symbol="BTC/USDC",
+            date_input="5000",
+            price_raw=80.0,
+            amount_raw=0.5,
+            config={},
+        )

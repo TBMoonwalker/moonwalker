@@ -9,12 +9,16 @@ import helper
 from controller.responses import json_response
 from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
+from service.config import Config
+from service.order_requests import normalize_order_symbol
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trades import Trades
+from service.trading_controls import TradingControlsService
 from service.websocket_fanout import WebSocketFanout
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_trades")
 trades = Trades()
+trading_controls = TradingControlsService()
 
 
 def _json_dumps(payload: Any) -> str:
@@ -159,9 +163,17 @@ async def closed_trades_length() -> dict[str, Any]:
 
 
 @get(path="/trades/closed/{page:str}")
-async def closed_trades_pagination(page: str) -> dict[str, Any]:
+async def closed_trades_pagination(
+    page: str,
+    sort_key: str | None = None,
+    sort_dir: str | None = None,
+) -> dict[str, Any]:
     """Get paginated closed trades data."""
-    response = await trades.get_closed_trades(int(page))
+    response = await trades.get_closed_trades(
+        int(page),
+        sort_key=sort_key,
+        sort_direction=sort_dir,
+    )
     return {"result": response}
 
 
@@ -235,6 +247,61 @@ async def waiting_campaign_activate(campaign_id: str) -> Any:
     )
 
 
+@post(path="/trades/mission/pause/{symbol:str}")
+async def mission_pause(symbol: str) -> Any:
+    """Pause automation for one open or waiting mission."""
+    try:
+        normalized_symbol = normalize_order_symbol(symbol)
+    except ValueError as exc:
+        return json_response({"result": "", "error": str(exc)}, 400)
+
+    config = await Config.instance()
+    result = await trading_controls.pause_mission(normalized_symbol, config.snapshot())
+    if result.status == "not_found":
+        return json_response({"result": "", "error": result.message}, 404)
+    if result.status == "tp_cancel_failed":
+        return json_response(
+            {
+                "result": "",
+                "error": result.message,
+                "status": result.status,
+                "symbol": result.symbol,
+                "campaign_id": result.campaign_id,
+                "automation_paused": result.automation_paused,
+            },
+            409,
+        )
+    return {
+        "result": result.status,
+        "message": result.message,
+        "status": result.status,
+        "symbol": result.symbol,
+        "campaign_id": result.campaign_id,
+        "automation_paused": result.automation_paused,
+    }
+
+
+@post(path="/trades/mission/resume/{symbol:str}")
+async def mission_resume(symbol: str) -> Any:
+    """Resume automation for one open or waiting mission."""
+    try:
+        normalized_symbol = normalize_order_symbol(symbol)
+    except ValueError as exc:
+        return json_response({"result": "", "error": str(exc)}, 400)
+
+    result = await trading_controls.resume_mission(normalized_symbol)
+    if result.status == "not_found":
+        return json_response({"result": "", "error": result.message}, 404)
+    return {
+        "result": result.status,
+        "message": result.message,
+        "status": result.status,
+        "symbol": result.symbol,
+        "campaign_id": result.campaign_id,
+        "automation_paused": result.automation_paused,
+    }
+
+
 route_handlers = [
     open_trades,
     closed_trades,
@@ -248,4 +315,6 @@ route_handlers = [
     unsellable_trade_delete,
     waiting_campaign_stop,
     waiting_campaign_activate,
+    mission_pause,
+    mission_resume,
 ]

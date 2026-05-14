@@ -220,6 +220,131 @@ async def test_process_ticker_data_logs_waiting_statistics_for_flat_sidestep_tra
 
 
 @pytest.mark.asyncio
+async def test_process_ticker_data_skips_waiting_reentry_when_mission_paused(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    waiting_metric_calls: list[tuple[str, float]] = []
+    reentry_attempted = 0
+
+    async def fake_get_trades_for_orders(_symbol: str):
+        return {
+            "symbol": "BTC/USDT",
+            "bot": "asap_BTC/USDT",
+            "campaign_id": "campaign-1",
+            "lifecycle_mode": "sidestep_reentry",
+            "exposure_state": "flat_waiting_reentry",
+            "automation_paused": True,
+            "waiting_reference_amount": 1.0,
+            "waiting_reference_quote": 120.0,
+            "waiting_reference_price": 120.0,
+            "reserved_reentry_quote": 120.0,
+        }
+
+    async def fake_update_waiting_virtual_metrics(trades, current_price: float):
+        waiting_metric_calls.append((trades["symbol"], current_price))
+
+    async def fake_attempt_waiting_reentry(*_args, **_kwargs):
+        nonlocal reentry_attempted
+        reentry_attempted += 1
+        return False
+
+    async def fake_get_sidestep_campaigns():
+        return _DummySidestepCampaignService()
+
+    monkeypatch.setattr(
+        dca.trades,
+        "get_trades_for_orders",
+        fake_get_trades_for_orders,
+    )
+    monkeypatch.setattr(
+        dca,
+        "_Dca__update_waiting_virtual_metrics",
+        fake_update_waiting_virtual_metrics,
+    )
+    monkeypatch.setattr(
+        dca,
+        "_Dca__attempt_waiting_reentry",
+        fake_attempt_waiting_reentry,
+    )
+    monkeypatch.setattr(dca, "_get_sidestep_campaigns", fake_get_sidestep_campaigns)
+
+    await dca.process_ticker_data(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 100.0}},
+        {
+            "trade_lifecycle_mode": "sidestep_reentry",
+            "market": "spot",
+        },
+    )
+
+    assert waiting_metric_calls == [("BTC/USDT", 100.0)]
+    assert reentry_attempted == 0
+
+
+@pytest.mark.asyncio
+async def test_process_ticker_data_skips_active_dca_and_tp_when_mission_paused(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    dca_calls = 0
+    tp_calls = 0
+
+    async def fake_get_trades_for_orders(_symbol: str):
+        return {
+            "timestamp": "1000",
+            "fee": 0.0,
+            "total_cost": 100.0,
+            "total_amount": 1.0,
+            "symbol": "BTC/USDT",
+            "direction": "long",
+            "side": "buy",
+            "bot": "asap_BTC/USDT",
+            "bo_price": 100.0,
+            "current_price": 95.0,
+            "safetyorders": [],
+            "safetyorders_count": 0,
+            "ordertype": "market",
+            "campaign_id": None,
+            "is_unsellable": False,
+            "automation_paused": True,
+        }
+
+    async def fail_calculate_dca(*_args, **_kwargs):
+        nonlocal dca_calls
+        dca_calls += 1
+        raise AssertionError("paused mission should skip DCA")
+
+    async def fail_calculate_tp(*_args, **_kwargs):
+        nonlocal tp_calls
+        tp_calls += 1
+        raise AssertionError("paused mission should skip TP")
+
+    async def fake_get_sidestep_campaigns():
+        return _DummySidestepCampaignService()
+
+    monkeypatch.setattr(
+        dca.trades,
+        "get_trades_for_orders",
+        fake_get_trades_for_orders,
+    )
+    monkeypatch.setattr(dca, "_Dca__calculate_dca", fail_calculate_dca)
+    monkeypatch.setattr(dca, "_Dca__calculate_tp", fail_calculate_tp)
+    monkeypatch.setattr(dca, "_get_sidestep_campaigns", fake_get_sidestep_campaigns)
+
+    await dca.process_ticker_data(
+        {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 95.0}},
+        {
+            "dca": True,
+            "tp": 10.0,
+            "market": "spot",
+        },
+    )
+
+    assert dca_calls == 0
+    assert tp_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_process_ticker_data_logs_sidestep_gate_without_active_trade(
     monkeypatch,
 ) -> None:
