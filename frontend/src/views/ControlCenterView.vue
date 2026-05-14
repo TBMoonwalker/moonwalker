@@ -90,6 +90,7 @@ const {
     indicatorFormRef,
     initializeClientTimezoneOptions,
     isAsapExchangeReady,
+    baselineState,
     isDirty,
     isSubmitDisabled,
     hasUnsavedChanges,
@@ -475,6 +476,9 @@ async function handleToggleAutopilot(): Promise<void> {
                     :currency="currency"
                     :dca="dca"
                     :dca-form-ref="dcaFormRef"
+                    :dry-run-activation-locked="
+                        baselineState?.exchange?.dry_run === true
+                    "
                     :exchange="exchange"
                     :exchange-form-ref="exchangeFormRef"
                     :exchanges="exchanges"

@@ -45,6 +45,7 @@ defineProps<{
     currency: StringSelectOption[]
     dca: DcaModel
     dcaFormRef?: VNodeRef
+    dryRunActivationLocked: boolean
     exchange: ExchangeModel
     exchangeFormRef?: VNodeRef
     exchanges: StringSelectOption[]
@@ -143,6 +144,7 @@ const emit = defineEmits<{
             <ConfigExchangeSection
                 :ref="exchangeFormRef"
                 :currency="currency"
+                :dry-run-activation-locked="dryRunActivationLocked"
                 :exchange="exchange"
                 :exchanges="exchanges"
                 :market="market"

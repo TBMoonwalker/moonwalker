@@ -51,7 +51,16 @@
                 />
             </n-form-item>
             <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="left">
-                <n-checkbox v-model:checked="exchange.dry_run" />
+                <n-flex vertical :size="6">
+                    <n-checkbox
+                        v-model:checked="exchange.dry_run"
+                        :disabled="dryRunActivationLocked"
+                    />
+                    <n-text v-if="dryRunActivationLocked" depth="3">
+                        Activate live trading from Overview after saving the rest of
+                        this configuration.
+                    </n-text>
+                </n-flex>
             </n-form-item>
             <n-form-item label="Currency" path="currency">
                 <n-select
@@ -81,6 +90,7 @@ import type { ExchangeModel, StringSelectOption } from '../../config-editor/type
 
 defineProps<{
     currency: StringSelectOption[]
+    dryRunActivationLocked: boolean
     exchange: ExchangeModel
     exchanges: StringSelectOption[]
     market: StringSelectOption[]
