@@ -186,7 +186,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid rgba(29, 92, 73, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 10px;
   background: rgba(29, 92, 73, 0.05);
 }
