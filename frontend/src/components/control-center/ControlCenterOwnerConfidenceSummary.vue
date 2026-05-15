@@ -398,10 +398,6 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
     font-size: 0.92rem;
 }
 
-.pause-control-button {
-    min-height: 44px;
-}
-
 .confidence-kicker-row {
     display: flex;
     flex-wrap: wrap;
