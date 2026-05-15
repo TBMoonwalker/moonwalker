@@ -140,9 +140,9 @@ const entryFlowValue = computed(() => (props.tradingPaused ? 'Paused' : 'Open'))
 
 const entryFlowDetail = computed(() => {
     if (props.tradingPaused) {
-        return 'New trades and re-entries are paused while existing exits keep running.'
+        return 'Moonwalker is not starting anything new right now, but it is still managing exits on trades that are already open.'
     }
-    return 'Moonwalker can accept new trades and sidestep re-entries.'
+    return 'Moonwalker is free to start new trades and bring waiting sidestep deals back in when their conditions line up.'
 })
 
 const toggleTradingPauseLabel = computed(() =>
@@ -298,8 +298,8 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
                             >
                                 {{
                                     tradingPaused
-                                        ? 'New exposure paused'
-                                        : 'New exposure open'
+                                        ? 'Not opening new trades'
+                                        : 'Ready for new trades'
                                 }}
                             </n-tag>
                             <span class="pause-control-detail">
@@ -309,8 +309,8 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
                     </div>
                     <n-button
                         class="pause-control-button"
-                        secondary
-                        :type="tradingPaused ? 'warning' : 'primary'"
+                        type="primary"
+                        strong
                         :loading="tradingPauseLoading"
                         @click="emit('toggle-trading-pause')"
                     >
