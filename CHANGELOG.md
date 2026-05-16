@@ -4,6 +4,8 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [3.0.0.1] - 2026-05-16
+
 ### Changed
 
 - Make `trade_mode` the canonical operator-facing trade lifecycle setting, with
