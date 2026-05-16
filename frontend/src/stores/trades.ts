@@ -9,6 +9,9 @@ export type OpenTradeRow = {
   lifecycle_mode?: string | null
   exposure_state?: string | null
   sidestep_count?: number
+  automation_paused?: boolean
+  automation_paused_at?: string | null
+  automation_pause_source?: string | null
   execution_history_complete?: boolean
   amount: number | string
   cost: number | string
@@ -200,6 +203,9 @@ export const useTradesStore = defineStore('trades', {
         lifecycle_mode: val.lifecycle_mode ?? null,
         exposure_state: val.exposure_state ?? null,
         sidestep_count: Number(val.sidestep_count ?? 0),
+        automation_paused: Boolean(val.automation_paused ?? false),
+        automation_paused_at: val.automation_paused_at ?? null,
+        automation_pause_source: val.automation_pause_source ?? null,
         execution_history_complete: Boolean(val.execution_history_complete ?? true),
         safetyorder: Array.isArray(val.safetyorders) ? val.safetyorders : [],
         precision: currentPrecision,

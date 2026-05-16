@@ -7,6 +7,11 @@ import pytest
 from service.config import Config
 from service.statistic import Statistic
 from tortoise import Tortoise
+from tortoise.exceptions import BaseORMException
+
+
+class _FakeOrmError(BaseORMException):
+    """Test-only ORM failure used to exercise fallback logging paths."""
 
 
 @pytest.mark.asyncio
@@ -350,6 +355,73 @@ async def test_profit_overall_timeline_returns_data(tmp_path, monkeypatch) -> No
     assert "funds_locked" in timeline[-1]
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_get_sum_value_logs_traceback_and_returns_zero_on_orm_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statistic = Statistic()
+    captured: dict[str, object] = {}
+
+    class _FailingQuery:
+        def annotate(self, **_kwargs):
+            return self
+
+        async def values_list(self, *_args, **_kwargs):
+            raise _FakeOrmError("boom")
+
+    import service.statistic as statistic_module
+
+    def fake_error(message: str, *args, **kwargs) -> None:
+        captured["message"] = message % args if args else message
+        captured["exc_info"] = kwargs.get("exc_info")
+
+    monkeypatch.setattr(statistic_module.logging, "error", fake_error)
+
+    result = await statistic._get_sum_value(
+        _FailingQuery(),
+        "profit",
+        "Error summing profits.",
+    )
+
+    assert result == 0.0
+    assert captured["message"] == "Error summing profits."
+    assert captured["exc_info"] is True
+
+
+@pytest.mark.asyncio
+async def test_get_profit_rows_since_logs_traceback_and_returns_empty_on_orm_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    statistic = Statistic()
+    captured: dict[str, object] = {}
+
+    class _FailingFilter:
+        async def values_list(self, *_args, **_kwargs):
+            raise _FakeOrmError("boom")
+
+    import service.statistic as statistic_module
+
+    def fake_error(message: str, *args, **kwargs) -> None:
+        captured["message"] = message % args if args else message
+        captured["exc_info"] = kwargs.get("exc_info")
+
+    monkeypatch.setattr(
+        model.ClosedTrades,
+        "filter",
+        lambda **_kwargs: _FailingFilter(),
+    )
+    monkeypatch.setattr(statistic_module.logging, "error", fake_error)
+
+    rows = await statistic._get_profit_rows_since(
+        datetime.now(UTC),
+        "Error fetching profit rows.",
+    )
+
+    assert rows == []
+    assert captured["message"] == "Error fetching profit rows."
+    assert captured["exc_info"] is True
 
 
 @pytest.mark.asyncio

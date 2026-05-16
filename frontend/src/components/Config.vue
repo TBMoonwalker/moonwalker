@@ -14,6 +14,7 @@
         <ConfigExchangeSection
             ref="exchangeFormRef"
             :currency="currency"
+            :dry-run-activation-locked="baselineState?.exchange?.dry_run === true"
             :exchange="exchange"
             :exchanges="exchanges"
             :market="market"
@@ -167,6 +168,7 @@ const {
     autopilotFormRef,
     backupDownloadLoading,
     backupIncludeTradeData,
+    baselineState,
     bindBackupFileInput,
     canTestMonitoringTelegram,
     capital,

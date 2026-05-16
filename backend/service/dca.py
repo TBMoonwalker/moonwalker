@@ -30,14 +30,12 @@ from service.dca_tp_state import (
 from service.exchange import Exchange
 from service.indicators import Indicators
 from service.orders import Orders
-from service.spot_campaign_types import (
-    TradeExposureState,
-    TradeLifecycleMode,
-)
+from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
 from service.strategy_capability import ensure_strategy_supported
 from service.trades import Trades
+from service.trading_controls import is_mission_automation_paused
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 
@@ -1110,7 +1108,20 @@ class Dca:
 
                 if self.__is_flat_waiting(trades):
                     await self.__update_waiting_virtual_metrics(trades, price)
+                    if is_mission_automation_paused(trades):
+                        logging.debug(
+                            "Skipping waiting re-entry for %s because mission automation is paused.",
+                            trades["symbol"],
+                        )
+                        return
                     await self.__attempt_waiting_reentry(trades, price)
+                    return
+
+                if is_mission_automation_paused(trades):
+                    logging.debug(
+                        "Skipping automated DCA/TP for %s because mission automation is paused.",
+                        trades["symbol"],
+                    )
                     return
 
                 # Check Autopilot

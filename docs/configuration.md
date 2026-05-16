@@ -36,10 +36,11 @@ values are:
 If `market` is not `spot`, sidestep can remain configured but the sidestep
 runtime stays inactive.
 
-Moonwalker still reads and writes the legacy compatibility mirrors
-`trade_lifecycle_mode`, `dynamic_dca`, and `sidestep_campaign_enabled` for one
-bridge release so older snapshots and clients can survive the cutover. New
-config writes, docs, and operator workflows should use `trade_mode`.
+Moonwalker now exposes and accepts `trade_mode` as the only supported
+operator-facing lifecycle field. Older stored rows and backup payloads can still
+be canonicalized during startup and restore so existing installs survive the
+cutover, but `/config/all` and supported config writes do not use the removed
+bridge keys anymore.
 
 ## Configuration Reference
 All supported configuration keys are listed below. Keys marked "(advanced)"
@@ -74,9 +75,6 @@ are not exposed in the UI and must be set via the API.
 | `order_check_range` | `int` | Seconds for post-order trade lookup (advanced). | `5` |
 | `dca` | `bool` | Enable DCA. | `true` |
 | `trade_mode` | `string` | Canonical trade mode for operator-facing config. Supported values are `dynamic_dca` and `sidestep`. | `dynamic_dca` |
-| `dynamic_dca` | `bool` | Legacy compatibility mirror derived from `trade_mode`. `true` means `trade_mode = dynamic_dca`. Do not use for new config writes. | `true` |
-| `trade_lifecycle_mode` | `string` | Legacy compatibility mirror derived from `trade_mode`. `classic_dca` maps to `dynamic_dca`; `sidestep_reentry` maps to `sidestep`. Do not use for new config writes. | `classic_dca` |
-| `sidestep_campaign_enabled` | `bool` | Legacy compatibility mirror derived from `trade_mode`. `true` means `trade_mode = sidestep`. Do not use for new config writes. | `false` |
 | `dca_strategy` | `string` | Strategy for dynamic DCA. | `ema_swing` |
 | `sidestep_bearish_strategy` | `string` | Bearish exit strategy used when `trade_mode = sidestep`. | `ema_down` |
 | `sidestep_reentry_strategy` | `string` | Required for new sidestep saves and restores. Legacy startup snapshots may still fall back to `dca_strategy` until they are re-saved from a current client. | `ema_swing` |

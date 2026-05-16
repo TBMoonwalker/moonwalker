@@ -23,6 +23,9 @@ interface RuntimeSnapshotStoreLike {
 }
 
 type RuntimeChangeOrigin = 'live_activation' | 'external_invalidation'
+type RuntimeMutationOrigin =
+    | RuntimeChangeOrigin
+    | 'trading_pause'
 
 interface ActivateLiveTradingResponse {
     data?: {
@@ -30,10 +33,19 @@ interface ActivateLiveTradingResponse {
     }
 }
 
+interface ToggleTradingPauseResponse {
+    data?: {
+        message?: string
+        status?: string
+        trading_paused?: boolean
+    }
+}
+
 interface UseControlCenterRuntimeActionsOptions {
     announce: (message: string | null) => void
     apiUrl: (path: string) => string
     hasUnsavedChanges: () => boolean
+    isTradingPaused: ComputedRef<boolean>
     isDirty: ComputedRef<boolean>
     navigateToControlCenter: (
         mode: ControlCenterRouteState['mode'],
@@ -45,13 +57,17 @@ interface UseControlCenterRuntimeActionsOptions {
     setTransitionIntent: (nextIntent: ControlCenterTransitionIntent) => void
     snapshotStore: RuntimeSnapshotStoreLike
     syncControlCenterConfigChange: (
-        origin: RuntimeChangeOrigin,
+        origin: RuntimeMutationOrigin,
     ) => Promise<OperationResult>
     confirmAction?: (message: string) => boolean
     postActivateRequest?: (
         url: string,
         payload: { confirm: true },
     ) => Promise<ActivateLiveTradingResponse>
+    postTradingPauseRequest?: (
+        url: string,
+        payload: { confirm: true },
+    ) => Promise<ToggleTradingPauseResponse>
     trackEvent?: (eventName: string) => void
 }
 
@@ -66,6 +82,13 @@ async function defaultPostActivateRequest(
     return axios.post(url, payload)
 }
 
+async function defaultPostTradingPauseRequest(
+    url: string,
+    payload: { confirm: true },
+): Promise<ToggleTradingPauseResponse> {
+    return axios.post(url, payload)
+}
+
 function defaultTrackEvent(eventName: string): void {
     trackUiEvent(eventName)
 }
@@ -74,9 +97,12 @@ export function useControlCenterRuntimeActions(
     options: UseControlCenterRuntimeActionsOptions,
 ) {
     const activationLoading = ref(false)
+    const tradingPauseLoading = ref(false)
     const confirmAction = options.confirmAction ?? defaultConfirmAction
     const postActivateRequest =
         options.postActivateRequest ?? defaultPostActivateRequest
+    const postTradingPauseRequest =
+        options.postTradingPauseRequest ?? defaultPostTradingPauseRequest
     const trackEvent = options.trackEvent ?? defaultTrackEvent
 
     async function handleActivateLiveTrading(): Promise<void> {
@@ -173,6 +199,88 @@ export function useControlCenterRuntimeActions(
         }
     }
 
+    async function handleToggleTradingPause(): Promise<void> {
+        if (tradingPauseLoading.value) {
+            return
+        }
+        if (options.isDirty.value) {
+            const blockedMessage =
+                'Save the current draft before changing Moonwalker pause state.'
+            options.setTransitionIntent({
+                kind: 'toggle_trading_pause',
+                status: 'blocked',
+                message: blockedMessage,
+                at: Date.now(),
+            })
+            options.announce(blockedMessage)
+            return
+        }
+
+        const nextAction = options.isTradingPaused.value ? 'resume' : 'pause'
+        const confirmMessage = options.isTradingPaused.value
+            ? 'Resume Moonwalker now? New trades and re-entries will be allowed again after this confirmation.'
+            : 'Pause Moonwalker now? Existing exits can keep running, but no new trades or re-entries will be allowed until you resume.'
+        if (!confirmAction(confirmMessage)) {
+            return
+        }
+
+        tradingPauseLoading.value = true
+        trackEvent(
+            nextAction === 'pause'
+                ? 'control_center_trading_pause_requested'
+                : 'control_center_trading_resume_requested',
+        )
+
+        try {
+            const response = await postTradingPauseRequest(
+                options.apiUrl(`/config/trading/${nextAction}`),
+                {
+                    confirm: true,
+                },
+            )
+            const syncResult = await options.syncControlCenterConfigChange(
+                'trading_pause',
+            )
+            if (syncResult.status === 'error') {
+                throw new Error(syncResult.message)
+            }
+            const successMessage =
+                response.data?.message ??
+                (nextAction === 'pause'
+                    ? 'Moonwalker paused for new exposure.'
+                    : 'Moonwalker resumed for new exposure.')
+            options.setTransitionIntent({
+                kind: 'toggle_trading_pause',
+                status: 'success',
+                message: successMessage,
+                at: Date.now(),
+                mode: options.routeState.value.mode,
+                target: options.routeState.value.target,
+            })
+            options.announce(successMessage)
+        } catch (error) {
+            const status =
+                axios.isAxiosError(error) && error.response?.status === 409
+                    ? 'blocked'
+                    : 'error'
+            const messageText = extractApiErrorMessage(
+                error,
+                'Trading pause change failed.',
+            )
+            options.setTransitionIntent({
+                kind: 'toggle_trading_pause',
+                status,
+                message: messageText,
+                at: Date.now(),
+                mode: options.routeState.value.mode,
+                target: options.routeState.value.target,
+            })
+            options.announce(messageText)
+        } finally {
+            tradingPauseLoading.value = false
+        }
+    }
+
     async function handleReloadAfterStalePrompt(): Promise<void> {
         if (
             options.hasUnsavedChanges() &&
@@ -238,5 +346,7 @@ export function useControlCenterRuntimeActions(
         handleActivateLiveTrading,
         handleDetectedExternalConfigChange,
         handleReloadAfterStalePrompt,
+        handleToggleTradingPause,
+        tradingPauseLoading,
     }
 }

@@ -26,6 +26,9 @@ export type OpenTradeRow = {
     lifecycle_mode?: string | null
     exposure_state?: string | null
     sidestep_count?: number
+    automation_paused?: boolean
+    automation_paused_at?: string | null
+    automation_pause_source?: string | null
     amount: number
     cost: number
     profit: number
@@ -113,6 +116,10 @@ export function resolveMinTimeframe(
 export function splitTradeSymbol(value: string): [string, string] {
     const [symbol = '', currency = ''] = String(value).split('/')
     return [symbol, currency]
+}
+
+export function tradeSymbolToRouteParam(value: string): string {
+    return String(value).trim().toLowerCase().replace('/', '-')
 }
 
 export function getOpenTradeOpenedAt(

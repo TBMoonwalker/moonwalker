@@ -8,9 +8,6 @@ from typing import Any
 from service.config import resolve_timeframe
 from service.trade_lifecycle_config import (
     TradeLifecycleConfigView,
-    derive_legacy_dynamic_dca_enabled,
-    derive_legacy_sidestep_enabled,
-    normalize_trade_lifecycle_mode,
     normalize_trade_mode,
     resolve_trade_mode_config,
 )
@@ -22,9 +19,6 @@ __all__ = [
     "SignalPluginConfigView",
     "TradeLifecycleConfigView",
     "WatcherRuntimeConfigView",
-    "derive_legacy_dynamic_dca_enabled",
-    "derive_legacy_sidestep_enabled",
-    "normalize_trade_lifecycle_mode",
     "normalize_trade_mode",
 ]
 

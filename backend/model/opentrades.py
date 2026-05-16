@@ -41,6 +41,8 @@ class OpenTrades(Model):
     tp_limit_order_price = fields.FloatField(null=True)
     tp_limit_order_amount = fields.FloatField(null=True)
     tp_limit_order_armed_at = fields.TextField(null=True)
+    automation_paused = fields.BooleanField(default=False)
+    automation_paused_at = fields.TextField(null=True)
     reserved_reentry_quote = fields.FloatField(default=0.0)
     waiting_reference_price = fields.FloatField(default=0.0)
     waiting_reference_amount = fields.FloatField(default=0.0)
@@ -71,6 +73,8 @@ class OpenTrades(Model):
             f"'tp_limit_order_price': {self.tp_limit_order_price}, "
             f"'tp_limit_order_amount': {self.tp_limit_order_amount}, "
             f"'tp_limit_order_armed_at': {self.tp_limit_order_armed_at}, "
+            f"'automation_paused': {self.automation_paused}, "
+            f"'automation_paused_at': {self.automation_paused_at}, "
             f"'reserved_reentry_quote': {self.reserved_reentry_quote}, "
             f"'waiting_reference_price': {self.waiting_reference_price}, "
             f"'waiting_reference_amount': {self.waiting_reference_amount}, "

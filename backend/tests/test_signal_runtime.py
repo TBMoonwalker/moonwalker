@@ -267,6 +267,22 @@ async def test_resolve_signal_admission_batch_prefers_favored_symbol(
 
 
 @pytest.mark.asyncio
+async def test_resolve_signal_admission_batch_respects_global_pause() -> None:
+    batch = await resolve_signal_admission_batch(
+        {"max_bots": 4, "trading_paused": True},
+        types.SimpleNamespace(get_profit=_async_result({})),
+        types.SimpleNamespace(resolve_runtime_state=_async_result({})),
+        ["BTC/USDT", "ETH/USDT"],
+    )
+
+    assert batch.admitted_symbols == []
+    assert [decision.reason_code for decision in batch.decisions] == [
+        "skipped_global_pause",
+        "skipped_global_pause",
+    ]
+
+
+@pytest.mark.asyncio
 async def test_resolve_signal_admission_batch_falls_back_to_symbol_order_when_memory_is_not_fresh(
     monkeypatch,
 ) -> None:

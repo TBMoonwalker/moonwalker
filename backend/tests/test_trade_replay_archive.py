@@ -4,6 +4,7 @@ import os
 import ccxt.async_support as ccxt
 import pytest
 from service.data import Data
+from service.database import Database
 from service.replay_candles import archive_replay_candles_for_deal
 from service.trades import Trades
 from tortoise import Tortoise
@@ -523,7 +524,7 @@ async def test_archive_replay_candles_skips_exchange_repair_for_missing_archive(
 
 
 @pytest.mark.asyncio
-async def test_data_service_repairs_missing_archive_from_exchange_history_on_read(
+async def test_background_replay_backfill_repairs_missing_archive_before_reads(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -611,6 +612,63 @@ async def test_data_service_repairs_missing_archive_from_exchange_history_on_rea
         fee=0.0,
     )
 
+    database = Database()
+    database.db_url = "sqlite:///tmp/healthy.sqlite"
+    await database._backfill_trade_replay_candles()
+
+    archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).values(
+        "timestamp"
+    )
+    archived_timestamps = sorted(int(row["timestamp"]) for row in archived_rows)
+
+    data = Data()
+    payload = await data.get_archived_ohlcv_for_deal(
+        deal_id,
+        "4h",
+        0,
+        43_200_000,
+        0,
+    )
+    records = [payload] if isinstance(payload, dict) else json.loads(payload)
+
+    assert [record["time"] for record in records] == [
+        0.0,
+        14_400.0,
+        28_800.0,
+        43_200.0,
+    ]
+    assert archived_timestamps == [0, 14_400_000, 28_800_000, 43_200_000]
+
+    await data.close()
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_data_service_reads_sparse_archive_without_mutating_it(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _init_test_db(tmp_path, monkeypatch)
+
+    import model
+
+    deal_id = "8a8a8a8a-8888-4444-8888-888888888888"
+
+    for timestamp, open_price, close_price in (
+        (0, 9.0, 9.5),
+        (43_200_000, 11.5, 12.0),
+    ):
+        await model.TradeReplayCandles.create(
+            deal_id=deal_id,
+            symbol="ABC/USDT",
+            timestamp=str(timestamp),
+            open=open_price,
+            high=open_price + 0.5,
+            low=open_price - 0.5,
+            close=close_price,
+            volume=10.0,
+        )
+
     data = Data()
     payload = await data.get_archived_ohlcv_for_deal(
         deal_id,
@@ -626,13 +684,8 @@ async def test_data_service_repairs_missing_archive_from_exchange_history_on_rea
     )
     archived_timestamps = sorted(int(row["timestamp"]) for row in archived_rows)
 
-    assert [record["time"] for record in records] == [
-        0.0,
-        14_400.0,
-        28_800.0,
-        43_200.0,
-    ]
-    assert archived_timestamps == [0, 14_400_000, 28_800_000, 43_200_000]
+    assert [record["time"] for record in records] == [0.0, 43_200.0]
+    assert archived_timestamps == [0, 43_200_000]
 
     await data.close()
     await Tortoise.close_connections()

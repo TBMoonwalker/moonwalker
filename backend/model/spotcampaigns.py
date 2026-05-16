@@ -27,6 +27,8 @@ class SpotCampaigns(Model):
     reserved_quote = fields.FloatField(default=0.0)
     cumulative_realized_quote = fields.FloatField(default=0.0)
     cumulative_realized_percent = fields.FloatField(default=0.0)
+    automation_paused = fields.BooleanField(default=False)
+    automation_paused_at = fields.TextField(null=True)
     metadata_json = fields.TextField(null=True)
 
     class Meta:

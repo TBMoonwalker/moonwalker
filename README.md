@@ -17,10 +17,9 @@ base orders, and plain-language trust signals in the Control Center.
 - In `sidestep`, Moonwalker can exit a bearish spot leg, keep the campaign in a
   waiting state, and later re-enter that same campaign instead of treating it
   as a brand-new trade.
-- Moonwalker still reads and writes the legacy compatibility mirrors
-  `trade_lifecycle_mode`, `dynamic_dca`, and `sidestep_campaign_enabled` for
-  one bridge release, but new docs and operator workflows should use
-  `trade_mode`.
+- Supported config writes and dashboard snapshots now use `trade_mode` only.
+  Older stored rows and backup payloads can still be canonicalized during load
+  and restore, but operator workflows should not use the removed bridge keys.
 
 ## Disclaimer
 **Moonwalker is meant to be used for educational purposes only. Use with real funds at your own risk**

@@ -129,12 +129,7 @@ function buildTradeModeSwitchGuard(
         return {
             blocked: false,
             can_switch: true,
-            current_trade_mode: normalizeTradeMode(
-                response.trade_mode,
-                response.trade_lifecycle_mode,
-                response.dynamic_dca,
-                response.sidestep_campaign_enabled,
-            ),
+            current_trade_mode: normalizeTradeMode(response.trade_mode),
             message: null,
             open_trade_count: 0,
             waiting_campaign_count: 0,
@@ -146,12 +141,7 @@ function buildTradeModeSwitchGuard(
         can_switch: parseBooleanString(rawGuard.can_switch) ?? true,
         current_trade_mode:
             toNullableString(rawGuard.current_trade_mode) ??
-            normalizeTradeMode(
-                response.trade_mode,
-                response.trade_lifecycle_mode,
-                response.dynamic_dca,
-                response.sidestep_campaign_enabled,
-            ),
+            normalizeTradeMode(response.trade_mode),
         message: toNullableString(rawGuard.message),
         open_trade_count: toNumberOrNull(rawGuard.open_trade_count) ?? 0,
         waiting_campaign_count:
@@ -216,12 +206,7 @@ export function buildLoadedConfigState(
         watcher_ohlcv: parseBooleanString(response.watcher_ohlcv) ?? false,
     }
     const dcaEnabled = parseBooleanString(response.dca) ?? false
-    const tradeMode = normalizeTradeMode(
-        response.trade_mode,
-        response.trade_lifecycle_mode,
-        response.dynamic_dca,
-        response.sidestep_campaign_enabled,
-    )
+    const tradeMode = normalizeTradeMode(response.trade_mode)
     const dynamicDca = isDynamicTradeMode(tradeMode)
     const tradeModeSwitchGuard = buildTradeModeSwitchGuard(response)
 

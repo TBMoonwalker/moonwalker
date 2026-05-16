@@ -296,6 +296,7 @@ async def test_database_init_surfaces_actionable_sqlite_corruption(
     monkeypatch.setattr("service.database.Tortoise.generate_schemas", _noop)
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
+    monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
@@ -327,6 +328,7 @@ async def test_database_init_reraises_non_corruption_failures(
     monkeypatch.setattr("service.database.Tortoise.generate_schemas", _noop)
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
+    monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
@@ -361,6 +363,7 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
     monkeypatch.setattr("service.database.Tortoise.generate_schemas", _noop)
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
+    monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
@@ -413,6 +416,11 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         Database, "_ensure_open_trades_columns", _record("ensure_open_trades_columns")
     )
     monkeypatch.setattr(
+        Database,
+        "_ensure_spot_campaign_columns",
+        _record("ensure_spot_campaign_columns"),
+    )
+    monkeypatch.setattr(
         Database, "_ensure_trade_ledger_columns", _record("ensure_trade_ledger_columns")
     )
     monkeypatch.setattr(
@@ -440,6 +448,7 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "apply_pragmas",
         "generate_schemas",
         "ensure_open_trades_columns",
+        "ensure_spot_campaign_columns",
         "ensure_trade_ledger_columns",
         "ensure_upnl_history_columns",
         "ensure_indexes",
@@ -515,6 +524,76 @@ async def test_background_replay_backfill_runs_after_startup(
     await database.backfill_trade_replay_candles_if_needed()
 
     assert calls == ["backfill_trade_replay_candles"]
+
+
+@pytest.mark.asyncio
+async def test_background_replay_backfill_allows_missing_archive_exchange_repair(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    import model
+    import service.database as database_module
+
+    captured_kwargs: list[dict[str, object]] = []
+
+    async def fake_archive_replay_candles_for_deal(
+        deal_id: str,
+        symbol: str,
+        *,
+        open_date,
+        close_date,
+        allow_missing_archive_exchange_repair: bool = False,
+        conn=None,
+    ) -> int:
+        captured_kwargs.append(
+            {
+                "deal_id": deal_id,
+                "symbol": symbol,
+                "open_date": open_date,
+                "close_date": close_date,
+                "allow_missing_archive_exchange_repair": (
+                    allow_missing_archive_exchange_repair
+                ),
+                "conn": conn,
+            }
+        )
+        return 4
+
+    monkeypatch.setattr(
+        database_module,
+        "archive_replay_candles_for_deal",
+        fake_archive_replay_candles_for_deal,
+    )
+
+    await model.ClosedTrades.create(
+        symbol="ABC/USDT",
+        deal_id="6f6f6f6f-6666-4444-8888-666666666666",
+        open_date="0",
+        close_date="43200000",
+    )
+
+    database = Database()
+    database.db_url = f"sqlite://{db_path}"
+
+    await database._backfill_trade_replay_candles()
+
+    assert captured_kwargs == [
+        {
+            "deal_id": "6f6f6f6f-6666-4444-8888-666666666666",
+            "symbol": "ABC/USDT",
+            "open_date": "0",
+            "close_date": "43200000",
+            "allow_missing_archive_exchange_repair": True,
+            "conn": None,
+        }
+    ]
+
+    await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio

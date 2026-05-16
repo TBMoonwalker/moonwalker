@@ -13,6 +13,7 @@ from service.autopilot_memory import AutopilotMemoryService, SymbolAdmissionProf
 from service.config import resolve_timeframe
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
+from service.trading_controls import is_global_trading_paused
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal_runtime")
 
@@ -342,8 +343,6 @@ async def _resolve_runtime_capacity(
     config: dict[str, Any],
     statistic: Statistic,
     autopilot: Autopilot,
-    *,
-    sidestep_campaigns: SpotSidestepCampaignService | None = None,
 ) -> tuple[list[str], int]:
     """Return current active symbols and the effective max-bot limit."""
     max_bots = int(config.get("max_bots", 0) or 0)
@@ -383,6 +382,22 @@ async def resolve_signal_admission_batch(
     normalized_candidates = _dedupe_candidate_symbols(candidate_symbols)
     if not normalized_candidates:
         return SignalAdmissionBatch(decisions=[])
+    if is_global_trading_paused(config):
+        return SignalAdmissionBatch(
+            decisions=[
+                SignalAdmissionDecision(
+                    symbol=symbol,
+                    admitted=False,
+                    reason_code="skipped_global_pause",
+                    memory_status="neutral",
+                    trust_direction="neutral",
+                    trust_score=None,
+                    available_slots=0,
+                    competing_candidates=0,
+                )
+                for symbol in normalized_candidates
+            ]
+        )
 
     async with _PENDING_ADMISSION_LOCK:
         sidestep_campaigns = await SpotSidestepCampaignService.instance()
@@ -390,7 +405,6 @@ async def resolve_signal_admission_batch(
             config,
             statistic,
             autopilot,
-            sidestep_campaigns=sidestep_campaigns,
         )
         active_symbol_set = set(active_symbols)
         reserved_symbol_set = set(_PENDING_ADMISSION_SYMBOLS)
@@ -407,7 +421,11 @@ async def resolve_signal_admission_batch(
                 enabled=bool(config.get("autopilot", False)),
             )
         except Exception as exc:  # noqa: BLE001 - fail open to stable fallback.
-            logging.warning("Autopilot memory admission unavailable: %s", exc)
+            logging.warning(
+                "Autopilot memory admission unavailable: %s",
+                exc,
+                exc_info=True,
+            )
             admission_profiles = {
                 symbol: _fallback_admission_profile(
                     symbol,

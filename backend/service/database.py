@@ -612,7 +612,7 @@ class Database:
             )
 
     async def _backfill_trade_replay_candles(self) -> None:
-        """Backfill per-deal replay candles for existing closed trades."""
+        """Backfill or repair per-deal replay candles for existing closed trades."""
         if not self.db_url.startswith("sqlite://"):
             return
 
@@ -632,6 +632,7 @@ class Database:
                 symbol,
                 open_date=closed_row.get("open_date"),
                 close_date=closed_row.get("close_date"),
+                allow_missing_archive_exchange_repair=True,
             )
 
     async def _ensure_open_trades_columns(self) -> None:
@@ -658,12 +659,39 @@ class Database:
                 ("tp_limit_order_price", "REAL NULL"),
                 ("tp_limit_order_amount", "REAL NULL"),
                 ("tp_limit_order_armed_at", "TEXT NULL"),
+                ("automation_paused", "INTEGER NOT NULL DEFAULT 0"),
+                ("automation_paused_at", "TEXT NULL"),
             ),
         )
         if alter_statements:
             await connection.execute_script("\n".join(alter_statements))
             logging.info(
                 "Added missing OpenTrades columns: %s",
+                ", ".join(_extract_added_column_names(alter_statements)),
+            )
+
+    async def _ensure_spot_campaign_columns(self) -> None:
+        """Ensure additive SpotCampaigns columns exist on existing SQLite databases."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query(
+            "PRAGMA table_info('spotcampaigns')"
+        )
+        existing = {row["name"] for row in columns}
+        alter_statements = _plan_additive_column_statements(
+            "spotcampaigns",
+            existing,
+            (
+                ("automation_paused", "INTEGER NOT NULL DEFAULT 0"),
+                ("automation_paused_at", "TEXT NULL"),
+            ),
+        )
+        if alter_statements:
+            await connection.execute_script("\n".join(alter_statements))
+            logging.info(
+                "Added missing SpotCampaigns columns: %s",
                 ", ".join(_extract_added_column_names(alter_statements)),
             )
 
@@ -754,6 +782,7 @@ class Database:
     async def _run_schema_init_steps(self) -> None:
         """Run additive schema and index maintenance for existing databases."""
         await self._ensure_open_trades_columns()
+        await self._ensure_spot_campaign_columns()
         await self._ensure_trade_ledger_columns()
         await self._ensure_upnl_history_columns()
         await self._ensure_indexes()

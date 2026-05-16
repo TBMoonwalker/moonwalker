@@ -19,6 +19,16 @@ const closedTradesSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'ClosedTrades.vue'),
     'utf8',
 )
+const missionPauseActionsSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useMissionPauseActions.ts',
+    ),
+    'utf8',
+)
 const configDcaSectionSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'config', 'ConfigDcaSection.vue'),
     'utf8',
@@ -60,6 +70,22 @@ test('waiting sidestep campaigns get their own surface and explicit waiting acti
         'expected the waiting campaigns table to label the manual re-entry action clearly',
     )
     assert.ok(
+        waitingCampaignsSource.includes('Pause automation'),
+        'expected the waiting campaigns table to expose a pause automation control',
+    )
+    assert.ok(
+        openTradeColumnsSource.includes('Pause automation'),
+        'expected the open trades table to expose a pause automation control',
+    )
+    assert.ok(
+        openTradeColumnsSource.includes('Automation paused'),
+        'expected paused open trades to render a persistent paused-state tag',
+    )
+    assert.ok(
+        missionPauseActionsSource.includes('/trades/mission/${action}/'),
+        'expected mission pause actions to use the dedicated mission pause/resume endpoint',
+    )
+    assert.ok(
         waitingCampaignsSource.includes('sidestep_count'),
         'expected the waiting campaigns table to surface sidestep cycle metadata for active-flat trades',
     )
@@ -88,8 +114,16 @@ test('waiting sidestep campaigns get their own surface and explicit waiting acti
         'expected open sidestep trades to render mission-level PnL instead of only the current leg',
     )
     assert.ok(
+        tradesViewSource.includes('Moonwalker paused'),
+        'expected the trades workspace to surface passive global-pause status copy',
+    )
+    assert.ok(
         closedTradesSource.includes("title: 'Outcome'"),
         'expected closed trades to label tactical sidestep exits separately from terminal outcomes',
+    )
+    assert.ok(
+        closedTradesSource.includes('sort_key'),
+        'expected closed trades pagination requests to include backend sort parameters',
     )
     assert.ok(
         configDcaSectionSource.includes('label="Trade mode"'),

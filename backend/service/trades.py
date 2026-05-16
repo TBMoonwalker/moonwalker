@@ -22,6 +22,7 @@ from service.spot_campaign_types import (
     TradeLifecycleMode,
 )
 from service.trade_math import parse_date_to_ms
+from service.trading_controls import resolve_mission_pause_fields
 from tortoise.exceptions import BaseORMException
 from tortoise.expressions import F
 from tortoise.functions import Sum
@@ -55,6 +56,18 @@ class Trades:
     CLOSED_TRADES_PAGE_SIZE = max(
         1, int(os.getenv("MOONWALKER_CLOSED_TRADES_PAGE_SIZE", "10"))
     )
+    CLOSED_TRADE_SORT_FIELDS = {
+        "id": "id",
+        "symbol": "symbol",
+        "amount": "amount",
+        "cost": "cost",
+        "profit": "profit",
+        "profit_percent": "profit_percent",
+        "so_count": "so_count",
+        "open_date": "open_date",
+        "close_date": "close_date",
+        "close_reason": "close_reason",
+    }
 
     @staticmethod
     def _log_db_error(message: str, exc: BaseORMException) -> None:
@@ -271,6 +284,21 @@ class Trades:
         row["last_long_signal_at"] = last_long_signal_at
         row["reentry_status"] = reentry_status
 
+    @staticmethod
+    def _apply_automation_pause_fields(
+        row: dict[str, Any],
+        *,
+        open_trade: dict[str, Any] | None,
+        campaign: dict[str, Any] | None,
+    ) -> None:
+        """Attach normalized mission pause fields for UI and runtime consumers."""
+        row.update(
+            resolve_mission_pause_fields(
+                open_trade=open_trade,
+                campaign=campaign,
+            )
+        )
+
     @classmethod
     def _resolve_display_open_date(
         cls,
@@ -411,6 +439,7 @@ class Trades:
     def _build_flat_waiting_trade_data(
         symbol: str,
         open_trade: dict[str, Any],
+        campaign: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return active-flat trade context when no live exposure legs exist."""
         transition_timestamp = str(
@@ -418,7 +447,7 @@ class Trades:
             or open_trade.get("open_date")
             or datetime.now(timezone.utc).timestamp() * 1000
         )
-        return {
+        trade_data = {
             "timestamp": transition_timestamp,
             "fee": 0.0,
             "total_cost": 0.0,
@@ -484,6 +513,27 @@ class Trades:
             "unsellable_min_notional": None,
             "unsellable_estimated_notional": None,
         }
+        trade_data.update(
+            resolve_mission_pause_fields(
+                open_trade=open_trade,
+                campaign=campaign,
+            )
+        )
+        if campaign is not None:
+            Trades._apply_waiting_campaign_status_fields(trade_data, campaign)
+        return trade_data
+
+    @classmethod
+    def _resolve_closed_trade_sort(
+        cls,
+        sort_key: str | None,
+        sort_direction: str | None,
+    ) -> str:
+        """Return a safe ORM order_by expression for closed-trade paging."""
+        normalized_key = str(sort_key or "id").strip().lower()
+        column_name = cls.CLOSED_TRADE_SORT_FIELDS.get(normalized_key, "id")
+        direction = str(sort_direction or "desc").strip().lower()
+        return column_name if direction == "asc" else f"-{column_name}"
 
     async def get_open_trades(
         self,
@@ -531,6 +581,7 @@ class Trades:
                     campaign_id__in=campaign_ids
                 ).values(
                     "campaign_id",
+                    "lifecycle_mode",
                     "started_at",
                     "sidestep_count",
                     "last_exit_reason",
@@ -538,6 +589,8 @@ class Trades:
                     "principal_quote",
                     "cumulative_realized_quote",
                     "cumulative_realized_percent",
+                    "automation_paused",
+                    "automation_paused_at",
                     "metadata_json",
                 )
                 campaigns_by_id = {
@@ -576,6 +629,11 @@ class Trades:
                 order["sidestep_count"] = int(
                     (campaign or {}).get("sidestep_count") or 0
                 )
+                self._apply_automation_pause_fields(
+                    order,
+                    open_trade=order,
+                    campaign=campaign,
+                )
                 self._apply_campaign_profit_fields(order, campaign)
                 if (
                     str(order.get("exposure_state") or "")
@@ -611,11 +669,19 @@ class Trades:
             | ~Q(close_reason__in=NON_TERMINAL_CLOSE_REASON_VALUES)
         )
 
-    async def get_closed_trades(self, page: int = 0) -> list[dict[str, Any]]:
+    async def get_closed_trades(
+        self,
+        page: int = 0,
+        *,
+        sort_key: str | None = None,
+        sort_direction: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Return paginated closed trades."""
         try:
             size = self.CLOSED_TRADES_PAGE_SIZE
-            query = self._visible_closed_trades_query().order_by("-id")
+            query = self._visible_closed_trades_query().order_by(
+                self._resolve_closed_trade_sort(sort_key, sort_direction)
+            )
             if page == 0:
                 orders = await query.limit(size).values()
             else:
@@ -995,6 +1061,8 @@ class Trades:
                         "state",
                         "last_exit_reason",
                         "cooldown_until",
+                        "automation_paused",
+                        "automation_paused_at",
                         "metadata_json",
                     )
                 )
@@ -1040,6 +1108,7 @@ class Trades:
                             "lifecycle_mode": lifecycle_mode,
                             "exposure_state": exposure_state,
                         },
+                        campaign,
                     )
                 return None
             if not baseorder:
@@ -1127,6 +1196,10 @@ class Trades:
                     float(open_trade.get("virtual_waiting_profit_percent") or 0.0)
                     if open_trade
                     else 0.0
+                ),
+                **resolve_mission_pause_fields(
+                    open_trade=open_trade,
+                    campaign=campaign,
                 ),
                 **unsellable_state,
             }

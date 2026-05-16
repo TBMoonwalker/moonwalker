@@ -47,6 +47,7 @@ from service.spot_campaign_types import TradeCloseReason
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades
+from service.trading_controls import evaluate_buy_like_gate
 from tortoise.exceptions import ConfigurationError
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
@@ -934,6 +935,26 @@ class Orders:
             )
 
         try:
+            existing_trade = await self.trades.get_trades_for_orders(order["symbol"])
+        except (RuntimeError, ConfigurationError):
+            # Isolated tests may exercise order orchestration without a live DB
+            # context; runtime paths still resolve the full mission snapshot.
+            existing_trade = None
+        gate = evaluate_buy_like_gate(
+            symbol=str(order.get("symbol") or ""),
+            config=config,
+            trade_data=existing_trade,
+        )
+        if not gate.allowed:
+            logging.warning(
+                "Skipping buy order for %s: %s (%s).",
+                order["symbol"],
+                gate.reason_code,
+                gate.message,
+            )
+            return False
+
+        try:
             if bool(order.get("safetyorder")) and not bool(order.get("baseorder")):
                 canceled = await self.cancel_tp_limit_order(order["symbol"], config)
                 if not canceled:
@@ -1045,6 +1066,13 @@ class Orders:
         trade_data = await self.trades.get_trades_for_orders(normalized_symbol)
         if not trade_data:
             raise ValueError(f"Cannot resolve trade context for {normalized_symbol}.")
+        gate = evaluate_buy_like_gate(
+            symbol=normalized_symbol,
+            config=config,
+            trade_data=trade_data,
+        )
+        if not gate.allowed:
+            raise ValueError(gate.message or "Manual buy add is currently blocked.")
 
         previous_price = float(last_trade.get("price") or 0.0)
         ordersize = calculate_order_size(price=request.price, amount=request.amount)

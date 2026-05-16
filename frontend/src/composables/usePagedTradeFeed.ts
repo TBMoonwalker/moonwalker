@@ -1,6 +1,7 @@
 import { onMounted, reactive, ref, watch, type Ref } from 'vue'
 
 import { fetchJson } from '../api/client'
+import type { TradeTableSortState } from '../helpers/tradeTable'
 
 type NormalizeRows<T> = (rawRows: unknown[]) => T[]
 
@@ -8,10 +9,15 @@ type UsePagedTradeFeedOptions<T> = {
   liveRows: Ref<T[]>
   normalizeRows: NormalizeRows<T>
   lengthEndpoint: string
-  pageEndpoint: (offset: number) => string
+  pageEndpoint: (
+    offset: number,
+    sortState: TradeTableSortState | null,
+  ) => string
   itemLabel: string
   pageSize?: number
   lengthRefreshIntervalMs?: number
+  sortState?: Ref<TradeTableSortState | null>
+  shouldUseLiveRows?: (sortState: TradeTableSortState | null) => boolean
 }
 
 type PaginationState = {
@@ -42,6 +48,8 @@ export function usePagedTradeFeed<T>(
     itemLabel,
     pageSize = 10,
     lengthRefreshIntervalMs = 5000,
+    sortState,
+    shouldUseLiveRows,
   } = options
 
   const totalCount = ref(0)
@@ -66,13 +74,19 @@ export function usePagedTradeFeed<T>(
   }
 
   const updateData = async (currentPage: number) => {
-    if (currentPage === 1) {
+    const activeSortState = sortState?.value ?? null
+    const useLiveRows =
+      currentPage === 1 &&
+      (shouldUseLiveRows ? shouldUseLiveRows(activeSortState) : true)
+    if (useLiveRows) {
       pagedRows.value = liveRows.value
       return
     }
 
     const offset = (currentPage - 1) * pagination.pageSize
-    const response = await fetchJson<{ result: unknown[] }>(pageEndpoint(offset))
+    const response = await fetchJson<{ result: unknown[] }>(
+      pageEndpoint(offset, activeSortState),
+    )
     pagedRows.value = normalizeRows(response.result ?? [])
   }
 
@@ -132,6 +146,17 @@ export function usePagedTradeFeed<T>(
   onMounted(async () => {
     await refreshLength(true)
   })
+
+  if (sortState) {
+    watch(
+      sortState,
+      async () => {
+        pagination.page = 1
+        await updateData(1)
+      },
+      { deep: true },
+    )
+  }
 
   return {
     pagedRows,

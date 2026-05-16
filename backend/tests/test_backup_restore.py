@@ -276,6 +276,51 @@ async def test_export_backup_omits_removed_legacy_autopilot_max_fund_key(
 
 
 @pytest.mark.asyncio
+async def test_restore_backup_canonicalizes_legacy_trade_mode_rows(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+    monkeypatch.setattr(Config, "instance", classmethod(_fake_config_instance))
+    Config._instance = None
+
+    import model
+
+    backup_service = BackupService()
+    summary = await backup_service.restore_backup(
+        {
+            "schema_version": 1,
+            "config": [
+                {"key": "timezone", "value": "Europe/Vienna", "value_type": "str"},
+                {
+                    "key": "trade_lifecycle_mode",
+                    "value": "classic_dca",
+                    "value_type": "str",
+                },
+                {"key": "dynamic_dca", "value": True, "value_type": "bool"},
+            ],
+        },
+        restore_trade_data=False,
+    )
+
+    persisted_rows = {
+        row.key: row.value for row in await model.AppConfig.all().order_by("key")
+    }
+    assert summary["config_keys"] == 2
+    assert persisted_rows == {
+        "timezone": "Europe/Vienna",
+        "trade_mode": "dynamic_dca",
+    }
+
+    await Tortoise.close_connections()
+    Config._instance = None
+
+
+@pytest.mark.asyncio
 async def test_restore_backup_preflights_trade_mode_before_destructive_writes(
     tmp_path, monkeypatch
 ) -> None:
@@ -294,21 +339,6 @@ async def test_restore_backup_preflights_trade_mode_before_destructive_writes(
         key="trade_mode",
         value="dynamic_dca",
         value_type="str",
-    )
-    await model.AppConfig.create(
-        key="trade_lifecycle_mode",
-        value="classic_dca",
-        value_type="str",
-    )
-    await model.AppConfig.create(
-        key="dynamic_dca",
-        value=True,
-        value_type="bool",
-    )
-    await model.AppConfig.create(
-        key="sidestep_campaign_enabled",
-        value=False,
-        value_type="bool",
     )
 
     backup_service = BackupService()
@@ -346,9 +376,6 @@ async def test_restore_backup_preflights_trade_mode_before_destructive_writes(
         row.key: row.value for row in await model.AppConfig.all().order_by("key")
     }
     assert persisted_rows == {
-        "dynamic_dca": "True",
-        "sidestep_campaign_enabled": "False",
-        "trade_lifecycle_mode": "classic_dca",
         "trade_mode": "dynamic_dca",
     }
 

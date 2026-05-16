@@ -40,6 +40,11 @@ class Statistic:
         }
 
     @staticmethod
+    def _log_orm_error(message: str) -> None:
+        """Log ORM failures with traceback while preserving caller fallbacks."""
+        logging.error("%s", message, exc_info=True)
+
+    @staticmethod
     def _extract_date_key(timestamp: Any) -> str | None:
         """Normalize timestamp-like values into a YYYY-MM-DD grouping key."""
         if isinstance(timestamp, datetime):
@@ -92,8 +97,8 @@ class Statistic:
                 "total", flat=True
             )
             return float(result[0] or 0.0)
-        except BaseORMException as exc:
-            logging.error(error_message, exc)
+        except BaseORMException:
+            self._log_orm_error(error_message)
             return 0.0
 
     async def _get_profit_rows_since(
@@ -106,8 +111,8 @@ class Statistic:
             return await model.ClosedTrades.filter(
                 close_date__gt=begin_datetime
             ).values_list("close_date", "profit")
-        except BaseORMException as exc:
-            logging.error(error_message, exc)
+        except BaseORMException:
+            self._log_orm_error(error_message)
             return []
 
     async def _get_open_trade_profit_snapshot(self) -> tuple[float, float, float]:

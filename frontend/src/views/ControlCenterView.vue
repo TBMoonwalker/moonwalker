@@ -90,6 +90,7 @@ const {
     indicatorFormRef,
     initializeClientTimezoneOptions,
     isAsapExchangeReady,
+    baselineState,
     isDirty,
     isSubmitDisabled,
     hasUnsavedChanges,
@@ -193,14 +194,12 @@ const {
     transitionIntent,
 })
 const tradeModeLabel = computed(() => {
-    const tradeMode = normalizeTradeMode(
-        configSnapshotStore.snapshot.value?.trade_mode,
-        configSnapshotStore.snapshot.value?.trade_lifecycle_mode,
-        configSnapshotStore.snapshot.value?.dynamic_dca,
-        configSnapshotStore.snapshot.value?.sidestep_campaign_enabled,
-    )
+    const tradeMode = normalizeTradeMode(configSnapshotStore.snapshot.value?.trade_mode)
     return tradeMode === 'sidestep' ? 'Sidestep' : 'Dynamic DCA'
 })
+const tradingPaused = computed(
+    () => Boolean(configSnapshotStore.snapshot.value?.trading_paused),
+)
 const { refreshWorkspaceFromSnapshot } = useControlCenterWorkspaceRefresh({
     fetchDefaultValues,
     loadRescueMessage,
@@ -227,10 +226,13 @@ const {
     handleActivateLiveTrading,
     handleDetectedExternalConfigChange,
     handleReloadAfterStalePrompt,
+    handleToggleTradingPause,
+    tradingPauseLoading,
 } = useControlCenterRuntimeActions({
     announce,
     apiUrl: buildMoonwalkerApiUrl,
     hasUnsavedChanges,
+    isTradingPaused: tradingPaused,
     isDirty,
     navigateToControlCenter,
     normalizeBlockers: normalizeControlCenterBlockers,
@@ -455,12 +457,15 @@ async function handleToggleAutopilot(): Promise<void> {
                     :formatted-trust-timestamp="formattedTrustTimestamp"
                     :live-activation-ref="bindTargetElement('live-activation')"
                     :readiness="readiness"
+                    :trading-pause-loading="tradingPauseLoading"
+                    :trading-paused="tradingPaused"
                     :trade-mode-label="tradeModeLabel"
                     :visible-blockers="visibleBlockers"
                     @activate-live="handleActivateLiveTrading"
                     @open-config="handleModeSelect('setup')"
                     @open-monitoring="openMonitoringPage"
                     @select-target="guideToTarget"
+                    @toggle-trading-pause="handleToggleTradingPause"
                     @toggle-autopilot="handleToggleAutopilot"
                     @tune-autopilot="openAutopilotAdvanced"
                 />
@@ -476,6 +481,9 @@ async function handleToggleAutopilot(): Promise<void> {
                     :currency="currency"
                     :dca="dca"
                     :dca-form-ref="dcaFormRef"
+                    :dry-run-activation-locked="
+                        baselineState?.exchange?.dry_run === true
+                    "
                     :exchange="exchange"
                     :exchange-form-ref="exchangeFormRef"
                     :exchanges="exchanges"

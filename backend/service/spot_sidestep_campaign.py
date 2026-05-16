@@ -117,7 +117,6 @@ class SpotSidestepCampaignService:
     def __init__(self) -> None:
         """Initialize runtime state and lazy collaborators."""
         self.config: dict[str, Any] = {}
-        self._watcher_queue: asyncio.Queue[Any] | None = None
         self._orders: Any | None = None
 
     @classmethod
@@ -134,22 +133,6 @@ class SpotSidestepCampaignService:
         config = await Config.instance()
         config.subscribe(self.on_config_change)
         self.on_config_change(config.snapshot())
-
-    async def start(self) -> None:
-        """Start the service.
-
-        Re-entry is watcher-owned now, so there is no separate background
-        campaign loop to start here.
-        """
-        return
-
-    async def shutdown(self) -> None:
-        """Release transient runtime references."""
-        self._watcher_queue = None
-
-    def bind_watcher_queue(self, watcher_queue: asyncio.Queue[Any]) -> None:
-        """Attach the shared watcher queue used for re-entry symbols."""
-        self._watcher_queue = watcher_queue
 
     def on_config_change(self, config: dict[str, Any]) -> None:
         """Cache the latest config snapshot."""

@@ -11,11 +11,12 @@
         :locale="{ emptyText: tableEmptyText }"
         aria-label="Closed trades table"
         @update:page="handlePageChange"
+        @update:sorter="handleSorterChange"
     />
 </template>
 
 <script setup lang="ts">
-import { computed, h, onMounted } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
 import { NButton } from 'naive-ui/es/button'
 import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
@@ -31,7 +32,10 @@ import { useViewport } from '../composables/useViewport'
 import {
     formatAssetAmount,
     formatFixed,
+    resolveTradeTableColumnOrder,
     resolveTradeDateTime,
+    resolveTradeTableSortState,
+    type TradeTableSortState,
 } from '../helpers/tradeTable'
 import { useTradesStore, type ClosedTradeRow } from '../stores/trades'
 
@@ -41,6 +45,7 @@ const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
     useConfiguredMinTimeframe()
 const dialog = useDialog()
 const message = useMessage()
+const sortState = ref<TradeTableSortState | null>(null)
 
 const {
     rows: closed_trades,
@@ -68,8 +73,23 @@ const {
         return trades_store.closedTrades as ClosedTradeRow[]
     },
     lengthEndpoint: '/trades/closed/length',
-    pageEndpoint: (offset) => `/trades/closed/${offset}`,
+    pageEndpoint: (offset, activeSortState) => {
+        const query = new URLSearchParams()
+        if (activeSortState) {
+            query.set('sort_key', activeSortState.columnKey)
+            query.set(
+                'sort_dir',
+                activeSortState.order === 'ascend' ? 'asc' : 'desc',
+            )
+        }
+        const suffix = query.toString()
+        return suffix
+            ? `/trades/closed/${offset}?${suffix}`
+            : `/trades/closed/${offset}`
+    },
     itemLabel: 'trades',
+    sortState,
+    shouldUseLiveRows: (activeSortState) => activeSortState === null,
 })
 
 function row_classes(row: ClosedTradeRow) {
@@ -114,6 +134,10 @@ function renderExpandIcon() {
     )
 }
 
+function handleSorterChange(sorter: unknown): void {
+    sortState.value = resolveTradeTableSortState(sorter)
+}
+
 function formatCloseReason(reason: string | null | undefined): string {
     switch (reason) {
         case 'sidestep_exit':
@@ -148,12 +172,15 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
         },
         {
             title: '#',
-            key: 'key',
-            defaultSortOrder: 'ascend'
+            key: 'id',
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'id'),
         },
         {
             title: 'Pair',
             key: 'symbol',
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'symbol'),
         },
         {
             title: 'Amount',
@@ -161,6 +188,8 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             render: (rowData) => {
                 return formatAssetAmount(rowData.amount)
             },
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'amount'),
         },
         {
             title: 'Profit',
@@ -168,6 +197,8 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             render: (rowData) => {
                 return formatFixed(rowData.profit)
             },
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'profit'),
         },
         {
             title: 'Cost',
@@ -175,6 +206,8 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             render: (rowData) => {
                 return formatFixed(rowData.cost)
             },
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'cost'),
         },
         {
             title: 'PNL %',
@@ -183,16 +216,28 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             render: (rowData) => {
                 return `${formatFixed(rowData.profit_percent)} %`
             },
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'profit_percent',
+            ),
         },
         {
             title: 'SO',
             key: 'so_count',
-            align: 'center'
+            align: 'center',
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'so_count'),
         },
         {
             title: 'Outcome',
             key: 'close_reason',
             render: (rowData) => formatCloseReason(rowData.close_reason),
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'close_reason',
+            ),
         },
         {
             title: 'Duration',
@@ -208,6 +253,11 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
                     h('div', time),
                 ]
             },
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'close_date',
+            ),
         },
         {
             title: 'Action',

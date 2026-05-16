@@ -27,6 +27,7 @@ function createRuntimeHarness(overrides = {}) {
         hasUnsavedChanges() {
             return false
         },
+        isTradingPaused: computed(() => false),
         isDirty: computed(() => false),
         async navigateToControlCenter(mode, target = null) {
             navigation.push([mode, target])
@@ -74,6 +75,13 @@ function createRuntimeHarness(overrides = {}) {
             return {
                 data: {
                     message: 'Live trading activated.',
+                },
+            }
+        },
+        async postTradingPauseRequest() {
+            return {
+                data: {
+                    message: 'Moonwalker paused for new exposure.',
                 },
             }
         },
@@ -136,6 +144,24 @@ test('runtime actions activate live trading through the extracted seam', async (
     assert.equal(harness.intents[0].mode, 'overview')
     assert.equal(harness.intents[0].target, 'live-activation')
     assert.deepEqual(harness.announcements, ['Live trading activated.'])
+})
+
+test('runtime actions toggle Moonwalker pause through the extracted seam', async () => {
+    const harness = createRuntimeHarness()
+
+    await harness.flow.handleToggleTradingPause()
+
+    assert.equal(harness.flow.tradingPauseLoading.value, false)
+    assert.deepEqual(harness.trackEvents, [
+        'control_center_trading_pause_requested',
+    ])
+    assert.deepEqual(harness.syncCalls, ['trading_pause'])
+    assert.equal(harness.intents.length, 1)
+    assert.equal(harness.intents[0].kind, 'toggle_trading_pause')
+    assert.equal(harness.intents[0].status, 'success')
+    assert.deepEqual(harness.announcements, [
+        'Moonwalker paused for new exposure.',
+    ])
 })
 
 test('runtime actions announce a newer external config when local drafts exist', async () => {

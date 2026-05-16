@@ -13,7 +13,9 @@ from model import AppConfig, OpenTrades
 from service.backup_restore import BackupService
 from service.config import (
     Config,
+    build_legacy_trade_mode_key_message,
     build_removed_config_key_message,
+    is_legacy_trade_mode_key,
     is_removed_config_key,
 )
 from service.config_persistence import should_persist_config_value
@@ -21,11 +23,13 @@ from service.config_views import TradeLifecycleConfigView
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trade_lifecycle_config import (
     TRADE_MODE_COMPATIBILITY_KEYS,
+    TRADE_MODE_LEGACY_KEYS,
     TradeModeConfigError,
     TradeModeSwitchGuard,
     build_blocked_live_mode_switch_error,
     resolve_trade_mode_config,
 )
+from service.trading_controls import GLOBAL_TRADING_PAUSED_KEY
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
@@ -106,14 +110,6 @@ def _get_raw_config_snapshot(config: Config) -> dict[str, Any]:
     return _get_config_snapshot(config)
 
 
-def _trade_mode_update_payload(value: Any) -> dict[str, Any]:
-    """Return the typed config payload for canonical trade-mode compatibility writes."""
-    return {
-        "value": value,
-        "type": "bool" if isinstance(value, bool) else "str",
-    }
-
-
 def _merge_config_snapshot_with_updates(
     config_snapshot: dict[str, Any],
     updates: ConfigUpdateMap,
@@ -131,7 +127,7 @@ def _merge_config_snapshot_with_updates(
 
 
 def _updates_touch_trade_mode(updates: ConfigUpdateMap) -> bool:
-    """Return whether the request mutates any trade-mode compatibility field."""
+    """Return whether the request mutates the canonical trade-mode field."""
     return any(key in TRADE_MODE_COMPATIBILITY_KEYS for key in updates)
 
 
@@ -139,18 +135,11 @@ def _requested_trade_mode_snapshot(
     config_snapshot: dict[str, Any],
     updates: ConfigUpdateMap,
 ) -> dict[str, Any]:
-    """Return the mode-resolution snapshot after discarding stale untouched mirrors."""
+    """Return the mode-resolution snapshot after dropping stale legacy bridge keys."""
     merged_snapshot = _merge_config_snapshot_with_updates(config_snapshot, updates)
-    legacy_keys = {
-        "trade_lifecycle_mode",
-        "dynamic_dca",
-        "sidestep_campaign_enabled",
-    }
     if "trade_mode" in updates:
-        for key in legacy_keys - updates.keys():
+        for key in TRADE_MODE_LEGACY_KEYS:
             merged_snapshot.pop(key, None)
-    if "trade_mode" not in updates and any(key in updates for key in legacy_keys):
-        merged_snapshot.pop("trade_mode", None)
     return merged_snapshot
 
 
@@ -199,7 +188,7 @@ async def _prepare_trade_mode_updates(
     config_snapshot: dict[str, Any],
     updates: ConfigUpdateMap,
 ) -> ConfigUpdateMap:
-    """Normalize mode-related config updates into canonical + bridge writes."""
+    """Validate canonical trade-mode updates against runtime switch rules."""
     prepared_updates = dict(updates)
     if not _updates_touch_trade_mode(prepared_updates):
         return prepared_updates
@@ -214,7 +203,6 @@ async def _prepare_trade_mode_updates(
         merged_snapshot,
         source="save",
         require_explicit_sidestep_reentry=False,
-        allow_canonical_without_legacy=True,
     ).trade_mode
 
     if requested_trade_mode != current_trade_mode:
@@ -228,19 +216,10 @@ async def _prepare_trade_mode_updates(
                 waiting_campaign_count=guard.waiting_campaign_count,
             )
 
-    prepared_updates.update(
-        {
-            key: _trade_mode_update_payload(value)
-            for key, value in resolve_trade_mode_config(
-                merged_snapshot,
-                source="save",
-                require_explicit_sidestep_reentry=False,
-                allow_canonical_without_legacy=True,
-            )
-            .compatibility_values()
-            .items()
-        }
-    )
+    prepared_updates["trade_mode"] = {
+        "value": requested_trade_mode,
+        "type": "str",
+    }
     return prepared_updates
 
 
@@ -295,7 +274,7 @@ def _find_live_activation_blockers(
                     }
                 )
         else:
-            dynamic_dca_enabled = bool(config_snapshot.get("dynamic_dca"))
+            dynamic_dca_enabled = lifecycle.trade_mode == "dynamic_dca"
             dca_required_keys = (
                 [
                     ("mstc", "Set max safety order count."),
@@ -371,6 +350,8 @@ def _validate_live_activation_boundary(
 def _validate_removed_config_keys(updates: ConfigUpdateMap) -> str | None:
     """Return an error when the payload references a removed config key."""
     for key in updates:
+        if is_legacy_trade_mode_key(key):
+            return build_legacy_trade_mode_key_message(key)
         if is_removed_config_key(key):
             return build_removed_config_key_message(key)
     return None
@@ -708,6 +689,100 @@ async def activate_live_trading(request: Request[Any, Any, Any]) -> Any:
     }
 
 
+async def _read_confirm_flag(
+    request: Request[Any, Any, Any],
+) -> tuple[bool | None, Any]:
+    """Return the explicit confirm flag or a shaped error response."""
+    try:
+        data = await request.json()
+    except SerializationException:
+        data = {}
+
+    if data is None:
+        data = {}
+    if not isinstance(data, dict):
+        return None, json_response({"error": "Payload must be a JSON object"}, 400)
+
+    confirm = bool(data.get("confirm", False))
+    if not confirm:
+        return None, json_response(
+            {
+                "error": "This action requires an explicit confirm flag.",
+                "message": "This action requires an explicit confirm flag.",
+            },
+            400,
+        )
+    return True, None
+
+
+@post(path="/config/trading/pause")
+async def pause_trading(request: Request[Any, Any, Any]) -> Any:
+    """Pause Moonwalker for new exposure while existing exits continue."""
+    _, error_response = await _read_confirm_flag(request)
+    if error_response is not None:
+        return error_response
+
+    config = await Config.instance()
+    if bool(config.get(GLOBAL_TRADING_PAUSED_KEY, False)):
+        return {
+            "message": "Moonwalker is already paused for new exposure.",
+            "status": "already_paused",
+            "trading_paused": True,
+        }
+
+    success = await config.set(
+        GLOBAL_TRADING_PAUSED_KEY,
+        {"value": True, "type": "bool"},
+    )
+    if not success:
+        logging.error("Global trading pause failed during config persistence.")
+        return json_response(
+            {"error": "Trading pause failed - check config.log"},
+            400,
+        )
+
+    logging.info("Moonwalker paused for new exposure.")
+    return {
+        "message": "Moonwalker paused for new exposure.",
+        "status": "paused",
+        "trading_paused": True,
+    }
+
+
+@post(path="/config/trading/resume")
+async def resume_trading(request: Request[Any, Any, Any]) -> Any:
+    """Resume Moonwalker so new exposure is allowed again."""
+    _, error_response = await _read_confirm_flag(request)
+    if error_response is not None:
+        return error_response
+
+    config = await Config.instance()
+    if not bool(config.get(GLOBAL_TRADING_PAUSED_KEY, False)):
+        return {
+            "message": "Moonwalker is already accepting new exposure.",
+            "status": "already_resumed",
+            "trading_paused": False,
+        }
+
+    success = await config.set(
+        GLOBAL_TRADING_PAUSED_KEY,
+        {"value": False, "type": "bool"},
+    )
+    if not success:
+        logging.error("Global trading resume failed during config persistence.")
+        return json_response(
+            {"error": "Trading resume failed - check config.log"},
+            400,
+        )
+
+    logging.info("Moonwalker resumed for new exposure.")
+    return {
+        "message": "Moonwalker resumed for new exposure.",
+        "status": "resumed",
+        "trading_paused": False,
+    }
+
+
 @post(path="/config/backup/restore")
 async def restore_backup(request: Request[Any, Any, Any]) -> Any:
     """Restore config-only or full backup payloads."""
@@ -752,5 +827,7 @@ route_handlers = [
     update_config_key,
     update_multiple_config_keys,
     activate_live_trading,
+    pause_trading,
+    resume_trading,
     restore_backup,
 ]

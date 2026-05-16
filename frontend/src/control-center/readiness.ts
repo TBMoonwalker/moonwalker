@@ -1,7 +1,11 @@
 import { resolveControlCenterBlocker } from './blockers'
 import { deriveSignalModeBlockers } from './signalMode'
 import { getTaskPresentation } from './taskRegistry'
-import { isDynamicTradeMode, isSidestepTradeMode, normalizeTradeMode } from '../helpers/tradeLifecycle'
+import {
+    isDynamicTradeMode,
+    isSidestepTradeMode,
+    normalizeTradeMode,
+} from '../helpers/tradeLifecycle'
 import type {
     ControlCenterBlocker,
     ControlCenterMode,
@@ -36,12 +40,7 @@ function hasPositiveNumber(value: unknown): boolean {
 }
 
 function getTradeMode(config: SharedConfigPayload): string {
-    return normalizeTradeMode(
-        config.trade_mode,
-        config.trade_lifecycle_mode,
-        config.dynamic_dca,
-        config.sidestep_campaign_enabled,
-    )
+    return normalizeTradeMode(config.trade_mode)
 }
 
 function isSpotMarket(config: SharedConfigPayload): boolean {
