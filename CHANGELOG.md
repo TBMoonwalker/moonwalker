@@ -24,6 +24,33 @@ All notable changes to Moonwalker are documented in this file.
   top-level docs so operators see the shipped `trade_mode` language
   consistently.
 
+## [3.0.0.0] - 2026-05-13
+
+### Changed
+
+- Remove static DCA code, consolidate around `trade_mode` (`dynamic_dca` and `sidestep`).
+- Update documentation to reflect new trade-mode model.
+
+## [2.0.0.0] - 2026-05-12
+
+### Changed
+
+- Implement spot shorting strategy with dedicated campaign support.
+- Optimize code and clean up architecture.
+
+## [1.4.0.2] - 2026-05-06
+
+### Changed
+
+- Fix live mode activation logic.
+- Clean up code smells and remove leftover legacy code.
+
+## [1.4.0.1] - 2026-05-05
+
+### Fixed
+
+- Size partial sell retries from remaining position.
+
 ## [1.4.0.0] - 2026-04-28
 
 ### Breaking Changes
