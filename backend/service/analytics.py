@@ -103,7 +103,7 @@ class Analytics:
 
         result: list[dict[str, Any]] = []
         for date_str, count in sorted(buckets.items()):
-            ts = _date_str_to_epoch_ms(date_str)
+            ts = _date_str_to_epoch_ms(date_str, resolution)
             if ts is not None:
                 result.append({"timestamp": ts, "value": count})
         return result
@@ -298,8 +298,11 @@ def _extract_date_key(
 
 
 def _date_str_to_epoch_ms(date_str: str, resolution: str = "daily") -> int | None:
-    """Convert a 'YYYY-MM-DD' key back to milliseconds."""
+    """Convert a date bucket key back to milliseconds."""
     try:
+        if resolution == "weekly":
+            parsed = datetime.strptime(f"{date_str}-1", "%G-W%V-%u")
+            return int(parsed.replace(tzinfo=UTC).timestamp() * 1000)
         if date_str.startswith("2") and "-" in date_str:
             parsed = datetime.strptime(date_str, "%Y-%m-%d")
             return int(parsed.replace(tzinfo=UTC).timestamp() * 1000)

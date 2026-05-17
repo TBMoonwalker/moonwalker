@@ -117,6 +117,42 @@ async def test_overview_heatmap_daily(tmp_path, monkeypatch, analytics) -> None:
 
 
 @pytest.mark.asyncio
+async def test_overview_heatmap_weekly_uses_iso_week_start(
+    tmp_path, monkeypatch, analytics
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monday = datetime(2026, 3, 2, 12, 0, tzinfo=UTC)
+    await model.ClosedTrades.create(
+        symbol="BTC/USDT",
+        profit=5.0,
+        close_date=monday.isoformat(),
+    )
+    await model.ClosedTrades.create(
+        symbol="ETH/USDT",
+        profit=3.0,
+        close_date=(monday + timedelta(days=2)).isoformat(),
+    )
+
+    result = await analytics.get_overview()
+
+    assert result["heatmap_weekly"] == [
+        {
+            "timestamp": int(
+                monday.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+                * 1000
+            ),
+            "value": 2,
+        }
+    ]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_overview_per_symbol(tmp_path, monkeypatch, analytics) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"
