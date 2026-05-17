@@ -46,12 +46,9 @@ const distribution = computed(
       () => (d.value as AnalyticsOverview | null)?.distribution ?? null,
  )
 
-const heatmapData = computed(() => {
-   if (isMobile.value) {
-       return heatmapWeekly.value
-       }
-   return heatmapDaily.value
- })
+const heatmapData = computed(
+       () => (d.value as AnalyticsOverview | null)?.heatmap_daily ?? [],
+ )
 
 function fmt2(val: number) {
    return val.toFixed(2)
