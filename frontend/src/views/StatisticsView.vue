@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, ref } from 'vue'
-import type { DataTableColumns } from 'naive-ui'
+import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import type { DataTableColumns, PaginationProps } from 'naive-ui'
 import Heatmap from '../components/Heatmap.vue'
 import { useAnalyticsStore } from '../stores/analytics'
 import type { AnalyticsOverview } from '../stores/analytics'
@@ -8,6 +8,12 @@ import type { AnalyticsOverview } from '../stores/analytics'
 const analytics = useAnalyticsStore()
 const activeTab = ref('symbols')
 const isMobile = ref(false)
+const symbolPagination = reactive<PaginationProps>({
+   page: 1,
+   pageSize: 10,
+   pageSlot: 5,
+   prefix: ({ itemCount }) => `Total ${itemCount} symbols`,
+})
 
 function handleResize() {
    isMobile.value = window.innerWidth < 768
@@ -49,6 +55,14 @@ const distribution = computed(
 const heatmapData = computed(
        () => (d.value as AnalyticsOverview | null)?.heatmap_daily ?? [],
  )
+
+watch(perSymbol, (rows) => {
+   const pageSize = symbolPagination.pageSize ?? 10
+   const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
+   if ((symbolPagination.page ?? 1) > maxPage) {
+     symbolPagination.page = maxPage
+   }
+})
 
 function fmt2(val: number) {
    return val.toFixed(2)
@@ -279,7 +293,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                     <n-data-table
                         :columns="getSymbolColumns()"
                         :data="perSymbol"
-                        :pagination="false"
+                        :pagination="symbolPagination"
                         :scroll-x="500"
                        size="small"
                     />
