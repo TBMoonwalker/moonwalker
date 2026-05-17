@@ -4,7 +4,7 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
-## [1.4.1.0] - 2026-05-17
+## [3.1.0.0] - 2026-05-17
 
 ### Added
 
