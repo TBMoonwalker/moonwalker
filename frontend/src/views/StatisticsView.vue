@@ -104,6 +104,7 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        key: 'trades',
        width: 80,
        sorter: 'default',
+       defaultSortOrder: 'descend',
       },
       {
        title: 'Win Rate',
