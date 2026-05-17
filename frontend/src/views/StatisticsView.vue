@@ -454,7 +454,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 
 .funds-label {
   font-size: 14px;
-  color: var(--n-label-text-color, rgba(255, 255, 255, 0.65));
+  color: var(--n-text-color-3, rgba(51, 64, 58, 0.62));
 }
 
 .heatmap-card {
