@@ -8,7 +8,7 @@ from typing import Any
 
 _DurationPattern = re.compile(
     r"^(?:(?P<days>\d+)\s+days?,\s*)?"
-    r"(?P<hours>\d{1,2}):(?P<minutes>\d{2}):(?P<seconds>\d{2})"
+    r"(?P<hours>\d+):(?P<minutes>\d{2}):(?P<seconds>\d{2})"
     r"(?:\.(?P<microseconds>\d+))?$"
 )
 

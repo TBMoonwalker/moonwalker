@@ -9,7 +9,6 @@ from typing import Any
 
 import helper
 import model
-from tortoise.functions import Sum
 
 logging = helper.LoggerFactory.get_logger("logs/analytics.log", "analytics")
 
@@ -67,16 +66,7 @@ class Analytics:
             sum(profit_percents) / len(profit_percents) if profit_percents else 0.0
         )
         avg_duration = sum(durations) / len(durations) if durations else 0.0
-        total_cost_result = (
-            await model.ClosedTrades.filter(pk__in=[r.pk for r in rows])
-            .annotate(__total=Sum("cost"))
-            .values_list("__total", flat=True)
-        )
-        total_cost = (
-            total_cost_result[0]
-            if total_cost_result and total_cost_result[0] is not None
-            else 0.0
-        )
+        total_cost = round(sum((r.cost or 0.0) for r in rows), 2)
 
         return {
             "total_trades": total,
