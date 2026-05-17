@@ -332,24 +332,77 @@ def _make_histogram_bins(
     values: list[float],
     num_bins: int = 10,
 ) -> list[dict[str, Any]]:
-    """Create evenly-spaced histogram bins from a list of percentages."""
+    """Create profit histogram bins without crossing breakeven."""
     if not values:
         return []
+
+    losses = [value for value in values if value < 0]
+    breakeven_count = sum(1 for value in values if value == 0)
+    profits = [value for value in values if value > 0]
+    reserved_bins = 1 if breakeven_count else 0
+    available_bins = max(1, num_bins - reserved_bins)
+
+    if losses and profits:
+        loss_bin_count = round(
+            available_bins * len(losses) / (len(losses) + len(profits))
+        )
+        loss_bin_count = min(max(1, loss_bin_count), available_bins - 1)
+        profit_bin_count = available_bins - loss_bin_count
+    elif losses:
+        loss_bin_count = available_bins
+        profit_bin_count = 0
+    else:
+        loss_bin_count = 0
+        profit_bin_count = available_bins
+
+    bins: list[dict[str, Any]] = []
+    bins.extend(_make_signed_histogram_bins(losses, loss_bin_count, "Loss"))
+    if breakeven_count:
+        bins.append(
+            {
+                "label": "Breakeven",
+                "min": 0.0,
+                "max": 0.0,
+                "count": breakeven_count,
+            }
+        )
+    bins.extend(_make_signed_histogram_bins(profits, profit_bin_count, "Profit"))
+    return bins
+
+
+def _make_signed_histogram_bins(
+    values: list[float],
+    target_bins: int,
+    label: str,
+) -> list[dict[str, Any]]:
+    """Create evenly-spaced histogram bins for one side of breakeven."""
+    if not values or target_bins <= 0:
+        return []
+
     mn = min(values)
     mx = max(values)
     if mn == mx:
-        return [{"label": f"{mn:.1f}%", "min": mn, "max": mx, "count": len(values)}]
-    width = (mx - mn) / num_bins
+        return [
+            {
+                "label": label,
+                "min": round(mn, 2),
+                "max": round(mx, 2),
+                "count": len(values),
+            }
+        ]
+
+    bin_count = min(target_bins, len(values))
+    width = (mx - mn) / bin_count
     bins: list[dict[str, Any]] = []
-    for i in range(num_bins):
+    for i in range(bin_count):
         lo = mn + width * i
         hi = mn + width * (i + 1)
         count = sum(
-            1 for v in values if v >= lo and (v < hi if i < num_bins - 1 else v <= hi)
+            1 for v in values if v >= lo and (v < hi if i < bin_count - 1 else v <= hi)
         )
         bins.append(
             {
-                "label": f"{lo:.1f}%",
+                "label": label,
                 "min": round(lo, 2),
                 "max": round(hi, 2),
                 "count": count,

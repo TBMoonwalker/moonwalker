@@ -278,6 +278,19 @@ async def test_overview_distribution(tmp_path, monkeypatch, analytics) -> None:
     assert len(dist["bins"]) == 10
     total_in_bins = sum(b["count"] for b in dist["bins"])
     assert total_in_bins == 10
+    assert all(not (b["min"] < 0 < b["max"]) for b in dist["bins"])
+    assert [b["label"] for b in dist["bins"]] == [
+        "Loss",
+        "Loss",
+        "Breakeven",
+        "Profit",
+        "Profit",
+        "Profit",
+        "Profit",
+        "Profit",
+        "Profit",
+        "Profit",
+    ]
     assert dist["best"] == 60.0
     assert dist["worst"] == -10.0
 

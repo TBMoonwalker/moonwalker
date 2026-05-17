@@ -58,6 +58,18 @@ function fmtPct(val: number) {
    return `${val}%`
 }
 
+function fmtRangePct(val: number) {
+   const normalized = Object.is(val, -0) ? 0 : val
+   return `${normalized.toFixed(2)}%`
+}
+
+function fmtProfitRange(row: { min: number; max: number }) {
+   if (row.min === row.max) {
+     return fmtRangePct(row.min)
+   }
+   return `${fmtRangePct(row.min)} to ${fmtRangePct(row.max)}`
+}
+
 const tabNames = [
       { name: 'symbols', label: 'Symbols' },
       { name: 'duration', label: 'Duration' },
@@ -170,7 +182,7 @@ function getDurationColumns(): DataTableColumns<AnalyticsOverview['duration_extr
 function getDistributionColumns(): DataTableColumns<{ label: string; min: number; max: number; count: number }> {
    return [
       {
-       title: 'Profit Range',
+       title: 'Outcome',
        key: 'label',
        width: 120,
       },
@@ -178,7 +190,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
        title: 'Range',
        width: 160,
        render(row: any) {
-        return `${row.min}% \u2013 ${row.max}%`
+        return fmtProfitRange(row)
         },
       },
       {
@@ -240,10 +252,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                 />
               </div>
               <div class="stat-cell">
-                <div class="stacked-stat funds-stat">
-                  <span class="funds-label">Avg Duration</span>
-                  <span class="funds-value">{{ summary.avg_duration_formatted }}</span>
-                </div>
+                <n-statistic label="Avg Duration" :value="summary.avg_duration_formatted" />
               </div>
             </div>
           </n-card>
@@ -307,12 +316,13 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                   <!-- Risk Tab -->
                   <template v-if="tab.name === 'risk' && drawdown">
                     <n-flex :size="12" vertical>
-                      <div class="stat-cell">
-                        <div class="stacked-stat funds-stat">
-                          <span class="funds-label">Max Drawdown</span>
-                          <span class="funds-value red">{{ fmt2(drawdown.max_drawdown) }}</span>
-                          <span class="stat-detail">{{ fmtPct(drawdown.max_drawdown_percent) }}</span>
-                        </div>
+                      <div class="stat-cell risk-stat">
+                        <n-statistic
+                            class="red"
+                            label="Max Drawdown"
+                            :value="fmt2(drawdown.max_drawdown)"
+                        />
+                        <span class="stat-detail">{{ fmtPct(drawdown.max_drawdown_percent) }}</span>
                       </div>
                       <n-card content-style="padding: 12px;">
                         <n-flex vertical :size="4">
@@ -409,7 +419,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 }
 
 .stat-detail {
-  color: rgba(255, 255, 255, 0.72);
+  color: var(--n-text-color-3, #8a948d);
   font-size: 12px;
   line-height: 1.25;
   text-align: center;
@@ -433,28 +443,9 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
    --n-value-text-color: rgb(99, 226, 183) !important;
 }
 
-.stacked-stat {
-  display: flex;
+.risk-stat {
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  text-align: center;
-  gap: 6px;
-  height: 100%;
-  width: 100%;
-}
-
-.funds-value {
-  color: var(--n-value-text-color);
-  font-size: 24px;
-  font-weight: 600;
-  font-variant-numeric: tabular-nums;
-  line-height: 1.15;
-}
-
-.funds-label {
-  font-size: 14px;
-  color: var(--n-text-color-3, rgba(51, 64, 58, 0.62));
+  gap: 4px;
 }
 
 .heatmap-card {
@@ -518,10 +509,6 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
     line-height: 1.15;
    }
 
-   .funds-label {
-    font-size: 12px;
-    line-height: 1.2;
-   }
 }
 
 @media (min-width: 769px) and (max-width: 1200px) {
