@@ -33,12 +33,17 @@ export function createAppRouter(
                 name: 'controlCenterAutopilot',
                 component: () => import('../views/AutopilotMemoryView.vue'),
             },
-            {
-                path: '/monitoring',
-                name: 'monitoring',
-                component: () => import('../views/MonitoringView.vue'),
-            },
-        ],
+              {
+                 path: '/monitoring',
+                 name: 'monitoring',
+                 component: () => import('../views/MonitoringView.vue'),
+              },
+              {
+                 path: '/stats',
+                 name: 'stats',
+                 component: () => import('../views/StatisticsView.vue'),
+              },
+          ],
     })
 
     router.beforeEach(async (to) => {

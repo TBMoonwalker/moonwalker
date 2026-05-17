@@ -3,7 +3,7 @@ import { computed, h, type Component } from 'vue'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import type { MenuOption } from 'naive-ui/es/menu'
 import { NIcon } from 'naive-ui/es/icon'
-import { SettingsOutline } from '@vicons/ionicons5'
+import { BarChartOutline, SettingsOutline } from '@vicons/ionicons5'
 import logoImage from '../assets/logo.png'
 
 function renderMenuIcon(icon: Component) {
@@ -17,25 +17,35 @@ const route = useRoute()
 const router = useRouter()
 
 const menuOptions: MenuOption[] = [
-  {
-    label: 'Control Center',
-    key: 'controlCenter',
-    icon: renderMenuIcon(SettingsOutline),
-  },
-]
+    {
+     label: 'Statistics',
+     key: 'stats',
+     icon: renderMenuIcon(BarChartOutline),
+    },
+    {
+     label: 'Control Center',
+     key: 'controlCenter',
+     icon: renderMenuIcon(SettingsOutline),
+    },
+ ]
 
 const activeMenuKey = computed<string | null>(() => {
+  if (route.name === 'stats') {
+     return 'stats'
+  }
   if (route.name === 'controlCenter') {
-    return 'controlCenter'
+     return 'controlCenter'
   }
 
   return null
 })
 
 function handleMenuSelect(key: string | number): void {
-  if (key === 'controlCenter') {
-    void router.push({ name: 'controlCenter' })
-  }
+  if (key === 'stats') {
+     void router.push({ name: 'stats' })
+  } else if (key === 'controlCenter') {
+     void router.push({ name: 'controlCenter' })
+    }
 }
 </script>
 
