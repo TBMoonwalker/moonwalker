@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { HeatmapDataItem } from 'naive-ui'
+import { normalizeTradeHeatmapData } from '../helpers/heatmap'
 
 const props = defineProps<{
    data: { timestamp: number; value: number }[]
@@ -9,13 +10,7 @@ const props = defineProps<{
 const ACTIVE_COLORS = ['#B9D7CB', '#7FB79C', '#4E9272', '#1D5C49']
 
 const heatmapData = computed<HeatmapDataItem[]>(() => {
-   return props.data
-      .filter((item) => Number.isFinite(item.timestamp))
-      .map((item) => ({
-         timestamp: item.timestamp,
-         value: Math.max(0, item.value),
-      }))
-      .sort((a, b) => a.timestamp - b.timestamp)
+   return normalizeTradeHeatmapData(props.data)
 })
 
 function formatTooltip(timestamp: number, value: number | null | undefined): string {
