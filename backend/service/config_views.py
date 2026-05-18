@@ -158,7 +158,6 @@ class WatcherRuntimeConfigView:
     watcher_ohlcv: bool
     btc_pulse_enabled: bool
     timeframe: str
-    ws_stale_timeout_ms: int
     exchange_connection: ExchangeConnectionConfigView
 
     @classmethod
@@ -168,12 +167,6 @@ class WatcherRuntimeConfigView:
             watcher_ohlcv=bool(config.get("watcher_ohlcv", True)),
             btc_pulse_enabled=bool(config.get("btc_pulse", False)),
             timeframe=resolve_timeframe(config),
-            ws_stale_timeout_ms=_int_config_value(
-                config,
-                "ws_stale_timeout_ms",
-                default=20_000,
-                falsey_fallback=20_000,
-            ),
             exchange_connection=ExchangeConnectionConfigView.from_config(config),
         )
 

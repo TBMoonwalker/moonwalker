@@ -16,7 +16,6 @@ class WatcherRuntimeState:
     timeframe: str = "1m"
     symbol_update_event: asyncio.Event = field(default_factory=asyncio.Event)
     exchange_watcher_ohlcv: bool = True
-    ws_stale_timeout_seconds: float = 20.0
 
     def get_live_candle(self, symbol: str) -> list[Any] | None:
         """Return a copy of the current in-memory candle for a symbol."""

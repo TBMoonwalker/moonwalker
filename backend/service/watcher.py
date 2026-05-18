@@ -127,10 +127,6 @@ class Watcher:
 
         runtime_state.exchange_watcher_ohlcv = watcher_config.watcher_ohlcv
         runtime_state.timeframe = watcher_config.timeframe
-        runtime_state.ws_stale_timeout_seconds = max(
-            1.0,
-            watcher_config.ws_stale_timeout_ms / 1000,
-        )
         runtime_state.mandatory_symbols = self.__get_mandatory_symbols(config)
         self._refresh_symbol_targets_from_current_state()
         self._schedule_btc_pulse_history_warmup(config, watcher_config)
@@ -740,16 +736,21 @@ class Watcher:
         """Wrapper that restarts the watcher on connection failures."""
         logging.info("Started websocket stream for %s", symbol)
         delay = self.RECONNECT_DELAY
+        had_failure = False
         while self.status:
             try:
                 await self.watch_symbol(symbol)
                 if not self.status:
                     break
+                if had_failure:
+                    logging.info("Recovered websocket stream for %s", symbol)
+                    had_failure = False
                 delay = self.RECONNECT_DELAY
             except asyncio.CancelledError:
                 logging.info("Watcher cancelled for %s", symbol)
                 break
             except ccxtpro.NetworkError as e:
+                had_failure = True
                 delay = await self._wait_for_symbol_retry(
                     symbol,
                     "network error",
@@ -757,6 +758,7 @@ class Watcher:
                     delay,
                 )
             except ccxtpro.ExchangeError as e:
+                had_failure = True
                 delay = await self._wait_for_symbol_retry(
                     symbol,
                     "exchange error",
@@ -764,6 +766,7 @@ class Watcher:
                     delay,
                 )
             except asyncio.TimeoutError as e:
+                had_failure = True
                 delay = await self._wait_for_symbol_retry(
                     symbol,
                     "timeout error",
@@ -779,6 +782,7 @@ class Watcher:
                 OSError,
             ) as e:
                 # Broad catch to keep reconnection loop alive.
+                had_failure = True
                 delay = await self._wait_for_symbol_retry(
                     symbol,
                     "unexpected error",
@@ -787,13 +791,6 @@ class Watcher:
                     exc_info=True,
                     log_level="error",
                 )
-
-    async def _watch_exchange_stream(self, awaitable: Any) -> Any:
-        """Await one exchange stream update and fail stale sockets into reconnect."""
-        return await asyncio.wait_for(
-            awaitable,
-            timeout=self.runtime_state.ws_stale_timeout_seconds,
-        )
 
     async def __process_ohlcv_data(self, symbol: str, ohlcv) -> None:
         price = float(ohlcv[-1][4])
@@ -814,13 +811,11 @@ class Watcher:
             )
 
         if self.runtime_state.exchange_watcher_ohlcv:
-            ohlcv = await self._watch_exchange_stream(
-                exchange.watch_ohlcv(symbol, self.runtime_state.timeframe)
-            )
+            ohlcv = await exchange.watch_ohlcv(symbol, self.runtime_state.timeframe)
             await self.__process_ohlcv_data(symbol, ohlcv)
             return
 
-        trades = await self._watch_exchange_stream(exchange.watch_trades(symbol))
+        trades = await exchange.watch_trades(symbol)
         if trades:
             await self.__process_trade_data(symbol, trades, exchange)
 
