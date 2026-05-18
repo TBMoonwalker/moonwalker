@@ -170,8 +170,8 @@ async def test_warmup_active_trade_strategy_history_backfills_insufficient_symbo
         required_history_days=67,
     )
 
-    assert history_adds == [("BTC/USDC", 67)]
-    assert history_checks == ["BTC/USDC", "BTC/USDC", "ETH/USDC"]
+    assert history_adds == [("BTC/USDC", 67), ("ETH/USDC", 67)]
+    assert history_checks == ["BTC/USDC", "BTC/USDC", "ETH/USDC", "ETH/USDC"]
     assert close_calls == ["closed"]
 
 

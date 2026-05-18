@@ -420,15 +420,14 @@ class Watcher:
                 return
 
             warmed_symbols = 0
+            refreshed_symbols = 0
             still_short_symbols: list[str] = []
             for symbol in trade_symbols:
-                has_history = await data.has_sufficient_resampled_history(
+                had_history = await data.has_sufficient_resampled_history(
                     symbol,
                     timeframe,
                     required_candles,
                 )
-                if has_history:
-                    continue
 
                 success = await data.add_history_data_for_symbol(
                     symbol,
@@ -442,7 +441,10 @@ class Watcher:
                     timeframe,
                     required_candles,
                 ):
-                    warmed_symbols += 1
+                    if had_history:
+                        refreshed_symbols += 1
+                    else:
+                        warmed_symbols += 1
                     continue
 
                 still_short_symbols.append(symbol)
@@ -455,6 +457,14 @@ class Watcher:
                     timeframe,
                     required_candles,
                     required_history_days,
+                )
+            if refreshed_symbols:
+                logging.info(
+                    "Strategy history startup check refreshed %s active "
+                    "symbol(s) (timeframe=%s, required_candles=%s).",
+                    refreshed_symbols,
+                    timeframe,
+                    required_candles,
                 )
             if still_short_symbols:
                 logging.warning(

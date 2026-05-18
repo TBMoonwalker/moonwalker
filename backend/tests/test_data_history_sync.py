@@ -129,6 +129,94 @@ async def test_history_sync_backfills_only_missing_newer_boundary(
 
 
 @pytest.mark.asyncio
+async def test_history_sync_refreshes_latest_existing_closed_candle(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    import model
+
+    await model.Tickers.create(
+        timestamp=1000,
+        symbol="BTC/USDC",
+        open=1.0,
+        high=2.0,
+        low=0.5,
+        close=1.5,
+        volume=10.0,
+    )
+    await model.Tickers.create(
+        timestamp=2000,
+        symbol="BTC/USDC",
+        open=2.0,
+        high=3.0,
+        low=1.5,
+        close=2.5,
+        volume=10.0,
+    )
+    await model.Tickers.create(
+        timestamp=3000,
+        symbol="BTC/USDC",
+        open=98.0,
+        high=100.0,
+        low=97.0,
+        close=99.0,
+        volume=1.0,
+    )
+
+    data = Data()
+    fetch_calls: list[int] = []
+
+    async def fake_get_history_for_symbol(
+        config: dict, symbol: str, timeframe: str, limit: int = 1, since: int = 0
+    ):
+        fetch_calls.append(int(since))
+        return [_make_candle(3000, 3.5)]
+
+    async def fake_close() -> None:
+        return None
+
+    monkeypatch.setattr(
+        data_module,
+        "resolve_required_history_window",
+        lambda history_data, timeframe, since_ms=None: (1000, 3000, 1000),
+    )
+    data.exchange = types.SimpleNamespace(
+        get_history_for_symbol=fake_get_history_for_symbol,
+        close=fake_close,
+    )
+
+    success = await data.add_history_data_for_symbol(
+        symbol="BTC/USDC",
+        history_data=1,
+        config={"timeframe": "1s"},
+    )
+
+    rows = (
+        await model.Tickers.filter(symbol="BTC/USDC")
+        .order_by("timestamp")
+        .values("timestamp", "open", "high", "low", "close", "volume")
+    )
+
+    assert success is True
+    assert fetch_calls == [3000]
+    assert len(rows) == 3
+    assert rows[-1] == {
+        "timestamp": "3000",
+        "open": 2.5,
+        "high": 4.5,
+        "low": 1.5,
+        "close": 3.5,
+        "volume": 10.0,
+    }
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_history_sync_falls_back_to_full_refill_for_internal_gap(
     tmp_path, monkeypatch
 ) -> None:
