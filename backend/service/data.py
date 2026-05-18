@@ -258,6 +258,7 @@ class Data:
         required_until: int,
         required_timestamps: set[int],
         existing_timestamps: set[int],
+        refresh_existing: bool = False,
     ) -> tuple[set[int], set[int]]:
         """Fetch OHLCV from exchange and return fetched and inserted candle timestamps."""
         ohlcv_data = await self.exchange.get_history_for_symbol(
@@ -288,6 +289,12 @@ class Data:
                 continue
             fetched_timestamps.add(timestamp)
             if timestamp in existing_timestamps or timestamp in inserted_timestamps:
+                if refresh_existing and timestamp in existing_timestamps:
+                    await self.__refresh_existing_history_candle(
+                        normalized_symbol=normalized_symbol,
+                        timestamp=timestamp,
+                        candle=candle,
+                    )
                 continue
 
             rows_to_insert.append(
@@ -310,6 +317,64 @@ class Data:
             )
 
         return fetched_timestamps, inserted_timestamps
+
+    async def __refresh_existing_history_candle(
+        self,
+        *,
+        normalized_symbol: str,
+        timestamp: int,
+        candle: list[Any],
+    ) -> None:
+        """Replace an existing closed history candle with exchange OHLCV values."""
+
+        async def update_existing_candle() -> None:
+            await Tortoise.get_connection("default").execute_query(
+                "UPDATE tickers "
+                "SET open = ?, high = ?, low = ?, close = ?, volume = ? "
+                "WHERE symbol = ? "
+                f"AND {_NORMALIZED_ROW_TIMESTAMP_SQL} = ?",
+                [
+                    float(candle[1]),
+                    float(candle[2]),
+                    float(candle[3]),
+                    float(candle[4]),
+                    float(candle[5]),
+                    normalized_symbol,
+                    int(timestamp),
+                ],
+            )
+
+        await run_sqlite_write_with_retry(
+            update_existing_candle,
+            f"refresh history candle for {normalized_symbol} at {timestamp}",
+        )
+
+    async def __refresh_latest_required_history_candle(
+        self,
+        *,
+        symbol: str,
+        config: dict[str, Any],
+        window: HistorySyncWindow,
+        existing_timestamps: set[int],
+    ) -> bool:
+        """Refresh the latest closed candle when the required window is present."""
+        latest_timestamp = window.required_until
+        if latest_timestamp not in existing_timestamps:
+            return False
+
+        fetched_timestamps, _inserted_timestamps = (
+            await self.__fetch_and_store_history_range(
+                symbol=symbol,
+                config=config,
+                fetch_since_ms=latest_timestamp,
+                required_since=latest_timestamp,
+                required_until=latest_timestamp,
+                required_timestamps={latest_timestamp},
+                existing_timestamps=existing_timestamps,
+                refresh_existing=True,
+            )
+        )
+        return latest_timestamp in fetched_timestamps
 
     async def count_history_data_for_symbol(self, symbol: str) -> int | bool:
         """Count history data rows for a symbol."""
@@ -411,7 +476,19 @@ class Data:
                 )
             )
             if sync_state.is_required_complete(window):
-                logging.info("History already complete for %s", symbol)
+                if await self.__refresh_latest_required_history_candle(
+                    symbol=symbol,
+                    config=config,
+                    window=window,
+                    existing_timestamps=sync_state.stored_timestamps,
+                ):
+                    logging.info(
+                        "History already complete for %s; refreshed latest "
+                        "closed candle.",
+                        symbol,
+                    )
+                else:
+                    logging.info("History already complete for %s", symbol)
                 return True
 
             for fetch_since in plan_boundary_fetch_starts(
