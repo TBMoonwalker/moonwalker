@@ -343,10 +343,9 @@ async def test_watch_symbol_processes_one_trade_cycle() -> None:
 
 
 @pytest.mark.asyncio
-async def test_watch_symbol_times_out_stale_trade_stream() -> None:
+async def test_watch_symbol_allows_idle_trade_stream_without_local_timeout() -> None:
     watcher = Watcher()
     watcher.runtime_state.exchange_watcher_ohlcv = False
-    watcher.runtime_state.ws_stale_timeout_seconds = 0.01
 
     class FakeExchange:
         async def watch_trades(self, symbol: str):
@@ -355,8 +354,13 @@ async def test_watch_symbol_times_out_stale_trade_stream() -> None:
 
     watcher.exchange = FakeExchange()
 
-    with pytest.raises(asyncio.TimeoutError):
-        await watcher.watch_symbol("BTC/USDC")
+    task = asyncio.create_task(watcher.watch_symbol("BTC/USDC"))
+    await asyncio.sleep(0.02)
+
+    assert not task.done()
+
+    task.cancel()
+    await asyncio.gather(task, return_exceptions=True)
 
 
 @pytest.mark.asyncio
@@ -384,3 +388,34 @@ async def test_watch_symbol_with_reconnect_uses_shared_backoff(monkeypatch) -> N
 
     assert attempts == ["BTC/USDC", "BTC/USDC", "BTC/USDC"]
     assert sleep_calls == [1, 2]
+
+
+@pytest.mark.asyncio
+async def test_watch_symbol_with_reconnect_logs_recovery(monkeypatch) -> None:
+    watcher = Watcher()
+    attempts: list[str] = []
+    sleep_calls: list[int] = []
+    info_messages: list[tuple[str, tuple[object, ...]]] = []
+
+    async def fake_sleep(delay: int) -> None:
+        sleep_calls.append(delay)
+
+    async def fake_watch_symbol(symbol: str) -> None:
+        attempts.append(symbol)
+        if len(attempts) == 1:
+            raise watcher_module.ccxtpro.NetworkError("boom")
+        if len(attempts) == 3:
+            watcher.status = False
+
+    def fake_info(message: str, *args: object) -> None:
+        info_messages.append((message, args))
+
+    monkeypatch.setattr(watcher_module.asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(watcher_module.logging, "info", fake_info)
+    watcher.watch_symbol = fake_watch_symbol
+
+    await watcher.watch_symbol_with_reconnect("BTC/USDC")
+
+    assert attempts == ["BTC/USDC", "BTC/USDC", "BTC/USDC"]
+    assert sleep_calls == [watcher.RECONNECT_DELAY]
+    assert ("Recovered websocket stream for %s", ("BTC/USDC",)) in info_messages
