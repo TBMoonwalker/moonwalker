@@ -15,10 +15,13 @@ import {
 
 import OpenTradeExpandedRow from '../components/OpenTradeExpandedRow.vue'
 import {
+    OPEN_TRADES_MOBILE_COLUMN_KEYS,
+    OPEN_TRADES_TABLET_COLUMN_KEYS,
     formatAssetAmount,
     formatFixed,
     resolveTradeTableColumnOrder,
     resolveTradeDateTime,
+    shouldShowTradeTableColumn,
     type TradeTableSortState,
 } from '../helpers/tradeTable'
 import {
@@ -466,8 +469,9 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 if (!('key' in column)) {
                     return true
                 }
-                return ['symbol', 'profit', 'action'].includes(
-                    String(column.key),
+                return shouldShowTradeTableColumn(
+                    column.key,
+                    OPEN_TRADES_MOBILE_COLUMN_KEYS,
                 )
             })
         }
@@ -477,8 +481,10 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 if (!('key' in column)) {
                     return true
                 }
-                return ['symbol', 'amount', 'profit', 'action', 'open_date']
-                    .includes(String(column.key))
+                return shouldShowTradeTableColumn(
+                    column.key,
+                    OPEN_TRADES_TABLET_COLUMN_KEYS,
+                )
             })
         }
 
