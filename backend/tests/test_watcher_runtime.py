@@ -343,6 +343,23 @@ async def test_watch_symbol_processes_one_trade_cycle() -> None:
 
 
 @pytest.mark.asyncio
+async def test_watch_symbol_times_out_stale_trade_stream() -> None:
+    watcher = Watcher()
+    watcher.runtime_state.exchange_watcher_ohlcv = False
+    watcher.runtime_state.ws_stale_timeout_seconds = 0.01
+
+    class FakeExchange:
+        async def watch_trades(self, symbol: str):
+            assert symbol == "BTC/USDC"
+            await asyncio.sleep(1)
+
+    watcher.exchange = FakeExchange()
+
+    with pytest.raises(asyncio.TimeoutError):
+        await watcher.watch_symbol("BTC/USDC")
+
+
+@pytest.mark.asyncio
 async def test_watch_symbol_with_reconnect_uses_shared_backoff(monkeypatch) -> None:
     watcher = Watcher()
     attempts: list[str] = []
