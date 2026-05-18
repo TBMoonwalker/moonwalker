@@ -5,9 +5,8 @@ from __future__ import annotations
 import asyncio
 import copy
 import math
-import re
 from dataclasses import asdict, dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
 import helper
@@ -18,129 +17,16 @@ from service.spot_campaign_types import TradeCloseReason
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
+# Re-export shared datetime helpers for callsite compatibility.
+_utc_now = helper.utc_now
+_ensure_utc = helper.ensure_utc
+_parse_datetime = helper.parse_datetime
+_parse_duration_hours = helper.parse_duration_hours
+
 logging = helper.LoggerFactory.get_logger(
     "logs/autopilot_memory.log",
     "autopilot_memory",
 )
-
-_DURATION_PATTERN = re.compile(
-    r"^(?:(?P<days>\d+)\s+days?,\s*)?"
-    r"(?P<hours>\d{1,2}):(?P<minutes>\d{2}):(?P<seconds>\d{2})"
-    r"(?:\.(?P<microseconds>\d+))?$"
-)
-
-
-def _utc_now() -> datetime:
-    """Return a timezone-aware UTC timestamp."""
-    return datetime.now(timezone.utc)
-
-
-def _ensure_utc(value: datetime) -> datetime:
-    """Return a timezone-aware UTC datetime."""
-    if value.tzinfo is None:
-        return value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
-
-
-def _parse_datetime(value: Any) -> datetime | None:
-    """Best-effort parsing for the mixed date formats used in closed trades."""
-    if isinstance(value, datetime):
-        return _ensure_utc(value)
-
-    if isinstance(value, (int, float)):
-        timestamp = float(value)
-        if timestamp > 1_000_000_000_000:
-            timestamp /= 1000
-        try:
-            return datetime.fromtimestamp(timestamp, tz=timezone.utc)
-        except (OSError, OverflowError, ValueError):
-            return None
-
-    if not isinstance(value, str):
-        return None
-
-    normalized = value.strip()
-    if not normalized:
-        return None
-
-    if normalized.isdigit():
-        return _parse_datetime(int(normalized))
-
-    for candidate in (
-        normalized.replace("Z", "+00:00"),
-        normalized,
-    ):
-        try:
-            return _ensure_utc(datetime.fromisoformat(candidate))
-        except ValueError:
-            continue
-
-    for pattern in (
-        "%Y-%m-%d %H:%M:%S.%f",
-        "%Y-%m-%d %H:%M:%S",
-        "%Y-%m-%dT%H:%M:%S.%f",
-        "%Y-%m-%dT%H:%M:%S",
-    ):
-        try:
-            return _ensure_utc(datetime.strptime(normalized, pattern))
-        except ValueError:
-            continue
-
-    return None
-
-
-def _parse_duration_hours(
-    value: Any,
-    *,
-    open_date: Any,
-    close_date: Any,
-) -> float | None:
-    """Return duration in hours using the best available source."""
-    opened_at = _parse_datetime(open_date)
-    closed_at = _parse_datetime(close_date)
-    if opened_at and closed_at and closed_at >= opened_at:
-        return max((closed_at - opened_at).total_seconds() / 3600, 0.0)
-
-    if value is None:
-        return None
-
-    if isinstance(value, (int, float)):
-        numeric = float(value)
-        if numeric >= 3600:
-            return numeric / 3600
-        if numeric >= 60:
-            return numeric / 60
-        return numeric
-
-    if not isinstance(value, str):
-        return None
-
-    normalized = value.strip()
-    if not normalized:
-        return None
-
-    try:
-        return _parse_duration_hours(float(normalized), open_date=None, close_date=None)
-    except ValueError:
-        pass
-
-    matched = _DURATION_PATTERN.match(normalized)
-    if matched:
-        days = int(matched.group("days") or 0)
-        hours = int(matched.group("hours") or 0)
-        minutes = int(matched.group("minutes") or 0)
-        seconds = int(matched.group("seconds") or 0)
-        microseconds = int((matched.group("microseconds") or "0")[:6].ljust(6, "0"))
-        total_seconds = (
-            days * 86_400
-            + hours * 3_600
-            + minutes * 60
-            + seconds
-            + microseconds / 1_000_000
-        )
-        return total_seconds / 3600
-
-    return None
 
 
 def _clamp(value: float, minimum: float, maximum: float) -> float:

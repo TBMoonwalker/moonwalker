@@ -127,6 +127,10 @@ class Watcher:
 
         runtime_state.exchange_watcher_ohlcv = watcher_config.watcher_ohlcv
         runtime_state.timeframe = watcher_config.timeframe
+        runtime_state.ws_stale_timeout_seconds = max(
+            1.0,
+            watcher_config.ws_stale_timeout_ms / 1000,
+        )
         runtime_state.mandatory_symbols = self.__get_mandatory_symbols(config)
         self._refresh_symbol_targets_from_current_state()
         self._schedule_btc_pulse_history_warmup(config, watcher_config)
@@ -784,6 +788,13 @@ class Watcher:
                     log_level="error",
                 )
 
+    async def _watch_exchange_stream(self, awaitable: Any) -> Any:
+        """Await one exchange stream update and fail stale sockets into reconnect."""
+        return await asyncio.wait_for(
+            awaitable,
+            timeout=self.runtime_state.ws_stale_timeout_seconds,
+        )
+
     async def __process_ohlcv_data(self, symbol: str, ohlcv) -> None:
         price = float(ohlcv[-1][4])
         await self.push_event(symbol, price, ohlcv)
@@ -803,11 +814,13 @@ class Watcher:
             )
 
         if self.runtime_state.exchange_watcher_ohlcv:
-            ohlcv = await exchange.watch_ohlcv(symbol, self.runtime_state.timeframe)
+            ohlcv = await self._watch_exchange_stream(
+                exchange.watch_ohlcv(symbol, self.runtime_state.timeframe)
+            )
             await self.__process_ohlcv_data(symbol, ohlcv)
             return
 
-        trades = await exchange.watch_trades(symbol)
+        trades = await self._watch_exchange_stream(exchange.watch_trades(symbol))
         if trades:
             await self.__process_trade_data(symbol, trades, exchange)
 

@@ -121,24 +121,25 @@ The backend is a Python application using Litestar with the following structure:
    - Handles orders, trades, statistics, and data endpoints
 
 2. **Services** (`backend/service/`)
-   - `config.py` - Singleton configuration manager backed by DB (`AppConfig`), hot-reload via Redis pub/sub
-   - `exchange.py` - Async CCXT wrapper: buy/sell lifecycle, precision, balance, retry logic
-   - `dca.py` - Core DCA engine: processes tickers, evaluates TP/SO triggers, places orders
-   - `watcher.py` - Real-time OHLCV/trade streaming via CCXT Pro WebSockets with auto-reconnect
-   - `trades.py` - Trade persistence layer: CRUD for open/closed trades, aggregation
-   - `orders.py` - Order execution and management
-   - `database.py` - Tortoise ORM database connection and management
-   - `housekeeper.py` - Periodic cleanup of old ticker data and uPNL history
-   - `statistic.py` - Portfolio stats, uPNL tracking, profit calculations
-   - `autopilot.py` - Dynamic trading parameter adjustment based on locked-fund thresholds
-   - `monitoring.py` - Telegram notifications via Telethon for buy/sell events
-   - `indicators.py` - TA-Lib wrappers for EMA, RSI, Bollinger Bands, Ichimoku, etc.
-   - `signal.py` - Signal plugin loader and lifecycle management
-   - `data.py` - Data endpoints and helpers for the controller layer
-   - `filter.py` - Symbol filtering (volume, market cap, pair age)
-   - `ath.py` - All-Time-High lookups with caching for dynamic SO scaling
-   - `redis.py` - Redis client setup and pub/sub helpers
-   - `strategy_capability.py` - Strategy availability validation
+    - `config.py` - Singleton configuration manager backed by DB (`AppConfig`), hot-reload via Redis pub/sub
+    - `exchange.py` - Async CCXT wrapper: buy/sell lifecycle, precision, balance, retry logic
+    - `dca.py` - Core DCA engine: processes tickers, evaluates TP/SO triggers, places orders
+    - `watcher.py` - Real-time OHLCV/trade streaming via CCXT Pro WebSockets with auto-reconnect
+    - `trades.py` - Trade persistence layer: CRUD for open/closed trades, aggregation
+    - `orders.py` - Order execution and management
+    - `database.py` - Tortoise ORM database connection and management
+    - `housekeeper.py` - Periodic cleanup of old ticker data and uPNL history
+    - `statistic.py` - Portfolio stats, uPNL tracking, profit calculations
+    - `autopilot.py` - Dynamic trading parameter adjustment based on locked-fund thresholds
+    - `monitoring.py` - Telegram notifications via Telethon for buy/sell events
+    - `indicators.py` - TA-Lib wrappers for EMA, RSI, Bollinger Bands, Ichimoku, etc.
+    - `signal.py` - Signal plugin loader and lifecycle management
+    - `data.py` - Data endpoints and helpers for the controller layer
+    - `filter.py` - Symbol filtering (volume, market cap, pair age)
+    - `ath.py` - All-Time-High lookups with caching for dynamic SO scaling
+    - `redis.py` - Redis client setup and pub/sub helpers
+    - `strategy_capability.py` - Strategy availability validation
+    - `analytics.py` - On-demand closed-trade analytics: KPIs, heatmaps, drawdown, profit distribution
 
 3. **Signal Plugins** (`backend/signals/`)
    - `asap.py` - Signal plugin for ASAP signals

@@ -228,3 +228,4 @@ package-lock.json
 # AI
 !CLAUDE.md
 .gstack/
+.opencode/

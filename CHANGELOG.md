@@ -4,6 +4,24 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [3.1.0.0] - 2026-05-17
+
+### Added
+
+- Statistics dashboard for closed-trade performance analysis with KPI cards,
+  trade activity heatmap, per-symbol breakdown, duration extremes, drawdown
+  risk metrics, and profit distribution histogram.
+
+### Changed
+
+- Extract datetime and duration parsing helpers from autopilot_memory into a
+  shared helper module for reuse across analytics and autopilot services.
+
+### Fixed
+
+- Eliminate redundant secondary database query in analytics summary calculation.
+- Broaden duration parsing regex to support trades longer than 99 hours.
+
 ## [3.0.0.1] - 2026-05-16
 
 ### Changed

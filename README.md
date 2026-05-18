@@ -74,4 +74,5 @@ You also need to install the ta-lib library for your OS. Please see: https://ta-
 - Dynamic SO details and formulas: `docs/dynamic-so.md`
 - Signal plugin setup (SymSignals, ASAP, CSV): `docs/signals.md`
 - CI, runtime operations, backups, logs, and dashboard streams:
-  `docs/operations.md`
+   `docs/operations.md`
+- Statistics dashboard: `/stats` in your browser
