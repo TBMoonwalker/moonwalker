@@ -176,6 +176,37 @@ async def test_warmup_active_trade_strategy_history_backfills_insufficient_symbo
 
 
 @pytest.mark.asyncio
+async def test_strategy_history_warmup_timeout_leaves_task_running(
+    monkeypatch,
+) -> None:
+    watcher = Watcher()
+    original_wait_for = asyncio.wait_for
+
+    async def slow_warmup() -> None:
+        await asyncio.sleep(3600)
+
+    async def fast_wait_for(awaitable, timeout):
+        assert timeout == 25
+        return await original_wait_for(awaitable, timeout=0.01)
+
+    warmup_task = asyncio.create_task(
+        slow_warmup(),
+        name="watcher:strategy_history_warmup",
+    )
+    watcher._strategy_history_warmup_task = warmup_task
+    monkeypatch.setattr(watcher_module.asyncio, "wait_for", fast_wait_for)
+
+    await watcher._await_strategy_history_warmup_if_needed()
+
+    assert warmup_task.done() is False
+    assert warmup_task.cancelled() is False
+
+    warmup_task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await warmup_task
+
+
+@pytest.mark.asyncio
 async def test_shutdown_cleans_up_internal_tasks_and_is_idempotent() -> None:
     watcher = Watcher()
     close_calls: list[str] = []

@@ -360,9 +360,15 @@ class Watcher:
         if not self._strategy_history_warmup_task:
             return
         try:
-            await asyncio.wait_for(self._strategy_history_warmup_task, timeout=25)
+            await asyncio.wait_for(
+                asyncio.shield(self._strategy_history_warmup_task),
+                timeout=25,
+            )
         except asyncio.TimeoutError:
-            logging.warning("Strategy history warmup timed out; continuing startup.")
+            logging.warning(
+                "Strategy history warmup timed out after 25s; continuing "
+                "startup while warmup runs in the background."
+            )
         except (RuntimeError, TypeError, ValueError) as exc:
             logging.warning(
                 "Strategy history warmup completed with warning: %s",
