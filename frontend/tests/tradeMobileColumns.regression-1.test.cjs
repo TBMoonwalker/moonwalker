@@ -11,10 +11,9 @@ const {
     shouldShowTradeTableColumn,
 } = loadFrontendModule('src/helpers/tradeTable.ts')
 
-test('mobile open trades keeps cost and PnL columns visible', () => {
+test('mobile open trades keeps PnL visible without the cost column', () => {
     assert.deepEqual(OPEN_TRADES_MOBILE_COLUMN_KEYS, [
         'symbol',
-        'cost',
         'display_profit_percent',
         'action',
     ])
@@ -29,6 +28,10 @@ test('mobile open trades keeps cost and PnL columns visible', () => {
         shouldShowTradeTableColumn('profit', OPEN_TRADES_MOBILE_COLUMN_KEYS),
         false,
     )
+    assert.equal(
+        shouldShowTradeTableColumn('cost', OPEN_TRADES_MOBILE_COLUMN_KEYS),
+        false,
+    )
 })
 
 test('tablet open trades keeps cost and PnL columns visible', () => {
@@ -41,15 +44,18 @@ test('tablet open trades keeps cost and PnL columns visible', () => {
     ])
 })
 
-test('mobile closed trades keeps cost and PnL columns visible', () => {
+test('mobile closed trades keeps PnL visible without the cost column', () => {
     assert.deepEqual(CLOSED_TRADES_MOBILE_COLUMN_KEYS, [
         'symbol',
         'profit',
-        'cost',
         'profit_percent',
         'close_date',
         'action',
     ])
+    assert.equal(
+        shouldShowTradeTableColumn('cost', CLOSED_TRADES_MOBILE_COLUMN_KEYS),
+        false,
+    )
 })
 
 test('tablet closed trades keeps cost and PnL columns visible', () => {
