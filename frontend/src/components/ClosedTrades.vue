@@ -30,11 +30,14 @@ import { usePagedTradeFeed } from '../composables/usePagedTradeFeed'
 import { useTradeTableFeed } from '../composables/useTradeTableFeed'
 import { useViewport } from '../composables/useViewport'
 import {
+    CLOSED_TRADES_MOBILE_COLUMN_KEYS,
+    CLOSED_TRADES_TABLET_COLUMN_KEYS,
     formatAssetAmount,
     formatFixed,
     resolveTradeTableColumnOrder,
     resolveTradeDateTime,
     resolveTradeTableSortState,
+    shouldShowTradeTableColumn,
     type TradeTableSortState,
 } from '../helpers/tradeTable'
 import { useTradesStore, type ClosedTradeRow } from '../stores/trades'
@@ -283,7 +286,10 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             if (!("key" in column)) {
                 return true
             }
-            return ["symbol", "profit_percent", "close_date", "action"].includes(String(column.key))
+            return shouldShowTradeTableColumn(
+                column.key,
+                CLOSED_TRADES_MOBILE_COLUMN_KEYS,
+            )
         })
     }
 
@@ -292,16 +298,10 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             if (!("key" in column)) {
                 return true
             }
-            return [
-                "symbol",
-                "amount",
-                "profit",
-                "profit_percent",
-                "close_reason",
-                "so_count",
-                "close_date",
-                "action",
-            ].includes(String(column.key))
+            return shouldShowTradeTableColumn(
+                column.key,
+                CLOSED_TRADES_TABLET_COLUMN_KEYS,
+            )
         })
     }
 

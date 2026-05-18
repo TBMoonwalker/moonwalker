@@ -12,9 +12,52 @@ export type TradeTableSortState = {
 
 export type TradeTableSortValueKind = 'number' | 'date' | 'text'
 
+export const OPEN_TRADES_MOBILE_COLUMN_KEYS = [
+    'symbol',
+    'cost',
+    'display_profit_percent',
+    'action',
+] as const
+
+export const OPEN_TRADES_TABLET_COLUMN_KEYS = [
+    'symbol',
+    'cost',
+    'display_profit_percent',
+    'action',
+    'open_date',
+] as const
+
+export const CLOSED_TRADES_MOBILE_COLUMN_KEYS = [
+    'symbol',
+    'profit',
+    'cost',
+    'profit_percent',
+    'close_date',
+    'action',
+] as const
+
+export const CLOSED_TRADES_TABLET_COLUMN_KEYS = [
+    'symbol',
+    'amount',
+    'profit',
+    'cost',
+    'profit_percent',
+    'close_reason',
+    'so_count',
+    'close_date',
+    'action',
+] as const
+
 export type TradeTableSortResolver<T> = {
     kind: TradeTableSortValueKind
     value: (row: T) => unknown
+}
+
+export function shouldShowTradeTableColumn(
+    columnKey: unknown,
+    visibleKeys: readonly string[],
+): boolean {
+    return visibleKeys.includes(String(columnKey))
 }
 
 export function formatFixed(value: unknown, decimals = 2): string {
