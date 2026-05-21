@@ -17,6 +17,7 @@ from service.config_runtime_store import (
     ConfigUpdateAction,
 )
 from service.redis import CONFIG_CHANNEL, redis_client
+from service.strategy_builder import PUBLIC_BUILTIN_SLUGS
 from service.strategy_capability import filter_supported_strategies
 from service.trade_lifecycle_config import (
     TRADE_MODE_COMPATIBILITY_KEYS,
@@ -464,8 +465,7 @@ class Config:
         Returns:
             List of strategy names (without .py extension) sorted alphabetically
         """
-        strategies = self.__get_filenames_in_directory("strategies")
-        return filter_supported_strategies(strategies)
+        return filter_supported_strategies(PUBLIC_BUILTIN_SLUGS)
 
     def __get_signal_plugins(self) -> list[str]:
         """Get a list of available signal plugin filenames from the signals directory.

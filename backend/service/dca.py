@@ -1,7 +1,6 @@
 """DCA strategy handling and order logic."""
 
 import asyncio
-import importlib
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -33,7 +32,7 @@ from service.orders import Orders
 from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
-from service.strategy_capability import ensure_strategy_supported
+from service.strategy_runtime import get_strategy_adapter
 from service.trades import Trades
 from service.trading_controls import is_mission_automation_paused
 
@@ -239,7 +238,7 @@ class Dca:
 
         if runtime_config.dca_strategy:
             strategy_timeframe = resolve_timeframe(self.config or {})
-            dca_strategy_plugin = self.__get_strategy_plugin(
+            dca_strategy_plugin = await self.__get_strategy_plugin(
                 runtime_config.dca_strategy,
                 strategy_timeframe,
                 "dca",
@@ -273,7 +272,7 @@ class Dca:
             return False
 
         strategy_timeframe = resolve_timeframe(self.config or {})
-        sidestep_strategy_plugin = self.__get_strategy_plugin(
+        sidestep_strategy_plugin = await self.__get_strategy_plugin(
             bearish_strategy_name,
             strategy_timeframe,
             "sidestep_exit",
@@ -293,7 +292,7 @@ class Dca:
             return False
 
         strategy_timeframe = resolve_timeframe(self.config or {})
-        reentry_strategy_plugin = self.__get_strategy_plugin(
+        reentry_strategy_plugin = await self.__get_strategy_plugin(
             reentry_strategy_name,
             strategy_timeframe,
             "sidestep_reentry",
@@ -473,13 +472,13 @@ class Dca:
             )
         return success
 
-    def __tp_strategy(self, symbol: str) -> bool:
+    async def __tp_strategy(self, symbol: str) -> bool:
         result = False
         runtime_config = self.__runtime_config()
 
         if runtime_config.tp_strategy:
             strategy_timeframe = resolve_timeframe(self.config or {})
-            tp_strategy_plugin = self.__get_strategy_plugin(
+            tp_strategy_plugin = await self.__get_strategy_plugin(
                 runtime_config.tp_strategy,
                 strategy_timeframe,
                 "tp",
@@ -488,19 +487,22 @@ class Dca:
             token, currency = symbol.split("/")
             symbol = f"{token}{currency}"
 
-            result = tp_strategy_plugin.run(symbol, "sell")
+            result = await tp_strategy_plugin.run(symbol, "sell")
 
         return result
 
-    def __get_strategy_plugin(self, name: str, timeframe: str, kind: str) -> object:
-        ensure_strategy_supported(name)
+    async def __get_strategy_plugin(
+        self,
+        name: str,
+        timeframe: str,
+        kind: str,
+    ) -> object:
         cache_key = (kind, name, timeframe)
         cached = self._strategy_cache.get(cache_key)
         if cached:
             return cached
 
-        module = importlib.import_module(f"strategies.{name}")
-        plugin = module.Strategy(timeframe=timeframe)
+        plugin = await get_strategy_adapter(name, timeframe)
         self._strategy_cache[cache_key] = plugin
         return plugin
 
@@ -764,7 +766,7 @@ class Dca:
         # TP strategy
         if not is_unsellable and runtime_config.tp_strategy and sell:
             logging.debug("Check if we should sell ...")
-            if self.__tp_strategy(trades["symbol"]):
+            if await self.__tp_strategy(trades["symbol"]):
                 sell = True
             else:
                 sell = False

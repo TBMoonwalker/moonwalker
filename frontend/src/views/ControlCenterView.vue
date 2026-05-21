@@ -10,6 +10,7 @@ import ControlCenterModeStrip from '../components/control-center/ControlCenterMo
 import ControlCenterOverviewWorkspace from '../components/control-center/ControlCenterOverviewWorkspace.vue'
 import ControlCenterSetupMode from '../components/control-center/ControlCenterSetupMode.vue'
 import ControlCenterUtilitiesWorkspace from '../components/control-center/ControlCenterUtilitiesWorkspace.vue'
+import StrategyBuilderWorkspace from '../components/control-center/StrategyBuilderWorkspace.vue'
 import { normalizeControlCenterBlockers } from '../control-center/blockers'
 import { createControlCenterConfigChangeSynchronizer } from '../control-center/configChangeSync'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
@@ -557,6 +558,10 @@ async function handleToggleAutopilot(): Promise<void> {
                     :rules="rules"
                     :signal="signal"
                 />
+            </template>
+
+            <template v-else-if="routeState.mode === 'strategy-builder'">
+                <StrategyBuilderWorkspace />
             </template>
 
             <template v-else>

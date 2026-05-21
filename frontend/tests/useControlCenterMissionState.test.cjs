@@ -67,6 +67,12 @@ test('mission state derives labels and summaries for incomplete setup', () => {
         'Draft changes: Exchange connection',
     )
     assert.equal(harness.missionState.advancedSections.value[0].title, 'Runtime diagnostics')
+    assert.equal(
+        harness.missionState.advancedSections.value.some(
+            (section) => section.target === 'strategy-builder',
+        ),
+        false,
+    )
 })
 
 test('mission state surfaces stale trust timestamps and matching alert tone', () => {

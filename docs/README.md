@@ -5,6 +5,7 @@
 - [Monitoring (Telegram)](monitoring.md)
 - [Dynamic SO](dynamic-so.md)
 - [Signals](signals.md)
+- [Strategy Builder](strategies.md)
 - [Operations (CI / Logging / Backup / Unsellable / Stats)](operations.md)
 
 Moonwalker is documented as a single-node, single-instance application with one

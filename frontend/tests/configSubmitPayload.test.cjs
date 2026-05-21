@@ -82,7 +82,7 @@ function createBaseOptions(overrides = {}) {
         dca: {
             enabled: true,
             trade_mode: 'dynamic_dca',
-            strategy: 'ema_cross',
+            strategy: 'ema20_swing',
             timeframe: '1h',
             trailing_tp: null,
             max_bots: 2,
@@ -175,7 +175,7 @@ test(
                     asap_use_url: false,
                     asap_symbol_select: [],
                     signal: 'csv_signal',
-                    strategy: 'ema_cross',
+                    strategy: 'ema20_swing',
                     strategy_enabled: true,
                     symsignal_url: null,
                     symsignal_key: null,
@@ -196,7 +196,7 @@ test(
                 dca: {
                     enabled: true,
                     trade_mode: 'dynamic_dca',
-                    strategy: 'ema_cross',
+                    strategy: 'ema20_swing',
                     timeframe: '1h',
                     trailing_tp: null,
                     max_bots: 2,
@@ -267,7 +267,7 @@ test('buildConfigSubmitPayload normalizes ASAP symbol selections', () => {
                 asap_use_url: false,
                 asap_symbol_select: ['btc', 'eth/busd'],
                 signal: 'asap',
-                strategy: 'ema_cross',
+                strategy: 'ema20_swing',
                 strategy_enabled: true,
                 symsignal_url: null,
                 symsignal_key: null,
@@ -284,7 +284,7 @@ test('buildConfigSubmitPayload normalizes ASAP symbol selections', () => {
         parseField(payload, 'symbol_list').value,
         'BTC/USDT,ETH/BUSD',
     )
-    assert.equal(parseField(payload, 'signal_strategy').value, 'ema_cross')
+    assert.equal(parseField(payload, 'signal_strategy').value, 'ema20_swing')
 })
 
 test('buildConfigSubmitPayload persists configured capital budget and stretch settings', () => {
@@ -474,7 +474,7 @@ test('buildConfigSubmitPayload persists only the canonical trade mode field', ()
             dca: {
                 enabled: true,
                 trade_mode: 'dynamic_dca',
-                strategy: 'ema_cross',
+                strategy: 'ema20_swing',
                 timeframe: '1h',
                 trailing_tp: null,
                 max_bots: 2,
@@ -515,7 +515,7 @@ test('buildConfigSubmitPayload keeps sidestep canonical without compatibility mi
             dca: {
                 enabled: true,
                 trade_mode: 'sidestep',
-                strategy: 'ema_cross',
+                strategy: 'ema20_swing',
                 timeframe: '1h',
                 trailing_tp: null,
                 max_bots: 2,

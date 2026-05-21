@@ -141,31 +141,6 @@ class Indicators:
             "high_k": float(high_k),
         }
 
-    @staticmethod
-    def _calculate_ema_cross_sync(df: Any) -> str:
-        """Compute EMA cross direction synchronously from candles."""
-        if df is None or df.empty:
-            return "none"
-
-        df = df.copy()
-        df["ema_short"] = talib.EMA(df["close"], timeperiod=9)
-        df["ema_long"] = talib.EMA(df["close"], timeperiod=21)
-        df.dropna(subset=["ema_short", "ema_long"], inplace=True)
-        if len(df) < 2:
-            return "none"
-
-        if (
-            df.iloc[-2]["ema_short"] <= df.iloc[-2]["ema_long"]
-            and df.iloc[-1]["ema_short"] >= df.iloc[-1]["ema_long"]
-        ):
-            return "up"
-        if (
-            df.iloc[-2]["ema_short"] >= df.iloc[-2]["ema_long"]
-            and df.iloc[-1]["ema_short"] <= df.iloc[-1]["ema_long"]
-        ):
-            return "down"
-        return "none"
-
     async def _get_indicator_source_data(
         self, symbol: str, timerange: str, minimum_length: int
     ) -> Any:
@@ -316,13 +291,3 @@ class Indicators:
         except INDICATOR_CALCULATION_EXCEPTIONS as e:
             self._log_indicator_error("ATR regime", symbol, e)
             return 1.0, {"regime": "mid", "atr_percent": 0.0}
-
-    async def calculate_ema_cross(self, symbol: str, timerange: str) -> str:
-        """Calculate EMA(9/21) cross direction for a symbol."""
-        try:
-            df_raw = await self.data.get_data_for_pair(symbol, timerange, 21)
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
-            return await asyncio.to_thread(self._calculate_ema_cross_sync, df)
-        except INDICATOR_CALCULATION_EXCEPTIONS as e:
-            self._log_indicator_error("EMA Cross", symbol, e)
-            return "none"

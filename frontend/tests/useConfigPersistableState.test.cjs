@@ -29,10 +29,10 @@ function createPersistableStateOptions() {
             ],
             signal: 'asap',
             plugins: [{ label: 'asap', value: 'asap' }],
-            strategy: 'ema_cross',
+            strategy: 'ema20_swing',
             strategy_enabled: true,
             strategy_plugins: [
-                { label: 'ema_cross', value: 'ema_cross' },
+                { label: 'ema20_swing', value: 'ema20_swing' },
             ],
             timeframe: '1h',
             symsignal_url: null,
@@ -66,7 +66,7 @@ function createPersistableStateOptions() {
         dca: ref({
             enabled: true,
             trade_mode: 'dynamic_dca',
-            strategy: 'ema_cross',
+            strategy: 'ema20_swing',
             timeframe: '1h',
             trailing_tp: null,
             max_bots: 2,

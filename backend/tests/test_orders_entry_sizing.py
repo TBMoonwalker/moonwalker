@@ -83,7 +83,7 @@ async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
             "so_percentage": None,
             "side": "buy",
             "signal_name": "asap",
-            "strategy_name": "ema_cross",
+            "strategy_name": "ema20_swing",
             "timeframe": "15m",
             "metadata_json": json.dumps(
                 {

@@ -53,6 +53,14 @@ const emit = defineEmits<{
                 <n-text depth="3" class="mode-group-label">Utilities</n-text>
                 <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
+                        :type="routeMode === 'strategy-builder' ? 'primary' : 'default'"
+                        :secondary="routeMode !== 'strategy-builder'"
+                        :strong="routeMode === 'strategy-builder'"
+                        @click="emit('select-mode', 'strategy-builder')"
+                    >
+                        Strategy Builder
+                    </n-button>
+                    <n-button
                         :type="routeMode === 'utilities' ? 'primary' : 'default'"
                         :secondary="routeMode !== 'utilities'"
                         :strong="routeMode === 'utilities'"

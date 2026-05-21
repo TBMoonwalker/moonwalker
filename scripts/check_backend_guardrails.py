@@ -9,7 +9,6 @@ import re
 import sys
 from pathlib import Path
 
-
 MAX_COMMENT_BLOCK_LINES = int(os.getenv("MAX_COMMENT_BLOCK_LINES", "12"))
 
 
@@ -67,10 +66,10 @@ def find_large_commented_blocks(path: Path, threshold: int) -> list[tuple[int, i
 def main() -> int:
     root = Path(__file__).resolve().parents[1]
     backend_dir = root / "backend"
-    strategy_dir = backend_dir / "strategies"
     service_dir = backend_dir / "service"
 
     sys.path.insert(0, str(backend_dir))
+    from service.strategy_builder import BUILTIN_STRATEGY_BY_SLUG
     from service.strategy_capability import (
         HIDDEN_STRATEGY_ALIASES,
         REQUIRED_INDICATOR_METHODS,
@@ -78,17 +77,7 @@ def main() -> int:
 
     errors: list[str] = []
     hidden_aliases = set(HIDDEN_STRATEGY_ALIASES)
-
-    strategy_files = sorted(
-        p
-        for p in strategy_dir.glob("*.py")
-        if (
-            p.name != "__init__.py"
-            and "__pycache__" not in p.parts
-            and p.stem not in hidden_aliases
-        )
-    )
-    strategy_names = {p.stem for p in strategy_files}
+    strategy_names = set(BUILTIN_STRATEGY_BY_SLUG) - hidden_aliases
     mapped_names = set(REQUIRED_INDICATOR_METHODS.keys()) - hidden_aliases
 
     for strategy_name in sorted(strategy_names):
@@ -104,14 +93,14 @@ def main() -> int:
             f"'{strategy_name}'."
         )
 
-    for strategy_file in strategy_files:
-        strategy_name = strategy_file.stem
-        actual_methods = parse_strategy_indicator_calls(strategy_file)
+    for strategy_name in sorted(strategy_names):
+        builtin = BUILTIN_STRATEGY_BY_SLUG[strategy_name]
         required_methods = set(REQUIRED_INDICATOR_METHODS.get(strategy_name, ()))
+        builtin_methods = set(builtin.required_methods)
 
-        if required_methods != actual_methods:
-            missing_in_map = sorted(actual_methods - required_methods)
-            stale_in_map = sorted(required_methods - actual_methods)
+        if required_methods != builtin_methods:
+            missing_in_map = sorted(builtin_methods - required_methods)
+            stale_in_map = sorted(required_methods - builtin_methods)
             errors.append(
                 f"Strategy '{strategy_name}' mismatch: "
                 f"missing_in_map={missing_in_map}, stale_in_map={stale_in_map}."

@@ -21,6 +21,7 @@ from service.config import (
 from service.config_persistence import should_persist_config_value
 from service.config_views import TradeLifecycleConfigView
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
+from service.strategy_builder import list_strategy_options, list_strategy_summaries
 from service.trade_lifecycle_config import (
     TRADE_MODE_COMPATIBILITY_KEYS,
     TRADE_MODE_LEGACY_KEYS,
@@ -508,6 +509,13 @@ async def get_config() -> Any:
     snapshot["trade_mode_switch_guard"] = (
         await _get_trade_mode_switch_guard(snapshot, strict=False)
     ).to_dict()
+    try:
+        snapshot["strategies"] = await list_strategy_options()
+        snapshot["strategy_details"] = await list_strategy_summaries()
+    except Exception:  # noqa: BLE001 - config still works without DB metadata.
+        logging.debug(
+            "Strategy metadata unavailable for config snapshot.", exc_info=True
+        )
     snapshot["config_updated_at"] = await _get_latest_config_updated_at()
     return snapshot
 

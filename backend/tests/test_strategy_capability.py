@@ -8,39 +8,36 @@ from service.strategy_capability import (
 
 
 def test_supported_strategy_has_no_support_error() -> None:
-    assert get_strategy_support_error("ema_cross") is None
     assert get_strategy_support_error("ema20_swing") is None
     assert get_strategy_support_error("ema20_swing_reverse") is None
     assert get_strategy_support_error("ema_swing_reverse") is None
 
 
 def test_unsupported_strategy_reports_missing_indicator_methods() -> None:
-    error = get_strategy_support_error("bbands_cross")
+    error = get_strategy_support_error("unknown_strategy")
     assert error is not None
-    assert "calculate_bbands_cross" in error
+    assert "not registered" in error
 
 
 def test_filter_supported_strategies_removes_unsupported_entries() -> None:
     supported = filter_supported_strategies(
         [
-            "ema_cross",
+            "ema_down",
             "ema20_swing",
             "ema20_swing_reverse",
             "ema_swing_reverse",
-            "bbands_cross",
-            "ichimoku_cross",
+            "unknown_strategy",
         ]
     )
-    assert "ema_cross" in supported
+    assert "ema_down" in supported
     assert "ema20_swing" in supported
     assert "ema20_swing_reverse" in supported
     assert "ema_swing_reverse" not in supported
-    assert "bbands_cross" not in supported
-    assert "ichimoku_cross" not in supported
+    assert "unknown_strategy" not in supported
 
 
 def test_get_strategy_min_history_candles_returns_expected_warmup() -> None:
-    assert get_strategy_min_history_candles("ema_cross") == 22
+    assert get_strategy_min_history_candles("ema_down") == 200
     assert get_strategy_min_history_candles("ema20_swing") == 200
     assert get_strategy_min_history_candles("ema20_swing_reverse") == 200
     assert get_strategy_min_history_candles("ema_low") == 200
@@ -51,7 +48,7 @@ def test_get_strategy_min_history_candles_returns_expected_warmup() -> None:
 def test_get_configured_strategy_min_history_candles_uses_maximum_requirement() -> None:
     required = get_configured_strategy_min_history_candles(
         {
-            "signal_strategy": "ema_cross",
+            "signal_strategy": "ema20_swing",
             "dca_strategy": "ema_low",
             "tp_strategy": "ema_down",
         }
@@ -68,8 +65,8 @@ def test_get_configured_strategy_min_history_candles_uses_sidestep_mode_strategi
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
             "sidestep_reentry_strategy": "ema20_swing_reverse",
-            "dca_strategy": "ema_cross",
-            "tp_strategy": "ema_cross",
+            "dca_strategy": "ema20_swing",
+            "tp_strategy": "ema_down",
         }
     )
     assert required == 200
@@ -87,11 +84,11 @@ def test_get_configured_strategy_min_history_candles_respects_canonical_mode_ove
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
             "sidestep_reentry_strategy": "ema20_swing_reverse",
-            "dca_strategy": "ema_cross",
-            "tp_strategy": "ema_cross",
+            "dca_strategy": "ema20_swing",
+            "tp_strategy": "ema_down",
         }
     )
-    assert required == 22
+    assert required == 200
 
 
 def test_get_configured_strategy_history_lookback_days_respects_timeframe() -> None:
@@ -111,7 +108,7 @@ def test_get_configured_strategy_history_lookback_days_uses_sidestep_mode_strate
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
             "sidestep_reentry_strategy": "ema20_swing_reverse",
-            "dca_strategy": "ema_cross",
+            "dca_strategy": "ema20_swing",
         },
         "1h",
         include_signal_strategy=False,

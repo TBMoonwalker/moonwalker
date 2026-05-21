@@ -446,7 +446,7 @@ async def test_resolve_signal_entry_orders_reuses_shared_autopilot_policy() -> N
         autopilot,
         ["BTC/USDT"],
         signal_name="asap",
-        strategy_name="ema_cross",
+        strategy_name="ema20_swing",
         timeframe="15m",
     )
 

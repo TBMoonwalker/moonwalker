@@ -87,6 +87,15 @@ const TASKS: readonly ControlCenterTaskPresentation[] = [
         emphasis: 'secondary',
     },
     {
+        target: 'strategy-builder',
+        title: 'Strategy Builder',
+        summary: 'Duplicate built-in strategies and promote validated custom graph versions.',
+        defaultMode: 'strategy-builder',
+        modes: ['strategy-builder'],
+        sectionId: 'control-center-strategy-builder',
+        emphasis: 'secondary',
+    },
+    {
         target: 'backup-restore',
         title: 'Backup and restore',
         summary: 'Download portable backups or restore a known-good configuration.',
@@ -161,6 +170,7 @@ const KEY_TARGETS: Record<string, ControlCenterTarget> = {
     sidestep_reentry_strategy: 'dca',
     sidestep_reentry_cooldown_candles: 'dca',
     sidestep_reentry_requires_fresh_long_signal: 'dca',
+    signal_strategy: 'strategy-builder',
     tp: 'dca',
     sl: 'dca',
     monitoring_enabled: 'monitoring',

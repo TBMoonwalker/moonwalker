@@ -12,6 +12,7 @@ from litestar.response import File
 
 _HASHED_ASSET_PATTERN = re.compile(r".+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
 _REMOVED_LEGACY_SPA_PATHS = frozenset({"config", "settings"})
+DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
 
 
 def _resolve_relative_file(root: Path, relative_path: str) -> Path | None:
@@ -72,6 +73,15 @@ async def serve_assets(file_path: str) -> File:
     return _file_response(asset_file)
 
 
+@get(path="/docs/{file_path:path}", include_in_schema=False)
+async def serve_docs(file_path: str) -> File:
+    """Serve local operator documentation files."""
+    docs_file = _resolve_relative_file(DOCS_DIR, file_path)
+    if docs_file is None or not await asyncio.to_thread(docs_file.is_file):
+        raise NotFoundException("Documentation file not found")
+    return _file_response(docs_file)
+
+
 @get(path="/{path:path}", include_in_schema=False)
 async def serve_vue(path: str) -> File:
     """Serve the Vue.js SPA entrypoint with static-file fallback."""
@@ -113,6 +123,7 @@ async def serve_root() -> File:
 route_handlers = [
     serve_static,
     serve_assets,
+    serve_docs,
     serve_spa_top_level_routes,
     serve_vue,
     serve_root,
