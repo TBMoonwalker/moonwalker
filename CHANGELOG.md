@@ -4,6 +4,37 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [3.2.0.0] - 2026-05-21
+
+### Added
+
+- Visual Strategy Builder in the Control Center: drag-and-drop node editor
+  to compose, validate, and save custom trading strategies from indicator,
+  logic, state, and value nodes.
+- Strategy Runtime engine that executes IR-based strategies with full signal
+  lifecycle: pre-check, build, evaluate, and post-check hooks, including
+  required history lookback enforcement.
+- Strategy capability service to detect available strategies, missing indicators,
+  and unsupported node types at build time.
+- Built-in strategy library with 5 pre-built strategies (EMA down, EMA low
+  rebound, EMA swing, EMA20 swing, EMA20 swing reverse) available as
+  read-only templates that can be duplicated into custom strategies.
+
+### Changed
+
+- Convert all strategy implementations from Python modules to JSON IR
+  (Intermediate Representation) consumed by the Strategy Runtime engine.
+- Centralize strategy validation into a single service with node-level,
+  connection-level, and graph-level checks.
+- Add strategy schema versioning for forward-compatible IR evolution.
+
+### Fixed
+
+- Strategy Builder reactivity: setting a decision node now re-renders the
+  graph and provides visual feedback.
+- Delete confirmation dialog now uses the app-native Naive UI dialog
+  instead of browser's native confirm.
+
 ## [3.1.0.0] - 2026-05-17
 
 ### Added
