@@ -53,7 +53,7 @@ are not exposed in the UI and must be set via the API.
 | `signal` | `string` | Signal plugin to use (e.g. `sym_signals`, `asap`, `csv_signal`). | `sym_signals` |
 | `signal_settings` | `string (json)` | Plugin settings per selected signal plugin. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |
 | `symbol_list` | `string` | CSV list or URL for ASAP symbol list. | `BTC/USDT,ETH/USDT` |
-| `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema_cross` |
+| `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema20_swing` |
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
 | `pair_denylist` | `string` | Comma-separated denied symbols. | `SCAM,XYZ` |
 | `volume` | `string (json)` | Minimum 24h volume filter. | `{"size":5,"range":"M"}` |
@@ -80,7 +80,7 @@ are not exposed in the UI and must be set via the API.
 | `sidestep_reentry_strategy` | `string` | Required for new sidestep saves and restores. Legacy startup snapshots may still fall back to `dca_strategy` until they are re-saved from a current client. | `ema_swing` |
 | `sidestep_reentry_cooldown_candles` | `int` | Minimum number of candles to wait before a sidestep campaign may re-enter again. | `0` |
 | `sidestep_reentry_requires_fresh_long_signal` | `bool` | Require a fresh long signal before a waiting sidestep campaign may re-enter (advanced). | `false` |
-| `tp_strategy` | `string` | Strategy for take-profit checks (advanced). | `ema_cross` |
+| `tp_strategy` | `string` | Strategy for take-profit checks (advanced). | `ema_down` |
 | `trailing_tp` | `float` | Trailing TP deviation (percent). | `0.5` |
 | `max_bots` | `int` | Max concurrent bots. | `3` |
 | `bo` | `float` | Base order size. | `10` |
@@ -153,7 +153,7 @@ are not exposed in the UI and must be set via the API.
 | `monitoring_telegram_chat_id` | `string` | Telegram chat ID (user/group/channel) receiving notifications. | `-1001234567890` |
 | `monitoring_timeout_sec` | `int` | Telegram send timeout in seconds. | `5` |
 | `monitoring_retry_count` | `int` | Number of retries after a failed Telegram send. | `1` |
-| `strategies` | `array[string]` | Available strategies (read-only). | `["ema_cross","ema_down","ema_low","ema_swing"]` |
+| `strategies` | `array[string]` | Available strategies (read-only). | `["ema_down","ema20_swing","ema20_swing_reverse","ema_low","ema_swing"]` |
 | `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals"]` |
 
 Read-only metadata keys such as `strategies` and `signal_plugins` are returned

@@ -13,6 +13,9 @@ from .emaswingstate import EmaSwingState as EmaSwingState
 from .listings import Listings as Listings
 from .opentrades import OpenTrades as OpenTrades
 from .spotcampaigns import SpotCampaigns as SpotCampaigns
+from .strategybuilder import StrategyDefinition as StrategyDefinition
+from .strategybuilder import StrategyGraphState as StrategyGraphState
+from .strategybuilder import StrategyVersion as StrategyVersion
 from .tickers import Tickers as Tickers
 from .tradeexecutions import TradeExecutions as TradeExecutions
 from .tradereplaycandles import TradeReplayCandles as TradeReplayCandles
@@ -34,6 +37,9 @@ __all__ = [
     "Listings",
     "OpenTrades",
     "SpotCampaigns",
+    "StrategyDefinition",
+    "StrategyGraphState",
+    "StrategyVersion",
     "Tickers",
     "TradeReplayCandles",
     "TradeExecutions",
@@ -53,6 +59,9 @@ if __name__ == "__main__":
         "Trades",
         "OpenTrades",
         "SpotCampaigns",
+        "StrategyDefinition",
+        "StrategyGraphState",
+        "StrategyVersion",
         "ClosedTrades",
         "TradeReplayCandles",
         "TradeExecutions",

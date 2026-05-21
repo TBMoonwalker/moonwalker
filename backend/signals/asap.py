@@ -1,7 +1,6 @@
 """ASAP signal plugin implementation."""
 
 import asyncio
-import importlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -27,10 +26,10 @@ from service.signal_runtime import (
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
 from service.strategy_capability import (
-    ensure_strategy_supported,
     get_configured_strategy_history_lookback_days,
     get_configured_strategy_min_history_candles,
 )
+from service.strategy_runtime import get_strategy_adapter
 from tenacity import retry, wait_fixed
 from tortoise.exceptions import BaseORMException
 
@@ -80,7 +79,7 @@ class SignalPlugin:
         self._required_history_days = 0
         self._required_history_candles = 0
 
-    def __prepare_runtime_settings(self) -> None:
+    async def __prepare_runtime_settings(self) -> None:
         """Cache parsed runtime settings and strategy instance for hot loops."""
         runtime = build_common_runtime_settings(self.config)
         self._pair_denylist = runtime.pair_denylist
@@ -108,12 +107,9 @@ class SignalPlugin:
 
         signal_strategy_name = self.config.get("signal_strategy", None)
         if signal_strategy_name:
-            ensure_strategy_supported(signal_strategy_name)
-            signal_strategy = importlib.import_module(
-                f"strategies.{signal_strategy_name}"
-            )
-            self._signal_strategy_plugin = signal_strategy.Strategy(
-                timeframe=self._strategy_timeframe,
+            self._signal_strategy_plugin = await get_strategy_adapter(
+                signal_strategy_name,
+                self._strategy_timeframe,
             )
 
     def __log_max_bots_waiting(self) -> None:
@@ -468,7 +464,7 @@ class SignalPlugin:
         """
         self.config = config
         self._max_bots_log_interval_sec = resolve_max_bots_log_interval(self.config)
-        self.__prepare_runtime_settings()
+        await self.__prepare_runtime_settings()
 
         while self.status:
             max_bots = await self.__check_max_bots()

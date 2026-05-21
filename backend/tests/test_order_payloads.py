@@ -113,7 +113,7 @@ def test_build_buy_payload_helpers_return_expected_values() -> None:
         "direction": "long",
         "side": "buy",
         "signal_name": "asap",
-        "strategy_name": "ema_cross",
+        "strategy_name": "ema20_swing",
         "timeframe": "15m",
         "metadata_json": '{"entry_sizing":{"applied":true}}',
     }

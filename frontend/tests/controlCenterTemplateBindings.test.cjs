@@ -175,6 +175,17 @@ const utilitiesWorkspaceSource = fs.readFileSync(
     ),
     'utf8',
 )
+const strategyBuilderWorkspaceSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'control-center',
+        'StrategyBuilderWorkspace.vue',
+    ),
+    'utf8',
+)
 const feedbackSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -836,6 +847,7 @@ test('control center delegates mission, mode, and overview presentation to dedic
         'Configure',
         'Utilities',
         "emit('select-mode', 'overview')",
+        "emit('select-mode', 'strategy-builder')",
         "emit('select-mode', 'utilities')",
     ]
     const requiredOverviewSnippets = [
@@ -1015,7 +1027,10 @@ test('control center delegates advanced and utilities presentation to dedicated 
     const requiredViewSnippets = [
         "import ControlCenterAdvancedMode from '../components/control-center/ControlCenterAdvancedMode.vue'",
         "import ControlCenterUtilitiesWorkspace from '../components/control-center/ControlCenterUtilitiesWorkspace.vue'",
+        "import StrategyBuilderWorkspace from '../components/control-center/StrategyBuilderWorkspace.vue'",
         '<ControlCenterAdvancedMode',
+        "routeState.mode === 'strategy-builder'",
+        '<StrategyBuilderWorkspace',
         '<ControlCenterUtilitiesWorkspace',
         '@update:backup-include-trade-data="backupIncludeTradeData = $event"',
     ]
@@ -1082,6 +1097,14 @@ test('control center delegates advanced and utilities presentation to dedicated 
     assert.equal(
         controlCenterViewSource.includes('Connectivity test'),
         false,
+    )
+    assert.equal(
+        advancedModeSource.includes('StrategyBuilderWorkspace'),
+        false,
+    )
+    assert.ok(
+        strategyBuilderWorkspaceSource.includes('Strategy Builder'),
+        'expected dedicated strategy builder workspace to remain available',
     )
     assert.equal(
         controlCenterViewSource.includes('<template #indicator>'),

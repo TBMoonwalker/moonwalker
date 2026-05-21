@@ -2,6 +2,7 @@ export const CONTROL_CENTER_MODES = [
     'overview',
     'setup',
     'advanced',
+    'strategy-builder',
     'utilities',
 ] as const
 
@@ -17,6 +18,7 @@ export const CONTROL_CENTER_TARGETS = [
     'autopilot',
     'monitoring',
     'indicator',
+    'strategy-builder',
     'backup-restore',
     'live-activation',
 ] as const

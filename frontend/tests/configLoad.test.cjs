@@ -117,9 +117,9 @@ test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () =>
     const urlState = buildLoadedConfigState(
         {
             signal: 'asap',
-            signal_strategy: 'ema_cross',
+            signal_strategy: 'ema20_swing',
             signal_plugins: ['asap', 'csv_signal'],
-            strategies: ['ema_cross'],
+            strategies: ['ema20_swing'],
             symbol_list: 'https://signals.example/symbols.txt',
             timeframe: '15m',
         },
@@ -133,7 +133,7 @@ test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () =>
         { label: 'csv_signal', value: 'csv_signal' },
     ])
     assert.deepEqual(urlState.signal.strategy_plugins, [
-        { label: 'ema_cross', value: 'ema_cross' },
+        { label: 'ema20_swing', value: 'ema20_swing' },
     ])
     assert.equal(urlState.signal.strategy_enabled, true)
 

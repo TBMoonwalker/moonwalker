@@ -121,6 +121,47 @@ function toConfigOptions(values: unknown): ConfigOption[] {
         }))
 }
 
+function toStrategyConfigOptions(
+    values: unknown,
+    details: unknown,
+): ConfigOption[] {
+    const baseOptions = toConfigOptions(values)
+    if (!Array.isArray(details)) {
+        return baseOptions
+    }
+
+    const detailBySlug = new Map(
+        details
+            .filter(
+                (detail): detail is Record<string, unknown> =>
+                    detail !== null && typeof detail === 'object',
+            )
+            .map((detail) => [String(detail.slug), detail]),
+    )
+
+    return baseOptions.map((option) => {
+        const detail = detailBySlug.get(option.value)
+        if (!detail) {
+            return {
+                ...option,
+                label: `${option.value} · missing metadata`,
+            }
+        }
+        const kind = detail.is_builtin ? 'Built-in' : 'Custom'
+        const status =
+            detail.validation_status === 'valid' && detail.available !== false
+                ? 'valid'
+                : 'needs review'
+        const version = detail.active_version
+            ? `v${String(detail.active_version)}`
+            : 'no active version'
+        return {
+            value: option.value,
+            label: `${String(detail.name || option.value)} · ${kind} · ${version} · ${status}`,
+        }
+    })
+}
+
 function buildTradeModeSwitchGuard(
     response: ConfigApiResponse,
 ): TradeModeSwitchGuardState {
@@ -225,7 +266,10 @@ export function buildLoadedConfigState(
             plugins: toConfigOptions(response.signal_plugins),
             strategy: signalStrategy,
             strategy_enabled: signalStrategy !== null,
-            strategy_plugins: toConfigOptions(response.strategies),
+            strategy_plugins: toStrategyConfigOptions(
+                response.strategies,
+                response.strategy_details,
+            ),
             timeframe,
             symsignal_url: signalSettings
                 ? String(signalSettings.api_url || defaults.defaultSymSignalUrl)

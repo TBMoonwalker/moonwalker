@@ -38,6 +38,23 @@ test('normalizeControlCenterRouteState uses the task default mode when needed', 
     })
 })
 
+test('normalizeControlCenterRouteState treats strategy builder as a dedicated mode', () => {
+    const state = normalizeControlCenterRouteState({
+        requestedMode: 'advanced',
+        requestedTarget: 'strategy-builder',
+        fallbackMode: 'overview',
+    })
+
+    assert.deepEqual(state, {
+        mode: 'strategy-builder',
+        target: 'strategy-builder',
+    })
+    assert.deepEqual(buildControlCenterQuery(state), {
+        mode: 'strategy-builder',
+        target: 'strategy-builder',
+    })
+})
+
 test('buildControlCenterQuery omits target when route state has no target', () => {
     assert.deepEqual(
         buildControlCenterQuery({

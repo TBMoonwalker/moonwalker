@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-import importlib
 import math
 import re
 from typing import Any, Iterable
 
 import helper
+from service.strategy_builder import BUILTIN_STRATEGY_BY_SLUG
 from service.trade_lifecycle_config import TradeLifecycleConfigView
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_capability")
@@ -16,34 +16,22 @@ HIDDEN_STRATEGY_ALIASES = frozenset({"ema_swing_reverse"})
 
 # Strategy -> indicator methods required by its implementation.
 REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {
-    "bbands_cross": ("calculate_bbands_cross",),
-    "ema_cross": ("calculate_ema_cross",),
     "ema_down": ("calculate_ema",),
     "ema20_swing": ("calculate_ema", "get_close_price"),
     "ema20_swing_reverse": ("calculate_ema", "get_close_price"),
     "ema_low": ("calculate_ema", "get_close_price"),
     "ema_swing": ("calculate_ema", "get_close_price"),
     "ema_swing_reverse": ("calculate_ema", "get_close_price"),
-    "ichimoku_cross": ("calculate_ichimoku_cross",),
-    "tothemoonv2": (
-        "calculate_ema_slope",
-        "calculate_rsi_slope",
-        "calculate_ema_cross",
-    ),
 }
 
 # Strategy -> minimum closed candles required before the strategy can run safely.
 MIN_HISTORY_CANDLES_BY_STRATEGY: dict[str, int] = {
-    "bbands_cross": 50,
-    "ema_cross": 22,
     "ema_down": 200,
     "ema20_swing": 200,
     "ema20_swing_reverse": 200,
     "ema_low": 200,
     "ema_swing": 200,
     "ema_swing_reverse": 200,
-    "ichimoku_cross": 52,
-    "tothemoonv2": 50,
 }
 
 _SECONDS_PER_DAY = 24 * 60 * 60
@@ -162,7 +150,13 @@ def get_strategy_support_error(strategy_name: str) -> str | None:
     """Return a human-readable support error for a strategy, if any."""
     from service.indicators import Indicators
 
-    required_methods = REQUIRED_INDICATOR_METHODS.get(strategy_name, ())
+    normalized_name = str(strategy_name or "").strip()
+    builtin = BUILTIN_STRATEGY_BY_SLUG.get(normalized_name)
+    required_methods = (
+        builtin.required_methods
+        if builtin
+        else REQUIRED_INDICATOR_METHODS.get(normalized_name, ())
+    )
     if required_methods:
         missing = [
             method
@@ -175,18 +169,11 @@ def get_strategy_support_error(strategy_name: str) -> str | None:
                 f"methods are missing: {', '.join(missing)}."
             )
 
-    try:
-        module = importlib.import_module(f"strategies.{strategy_name}")
-    except Exception as exc:
-        return f"Strategy '{strategy_name}' cannot be imported: {exc}"
-
-    strategy_class = getattr(module, "Strategy", None)
-    if strategy_class is None:
-        return f"Strategy '{strategy_name}' is missing class 'Strategy'."
-
-    run_method = getattr(strategy_class, "run", None)
-    if not callable(run_method):
-        return f"Strategy '{strategy_name}' is missing callable method 'run'."
+    if (
+        normalized_name not in BUILTIN_STRATEGY_BY_SLUG
+        and not normalized_name.startswith("custom_")
+    ):
+        return f"Strategy '{strategy_name}' is not registered in Strategy Builder."
 
     return None
 
