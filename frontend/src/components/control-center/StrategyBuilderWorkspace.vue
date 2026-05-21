@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import axios from 'axios'
+import { useDialog } from 'naive-ui'
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { AreaExtensions, AreaPlugin } from 'rete-area-plugin'
 import { ClassicPreset, NodeEditor, type GetSchemes } from 'rete'
@@ -79,6 +80,7 @@ type ReteConnection = ClassicPreset.Connection<ReteNode, ReteNode>
 type Schemes = GetSchemes<ReteNode, ReteConnection>
 type AreaExtra = VueArea2D<Schemes>
 
+const dialog = useDialog()
 const strategies = ref<StrategySummary[]>([])
 const palette = ref<StrategyDetail['palette']>([])
 const selectedSlug = ref<string | null>(null)
@@ -301,9 +303,16 @@ async function deleteSelected(): Promise<void> {
     if (!detail || detail.is_builtin || saving.value) {
         return
     }
-    const confirmed = window.confirm(
-        `Delete custom strategy "${detail.name}"? This cannot be undone.`,
-    )
+    const confirmed = await new Promise<boolean>((resolve) => {
+        dialog.warning({
+            title: 'Delete Strategy',
+            content: `Delete custom strategy "${detail.name}"? This cannot be undone.`,
+            positiveText: 'Delete',
+            negativeText: 'Cancel',
+            onPositiveClick: () => resolve(true),
+            onNegativeClick: () => resolve(false),
+        })
+    })
     if (!confirmed) {
         return
     }
@@ -755,7 +764,9 @@ function setDecisionNode(nodeId: string): void {
     }
     detail.ir.root = nodeId
     selectedNodeId.value = nodeId
+    saveMessage.value = 'Decision node set.'
     void validateDraft()
+    void renderReteGraph()
 }
 
 async function renderReteGraph(): Promise<void> {
