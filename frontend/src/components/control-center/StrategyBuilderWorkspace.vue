@@ -1321,7 +1321,7 @@ function destroyRete(): void {
 .strategy-left-rail,
 .strategy-workbench {
     border: 1px solid var(--mw-color-border);
-    border-radius: 8px;
+    border-radius: var(--mw-radius-sm, 6px);
     background: var(--mw-color-surface-panel);
 }
 

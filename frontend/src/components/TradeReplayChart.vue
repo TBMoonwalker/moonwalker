@@ -197,12 +197,12 @@ async function initChart(): Promise<void> {
     })
 
     const candlestickSeries = chart.addSeries(CandlestickSeries, {
-        upColor: 'rgb(99, 226, 183)',
-        borderUpColor: 'rgb(99, 226, 183)',
-        wickUpColor: 'rgb(99, 226, 183)',
-        downColor: 'rgb(224, 108, 117)',
-        borderDownColor: 'rgb(224, 108, 117)',
-        wickDownColor: 'rgb(224, 108, 117)',
+        upColor: '#2E7D5B',
+        borderUpColor: '#2E7D5B',
+        wickUpColor: '#2E7D5B',
+        downColor: '#B4443F',
+        borderDownColor: '#B4443F',
+        wickDownColor: '#B4443F',
         priceFormat: {
             type: 'price',
             minMove: precision,

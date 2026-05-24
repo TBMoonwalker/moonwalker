@@ -290,7 +290,7 @@ function formatBlockReason(value: string): string {
     min-width: 0;
     padding: 6px 10px;
     border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
+    border-radius: var(--mw-radius-sm, 6px);
     background: rgba(255, 255, 255, 0.02);
     display: flex;
     align-items: center;
@@ -315,15 +315,15 @@ function formatBlockReason(value: string): string {
 }
 
 .red {
-    --n-value-text-color: rgb(224, 108, 117) !important;
+     --n-value-text-color: #B4443F !important;
 }
 
 .green {
-    --n-value-text-color: rgb(99, 226, 183) !important;
+     --n-value-text-color: #2E7D5B !important;
 }
 
 .orange {
-    --n-value-text-color: rgb(240, 173, 78) !important;
+     --n-value-text-color: #B7791F !important;
 }
 
 .stacked-stat {
@@ -386,11 +386,11 @@ function formatBlockReason(value: string): string {
 }
 
 .autopilot-icon.red {
-    color: rgb(224, 108, 117);
+    color: #B4443F;
 }
 
 .autopilot-icon.orange {
-    color: rgb(240, 173, 78);
+    color: #B7791F;
 }
 
 .muted {
@@ -439,8 +439,8 @@ function formatBlockReason(value: string): string {
 }
 
 @media (min-width: 769px) and (max-width: 1200px) {
-    .statistics-grid {
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-    }
+      .statistics-grid {
+         grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
 }
 </style>

@@ -164,7 +164,7 @@ watch([statistics_data.data, profit_store_refs.data], async ([newData]) => {
                 },
                 series: [
                     {
-                        color: 'rgb(99, 226, 183)',
+                        color: '#2E7D5B',
                         data: chart_data.value.datasets,
                         type: 'bar',
                         barWidth,
@@ -185,9 +185,9 @@ watch([statistics_data.data, profit_store_refs.data], async ([newData]) => {
 }, { immediate: true })
 
 function chart_classes(data: any) {
-    let column_color = 'rgb(99, 226, 183)'
+    let column_color = '#2E7D5B'
     if (Math.sign(data) <= 0) {
-        column_color = 'rgb(224, 108, 117)'
+        column_color = '#B4443F'
     }
     return {
         value: data,
@@ -209,12 +209,12 @@ function chart_classes(data: any) {
     width: 100%;
     overflow: hidden;
     padding: 8px 0 16px;
-    border-radius: 8px;
+    border-radius: var(--mw-radius-sm, 6px);
 }
 
 .chart-placeholder {
     width: 100%;
-    border-radius: 8px;
+    border-radius: var(--mw-radius-sm, 6px);
     background: rgba(255, 255, 255, 0.04);
 }
 

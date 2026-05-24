@@ -122,9 +122,9 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        sorter: 'default',
        render(row: any) {
         const color = row.total_profit >= 0
-             ? 'rgb(99, 226, 183)'
-             : 'rgb(224, 108, 117)'
-       return h('span', { style: { color } }, row.total_profit.toFixed(2))
+              ? '#2E7D5B'
+              : '#B4443F'
+        return h('span', { style: { color } }, row.total_profit.toFixed(2))
         },
       },
       {
@@ -132,12 +132,12 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        key: 'avg_profit',
        width: 100,
        sorter: 'default',
-       render(row: any) {
-        const color = row.avg_profit >= 0
-             ? 'rgb(99, 226, 183)'
-             : 'rgb(224, 108, 117)'
-        return h('span', { style: { color } }, row.avg_profit.toFixed(2))
-        },
+        render(row: any) {
+         const color = row.avg_profit >= 0
+               ? '#2E7D5B'
+               : '#B4443F'
+         return h('span', { style: { color } }, row.avg_profit.toFixed(2))
+          },
       },
       {
        title: 'Avg Duration',
@@ -163,23 +163,23 @@ function getDurationColumns(): DataTableColumns<AnalyticsOverview['duration_extr
        title: 'Profit',
        key: 'profit',
        width: 100,
-       render(row: any) {
-        const color = row.profit >= 0
-             ? 'rgb(99, 226, 183)'
-             : 'rgb(224, 108, 117)'
-        return h('span', { style: { color } }, row.profit.toFixed(2))
-        },
+        render(row: any) {
+         const color = row.profit >= 0
+               ? '#2E7D5B'
+               : '#B4443F'
+         return h('span', { style: { color } }, row.profit.toFixed(2))
+          },
       },
       {
        title: 'Profit %',
        key: 'profit_percent',
        width: 100,
-       render(row: any) {
-        const color = row.profit_percent >= 0
-             ? 'rgb(99, 226, 183)'
-             : 'rgb(224, 108, 117)'
-        return h('span', { style: { color } }, `${row.profit_percent}%`)
-        },
+        render(row: any) {
+         const color = row.profit_percent >= 0
+               ? '#2E7D5B'
+               : '#B4443F'
+         return h('span', { style: { color } }, `${row.profit_percent}%`)
+          },
       },
       {
        title: 'Closed',
@@ -244,8 +244,11 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
       <template v-else>
         <!-- KPI Cards -->
         <n-flex class="page-section" vertical>
-          <n-card content-style="padding: 0;">
-            <div class="statistics-grid">
+          <n-card
+              class="statistics-overview-card mw-shell-card"
+              content-style="padding: 14px 16px;"
+          >
+            <div class="statistics-grid" aria-label="Statistics overview">
               <div class="stat-cell">
                 <n-statistic label="Total Trades" :value="summary.total_trades" />
               </div>
@@ -426,7 +429,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
   min-width: 0;
   padding: 6px 10px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
+  border-radius: var(--mw-radius-sm, 6px);
   background: rgba(255, 255, 255, 0.02);
   display: flex;
   align-items: center;
@@ -451,11 +454,11 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 }
 
 .red {
-   --n-value-text-color: rgb(224, 108, 117) !important;
+    --n-value-text-color: #B4443F !important;
 }
 
 .green {
-   --n-value-text-color: rgb(99, 226, 183) !important;
+    --n-value-text-color: #2E7D5B !important;
 }
 
 .risk-stat {
@@ -527,8 +530,8 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 }
 
 @media (min-width: 769px) and (max-width: 1200px) {
-   .statistics-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-   }
+    .statistics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
 }
 </style>

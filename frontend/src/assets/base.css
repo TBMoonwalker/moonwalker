@@ -1,9 +1,9 @@
 @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Source+Sans+3:wght@400;600;700&family=Space+Grotesk:wght@500;700&display=swap');
 
 :root {
-  --mw-font-display: 'Space Grotesk', 'Segoe UI', sans-serif;
-  --mw-font-body: 'Source Sans 3', 'Segoe UI', sans-serif;
-  --mw-font-mono: 'IBM Plex Mono', 'SFMono-Regular', monospace;
+  --mw-font-display: 'Space Grotesk', sans-serif;
+  --mw-font-body: 'Source Sans 3', sans-serif;
+  --mw-font-mono: 'IBM Plex Mono', monospace;
 
   --mw-color-primary: #1d5c49;
   --mw-color-primary-strong: #18413a;

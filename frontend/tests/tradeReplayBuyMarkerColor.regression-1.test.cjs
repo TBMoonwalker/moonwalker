@@ -27,21 +27,21 @@ test('trade replay buy markers use the chart bullish green', () => {
     // trade buy markers from the chart bullish green to the darker operator
     // primary, which made the buy arrows visibly dimmer.
     assert.ok(
-        tradeReplayChartSource.includes("upColor: 'rgb(99, 226, 183)'"),
-        'expected the replay chart bullish candle color to stay bright green',
-    )
+        tradeReplayChartSource.includes("upColor: '#2E7D5B'"),
+          'expected the replay chart bullish candle color to use DESIGN.md success green',
+      )
     assert.ok(
         openTradeExpandedRowSource.includes(
-            "const BUY_MARKER_COLOR = 'rgb(99, 226, 183)'",
-        ),
-        'expected open-trade buy markers to use the bullish chart green',
-    )
+              "const BUY_MARKER_COLOR = '#2E7D5B'",
+          ),
+          'expected open-trade buy markers to use DESIGN.md success green',
+      )
     assert.ok(
         closedTradeExpandedRowSource.includes(
-            "const BUY_MARKER_COLOR = 'rgb(99, 226, 183)'",
-        ),
-        'expected closed-trade buy markers to use the bullish chart green',
-    )
+              "const BUY_MARKER_COLOR = '#2E7D5B'",
+          ),
+          'expected closed-trade buy markers to use DESIGN.md success green',
+      )
     assert.ok(
         openTradeExpandedRowSource.includes('campaign_started_at'),
         'expected open-trade replay to anchor sidestep missions to the campaign start instead of only the latest leg',

@@ -154,7 +154,7 @@ const monitoring = useControlCenterMonitoringSummary()
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-mono);
     font-size: 1rem;
-    line-height: 1.4;
+    line-height: 1.5;
 }
 
 @media (max-width: 768px) {

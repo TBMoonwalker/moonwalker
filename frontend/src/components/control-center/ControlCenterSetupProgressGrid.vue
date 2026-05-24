@@ -60,7 +60,7 @@ const emit = defineEmits<{
     gap: 6px;
     padding: 14px 16px;
     border: 1px solid rgba(29, 92, 73, 0.12);
-    border-radius: 12px;
+    border-radius: var(--mw-radius-lg, 12px);
     background: var(--mw-surface-card-muted);
     color: inherit;
     text-align: left;

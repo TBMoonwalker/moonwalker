@@ -91,8 +91,8 @@ const option = computed(() => {
   const lockedValues = data.value.map((point) => Number(point.funds_locked))
   const latestProfitValue = profitValues.length > 0 ? profitValues[profitValues.length - 1] : 0
   const isNegative = latestProfitValue < 0
-  const profitLineColor = isNegative ? 'rgb(224, 108, 117)' : 'rgb(99, 226, 183)'
-  const profitAreaColor = isNegative ? 'rgba(224, 108, 117, 0.18)' : 'rgba(99, 226, 183, 0.18)'
+  const profitLineColor = isNegative ? '#B4443F' : '#2E7D5B'
+  const profitAreaColor = isNegative ? 'rgba(180, 68, 63, 0.18)' : 'rgba(46, 125, 91, 0.18)'
   const lockedLineColor = 'rgb(245, 166, 35)'
   const chartLegendTextColor = '#ECEFEA'
   const chartMutedTextColor = '#8A948D'
@@ -223,12 +223,12 @@ watch(
   width: 100%;
   overflow: hidden;
   padding: 8px 0 16px;
-  border-radius: 8px;
+  border-radius: var(--mw-radius-sm, 6px);
 }
 
 .chart-placeholder {
   width: 100%;
-  border-radius: 8px;
+  border-radius: var(--mw-radius-sm, 6px);
   background: rgba(255, 255, 255, 0.04);
 }
 

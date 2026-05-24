@@ -363,7 +363,11 @@ onMounted(() => {
                     <h2>Run setup</h2>
                 </div>
 
-                <n-form label-placement="top" :show-feedback="false">
+                <n-form
+                    class="backtest-form"
+                    label-placement="top"
+                    :show-feedback="false"
+                >
                     <n-form-item label="Symbol">
                         <n-flex vertical class="symbol-picker">
                             <n-alert
@@ -466,7 +470,7 @@ onMounted(() => {
                         </n-form-item>
                     </div>
 
-                    <div class="control-grid two">
+                    <div class="control-grid two numeric-grid">
                         <n-form-item label="Timeframe">
                             <n-select
                                 v-model:value="form.timeframe"
@@ -726,7 +730,7 @@ onMounted(() => {
 
 .backtest-workspace {
     display: grid;
-    grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
     gap: 16px;
     align-items: start;
 }
@@ -757,13 +761,22 @@ onMounted(() => {
     font-size: 1.25rem;
 }
 
+.backtest-form {
+    display: grid;
+    gap: 14px;
+}
+
 .control-grid {
     display: grid;
-    gap: 12px;
+    gap: 14px 12px;
 }
 
 .control-grid.two {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.numeric-grid {
+    align-items: start;
 }
 
 .date-range-item {
@@ -773,6 +786,12 @@ onMounted(() => {
 .backtest-controls :deep(.n-date-picker),
 .backtest-controls :deep(.n-input-number) {
     width: 100%;
+}
+
+.backtest-controls :deep(.n-form-item-label) {
+    min-height: 24px;
+    padding: 0 0 6px 2px;
+    line-height: 1.25;
 }
 
 .symbol-picker {
@@ -797,7 +816,7 @@ onMounted(() => {
     display: flex;
     flex-wrap: wrap;
     gap: 10px;
-    margin-top: 4px;
+    margin-top: 14px;
 }
 
 .result-alert {
