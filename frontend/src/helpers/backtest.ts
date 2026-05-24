@@ -25,10 +25,9 @@ export interface BacktestFormState {
     timeframe: string
     baseOrderSize: number
     takeProfitPct: number
-    stopLossPct: number
+    stopLossPct: number | null
     maxSafetyOrders: number
     safetyOrderStepPct: number
-    stepScale: number
     fee: number
 }
 
@@ -43,10 +42,9 @@ export interface BacktestRunRequest {
     end_date: number
     base_order_size: number
     take_profit_pct: number
-    stop_loss_pct: number
+    stop_loss_pct: number | null
     max_safety_orders: number
     safety_order_step_pct: number
-    step_scale: number
     fee: number
 }
 
@@ -132,10 +130,9 @@ export function createDefaultBacktestForm(): BacktestFormState {
         timeframe: '1h',
         baseOrderSize: 20,
         takeProfitPct: 2.5,
-        stopLossPct: 5,
+        stopLossPct: null,
         maxSafetyOrders: 5,
         safetyOrderStepPct: 3,
-        stepScale: 1,
         fee: 0.001,
     }
 }
@@ -166,7 +163,6 @@ export function buildBacktestRequest(
         stop_loss_pct: form.stopLossPct,
         max_safety_orders: form.maxSafetyOrders,
         safety_order_step_pct: form.safetyOrderStepPct,
-        step_scale: form.stepScale,
         fee: form.fee,
     }
 }

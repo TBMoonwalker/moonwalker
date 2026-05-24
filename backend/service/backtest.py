@@ -18,7 +18,6 @@ from service.dca_math import (
     BacktestTradeState,
     calculate_actual_pnl_percent,
     calculate_average_entry_price,
-    calculate_safety_order_trigger_threshold,
     calculate_stop_loss_price,
     calculate_take_profit_price,
     calculate_trade_profit_pct,
@@ -302,10 +301,9 @@ class DcaSimulator:
         self,
         base_order_size: float,
         take_profit_pct: float,
-        stop_loss_pct: float,
+        stop_loss_pct: float | None,
         max_safety_orders: int,
         safety_order_step_pct: float = 3.0,
-        step_scale: float = 1.0,
         fee: float = 0.001,
         allow_safety_orders: bool = True,
     ) -> None:
@@ -314,7 +312,6 @@ class DcaSimulator:
         self.stop_loss_pct = stop_loss_pct
         self.max_safety_orders = max_safety_orders
         self.safety_order_step_pct = safety_order_step_pct
-        self.step_scale = step_scale
         self.fee = fee
         self.allow_safety_orders = allow_safety_orders
 
@@ -358,7 +355,6 @@ class DcaSimulator:
         tp_price = calculate_take_profit_price(
             avg_price, self.take_profit_pct, trade.fee
         )
-        sl_price = calculate_stop_loss_price(avg_price, self.stop_loss_pct, trade.fee)
 
         # TP check first (highest priority in intra-candle collision)
         if check_take_profit_hit(
@@ -371,17 +367,21 @@ class DcaSimulator:
             return BacktestTrade(trade, tp_price, candle.timestamp)
 
         # SL check second (only fires if all safety orders exhausted)
-        if check_stop_loss_hit(
-            trade.total_cost / trade.total_amount,
-            sl_price,
-            trade.safety_orders_count >= self.max_safety_orders,
-            candle.low,
-        ):
-            trade.closed = True
-            trade.exit_price = sl_price
-            trade.exit_timestamp = candle.timestamp
-            trade.sell_reason = "stop_loss"
-            return BacktestTrade(trade, sl_price, candle.timestamp)
+        if self.stop_loss_pct is not None:
+            sl_price = calculate_stop_loss_price(
+                avg_price, self.stop_loss_pct, trade.fee
+            )
+            if check_stop_loss_hit(
+                trade.total_cost / trade.total_amount,
+                sl_price,
+                trade.safety_orders_count >= self.max_safety_orders,
+                candle.low,
+            ):
+                trade.closed = True
+                trade.exit_price = sl_price
+                trade.exit_timestamp = candle.timestamp
+                trade.sell_reason = "stop_loss"
+                return BacktestTrade(trade, sl_price, candle.timestamp)
 
         # Safety order evaluation last
         actual_pnl = calculate_actual_pnl_percent(
@@ -393,11 +393,7 @@ class DcaSimulator:
 
         if self.allow_safety_orders and should_place_safety_order(
             actual_pnl=actual_pnl,
-            trigger_threshold=calculate_safety_order_trigger_threshold(
-                self.safety_order_step_pct,
-                self.step_scale,
-                trade.safety_orders_count,
-            ),
+            trigger_threshold=self._next_safety_order_threshold(trade),
             max_safety_orders=self.max_safety_orders,
             current_safety_orders=trade.safety_orders_count,
         ):
@@ -413,10 +409,21 @@ class DcaSimulator:
                     "amount": so_amount,
                     "cost": so_size,
                     "timestamp": candle.timestamp,
+                    "so_percentage": round(actual_pnl, 1),
                 }
             )
 
         return None
+
+    def _next_safety_order_threshold(self, trade: BacktestTradeState) -> float:
+        """Return the next dynamic DCA trigger threshold."""
+        if not trade.safety_orders:
+            return -abs(self.safety_order_step_pct)
+        last_percentage = trade.safety_orders[-1].get("so_percentage")
+        try:
+            return float(last_percentage) - abs(self.safety_order_step_pct)
+        except (TypeError, ValueError):
+            return -abs(self.safety_order_step_pct * (trade.safety_orders_count + 1))
 
 
 # ── Main Backtest engine ──────────────────────────────────────────────────────
@@ -439,7 +446,7 @@ class Backtest:
         end_date: datetime | str,
         base_order_size: float = 20.0,
         take_profit_pct: float = 2.5,
-        stop_loss_pct: float = 5.0,
+        stop_loss_pct: float | None = None,
         max_safety_orders: int = 5,
         safety_order_step_pct: float = 3.0,
         step_scale: float = 1.0,
@@ -467,14 +474,17 @@ class Backtest:
         )
         self.base_order_size = _positive_float(base_order_size, "base_order_size")
         self.take_profit_pct = _non_negative_float(take_profit_pct, "take_profit_pct")
-        self.stop_loss_pct = _non_negative_float(stop_loss_pct, "stop_loss_pct")
+        self.stop_loss_pct = _optional_non_negative_float(
+            stop_loss_pct, "stop_loss_pct"
+        )
         self.max_safety_orders = _non_negative_int(
             max_safety_orders, "max_safety_orders"
         )
         self.safety_order_step_pct = _positive_float(
             safety_order_step_pct, "safety_order_step_pct"
         )
-        self.step_scale = _positive_float(step_scale, "step_scale")
+        # Kept for backward-compatible direct callers; dynamic DCA derives thresholds.
+        _ = step_scale
         self.fee = _non_negative_float(fee, "fee")
         self.trade_mode = _trade_mode(trade_mode)
         self.sidestep_bearish_strategy = _strategy_slug(
@@ -522,7 +532,6 @@ class Backtest:
                 else 0
             ),
             safety_order_step_pct=self.safety_order_step_pct,
-            step_scale=self.step_scale,
             fee=self.fee,
             allow_safety_orders=self.trade_mode == TRADE_MODE_DYNAMIC_DCA,
         )
@@ -565,6 +574,7 @@ class Backtest:
 
             # 1. Evaluate existing trade against CURRENT candle (eval before signal)
             if self._open_trade:
+                previous_safety_orders = self._open_trade.safety_orders_count
                 closed = simulator.evaluate(self._open_trade, candle)
                 if closed:
                     self._closed_trades.append(closed)
@@ -578,6 +588,8 @@ class Backtest:
                         }
                     )
                     self._open_trade = None
+                elif self._open_trade.safety_orders_count > previous_safety_orders:
+                    self._append_safety_order_marker(self._open_trade)
 
             # 2. Check for new entry signal on current candle
             if not self._open_trade:
@@ -594,17 +606,10 @@ class Backtest:
                     )
                     if trade:
                         self._open_trade = trade
-                        self._chart_markers.append(
-                            {
-                                "time": next_candle.timestamp,
-                                "position": "belowBar",
-                                "color": "#2E7D5B",
-                                "shape": "arrow_up",
-                                "text": "BUY",
-                            }
-                        )
+                        self._append_buy_marker(next_candle.timestamp, "BO")
 
         if self._open_trade is not None:
+            previous_safety_orders = self._open_trade.safety_orders_count
             closed = simulator.evaluate(self._open_trade, candles[-1])
             if closed:
                 self._closed_trades.append(closed)
@@ -618,6 +623,8 @@ class Backtest:
                     }
                 )
                 self._open_trade = None
+            elif self._open_trade.safety_orders_count > previous_safety_orders:
+                self._append_safety_order_marker(self._open_trade)
 
         # Log still-open trade at end of range
         if self._open_trade is not None:
@@ -764,6 +771,33 @@ class Backtest:
         for idx in range(replay_start_index):
             for slug, side in strategies:
                 await self._evaluate_strategy(slug, side, indicators, idx)
+
+    def _append_buy_marker(self, timestamp: int, text: str) -> None:
+        """Append a buy marker for a base or re-entry order."""
+        self._chart_markers.append(
+            {
+                "time": timestamp,
+                "position": "belowBar",
+                "color": "#2E7D5B",
+                "shape": "arrow_up",
+                "text": text,
+            }
+        )
+
+    def _append_safety_order_marker(self, trade: BacktestTradeState) -> None:
+        """Append a marker for the latest safety order."""
+        if not trade.safety_orders:
+            return
+        safety_order = trade.safety_orders[-1]
+        self._chart_markers.append(
+            {
+                "time": int(safety_order["timestamp"]),
+                "position": "belowBar",
+                "color": "#356D86",
+                "shape": "circle",
+                "text": f"SO {int(safety_order['index'])}",
+            }
+        )
 
     def _append_closed_trade_marker(self, closed: BacktestTrade) -> None:
         """Append a standard sell marker for a closed replay trade."""
@@ -966,6 +1000,15 @@ def _non_negative_float(value: Any, field: str) -> float:
     if parsed < 0:
         raise BacktestValidationError(f"{field} must be greater than or equal to 0")
     return parsed
+
+
+def _optional_non_negative_float(value: Any, field: str) -> float | None:
+    """Return an optional non-negative float or None when omitted."""
+    if value is None:
+        return None
+    if isinstance(value, str) and not value.strip():
+        return None
+    return _non_negative_float(value, field)
 
 
 def _non_negative_int(value: Any, field: str) -> int:

@@ -140,11 +140,27 @@ const tradeColumns: DataTableColumns<BacktestTrade> = [
         width: 120,
     },
     {
+        title: 'Opened',
+        key: 'open_timestamp',
+        width: 170,
+        render(row) {
+            return formatBacktestTimestamp(row.open_timestamp)
+        },
+    },
+    {
         title: 'Entry',
         key: 'open_price',
         width: 120,
         render(row) {
             return formatBacktestNumber(row.open_price, 6)
+        },
+    },
+    {
+        title: 'Closed',
+        key: 'close_timestamp',
+        width: 170,
+        render(row) {
+            return formatBacktestTimestamp(row.close_timestamp)
         },
     },
     {
@@ -209,6 +225,10 @@ const statusText = computed(() => {
 const lastRunLabel = computed(() =>
     lastRunAt.value ? new Date(lastRunAt.value).toLocaleString() : 'No run yet',
 )
+
+function formatBacktestTimestamp(timestamp: number): string {
+    return new Date(timestamp).toLocaleString()
+}
 
 async function loadStrategies(): Promise<void> {
     isLoadingStrategies.value = true
@@ -486,6 +506,8 @@ onMounted(() => {
                                 v-model:value="form.stopLossPct"
                                 :min="0"
                                 :precision="2"
+                                clearable
+                                placeholder="Disabled"
                             />
                         </n-form-item>
                     </div>
@@ -501,13 +523,6 @@ onMounted(() => {
                         <n-form-item label="Safety step %">
                             <n-input-number
                                 v-model:value="form.safetyOrderStepPct"
-                                :min="0.1"
-                                :precision="2"
-                            />
-                        </n-form-item>
-                        <n-form-item label="Step scale">
-                            <n-input-number
-                                v-model:value="form.stepScale"
                                 :min="0.1"
                                 :precision="2"
                             />

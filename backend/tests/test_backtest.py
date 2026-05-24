@@ -25,11 +25,7 @@ from service.backtest import (
     estimate_candle_count,
     validate_backtest_range,
 )
-from service.dca_math import (
-    BacktestTradeState,
-    calculate_safety_order_trigger_threshold,
-)
-from service.dca_safety_orders import calculate_static_deviations
+from service.dca_math import BacktestTradeState
 from service.exchange import Exchange
 from service.strategy_runtime import EvaluationContext
 
@@ -213,6 +209,44 @@ async def test_backtest_enters_on_next_candle_open(
     assert result["trades"][0]["open_timestamp"] == 61_000
     assert result["trades"][0]["open_price"] == 105.0
     assert result["chart"]["markers"][0]["time"] == 61_000
+    assert result["chart"]["markers"][0]["text"] == "BO"
+
+
+@pytest.mark.asyncio
+async def test_backtest_marks_base_and_safety_orders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="demo",
+        timeframe="1m",
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
+        take_profit_pct=50.0,
+        stop_loss_pct=None,
+        max_safety_orders=1,
+        safety_order_step_pct=10.0,
+    )
+    engine._candles = [
+        OhlcvCandle(1_000, 100.0, 100.0, 100.0, 100.0, 1.0),
+        OhlcvCandle(61_000, 100.0, 100.0, 88.0, 89.0, 1.0),
+        OhlcvCandle(121_000, 89.0, 90.0, 88.0, 89.0, 1.0),
+    ]
+
+    async def fake_snapshot(slug: str) -> object:
+        return object()
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(matched=kwargs["candle_index"] == 0)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+
+    result = await engine.run()
+
+    assert [marker["text"] for marker in result["chart"]["markers"]] == ["BO", "SO 1"]
+    assert result["chart"]["markers"][1]["time"] == 61_000
 
 
 @pytest.mark.asyncio
@@ -419,14 +453,13 @@ def test_dca_simulator_tp_wins_same_candle_collision() -> None:
     assert closed.sell_reason == "take_profit"
 
 
-def test_dca_simulator_places_scaled_safety_order() -> None:
+def test_dca_simulator_places_dynamic_safety_order() -> None:
     sim = DcaSimulator(
         base_order_size=100.0,
         take_profit_pct=5.0,
         stop_loss_pct=5.0,
         max_safety_orders=2,
         safety_order_step_pct=10.0,
-        step_scale=1.3,
         fee=0.0,
     )
     trade = _make_state()
@@ -437,12 +470,21 @@ def test_dca_simulator_places_scaled_safety_order() -> None:
 
     assert trade.safety_orders_count == 1
     assert trade.safety_orders[0]["cost"] == pytest.approx(100.0)
-    assert calculate_safety_order_trigger_threshold(10.0, 1.3, 1) == pytest.approx(
-        -23.0
+    assert trade.safety_orders[0]["so_percentage"] == pytest.approx(-11.0)
+
+
+def test_dca_simulator_ignores_disabled_stop_loss() -> None:
+    sim = DcaSimulator(
+        base_order_size=100.0,
+        take_profit_pct=5.0,
+        stop_loss_pct=None,
+        max_safety_orders=0,
+        fee=0.0,
     )
-    max_deviation, _actual_deviation = calculate_static_deviations(1.3, 10.0, 1)
-    assert calculate_safety_order_trigger_threshold(10.0, 1.3, 1) == pytest.approx(
-        -max_deviation
+
+    assert (
+        sim.evaluate(_make_state(), OhlcvCandle(2_000, 100.0, 100.0, 1.0, 1.0, 1.0))
+        is None
     )
 
 

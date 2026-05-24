@@ -46,6 +46,15 @@ test('backtest view is wired to the backend replay endpoint and chart markers', 
         'expected sidestep mode to hide dynamic DCA safety-order controls',
     )
     assert.ok(
+        !backtestViewSource.includes('form.stepScale'),
+        'expected Backtest UI to omit manual step scale controls',
+    )
+    assert.ok(
+        backtestViewSource.includes("title: 'Opened'") &&
+            backtestViewSource.includes("title: 'Closed'"),
+        'expected the Backtest table to show trade date/time columns',
+    )
+    assert.ok(
         backtestChartSource.includes('createSeriesMarkers'),
         'expected the Backtest chart to render buy and sell markers',
     )

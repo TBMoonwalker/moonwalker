@@ -29,7 +29,9 @@ test('buildBacktestRequest maps UI state to the backend contract', () => {
     assert.equal(request.start_date, 1_700_000_000_000)
     assert.equal(request.end_date, 1_700_003_600_000)
     assert.equal(request.base_order_size, 20)
+    assert.equal(request.stop_loss_pct, null)
     assert.equal(request.max_safety_orders, 5)
+    assert.equal('step_scale' in request, false)
 })
 
 test('buildBacktestRequest uses sidestep re-entry as replay strategy', () => {
