@@ -26,6 +26,14 @@ test('backtest view is wired to the backend replay endpoint and chart markers', 
         'expected the Backtest UI to keep a previous run for comparison',
     )
     assert.ok(
+        backtestViewSource.includes('tradeModeOptions'),
+        'expected the Backtest UI to expose trade mode selection',
+    )
+    assert.ok(
+        backtestViewSource.includes('sidestepBearishStrategySlug'),
+        'expected the Backtest UI to configure sidestep strategies',
+    )
+    assert.ok(
         backtestChartSource.includes('createSeriesMarkers'),
         'expected the Backtest chart to render buy and sell markers',
     )

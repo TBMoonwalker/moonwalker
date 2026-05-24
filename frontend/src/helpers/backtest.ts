@@ -5,11 +5,23 @@ export const BACKTEST_TIMEFRAME_OPTIONS = [
     { label: '1h', value: '1h' },
     { label: '4h', value: '4h' },
     { label: '1d', value: '1d' },
+    { label: '1w', value: '1w' },
 ] as const
+
+export const BACKTEST_TRADE_MODE_OPTIONS = [
+    { label: 'Dynamic DCA', value: 'dynamic_dca' },
+    { label: 'Sidestep', value: 'sidestep' },
+] as const
+
+export type BacktestTradeMode =
+    (typeof BACKTEST_TRADE_MODE_OPTIONS)[number]['value']
 
 export interface BacktestFormState {
     symbol: string
     strategySlug: string
+    tradeMode: BacktestTradeMode
+    sidestepBearishStrategySlug: string
+    sidestepReentryStrategySlug: string
     timeframe: string
     baseOrderSize: number
     takeProfitPct: number
@@ -23,6 +35,9 @@ export interface BacktestFormState {
 export interface BacktestRunRequest {
     symbol: string
     strategy_slug: string
+    trade_mode: BacktestTradeMode
+    sidestep_bearish_strategy: string
+    sidestep_reentry_strategy: string
     timeframe: string
     start_date: number
     end_date: number
@@ -84,7 +99,11 @@ export interface BacktestStats {
     timeframe?: string
     symbol?: string
     strategy?: string
+    trade_mode?: BacktestTradeMode
+    sidestep_bearish_strategy?: string
+    sidestep_reentry_strategy?: string
     still_open_at_end?: boolean
+    sidestep_waiting_at_end?: boolean
 }
 
 export interface BacktestResult {
@@ -106,6 +125,9 @@ export function createDefaultBacktestForm(): BacktestFormState {
     return {
         symbol: 'BTC/USDT',
         strategySlug: 'ema20_swing',
+        tradeMode: 'dynamic_dca',
+        sidestepBearishStrategySlug: 'ema_down',
+        sidestepReentryStrategySlug: 'ema20_swing_reverse',
         timeframe: '1h',
         baseOrderSize: 20,
         takeProfitPct: 2.5,
@@ -128,7 +150,13 @@ export function buildBacktestRequest(
 ): BacktestRunRequest {
     return {
         symbol: form.symbol.trim(),
-        strategy_slug: form.strategySlug.trim(),
+        strategy_slug:
+            form.tradeMode === 'sidestep'
+                ? form.sidestepReentryStrategySlug.trim()
+                : form.strategySlug.trim(),
+        trade_mode: form.tradeMode,
+        sidestep_bearish_strategy: form.sidestepBearishStrategySlug.trim(),
+        sidestep_reentry_strategy: form.sidestepReentryStrategySlug.trim(),
         timeframe: form.timeframe,
         start_date: dateRange[0],
         end_date: dateRange[1],

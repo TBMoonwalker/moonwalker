@@ -16,6 +16,7 @@ from service import backtest as backtest_service
 from service import strategy_runtime
 from service.analytics import compute_stats_from_trades
 from service.backtest import (
+    TRADE_MODE_SIDESTEP,
     Backtest,
     BacktestValidationError,
     DcaSimulator,
@@ -244,6 +245,73 @@ async def test_backtest_marks_still_open_trade_at_end(
     assert result["stats"]["still_open_at_end"] is True
 
 
+@pytest.mark.asyncio
+async def test_sidestep_backtest_exits_on_bearish_and_waits_for_reentry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="ema20_swing",
+        timeframe="1m",
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
+        take_profit_pct=50.0,
+        stop_loss_pct=50.0,
+        trade_mode=TRADE_MODE_SIDESTEP,
+        sidestep_bearish_strategy="ema_down",
+        sidestep_reentry_strategy="ema20_swing_reverse",
+    )
+    engine._candles = [
+        OhlcvCandle(1_000, 100.0, 100.0, 100.0, 100.0, 1.0),
+        OhlcvCandle(61_000, 100.0, 101.0, 99.0, 100.0, 1.0),
+        OhlcvCandle(121_000, 105.0, 106.0, 104.0, 105.0, 1.0),
+        OhlcvCandle(181_000, 95.0, 96.0, 94.0, 95.0, 1.0),
+    ]
+
+    async def fake_snapshot(slug: str) -> object:
+        return object()
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        slug = args[0]
+        candle_index = kwargs["candle_index"]
+        matched = (
+            slug == "ema20_swing_reverse"
+            and candle_index == 0
+            or slug == "ema_down"
+            and candle_index == 1
+        )
+        return SimpleNamespace(matched=matched)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+
+    result = await engine.run()
+
+    assert result["trades"][0]["open_timestamp"] == 61_000
+    assert result["trades"][0]["close_timestamp"] == 121_000
+    assert result["trades"][0]["sell_reason"] == "sidestep_exit"
+    assert result["trades"][0]["safety_orders_count"] == 0
+    assert result["chart"]["markers"][0]["text"] == "RE-ENTRY"
+    assert result["chart"]["markers"][1]["text"] == "SIDESTEP"
+    assert result["stats"]["trade_mode"] == "sidestep"
+    assert result["stats"]["sidestep_waiting_at_end"] is True
+
+
+def test_sidestep_backtest_requires_sidestep_strategies() -> None:
+    with pytest.raises(BacktestValidationError):
+        Backtest(
+            config={},
+            symbol="BTC/USDT",
+            strategy_slug="ema20_swing",
+            timeframe="1m",
+            start_date=datetime(2024, 1, 1, tzinfo=UTC),
+            end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
+            trade_mode=TRADE_MODE_SIDESTEP,
+            sidestep_bearish_strategy="ema_down",
+        )
+
+
 def test_candles_to_dataframe_empty_and_populated() -> None:
     assert candles_to_dataframe([]).empty
     df = candles_to_dataframe([_candle(0, 101.0), _candle(1, 102.0)])
@@ -344,6 +412,7 @@ def test_validate_backtest_range_rejects_excessive_candles() -> None:
         validate_backtest_range("1m", start, end)
 
     assert estimate_candle_count("1h", start, start + 3_600_000) == 2
+    assert estimate_candle_count("1w", start, start + 7 * 86_400_000) == 2
 
 
 @pytest.mark.asyncio
@@ -367,6 +436,9 @@ async def test_controller_validation_and_success(
             assert self.kwargs["start_date"].tzinfo is not None
             assert self.kwargs["end_date"].tzinfo is not None
             assert self.kwargs["fee"] == 0.002
+            assert self.kwargs["trade_mode"] == "sidestep"
+            assert self.kwargs["sidestep_bearish_strategy"] == "ema_down"
+            assert self.kwargs["sidestep_reentry_strategy"] == "ema20_swing_reverse"
             return {"ok": True}
 
     monkeypatch.setattr(backtest_controller, "Config", FakeConfig)
@@ -383,6 +455,9 @@ async def test_controller_validation_and_success(
             "start_date": "2024-01-01T00:00:00Z",
             "end_date": 1_704_070_800_000,
             "fee": 0.002,
+            "trade_mode": "sidestep",
+            "sidestep_bearish_strategy": "ema_down",
+            "sidestep_reentry_strategy": "ema20_swing_reverse",
         }
     )
 

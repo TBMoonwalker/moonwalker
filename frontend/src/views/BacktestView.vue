@@ -13,6 +13,7 @@ import BacktestResultChart from '../components/BacktestResultChart.vue'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import {
     BACKTEST_TIMEFRAME_OPTIONS,
+    BACKTEST_TRADE_MODE_OPTIONS,
     buildBacktestRequest,
     computeBacktestComparison,
     createDefaultBacktestForm,
@@ -43,14 +44,20 @@ const strategyOptions = ref<SelectOption[]>([])
 const lastRunAt = ref<number | null>(null)
 
 const timeframeOptions = BACKTEST_TIMEFRAME_OPTIONS.map((option) => ({ ...option }))
+const tradeModeOptions = BACKTEST_TRADE_MODE_OPTIONS.map((option) => ({ ...option }))
+const isSidestepMode = computed(() => form.tradeMode === 'sidestep')
 
 const canRun = computed(() => {
     if (!dateRange.value) {
         return false
     }
+    const hasStrategy = isSidestepMode.value
+        ? form.sidestepBearishStrategySlug.trim().length > 0 &&
+          form.sidestepReentryStrategySlug.trim().length > 0
+        : form.strategySlug.trim().length > 0
     return (
         form.symbol.trim().length > 0 &&
-        form.strategySlug.trim().length > 0 &&
+        hasStrategy &&
         dateRange.value[1] > dateRange.value[0]
     )
 })
@@ -278,7 +285,7 @@ onMounted(() => {
                         />
                     </n-form-item>
 
-                    <n-form-item label="Strategy">
+                    <n-form-item v-if="!isSidestepMode" label="Strategy">
                         <n-select
                             v-if="strategyOptions.length > 0"
                             v-model:value="form.strategySlug"
@@ -293,6 +300,54 @@ onMounted(() => {
                             autocomplete="off"
                         />
                     </n-form-item>
+
+                    <n-form-item label="Trade mode">
+                        <n-radio-group
+                            v-model:value="form.tradeMode"
+                            class="trade-mode-selector"
+                        >
+                            <n-radio-button
+                                v-for="option in tradeModeOptions"
+                                :key="option.value"
+                                :value="option.value"
+                            >
+                                {{ option.label }}
+                            </n-radio-button>
+                        </n-radio-group>
+                    </n-form-item>
+
+                    <div v-if="isSidestepMode" class="control-grid two">
+                        <n-form-item label="Bearish sidestep strategy">
+                            <n-select
+                                v-if="strategyOptions.length > 0"
+                                v-model:value="form.sidestepBearishStrategySlug"
+                                filterable
+                                :loading="isLoadingStrategies"
+                                :options="strategyOptions"
+                            />
+                            <n-input
+                                v-else
+                                v-model:value="form.sidestepBearishStrategySlug"
+                                placeholder="ema_down"
+                                autocomplete="off"
+                            />
+                        </n-form-item>
+                        <n-form-item label="Re-entry strategy">
+                            <n-select
+                                v-if="strategyOptions.length > 0"
+                                v-model:value="form.sidestepReentryStrategySlug"
+                                filterable
+                                :loading="isLoadingStrategies"
+                                :options="strategyOptions"
+                            />
+                            <n-input
+                                v-else
+                                v-model:value="form.sidestepReentryStrategySlug"
+                                placeholder="ema20_swing_reverse"
+                                autocomplete="off"
+                            />
+                        </n-form-item>
+                    </div>
 
                     <div class="control-grid two">
                         <n-form-item label="Timeframe">
@@ -455,6 +510,24 @@ onMounted(() => {
                                     <dd>{{ result.stats.strategy }}</dd>
                                 </div>
                                 <div>
+                                    <dt>Trade mode</dt>
+                                    <dd>
+                                        {{
+                                            result.stats.trade_mode === 'sidestep'
+                                                ? 'Sidestep'
+                                                : 'Dynamic DCA'
+                                        }}
+                                    </dd>
+                                </div>
+                                <div v-if="result.stats.trade_mode === 'sidestep'">
+                                    <dt>Bearish strategy</dt>
+                                    <dd>{{ result.stats.sidestep_bearish_strategy }}</dd>
+                                </div>
+                                <div v-if="result.stats.trade_mode === 'sidestep'">
+                                    <dt>Re-entry strategy</dt>
+                                    <dd>{{ result.stats.sidestep_reentry_strategy }}</dd>
+                                </div>
+                                <div>
                                     <dt>Timeframe</dt>
                                     <dd>{{ result.stats.timeframe }}</dd>
                                 </div>
@@ -581,6 +654,16 @@ onMounted(() => {
 .backtest-controls :deep(.n-date-picker),
 .backtest-controls :deep(.n-input-number) {
     width: 100%;
+}
+
+.trade-mode-selector {
+    display: flex;
+    width: 100%;
+}
+
+.trade-mode-selector :deep(.n-radio-button) {
+    flex: 1 1 0;
+    text-align: center;
 }
 
 .action-row {

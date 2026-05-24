@@ -37,6 +37,10 @@ OHLCV_PAGE_SIZE = 1000
 OHLCV_PAGE_DELAY = 0.5
 MAX_BACKTEST_DAYS = 90
 
+TRADE_MODE_DYNAMIC_DCA = "dynamic_dca"
+TRADE_MODE_SIDESTEP = "sidestep"
+SUPPORTED_TRADE_MODES = frozenset({TRADE_MODE_DYNAMIC_DCA, TRADE_MODE_SIDESTEP})
+
 
 TIMEFRAME_TO_MS = {
     "1m": 60_000,
@@ -51,6 +55,7 @@ TIMEFRAME_TO_MS = {
     "8h": 28_800_000,
     "12h": 43_200_000,
     "1d": 86_400_000,
+    "1w": 604_800_000,
 }
 
 
@@ -301,6 +306,7 @@ class DcaSimulator:
         safety_order_step_pct: float = 3.0,
         step_scale: float = 1.0,
         fee: float = 0.001,
+        allow_safety_orders: bool = True,
     ) -> None:
         self.base_order_size = base_order_size
         self.take_profit_pct = take_profit_pct
@@ -309,6 +315,7 @@ class DcaSimulator:
         self.safety_order_step_pct = safety_order_step_pct
         self.step_scale = step_scale
         self.fee = fee
+        self.allow_safety_orders = allow_safety_orders
 
     def try_enter(
         self, symbol: str, entry_price: float, timestamp: int
@@ -383,7 +390,7 @@ class DcaSimulator:
             candle.close,
         )
 
-        if should_place_safety_order(
+        if self.allow_safety_orders and should_place_safety_order(
             actual_pnl=actual_pnl,
             trigger_threshold=calculate_safety_order_trigger_threshold(
                 self.safety_order_step_pct,
@@ -436,6 +443,9 @@ class Backtest:
         safety_order_step_pct: float = 3.0,
         step_scale: float = 1.0,
         fee: float = 0.001,
+        trade_mode: str = TRADE_MODE_DYNAMIC_DCA,
+        sidestep_bearish_strategy: str | None = None,
+        sidestep_reentry_strategy: str | None = None,
     ) -> None:
         self.config = config
         self.strategy_slug = strategy_slug
@@ -455,12 +465,24 @@ class Backtest:
         )
         self.step_scale = _positive_float(step_scale, "step_scale")
         self.fee = _non_negative_float(fee, "fee")
+        self.trade_mode = _trade_mode(trade_mode)
+        self.sidestep_bearish_strategy = _strategy_slug(
+            sidestep_bearish_strategy,
+            "sidestep_bearish_strategy",
+            required=self.trade_mode == TRADE_MODE_SIDESTEP,
+        )
+        self.sidestep_reentry_strategy = _strategy_slug(
+            sidestep_reentry_strategy,
+            "sidestep_reentry_strategy",
+            required=self.trade_mode == TRADE_MODE_SIDESTEP,
+        )
         self._candles: list[OhlcvCandle] | None = None
         self._indicators: Indicators | None = None
         self._open_trade: BacktestTradeState | None = None
         self._closed_trades: list[BacktestTrade] = []
         self._chart_markers: list[dict[str, Any]] = []
         self._still_open_at_end: bool = False
+        self._sidestep_waiting_at_end: bool = False
         self._state_store: dict[tuple[str, str, str, str], Any] = {}
 
     async def run(self) -> dict[str, Any]:
@@ -481,16 +503,32 @@ class Backtest:
             base_order_size=self.base_order_size,
             take_profit_pct=self.take_profit_pct,
             stop_loss_pct=self.stop_loss_pct,
-            max_safety_orders=self.max_safety_orders,
+            max_safety_orders=(
+                self.max_safety_orders
+                if self.trade_mode == TRADE_MODE_DYNAMIC_DCA
+                else 0
+            ),
             safety_order_step_pct=self.safety_order_step_pct,
             step_scale=self.step_scale,
             fee=self.fee,
+            allow_safety_orders=self.trade_mode == TRADE_MODE_DYNAMIC_DCA,
         )
 
-        # Precompute strategy snapshot once (cache is keyed by slug)
-        from service.strategy_runtime import _load_strategy_snapshot as _lsnap
+        if self.trade_mode == TRADE_MODE_SIDESTEP:
+            await self._run_sidestep(candles, indicators, simulator)
+        else:
+            await self._run_dynamic_dca(candles, indicators, simulator)
 
-        await _lsnap(self.strategy_slug)
+        return self._build_result(candles)
+
+    async def _run_dynamic_dca(
+        self,
+        candles: list[OhlcvCandle],
+        indicators: Indicators,
+        simulator: DcaSimulator,
+    ) -> None:
+        """Replay the default dynamic DCA lifecycle."""
+        await self._preload_strategy_snapshots(self.strategy_slug)
 
         for idx in range(len(candles) - 1):
             candle = candles[idx]
@@ -514,14 +552,11 @@ class Backtest:
 
             # 2. Check for new entry signal on current candle
             if not self._open_trade:
-                result = await evaluate_strategy_graph(
+                result = await self._evaluate_strategy(
                     self.strategy_slug,
-                    self.timeframe,
-                    self.symbol,
                     "buy",
                     indicators,
-                    candle_index=idx,
-                    state_store=self._state_store,
+                    idx,
                 )
 
                 if result.matched:
@@ -565,7 +600,137 @@ class Backtest:
                 self._open_trade.entry_timestamp,
             )
 
-        return self._build_result(candles)
+    async def _run_sidestep(
+        self,
+        candles: list[OhlcvCandle],
+        indicators: Indicators,
+        simulator: DcaSimulator,
+    ) -> None:
+        """Replay spot sidestep: re-entry opens, bearish signal exits to flat."""
+        bearish_strategy = self.sidestep_bearish_strategy or ""
+        reentry_strategy = self.sidestep_reentry_strategy or ""
+        await self._preload_strategy_snapshots(bearish_strategy, reentry_strategy)
+
+        for idx in range(len(candles) - 1):
+            candle = candles[idx]
+            next_candle = candles[idx + 1]
+
+            if self._open_trade:
+                closed = simulator.evaluate(self._open_trade, candle)
+                if closed:
+                    self._append_closed_trade_marker(closed)
+                    self._open_trade = None
+                    self._sidestep_waiting_at_end = False
+                    continue
+
+                exit_signal = await self._evaluate_strategy(
+                    bearish_strategy,
+                    "sell",
+                    indicators,
+                    idx,
+                )
+                if exit_signal.matched:
+                    trade = self._open_trade
+                    trade.closed = True
+                    trade.exit_price = next_candle.open
+                    trade.exit_timestamp = next_candle.timestamp
+                    trade.sell_reason = "sidestep_exit"
+                    closed = BacktestTrade(
+                        trade, next_candle.open, next_candle.timestamp
+                    )
+                    self._closed_trades.append(closed)
+                    self._chart_markers.append(
+                        {
+                            "time": closed.close_timestamp,
+                            "position": "aboveBar",
+                            "color": "#B7791F",
+                            "shape": "arrow_down",
+                            "text": "SIDESTEP",
+                        }
+                    )
+                    self._open_trade = None
+                    self._sidestep_waiting_at_end = True
+                    continue
+
+            if not self._open_trade:
+                entry_signal = await self._evaluate_strategy(
+                    reentry_strategy,
+                    "buy",
+                    indicators,
+                    idx,
+                )
+                if entry_signal.matched:
+                    trade = simulator.try_enter(
+                        self.symbol, next_candle.open, next_candle.timestamp
+                    )
+                    if trade:
+                        self._open_trade = trade
+                        self._sidestep_waiting_at_end = False
+                        self._chart_markers.append(
+                            {
+                                "time": next_candle.timestamp,
+                                "position": "belowBar",
+                                "color": "#2E7D5B",
+                                "shape": "arrow_up",
+                                "text": "RE-ENTRY",
+                            }
+                        )
+
+        if self._open_trade is not None:
+            closed = simulator.evaluate(self._open_trade, candles[-1])
+            if closed:
+                self._append_closed_trade_marker(closed)
+                self._open_trade = None
+                self._sidestep_waiting_at_end = False
+
+        if self._open_trade is not None:
+            self._still_open_at_end = True
+            logging.warning(
+                "Sidestep backtest for %s ended with trade still open (entry: %s). "
+                "Excluded from stats.",
+                self.symbol,
+                self._open_trade.entry_timestamp,
+            )
+
+    async def _preload_strategy_snapshots(self, *slugs: str) -> None:
+        """Preload strategy snapshots once before candle replay."""
+        from service.strategy_runtime import _load_strategy_snapshot as _lsnap
+
+        for slug in dict.fromkeys(
+            str(slug).strip() for slug in slugs if str(slug).strip()
+        ):
+            await _lsnap(slug)
+
+    async def _evaluate_strategy(
+        self,
+        strategy_slug: str,
+        side: str,
+        indicators: Indicators,
+        candle_index: int,
+    ) -> Any:
+        """Evaluate one strategy graph against the current replay candle."""
+        return await evaluate_strategy_graph(
+            strategy_slug,
+            self.timeframe,
+            self.symbol,
+            side,
+            indicators,
+            candle_index=candle_index,
+            state_store=self._state_store,
+        )
+
+    def _append_closed_trade_marker(self, closed: BacktestTrade) -> None:
+        """Append a standard sell marker for a closed replay trade."""
+        self._closed_trades.append(closed)
+        self._chart_markers.append(
+            {
+                "time": closed.close_timestamp,
+                "position": "aboveBar",
+                "color": "#B4443F",
+                "shape": "arrow_down",
+                "text": closed.sell_reason or "SELL",
+            }
+        )
 
     async def _fetch(self) -> list[OhlcvCandle]:
         """Fetch OHLCV for the configured range."""
@@ -590,7 +755,11 @@ class Backtest:
                 "timeframe": self.timeframe,
                 "symbol": self.symbol,
                 "strategy": self.strategy_slug,
+                "trade_mode": self.trade_mode,
+                "sidestep_bearish_strategy": self.sidestep_bearish_strategy,
+                "sidestep_reentry_strategy": self.sidestep_reentry_strategy,
                 "still_open_at_end": False,
+                "sidestep_waiting_at_end": False,
             }
         )
         return {
@@ -610,7 +779,11 @@ class Backtest:
                 "timeframe": self.timeframe,
                 "symbol": self.symbol,
                 "strategy": self.strategy_slug,
+                "trade_mode": self.trade_mode,
+                "sidestep_bearish_strategy": self.sidestep_bearish_strategy,
+                "sidestep_reentry_strategy": self.sidestep_reentry_strategy,
                 "still_open_at_end": self._still_open_at_end,
+                "sidestep_waiting_at_end": self._sidestep_waiting_at_end,
             }
         )
 
@@ -734,3 +907,19 @@ def _non_negative_int(value: Any, field: str) -> int:
     if parsed < 0:
         raise BacktestValidationError(f"{field} must be greater than or equal to 0")
     return parsed
+
+
+def _trade_mode(value: Any) -> str:
+    """Return a supported trade mode or raise a validation error."""
+    normalized = str(value or TRADE_MODE_DYNAMIC_DCA).strip().lower()
+    if normalized not in SUPPORTED_TRADE_MODES:
+        raise BacktestValidationError(f"Unsupported trade_mode: {value}")
+    return normalized
+
+
+def _strategy_slug(value: Any, field: str, *, required: bool) -> str | None:
+    """Normalize optional strategy slugs used by sidestep replay."""
+    normalized = str(value or "").strip()
+    if required and not normalized:
+        raise BacktestValidationError(f"{field} is required for sidestep backtests")
+    return normalized or None
