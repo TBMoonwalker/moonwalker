@@ -32,15 +32,12 @@ class Analytics:
         if not rows:
             return self._empty()
 
-        return {
-            "summary": await self._summary(rows),
-            "heatmap_daily": await self._heatmap(rows, "daily"),
-            "heatmap_weekly": await self._heatmap(rows, "weekly"),
-            "per_symbol": await self._per_symbol(rows),
-            "duration_extremes": await self._duration_extremes(rows),
-            "drawdown": await self._drawdown(rows),
-            "distribution": await self._distribution(rows),
-        }
+        return compute_stats_from_trades(rows)
+
+    @staticmethod
+    def compute_stats_from_trades(rows: list[Any]) -> dict[str, Any]:
+        """Return analytics overview from in-memory trade rows."""
+        return compute_stats_from_trades(rows)
 
     async def _summary(self, rows: list[model.ClosedTrades]) -> dict[str, Any]:
         total = len(rows)
@@ -299,6 +296,213 @@ def _date_str_to_epoch_ms(date_str: str, resolution: str = "daily") -> int | Non
     except ValueError:
         pass
     return None
+
+
+def _trade_value(row: Any, key: str, default: Any = None) -> Any:
+    """Read a trade field from an ORM row or dictionary."""
+    if isinstance(row, dict):
+        return row.get(key, default)
+    return getattr(row, key, default)
+
+
+def compute_stats_from_trades(rows: list[Any]) -> dict[str, Any]:
+    """Return analytics overview from ORM rows or synthetic trade dictionaries."""
+    if not rows:
+        return Analytics._empty()
+    return {
+        "summary": _summary_from_rows(rows),
+        "heatmap_daily": _heatmap_from_rows(rows, "daily"),
+        "heatmap_weekly": _heatmap_from_rows(rows, "weekly"),
+        "per_symbol": _per_symbol_from_rows(rows),
+        "duration_extremes": _duration_extremes_from_rows(rows),
+        "drawdown": _drawdown_from_rows(rows),
+        "distribution": _distribution_from_rows(rows),
+    }
+
+
+def _summary_from_rows(rows: list[Any]) -> dict[str, Any]:
+    total = len(rows)
+    profits = [_trade_value(r, "profit") for r in rows]
+    profits = [p for p in profits if p is not None]
+    profit_percents = [_trade_value(r, "profit_percent") for r in rows]
+    profit_percents = [p for p in profit_percents if p is not None]
+    durations: list[float] = []
+
+    for r in rows:
+        hours = helper.parse_duration_hours(
+            _trade_value(r, "duration"),
+            open_date=_trade_value(r, "open_date"),
+            close_date=_trade_value(r, "close_date"),
+        )
+        if hours is not None:
+            durations.append(hours)
+
+    profitable = sum(1 for p in profits if p > 0)
+    total_profit = sum(profits) or 0.0
+    avg_profit = sum(profits) / len(profits) if profits else 0.0
+    avg_profit_pct = (
+        sum(profit_percents) / len(profit_percents) if profit_percents else 0.0
+    )
+    avg_duration = sum(durations) / len(durations) if durations else 0.0
+    total_cost = round(sum((_trade_value(r, "cost") or 0.0) for r in rows), 2)
+
+    return {
+        "total_trades": total,
+        "profit_trades": profitable,
+        "loss_trades": total - profitable,
+        "win_rate": round(profitable / total * 100, 2) if total else 0.0,
+        "total_profit": round(total_profit, 2),
+        "avg_profit": round(avg_profit, 2),
+        "avg_profit_percent": round(avg_profit_pct, 2),
+        "avg_duration_formatted": _format_duration(avg_duration),
+        "total_cost": round(total_cost, 2),
+    }
+
+
+def _heatmap_from_rows(rows: list[Any], resolution: str) -> list[dict[str, Any]]:
+    buckets: dict[str, int] = defaultdict(int)
+    for r in rows:
+        key = _extract_date_key(_trade_value(r, "close_date"), resolution)
+        if key:
+            buckets[key] += 1
+
+    result: list[dict[str, Any]] = []
+    for date_str, count in sorted(buckets.items()):
+        ts = _date_str_to_epoch_ms(date_str, resolution)
+        if ts is not None:
+            result.append({"timestamp": ts, "value": count})
+    return result
+
+
+def _per_symbol_from_rows(rows: list[Any]) -> list[dict[str, Any]]:
+    by_symbol: dict[str, list[Any]] = defaultdict(list)
+    for r in rows:
+        by_symbol[str(_trade_value(r, "symbol", ""))].append(r)
+
+    result: list[dict[str, Any]] = []
+    for symbol, trades in sorted(
+        by_symbol.items(),
+        key=lambda item: sum((_trade_value(t, "profit") or 0) for t in item[1]),
+        reverse=True,
+    ):
+        total = len(trades)
+        profits = [_trade_value(t, "profit") for t in trades]
+        profits = [p for p in profits if p is not None]
+        durations: list[float] = []
+        for t in trades:
+            hours = helper.parse_duration_hours(
+                _trade_value(t, "duration"),
+                open_date=_trade_value(t, "open_date"),
+                close_date=_trade_value(t, "close_date"),
+            )
+            if hours is not None:
+                durations.append(hours)
+
+        profitable = sum(1 for p in profits if p > 0)
+        total_profit = sum(profits) or 0.0
+        avg_profit = sum(profits) / len(profits) if profits else 0.0
+        avg_duration = sum(durations) / len(durations) if durations else 0.0
+
+        result.append(
+            {
+                "symbol": symbol,
+                "trades": total,
+                "win_rate": round(profitable / total * 100, 2) if total else 0.0,
+                "total_profit": round(total_profit, 2),
+                "avg_profit": round(avg_profit, 2),
+                "avg_duration_formatted": _format_duration(avg_duration),
+            }
+        )
+    return result
+
+
+def _duration_extremes_from_rows(rows: list[Any]) -> dict[str, list[dict[str, Any]]]:
+    with_duration: list[tuple[float, Any]] = []
+    for r in rows:
+        hours = helper.parse_duration_hours(
+            _trade_value(r, "duration"),
+            open_date=_trade_value(r, "open_date"),
+            close_date=_trade_value(r, "close_date"),
+        )
+        if hours is not None:
+            with_duration.append((hours, r))
+
+    with_duration.sort(key=lambda item: item[0])
+    shortest = with_duration[:5] if with_duration else []
+    longest = with_duration[-5:] if with_duration else []
+
+    def _trade_summary(hours: float, trade: Any) -> dict[str, Any]:
+        profit = _trade_value(trade, "profit")
+        profit_percent = _trade_value(trade, "profit_percent")
+        return {
+            "symbol": _trade_value(trade, "symbol"),
+            "duration_hours": round(hours, 2),
+            "duration_formatted": _format_duration(hours),
+            "profit": round(profit, 2) if profit is not None else 0.0,
+            "profit_percent": (
+                round(profit_percent, 2) if profit_percent is not None else 0.0
+            ),
+            "close_date": _trade_value(trade, "close_date"),
+            "deal_id": _trade_value(trade, "deal_id"),
+        }
+
+    return {
+        "longest": [_trade_summary(h, t) for h, t in reversed(longest)],
+        "shortest": [_trade_summary(h, t) for h, t in shortest],
+    }
+
+
+def _drawdown_from_rows(rows: list[Any]) -> dict[str, Any]:
+    sorted_trades = sorted(
+        (r for r in rows if _trade_value(r, "close_date")),
+        key=lambda r: _trade_value(r, "close_date"),
+    )
+    if not sorted_trades:
+        return {"max_drawdown": 0.0, "max_drawdown_percent": 0.0}
+
+    cumulative = 0.0
+    peak = 0.0
+    worst = 0.0
+    worst_pct = 0.0
+
+    for t in sorted_trades:
+        cumulative += _trade_value(t, "profit") or 0.0
+        if cumulative > peak:
+            peak = cumulative
+        drawdown = peak - cumulative
+        if drawdown > worst:
+            worst = drawdown
+            worst_pct = round(drawdown / abs(peak) * 100, 2) if peak != 0 else 0.0
+
+    return {
+        "max_drawdown": round(worst, 2),
+        "max_drawdown_percent": worst_pct,
+    }
+
+
+def _distribution_from_rows(rows: list[Any]) -> dict[str, Any]:
+    profit_percents = [_trade_value(r, "profit_percent") for r in rows]
+    profit_percents = [p for p in profit_percents if p is not None]
+    if not profit_percents:
+        return {
+            "bins": [],
+            "median": 0.0,
+            "std_dev": 0.0,
+            "best": 0.0,
+            "worst": 0.0,
+        }
+
+    bins = _make_histogram_bins(profit_percents)
+    median = stdlib_stats.median(profit_percents)
+    std_dev = stdlib_stats.stdev(profit_percents) if len(profit_percents) >= 2 else 0.0
+
+    return {
+        "bins": bins,
+        "median": round(median, 2),
+        "std_dev": round(std_dev, 2),
+        "best": round(max(profit_percents), 2),
+        "worst": round(min(profit_percents), 2),
+    }
 
 
 def _format_duration(hours: float) -> str:

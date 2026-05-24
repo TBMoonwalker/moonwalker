@@ -24,11 +24,21 @@ INDICATOR_CALCULATION_EXCEPTIONS = (
 class Indicators:
     """Compute technical indicators used by strategies."""
 
-    def __init__(self) -> None:
-        self.data = Data()
+    def __init__(self, data: Any | None = None) -> None:
+        """Initialize indicators with optional data source override.
+
+        Args:
+            data: Optional data source. When provided, used instead of live
+                 `Data()` for all indicator lookups. Used by backtest to inject
+                 in-memory OHLCV data without hitting the DB.
+        """
+        self.data = data if data is not None else Data()
         self._ema_cache: dict[
             tuple[str, str, tuple[int, ...]], tuple[float | None, dict[str, Any]]
         ] = {}
+        self._ema_series_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = (
+            {}
+        )
         self._close_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
 
     @staticmethod
@@ -179,6 +189,32 @@ class Indicators:
             if cached:
                 return cached[1]
         return ema
+
+    async def calculate_ema_series(
+        self, symbol: str, timerange: str, length: int
+    ) -> Any:
+        """Return a cached EMA series for candle-indexed replay paths."""
+        cache_key = (symbol, timerange, int(length))
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._ema_series_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
+
+        try:
+            df_raw = await self._get_indicator_source_data(
+                symbol, timerange, max(length * 2, 200)
+            )
+            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+            series = await asyncio.to_thread(
+                lambda: talib.EMA(df["close"].dropna(), timeperiod=length)
+            )
+            self._ema_series_cache[cache_key] = (latest_timestamp, series)
+            return series
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("EMA series", symbol, e)
+            if cached:
+                return cached[1]
+            return None
 
     async def get_close_price(self, symbol: str, timerange: str, length: int) -> Any:
         """Return close price series for a symbol."""

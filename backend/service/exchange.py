@@ -310,6 +310,85 @@ class Exchange:
 
         return all_candles
 
+    async def get_history_for_symbol_batched(
+        self,
+        config: dict[str, Any],
+        symbol: str,
+        timeframe: str,
+        since: int = 0,
+        until: int | None = None,
+        page_size: int = 1000,
+        max_candles: int = 20_000,
+        page_delay: float = 0.5,
+    ) -> list[list[Any]]:
+        """Fetch OHLCV in fixed-size pages with rate-limit backoff."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        resolved_symbol = self.__resolve_symbol(symbol)
+        if resolved_symbol is None:
+            logging.error("%s not found", symbol)
+            return []
+
+        all_candles: list[list[Any]] = []
+        seen_timestamps: set[int] = set()
+        consecutive_errors = 0
+        now = self.exchange.milliseconds()
+        upper_bound = min(now, int(until)) if until is not None else now
+
+        current_since = since if since > 0 else 0
+        while current_since < upper_bound:
+            if len(all_candles) >= max_candles:
+                break
+
+            try:
+                candles = await self.exchange.fetch_ohlcv(
+                    symbol=resolved_symbol,
+                    timeframe=timeframe,
+                    since=current_since,
+                    limit=page_size,
+                )
+                if not candles:
+                    break
+
+                bounded = [
+                    c for c in candles if len(c) > 0 and int(c[0]) <= upper_bound
+                ]
+                if not bounded:
+                    break
+
+                new_candles: list[list[Any]] = []
+                for candle in bounded:
+                    timestamp = int(candle[0])
+                    if timestamp in seen_timestamps:
+                        continue
+                    seen_timestamps.add(timestamp)
+                    new_candles.append(candle)
+
+                needed = max_candles - len(all_candles)
+                all_candles.extend(new_candles[:needed])
+
+                if len(bounded) < page_size:
+                    break
+
+                current_since = int(bounded[-1][0]) + 1
+                consecutive_errors = 0
+                if len(all_candles) < max_candles and current_since < upper_bound:
+                    await asyncio.sleep(page_delay)
+            except (ccxt.NetworkError, ccxt.ExchangeError, ccxt.BaseError) as e:
+                logging.error("Batch fetch error: %s", e)
+                consecutive_errors += 1
+                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+                    break
+                await asyncio.sleep(page_delay * (2 ** (consecutive_errors - 1)))
+            except (TypeError, ValueError, RuntimeError) as e:
+                logging.error("Batch fetch error: %s", e)
+                consecutive_errors += 1
+                if consecutive_errors >= self.HISTORY_MAX_CONSECUTIVE_ERRORS:
+                    break
+                await asyncio.sleep(page_delay * (2 ** (consecutive_errors - 1)))
+
+        return all_candles[:max_candles]
+
     async def get_symbols_for_quote_currency(
         self, config: dict[str, Any], quote_currency: str
     ) -> list[str]:

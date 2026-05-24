@@ -13,6 +13,11 @@ from service.config_views import (
     SidestepCampaignConfigView,
     TradeLifecycleConfigView,
 )
+from service.dca_math import (
+    calculate_average_entry_price,
+    calculate_stop_loss_price,
+    calculate_take_profit_price,
+)
 from service.dca_safety_orders import (
     SafetyOrderContext,
     calculate_static_deviations,
@@ -654,12 +659,18 @@ class Dca:
         tp_confirmation_pending = False
         tp_confirmation_ticks = 0
 
-        # Last sell fee has to be considered
         total_cost = trades["total_cost"] + (trades["total_cost"] * trades["fee"])
-        average_buy_price = total_cost / trades["total_amount"]
+        average_buy_price = calculate_average_entry_price(
+            trades["total_cost"],
+            trades["fee"],
+            trades["total_amount"],
+        )
 
         # Calculate TP/SL
-        take_profit_price = average_buy_price * (1 + (trading_policy.take_profit / 100))
+        take_profit_price = calculate_take_profit_price(
+            average_buy_price,
+            trading_policy.take_profit,
+        )
         if self.__is_sidestep_mode(trades) and trades.get("campaign_id"):
             sidestep_campaigns = await self._get_sidestep_campaigns()
             campaign = await sidestep_campaigns.get_campaign_snapshot(
@@ -680,7 +691,10 @@ class Dca:
                     take_profit_price = (
                         required_unrealized_quote + total_cost
                     ) / trades["total_amount"]
-        stop_loss_price = average_buy_price * (1 - (trading_policy.stop_loss / 100))
+        stop_loss_price = calculate_stop_loss_price(
+            average_buy_price,
+            trading_policy.stop_loss,
+        )
         tp_reached = not is_unsellable and current_price >= take_profit_price
         prearm_supported = self.__tp_limit_prearm_supported(
             runtime_config,
@@ -1181,8 +1195,15 @@ class Dca:
             )
             return False
 
-        average_buy_price = (total_cost + (total_cost * total_fee)) / total_amount
-        take_profit_price = average_buy_price * (1 + (trading_policy.take_profit / 100))
+        average_buy_price = calculate_average_entry_price(
+            total_cost,
+            total_fee,
+            total_amount,
+        )
+        take_profit_price = calculate_take_profit_price(
+            average_buy_price,
+            trading_policy.take_profit,
+        )
         if current_price >= take_profit_price:
             self.__log_sidestep_gate(
                 trades["symbol"],

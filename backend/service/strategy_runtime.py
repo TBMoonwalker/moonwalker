@@ -40,6 +40,8 @@ class EvaluationContext:
     symbol: str
     side: str
     indicators: Indicators
+    candle_index: int | None = None
+    state_store: dict[tuple[str, str, str, str], Any] | None = None
     memo: dict[tuple[Any, ...], Any] = field(default_factory=dict)
 
 
@@ -113,6 +115,8 @@ async def evaluate_strategy_graph(
     symbol: str,
     side: str,
     indicators: Indicators | None = None,
+    candle_index: int | None = None,
+    state_store: dict[tuple[str, str, str, str], Any] | None = None,
 ) -> StrategyEvaluationResult:
     """Evaluate a strategy graph against current candle data."""
     snapshot = await _load_strategy_snapshot(slug)
@@ -129,6 +133,8 @@ async def evaluate_strategy_graph(
         symbol=symbol,
         side=side,
         indicators=indicators or Indicators(),
+        candle_index=candle_index,
+        state_store=state_store,
     )
     try:
         matched = await _evaluate_root(snapshot.ir, context)
@@ -558,35 +564,45 @@ async def _evaluate_ema_swing(
 
 
 async def _ema(context: EvaluationContext, lengths: list[int]) -> dict[str, Any]:
-    """Memoized EMA call."""
+    """Return memoized EMA scalar values for the current evaluation candle."""
     key = ("ema", tuple(lengths))
-    return await _memo_indicator(
-        context,
-        key,
-        lambda: context.indicators.calculate_ema(
-            context.symbol, context.timeframe, lengths
-        ),
-    )
+    if key not in context.memo:
+        if context.candle_index is None:
+            context.memo[key] = await context.indicators.calculate_ema(
+                context.symbol, context.timeframe, lengths
+            )
+        else:
+            context.memo[key] = await _ema_values_at_candle(context, lengths)
+    return context.memo[key]
 
 
 async def _close(context: EvaluationContext, length: int) -> Any:
-    """Memoized close-series call."""
-    return await _memo_indicator(
-        context,
-        ("close", length),
-        lambda: context.indicators.get_close_price(
+    """Return a memoized close series sliced to the current replay candle."""
+    key = ("close", length)
+    if key not in context.memo:
+        raw = await context.indicators.get_close_price(
             context.symbol, context.timeframe, length
-        ),
-    )
+        )
+        if context.candle_index is not None and raw is not None:
+            raw = _slice_series(raw, context.candle_index)
+        context.memo[key] = raw
+    return context.memo[key]
 
 
 async def _ema_series(context: EvaluationContext, length: int, lookback: int) -> Any:
     """Return a memoized EMA series for relation and trend nodes."""
     key = ("ema_series", length, lookback)
     if key not in context.memo:
-        close = await _close(context, lookback)
         try:
-            context.memo[key] = talib.EMA(close.dropna(), timeperiod=length)
+            if context.candle_index is not None:
+                ema_raw = await context.indicators.calculate_ema_series(
+                    context.symbol, context.timeframe, length
+                )
+                ema_raw = _slice_series(ema_raw, context.candle_index)
+            else:
+                close = await _close(context, lookback)
+                ema_raw = talib.EMA(close.dropna(), timeperiod=length)
+            context.memo[key] = ema_raw
         except (AttributeError, TypeError, ValueError):
             context.memo[key] = None
     return context.memo[key]
@@ -599,6 +615,36 @@ async def _memo_indicator(
     if key not in context.memo:
         context.memo[key] = await factory()
     return context.memo[key]
+
+
+async def _ema_values_at_candle(
+    context: EvaluationContext, lengths: list[int]
+) -> dict[str, Any]:
+    """Resolve EMA scalar values at the current backtest candle index."""
+    values: dict[str, Any] = {}
+    for length in lengths:
+        series = await context.indicators.calculate_ema_series(
+            context.symbol,
+            context.timeframe,
+            length,
+        )
+        try:
+            value = float(_slice_series(series, context.candle_index or 0).iloc[-1])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            value = None
+        values[f"ema_{length}"] = value
+    return values
+
+
+def _slice_series(series: Any, candle_index: int) -> Any:
+    """Slice a pandas Series to only include values up to candle_index.
+
+    When candle_index=0 (first candle), slice to index 0 (inclusive).
+    """
+    if series is None:
+        return None
+    end = candle_index + 1
+    return series.iloc[:end]
 
 
 async def _resolve_float_state(
@@ -635,6 +681,9 @@ async def _resolve_tuple_state(
 
 async def _load_state(context: EvaluationContext, state_key: str) -> Any:
     """Load persisted generic graph state."""
+    if context.state_store is not None:
+        return context.state_store.get(_state_store_key(context, state_key))
+
     try:
         row = await model.StrategyGraphState.get_or_none(
             strategy_slug=context.slug,
@@ -670,6 +719,10 @@ async def _remember_state(
     context: EvaluationContext, state_key: str, value: Any
 ) -> None:
     """Persist graph state only when the serialized value changed."""
+    if context.state_store is not None:
+        context.state_store[_state_store_key(context, state_key)] = value
+        return
+
     value_json = json.dumps(value, sort_keys=True, separators=(",", ":"))
     row = await model.StrategyGraphState.get_or_none(
         strategy_slug=context.slug,
@@ -693,6 +746,13 @@ async def _remember_state(
         _persist,
         f"persisting graph state {state_key} for {context.slug}/{context.symbol}",
     )
+
+
+def _state_store_key(
+    context: EvaluationContext, state_key: str
+) -> tuple[str, str, str, str]:
+    """Return the in-memory state-store key for a strategy state value."""
+    return (context.slug, state_key, context.symbol, context.timeframe)
 
 
 def _bootstrap_ema_swing_state(close: Any) -> float | None:
