@@ -96,6 +96,7 @@ export interface BacktestStats {
     }
     candles_fetched?: number
     candles_evaluated?: number
+    warmup_candles?: number
     timeframe?: string
     symbol?: string
     strategy?: string

@@ -635,6 +635,10 @@ onMounted(() => {
                                     <dt>Candles fetched</dt>
                                     <dd>{{ result.stats.candles_fetched }}</dd>
                                 </div>
+                                <div>
+                                    <dt>Warmup candles</dt>
+                                    <dd>{{ result.stats.warmup_candles ?? 0 }}</dd>
+                                </div>
                             </dl>
                         </n-tab-pane>
                     </n-tabs>

@@ -298,6 +298,50 @@ async def test_sidestep_backtest_exits_on_bearish_and_waits_for_reentry(
     assert result["stats"]["sidestep_waiting_at_end"] is True
 
 
+@pytest.mark.asyncio
+async def test_backtest_warms_strategy_state_before_visible_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candles = [
+        _candle(0, 100.0),
+        _candle(1, 101.0),
+        _candle(2, 102.0),
+        _candle(3, 103.0),
+    ]
+    start_dt = datetime.fromtimestamp(candles[2].timestamp / 1000, tz=UTC)
+    end_dt = datetime.fromtimestamp(candles[3].timestamp / 1000, tz=UTC)
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="ema20_swing",
+        timeframe="1m",
+        start_date=start_dt,
+        end_date=end_dt,
+        take_profit_pct=50.0,
+    )
+    engine._candles = candles
+    evaluated_indices: list[int] = []
+
+    async def fake_snapshot(slug: str) -> object:
+        return object()
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        candle_index = kwargs["candle_index"]
+        evaluated_indices.append(candle_index)
+        return SimpleNamespace(matched=candle_index == 2)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+
+    result = await engine.run()
+
+    assert evaluated_indices[:2] == [0, 1]
+    assert result["chart"]["candles"][0]["time"] == candles[2].timestamp
+    assert result["chart"]["markers"][0]["time"] == candles[3].timestamp
+    assert result["stats"]["warmup_candles"] == 2
+    assert result["stats"]["candles_fetched"] == 4
+
+
 def test_sidestep_backtest_requires_sidestep_strategies() -> None:
     with pytest.raises(BacktestValidationError):
         Backtest(
@@ -423,6 +467,24 @@ def test_validate_backtest_range_allows_long_high_timeframe_ranges() -> None:
 
     validate_backtest_range("1h", start, end)
     validate_backtest_range("1w", start, end)
+
+
+def test_backtest_fetch_start_includes_strategy_warmup() -> None:
+    start_dt = datetime(2026, 2, 1, tzinfo=UTC)
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDC",
+        strategy_slug="ema20_swing",
+        timeframe="1w",
+        start_date=start_dt,
+        end_date=datetime(2026, 5, 23, tzinfo=UTC),
+        trade_mode=TRADE_MODE_SIDESTEP,
+        sidestep_bearish_strategy="ema20_swing_reverse",
+        sidestep_reentry_strategy="ema20_swing",
+    )
+
+    assert engine._warmup_candle_count == 200
+    assert engine._fetch_start_date == engine.start_date - 200 * 7 * 86_400_000
 
 
 @pytest.mark.asyncio

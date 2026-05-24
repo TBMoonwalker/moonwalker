@@ -28,6 +28,7 @@ from service.dca_math import (
 )
 from service.exchange import Exchange
 from service.indicators import Indicators
+from service.strategy_capability import get_strategy_min_history_candles
 from service.strategy_runtime import evaluate_strategy_graph
 
 logging = helper.LoggerFactory.get_logger("logs/backtest.log", "backtest")
@@ -187,6 +188,7 @@ async def fetch_ohlcv(
     timeframe: str,
     start_date: int = 0,
     end_date: int | None = None,
+    max_candles: int = MAX_CANDLES,
 ) -> list[OhlcvCandle]:
     """Fetch historical OHLCV from exchange with pagination and rate-limit awareness.
 
@@ -209,7 +211,7 @@ async def fetch_ohlcv(
             since=start_date if start_date > 0 else 0,
             until=end_date,
             page_size=OHLCV_PAGE_SIZE,
-            max_candles=MAX_CANDLES,
+            max_candles=max_candles,
             page_delay=OHLCV_PAGE_DELAY,
         )
 
@@ -453,6 +455,16 @@ class Backtest:
         self.start_date = _datetime_to_ms(_coerce_datetime(start_date, "start_date"))
         self.end_date = _datetime_to_ms(_coerce_datetime(end_date, "end_date"))
         validate_backtest_range(self.timeframe, self.start_date, self.end_date)
+        self._warmup_candle_count = self._resolve_warmup_candle_count(
+            strategy_slug,
+            sidestep_bearish_strategy,
+            sidestep_reentry_strategy,
+        )
+        self._fetch_start_date = max(
+            0,
+            self.start_date
+            - self._warmup_candle_count * TIMEFRAME_TO_MS.get(self.timeframe, 0),
+        )
         self.base_order_size = _positive_float(base_order_size, "base_order_size")
         self.take_profit_pct = _non_negative_float(take_profit_pct, "take_profit_pct")
         self.stop_loss_pct = _non_negative_float(stop_loss_pct, "stop_loss_pct")
@@ -491,8 +503,10 @@ class Backtest:
             Dict with 'trades', 'chart', 'stats' keys.
         """
         candles = await self._fetch()
-        if len(candles) < 2:
-            return self._empty_result(candles)
+        replay_start_index = self._first_replay_index(candles)
+        replay_candles = candles[replay_start_index:]
+        if len(replay_candles) < 2:
+            return self._empty_result(replay_candles, len(candles), replay_start_index)
 
         df = candles_to_dataframe(candles)
         backtest_data = BacktestData(df, self.timeframe)
@@ -514,22 +528,38 @@ class Backtest:
         )
 
         if self.trade_mode == TRADE_MODE_SIDESTEP:
-            await self._run_sidestep(candles, indicators, simulator)
+            await self._run_sidestep(
+                candles,
+                indicators,
+                simulator,
+                replay_start_index,
+            )
         else:
-            await self._run_dynamic_dca(candles, indicators, simulator)
+            await self._run_dynamic_dca(
+                candles,
+                indicators,
+                simulator,
+                replay_start_index,
+            )
 
-        return self._build_result(candles)
+        return self._build_result(replay_candles, len(candles), replay_start_index)
 
     async def _run_dynamic_dca(
         self,
         candles: list[OhlcvCandle],
         indicators: Indicators,
         simulator: DcaSimulator,
+        replay_start_index: int = 0,
     ) -> None:
         """Replay the default dynamic DCA lifecycle."""
         await self._preload_strategy_snapshots(self.strategy_slug)
+        await self._warm_strategy_state(
+            ((self.strategy_slug, "buy"),),
+            indicators,
+            replay_start_index,
+        )
 
-        for idx in range(len(candles) - 1):
+        for idx in range(replay_start_index, len(candles) - 1):
             candle = candles[idx]
             next_candle = candles[idx + 1]
 
@@ -604,13 +634,19 @@ class Backtest:
         candles: list[OhlcvCandle],
         indicators: Indicators,
         simulator: DcaSimulator,
+        replay_start_index: int = 0,
     ) -> None:
         """Replay spot sidestep: re-entry opens, bearish signal exits to flat."""
         bearish_strategy = self.sidestep_bearish_strategy or ""
         reentry_strategy = self.sidestep_reentry_strategy or ""
         await self._preload_strategy_snapshots(bearish_strategy, reentry_strategy)
+        await self._warm_strategy_state(
+            ((bearish_strategy, "sell"), (reentry_strategy, "buy")),
+            indicators,
+            replay_start_index,
+        )
 
-        for idx in range(len(candles) - 1):
+        for idx in range(replay_start_index, len(candles) - 1):
             candle = candles[idx]
             next_candle = candles[idx + 1]
 
@@ -718,6 +754,17 @@ class Backtest:
             state_store=self._state_store,
         )
 
+    async def _warm_strategy_state(
+        self,
+        strategies: tuple[tuple[str, str], ...],
+        indicators: Indicators,
+        replay_start_index: int,
+    ) -> None:
+        """Advance stateful strategy memory before the visible replay window."""
+        for idx in range(replay_start_index):
+            for slug, side in strategies:
+                await self._evaluate_strategy(slug, side, indicators, idx)
+
     def _append_closed_trade_marker(self, closed: BacktestTrade) -> None:
         """Append a standard sell marker for a closed replay trade."""
         self._closed_trades.append(closed)
@@ -738,19 +785,26 @@ class Backtest:
                 self.config,
                 self.symbol,
                 self.timeframe,
-                self.start_date,
+                self._fetch_start_date,
                 self.end_date,
+                max_candles=MAX_CANDLES + self._warmup_candle_count,
             )
         return self._candles
 
-    def _empty_result(self, candles: list[OhlcvCandle]) -> dict[str, Any]:
+    def _empty_result(
+        self,
+        candles: list[OhlcvCandle],
+        total_candles_fetched: int | None = None,
+        warmup_candles: int = 0,
+    ) -> dict[str, Any]:
         """Return empty result when no meaningful backtest can run."""
         ohlcv = self._candles_to_ohlcv_payload(candles)
         stats = compute_stats_from_trades([])
         stats.update(
             {
-                "candles_fetched": len(candles),
+                "candles_fetched": total_candles_fetched or len(candles),
                 "candles_evaluated": 0,
+                "warmup_candles": warmup_candles,
                 "timeframe": self.timeframe,
                 "symbol": self.symbol,
                 "strategy": self.strategy_slug,
@@ -767,14 +821,20 @@ class Backtest:
             "stats": stats,
         }
 
-    def _build_result(self, candles: list[OhlcvCandle]) -> dict[str, Any]:
+    def _build_result(
+        self,
+        candles: list[OhlcvCandle],
+        total_candles_fetched: int | None = None,
+        warmup_candles: int = 0,
+    ) -> dict[str, Any]:
         """Build final backtest result with trades, chart data, and stats."""
         closed_trades = [t.to_dict() for t in self._closed_trades]
         stats = compute_stats_from_trades(closed_trades)
         stats.update(
             {
-                "candles_fetched": len(candles),
+                "candles_fetched": total_candles_fetched or len(candles),
                 "candles_evaluated": min(len(candles) - 1, len(candles)),
+                "warmup_candles": warmup_candles,
                 "timeframe": self.timeframe,
                 "symbol": self.symbol,
                 "strategy": self.strategy_slug,
@@ -810,6 +870,24 @@ class Backtest:
             }
             for c in candles
         ]
+
+    def _first_replay_index(self, candles: list[OhlcvCandle]) -> int:
+        """Return the first candle index inside the requested replay window."""
+        for index, candle in enumerate(candles):
+            if candle.timestamp >= self.start_date:
+                return index
+        return 0
+
+    def _resolve_warmup_candle_count(self, *strategies: str | None) -> int:
+        """Return the max warmup candles required by configured strategies."""
+        return max(
+            (
+                get_strategy_min_history_candles(strategy)
+                for strategy in strategies
+                if strategy
+            ),
+            default=0,
+        )
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
