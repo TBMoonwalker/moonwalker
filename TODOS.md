@@ -2,30 +2,6 @@
 
 ## Deferred
 
-### Build the operator-facing Backtest UI after backend core stabilizes
-
-**What:** Add the Backtest page, chart, previous-run comparison, loading and
-error states, responsive layout, and accessibility polish once `/backtest/run`
-has a stable backend contract.
-
-**Why:** The backend/API slice was intentionally reduced to protect simulation
-correctness first. Operators still need the visual workflow before the feature
-is product-complete.
-
-**Pros:** Keeps the deferred UI work visible with the design-review context
-attached, and gives the UI implementation a tested API and analytics shape to
-build on.
-
-**Cons:** Requires a follow-up implementation slice before operators can run
-backtests from the dashboard.
-
-**Context:** Start from the Backtest Engine design doc's action bar, Lightweight
-Charts marker plan, stats grid, comparison footer, interaction-state table,
-DESIGN.md token references, responsive behavior, and accessibility requirements.
-
-**Depends on / blocked by:** Stable `/backtest/run` response shape, shared
-analytics stats, and backend regression coverage for strategy replay.
-
 ### Extend sidestep campaign analytics beyond grouped replay polish
 
 **What:** If operators later need deeper reporting, add a campaign-first
@@ -52,6 +28,16 @@ actually warranted.
 current grouped replay and waiting-campaign context are still insufficient.
 
 ## Completed
+
+### Build the operator-facing Backtest UI after backend core stabilizes
+
+**Completed:** Unreleased (2026-05-24)
+
+**What shipped:** Added a Backtest route with strategy replay controls,
+Lightweight Charts candles and buy/sell markers, stats, run metadata,
+previous-run comparison, loading and safe error states, responsive layout, and
+frontend helper coverage for request shaping, marker normalization, and
+comparison math.
 
 ### Centralize lifecycle normalization across backend and frontend config seams
 
