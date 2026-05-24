@@ -20,7 +20,6 @@ async def run_backtest(data: dict[str, Any]) -> Any:
 
 async def _run_backtest(data: dict[str, Any]) -> Any:
     """Run a backtest with the given parameters."""
-    config = Config().get()
     symbol = data.get("symbol")
     strategy_slug = data.get("strategy_slug")
     timeframe = data.get("timeframe")
@@ -56,6 +55,8 @@ async def _run_backtest(data: dict[str, Any]) -> Any:
         )
 
     try:
+        config_service = await Config.instance()
+        config = config_service.snapshot()
         engine = Backtest(
             config=config,
             symbol=symbol,

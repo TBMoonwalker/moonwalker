@@ -10,6 +10,8 @@ from typing import Any
 import pandas as pd
 import pytest
 from controller import backtest as backtest_controller
+from litestar import Litestar
+from litestar.testing import TestClient
 from service import backtest as backtest_service
 from service import strategy_runtime
 from service.analytics import compute_stats_from_trades
@@ -348,9 +350,14 @@ def test_validate_backtest_range_rejects_excessive_candles() -> None:
 async def test_controller_validation_and_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FakeConfig:
-        def get(self) -> dict[str, Any]:
+    class FakeConfigService:
+        def snapshot(self) -> dict[str, Any]:
             return {"exchange": "binance"}
+
+    class FakeConfig:
+        @classmethod
+        async def instance(cls) -> FakeConfigService:
+            return FakeConfigService()
 
     class FakeBacktest:
         def __init__(self, **kwargs: Any) -> None:
@@ -387,9 +394,14 @@ async def test_controller_validation_and_success(
 async def test_controller_returns_safe_error_envelope(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    class FakeConfig:
-        def get(self) -> dict[str, Any]:
+    class FakeConfigService:
+        def snapshot(self) -> dict[str, Any]:
             return {}
+
+    class FakeConfig:
+        @classmethod
+        async def instance(cls) -> FakeConfigService:
+            return FakeConfigService()
 
     class FailingBacktest:
         def __init__(self, **kwargs: Any) -> None:
@@ -414,6 +426,47 @@ async def test_controller_returns_safe_error_envelope(
     assert response.status_code == 500
     assert body["code"] == "backtest_failed"
     assert "secret" not in body["error"]
+
+
+def test_backtest_route_uses_runtime_config_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Litestar route should not call the keyed Config.get API as a snapshot."""
+
+    class FakeConfigService:
+        def snapshot(self) -> dict[str, Any]:
+            return {"exchange": "binance"}
+
+    class FakeConfig:
+        @classmethod
+        async def instance(cls) -> FakeConfigService:
+            return FakeConfigService()
+
+    class FakeBacktest:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+        async def run(self) -> dict[str, Any]:
+            assert self.kwargs["config"] == {"exchange": "binance"}
+            return {"ok": True}
+
+    monkeypatch.setattr(backtest_controller, "Config", FakeConfig)
+    monkeypatch.setattr(backtest_controller, "Backtest", FakeBacktest)
+
+    app = Litestar(route_handlers=[backtest_controller.run_backtest])
+    with TestClient(app=app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/backtest/run",
+            json={
+                "symbol": "BTC/USDT",
+                "strategy_slug": "ema20_swing",
+                "timeframe": "1h",
+                "start_date": "2024-01-01T00:00:00Z",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
 
 
 def test_backtest_stats_use_shared_analytics_shape() -> None:
