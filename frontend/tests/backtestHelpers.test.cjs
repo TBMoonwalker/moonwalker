@@ -9,6 +9,7 @@ const {
     computeBacktestComparison,
     createDefaultBacktestForm,
     createDefaultBacktestRange,
+    normalizeBacktestSymbolsForCurrency,
     normalizeBacktestMarkerShape,
     normalizeBacktestTimestampSeconds,
 } = loadFrontendModule('src/helpers/backtest.ts')
@@ -47,6 +48,16 @@ test('backtest timeframe options include weekly candles', () => {
     assert.ok(
         BACKTEST_TIMEFRAME_OPTIONS.some((option) => option.value === '1w'),
         'expected the Backtest UI to offer 1w candles',
+    )
+})
+
+test('normalizeBacktestSymbolsForCurrency keeps only configured quote markets', () => {
+    assert.deepEqual(
+        normalizeBacktestSymbolsForCurrency(
+            ['ETH/BTC', ' BTC/USDT ', 'ETH/USDT', 'BTC/USDT', 'SOL/EUR'],
+            'usdt',
+        ),
+        ['BTC/USDT', 'ETH/USDT'],
     )
 })
 

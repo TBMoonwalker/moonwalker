@@ -21,6 +21,7 @@ import {
     formatBacktestDelta,
     formatBacktestNumber,
     getBacktestSummary,
+    normalizeBacktestSymbolsForCurrency,
     type BacktestFormState,
     type BacktestResult,
     type BacktestTrade,
@@ -33,19 +34,36 @@ interface StrategyListResponse {
     }>
 }
 
+interface ConfigSnapshotResponse {
+    currency?: string | null
+}
+
+interface ExchangeSymbolsResponse {
+    symbols?: string[]
+}
+
 const form = reactive<BacktestFormState>(createDefaultBacktestForm())
 const dateRange = ref<[number, number] | null>(createDefaultBacktestRange())
 const result = ref<BacktestResult | null>(null)
 const previousResult = ref<BacktestResult | null>(null)
 const isRunning = ref(false)
 const isLoadingStrategies = ref(false)
+const isLoadingSymbols = ref(false)
 const errorMessage = ref('')
+const symbolLoadError = ref('')
+const configuredCurrency = ref('')
 const strategyOptions = ref<SelectOption[]>([])
+const symbolOptions = ref<SelectOption[]>([])
 const lastRunAt = ref<number | null>(null)
 
 const timeframeOptions = BACKTEST_TIMEFRAME_OPTIONS.map((option) => ({ ...option }))
 const tradeModeOptions = BACKTEST_TRADE_MODE_OPTIONS.map((option) => ({ ...option }))
 const isSidestepMode = computed(() => form.tradeMode === 'sidestep')
+const symbolPlaceholder = computed(() =>
+    configuredCurrency.value
+        ? `Select ${configuredCurrency.value} market`
+        : 'Load exchange symbols',
+)
 
 const canRun = computed(() => {
     if (!dateRange.value) {
@@ -212,6 +230,54 @@ async function loadStrategies(): Promise<void> {
     }
 }
 
+function normalizeSymbolOptions(symbols: string[], currency: string): SelectOption[] {
+    return normalizeBacktestSymbolsForCurrency(symbols, currency)
+        .map((symbol) => ({
+            label: symbol,
+            value: symbol,
+        }))
+}
+
+async function loadExchangeSymbols(): Promise<void> {
+    isLoadingSymbols.value = true
+    symbolLoadError.value = ''
+
+    try {
+        const config = await fetchJson<ConfigSnapshotResponse>('/config/all')
+        const currency = String(config.currency ?? '').trim().toUpperCase()
+        configuredCurrency.value = currency
+
+        if (!currency) {
+            symbolOptions.value = []
+            symbolLoadError.value = 'Configure a quote currency before selecting symbols.'
+            return
+        }
+
+        const payload = await fetchJson<ExchangeSymbolsResponse>(
+            `/data/exchange/symbols/${encodeURIComponent(currency)}`,
+        )
+        symbolOptions.value = normalizeSymbolOptions(payload.symbols ?? [], currency)
+
+        if (symbolOptions.value.length === 0) {
+            symbolLoadError.value = `No ${currency} symbols returned by the exchange.`
+            form.symbol = ''
+            return
+        }
+
+        const optionValues = new Set(
+            symbolOptions.value.map((option) => String(option.value)),
+        )
+        if (!optionValues.has(form.symbol)) {
+            form.symbol = String(symbolOptions.value[0].value)
+        }
+    } catch {
+        symbolOptions.value = []
+        symbolLoadError.value = 'Failed to load symbols from exchange.'
+    } finally {
+        isLoadingSymbols.value = false
+    }
+}
+
 async function runBacktest(): Promise<void> {
     if (!canRun.value || !dateRange.value) {
         return
@@ -252,6 +318,7 @@ function resetResult(): void {
 
 onMounted(() => {
     void loadStrategies()
+    void loadExchangeSymbols()
 })
 </script>
 
@@ -278,10 +345,40 @@ onMounted(() => {
 
                 <n-form label-placement="top" :show-feedback="false">
                     <n-form-item label="Symbol">
+                        <n-flex vertical class="symbol-picker">
+                            <n-alert
+                                v-if="symbolLoadError"
+                                type="warning"
+                                :show-icon="false"
+                            >
+                                {{ symbolLoadError }}
+                            </n-alert>
+                            <n-input-group>
+                                <n-select
+                                    v-model:value="form.symbol"
+                                    filterable
+                                    :loading="isLoadingSymbols"
+                                    :disabled="symbolOptions.length === 0"
+                                    :options="symbolOptions"
+                                    :placeholder="symbolPlaceholder"
+                                />
+                                <n-button
+                                    secondary
+                                    :loading="isLoadingSymbols"
+                                    @click="loadExchangeSymbols"
+                                >
+                                    <template #icon>
+                                        <n-icon><RefreshOutline /></n-icon>
+                                    </template>
+                                </n-button>
+                            </n-input-group>
+                        </n-flex>
                         <n-input
+                            v-if="symbolOptions.length === 0 && !isLoadingSymbols"
                             v-model:value="form.symbol"
                             placeholder="BTC/USDT"
                             autocomplete="off"
+                            class="symbol-fallback-input"
                         />
                     </n-form-item>
 
@@ -391,6 +488,9 @@ onMounted(() => {
                                 :precision="2"
                             />
                         </n-form-item>
+                    </div>
+
+                    <div v-if="!isSidestepMode" class="control-grid two">
                         <n-form-item label="Max safety orders">
                             <n-input-number
                                 v-model:value="form.maxSafetyOrders"
@@ -654,6 +754,14 @@ onMounted(() => {
 .backtest-controls :deep(.n-date-picker),
 .backtest-controls :deep(.n-input-number) {
     width: 100%;
+}
+
+.symbol-picker {
+    width: 100%;
+}
+
+.symbol-fallback-input {
+    margin-top: 8px;
 }
 
 .trade-mode-selector {

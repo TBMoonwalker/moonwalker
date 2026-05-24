@@ -211,6 +211,30 @@ export function formatBacktestDelta(value: number, suffix = ''): string {
     return `${prefix}${formatBacktestNumber(value)}${suffix}`
 }
 
+export function getBacktestSymbolQuoteCurrency(symbol: string): string {
+    const [, quote = ''] = String(symbol).split('/')
+    return quote.trim().toUpperCase()
+}
+
+export function normalizeBacktestSymbolsForCurrency(
+    symbols: string[],
+    currency: string,
+): string[] {
+    const quoteCurrency = currency.trim().toUpperCase()
+    const seen = new Set<string>()
+
+    return symbols
+        .map((symbol) => symbol.trim())
+        .filter((symbol) => {
+            if (!symbol || seen.has(symbol)) {
+                return false
+            }
+            seen.add(symbol)
+            return !quoteCurrency || getBacktestSymbolQuoteCurrency(symbol) === quoteCurrency
+        })
+        .sort((left, right) => left.localeCompare(right))
+}
+
 export function normalizeBacktestMarkerShape(
     shape: BacktestMarker['shape'],
 ): 'arrowUp' | 'arrowDown' | 'circle' {

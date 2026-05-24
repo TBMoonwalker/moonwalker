@@ -35,7 +35,6 @@ logging = helper.LoggerFactory.get_logger("logs/backtest.log", "backtest")
 MAX_CANDLES = 20_000
 OHLCV_PAGE_SIZE = 1000
 OHLCV_PAGE_DELAY = 0.5
-MAX_BACKTEST_DAYS = 90
 
 TRADE_MODE_DYNAMIC_DCA = "dynamic_dca"
 TRADE_MODE_SIDESTEP = "sidestep"
@@ -857,16 +856,9 @@ def estimate_candle_count(timeframe: str, start_ms: int, end_ms: int) -> int:
 
 
 def validate_backtest_range(timeframe: str, start_ms: int, end_ms: int) -> None:
-    """Validate range ordering, day span, and estimated candle count."""
+    """Validate range ordering and estimated candle count."""
     if end_ms <= start_ms:
         raise BacktestValidationError("end_date must be after start_date")
-
-    span_days = (end_ms - start_ms) / 86_400_000
-    if span_days > MAX_BACKTEST_DAYS:
-        raise BacktestValidationError(
-            f"Backtest range too large: {span_days:.0f} days "
-            f"(max {MAX_BACKTEST_DAYS})"
-        )
 
     estimated = estimate_candle_count(timeframe, start_ms, end_ms)
     if estimated > MAX_CANDLES:

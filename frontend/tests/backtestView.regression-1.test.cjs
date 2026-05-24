@@ -34,6 +34,18 @@ test('backtest view is wired to the backend replay endpoint and chart markers', 
         'expected the Backtest UI to configure sidestep strategies',
     )
     assert.ok(
+        backtestViewSource.includes("fetchJson<ConfigSnapshotResponse>('/config/all')"),
+        'expected the Backtest UI to load configured quote currency',
+    )
+    assert.ok(
+        backtestViewSource.includes('/data/exchange/symbols/'),
+        'expected the Backtest UI to load symbols from the exchange',
+    )
+    assert.ok(
+        backtestViewSource.includes('v-if="!isSidestepMode" class="control-grid two"'),
+        'expected sidestep mode to hide dynamic DCA safety-order controls',
+    )
+    assert.ok(
         backtestChartSource.includes('createSeriesMarkers'),
         'expected the Backtest chart to render buy and sell markers',
     )

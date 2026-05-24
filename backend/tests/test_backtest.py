@@ -415,6 +415,16 @@ def test_validate_backtest_range_rejects_excessive_candles() -> None:
     assert estimate_candle_count("1w", start, start + 7 * 86_400_000) == 2
 
 
+def test_validate_backtest_range_allows_long_high_timeframe_ranges() -> None:
+    start = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1000)
+    end = int(
+        (datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=111)).timestamp() * 1000
+    )
+
+    validate_backtest_range("1h", start, end)
+    validate_backtest_range("1w", start, end)
+
+
 @pytest.mark.asyncio
 async def test_controller_validation_and_success(
     monkeypatch: pytest.MonkeyPatch,
