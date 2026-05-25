@@ -27,6 +27,7 @@ from service.backtest import (
 )
 from service.dca_math import BacktestTradeState
 from service.exchange import Exchange
+from service.strategy_builder import BUILTIN_STRATEGY_BY_SLUG, build_builtin_ir
 from service.strategy_runtime import EvaluationContext
 
 
@@ -75,6 +76,91 @@ class _FakeIndicators:
         self, symbol: str, timerange: str, length: int
     ) -> pd.Series:
         return pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+
+
+class _BollingerGraphIndicators:
+    def __init__(self, mode: str) -> None:
+        self.mode = mode
+
+    async def get_close_price(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "sell":
+            return pd.Series([100.0, 101.0, 107.0, 1.0])
+        return pd.Series([105.0, 101.0, 94.0, 300.0])
+
+    async def get_high_price(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "sell":
+            return pd.Series([104.0, 104.0, 110.0, 1.0])
+        return pd.Series([105.0, 101.0, 94.0, 300.0])
+
+    async def get_low_price(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "buy_prior_ema_break":
+            return pd.Series([100.0, 85.0, 70.0, 300.0])
+        return pd.Series([105.0, 101.0, 94.0, 300.0])
+
+    async def calculate_ema_series(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "buy_prior_ema_break":
+            return pd.Series([90.0, 90.0, 90.0, 1000.0])
+        if length == 50:
+            return pd.Series([99.0, 100.0, 95.0, 1000.0])
+        return pd.Series([90.0, 90.0, 90.0, 1000.0])
+
+    async def calculate_bollinger_bands_series(
+        self,
+        symbol: str,
+        timerange: str,
+        length: int,
+        standard_deviations: float,
+    ) -> dict[str, pd.Series]:
+        if self.mode == "sell":
+            return {
+                "upper": pd.Series([105.0, 105.0, 108.0, 1000.0]),
+                "middle": pd.Series([100.0, 100.0, 100.0, 1000.0]),
+                "lower": pd.Series([95.0, 95.0, 95.0, 1000.0]),
+                "bandwidth": pd.Series([10.0, 10.0, 10.0, 0.1]),
+            }
+        if self.mode == "buy_prior_ema_break":
+            return {
+                "upper": pd.Series([120.0, 115.0, 114.0, 1000.0]),
+                "middle": pd.Series([100.0, 100.0, 99.0, 0.0]),
+                "lower": pd.Series([80.0, 80.0, 75.0, 0.0]),
+                "bandwidth": pd.Series([3.0, 3.0, 3.0, 0.1]),
+            }
+        bandwidth = 1.0 if self.mode == "buy_narrow" else 3.0
+        return {
+            "upper": pd.Series([102.0, 103.0, 106.0, 1000.0]),
+            "middle": pd.Series([100.0, 100.0, 101.0, 0.0]),
+            "lower": pd.Series([98.0, 100.0, 95.0, 0.0]),
+            "bandwidth": pd.Series([3.0, 3.0, bandwidth, 0.1]),
+        }
+
+    async def calculate_rsi_series(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "sell":
+            return pd.Series([58.0, 59.0, 64.0, 90.0])
+        return pd.Series([60.0, 49.0, 45.0, 90.0])
+
+    async def calculate_macd_series(
+        self,
+        symbol: str,
+        timerange: str,
+        fast_period: int,
+        slow_period: int,
+        signal_period: int,
+    ) -> dict[str, pd.Series]:
+        return {
+            "macd": pd.Series([1.0, 1.0, 1.0, 3.0]),
+            "signal": pd.Series([0.0, 0.0, 0.0, 1.0]),
+            "histogram": pd.Series([1.0, 0.8, 0.7, 2.0]),
+        }
 
 
 def _json(response: Any) -> dict[str, Any]:
@@ -174,6 +260,74 @@ async def test_backtest_ema_values_use_candle_index_not_final_scalar() -> None:
     values = await strategy_runtime._ema(context, [20, 50])
 
     assert values == {"ema_20": 30.0, "ema_50": 30.0}
+
+
+@pytest.mark.asyncio
+async def test_bollinger_buy_matches_lower_band_cross_with_filters_at_candle_index() -> (
+    None
+):
+    context = EvaluationContext(
+        slug="bollinger_buy",
+        timeframe="4h",
+        symbol="BTC/USDC",
+        side="buy",
+        indicators=_BollingerGraphIndicators("buy"),
+        candle_index=2,
+        state_store={},
+    )
+    ir = build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG["bollinger_buy"])
+
+    assert await strategy_runtime._evaluate_root(ir, context) is True
+
+
+@pytest.mark.asyncio
+async def test_bollinger_buy_allows_ema_wick_penetration_before_lower_band_cross() -> (
+    None
+):
+    context = EvaluationContext(
+        slug="bollinger_buy",
+        timeframe="1w",
+        symbol="BTC/USDC",
+        side="buy",
+        indicators=_BollingerGraphIndicators("buy_prior_ema_break"),
+        candle_index=2,
+        state_store={},
+    )
+    ir = build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG["bollinger_buy"])
+
+    assert await strategy_runtime._evaluate_root(ir, context) is True
+
+
+@pytest.mark.asyncio
+async def test_bollinger_buy_rejects_narrow_sideways_bands() -> None:
+    context = EvaluationContext(
+        slug="bollinger_buy",
+        timeframe="4h",
+        symbol="BTC/USDC",
+        side="buy",
+        indicators=_BollingerGraphIndicators("buy_narrow"),
+        candle_index=2,
+        state_store={},
+    )
+    ir = build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG["bollinger_buy"])
+
+    assert await strategy_runtime._evaluate_root(ir, context) is False
+
+
+@pytest.mark.asyncio
+async def test_bollinger_sell_matches_upper_band_wick_rejection_with_high_rsi() -> None:
+    context = EvaluationContext(
+        slug="bollinger_sell",
+        timeframe="4h",
+        symbol="BTC/USDC",
+        side="sell",
+        indicators=_BollingerGraphIndicators("sell"),
+        candle_index=2,
+        state_store={},
+    )
+    ir = build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG["bollinger_sell"])
+
+    assert await strategy_runtime._evaluate_root(ir, context) is True
 
 
 @pytest.mark.asyncio
@@ -330,6 +484,47 @@ async def test_sidestep_backtest_exits_on_bearish_and_waits_for_reentry(
     assert result["chart"]["markers"][1]["text"] == "SIDESTEP"
     assert result["stats"]["trade_mode"] == "sidestep"
     assert result["stats"]["sidestep_waiting_at_end"] is True
+
+
+@pytest.mark.asyncio
+async def test_backtest_returns_strategy_indicator_series_for_chart_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sidestep chart evidence includes both entry and exit graph indicators."""
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="bollinger_buy",
+        timeframe="1m",
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
+        trade_mode=TRADE_MODE_SIDESTEP,
+        sidestep_bearish_strategy="bollinger_sell",
+        sidestep_reentry_strategy="bollinger_buy",
+    )
+    engine._candles = [_candle(index, 100.0 + index) for index in range(4)]
+
+    async def fake_snapshot(slug: str) -> object:
+        return SimpleNamespace(ir=build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG[slug]))
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(matched=False)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+    monkeypatch.setattr(
+        backtest_service,
+        "Indicators",
+        lambda data: _BollingerGraphIndicators("sell"),
+    )
+
+    result = await engine.run()
+    by_label = {series["label"]: series for series in result["chart"]["indicators"]}
+
+    assert {"BB Upper 20", "BB Middle 20", "BB Lower 20"}.issubset(by_label)
+    assert {"EMA 50", "EMA 100", "RSI 14", "BB Bandwidth 20"}.issubset(by_label)
+    assert by_label["BB Lower 20"]["pane"] == "price"
+    assert by_label["RSI 14"]["pane"] == "rsi"
 
 
 @pytest.mark.asyncio

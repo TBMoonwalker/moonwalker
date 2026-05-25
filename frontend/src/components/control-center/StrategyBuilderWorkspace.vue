@@ -109,6 +109,14 @@ const comparisonOperatorOptions = [
 
 const indicatorOptions = [
     { label: 'EMA', value: 'ema' },
+    { label: 'RSI', value: 'rsi' },
+    { label: 'Bollinger upper', value: 'bollinger_upper' },
+    { label: 'Bollinger middle', value: 'bollinger_middle' },
+    { label: 'Bollinger lower', value: 'bollinger_lower' },
+    { label: 'Bollinger bandwidth %', value: 'bollinger_bandwidth' },
+    { label: 'MACD line', value: 'macd_line' },
+    { label: 'MACD signal', value: 'macd_signal' },
+    { label: 'MACD histogram', value: 'macd_histogram' },
 ]
 
 const indicatorLengthOptions = [
@@ -462,11 +470,13 @@ function isGenericParamVisible(key: string, value: unknown): boolean {
 
 function indicatorUsesLength(node: StrategyNode | null): boolean {
     const indicator = String(node?.params?.indicator ?? '')
-    return indicator === 'ema'
+    return indicator === 'ema' || indicator === 'rsi' || indicator.startsWith('bollinger_')
 }
 
 function indicatorUsesSample(node: StrategyNode | null): boolean {
-    return String(node?.params?.indicator ?? '') === 'ema'
+    return ['ema', 'rsi'].includes(String(node?.params?.indicator ?? '')) ||
+        String(node?.params?.indicator ?? '').startsWith('bollinger_') ||
+        String(node?.params?.indicator ?? '').startsWith('macd_')
 }
 
 function updateIndicatorSelection(value: string | number | null): void {
@@ -480,12 +490,31 @@ function updateIndicatorSelection(value: string | number | null): void {
         ...(node.params ?? {}),
         indicator,
     }
-    if (indicator === 'ema') {
-        nextParams.length = Number(nextParams.length || 20)
+    if (indicator === 'ema' || indicator === 'rsi' || indicator.startsWith('bollinger_')) {
+        delete nextParams.fast_period
+        delete nextParams.slow_period
+        delete nextParams.signal_period
+        nextParams.length = Number(nextParams.length || (indicator === 'rsi' ? 14 : 20))
         nextParams.sample = String(nextParams.sample || 'current')
+        if (indicator.startsWith('bollinger_')) {
+            nextParams.standard_deviations = Number(nextParams.standard_deviations || 2)
+        } else {
+            delete nextParams.standard_deviations
+        }
+    } else if (indicator.startsWith('macd_')) {
+        delete nextParams.length
+        delete nextParams.standard_deviations
+        nextParams.sample = String(nextParams.sample || 'current')
+        nextParams.fast_period = Number(nextParams.fast_period || 12)
+        nextParams.slow_period = Number(nextParams.slow_period || 26)
+        nextParams.signal_period = Number(nextParams.signal_period || 9)
     } else {
         delete nextParams.length
         delete nextParams.sample
+        delete nextParams.standard_deviations
+        delete nextParams.fast_period
+        delete nextParams.slow_period
+        delete nextParams.signal_period
     }
     node.params = nextParams
     void validateDraft()
@@ -495,6 +524,8 @@ function updateIndicatorSelection(value: string | number | null): void {
 function isValueNode(node: StrategyNode): boolean {
     return [
         'close_price',
+        'low_price',
+        'high_price',
         'constant_value',
         'indicator',
         'ema_indicator',
@@ -516,11 +547,17 @@ function nodeTitle(node: StrategyNode): string {
             node.type === 'ema_indicator' ? 'ema' : node.params?.indicator ?? 'indicator',
         )
         const length = node.params?.length ? ` ${node.params.length}` : ''
-        const sample = indicator === 'ema' ? ` ${sampleLabel(node.params?.sample)}` : ''
+        const sample = indicatorUsesSample(node) ? ` ${sampleLabel(node.params?.sample)}` : ''
         return `${indicatorLabel(indicator)}${length}${sample}`
     }
     if (node.type === 'close_price') {
         return `Close ${sampleLabel(node.params?.sample)}`
+    }
+    if (node.type === 'low_price') {
+        return `Low ${sampleLabel(node.params?.sample)}`
+    }
+    if (node.type === 'high_price') {
+        return `High ${sampleLabel(node.params?.sample)}`
     }
     if (node.type === 'constant_value') {
         return String(node.params?.value ?? 'Constant value')
@@ -563,6 +600,14 @@ function sampleLabel(value: unknown): string {
 function indicatorLabel(value: string): string {
     const labels: Record<string, string> = {
         ema: 'EMA',
+        rsi: 'RSI',
+        bollinger_upper: 'Bollinger upper',
+        bollinger_middle: 'Bollinger middle',
+        bollinger_lower: 'Bollinger lower',
+        bollinger_bandwidth: 'Bollinger bandwidth %',
+        macd_line: 'MACD line',
+        macd_signal: 'MACD signal',
+        macd_histogram: 'MACD histogram',
     }
     return labels[value] ?? value
 }

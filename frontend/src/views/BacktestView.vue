@@ -606,6 +606,7 @@ onMounted(() => {
                     <BacktestResultChart
                         :candles="result.chart.candles"
                         :markers="result.chart.markers"
+                        :indicators="result.chart.indicators ?? []"
                     />
 
                     <n-tabs type="line" animated>

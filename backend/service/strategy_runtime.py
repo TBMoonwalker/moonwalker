@@ -217,6 +217,8 @@ async def _evaluate_node(
         return False
     if node_type in {
         "close_price",
+        "low_price",
+        "high_price",
         "constant_value",
         "ema_indicator",
         "indicator",
@@ -335,8 +337,15 @@ async def _resolve_value_node(
     if node_type == "constant_value":
         return params.get("value")
     if node_type == "indicator":
-        if str(params.get("indicator") or "") == "ema":
+        indicator = str(params.get("indicator") or "")
+        if indicator == "ema":
             return await _resolve_ema_indicator(params, context, index)
+        if indicator == "rsi":
+            return await _resolve_rsi_indicator(params, context, index)
+        if indicator.startswith("bollinger_"):
+            return await _resolve_bollinger_indicator(params, context, index)
+        if indicator.startswith("macd_"):
+            return await _resolve_macd_indicator(params, context, index)
         return None
     if node_type == "ema_indicator":
         return await _resolve_ema_indicator(params, context, index)
@@ -345,6 +354,22 @@ async def _resolve_value_node(
         close = await _close(context, lookback)
         try:
             value = float(close.dropna().iloc[index])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        return None if _is_missing_number(value) else value
+    if node_type == "low_price":
+        lookback = int(params.get("lookback") or EMA20_LOOKBACK_LENGTH)
+        low = await _low(context, lookback)
+        try:
+            value = float(low.dropna().iloc[index])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        return None if _is_missing_number(value) else value
+    if node_type == "high_price":
+        lookback = int(params.get("lookback") or EMA20_LOOKBACK_LENGTH)
+        high = await _high(context, lookback)
+        try:
+            value = float(high.dropna().iloc[index])
         except (AttributeError, IndexError, TypeError, ValueError):
             return None
         return None if _is_missing_number(value) else value
@@ -365,6 +390,69 @@ async def _resolve_ema_indicator(
     )
     try:
         value = float(ema_series.iloc[index])
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return None
+    return None if _is_missing_number(value) else value
+
+
+async def _resolve_rsi_indicator(
+    params: dict[str, Any],
+    context: EvaluationContext,
+    index: int,
+) -> float | None:
+    """Resolve an RSI indicator node sample into a comparable value."""
+    length = int(params.get("length") or 14)
+    series = await _rsi_series(context, length)
+    return _sample_series_value(series, index)
+
+
+async def _resolve_bollinger_indicator(
+    params: dict[str, Any],
+    context: EvaluationContext,
+    index: int,
+) -> float | None:
+    """Resolve a Bollinger Band component or bandwidth sample."""
+    indicator = str(params.get("indicator") or "")
+    component = indicator.removeprefix("bollinger_")
+    if component not in {"upper", "middle", "lower", "bandwidth"}:
+        return None
+    length = int(params.get("length") or 20)
+    standard_deviations = float(params.get("standard_deviations") or 2.0)
+    series = await _bollinger_series(context, length, standard_deviations)
+    if not isinstance(series, dict):
+        return None
+    return _sample_series_value(series.get(component), index)
+
+
+async def _resolve_macd_indicator(
+    params: dict[str, Any],
+    context: EvaluationContext,
+    index: int,
+) -> float | None:
+    """Resolve a MACD line, signal line, or histogram sample."""
+    indicator = str(params.get("indicator") or "")
+    component = indicator.removeprefix("macd_")
+    if component not in {"line", "signal", "histogram"}:
+        return None
+    component_key = "macd" if component == "line" else component
+    fast_period = int(params.get("fast_period") or 12)
+    slow_period = int(params.get("slow_period") or 26)
+    signal_period = int(params.get("signal_period") or 9)
+    series = await _macd_series(
+        context,
+        fast_period,
+        slow_period,
+        signal_period,
+    )
+    if not isinstance(series, dict):
+        return None
+    return _sample_series_value(series.get(component_key), index)
+
+
+def _sample_series_value(series: Any, index: int) -> float | None:
+    """Return a non-missing numeric value from a sampled indicator series."""
+    try:
+        value = float(series.iloc[index])
     except (AttributeError, IndexError, TypeError, ValueError):
         return None
     return None if _is_missing_number(value) else value
@@ -589,6 +677,32 @@ async def _close(context: EvaluationContext, length: int) -> Any:
     return context.memo[key]
 
 
+async def _low(context: EvaluationContext, length: int) -> Any:
+    """Return a memoized low series sliced to the current replay candle."""
+    key = ("low", length)
+    if key not in context.memo:
+        raw = await context.indicators.get_low_price(
+            context.symbol, context.timeframe, length
+        )
+        if context.candle_index is not None and raw is not None:
+            raw = _slice_series(raw, context.candle_index)
+        context.memo[key] = raw
+    return context.memo[key]
+
+
+async def _high(context: EvaluationContext, length: int) -> Any:
+    """Return a memoized high series sliced to the current replay candle."""
+    key = ("high", length)
+    if key not in context.memo:
+        raw = await context.indicators.get_high_price(
+            context.symbol, context.timeframe, length
+        )
+        if context.candle_index is not None and raw is not None:
+            raw = _slice_series(raw, context.candle_index)
+        context.memo[key] = raw
+    return context.memo[key]
+
+
 async def _ema_series(context: EvaluationContext, length: int, lookback: int) -> Any:
     """Return a memoized EMA series for relation and trend nodes."""
     key = ("ema_series", length, lookback)
@@ -605,6 +719,69 @@ async def _ema_series(context: EvaluationContext, length: int, lookback: int) ->
             context.memo[key] = ema_raw
         except (AttributeError, TypeError, ValueError):
             context.memo[key] = None
+    return context.memo[key]
+
+
+async def _rsi_series(context: EvaluationContext, length: int) -> Any:
+    """Return a memoized RSI series scoped to the replay candle."""
+    key = ("rsi_series", length)
+    if key not in context.memo:
+        raw = await context.indicators.calculate_rsi_series(
+            context.symbol,
+            context.timeframe,
+            length,
+        )
+        if context.candle_index is not None:
+            raw = _slice_series(raw, context.candle_index)
+        context.memo[key] = raw
+    return context.memo[key]
+
+
+async def _bollinger_series(
+    context: EvaluationContext,
+    length: int,
+    standard_deviations: float,
+) -> dict[str, Any] | None:
+    """Return memoized Bollinger series scoped to the replay candle."""
+    key = ("bollinger_series", length, standard_deviations)
+    if key not in context.memo:
+        raw = await context.indicators.calculate_bollinger_bands_series(
+            context.symbol,
+            context.timeframe,
+            length,
+            standard_deviations,
+        )
+        if context.candle_index is not None and isinstance(raw, dict):
+            raw = {
+                component: _slice_series(series, context.candle_index)
+                for component, series in raw.items()
+            }
+        context.memo[key] = raw
+    return context.memo[key]
+
+
+async def _macd_series(
+    context: EvaluationContext,
+    fast_period: int,
+    slow_period: int,
+    signal_period: int,
+) -> dict[str, Any] | None:
+    """Return memoized MACD series scoped to the replay candle."""
+    key = ("macd_series", fast_period, slow_period, signal_period)
+    if key not in context.memo:
+        raw = await context.indicators.calculate_macd_series(
+            context.symbol,
+            context.timeframe,
+            fast_period,
+            slow_period,
+            signal_period,
+        )
+        if context.candle_index is not None and isinstance(raw, dict):
+            raw = {
+                component: _slice_series(series, context.candle_index)
+                for component, series in raw.items()
+            }
+        context.memo[key] = raw
     return context.memo[key]
 
 

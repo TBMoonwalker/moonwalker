@@ -19,14 +19,41 @@ ports are normalized to `value1` and `value2`.
 
 ## Indicator
 
-Reads a configured indicator value. EMA values can be compared against prices or
-other EMA nodes.
+Reads a configured TA-Lib indicator value. Indicators can be compared against
+prices, constants, or other indicator samples.
 
 Parameters:
-- `indicator`: `ema`.
-- `length`: optional EMA period.
-- `sample`: for EMA only, `current` for the latest closed value, `previous` for
-  the prior closed value, or `two_back` for the candle before `previous`.
+- `indicator`: `ema`, `rsi`, `bollinger_upper`, `bollinger_middle`,
+  `bollinger_lower`, `bollinger_bandwidth`, `macd_line`, `macd_signal`, or
+  `macd_histogram`.
+- `length`: optional period for EMA, RSI, and Bollinger Bands.
+- `standard_deviations`: optional Bollinger Band deviation multiplier; defaults
+  to `2`.
+- `fast_period`, `slow_period`, `signal_period`: optional MACD periods;
+  defaults to `12`, `26`, and `9`.
+- `sample`: `current` for the latest closed value, `previous` for the prior
+  closed value, or `two_back` for the candle before `previous`.
+
+`bollinger_bandwidth` is expressed as a percent of the middle band:
+`(upper - lower) / middle * 100`.
+
+## Bollinger Buy
+
+The built-in `bollinger_buy` graph triggers when all of the following are true:
+
+- The candle low freshly crosses down through the lower Bollinger Band.
+- A rising Bollinger middle band requires the signal candle low to be below
+  EMA50; a flat or falling middle band requires it to be below EMA100.
+  The EMA penetration may already have started on an earlier candle.
+- RSI14 is below `50`.
+- Bollinger bandwidth is at least `2%`, filtering narrow sideways conditions.
+
+## Bollinger Sell
+
+The built-in `bollinger_sell` graph triggers when the candle high freshly
+crosses above the upper Bollinger Band, the candle closes back below that band,
+and RSI14 is at least `60`. This models a rejected overextended top rather than
+waiting for MACD momentum to fade.
 
 ## Close Price
 
@@ -37,6 +64,24 @@ Parameters:
 - `sample`: `current` for the latest closed value, or `previous` for the prior
   closed value. Some migrated built-ins also use `two_back` for the candle before
   `previous`.
+
+## Low Price
+
+Reads a candle low for wick-based conditions.
+
+Parameters:
+- `lookback`: number of candles to load.
+- `sample`: `current` for the latest closed value, or `previous` for the prior
+  closed value.
+
+## High Price
+
+Reads a candle high for wick-based conditions.
+
+Parameters:
+- `lookback`: number of candles to load.
+- `sample`: `current` for the latest closed value, or `previous` for the prior
+  closed value.
 
 ## Constant Value
 

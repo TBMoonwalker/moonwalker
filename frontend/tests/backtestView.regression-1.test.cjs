@@ -59,6 +59,16 @@ test('backtest view is wired to the backend replay endpoint and chart markers', 
         'expected the Backtest chart to render buy and sell markers',
     )
     assert.ok(
+        backtestViewSource.includes(':indicators="result.chart.indicators ?? []"'),
+        'expected the Backtest result to pass strategy indicators to the chart',
+    )
+    assert.ok(
+        backtestChartSource.includes('LineSeries') &&
+            backtestChartSource.includes('HistogramSeries') &&
+            backtestChartSource.includes('indicatorPanes'),
+        'expected the Backtest chart to render price overlays and oscillator panels',
+    )
+    assert.ok(
         appHeaderSource.includes("label: 'Backtest'"),
         'expected the app header to expose the Backtest route',
     )

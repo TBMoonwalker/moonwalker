@@ -39,7 +39,18 @@ class Indicators:
         self._ema_series_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = (
             {}
         )
+        self._rsi_series_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = (
+            {}
+        )
+        self._bollinger_series_cache: dict[
+            tuple[str, str, int, float], tuple[float | None, dict[str, Any]]
+        ] = {}
+        self._macd_series_cache: dict[
+            tuple[str, str, int, int, int], tuple[float | None, dict[str, Any]]
+        ] = {}
         self._close_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
+        self._low_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
+        self._high_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
 
     @staticmethod
     def _log_indicator_error(name: str, symbol: str, exc: Exception) -> None:
@@ -93,6 +104,56 @@ class Indicators:
         if rsi.empty:
             return None
         return float(rsi.iloc[-1])
+
+    @staticmethod
+    def _calculate_bollinger_bands_sync(
+        df: Any, length: int, standard_deviations: float
+    ) -> dict[str, float] | None:
+        """Compute latest Bollinger Band values from a candle DataFrame."""
+        if df is None or df.empty:
+            return None
+        upper, middle, lower = talib.BBANDS(
+            df["close"],
+            timeperiod=length,
+            nbdevup=standard_deviations,
+            nbdevdn=standard_deviations,
+            matype=0,
+        )
+        if upper.dropna().empty or middle.dropna().empty or lower.dropna().empty:
+            return None
+        middle_value = float(middle.dropna().iloc[-1])
+        upper_value = float(upper.dropna().iloc[-1])
+        lower_value = float(lower.dropna().iloc[-1])
+        bandwidth = (
+            ((upper_value - lower_value) / middle_value) * 100 if middle_value else 0.0
+        )
+        return {
+            "upper": upper_value,
+            "middle": middle_value,
+            "lower": lower_value,
+            "bandwidth": bandwidth,
+        }
+
+    @staticmethod
+    def _calculate_macd_sync(
+        df: Any, fast_period: int, slow_period: int, signal_period: int
+    ) -> dict[str, float] | None:
+        """Compute latest MACD values from a candle DataFrame."""
+        if df is None or df.empty:
+            return None
+        macd, signal, histogram = talib.MACD(
+            df["close"],
+            fastperiod=fast_period,
+            slowperiod=slow_period,
+            signalperiod=signal_period,
+        )
+        if macd.dropna().empty or signal.dropna().empty or histogram.dropna().empty:
+            return None
+        return {
+            "macd": float(macd.dropna().iloc[-1]),
+            "signal": float(signal.dropna().iloc[-1]),
+            "histogram": float(histogram.dropna().iloc[-1]),
+        }
 
     @staticmethod
     def _calculate_24h_volume_sync(df: Any) -> float | None:
@@ -238,6 +299,50 @@ class Indicators:
                 return cached[1]
             return None
 
+    async def get_low_price(self, symbol: str, timerange: str, length: int) -> Any:
+        """Return low price series for wick-based strategy conditions."""
+        cache_key = (symbol, timerange, length)
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._low_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
+
+        try:
+            df_raw = await self._get_indicator_source_data(
+                symbol, timerange, max(length * 2, 50)
+            )
+            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+            low = df["low"]
+            self._low_cache[cache_key] = (latest_timestamp, low)
+            return low
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("Low price", symbol, e)
+            if cached:
+                return cached[1]
+            return None
+
+    async def get_high_price(self, symbol: str, timerange: str, length: int) -> Any:
+        """Return high price series for wick-based strategy conditions."""
+        cache_key = (symbol, timerange, length)
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._high_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
+
+        try:
+            df_raw = await self._get_indicator_source_data(
+                symbol, timerange, max(length * 2, 50)
+            )
+            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+            high = df["high"]
+            self._high_cache[cache_key] = (latest_timestamp, high)
+            return high
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("High price", symbol, e)
+            if cached:
+                return cached[1]
+            return None
+
     async def calculate_btc_pulse(self, currency: str, timerange: str) -> bool:
         """Return BTC pulse trend state for the configured quote currency.
 
@@ -268,6 +373,179 @@ class Indicators:
             return await asyncio.to_thread(self._calculate_rsi_sync, df, length)
         except INDICATOR_CALCULATION_EXCEPTIONS as e:
             self._log_indicator_error("RSI", symbol, e)
+            return None
+
+    async def calculate_rsi_series(
+        self, symbol: str, timerange: str, length: int = 14
+    ) -> Any:
+        """Return a cached RSI series for runtime and candle-indexed replay."""
+        cache_key = (symbol, timerange, int(length))
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._rsi_series_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
+
+        try:
+            df_raw = await self._get_indicator_source_data(
+                symbol, timerange, max(length * 3, 50)
+            )
+            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+            series = await asyncio.to_thread(
+                lambda: talib.RSI(df["close"].dropna(), timeperiod=length)
+            )
+            self._rsi_series_cache[cache_key] = (latest_timestamp, series)
+            return series
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("RSI series", symbol, e)
+            if cached:
+                return cached[1]
+            return None
+
+    async def calculate_bollinger_bands(
+        self,
+        symbol: str,
+        timerange: str,
+        length: int = 20,
+        standard_deviations: float = 2.0,
+    ) -> dict[str, float] | None:
+        """Calculate latest Bollinger Band values and bandwidth percent."""
+        series = await self.calculate_bollinger_bands_series(
+            symbol,
+            timerange,
+            length,
+            standard_deviations,
+        )
+        try:
+            upper = float(series["upper"].dropna().iloc[-1])
+            middle = float(series["middle"].dropna().iloc[-1])
+            lower = float(series["lower"].dropna().iloc[-1])
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+            return None
+        return {
+            "upper": upper,
+            "middle": middle,
+            "lower": lower,
+            "bandwidth": (((upper - lower) / middle) * 100 if middle else 0.0),
+        }
+
+    async def calculate_bollinger_bands_series(
+        self,
+        symbol: str,
+        timerange: str,
+        length: int = 20,
+        standard_deviations: float = 2.0,
+    ) -> dict[str, Any] | None:
+        """Return cached Bollinger Band and bandwidth series."""
+        cache_key = (
+            symbol,
+            timerange,
+            int(length),
+            float(standard_deviations),
+        )
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._bollinger_series_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
+
+        try:
+            df_raw = await self._get_indicator_source_data(
+                symbol, timerange, max(length * 3, 50)
+            )
+            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+
+            def _build_series() -> dict[str, Any]:
+                upper, middle, lower = talib.BBANDS(
+                    df["close"].dropna(),
+                    timeperiod=length,
+                    nbdevup=standard_deviations,
+                    nbdevdn=standard_deviations,
+                    matype=0,
+                )
+                bandwidth = ((upper - lower) / middle) * 100
+                return {
+                    "upper": upper,
+                    "middle": middle,
+                    "lower": lower,
+                    "bandwidth": bandwidth,
+                }
+
+            series = await asyncio.to_thread(_build_series)
+            self._bollinger_series_cache[cache_key] = (latest_timestamp, series)
+            return series
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("Bollinger Bands series", symbol, e)
+            if cached:
+                return cached[1]
+            return None
+
+    async def calculate_macd(
+        self,
+        symbol: str,
+        timerange: str,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
+    ) -> dict[str, float] | None:
+        """Calculate latest MACD line, signal line, and histogram values."""
+        series = await self.calculate_macd_series(
+            symbol,
+            timerange,
+            fast_period,
+            slow_period,
+            signal_period,
+        )
+        try:
+            return {
+                "macd": float(series["macd"].dropna().iloc[-1]),
+                "signal": float(series["signal"].dropna().iloc[-1]),
+                "histogram": float(series["histogram"].dropna().iloc[-1]),
+            }
+        except (AttributeError, IndexError, KeyError, TypeError, ValueError):
+            return None
+
+    async def calculate_macd_series(
+        self,
+        symbol: str,
+        timerange: str,
+        fast_period: int = 12,
+        slow_period: int = 26,
+        signal_period: int = 9,
+    ) -> dict[str, Any] | None:
+        """Return cached MACD series for runtime and candle-indexed replay."""
+        cache_key = (
+            symbol,
+            timerange,
+            int(fast_period),
+            int(slow_period),
+            int(signal_period),
+        )
+        latest_timestamp = await self.data.get_latest_timestamp_for_pair(symbol)
+        cached = self._macd_series_cache.get(cache_key)
+        if cached and cached[0] == latest_timestamp:
+            return cached[1]
+
+        try:
+            df_raw = await self._get_indicator_source_data(
+                symbol, timerange, max(slow_period * 3, 100)
+            )
+            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+
+            def _build_series() -> dict[str, Any]:
+                macd, signal, histogram = talib.MACD(
+                    df["close"].dropna(),
+                    fastperiod=fast_period,
+                    slowperiod=slow_period,
+                    signalperiod=signal_period,
+                )
+                return {"macd": macd, "signal": signal, "histogram": histogram}
+
+            series = await asyncio.to_thread(_build_series)
+            self._macd_series_cache[cache_key] = (latest_timestamp, series)
+            return series
+        except INDICATOR_CALCULATION_EXCEPTIONS as e:
+            self._log_indicator_error("MACD series", symbol, e)
+            if cached:
+                return cached[1]
             return None
 
     async def calculate_24h_volume(self, symbol: str) -> float | None:

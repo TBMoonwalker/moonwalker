@@ -19,7 +19,19 @@ STRATEGY_KIND_CUSTOM = "custom"
 STRATEGY_KIND_BUILTIN = "builtin"
 CUSTOM_SLUG_PREFIX = "custom_"
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_]{1,94}$")
-SUPPORTED_INDICATORS = frozenset({"ema"})
+SUPPORTED_INDICATORS = frozenset(
+    {
+        "ema",
+        "rsi",
+        "bollinger_upper",
+        "bollinger_middle",
+        "bollinger_lower",
+        "bollinger_bandwidth",
+        "macd_line",
+        "macd_signal",
+        "macd_histogram",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -92,6 +104,40 @@ BUILTIN_STRATEGIES: tuple[BuiltinStrategySpec, ...] = (
         required_methods=("calculate_ema", "get_close_price"),
         hidden=True,
     ),
+    BuiltinStrategySpec(
+        slug="bollinger_buy",
+        name="Bollinger Buy",
+        description=(
+            "Buys a fresh lower-band wick break below the trend-selected EMA, "
+            "RSI below 50, and sufficient band width."
+        ),
+        node_type="all",
+        params={},
+        min_history_candles=202,
+        required_methods=(
+            "calculate_bollinger_bands_series",
+            "calculate_ema",
+            "calculate_rsi_series",
+            "get_low_price",
+        ),
+    ),
+    BuiltinStrategySpec(
+        slug="bollinger_sell",
+        name="Bollinger Sell",
+        description=(
+            "Sells a fresh upper-band wick rejection while RSI confirms "
+            "overextension."
+        ),
+        node_type="all",
+        params={},
+        min_history_candles=50,
+        required_methods=(
+            "calculate_bollinger_bands_series",
+            "calculate_rsi_series",
+            "get_high_price",
+            "get_close_price",
+        ),
+    ),
 )
 
 BUILTIN_STRATEGY_BY_SLUG = {strategy.slug: strategy for strategy in BUILTIN_STRATEGIES}
@@ -115,6 +161,22 @@ NODE_PALETTE: tuple[dict[str, Any], ...] = (
         "description": "Read a current or previous close price.",
         "params": {"lookback": 50, "sample": "current"},
         "documentation_url": "/docs/strategies.md#close-price",
+    },
+    {
+        "type": "low_price",
+        "label": "Low price",
+        "category": "Indicator",
+        "description": "Read a current or previous candle low.",
+        "params": {"lookback": 50, "sample": "current"},
+        "documentation_url": "/docs/strategies.md#low-price",
+    },
+    {
+        "type": "high_price",
+        "label": "High price",
+        "category": "Indicator",
+        "description": "Read a current or previous candle high.",
+        "params": {"lookback": 50, "sample": "current"},
+        "documentation_url": "/docs/strategies.md#high-price",
     },
     {
         "type": "constant_value",
@@ -197,6 +259,10 @@ def build_builtin_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
         return _build_ema_low_ir(spec)
     if spec.slug == "ema_swing":
         return _build_ema_swing_ir(spec)
+    if spec.slug == "bollinger_buy":
+        return _build_bollinger_buy_ir(spec)
+    if spec.slug == "bollinger_sell":
+        return _build_bollinger_sell_ir(spec)
     decision_node = _node(
         "decision",
         spec.node_type,
@@ -315,6 +381,292 @@ def _build_ema_down_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
         _comparison("decision", "EMA 20 below EMA 50", "less_than", 360, 200),
     ]
     return _builtin_ir(spec, nodes, _comparison_edges("ema20", "ema50", "decision"))
+
+
+def _build_bollinger_buy_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
+    """Return the lower-band wick and trend-filtered Bollinger buy graph."""
+    nodes = [
+        _node(
+            "low_previous",
+            "low_price",
+            "Low previous",
+            {"lookback": 202, "sample": "previous"},
+            40,
+            20,
+        ),
+        _node(
+            "low_current",
+            "low_price",
+            "Low current",
+            {"lookback": 202, "sample": "current"},
+            40,
+            100,
+        ),
+        _indicator(
+            "lower_previous",
+            "bollinger_lower",
+            "Bollinger lower previous",
+            40,
+            180,
+            length=20,
+            sample="previous",
+        ),
+        _indicator(
+            "lower_current",
+            "bollinger_lower",
+            "Bollinger lower current",
+            40,
+            260,
+            length=20,
+            sample="current",
+        ),
+        _indicator(
+            "middle_previous",
+            "bollinger_middle",
+            "Bollinger middle previous",
+            40,
+            340,
+            length=20,
+            sample="previous",
+        ),
+        _indicator(
+            "middle_current",
+            "bollinger_middle",
+            "Bollinger middle current",
+            40,
+            420,
+            length=20,
+            sample="current",
+        ),
+        _indicator(
+            "ema50_current",
+            "ema",
+            "EMA 50 current",
+            40,
+            580,
+            length=50,
+            sample="current",
+        ),
+        _indicator(
+            "ema100_current",
+            "ema",
+            "EMA 100 current",
+            40,
+            740,
+            length=100,
+            sample="current",
+        ),
+        _indicator(
+            "rsi14", "rsi", "RSI 14 current", 40, 820, length=14, sample="current"
+        ),
+        _indicator(
+            "bandwidth",
+            "bollinger_bandwidth",
+            "Bollinger bandwidth percent",
+            40,
+            900,
+            length=20,
+            sample="current",
+        ),
+        _node(
+            "rsi_limit", "constant_value", "RSI threshold 50", {"value": 50.0}, 40, 980
+        ),
+        _node(
+            "bandwidth_limit",
+            "constant_value",
+            "Minimum bandwidth percent 2",
+            {"value": 2.0},
+            40,
+            1060,
+        ),
+        _comparison(
+            "was_above_lower",
+            "Previous low at or above lower band",
+            "greater_or_equal",
+            350,
+            40,
+        ),
+        _comparison(
+            "breaks_lower",
+            "Current low below lower band",
+            "less_than",
+            350,
+            140,
+        ),
+        _node("lower_break", "all", "Wick crosses lower band", {}, 620, 90),
+        _comparison("band_uptrend", "Middle band rising", "greater_than", 350, 300),
+        _comparison(
+            "band_downtrend",
+            "Middle band flat or falling",
+            "less_or_equal",
+            350,
+            390,
+        ),
+        _comparison(
+            "under_ema50",
+            "Current low below EMA 50",
+            "less_than",
+            350,
+            530,
+        ),
+        _node(
+            "uptrend_branch",
+            "all",
+            "Uptrend: low below EMA 50",
+            {},
+            870,
+            370,
+        ),
+        _comparison(
+            "under_ema100",
+            "Current low below EMA 100",
+            "less_than",
+            350,
+            700,
+        ),
+        _node(
+            "downtrend_branch",
+            "all",
+            "Downtrend: low below EMA 100",
+            {},
+            870,
+            650,
+        ),
+        _node("trend_cross", "any", "Trend-dependent EMA cross", {}, 1100, 500),
+        _comparison("rsi_under_50", "RSI 14 below 50", "less_than", 350, 850),
+        _comparison(
+            "bands_are_wide",
+            "Bollinger bandwidth at least 2 percent",
+            "greater_or_equal",
+            350,
+            960,
+        ),
+        _node("decision", "all", "All Bollinger buy conditions", {}, 1360, 420),
+    ]
+    connections = [
+        *_comparison_edges("low_previous", "lower_previous", "was_above_lower"),
+        *_comparison_edges("low_current", "lower_current", "breaks_lower"),
+        {"source": "was_above_lower", "target": "lower_break"},
+        {"source": "breaks_lower", "target": "lower_break"},
+        *_comparison_edges("middle_current", "middle_previous", "band_uptrend"),
+        *_comparison_edges("middle_current", "middle_previous", "band_downtrend"),
+        *_comparison_edges("low_current", "ema50_current", "under_ema50"),
+        {"source": "band_uptrend", "target": "uptrend_branch"},
+        {"source": "under_ema50", "target": "uptrend_branch"},
+        *_comparison_edges("low_current", "ema100_current", "under_ema100"),
+        {"source": "band_downtrend", "target": "downtrend_branch"},
+        {"source": "under_ema100", "target": "downtrend_branch"},
+        {"source": "uptrend_branch", "target": "trend_cross"},
+        {"source": "downtrend_branch", "target": "trend_cross"},
+        *_comparison_edges("rsi14", "rsi_limit", "rsi_under_50"),
+        *_comparison_edges("bandwidth", "bandwidth_limit", "bands_are_wide"),
+        {"source": "lower_break", "target": "decision"},
+        {"source": "trend_cross", "target": "decision"},
+        {"source": "rsi_under_50", "target": "decision"},
+        {"source": "bands_are_wide", "target": "decision"},
+    ]
+    return _builtin_ir(spec, nodes, connections)
+
+
+def _build_bollinger_sell_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
+    """Return the upper-band wick rejection Bollinger sell graph."""
+    nodes = [
+        _node(
+            "high_previous",
+            "high_price",
+            "High previous",
+            {"lookback": 50, "sample": "previous"},
+            60,
+            80,
+        ),
+        _node(
+            "high_current",
+            "high_price",
+            "High current",
+            {"lookback": 50, "sample": "current"},
+            60,
+            180,
+        ),
+        _node(
+            "close_current",
+            "close_price",
+            "Close current",
+            {"lookback": 50, "sample": "current"},
+            60,
+            280,
+        ),
+        _indicator(
+            "upper_previous",
+            "bollinger_upper",
+            "Bollinger upper previous",
+            60,
+            380,
+            length=20,
+            sample="previous",
+        ),
+        _indicator(
+            "upper_current",
+            "bollinger_upper",
+            "Bollinger upper current",
+            60,
+            480,
+            length=20,
+            sample="current",
+        ),
+        _indicator(
+            "rsi14",
+            "rsi",
+            "RSI 14 current",
+            60,
+            580,
+            length=14,
+            sample="current",
+        ),
+        _node(
+            "rsi_limit",
+            "constant_value",
+            "RSI threshold 60",
+            {"value": 60.0},
+            60,
+            680,
+        ),
+        _comparison(
+            "was_below_upper",
+            "Previous high at or below upper band",
+            "less_or_equal",
+            380,
+            160,
+        ),
+        _comparison(
+            "breaks_upper",
+            "Current high above upper band",
+            "greater_than",
+            380,
+            310,
+        ),
+        _comparison(
+            "closes_inside_upper",
+            "Current close below upper band",
+            "less_than",
+            380,
+            440,
+        ),
+        _node("upper_rejection", "all", "Upper band wick rejection", {}, 680, 300),
+        _comparison("rsi_over_60", "RSI 14 at least 60", "greater_or_equal", 380, 570),
+        _node("decision", "all", "All Bollinger sell conditions", {}, 950, 400),
+    ]
+    connections = [
+        *_comparison_edges("high_previous", "upper_previous", "was_below_upper"),
+        *_comparison_edges("high_current", "upper_current", "breaks_upper"),
+        *_comparison_edges("close_current", "upper_current", "closes_inside_upper"),
+        {"source": "was_below_upper", "target": "upper_rejection"},
+        {"source": "breaks_upper", "target": "upper_rejection"},
+        {"source": "closes_inside_upper", "target": "upper_rejection"},
+        *_comparison_edges("rsi14", "rsi_limit", "rsi_over_60"),
+        {"source": "upper_rejection", "target": "decision"},
+        {"source": "rsi_over_60", "target": "decision"},
+    ]
+    return _builtin_ir(spec, nodes, connections)
 
 
 def _build_ema_low_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
@@ -679,6 +1031,8 @@ def validate_strategy_ir(ir: dict[str, Any]) -> dict[str, Any]:
     data_node_types = {
         "constant_value",
         "close_price",
+        "low_price",
+        "high_price",
         "ema_indicator",
         "indicator",
     }
@@ -897,15 +1251,32 @@ def _node_runtime_requirements(node: dict[str, Any]) -> tuple[tuple[str, ...], i
                 ("calculate_ema", "get_close_price"),
                 max(length + 2, 200),
             )
+        if indicator == "rsi":
+            length = int(params.get("length") or 14)
+            return (("calculate_rsi_series",), max(length + 2, 50))
+        if indicator.startswith("bollinger_"):
+            length = int(params.get("length") or 20)
+            return (("calculate_bollinger_bands_series",), max(length + 2, 50))
+        if indicator.startswith("macd_"):
+            slow_period = int(params.get("slow_period") or 26)
+            signal_period = int(params.get("signal_period") or 9)
+            return (
+                ("calculate_macd_series",),
+                max(slow_period + signal_period + 2, 50),
+            )
         return ((), 0)
     if node_type == "constant_value":
         return ((), 0)
-    if node_type in {
-        "close_price",
-        "comparison",
-        "fresh_signal_state",
-        "swing_low_state",
-    }:
+    if node_type == "close_price":
+        lookback = int(params.get("lookback") or 50)
+        return (("get_close_price",), lookback)
+    if node_type == "low_price":
+        lookback = int(params.get("lookback") or 50)
+        return (("get_low_price",), lookback)
+    if node_type == "high_price":
+        lookback = int(params.get("lookback") or 50)
+        return (("get_high_price",), lookback)
+    if node_type in {"fresh_signal_state", "swing_low_state"}:
         return (("calculate_ema", "get_close_price"), 200)
     if node_type == "ema_swing":
         return (("calculate_ema", "get_close_price"), 200)

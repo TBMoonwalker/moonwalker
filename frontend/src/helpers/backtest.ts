@@ -65,6 +65,23 @@ export interface BacktestMarker {
     text: string
 }
 
+export type BacktestIndicatorPane = 'price' | 'rsi' | 'bandwidth' | 'macd'
+export type BacktestIndicatorRenderer = 'line' | 'histogram'
+
+export interface BacktestIndicatorValue {
+    time: number
+    value: number
+}
+
+export interface BacktestIndicatorSeries {
+    key: string
+    label: string
+    pane: BacktestIndicatorPane
+    renderer: BacktestIndicatorRenderer
+    color: string
+    values: BacktestIndicatorValue[]
+}
+
 export interface BacktestTrade {
     id: number | string
     symbol: string
@@ -110,6 +127,7 @@ export interface BacktestResult {
     chart: {
         candles: BacktestCandle[]
         markers: BacktestMarker[]
+        indicators: BacktestIndicatorSeries[]
     }
     stats: BacktestStats
 }
