@@ -29,6 +29,11 @@ Moonwalker runs as a single-node, single-instance application.
 creates or reuses `.venv`, installs backend requirements, and starts the
 Litestar app in the background.
 
+Production supervisors should invoke `./run.sh start` or perform the same
+requirements installation step before launching `backend/app.py` directly.
+Starting `backend/app.py` from an existing virtual environment bypasses
+dependency synchronization after an upgrade.
+
 ## Logging
 You can see information about DCA and TP status in `statistics.log`. Other logs
 are available as well (for exchange, controller, monitoring, etc.).
