@@ -12,7 +12,7 @@ def test_supported_strategy_has_no_support_error() -> None:
     assert get_strategy_support_error("ema20_swing_reverse") is None
     assert get_strategy_support_error("ema_swing_reverse") is None
     assert get_strategy_support_error("bollinger_buy") is None
-    assert get_strategy_support_error("bollinger_sell") is None
+    assert "not registered" in (get_strategy_support_error("bollinger_sell") or "")
 
 
 def test_unsupported_strategy_reports_missing_indicator_methods() -> None:
@@ -45,7 +45,7 @@ def test_get_strategy_min_history_candles_returns_expected_warmup() -> None:
     assert get_strategy_min_history_candles("ema_low") == 200
     assert get_strategy_min_history_candles("ema_swing_reverse") == 200
     assert get_strategy_min_history_candles("bollinger_buy") == 202
-    assert get_strategy_min_history_candles("bollinger_sell") == 50
+    assert get_strategy_min_history_candles("bollinger_sell") == 0
     assert get_strategy_min_history_candles(None) == 0
 
 

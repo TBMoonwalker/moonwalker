@@ -315,22 +315,6 @@ async def test_bollinger_buy_rejects_narrow_sideways_bands() -> None:
 
 
 @pytest.mark.asyncio
-async def test_bollinger_sell_matches_upper_band_wick_rejection_with_high_rsi() -> None:
-    context = EvaluationContext(
-        slug="bollinger_sell",
-        timeframe="4h",
-        symbol="BTC/USDC",
-        side="sell",
-        indicators=_BollingerGraphIndicators("sell"),
-        candle_index=2,
-        state_store={},
-    )
-    ir = build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG["bollinger_sell"])
-
-    assert await strategy_runtime._evaluate_root(ir, context) is True
-
-
-@pytest.mark.asyncio
 async def test_backtest_enters_on_next_candle_open(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -499,7 +483,7 @@ async def test_backtest_returns_strategy_indicator_series_for_chart_audit(
         start_date=datetime(2024, 1, 1, tzinfo=UTC),
         end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
         trade_mode=TRADE_MODE_SIDESTEP,
-        sidestep_bearish_strategy="bollinger_sell",
+        sidestep_bearish_strategy="ema_down",
         sidestep_reentry_strategy="bollinger_buy",
     )
     engine._candles = [_candle(index, 100.0 + index) for index in range(4)]
@@ -515,7 +499,7 @@ async def test_backtest_returns_strategy_indicator_series_for_chart_audit(
     monkeypatch.setattr(
         backtest_service,
         "Indicators",
-        lambda data: _BollingerGraphIndicators("sell"),
+        lambda data: _BollingerGraphIndicators("buy"),
     )
 
     result = await engine.run()

@@ -160,21 +160,19 @@ async def test_other_builtins_are_decomposed_into_graph_nodes(strategy_db) -> No
 
 
 @pytest.mark.asyncio
-async def test_bollinger_builtins_seed_as_executable_indicator_graphs(
+async def test_bollinger_buy_seeds_as_executable_indicator_graph(
     strategy_db,
 ) -> None:
     await seed_builtin_strategies()
 
     buy = await get_strategy_detail("bollinger_buy")
-    sell = await get_strategy_detail("bollinger_sell")
     options = await list_strategy_options()
 
     assert buy is not None
-    assert sell is not None
     assert buy["validation"]["status"] == "valid"
-    assert sell["validation"]["status"] == "valid"
     assert "bollinger_buy" in options
-    assert "bollinger_sell" in options
+    assert "bollinger_sell" not in options
+    assert await get_strategy_detail("bollinger_sell") is None
 
     buy_indicators = {
         node["params"]["indicator"]
@@ -199,18 +197,6 @@ async def test_bollinger_builtins_seed_as_executable_indicator_graphs(
         node["id"] == "trend_cross" and node["type"] == "any"
         for node in buy["ir"]["nodes"]
     )
-
-    sell_indicators = {
-        node["params"]["indicator"]
-        for node in sell["ir"]["nodes"]
-        if node["type"] == "indicator"
-    }
-    assert sell_indicators == {"bollinger_upper", "rsi"}
-    assert {node["type"] for node in sell["ir"]["nodes"]} >= {
-        "close_price",
-        "high_price",
-        "indicator",
-    }
 
 
 @pytest.mark.asyncio

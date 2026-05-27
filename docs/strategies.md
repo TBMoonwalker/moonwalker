@@ -48,13 +48,6 @@ The built-in `bollinger_buy` graph triggers when all of the following are true:
 - RSI14 is below `50`.
 - Bollinger bandwidth is at least `2%`, filtering narrow sideways conditions.
 
-## Bollinger Sell
-
-The built-in `bollinger_sell` graph triggers when the candle high freshly
-crosses above the upper Bollinger Band, the candle closes back below that band,
-and RSI14 is at least `60`. This models a rejected overextended top rather than
-waiting for MACD momentum to fade.
-
 ## Close Price
 
 Reads a close price from recent candle history.

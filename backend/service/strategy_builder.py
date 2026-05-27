@@ -121,23 +121,6 @@ BUILTIN_STRATEGIES: tuple[BuiltinStrategySpec, ...] = (
             "get_low_price",
         ),
     ),
-    BuiltinStrategySpec(
-        slug="bollinger_sell",
-        name="Bollinger Sell",
-        description=(
-            "Sells a fresh upper-band wick rejection while RSI confirms "
-            "overextension."
-        ),
-        node_type="all",
-        params={},
-        min_history_candles=50,
-        required_methods=(
-            "calculate_bollinger_bands_series",
-            "calculate_rsi_series",
-            "get_high_price",
-            "get_close_price",
-        ),
-    ),
 )
 
 BUILTIN_STRATEGY_BY_SLUG = {strategy.slug: strategy for strategy in BUILTIN_STRATEGIES}
@@ -261,8 +244,6 @@ def build_builtin_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
         return _build_ema_swing_ir(spec)
     if spec.slug == "bollinger_buy":
         return _build_bollinger_buy_ir(spec)
-    if spec.slug == "bollinger_sell":
-        return _build_bollinger_sell_ir(spec)
     decision_node = _node(
         "decision",
         spec.node_type,
@@ -564,107 +545,6 @@ def _build_bollinger_buy_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
         {"source": "trend_cross", "target": "decision"},
         {"source": "rsi_under_50", "target": "decision"},
         {"source": "bands_are_wide", "target": "decision"},
-    ]
-    return _builtin_ir(spec, nodes, connections)
-
-
-def _build_bollinger_sell_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
-    """Return the upper-band wick rejection Bollinger sell graph."""
-    nodes = [
-        _node(
-            "high_previous",
-            "high_price",
-            "High previous",
-            {"lookback": 50, "sample": "previous"},
-            60,
-            80,
-        ),
-        _node(
-            "high_current",
-            "high_price",
-            "High current",
-            {"lookback": 50, "sample": "current"},
-            60,
-            180,
-        ),
-        _node(
-            "close_current",
-            "close_price",
-            "Close current",
-            {"lookback": 50, "sample": "current"},
-            60,
-            280,
-        ),
-        _indicator(
-            "upper_previous",
-            "bollinger_upper",
-            "Bollinger upper previous",
-            60,
-            380,
-            length=20,
-            sample="previous",
-        ),
-        _indicator(
-            "upper_current",
-            "bollinger_upper",
-            "Bollinger upper current",
-            60,
-            480,
-            length=20,
-            sample="current",
-        ),
-        _indicator(
-            "rsi14",
-            "rsi",
-            "RSI 14 current",
-            60,
-            580,
-            length=14,
-            sample="current",
-        ),
-        _node(
-            "rsi_limit",
-            "constant_value",
-            "RSI threshold 60",
-            {"value": 60.0},
-            60,
-            680,
-        ),
-        _comparison(
-            "was_below_upper",
-            "Previous high at or below upper band",
-            "less_or_equal",
-            380,
-            160,
-        ),
-        _comparison(
-            "breaks_upper",
-            "Current high above upper band",
-            "greater_than",
-            380,
-            310,
-        ),
-        _comparison(
-            "closes_inside_upper",
-            "Current close below upper band",
-            "less_than",
-            380,
-            440,
-        ),
-        _node("upper_rejection", "all", "Upper band wick rejection", {}, 680, 300),
-        _comparison("rsi_over_60", "RSI 14 at least 60", "greater_or_equal", 380, 570),
-        _node("decision", "all", "All Bollinger sell conditions", {}, 950, 400),
-    ]
-    connections = [
-        *_comparison_edges("high_previous", "upper_previous", "was_below_upper"),
-        *_comparison_edges("high_current", "upper_current", "breaks_upper"),
-        *_comparison_edges("close_current", "upper_current", "closes_inside_upper"),
-        {"source": "was_below_upper", "target": "upper_rejection"},
-        {"source": "breaks_upper", "target": "upper_rejection"},
-        {"source": "closes_inside_upper", "target": "upper_rejection"},
-        *_comparison_edges("rsi14", "rsi_limit", "rsi_over_60"),
-        {"source": "upper_rejection", "target": "decision"},
-        {"source": "rsi_over_60", "target": "decision"},
     ]
     return _builtin_ir(spec, nodes, connections)
 

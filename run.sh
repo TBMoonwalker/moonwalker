@@ -86,7 +86,7 @@ start_services() {
 
     echo "📦 Installing frontend deps & building Vue..."
     cd frontend
-    npm install
+    npm ci
     # Startup path should prioritize successful asset build over type-checking.
     # Type checks are still available via `npm run build`/CI.
     build_frontend_with_fallback

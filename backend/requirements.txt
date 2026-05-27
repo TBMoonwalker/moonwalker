@@ -1,9 +1,9 @@
-cachetools==7.0.6
-ccxt==4.5.50
-pandas==3.0.2
+cachetools==7.1.4
+ccxt==4.5.56
+pandas==3.0.3
 litestar==2.21.1
-python-socketio==5.16.1
-Telethon==1.42.0
+python-socketio==5.16.2
+Telethon==1.43.2
 ta-lib==0.6.8
 tenacity==9.1.4
 tortoise-orm==1.1.7
@@ -12,4 +12,9 @@ sniffio==1.3.1
 aiosqlite==0.22.1
 redis==7.4.0
 httpx==0.28.1
-uvicorn==0.46.0
+uvicorn==0.48.0
+
+# Explicit security pins for transitives used by the HTTP/exchange stack.
+cryptography==46.0.7
+idna==3.16
+urllib3==2.7.0
