@@ -1,7 +1,7 @@
 cachetools==7.1.4
 ccxt==4.5.56
 pandas==3.0.3
-litestar==2.21.1
+litestar==2.22.0
 python-socketio==5.16.2
 Telethon==1.43.2
 ta-lib==0.6.8

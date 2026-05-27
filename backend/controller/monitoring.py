@@ -8,6 +8,7 @@ from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
 from litestar.handlers import get, post
+from litestar.params import FromPath, FromQuery
 from litestar.response import File
 from service.config import Config
 from service.log_viewer import LogViewerService
@@ -28,10 +29,10 @@ async def get_monitoring_log_sources() -> Any:
 
 @get(path="/monitoring/logs/{source:str}")
 async def get_monitoring_log_source(
-    source: str,
-    cursor: int | None = None,
-    before: int | None = None,
-    limit: int = 200,
+    source: FromPath[str],
+    cursor: FromQuery[int | None] = None,
+    before: FromQuery[int | None] = None,
+    limit: FromQuery[int] = 200,
 ) -> Any:
     """Return tailed or backfilled lines for a monitoring log source."""
     try:
@@ -50,7 +51,7 @@ async def get_monitoring_log_source(
 
 
 @get(path="/monitoring/logs/{source:str}/download")
-async def download_monitoring_log_source(source: str) -> Any:
+async def download_monitoring_log_source(source: FromPath[str]) -> Any:
     """Download the current file for a monitored allowlisted log source."""
     try:
         log_source, path = await asyncio.to_thread(

@@ -7,6 +7,7 @@ from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
 from litestar.handlers import post
+from litestar.params import FromPath
 from service.config import Config
 from service.orders import Orders
 
@@ -15,7 +16,7 @@ orders = Orders()
 
 
 @post(path="/orders/sell/{symbol:str}", status_code=200)
-async def sell_order(symbol: str) -> dict[str, Any]:
+async def sell_order(symbol: FromPath[str]) -> dict[str, Any]:
     """Create a sell order for the specified symbol.
 
     Args:
@@ -35,7 +36,7 @@ async def sell_order(symbol: str) -> dict[str, Any]:
 
 
 @post(path="/orders/buy/{symbol:str}/{ordersize:str}", status_code=200)
-async def buy_order(symbol: str, ordersize: str) -> dict[str, Any]:
+async def buy_order(symbol: FromPath[str], ordersize: FromPath[str]) -> dict[str, Any]:
     """Create a buy order for the specified symbol and size.
 
     Args:
@@ -56,7 +57,7 @@ async def buy_order(symbol: str, ordersize: str) -> dict[str, Any]:
 
 
 @post(path="/orders/stop/{symbol:str}", status_code=200)
-async def stop_order(symbol: str) -> dict[str, Any]:
+async def stop_order(symbol: FromPath[str]) -> dict[str, Any]:
     """Stop an active order for the specified symbol.
 
     Args:

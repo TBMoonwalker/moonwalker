@@ -8,6 +8,7 @@ from typing import Any
 import helper
 from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, websocket_stream
+from litestar.params import FromPath
 from service.config import Config
 from service.exchange import Exchange
 from service.statistic import Statistic
@@ -95,7 +96,9 @@ async def profit() -> AsyncGenerator[str, None]:
 
 
 @get(path="/statistic/profit/{timestamp:str}/{period:str}")
-async def profit_statistics(timestamp: str, period: str) -> dict[str, Any]:
+async def profit_statistics(
+    timestamp: FromPath[str], period: FromPath[str]
+) -> dict[str, Any]:
     """Get profit statistics for a specific time period.
 
     Args:

@@ -4,6 +4,7 @@ from typing import Any
 
 from controller.responses import json_response
 from litestar.handlers import delete, get, post, put
+from litestar.params import FromPath
 from service.strategy_builder import (
     create_blank_strategy,
     delete_custom_strategy,
@@ -27,7 +28,7 @@ async def list_strategies() -> dict[str, Any]:
 
 
 @get(path="/strategies/{slug:str}")
-async def get_strategy(slug: str) -> Any:
+async def get_strategy(slug: FromPath[str]) -> Any:
     """Return one Strategy Builder definition."""
     detail = await get_strategy_detail(slug)
     if detail is None:
@@ -66,7 +67,7 @@ async def validate_strategy_endpoint(data: dict[str, Any]) -> Any:
 
 
 @put(path="/strategies/{slug:str}")
-async def save_strategy(slug: str, data: dict[str, Any]) -> Any:
+async def save_strategy(slug: FromPath[str], data: dict[str, Any]) -> Any:
     """Promote a validated custom strategy draft to a new active version."""
     ir = data.get("ir")
     if not isinstance(ir, dict):
@@ -93,7 +94,7 @@ async def save_strategy(slug: str, data: dict[str, Any]) -> Any:
 
 
 @delete(path="/strategies/{slug:str}", status_code=200)
-async def delete_strategy(slug: str) -> Any:
+async def delete_strategy(slug: FromPath[str]) -> Any:
     """Delete a custom Strategy Builder definition."""
     try:
         await delete_custom_strategy(slug)
