@@ -16,7 +16,7 @@ import { useWebSocketDataStore } from '../stores/websocket'
 import { useProfitDatastore } from '../stores/profit'
 import { storeToRefs } from 'pinia'
 import { use } from 'echarts/core'
-import { BarChart } from 'echarts/charts'
+import { BarChart, LineChart } from 'echarts/charts'
 import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
@@ -40,7 +40,7 @@ const isMobile = ref(false)
 let historic_data = false
 let isLoadingHistory = false
 
-use([GridComponent, TooltipComponent, BarChart, CanvasRenderer])
+use([GridComponent, TooltipComponent, BarChart, LineChart, CanvasRenderer])
 
 function getIsMobileViewport(): boolean {
     if (typeof window === 'undefined') {
@@ -112,6 +112,12 @@ watch([statistics_data.data, profit_store_refs.data], async ([newData]) => {
                 labels: labels,
                 datasets: datasets
             }
+            const profitValues = datasets.map((dataset: any) => Number(dataset.value))
+            let cumulativeProfit = 0
+            const runningAverageProfit = profitValues.map((value, index) => {
+                cumulativeProfit += value
+                return cumulativeProfit / (index + 1)
+            })
 
             const count = chart_data.value.labels.length || 1
             const maxBarWidth = isMobile.value ? 24 : 48
@@ -164,12 +170,29 @@ watch([statistics_data.data, profit_store_refs.data], async ([newData]) => {
                 },
                 series: [
                     {
+                        name: 'Profit',
                         color: '#2E7D5B',
                         data: chart_data.value.datasets,
                         type: 'bar',
                         barWidth,
                         barMaxWidth: 48,
                         itemStyle: { borderRadius: 4 }
+                    },
+                    {
+                        name: 'Running average',
+                        color: '#B7791F',
+                        data: runningAverageProfit,
+                        type: 'line',
+                        symbol: 'none',
+                        lineStyle: {
+                            color: '#B7791F',
+                            type: 'dashed',
+                            width: 2
+                        },
+                        emphasis: {
+                            disabled: true
+                        },
+                        z: 3
                     }
                 ]
             }
