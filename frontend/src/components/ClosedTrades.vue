@@ -318,11 +318,11 @@ onMounted(async () => {
 
 <style scoped>
 :deep(.red .profit) {
-    color: rgb(224, 108, 117) !important;
+    color: #B4443F !important;
 }
 
 :deep(.green .profit) {
-    color: rgb(99, 226, 183) !important;
+    color: #2E7D5B !important;
 }
 
 :deep(.n-data-table-expand-trigger) {

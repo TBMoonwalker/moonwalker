@@ -9,6 +9,7 @@ from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
 from litestar.handlers import get, post, put
+from litestar.params import FromPath, FromQuery
 from model import AppConfig, OpenTrades
 from service.backup_restore import BackupService
 from service.config import (
@@ -535,13 +536,13 @@ async def get_config_freshness() -> Any:
 
 
 @get(path="/config/backup/export")
-async def export_backup(include_trade_data: bool = False) -> Any:
+async def export_backup(include_trade_data: FromQuery[bool] = False) -> Any:
     """Export config backup with optional trade data."""
     return await backup_service.export_backup(include_trade_data)
 
 
 @get(path="/config/single/{key:str}")
-async def get_config_key(key: str) -> Any:
+async def get_config_key(key: FromPath[str]) -> Any:
     """Get a specific config value.
 
     Args:
@@ -558,7 +559,7 @@ async def get_config_key(key: str) -> Any:
 
 
 @put(path="/config/single/{key:str}")
-async def update_config_key(key: str, request: Request[Any, Any, Any]) -> Any:
+async def update_config_key(key: FromPath[str], request: Request[Any, Any, Any]) -> Any:
     """Update a specific config key via JSON body.
 
     Args:

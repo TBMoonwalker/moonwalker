@@ -64,10 +64,10 @@ import type { TimeframeChoice } from '../helpers/openTrades'
 import type { ClosedTradeRow, TradeExecutionRow } from '../stores/trades'
 import TradeReplayChart from './TradeReplayChart.vue'
 
-const BUY_MARKER_COLOR = 'rgb(99, 226, 183)'
+const BUY_MARKER_COLOR = '#2E7D5B'
 const BUY_LINE_COLOR = '#1D5C49'
-const SELL_PROFIT_COLOR = 'rgb(99, 226, 183)'
-const SELL_LOSS_COLOR = 'rgb(224, 108, 117)'
+const SELL_PROFIT_COLOR = '#2E7D5B'
+const SELL_LOSS_COLOR = '#B4443F'
 
 type TimelineItem = {
     key: string

@@ -224,6 +224,7 @@ backend/templates/index.html
 
 # NPM
 package-lock.json
+!frontend/package-lock.json
 
 # AI
 !CLAUDE.md

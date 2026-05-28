@@ -8,6 +8,7 @@ from pathlib import Path
 from controller import STATIC_DIR, TEMPLATE_DIR
 from litestar.exceptions import NotFoundException
 from litestar.handlers import get
+from litestar.params import FromPath
 from litestar.response import File
 
 _HASHED_ASSET_PATTERN = re.compile(r".+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
@@ -56,7 +57,7 @@ def _file_response(path: Path) -> File:
 
 
 @get(path="/static/{file_path:path}", include_in_schema=False)
-async def serve_static(file_path: str) -> File:
+async def serve_static(file_path: FromPath[str]) -> File:
     """Serve files from backend/static."""
     static_file = _resolve_relative_file(STATIC_DIR, file_path)
     if static_file is None or not await asyncio.to_thread(static_file.is_file):
@@ -65,7 +66,7 @@ async def serve_static(file_path: str) -> File:
 
 
 @get(path="/assets/{file_path:path}", include_in_schema=False)
-async def serve_assets(file_path: str) -> File:
+async def serve_assets(file_path: FromPath[str]) -> File:
     """Serve hashed frontend bundles at the Vite-generated /assets path."""
     asset_file = _resolve_relative_file(STATIC_DIR / "assets", file_path)
     if asset_file is None or not await asyncio.to_thread(asset_file.is_file):
@@ -74,7 +75,7 @@ async def serve_assets(file_path: str) -> File:
 
 
 @get(path="/docs/{file_path:path}", include_in_schema=False)
-async def serve_docs(file_path: str) -> File:
+async def serve_docs(file_path: FromPath[str]) -> File:
     """Serve local operator documentation files."""
     docs_file = _resolve_relative_file(DOCS_DIR, file_path)
     if docs_file is None or not await asyncio.to_thread(docs_file.is_file):
@@ -83,7 +84,7 @@ async def serve_docs(file_path: str) -> File:
 
 
 @get(path="/{path:path}", include_in_schema=False)
-async def serve_vue(path: str) -> File:
+async def serve_vue(path: FromPath[str]) -> File:
     """Serve the Vue.js SPA entrypoint with static-file fallback."""
     return await _serve_vue_path(path)
 

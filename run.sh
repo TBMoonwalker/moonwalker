@@ -67,6 +67,7 @@ start_services() {
     local debug="${1:-false}"
     local trace="${2:-false}"
     local port="${3:-8130}"
+    local app_pid
     # Check if services are already running
     if [ -f "$LOCK_FILE" ]; then
         echo "❌ Services are already running"
@@ -75,6 +76,7 @@ start_services() {
 
     # Create lock file to indicate services are running
     touch "$LOCK_FILE"
+    trap 'rm -f "$LOCK_FILE"' ERR
 
     echo "📦 Checking npm-run-all..."
     if ! npx --no-install run-p --version >/dev/null 2>&1; then
@@ -86,7 +88,7 @@ start_services() {
 
     echo "📦 Installing frontend deps & building Vue..."
     cd frontend
-    npm install
+    npm ci
     # Startup path should prioritize successful asset build over type-checking.
     # Type checks are still available via `npm run build`/CI.
     build_frontend_with_fallback
@@ -103,10 +105,14 @@ start_services() {
     cp -r frontend/dist/assets backend/static/
     cp frontend/dist/index.html backend/templates/
 
-    echo "🐍 Installing Python venv and deps & starting Litestar..."
+    echo "🐍 Installing Python venv and backend dependencies..."
     python3 -m venv .venv
+    ./.venv/bin/python -m pip install -r backend/requirements.txt
+    ./.venv/bin/python -m pip check
+
+    echo "🚀 Validating backend imports & starting Litestar..."
     cd backend
-    ../.venv/bin/pip install -r requirements.txt
+    ../.venv/bin/python -c "from controller import route_handlers"
     if [ "$trace" = "true" ]; then
         MOONWALKER_LOG_LEVEL=TRACE MOONWALKER_PORT="$port" ../.venv/bin/python app.py > ../run.log 2>&1 &
     elif [ "$debug" = "true" ]; then
@@ -114,9 +120,18 @@ start_services() {
     else
         MOONWALKER_PORT="$port" ../.venv/bin/python app.py > ../run.log 2>&1 &
     fi
-    echo $! > ../$PID_FILE
+    app_pid=$!
+    echo "$app_pid" > ../$PID_FILE
     cd ..
 
+    sleep 1
+    if ! kill -0 "$app_pid" 2>/dev/null; then
+        echo "❌ Backend exited during startup. See run.log for details."
+        rm -f "$PID_FILE" "$LOCK_FILE"
+        exit 1
+    fi
+
+    trap - ERR
     echo "✅ Services started in background. Use './run.sh stop' to stop them."
 }
 

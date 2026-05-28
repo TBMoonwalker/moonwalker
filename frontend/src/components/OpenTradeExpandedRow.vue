@@ -73,9 +73,9 @@ const props = defineProps<{
     onAddOrderManually?: (rowData: RowData) => void
 }>()
 
-const BUY_MARKER_COLOR = 'rgb(99, 226, 183)'
+const BUY_MARKER_COLOR = '#2E7D5B'
 const BUY_LINE_COLOR = '#1D5C49'
-const SELL_MARKER_COLOR = 'rgb(224, 108, 117)'
+const SELL_MARKER_COLOR = '#B4443F'
 const TP_LINE_COLOR = '#B78A2E'
 
 type TimelineItem = {

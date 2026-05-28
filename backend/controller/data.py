@@ -6,6 +6,7 @@ import helper
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
 from litestar.handlers import get, post
+from litestar.params import FromPath
 from service.config import Config
 from service.data import Data
 
@@ -16,9 +17,9 @@ logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_dat
 
 @get(path="/data/ohlcv/replay/{deal_id:str}/{timerange:str}/{offset:str}")
 async def get_archived_replay_ohlcv_data(
-    deal_id: str,
-    timerange: str,
-    offset: str,
+    deal_id: FromPath[str],
+    timerange: FromPath[str],
+    offset: FromPath[str],
 ) -> Any:
     """Get archived OHLCV replay data for one closed deal."""
     response = await data.get_archived_ohlcv_for_deal(
@@ -36,11 +37,11 @@ async def get_archived_replay_ohlcv_data(
     "{deal_id:str}/{timerange:str}/{timestamp_start:str}/{timestamp_end:str}/{offset:str}"
 )
 async def get_archived_replay_ohlcv_data_bounded(
-    deal_id: str,
-    timerange: str,
-    timestamp_start: str,
-    timestamp_end: str,
-    offset: str,
+    deal_id: FromPath[str],
+    timerange: FromPath[str],
+    timestamp_start: FromPath[str],
+    timestamp_end: FromPath[str],
+    offset: FromPath[str],
 ) -> Any:
     """Get archived OHLCV replay data for one closed deal within a bounded window."""
     response = await data.get_archived_ohlcv_for_deal(
@@ -55,7 +56,10 @@ async def get_archived_replay_ohlcv_data_bounded(
 
 @get(path="/data/ohlcv/{symbol:str}/{timerange:str}/{timestamp_start:str}/{offset:str}")
 async def get_ohlcv_data(
-    symbol: str, timerange: str, timestamp_start: str, offset: str
+    symbol: FromPath[str],
+    timerange: FromPath[str],
+    timestamp_start: FromPath[str],
+    offset: FromPath[str],
 ) -> Any:
     """Get OHLCV (Open, High, Low, Close, Volume) data for a trading pair.
 
@@ -78,11 +82,11 @@ async def get_ohlcv_data(
     "{symbol:str}/{timerange:str}/{timestamp_start:str}/{timestamp_end:str}/{offset:str}"
 )
 async def get_ohlcv_data_until(
-    symbol: str,
-    timerange: str,
-    timestamp_start: str,
-    timestamp_end: str,
-    offset: str,
+    symbol: FromPath[str],
+    timerange: FromPath[str],
+    timestamp_start: FromPath[str],
+    timestamp_end: FromPath[str],
+    offset: FromPath[str],
 ) -> Any:
     """Get OHLCV data for a bounded start/end replay window."""
     response = await data.get_ohlcv_for_pair(
@@ -96,7 +100,7 @@ async def get_ohlcv_data_until(
 
 
 @get(path="/data/exchange/symbols/{currency:str}")
-async def get_exchange_symbols(currency: str) -> Any:
+async def get_exchange_symbols(currency: FromPath[str]) -> Any:
     """Get exchange symbols for a configured quote currency."""
     config = await Config.instance()
     symbols = await data.get_exchange_symbols_for_currency(config.snapshot(), currency)

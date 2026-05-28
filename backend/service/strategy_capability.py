@@ -22,6 +22,12 @@ REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {
     "ema_low": ("calculate_ema", "get_close_price"),
     "ema_swing": ("calculate_ema", "get_close_price"),
     "ema_swing_reverse": ("calculate_ema", "get_close_price"),
+    "bollinger_buy": (
+        "calculate_bollinger_bands_series",
+        "calculate_ema",
+        "calculate_rsi_series",
+        "get_low_price",
+    ),
 }
 
 # Strategy -> minimum closed candles required before the strategy can run safely.
@@ -32,6 +38,7 @@ MIN_HISTORY_CANDLES_BY_STRATEGY: dict[str, int] = {
     "ema_low": 200,
     "ema_swing": 200,
     "ema_swing_reverse": 200,
+    "bollinger_buy": 202,
 }
 
 _SECONDS_PER_DAY = 24 * 60 * 60

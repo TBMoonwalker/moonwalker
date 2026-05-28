@@ -283,8 +283,8 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     const maxPrice = (tpPrice / 100) * 0.7 + Number(tpPrice)
                     const fillColor =
                         currentPrice < avgPrice
-                            ? 'rgb(224, 108, 117)'
-                            : 'rgb(99, 226, 183)'
+                              ? '#B4443F'
+                              : '#2E7D5B'
                     return [
                         h(NSlider, {
                             value: [currentPrice, avgPrice],

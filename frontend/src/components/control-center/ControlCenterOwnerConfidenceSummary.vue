@@ -338,7 +338,7 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
 .owner-confidence-summary {
     width: 100%;
     border: 1px solid var(--mw-color-border-strong);
-    border-radius: 12px;
+    border-radius: var(--mw-radius-lg, 12px);
     background: var(--mw-surface-card);
     color: var(--mw-color-text-primary);
     padding: 18px 20px;
@@ -434,7 +434,7 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
 .confidence-evidence-grid {
     display: grid;
     gap: 12px 16px;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .evidence-chip {

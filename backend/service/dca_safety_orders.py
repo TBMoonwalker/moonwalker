@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from typing import Any
 
+from service.dca_math import calculate_cumulative_safety_order_deviation
+
 
 @dataclass(frozen=True)
 class SafetyOrderContext:
@@ -21,17 +23,19 @@ def calculate_static_deviations(
     safetyorders_count: int,
 ) -> tuple[float, float]:
     """Calculate max and actual deviation for static DCA progression."""
-    if step_scale == 1:
-        max_deviation = price_deviation * (safetyorders_count + 1)
-        actual_deviation = price_deviation * safetyorders_count
-        return max_deviation, actual_deviation
-
-    max_deviation = (price_deviation * (1 - step_scale ** (safetyorders_count + 1))) / (
-        1 - step_scale
+    max_deviation = calculate_cumulative_safety_order_deviation(
+        price_deviation,
+        step_scale,
+        safetyorders_count,
     )
-    max_deviation = round(max_deviation, 2)
-    actual_deviation = (price_deviation * (1 - step_scale**safetyorders_count)) / (
-        1 - step_scale
+    actual_deviation = (
+        calculate_cumulative_safety_order_deviation(
+            price_deviation,
+            step_scale,
+            safetyorders_count - 1,
+        )
+        if safetyorders_count > 0
+        else 0
     )
     return max_deviation, actual_deviation
 

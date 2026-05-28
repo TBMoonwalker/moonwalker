@@ -1,0 +1,932 @@
+"""Backtest backend regression coverage."""
+
+from __future__ import annotations
+
+import json
+from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from typing import Any
+
+import pandas as pd
+import pytest
+from controller import backtest as backtest_controller
+from litestar import Litestar
+from litestar.testing import TestClient
+from service import backtest as backtest_service
+from service import strategy_runtime
+from service.analytics import compute_stats_from_trades
+from service.backtest import (
+    TRADE_MODE_SIDESTEP,
+    Backtest,
+    BacktestValidationError,
+    DcaSimulator,
+    OhlcvCandle,
+    candles_to_dataframe,
+    estimate_candle_count,
+    validate_backtest_range,
+)
+from service.dca_math import BacktestTradeState
+from service.exchange import Exchange
+from service.strategy_builder import BUILTIN_STRATEGY_BY_SLUG, build_builtin_ir
+from service.strategy_runtime import EvaluationContext
+
+
+def _candle(index: int, close: float = 100.0) -> OhlcvCandle:
+    timestamp = 1_700_000_000_000 + index * 60_000
+    return OhlcvCandle(
+        timestamp=timestamp,
+        open_price=close,
+        high=close,
+        low=close,
+        close=close,
+        volume=10.0,
+    )
+
+
+def _make_state(
+    *,
+    entry_price: float = 100.0,
+    fee: float = 0.0,
+    safety_orders_count: int = 0,
+) -> BacktestTradeState:
+    amount = 100.0 / entry_price
+    return BacktestTradeState(
+        symbol="BTC/USDT",
+        entry_price=entry_price,
+        entry_amount=amount,
+        entry_cost=100.0,
+        fee=fee,
+        entry_timestamp=1_000,
+        safety_orders_count=safety_orders_count,
+        total_amount=amount,
+        total_cost=100.0,
+    )
+
+
+class _FakeIndicators:
+    async def calculate_ema(self, symbol: str, timerange: str, lengths: list[int]):
+        return {f"ema_{length}": 9999.0 for length in lengths}
+
+    async def calculate_ema_series(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        return pd.Series([10.0, 20.0, 30.0, 40.0, 50.0])
+
+    async def get_close_price(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        return pd.Series([1.0, 2.0, 3.0, 4.0, 5.0])
+
+
+class _BollingerGraphIndicators:
+    def __init__(self, mode: str) -> None:
+        self.mode = mode
+
+    async def get_close_price(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "sell":
+            return pd.Series([100.0, 101.0, 107.0, 1.0])
+        return pd.Series([105.0, 101.0, 94.0, 300.0])
+
+    async def get_high_price(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "sell":
+            return pd.Series([104.0, 104.0, 110.0, 1.0])
+        return pd.Series([105.0, 101.0, 94.0, 300.0])
+
+    async def get_low_price(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "buy_prior_ema_break":
+            return pd.Series([100.0, 85.0, 70.0, 300.0])
+        return pd.Series([105.0, 101.0, 94.0, 300.0])
+
+    async def calculate_ema_series(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "buy_prior_ema_break":
+            return pd.Series([90.0, 90.0, 90.0, 1000.0])
+        if length == 50:
+            return pd.Series([99.0, 100.0, 95.0, 1000.0])
+        return pd.Series([90.0, 90.0, 90.0, 1000.0])
+
+    async def calculate_bollinger_bands_series(
+        self,
+        symbol: str,
+        timerange: str,
+        length: int,
+        standard_deviations: float,
+    ) -> dict[str, pd.Series]:
+        if self.mode == "sell":
+            return {
+                "upper": pd.Series([105.0, 105.0, 108.0, 1000.0]),
+                "middle": pd.Series([100.0, 100.0, 100.0, 1000.0]),
+                "lower": pd.Series([95.0, 95.0, 95.0, 1000.0]),
+                "bandwidth": pd.Series([10.0, 10.0, 10.0, 0.1]),
+            }
+        if self.mode == "buy_prior_ema_break":
+            return {
+                "upper": pd.Series([120.0, 115.0, 114.0, 1000.0]),
+                "middle": pd.Series([100.0, 100.0, 99.0, 0.0]),
+                "lower": pd.Series([80.0, 80.0, 75.0, 0.0]),
+                "bandwidth": pd.Series([3.0, 3.0, 3.0, 0.1]),
+            }
+        bandwidth = 1.0 if self.mode == "buy_narrow" else 3.0
+        return {
+            "upper": pd.Series([102.0, 103.0, 106.0, 1000.0]),
+            "middle": pd.Series([100.0, 100.0, 101.0, 0.0]),
+            "lower": pd.Series([98.0, 100.0, 95.0, 0.0]),
+            "bandwidth": pd.Series([3.0, 3.0, bandwidth, 0.1]),
+        }
+
+    async def calculate_rsi_series(
+        self, symbol: str, timerange: str, length: int
+    ) -> pd.Series:
+        if self.mode == "sell":
+            return pd.Series([58.0, 59.0, 64.0, 90.0])
+        return pd.Series([60.0, 49.0, 45.0, 90.0])
+
+    async def calculate_macd_series(
+        self,
+        symbol: str,
+        timerange: str,
+        fast_period: int,
+        slow_period: int,
+        signal_period: int,
+    ) -> dict[str, pd.Series]:
+        return {
+            "macd": pd.Series([1.0, 1.0, 1.0, 3.0]),
+            "signal": pd.Series([0.0, 0.0, 0.0, 1.0]),
+            "histogram": pd.Series([1.0, 0.8, 0.7, 2.0]),
+        }
+
+
+def _json(response: Any) -> dict[str, Any]:
+    return json.loads(response.content)
+
+
+def test_strategy_runtime_imports_cleanly() -> None:
+    """Importing strategy_runtime is the first backtest runtime gate."""
+    assert strategy_runtime.EvaluationContext.__name__ == "EvaluationContext"
+
+
+@pytest.mark.asyncio
+async def test_backtest_state_store_bypasses_strategy_graph_state(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Backtest state must stay in memory and never touch live graph state."""
+
+    async def fail_get_or_none(**kwargs: Any) -> None:
+        raise AssertionError("StrategyGraphState DB read should not happen")
+
+    async def fail_update_or_create(**kwargs: Any) -> None:
+        raise AssertionError("StrategyGraphState DB write should not happen")
+
+    monkeypatch.setattr(
+        strategy_runtime.model.StrategyGraphState,
+        "get_or_none",
+        fail_get_or_none,
+    )
+    monkeypatch.setattr(
+        strategy_runtime.model.StrategyGraphState,
+        "update_or_create",
+        fail_update_or_create,
+    )
+
+    context = EvaluationContext(
+        slug="demo",
+        timeframe="1m",
+        symbol="BTC/USDT",
+        side="buy",
+        indicators=_FakeIndicators(),
+        state_store={},
+    )
+
+    await strategy_runtime._remember_state(context, "state", [1.0, 2.0])
+    assert await strategy_runtime._load_state(context, "state") == [1.0, 2.0]
+
+
+@pytest.mark.asyncio
+async def test_live_strategy_state_still_uses_persisted_store(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Live graph evaluation keeps the existing persisted state behavior."""
+    calls: list[dict[str, Any]] = []
+
+    async def fake_get_or_none(**kwargs: Any) -> Any:
+        calls.append(kwargs)
+        return SimpleNamespace(value_json=json.dumps(7.0))
+
+    monkeypatch.setattr(
+        strategy_runtime.model.StrategyGraphState,
+        "get_or_none",
+        fake_get_or_none,
+    )
+
+    context = EvaluationContext(
+        slug="demo",
+        timeframe="1m",
+        symbol="BTC/USDT",
+        side="buy",
+        indicators=_FakeIndicators(),
+    )
+
+    assert await strategy_runtime._load_state(context, "state") == 7.0
+    assert calls == [
+        {
+            "strategy_slug": "demo",
+            "state_key": "state",
+            "symbol": "BTC/USDT",
+            "timeframe": "1m",
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_backtest_ema_values_use_candle_index_not_final_scalar() -> None:
+    """Backtest EMA scalars must not use final-candle indicator values."""
+    context = EvaluationContext(
+        slug="demo",
+        timeframe="1m",
+        symbol="BTC/USDT",
+        side="buy",
+        indicators=_FakeIndicators(),
+        candle_index=2,
+        state_store={},
+    )
+
+    values = await strategy_runtime._ema(context, [20, 50])
+
+    assert values == {"ema_20": 30.0, "ema_50": 30.0}
+
+
+@pytest.mark.asyncio
+async def test_bollinger_buy_matches_lower_band_cross_with_filters_at_candle_index() -> (
+    None
+):
+    context = EvaluationContext(
+        slug="bollinger_buy",
+        timeframe="4h",
+        symbol="BTC/USDC",
+        side="buy",
+        indicators=_BollingerGraphIndicators("buy"),
+        candle_index=2,
+        state_store={},
+    )
+    ir = build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG["bollinger_buy"])
+
+    assert await strategy_runtime._evaluate_root(ir, context) is True
+
+
+@pytest.mark.asyncio
+async def test_bollinger_buy_allows_ema_wick_penetration_before_lower_band_cross() -> (
+    None
+):
+    context = EvaluationContext(
+        slug="bollinger_buy",
+        timeframe="1w",
+        symbol="BTC/USDC",
+        side="buy",
+        indicators=_BollingerGraphIndicators("buy_prior_ema_break"),
+        candle_index=2,
+        state_store={},
+    )
+    ir = build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG["bollinger_buy"])
+
+    assert await strategy_runtime._evaluate_root(ir, context) is True
+
+
+@pytest.mark.asyncio
+async def test_bollinger_buy_rejects_narrow_sideways_bands() -> None:
+    context = EvaluationContext(
+        slug="bollinger_buy",
+        timeframe="4h",
+        symbol="BTC/USDC",
+        side="buy",
+        indicators=_BollingerGraphIndicators("buy_narrow"),
+        candle_index=2,
+        state_store={},
+    )
+    ir = build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG["bollinger_buy"])
+
+    assert await strategy_runtime._evaluate_root(ir, context) is False
+
+
+@pytest.mark.asyncio
+async def test_backtest_enters_on_next_candle_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="demo",
+        timeframe="1m",
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 1, 1, 0, 3, tzinfo=UTC),
+        take_profit_pct=1.0,
+    )
+    engine._candles = [
+        OhlcvCandle(1_000, 100.0, 100.0, 100.0, 100.0, 1.0),
+        OhlcvCandle(61_000, 105.0, 106.0, 104.0, 105.0, 1.0),
+        OhlcvCandle(121_000, 106.0, 110.0, 105.0, 109.0, 1.0),
+    ]
+
+    async def fake_snapshot(slug: str) -> object:
+        return object()
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(matched=kwargs["candle_index"] == 0)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+
+    result = await engine.run()
+
+    assert result["trades"][0]["open_timestamp"] == 61_000
+    assert result["trades"][0]["open_price"] == 105.0
+    assert result["chart"]["markers"][0]["time"] == 61_000
+    assert result["chart"]["markers"][0]["text"] == "BO"
+
+
+@pytest.mark.asyncio
+async def test_backtest_marks_base_and_safety_orders(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="demo",
+        timeframe="1m",
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
+        take_profit_pct=50.0,
+        stop_loss_pct=None,
+        max_safety_orders=1,
+        safety_order_step_pct=10.0,
+    )
+    engine._candles = [
+        OhlcvCandle(1_000, 100.0, 100.0, 100.0, 100.0, 1.0),
+        OhlcvCandle(61_000, 100.0, 100.0, 88.0, 89.0, 1.0),
+        OhlcvCandle(121_000, 89.0, 90.0, 88.0, 89.0, 1.0),
+    ]
+
+    async def fake_snapshot(slug: str) -> object:
+        return object()
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(matched=kwargs["candle_index"] == 0)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+
+    result = await engine.run()
+
+    assert [marker["text"] for marker in result["chart"]["markers"]] == ["BO", "SO 1"]
+    assert result["chart"]["markers"][1]["time"] == 61_000
+
+
+@pytest.mark.asyncio
+async def test_backtest_marks_still_open_trade_at_end(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="demo",
+        timeframe="1m",
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 1, 1, 0, 3, tzinfo=UTC),
+        take_profit_pct=50.0,
+    )
+    engine._candles = [_candle(0, 100.0), _candle(1, 100.0), _candle(2, 100.0)]
+
+    async def fake_snapshot(slug: str) -> object:
+        return object()
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(matched=kwargs["candle_index"] == 0)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+
+    result = await engine.run()
+
+    assert result["trades"] == []
+    assert result["stats"]["still_open_at_end"] is True
+
+
+@pytest.mark.asyncio
+async def test_sidestep_backtest_exits_on_bearish_and_waits_for_reentry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="ema20_swing",
+        timeframe="1m",
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
+        take_profit_pct=50.0,
+        stop_loss_pct=50.0,
+        trade_mode=TRADE_MODE_SIDESTEP,
+        sidestep_bearish_strategy="ema_down",
+        sidestep_reentry_strategy="ema20_swing_reverse",
+    )
+    engine._candles = [
+        OhlcvCandle(1_000, 100.0, 100.0, 100.0, 100.0, 1.0),
+        OhlcvCandle(61_000, 100.0, 101.0, 99.0, 100.0, 1.0),
+        OhlcvCandle(121_000, 105.0, 106.0, 104.0, 105.0, 1.0),
+        OhlcvCandle(181_000, 95.0, 96.0, 94.0, 95.0, 1.0),
+    ]
+
+    async def fake_snapshot(slug: str) -> object:
+        return object()
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        slug = args[0]
+        candle_index = kwargs["candle_index"]
+        matched = (
+            slug == "ema20_swing_reverse"
+            and candle_index == 0
+            or slug == "ema_down"
+            and candle_index == 1
+        )
+        return SimpleNamespace(matched=matched)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+
+    result = await engine.run()
+
+    assert result["trades"][0]["open_timestamp"] == 61_000
+    assert result["trades"][0]["close_timestamp"] == 121_000
+    assert result["trades"][0]["sell_reason"] == "sidestep_exit"
+    assert result["trades"][0]["safety_orders_count"] == 0
+    assert result["chart"]["markers"][0]["text"] == "RE-ENTRY"
+    assert result["chart"]["markers"][1]["text"] == "SIDESTEP"
+    assert result["stats"]["trade_mode"] == "sidestep"
+    assert result["stats"]["sidestep_waiting_at_end"] is True
+
+
+@pytest.mark.asyncio
+async def test_backtest_returns_strategy_indicator_series_for_chart_audit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Sidestep chart evidence includes both entry and exit graph indicators."""
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="bollinger_buy",
+        timeframe="1m",
+        start_date=datetime(2024, 1, 1, tzinfo=UTC),
+        end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
+        trade_mode=TRADE_MODE_SIDESTEP,
+        sidestep_bearish_strategy="ema_down",
+        sidestep_reentry_strategy="bollinger_buy",
+    )
+    engine._candles = [_candle(index, 100.0 + index) for index in range(4)]
+
+    async def fake_snapshot(slug: str) -> object:
+        return SimpleNamespace(ir=build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG[slug]))
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(matched=False)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+    monkeypatch.setattr(
+        backtest_service,
+        "Indicators",
+        lambda data: _BollingerGraphIndicators("buy"),
+    )
+
+    result = await engine.run()
+    by_label = {series["label"]: series for series in result["chart"]["indicators"]}
+
+    assert {"BB Upper 20", "BB Middle 20", "BB Lower 20"}.issubset(by_label)
+    assert {"EMA 50", "EMA 100", "RSI 14", "BB Bandwidth 20"}.issubset(by_label)
+    assert by_label["BB Lower 20"]["pane"] == "price"
+    assert by_label["RSI 14"]["pane"] == "rsi"
+
+
+@pytest.mark.asyncio
+async def test_backtest_warms_strategy_state_before_visible_replay(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candles = [
+        _candle(0, 100.0),
+        _candle(1, 101.0),
+        _candle(2, 102.0),
+        _candle(3, 103.0),
+    ]
+    start_dt = datetime.fromtimestamp(candles[2].timestamp / 1000, tz=UTC)
+    end_dt = datetime.fromtimestamp(candles[3].timestamp / 1000, tz=UTC)
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDT",
+        strategy_slug="ema20_swing",
+        timeframe="1m",
+        start_date=start_dt,
+        end_date=end_dt,
+        take_profit_pct=50.0,
+    )
+    engine._candles = candles
+    evaluated_indices: list[int] = []
+
+    async def fake_snapshot(slug: str) -> object:
+        return object()
+
+    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
+        candle_index = kwargs["candle_index"]
+        evaluated_indices.append(candle_index)
+        return SimpleNamespace(matched=candle_index == 2)
+
+    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
+    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
+
+    result = await engine.run()
+
+    assert evaluated_indices[:2] == [0, 1]
+    assert result["chart"]["candles"][0]["time"] == candles[2].timestamp
+    assert result["chart"]["markers"][0]["time"] == candles[3].timestamp
+    assert result["stats"]["warmup_candles"] == 2
+    assert result["stats"]["candles_fetched"] == 4
+
+
+def test_sidestep_backtest_requires_sidestep_strategies() -> None:
+    with pytest.raises(BacktestValidationError):
+        Backtest(
+            config={},
+            symbol="BTC/USDT",
+            strategy_slug="ema20_swing",
+            timeframe="1m",
+            start_date=datetime(2024, 1, 1, tzinfo=UTC),
+            end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
+            trade_mode=TRADE_MODE_SIDESTEP,
+            sidestep_bearish_strategy="ema_down",
+        )
+
+
+def test_candles_to_dataframe_empty_and_populated() -> None:
+    assert candles_to_dataframe([]).empty
+    df = candles_to_dataframe([_candle(0, 101.0), _candle(1, 102.0)])
+    assert list(df["close"]) == [101.0, 102.0]
+
+
+def test_dca_simulator_take_profit_uses_candle_high() -> None:
+    sim = DcaSimulator(
+        base_order_size=100.0,
+        take_profit_pct=5.0,
+        stop_loss_pct=5.0,
+        max_safety_orders=0,
+        fee=0.0,
+    )
+    trade = _make_state()
+    closed = sim.evaluate(
+        trade,
+        OhlcvCandle(2_000, 100.0, 106.0, 99.0, 100.0, 1.0),
+    )
+    assert closed is not None
+    assert closed.sell_reason == "take_profit"
+
+
+def test_dca_simulator_stop_loss_requires_max_safety_orders() -> None:
+    sim = DcaSimulator(
+        base_order_size=100.0,
+        take_profit_pct=5.0,
+        stop_loss_pct=5.0,
+        max_safety_orders=1,
+        fee=0.0,
+    )
+
+    assert (
+        sim.evaluate(_make_state(), OhlcvCandle(2_000, 100.0, 100.0, 90.0, 90.0, 1.0))
+        is None
+    )
+
+    closed = sim.evaluate(
+        _make_state(safety_orders_count=1),
+        OhlcvCandle(2_000, 100.0, 100.0, 90.0, 90.0, 1.0),
+    )
+    assert closed is not None
+    assert closed.sell_reason == "stop_loss"
+
+
+def test_dca_simulator_tp_wins_same_candle_collision() -> None:
+    sim = DcaSimulator(
+        base_order_size=100.0,
+        take_profit_pct=5.0,
+        stop_loss_pct=5.0,
+        max_safety_orders=0,
+        fee=0.0,
+    )
+
+    closed = sim.evaluate(
+        _make_state(),
+        OhlcvCandle(2_000, 100.0, 106.0, 90.0, 95.0, 1.0),
+    )
+
+    assert closed is not None
+    assert closed.sell_reason == "take_profit"
+
+
+def test_dca_simulator_places_dynamic_safety_order() -> None:
+    sim = DcaSimulator(
+        base_order_size=100.0,
+        take_profit_pct=5.0,
+        stop_loss_pct=5.0,
+        max_safety_orders=2,
+        safety_order_step_pct=10.0,
+        fee=0.0,
+    )
+    trade = _make_state()
+
+    assert (
+        sim.evaluate(trade, OhlcvCandle(2_000, 100.0, 100.0, 85.0, 89.0, 1.0)) is None
+    )
+
+    assert trade.safety_orders_count == 1
+    assert trade.safety_orders[0]["cost"] == pytest.approx(100.0)
+    assert trade.safety_orders[0]["so_percentage"] == pytest.approx(-11.0)
+
+
+def test_dca_simulator_ignores_disabled_stop_loss() -> None:
+    sim = DcaSimulator(
+        base_order_size=100.0,
+        take_profit_pct=5.0,
+        stop_loss_pct=None,
+        max_safety_orders=0,
+        fee=0.0,
+    )
+
+    assert (
+        sim.evaluate(_make_state(), OhlcvCandle(2_000, 100.0, 100.0, 1.0, 1.0, 1.0))
+        is None
+    )
+
+
+def test_validate_backtest_range_rejects_excessive_candles() -> None:
+    start = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1000)
+    end = int(
+        (datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=30)).timestamp() * 1000
+    )
+
+    with pytest.raises(BacktestValidationError):
+        validate_backtest_range("1m", start, end)
+
+    assert estimate_candle_count("1h", start, start + 3_600_000) == 2
+    assert estimate_candle_count("1w", start, start + 7 * 86_400_000) == 2
+
+
+def test_validate_backtest_range_allows_long_high_timeframe_ranges() -> None:
+    start = int(datetime(2024, 1, 1, tzinfo=UTC).timestamp() * 1000)
+    end = int(
+        (datetime(2024, 1, 1, tzinfo=UTC) + timedelta(days=111)).timestamp() * 1000
+    )
+
+    validate_backtest_range("1h", start, end)
+    validate_backtest_range("1w", start, end)
+
+
+def test_backtest_fetch_start_includes_strategy_warmup() -> None:
+    start_dt = datetime(2026, 2, 1, tzinfo=UTC)
+    engine = Backtest(
+        config={},
+        symbol="BTC/USDC",
+        strategy_slug="ema20_swing",
+        timeframe="1w",
+        start_date=start_dt,
+        end_date=datetime(2026, 5, 23, tzinfo=UTC),
+        trade_mode=TRADE_MODE_SIDESTEP,
+        sidestep_bearish_strategy="ema20_swing_reverse",
+        sidestep_reentry_strategy="ema20_swing",
+    )
+
+    assert engine._warmup_candle_count == 200
+    assert engine._fetch_start_date == engine.start_date - 200 * 7 * 86_400_000
+
+
+@pytest.mark.asyncio
+async def test_controller_validation_and_success(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeConfigService:
+        def snapshot(self) -> dict[str, Any]:
+            return {"exchange": "binance"}
+
+    class FakeConfig:
+        @classmethod
+        async def instance(cls) -> FakeConfigService:
+            return FakeConfigService()
+
+    class FakeBacktest:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+        async def run(self) -> dict[str, Any]:
+            assert self.kwargs["start_date"].tzinfo is not None
+            assert self.kwargs["end_date"].tzinfo is not None
+            assert self.kwargs["fee"] == 0.002
+            assert self.kwargs["trade_mode"] == "sidestep"
+            assert self.kwargs["sidestep_bearish_strategy"] == "ema_down"
+            assert self.kwargs["sidestep_reentry_strategy"] == "ema20_swing_reverse"
+            return {"ok": True}
+
+    monkeypatch.setattr(backtest_controller, "Config", FakeConfig)
+    monkeypatch.setattr(backtest_controller, "Backtest", FakeBacktest)
+
+    missing = await backtest_controller._run_backtest({})
+    assert missing.status_code == 400
+
+    response = await backtest_controller._run_backtest(
+        {
+            "symbol": "BTC/USDT",
+            "strategy_slug": "demo",
+            "timeframe": "1h",
+            "start_date": "2024-01-01T00:00:00Z",
+            "end_date": 1_704_070_800_000,
+            "fee": 0.002,
+            "trade_mode": "sidestep",
+            "sidestep_bearish_strategy": "ema_down",
+            "sidestep_reentry_strategy": "ema20_swing_reverse",
+        }
+    )
+
+    assert response.status_code == 200
+    assert _json(response) == {"ok": True}
+
+
+@pytest.mark.asyncio
+async def test_controller_returns_safe_error_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeConfigService:
+        def snapshot(self) -> dict[str, Any]:
+            return {}
+
+    class FakeConfig:
+        @classmethod
+        async def instance(cls) -> FakeConfigService:
+            return FakeConfigService()
+
+    class FailingBacktest:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def run(self) -> dict[str, Any]:
+            raise RuntimeError("secret stack detail")
+
+    monkeypatch.setattr(backtest_controller, "Config", FakeConfig)
+    monkeypatch.setattr(backtest_controller, "Backtest", FailingBacktest)
+
+    response = await backtest_controller._run_backtest(
+        {
+            "symbol": "BTC/USDT",
+            "strategy_slug": "demo",
+            "timeframe": "1h",
+            "start_date": "2024-01-01T00:00:00Z",
+        }
+    )
+
+    body = _json(response)
+    assert response.status_code == 500
+    assert body["code"] == "backtest_failed"
+    assert "secret" not in body["error"]
+
+
+def test_backtest_route_uses_runtime_config_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Litestar route should not call the keyed Config.get API as a snapshot."""
+
+    class FakeConfigService:
+        def snapshot(self) -> dict[str, Any]:
+            return {"exchange": "binance"}
+
+    class FakeConfig:
+        @classmethod
+        async def instance(cls) -> FakeConfigService:
+            return FakeConfigService()
+
+    class FakeBacktest:
+        def __init__(self, **kwargs: Any) -> None:
+            self.kwargs = kwargs
+
+        async def run(self) -> dict[str, Any]:
+            assert self.kwargs["config"] == {"exchange": "binance"}
+            return {"ok": True}
+
+    monkeypatch.setattr(backtest_controller, "Config", FakeConfig)
+    monkeypatch.setattr(backtest_controller, "Backtest", FakeBacktest)
+
+    app = Litestar(route_handlers=[backtest_controller.run_backtest])
+    with TestClient(app=app, raise_server_exceptions=False) as client:
+        response = client.post(
+            "/backtest/run",
+            json={
+                "symbol": "BTC/USDT",
+                "strategy_slug": "ema20_swing",
+                "timeframe": "1h",
+                "start_date": "2024-01-01T00:00:00Z",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+
+
+def test_backtest_stats_use_shared_analytics_shape() -> None:
+    rows = [
+        {
+            "symbol": "BTC/USDT",
+            "deal_id": "1",
+            "profit": 5.0,
+            "profit_percent": 2.5,
+            "cost": 100.0,
+            "duration": "3600",
+            "open_date": "2024-01-01T00:00:00+00:00",
+            "close_date": "2024-01-01T01:00:00+00:00",
+        }
+    ]
+
+    stats = compute_stats_from_trades(rows)
+
+    assert set(stats) == {
+        "summary",
+        "heatmap_daily",
+        "heatmap_weekly",
+        "per_symbol",
+        "duration_extremes",
+        "drawdown",
+        "distribution",
+    }
+    assert stats["summary"]["total_trades"] == 1
+    assert stats["per_symbol"][0]["symbol"] == "BTC/USDT"
+
+
+class _PagedExchange:
+    def __init__(self) -> None:
+        self.calls: list[int] = []
+
+    def milliseconds(self) -> int:
+        return 600_000
+
+    async def fetch_ohlcv(
+        self,
+        *,
+        symbol: str,
+        timeframe: str,
+        since: int,
+        limit: int,
+    ) -> list[list[float]]:
+        self.calls.append(since)
+        if len(self.calls) == 1:
+            return [
+                [0, 1, 1, 1, 1, 1],
+                [60_000, 1, 1, 1, 1, 1],
+            ]
+        return [
+            [60_000, 1, 1, 1, 1, 1],
+            [120_000, 1, 1, 1, 1, 1],
+        ]
+
+
+@pytest.mark.asyncio
+async def test_batched_history_paces_pages_and_dedupes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    exchange = Exchange()
+    exchange.exchange = _PagedExchange()
+    sleeps: list[float] = []
+
+    async def fake_ensure_exchange(_config: dict[str, object]) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(
+        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
+    )
+    monkeypatch.setattr(exchange, "_Exchange__resolve_symbol", lambda symbol: symbol)
+    monkeypatch.setattr("service.exchange.asyncio.sleep", fake_sleep)
+
+    candles = await exchange.get_history_for_symbol_batched(
+        config={"exchange": "binance"},
+        symbol="BTC/USDT",
+        timeframe="1m",
+        since=0,
+        until=120_000,
+        page_size=2,
+        max_candles=10,
+        page_delay=0.25,
+    )
+
+    assert [int(c[0]) for c in candles] == [0, 60_000, 120_000]
+    assert sleeps == [0.25]

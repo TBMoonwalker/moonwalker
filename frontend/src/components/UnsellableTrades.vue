@@ -366,7 +366,7 @@ const columns_unsellable_trades = computed(() => columns_trades())
 .unsellable-trades-summary {
     color: inherit;
     font-size: 14px;
-    line-height: 1.4;
+    line-height: 1.5;
     opacity: 0.82;
 }
 

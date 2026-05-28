@@ -40,6 +40,8 @@ class EvaluationContext:
     symbol: str
     side: str
     indicators: Indicators
+    candle_index: int | None = None
+    state_store: dict[tuple[str, str, str, str], Any] | None = None
     memo: dict[tuple[Any, ...], Any] = field(default_factory=dict)
 
 
@@ -113,6 +115,8 @@ async def evaluate_strategy_graph(
     symbol: str,
     side: str,
     indicators: Indicators | None = None,
+    candle_index: int | None = None,
+    state_store: dict[tuple[str, str, str, str], Any] | None = None,
 ) -> StrategyEvaluationResult:
     """Evaluate a strategy graph against current candle data."""
     snapshot = await _load_strategy_snapshot(slug)
@@ -129,6 +133,8 @@ async def evaluate_strategy_graph(
         symbol=symbol,
         side=side,
         indicators=indicators or Indicators(),
+        candle_index=candle_index,
+        state_store=state_store,
     )
     try:
         matched = await _evaluate_root(snapshot.ir, context)
@@ -211,6 +217,8 @@ async def _evaluate_node(
         return False
     if node_type in {
         "close_price",
+        "low_price",
+        "high_price",
         "constant_value",
         "ema_indicator",
         "indicator",
@@ -329,8 +337,15 @@ async def _resolve_value_node(
     if node_type == "constant_value":
         return params.get("value")
     if node_type == "indicator":
-        if str(params.get("indicator") or "") == "ema":
+        indicator = str(params.get("indicator") or "")
+        if indicator == "ema":
             return await _resolve_ema_indicator(params, context, index)
+        if indicator == "rsi":
+            return await _resolve_rsi_indicator(params, context, index)
+        if indicator.startswith("bollinger_"):
+            return await _resolve_bollinger_indicator(params, context, index)
+        if indicator.startswith("macd_"):
+            return await _resolve_macd_indicator(params, context, index)
         return None
     if node_type == "ema_indicator":
         return await _resolve_ema_indicator(params, context, index)
@@ -339,6 +354,22 @@ async def _resolve_value_node(
         close = await _close(context, lookback)
         try:
             value = float(close.dropna().iloc[index])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        return None if _is_missing_number(value) else value
+    if node_type == "low_price":
+        lookback = int(params.get("lookback") or EMA20_LOOKBACK_LENGTH)
+        low = await _low(context, lookback)
+        try:
+            value = float(low.dropna().iloc[index])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            return None
+        return None if _is_missing_number(value) else value
+    if node_type == "high_price":
+        lookback = int(params.get("lookback") or EMA20_LOOKBACK_LENGTH)
+        high = await _high(context, lookback)
+        try:
+            value = float(high.dropna().iloc[index])
         except (AttributeError, IndexError, TypeError, ValueError):
             return None
         return None if _is_missing_number(value) else value
@@ -359,6 +390,69 @@ async def _resolve_ema_indicator(
     )
     try:
         value = float(ema_series.iloc[index])
+    except (AttributeError, IndexError, TypeError, ValueError):
+        return None
+    return None if _is_missing_number(value) else value
+
+
+async def _resolve_rsi_indicator(
+    params: dict[str, Any],
+    context: EvaluationContext,
+    index: int,
+) -> float | None:
+    """Resolve an RSI indicator node sample into a comparable value."""
+    length = int(params.get("length") or 14)
+    series = await _rsi_series(context, length)
+    return _sample_series_value(series, index)
+
+
+async def _resolve_bollinger_indicator(
+    params: dict[str, Any],
+    context: EvaluationContext,
+    index: int,
+) -> float | None:
+    """Resolve a Bollinger Band component or bandwidth sample."""
+    indicator = str(params.get("indicator") or "")
+    component = indicator.removeprefix("bollinger_")
+    if component not in {"upper", "middle", "lower", "bandwidth"}:
+        return None
+    length = int(params.get("length") or 20)
+    standard_deviations = float(params.get("standard_deviations") or 2.0)
+    series = await _bollinger_series(context, length, standard_deviations)
+    if not isinstance(series, dict):
+        return None
+    return _sample_series_value(series.get(component), index)
+
+
+async def _resolve_macd_indicator(
+    params: dict[str, Any],
+    context: EvaluationContext,
+    index: int,
+) -> float | None:
+    """Resolve a MACD line, signal line, or histogram sample."""
+    indicator = str(params.get("indicator") or "")
+    component = indicator.removeprefix("macd_")
+    if component not in {"line", "signal", "histogram"}:
+        return None
+    component_key = "macd" if component == "line" else component
+    fast_period = int(params.get("fast_period") or 12)
+    slow_period = int(params.get("slow_period") or 26)
+    signal_period = int(params.get("signal_period") or 9)
+    series = await _macd_series(
+        context,
+        fast_period,
+        slow_period,
+        signal_period,
+    )
+    if not isinstance(series, dict):
+        return None
+    return _sample_series_value(series.get(component_key), index)
+
+
+def _sample_series_value(series: Any, index: int) -> float | None:
+    """Return a non-missing numeric value from a sampled indicator series."""
+    try:
+        value = float(series.iloc[index])
     except (AttributeError, IndexError, TypeError, ValueError):
         return None
     return None if _is_missing_number(value) else value
@@ -558,37 +652,136 @@ async def _evaluate_ema_swing(
 
 
 async def _ema(context: EvaluationContext, lengths: list[int]) -> dict[str, Any]:
-    """Memoized EMA call."""
+    """Return memoized EMA scalar values for the current evaluation candle."""
     key = ("ema", tuple(lengths))
-    return await _memo_indicator(
-        context,
-        key,
-        lambda: context.indicators.calculate_ema(
-            context.symbol, context.timeframe, lengths
-        ),
-    )
+    if key not in context.memo:
+        if context.candle_index is None:
+            context.memo[key] = await context.indicators.calculate_ema(
+                context.symbol, context.timeframe, lengths
+            )
+        else:
+            context.memo[key] = await _ema_values_at_candle(context, lengths)
+    return context.memo[key]
 
 
 async def _close(context: EvaluationContext, length: int) -> Any:
-    """Memoized close-series call."""
-    return await _memo_indicator(
-        context,
-        ("close", length),
-        lambda: context.indicators.get_close_price(
+    """Return a memoized close series sliced to the current replay candle."""
+    key = ("close", length)
+    if key not in context.memo:
+        raw = await context.indicators.get_close_price(
             context.symbol, context.timeframe, length
-        ),
-    )
+        )
+        if context.candle_index is not None and raw is not None:
+            raw = _slice_series(raw, context.candle_index)
+        context.memo[key] = raw
+    return context.memo[key]
+
+
+async def _low(context: EvaluationContext, length: int) -> Any:
+    """Return a memoized low series sliced to the current replay candle."""
+    key = ("low", length)
+    if key not in context.memo:
+        raw = await context.indicators.get_low_price(
+            context.symbol, context.timeframe, length
+        )
+        if context.candle_index is not None and raw is not None:
+            raw = _slice_series(raw, context.candle_index)
+        context.memo[key] = raw
+    return context.memo[key]
+
+
+async def _high(context: EvaluationContext, length: int) -> Any:
+    """Return a memoized high series sliced to the current replay candle."""
+    key = ("high", length)
+    if key not in context.memo:
+        raw = await context.indicators.get_high_price(
+            context.symbol, context.timeframe, length
+        )
+        if context.candle_index is not None and raw is not None:
+            raw = _slice_series(raw, context.candle_index)
+        context.memo[key] = raw
+    return context.memo[key]
 
 
 async def _ema_series(context: EvaluationContext, length: int, lookback: int) -> Any:
     """Return a memoized EMA series for relation and trend nodes."""
     key = ("ema_series", length, lookback)
     if key not in context.memo:
-        close = await _close(context, lookback)
         try:
-            context.memo[key] = talib.EMA(close.dropna(), timeperiod=length)
+            if context.candle_index is not None:
+                ema_raw = await context.indicators.calculate_ema_series(
+                    context.symbol, context.timeframe, length
+                )
+                ema_raw = _slice_series(ema_raw, context.candle_index)
+            else:
+                close = await _close(context, lookback)
+                ema_raw = talib.EMA(close.dropna(), timeperiod=length)
+            context.memo[key] = ema_raw
         except (AttributeError, TypeError, ValueError):
             context.memo[key] = None
+    return context.memo[key]
+
+
+async def _rsi_series(context: EvaluationContext, length: int) -> Any:
+    """Return a memoized RSI series scoped to the replay candle."""
+    key = ("rsi_series", length)
+    if key not in context.memo:
+        raw = await context.indicators.calculate_rsi_series(
+            context.symbol,
+            context.timeframe,
+            length,
+        )
+        if context.candle_index is not None:
+            raw = _slice_series(raw, context.candle_index)
+        context.memo[key] = raw
+    return context.memo[key]
+
+
+async def _bollinger_series(
+    context: EvaluationContext,
+    length: int,
+    standard_deviations: float,
+) -> dict[str, Any] | None:
+    """Return memoized Bollinger series scoped to the replay candle."""
+    key = ("bollinger_series", length, standard_deviations)
+    if key not in context.memo:
+        raw = await context.indicators.calculate_bollinger_bands_series(
+            context.symbol,
+            context.timeframe,
+            length,
+            standard_deviations,
+        )
+        if context.candle_index is not None and isinstance(raw, dict):
+            raw = {
+                component: _slice_series(series, context.candle_index)
+                for component, series in raw.items()
+            }
+        context.memo[key] = raw
+    return context.memo[key]
+
+
+async def _macd_series(
+    context: EvaluationContext,
+    fast_period: int,
+    slow_period: int,
+    signal_period: int,
+) -> dict[str, Any] | None:
+    """Return memoized MACD series scoped to the replay candle."""
+    key = ("macd_series", fast_period, slow_period, signal_period)
+    if key not in context.memo:
+        raw = await context.indicators.calculate_macd_series(
+            context.symbol,
+            context.timeframe,
+            fast_period,
+            slow_period,
+            signal_period,
+        )
+        if context.candle_index is not None and isinstance(raw, dict):
+            raw = {
+                component: _slice_series(series, context.candle_index)
+                for component, series in raw.items()
+            }
+        context.memo[key] = raw
     return context.memo[key]
 
 
@@ -599,6 +792,36 @@ async def _memo_indicator(
     if key not in context.memo:
         context.memo[key] = await factory()
     return context.memo[key]
+
+
+async def _ema_values_at_candle(
+    context: EvaluationContext, lengths: list[int]
+) -> dict[str, Any]:
+    """Resolve EMA scalar values at the current backtest candle index."""
+    values: dict[str, Any] = {}
+    for length in lengths:
+        series = await context.indicators.calculate_ema_series(
+            context.symbol,
+            context.timeframe,
+            length,
+        )
+        try:
+            value = float(_slice_series(series, context.candle_index or 0).iloc[-1])
+        except (AttributeError, IndexError, TypeError, ValueError):
+            value = None
+        values[f"ema_{length}"] = value
+    return values
+
+
+def _slice_series(series: Any, candle_index: int) -> Any:
+    """Slice a pandas Series to only include values up to candle_index.
+
+    When candle_index=0 (first candle), slice to index 0 (inclusive).
+    """
+    if series is None:
+        return None
+    end = candle_index + 1
+    return series.iloc[:end]
 
 
 async def _resolve_float_state(
@@ -635,6 +858,9 @@ async def _resolve_tuple_state(
 
 async def _load_state(context: EvaluationContext, state_key: str) -> Any:
     """Load persisted generic graph state."""
+    if context.state_store is not None:
+        return context.state_store.get(_state_store_key(context, state_key))
+
     try:
         row = await model.StrategyGraphState.get_or_none(
             strategy_slug=context.slug,
@@ -670,6 +896,10 @@ async def _remember_state(
     context: EvaluationContext, state_key: str, value: Any
 ) -> None:
     """Persist graph state only when the serialized value changed."""
+    if context.state_store is not None:
+        context.state_store[_state_store_key(context, state_key)] = value
+        return
+
     value_json = json.dumps(value, sort_keys=True, separators=(",", ":"))
     row = await model.StrategyGraphState.get_or_none(
         strategy_slug=context.slug,
@@ -693,6 +923,13 @@ async def _remember_state(
         _persist,
         f"persisting graph state {state_key} for {context.slug}/{context.symbol}",
     )
+
+
+def _state_store_key(
+    context: EvaluationContext, state_key: str
+) -> tuple[str, str, str, str]:
+    """Return the in-memory state-store key for a strategy state value."""
+    return (context.slug, state_key, context.symbol, context.timeframe)
 
 
 def _bootstrap_ema_swing_state(close: Any) -> float | None:

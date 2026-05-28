@@ -399,7 +399,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     gap: 10px;
     align-content: start;
     padding: 14px;
-    border-radius: 12px;
+    border-radius: var(--mw-radius-lg, 12px);
     background: var(--mw-surface-card-subtle);
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
 }
@@ -464,7 +464,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-body);
     font-size: 0.85rem;
-    line-height: 1.45;
+    line-height: 1.5;
 }
 
 .trust-row-positive {

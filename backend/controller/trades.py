@@ -9,6 +9,7 @@ import helper
 from controller.responses import json_response
 from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
+from litestar.params import FromPath, FromQuery
 from service.config import Config
 from service.order_requests import normalize_order_symbol
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
@@ -164,9 +165,9 @@ async def closed_trades_length() -> dict[str, Any]:
 
 @get(path="/trades/closed/{page:str}")
 async def closed_trades_pagination(
-    page: str,
-    sort_key: str | None = None,
-    sort_dir: str | None = None,
+    page: FromPath[str],
+    sort_key: FromQuery[str | None] = None,
+    sort_dir: FromQuery[str | None] = None,
 ) -> dict[str, Any]:
     """Get paginated closed trades data."""
     response = await trades.get_closed_trades(
@@ -178,14 +179,14 @@ async def closed_trades_pagination(
 
 
 @get(path="/trades/executions/{deal_id:str}")
-async def trade_executions(deal_id: str) -> dict[str, Any]:
+async def trade_executions(deal_id: FromPath[str]) -> dict[str, Any]:
     """Get execution rows for one trade deal."""
     response = await trades.get_trade_executions(deal_id)
     return {"result": response}
 
 
 @post(path="/trades/closed/delete/{trade_id:str}")
-async def closed_trade_delete(trade_id: str) -> Any:
+async def closed_trade_delete(trade_id: FromPath[str]) -> Any:
     """Delete a closed trade by ID."""
     try:
         trade_identifier = int(trade_id)
@@ -199,7 +200,7 @@ async def closed_trade_delete(trade_id: str) -> Any:
 
 
 @post(path="/trades/unsellable/delete/{trade_id:str}")
-async def unsellable_trade_delete(trade_id: str) -> Any:
+async def unsellable_trade_delete(trade_id: FromPath[str]) -> Any:
     """Delete an unsellable trade by ID after manual cleanup."""
     try:
         trade_identifier = int(trade_id)
@@ -225,7 +226,7 @@ async def unsellable_trades_delete_all() -> Any:
 
 
 @post(path="/trades/waiting/stop/{campaign_id:str}")
-async def waiting_campaign_stop(campaign_id: str) -> Any:
+async def waiting_campaign_stop(campaign_id: FromPath[str]) -> Any:
     """Stop a waiting sidestep campaign manually."""
     sidestep_campaigns = await SpotSidestepCampaignService.instance()
     stopped = await sidestep_campaigns.stop_campaign(campaign_id)
@@ -235,7 +236,7 @@ async def waiting_campaign_stop(campaign_id: str) -> Any:
 
 
 @post(path="/trades/waiting/activate/{campaign_id:str}")
-async def waiting_campaign_activate(campaign_id: str) -> Any:
+async def waiting_campaign_activate(campaign_id: FromPath[str]) -> Any:
     """Force a waiting sidestep campaign back into an active long leg."""
     sidestep_campaigns = await SpotSidestepCampaignService.instance()
     activated = await sidestep_campaigns.activate_campaign(campaign_id)
@@ -248,7 +249,7 @@ async def waiting_campaign_activate(campaign_id: str) -> Any:
 
 
 @post(path="/trades/mission/pause/{symbol:str}")
-async def mission_pause(symbol: str) -> Any:
+async def mission_pause(symbol: FromPath[str]) -> Any:
     """Pause automation for one open or waiting mission."""
     try:
         normalized_symbol = normalize_order_symbol(symbol)
@@ -282,7 +283,7 @@ async def mission_pause(symbol: str) -> Any:
 
 
 @post(path="/trades/mission/resume/{symbol:str}")
-async def mission_resume(symbol: str) -> Any:
+async def mission_resume(symbol: FromPath[str]) -> Any:
     """Resume automation for one open or waiting mission."""
     try:
         normalized_symbol = normalize_order_symbol(symbol)

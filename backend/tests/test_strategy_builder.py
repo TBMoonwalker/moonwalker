@@ -160,6 +160,46 @@ async def test_other_builtins_are_decomposed_into_graph_nodes(strategy_db) -> No
 
 
 @pytest.mark.asyncio
+async def test_bollinger_buy_seeds_as_executable_indicator_graph(
+    strategy_db,
+) -> None:
+    await seed_builtin_strategies()
+
+    buy = await get_strategy_detail("bollinger_buy")
+    options = await list_strategy_options()
+
+    assert buy is not None
+    assert buy["validation"]["status"] == "valid"
+    assert "bollinger_buy" in options
+    assert "bollinger_sell" not in options
+    assert await get_strategy_detail("bollinger_sell") is None
+
+    buy_indicators = {
+        node["params"]["indicator"]
+        for node in buy["ir"]["nodes"]
+        if node["type"] == "indicator"
+    }
+    assert buy_indicators >= {
+        "bollinger_lower",
+        "bollinger_middle",
+        "bollinger_bandwidth",
+        "ema",
+        "rsi",
+    }
+    assert {
+        node["params"]["length"]
+        for node in buy["ir"]["nodes"]
+        if node["type"] == "indicator" and node["params"]["indicator"] == "ema"
+    } == {50, 100}
+    assert {node["type"] for node in buy["ir"]["nodes"]} >= {"indicator", "low_price"}
+    assert "close_price" not in {node["type"] for node in buy["ir"]["nodes"]}
+    assert any(
+        node["id"] == "trend_cross" and node["type"] == "any"
+        for node in buy["ir"]["nodes"]
+    )
+
+
+@pytest.mark.asyncio
 async def test_blank_custom_strategy_starts_empty_and_invalid(strategy_db) -> None:
     detail = await create_blank_strategy("Operator blank")
 

@@ -350,8 +350,8 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
                     themeOverrides: {
                         fillColor:
                             currentPrice <= referencePrice
-                                ? 'rgb(99, 226, 183)'
-                                : 'rgb(224, 108, 117)',
+                                 ? '#2E7D5B'
+                                 : '#B4443F',
                         handleSize: '8px',
                         opacityDisabled: '1',
                     },
@@ -574,10 +574,10 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
 
 <style scoped>
 :deep(.red .profit) {
-    color: rgb(224, 108, 117) !important;
+    color: #B4443F !important;
 }
 
 :deep(.green .profit) {
-    color: rgb(99, 226, 183) !important;
+    color: #2E7D5B !important;
 }
 </style>
