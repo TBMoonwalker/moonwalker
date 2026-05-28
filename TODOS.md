@@ -31,7 +31,7 @@ current grouped replay and waiting-campaign context are still insufficient.
 
 ### Build the operator-facing Backtest UI after backend core stabilizes
 
-**Completed:** Unreleased (2026-05-24)
+**Completed:** v3.3.0.0 (2026-05-28)
 
 **What shipped:** Added a Backtest route with strategy replay controls,
 Lightweight Charts candles and buy/sell markers, stats, run metadata,

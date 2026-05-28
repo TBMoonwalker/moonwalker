@@ -4,6 +4,40 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [3.3.0.0] - 2026-05-28
+
+### Added
+
+- Add the operator-facing Backtest workspace with strategy replay controls,
+  weekly candles, dynamic DCA and sidestep modes, chart indicators, base and
+  safety-order markers, trade tables with timestamps, previous-run comparison,
+  and backend-safe error states.
+- Add backend backtest APIs, isolated strategy replay state, causal indicator
+  evaluation, shared DCA math, shared analytics summaries, OHLCV range caps,
+  pagination pacing, and regression coverage for runtime, engine, API, fetch,
+  analytics, and DCA behavior.
+- Add Bollinger Bands, RSI, and MACD indicator support plus the Bollinger Buy
+  strategy using wick-based Bollinger/EMA context checks.
+- Add average lines to the daily, monthly, and yearly profit charts.
+
+### Changed
+
+- Align backtest configuration with current Moonwalker trading behavior by
+  calculating DCA step scaling dynamically and leaving stop loss disabled when
+  empty.
+- Rework backtest symbol selection, form spacing, chart markers, and statistic
+  cards to match the trading and statistics surfaces.
+- Upgrade safe frontend and backend dependencies, including the Litestar route
+  annotation update required by the current backend startup path.
+- Harden `run.sh` so startup installs backend requirements, verifies
+  dependency compatibility, validates controller imports, and cleans stale lock
+  files when the backend exits immediately.
+
+### Removed
+
+- Remove the Bollinger Sell strategy from sell-strategy selection while keeping
+  Bollinger Buy available for buy setups.
+
 ## [3.2.0.0] - 2026-05-21
 
 ### Added
