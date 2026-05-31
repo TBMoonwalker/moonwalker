@@ -1,6 +1,5 @@
 import { computed, h, type Ref } from 'vue'
 import { NButton } from 'naive-ui/es/button'
-import { NButtonGroup } from 'naive-ui/es/button-group'
 import { NDivider } from 'naive-ui/es/divider'
 import { NDropdown } from 'naive-ui/es/dropdown'
 import { NIcon } from 'naive-ui/es/icon'
@@ -334,76 +333,6 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                         ]
                     }
                     const actionError = resolveActionError(rowData)
-                    const pauseAction = rowData.automation_paused
-                        ? () => options.onResumeMission(rowData)
-                        : () => options.onPauseMission(rowData)
-                    const pauseActionLabel = rowData.automation_paused
-                        ? 'Resume automation'
-                        : 'Pause automation'
-                    const pauseActionLoading = options.isMissionActionLoading(
-                        rowData.symbol,
-                        rowData.automation_paused ? 'resume' : 'pause',
-                    )
-                    const desktopActions = h(
-                        NButtonGroup,
-                        { size: 'medium', vertical: true },
-                        {
-                            default: () => [
-                                h(
-                                    NButton,
-                                    {
-                                        primary: true,
-                                        size: 'medium',
-                                        ghost: true,
-                                        color: '#63e2b7',
-                                        style: tradeActionButtonStyle,
-                                        onClick: () =>
-                                            options.onDealSell(rowData),
-                                    },
-                                    { default: () => 'Sell' },
-                                ),
-                                h(
-                                    NButton,
-                                    {
-                                        primary: true,
-                                        size: 'medium',
-                                        ghost: true,
-                                        color: '#63e2b7',
-                                        style: tradeActionButtonStyle,
-                                        disabled: isBuyBlocked(rowData),
-                                        onClick: () =>
-                                            options.onDealBuy(rowData),
-                                    },
-                                    { default: () => 'Buy' },
-                                ),
-                                h(
-                                    NButton,
-                                    {
-                                        primary: true,
-                                        size: 'medium',
-                                        ghost: true,
-                                        color: '#63e2b7',
-                                        style: tradeActionButtonStyle,
-                                        onClick: () =>
-                                            options.onDealStop(rowData),
-                                    },
-                                    { default: () => 'Stop' },
-                                ),
-                                h(
-                                    NButton,
-                                    {
-                                        type: 'warning',
-                                        ghost: !rowData.automation_paused,
-                                        size: 'medium',
-                                        style: tradeActionButtonStyle,
-                                        loading: pauseActionLoading,
-                                        onClick: pauseAction,
-                                    },
-                                    { default: () => pauseActionLabel },
-                                ),
-                            ],
-                        },
-                    )
                     const compactActions = h(
                         'div',
                         {
@@ -426,9 +355,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                         ],
                     )
                     return [
-                        options.isMobile.value || options.isTablet.value
-                            ? compactActions
-                            : desktopActions,
+                        compactActions,
                         actionError
                             ? h(
                                   'div',
