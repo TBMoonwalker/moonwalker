@@ -1330,6 +1330,10 @@ function destroyRete(): void {
     gap: 10px;
 }
 
+.status-actions {
+    flex-wrap: wrap;
+}
+
 .strategy-status-bar h3 {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
@@ -1753,6 +1757,23 @@ label {
     .canvas-toolbar,
     .inspector-panel {
         display: none;
+    }
+}
+
+@media (max-width: 560px) {
+    .strategy-status-bar {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .status-actions {
+        justify-content: flex-start;
+        width: 100%;
+    }
+
+    .status-actions :deep(.n-button) {
+        flex: 1 1 132px;
+        min-width: 0;
     }
 }
 </style>

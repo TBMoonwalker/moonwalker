@@ -147,6 +147,7 @@ function handleMenuSelect(key: string | number): void {
   font-size: 1.3rem;
   font-weight: 700;
   letter-spacing: 0.02em;
+  white-space: nowrap;
 }
 
 .brand-caption {
@@ -250,6 +251,27 @@ function handleMenuSelect(key: string | number): void {
 }
 
 @media (max-width: 480px) {
+  .header-shell {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .brand-link {
+    gap: 8px;
+  }
+
+  .brand-mark {
+    width: 42px;
+    height: 28px;
+  }
+
+  .brand-title {
+    font-size: 0.92rem;
+  }
+
+  .header-menu-wrap {
+    min-width: 0;
+  }
+
   :deep(.header-menu .n-menu-item-content-header) {
     display: none;
   }
