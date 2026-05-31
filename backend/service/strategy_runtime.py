@@ -220,7 +220,6 @@ async def _evaluate_node(
         "low_price",
         "high_price",
         "constant_value",
-        "ema_indicator",
         "indicator",
     }:
         return False
@@ -239,8 +238,6 @@ async def _evaluate_node(
         )
     if node_type == "swing_low_state":
         return await _evaluate_swing_low_state(node, node_by_id, connections, context)
-    if node_type == "ema_swing":
-        return await _evaluate_ema_swing(params, context)
     return False
 
 
@@ -302,10 +299,6 @@ def _input_node_for_port(
             input_nodes[fallback_index] if len(input_nodes) > fallback_index else None
         )
     node_id = str(node.get("id") or "")
-    port_aliases = {
-        "value1": {"value1", "left"},
-        "value2": {"value2", "right"},
-    }.get(port, {port})
     for connection in connections:
         if not isinstance(connection, dict):
             continue
@@ -317,7 +310,7 @@ def _input_node_for_port(
             or ""
         )
         source = str(connection.get("source") or connection.get("sourceNode") or "")
-        if target == node_id and target_input in port_aliases and source in node_by_id:
+        if target == node_id and target_input == port and source in node_by_id:
             return node_by_id[source]
     if len(input_nodes) > fallback_index:
         return input_nodes[fallback_index]
@@ -339,7 +332,7 @@ async def _resolve_value_node(
     if node_type == "indicator":
         indicator = str(params.get("indicator") or "")
         if indicator == "ema":
-            return await _resolve_ema_indicator(params, context, index)
+            return await _resolve_ema_value(params, context, index)
         if indicator == "rsi":
             return await _resolve_rsi_indicator(params, context, index)
         if indicator.startswith("bollinger_"):
@@ -347,8 +340,6 @@ async def _resolve_value_node(
         if indicator.startswith("macd_"):
             return await _resolve_macd_indicator(params, context, index)
         return None
-    if node_type == "ema_indicator":
-        return await _resolve_ema_indicator(params, context, index)
     if node_type == "close_price":
         lookback = int(params.get("lookback") or EMA20_LOOKBACK_LENGTH)
         close = await _close(context, lookback)
@@ -376,7 +367,7 @@ async def _resolve_value_node(
     return None
 
 
-async def _resolve_ema_indicator(
+async def _resolve_ema_value(
     params: dict[str, Any],
     context: EvaluationContext,
     index: int,
@@ -483,7 +474,7 @@ async def _evaluate_fresh_signal_state(
             continue
         if input_type == "close_price":
             latest_close = value
-        elif input_type == "ema_indicator" or (
+        elif (
             input_type == "indicator"
             and str(input_params.get("indicator") or "") == "ema"
         ):
@@ -609,59 +600,6 @@ async def _evaluate_price_indicator_relation(
     if operator == "less_than":
         return close_value < indicator_value
     return close_value > indicator_value
-
-
-async def _evaluate_ema_swing(
-    params: dict[str, Any], context: EvaluationContext
-) -> bool:
-    """Evaluate the migrated EMA swing higher-low strategy."""
-    ema = await _ema(context, [20, 50, 100, 200])
-    close = await _close(context, 8)
-    try:
-        close_series = close.dropna()
-        close_prev = float(close_series.iloc[-2])
-        close_prev2 = float(close_series.iloc[-3])
-        trend_ok = (
-            ema["ema_20"] < ema["ema_200"]
-            and ema["ema_50"] < ema["ema_200"]
-            and ema["ema_100"] < ema["ema_200"]
-        )
-        swing_up = close_prev > float(ema["ema_20"]) and close_prev2 < float(
-            ema["ema_20"]
-        )
-        current_swing_low = min(close_prev, close_prev2)
-    except (AttributeError, IndexError, KeyError, TypeError, ValueError):
-        return False
-
-    state_key = str(params.get("state_key") or "ema_swing")
-    previous, bootstrapped = await _resolve_float_state(
-        context,
-        state_key,
-        bootstrap=lambda: _bootstrap_ema_swing_state(close),
-    )
-    result = (
-        trend_ok
-        and swing_up
-        and previous is not None
-        and not bootstrapped
-        and current_swing_low > previous
-    )
-    if previous != current_swing_low:
-        await _remember_state(context, state_key, current_swing_low)
-    return result
-
-
-async def _ema(context: EvaluationContext, lengths: list[int]) -> dict[str, Any]:
-    """Return memoized EMA scalar values for the current evaluation candle."""
-    key = ("ema", tuple(lengths))
-    if key not in context.memo:
-        if context.candle_index is None:
-            context.memo[key] = await context.indicators.calculate_ema(
-                context.symbol, context.timeframe, lengths
-            )
-        else:
-            context.memo[key] = await _ema_values_at_candle(context, lengths)
-    return context.memo[key]
 
 
 async def _close(context: EvaluationContext, length: int) -> Any:
@@ -933,7 +871,7 @@ def _state_store_key(
 
 
 def _bootstrap_ema_swing_state(close: Any) -> float | None:
-    """Return latest historical swing low for EMA swing migration parity."""
+    """Return latest historical swing low for the current swing-low node."""
     try:
         close_series = close.dropna()
         if len(close_series) < 3:

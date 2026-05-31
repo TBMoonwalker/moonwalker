@@ -257,7 +257,7 @@ async def test_backtest_ema_values_use_candle_index_not_final_scalar() -> None:
         state_store={},
     )
 
-    values = await strategy_runtime._ema(context, [20, 50])
+    values = await strategy_runtime._ema_values_at_candle(context, [20, 50])
 
     assert values == {"ema_20": 30.0, "ema_50": 30.0}
 

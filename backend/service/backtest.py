@@ -462,7 +462,6 @@ class Backtest:
         stop_loss_pct: float | None = None,
         max_safety_orders: int = 5,
         safety_order_step_pct: float = 3.0,
-        step_scale: float = 1.0,
         fee: float = 0.001,
         trade_mode: str = TRADE_MODE_DYNAMIC_DCA,
         sidestep_bearish_strategy: str | None = None,
@@ -496,8 +495,6 @@ class Backtest:
         self.safety_order_step_pct = _positive_float(
             safety_order_step_pct, "safety_order_step_pct"
         )
-        # Kept for backward-compatible direct callers; dynamic DCA derives thresholds.
-        _ = step_scale
         self.fee = _non_negative_float(fee, "fee")
         self.trade_mode = _trade_mode(trade_mode)
         self.sidestep_bearish_strategy = _strategy_slug(
@@ -778,9 +775,7 @@ class Backtest:
             params = node.get("params") if isinstance(node.get("params"), dict) else {}
             if node_type == "indicator":
                 self._add_chart_indicator(str(params.get("indicator") or ""), params)
-            elif node_type == "ema_indicator":
-                self._add_chart_indicator("ema", params)
-            elif node_type in {"fresh_signal_state", "ema_swing", "swing_low_state"}:
+            elif node_type in {"fresh_signal_state", "swing_low_state"}:
                 for length in (
                     (20,) if node_type == "fresh_signal_state" else (20, 50, 100, 200)
                 ):

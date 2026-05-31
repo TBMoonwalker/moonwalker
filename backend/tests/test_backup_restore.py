@@ -276,7 +276,7 @@ async def test_export_backup_omits_removed_legacy_autopilot_max_fund_key(
 
 
 @pytest.mark.asyncio
-async def test_restore_backup_canonicalizes_legacy_trade_mode_rows(
+async def test_restore_backup_rejects_removed_trade_mode_rows(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
@@ -288,33 +288,29 @@ async def test_restore_backup_canonicalizes_legacy_trade_mode_rows(
     monkeypatch.setattr(Config, "instance", classmethod(_fake_config_instance))
     Config._instance = None
 
-    import model
-
     backup_service = BackupService()
-    summary = await backup_service.restore_backup(
-        {
-            "schema_version": 1,
-            "config": [
-                {"key": "timezone", "value": "Europe/Vienna", "value_type": "str"},
-                {
-                    "key": "trade_lifecycle_mode",
-                    "value": "classic_dca",
-                    "value_type": "str",
-                },
-                {"key": "dynamic_dca", "value": True, "value_type": "bool"},
-            ],
-        },
-        restore_trade_data=False,
-    )
-
-    persisted_rows = {
-        row.key: row.value for row in await model.AppConfig.all().order_by("key")
-    }
-    assert summary["config_keys"] == 2
-    assert persisted_rows == {
-        "timezone": "Europe/Vienna",
-        "trade_mode": "dynamic_dca",
-    }
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Config key 'trade_lifecycle_mode' was removed in this release. "
+            "Use 'trade_mode' instead."
+        ),
+    ):
+        await backup_service.restore_backup(
+            {
+                "schema_version": 1,
+                "config": [
+                    {"key": "timezone", "value": "Europe/Vienna", "value_type": "str"},
+                    {
+                        "key": "trade_lifecycle_mode",
+                        "value": "classic_dca",
+                        "value_type": "str",
+                    },
+                    {"key": "dynamic_dca", "value": True, "value_type": "bool"},
+                ],
+            },
+            restore_trade_data=False,
+        )
 
     await Tortoise.close_connections()
     Config._instance = None
@@ -351,17 +347,6 @@ async def test_restore_backup_preflights_trade_mode_before_destructive_writes(
                 "schema_version": 1,
                 "config": [
                     {"key": "trade_mode", "value": "sidestep", "value_type": "str"},
-                    {
-                        "key": "trade_lifecycle_mode",
-                        "value": "sidestep_reentry",
-                        "value_type": "str",
-                    },
-                    {"key": "dynamic_dca", "value": False, "value_type": "bool"},
-                    {
-                        "key": "sidestep_campaign_enabled",
-                        "value": True,
-                        "value_type": "bool",
-                    },
                     {
                         "key": "dca_strategy",
                         "value": "ema20_swing",

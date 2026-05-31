@@ -357,7 +357,7 @@ async def test_config_load_all_clears_removed_keys(tmp_path, monkeypatch) -> Non
 
 
 @pytest.mark.asyncio
-async def test_config_load_all_accepts_legacy_dynamic_dca_rows(
+async def test_config_load_all_ignores_removed_trade_mode_rows(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
@@ -387,14 +387,14 @@ async def test_config_load_all_accepts_legacy_dynamic_dca_rows(
     assert config.snapshot()["trade_mode"] == "dynamic_dca"
     assert "dynamic_dca" not in config.snapshot()
     assert "trade_lifecycle_mode" not in config.snapshot()
-    assert config.raw_snapshot()["dynamic_dca"] is True
-    assert config.raw_snapshot()["trade_lifecycle_mode"] == "classic_dca"
+    assert "dynamic_dca" not in config.raw_snapshot()
+    assert "trade_lifecycle_mode" not in config.raw_snapshot()
 
     await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio
-async def test_config_trade_mode_save_cleans_legacy_bridge_rows(
+async def test_config_set_rejects_removed_trade_mode_bridge_key(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
@@ -404,56 +404,18 @@ async def test_config_trade_mode_save_cleans_legacy_bridge_rows(
 
     monkeypatch.setattr(config_module, "redis_client", DummyRedis())
 
-    import model
-
-    await model.AppConfig.create(
-        key="trade_lifecycle_mode",
-        value="classic_dca",
-        value_type="str",
-    )
-    await model.AppConfig.create(
-        key="dynamic_dca",
-        value=True,
-        value_type="bool",
-    )
-
     config = Config()
-    await config.load_all()
-    await config.set("trade_mode", {"value": "dynamic_dca", "type": "str"})
-
-    persisted_rows = {
-        row.key: row.value for row in await model.AppConfig.all().order_by("key")
-    }
-    assert persisted_rows == {"trade_mode": "dynamic_dca"}
-    assert "dynamic_dca" not in config.snapshot()
-    assert "trade_lifecycle_mode" not in config.snapshot()
-    assert config.get("trade_mode") == "dynamic_dca"
-
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
-async def test_config_load_all_rejects_deprecated_static_mode(
-    tmp_path, monkeypatch
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
-
-    import model
-
-    await model.AppConfig.create(
-        key="trade_lifecycle_mode",
-        value="classic_dca",
-        value_type="str",
-    )
-
-    config = Config()
-    with pytest.raises(TradeModeConfigError, match="Static DCA mode"):
-        await config.load_all()
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Config key 'trade_lifecycle_mode' was removed in this release. "
+            "Use 'trade_mode' instead."
+        ),
+    ):
+        await config.set(
+            "trade_lifecycle_mode",
+            {"value": "classic_dca", "type": "str"},
+        )
 
     await Tortoise.close_connections()
 
@@ -525,7 +487,7 @@ def test_config_directory_scan_wraps_oserror(monkeypatch) -> None:
     monkeypatch.setattr(config_module.os, "walk", fail_walk)
 
     with pytest.raises(IOError, match="disk failure"):
-        config._Config__get_filenames_in_directory("strategies")
+        config._Config__get_filenames_in_directory("signals")
 
 
 def test_config_directory_scan_propagates_unexpected_errors(monkeypatch) -> None:
@@ -537,7 +499,7 @@ def test_config_directory_scan_propagates_unexpected_errors(monkeypatch) -> None
     monkeypatch.setattr(config_module.os, "walk", fail_walk)
 
     with pytest.raises(TypeError, match="unexpected walker bug"):
-        config._Config__get_filenames_in_directory("strategies")
+        config._Config__get_filenames_in_directory("signals")
 
 
 def test_should_persist_config_value_matches_existing_semantics() -> None:

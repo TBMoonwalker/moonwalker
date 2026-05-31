@@ -17,7 +17,6 @@ BACKEND_DIR = os.path.join(ROOT_DIR, "backend")
 if BACKEND_DIR not in sys.path:
     sys.path.insert(0, BACKEND_DIR)
 
-import helper  # noqa: E402
 from service.data import Data  # noqa: E402
 from tortoise import Tortoise  # noqa: E402
 

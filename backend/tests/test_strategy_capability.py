@@ -10,9 +10,9 @@ from service.strategy_capability import (
 def test_supported_strategy_has_no_support_error() -> None:
     assert get_strategy_support_error("ema20_swing") is None
     assert get_strategy_support_error("ema20_swing_reverse") is None
-    assert get_strategy_support_error("ema_swing_reverse") is None
     assert get_strategy_support_error("bollinger_buy") is None
     assert "not registered" in (get_strategy_support_error("bollinger_sell") or "")
+    assert "not registered" in (get_strategy_support_error("ema_swing_reverse") or "")
 
 
 def test_unsupported_strategy_reports_missing_indicator_methods() -> None:
@@ -43,7 +43,7 @@ def test_get_strategy_min_history_candles_returns_expected_warmup() -> None:
     assert get_strategy_min_history_candles("ema20_swing") == 200
     assert get_strategy_min_history_candles("ema20_swing_reverse") == 200
     assert get_strategy_min_history_candles("ema_low") == 200
-    assert get_strategy_min_history_candles("ema_swing_reverse") == 200
+    assert get_strategy_min_history_candles("ema_swing_reverse") == 0
     assert get_strategy_min_history_candles("bollinger_buy") == 202
     assert get_strategy_min_history_candles("bollinger_sell") == 0
     assert get_strategy_min_history_candles(None) == 0
@@ -65,7 +65,7 @@ def test_get_configured_strategy_min_history_candles_uses_sidestep_mode_strategi
 ):
     required = get_configured_strategy_min_history_candles(
         {
-            "trade_lifecycle_mode": "sidestep_reentry",
+            "trade_mode": "sidestep",
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
             "sidestep_reentry_strategy": "ema20_swing_reverse",
@@ -76,15 +76,12 @@ def test_get_configured_strategy_min_history_candles_uses_sidestep_mode_strategi
     assert required == 200
 
 
-def test_get_configured_strategy_min_history_candles_respects_canonical_mode_over_legacy_flag() -> (
+def test_get_configured_strategy_min_history_candles_uses_canonical_dynamic_mode() -> (
     None
 ):
     required = get_configured_strategy_min_history_candles(
         {
             "trade_mode": "dynamic_dca",
-            "trade_lifecycle_mode": "classic_dca",
-            "dynamic_dca": True,
-            "sidestep_campaign_enabled": True,
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
             "sidestep_reentry_strategy": "ema20_swing_reverse",
@@ -108,7 +105,7 @@ def test_get_configured_strategy_history_lookback_days_uses_sidestep_mode_strate
 ):
     required_days = get_configured_strategy_history_lookback_days(
         {
-            "trade_lifecycle_mode": "sidestep_reentry",
+            "trade_mode": "sidestep",
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
             "sidestep_reentry_strategy": "ema20_swing_reverse",

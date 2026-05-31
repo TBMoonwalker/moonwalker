@@ -48,6 +48,10 @@ export function createAppRouter(
                 name: 'stats',
                 component: () => import('../views/StatisticsView.vue'),
             },
+            {
+                path: '/statistics',
+                redirect: { name: 'stats' },
+            },
         ],
     })
 

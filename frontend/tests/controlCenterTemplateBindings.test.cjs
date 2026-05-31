@@ -1106,6 +1106,21 @@ test('control center delegates advanced and utilities presentation to dedicated 
         strategyBuilderWorkspaceSource.includes('Strategy Builder'),
         'expected dedicated strategy builder workspace to remain available',
     )
+    assert.ok(
+        strategyBuilderWorkspaceSource.indexOf('await nextTick()') <
+            strategyBuilderWorkspaceSource.indexOf('const host = reteHost.value'),
+        'expected strategy builder to wait for the canvas host before rendering Rete',
+    )
+    assert.ok(
+        strategyBuilderWorkspaceSource.includes('const RETE_FIT_SCALE = 0.98'),
+        'expected strategy builder to keep graph fit scale readable',
+    )
+    assert.ok(
+        strategyBuilderWorkspaceSource.includes(
+            'AreaExtensions.zoomAt(area, reteNodes, { scale: RETE_FIT_SCALE })',
+        ),
+        'expected strategy builder to apply the readable graph fit scale',
+    )
     assert.equal(
         controlCenterViewSource.includes('<template #indicator>'),
         false,

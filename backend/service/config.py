@@ -19,20 +19,21 @@ from service.config_runtime_store import (
 from service.redis import CONFIG_CHANNEL, redis_client
 from service.strategy_builder import PUBLIC_BUILTIN_SLUGS
 from service.strategy_capability import filter_supported_strategies
-from service.trade_lifecycle_config import (
-    TRADE_MODE_COMPATIBILITY_KEYS,
-    TRADE_MODE_LEGACY_KEYS,
-    resolve_trade_mode_config,
-)
+from service.trade_lifecycle_config import resolve_trade_mode_config
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 REMOVED_CONFIG_KEY_REPLACEMENTS = {
-    "autopilot_max_fund": "capital_max_fund",
+    "autopilot_max_fund": ("capital_max_fund", "v1.4.0.0"),
+    "trade_lifecycle_mode": ("trade_mode", "this release"),
+    "dynamic_dca": ("trade_mode", "this release"),
+    "sidestep_campaign_enabled": ("trade_mode", "this release"),
+    "autopilot_entry_stretch_max_multiplier": (
+        "autopilot_base_order_stretch_max_multiplier",
+        "this release",
+    ),
 }
-REMOVED_CONFIG_VERSION = "1.4.0.0"
-LEGACY_TRADE_MODE_KEY_REPLACEMENT = "trade_mode"
 
 HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
     "1m": "30d",
@@ -51,6 +52,7 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 }
 
 DEFAULT_CONFIG_VALUES = {
+    "trade_mode": "dynamic_dca",
     "trading_paused": False,
     "sidestep_bearish_strategy": "",
     "sidestep_reentry_strategy": "",
@@ -90,27 +92,15 @@ def is_removed_config_key(key: str) -> bool:
 def build_removed_config_key_message(key: str) -> str:
     """Return the operator-facing error for a removed config key."""
     normalized_key = str(key).strip()
-    replacement = REMOVED_CONFIG_KEY_REPLACEMENTS.get(normalized_key)
+    removed = REMOVED_CONFIG_KEY_REPLACEMENTS.get(normalized_key)
+    replacement = removed[0] if removed is not None else None
+    version = removed[1] if removed is not None else "a previous release"
     if replacement:
         return (
-            f"Config key '{normalized_key}' was removed in v{REMOVED_CONFIG_VERSION}. "
+            f"Config key '{normalized_key}' was removed in {version}. "
             f"Use '{replacement}' instead."
         )
-    return f"Config key '{normalized_key}' was removed in v{REMOVED_CONFIG_VERSION}."
-
-
-def is_legacy_trade_mode_key(key: str) -> bool:
-    """Return whether the key belongs to the removed trade-mode compatibility bridge."""
-    return str(key).strip() in TRADE_MODE_LEGACY_KEYS
-
-
-def build_legacy_trade_mode_key_message(key: str) -> str:
-    """Return the operator-facing error for removed trade-mode bridge keys."""
-    normalized_key = str(key).strip()
-    return (
-        f"Config key '{normalized_key}' is no longer supported. "
-        f"Use '{LEGACY_TRADE_MODE_KEY_REPLACEMENT}' instead."
-    )
+    return f"Config key '{normalized_key}' was removed in {version}."
 
 
 def resolve_timeframe(config: dict[str, Any], default: str = "1m") -> str:
@@ -315,8 +305,6 @@ class Config:
         raw_snapshot = self.__raw_snapshot()
         trade_mode_state = resolve_trade_mode_config(raw_snapshot, source="runtime")
         snapshot = dict(raw_snapshot)
-        for key in TRADE_MODE_LEGACY_KEYS:
-            snapshot.pop(key, None)
         snapshot["trade_mode"] = trade_mode_state.trade_mode
         return snapshot
 
@@ -360,7 +348,7 @@ class Config:
             )
 
     def __raw_snapshot(self) -> dict[str, Any]:
-        """Return the runtime snapshot before derived trade-mode compatibility."""
+        """Return the runtime snapshot."""
         return self._store.snapshot(defaults=DEFAULT_CONFIG_VALUES)
 
     def __build_snapshot_from_entries(
@@ -377,9 +365,6 @@ class Config:
     ) -> dict[str, Any]:
         """Apply pending config actions to the raw runtime snapshot."""
         snapshot = self.__raw_snapshot()
-        if any(action.key == "trade_mode" for action in actions):
-            for key in TRADE_MODE_LEGACY_KEYS:
-                snapshot.pop(key, None)
         for action in actions:
             if action.persist:
                 snapshot[action.key] = action.runtime_value
@@ -456,14 +441,12 @@ class Config:
         normalized_key = str(key).strip()
         if is_removed_config_key(normalized_key):
             raise ValueError(build_removed_config_key_message(normalized_key))
-        if is_legacy_trade_mode_key(normalized_key):
-            raise ValueError(build_legacy_trade_mode_key_message(normalized_key))
 
     def __get_strategies(self) -> list[str]:
-        """Get a list of available strategy filenames from the strategies directory.
+        """Get the public Strategy Builder strategy slugs.
 
         Returns:
-            List of strategy names (without .py extension) sorted alphabetically
+            Supported public built-in strategy slugs.
         """
         return filter_supported_strategies(PUBLIC_BUILTIN_SLUGS)
 
@@ -486,10 +469,6 @@ class Config:
         Returns:
             The configuration value or default if key not found
         """
-        if key in TRADE_MODE_COMPATIBILITY_KEYS:
-            return self.snapshot().get(key, default)
-        if key in TRADE_MODE_LEGACY_KEYS:
-            return default
         return self._store.get(key, defaults=DEFAULT_CONFIG_VALUES, default=default)
 
     async def set(self, key: str, value: Any) -> bool:
@@ -521,10 +500,6 @@ class Config:
                 )
             else:
                 await AppConfig.filter(key=key).using_db(conn).delete()
-            if key == "trade_mode":
-                await AppConfig.filter(key__in=list(TRADE_MODE_LEGACY_KEYS)).using_db(
-                    conn
-                ).delete()
 
         entry = action.to_entry()
         if entry is not None:
@@ -532,10 +507,6 @@ class Config:
         else:
             self._store.remove_entry(key)
         changed_keys = [key]
-        if key == "trade_mode":
-            for legacy_key in TRADE_MODE_LEGACY_KEYS:
-                self._store.remove_entry(legacy_key)
-            changed_keys.extend(sorted(TRADE_MODE_LEGACY_KEYS))
         self.__notify_subscribers()
         # Notify all subscribers across processes (best effort)
         await self.__publish_change(changed_keys)
@@ -575,10 +546,6 @@ class Config:
                     )
                 else:
                     await AppConfig.filter(key=action.key).using_db(conn).delete()
-            if any(action.key == "trade_mode" for action in actions):
-                await AppConfig.filter(key__in=list(TRADE_MODE_LEGACY_KEYS)).using_db(
-                    conn
-                ).delete()
 
         changed_keys = [action.key for action in actions]
         for action in actions:
@@ -587,14 +554,6 @@ class Config:
                 self._store.upsert_entry(entry)
             else:
                 self._store.remove_entry(action.key)
-        if "trade_mode" in changed_keys:
-            for legacy_key in TRADE_MODE_LEGACY_KEYS:
-                self._store.remove_entry(legacy_key)
-            changed_keys.extend(
-                legacy_key
-                for legacy_key in sorted(TRADE_MODE_LEGACY_KEYS)
-                if legacy_key not in changed_keys
-            )
 
         if changed_keys:
             self.__notify_subscribers()

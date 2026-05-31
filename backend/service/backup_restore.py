@@ -18,7 +18,6 @@ from service.config import (
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.trade_lifecycle_config import (
-    TRADE_MODE_LEGACY_KEYS,
     build_invalid_backup_shape_error,
     resolve_trade_mode_config,
 )
@@ -77,9 +76,7 @@ class BackupService:
         restore_trade_data: bool,
     ) -> dict[str, Any]:
         """Restore config-only or full backup payloads."""
-        config_rows = self._canonicalize_trade_mode_rows(
-            self._validate_config_rows(backup_payload.get("config"))
-        )
+        config_rows = self._validate_config_rows(backup_payload.get("config"))
         candidate_config = self._build_config_snapshot(config_rows)
         resolve_trade_mode_config(
             candidate_config,
@@ -241,31 +238,6 @@ class BackupService:
                 row["value_type"],
             )
         return snapshot
-
-    @staticmethod
-    def _canonicalize_trade_mode_rows(
-        config_rows: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """Collapse legacy trade-mode rows into the canonical trade_mode key."""
-        candidate_snapshot = BackupService._build_config_snapshot(config_rows)
-        trade_mode_state = resolve_trade_mode_config(
-            candidate_snapshot,
-            source="restore",
-            require_explicit_sidestep_reentry=True,
-        )
-        normalized_rows = [
-            dict(row)
-            for row in config_rows
-            if row["key"] not in TRADE_MODE_LEGACY_KEYS and row["key"] != "trade_mode"
-        ]
-        normalized_rows.append(
-            {
-                "key": "trade_mode",
-                "value": trade_mode_state.trade_mode,
-                "value_type": "str",
-            }
-        )
-        return normalized_rows
 
     @staticmethod
     def _deserialize_row(model_class: type, row: dict[str, Any]) -> dict[str, Any]:

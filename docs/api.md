@@ -36,14 +36,17 @@ Notes:
   `/config/freshness` so a stale snapshot is not mistaken for a freshly loaded
   one when another tab or client saves between requests.
 - Config update endpoints reject removed legacy keys such as
-  `autopilot_max_fund`; use `capital_max_fund`.
+  `autopilot_max_fund`, `autopilot_entry_stretch_max_multiplier`,
+  `trade_lifecycle_mode`, `dynamic_dca`, and `sidestep_campaign_enabled`; use
+  `capital_max_fund`, `autopilot_base_order_stretch_max_multiplier`, and
+  canonical `trade_mode` instead.
 - Generic config saves cannot switch `dry_run` from `true` to `false`; that
   transition is rejected unless it goes through `POST /config/live/activate`.
 - `POST /config/live/activate` expects `{"confirm": true}` and returns `409`
   with a `blockers` array when required setup is still incomplete.
 - `POST /config/backup/restore` expects a JSON body with `backup` and optional
   `restore_trade_data`, and rejects backups that still contain removed legacy
-  config keys such as `autopilot_max_fund`.
+  config keys.
 - Switching the signal plugin to `csv_signal` is rejected while open trades
   still exist.
 

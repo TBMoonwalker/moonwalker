@@ -7,9 +7,6 @@ from .autopilotmemoryevent import AutopilotMemoryEvent as AutopilotMemoryEvent
 from .autopilotmemorystate import AutopilotMemoryState as AutopilotMemoryState
 from .autopilotsymbolmemory import AutopilotSymbolMemory as AutopilotSymbolMemory
 from .closedtrades import ClosedTrades as ClosedTrades
-from .ema20swingstate import Ema20SwingState as Ema20SwingState
-from .emaswingreversestate import EmaSwingReverseState as EmaSwingReverseState
-from .emaswingstate import EmaSwingState as EmaSwingState
 from .listings import Listings as Listings
 from .opentrades import OpenTrades as OpenTrades
 from .spotcampaigns import SpotCampaigns as SpotCampaigns
@@ -31,9 +28,6 @@ __all__ = [
     "AutopilotMemoryState",
     "AutopilotSymbolMemory",
     "ClosedTrades",
-    "Ema20SwingState",
-    "EmaSwingReverseState",
-    "EmaSwingState",
     "Listings",
     "OpenTrades",
     "SpotCampaigns",
@@ -65,9 +59,6 @@ if __name__ == "__main__":
         "ClosedTrades",
         "TradeReplayCandles",
         "TradeExecutions",
-        "Ema20SwingState",
-        "EmaSwingReverseState",
-        "EmaSwingState",
         "UnsellableTrades",
         "Listings",
         "UpnlHistory",

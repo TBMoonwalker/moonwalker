@@ -101,10 +101,7 @@ def _base_order_stretch_multiplier(config: dict[str, Any]) -> float:
     """Return configured Autopilot base-order stretch multiplier."""
     if not bool(config.get("autopilot_profit_stretch_enabled", False)):
         return 1.0
-    configured_multiplier = config.get(
-        "autopilot_base_order_stretch_max_multiplier",
-        config.get("autopilot_entry_stretch_max_multiplier"),
-    )
+    configured_multiplier = config.get("autopilot_base_order_stretch_max_multiplier")
     return max(
         1.0,
         _safe_float(configured_multiplier) or 1.0,

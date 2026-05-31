@@ -29,6 +29,15 @@ current grouped replay and waiting-campaign context are still insufficient.
 
 ## Completed
 
+### Polish Statistics heatmap density and Strategy Builder graph readability
+
+**Completed:** v4.0.0.0 (2026-05-31)
+
+**What shipped:** Tightened the Statistics Trade Activity panel with compact
+padding and an inline closed-trade activity summary, removed duplicate heatmap
+computed state, and made Strategy Builder graph labels easier to read by using
+a less aggressive Rete fit scale plus larger node and control typography.
+
 ### Build the operator-facing Backtest UI after backend core stabilizes
 
 **Completed:** v3.3.0.0 (2026-05-28)
@@ -44,11 +53,10 @@ comparison math.
 **Completed:** Unreleased (2026-05-12)
 
 **What shipped:** Added one canonical lifecycle normalization seam on each
-side, made `trade_lifecycle_mode` the operator-facing source of truth, kept
-`sidestep_campaign_enabled` as a derived compatibility mirror, routed backend
+side, made `trade_mode` the operator-facing source of truth, routed backend
 capability checks and frontend config load, submit, readiness, and validation
-through the shared helpers, and added regression coverage for legacy
-boolean-only snapshots plus canonical-mode round trips.
+through the shared helpers, and added regression coverage for canonical-mode
+round trips.
 
 ### Confirm waiting sidestep campaigns keep owning capacity while flat
 
