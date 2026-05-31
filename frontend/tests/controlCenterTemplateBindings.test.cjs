@@ -1106,6 +1106,11 @@ test('control center delegates advanced and utilities presentation to dedicated 
         strategyBuilderWorkspaceSource.includes('Strategy Builder'),
         'expected dedicated strategy builder workspace to remain available',
     )
+    assert.ok(
+        strategyBuilderWorkspaceSource.indexOf('await nextTick()') <
+            strategyBuilderWorkspaceSource.indexOf('const host = reteHost.value'),
+        'expected strategy builder to wait for the canvas host before rendering Rete',
+    )
     assert.equal(
         controlCenterViewSource.includes('<template #indicator>'),
         false,

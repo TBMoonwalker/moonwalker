@@ -815,12 +815,15 @@ async function renderReteGraph(): Promise<void> {
     destroyRete()
     reteReady.value = false
     reteError.value = null
-    const host = reteHost.value
     const detail = selectedDetail.value
-    if (!host || !detail) {
+    if (!detail) {
         return
     }
     await nextTick()
+    const host = reteHost.value
+    if (!host) {
+        return
+    }
     try {
         const editor = new NodeEditor<Schemes>()
         const area = new AreaPlugin<Schemes, AreaExtra>(host)
