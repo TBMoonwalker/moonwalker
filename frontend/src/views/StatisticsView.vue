@@ -33,12 +33,6 @@ const d = computed(() => analytics.data)
 const summary = computed(
       () => (d.value as AnalyticsOverview | null)?.summary ?? null,
  )
-const heatmapDaily = computed(
-      () => (d.value as AnalyticsOverview | null)?.heatmap_daily ?? [],
- )
-const heatmapWeekly = computed(
-      () => (d.value as AnalyticsOverview | null)?.heatmap_weekly ?? [],
- )
 const perSymbol = computed(
       () => (d.value as AnalyticsOverview | null)?.per_symbol ?? [],
  )
@@ -55,6 +49,38 @@ const distribution = computed(
 const heatmapData = computed(
        () => (d.value as AnalyticsOverview | null)?.heatmap_daily ?? [],
  )
+const heatmapSummary = computed(() => {
+   const rows = heatmapData.value
+   const activeDays = rows.filter((row) => Number(row.value ?? 0) > 0).length
+   const closedTrades = rows.reduce(
+      (total, row) => total + Number(row.value ?? 0),
+      0,
+   )
+   if (!closedTrades) {
+     return 'No closed trades in this range'
+   }
+   const dayLabel = activeDays === 1 ? 'active day' : 'active days'
+   return `${closedTrades} closes across ${activeDays} ${dayLabel}`
+})
+const heatmapMetrics = computed(() => {
+   const rows = heatmapData.value
+   const activeRows = rows.filter((row) => Number(row.value ?? 0) > 0)
+   const closedTrades = activeRows.reduce(
+      (total, row) => total + Number(row.value ?? 0),
+      0,
+   )
+   const peak = activeRows.reduce(
+      (best, row) =>
+         Number(row.value ?? 0) > Number(best?.value ?? 0) ? row : best,
+      activeRows[0] ?? null,
+   )
+   return {
+      closedTrades,
+      activeDays: activeRows.length,
+      peakCount: Number(peak?.value ?? 0),
+      peakDate: peak ? new Date(peak.timestamp).toLocaleDateString() : '-',
+   }
+})
 
 watch(perSymbol, (rows) => {
    const pageSize = symbolPagination.pageSize ?? 10
@@ -278,10 +304,29 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 
         <!-- Heatmap -->
         <n-flex class="page-section" vertical>
-          <n-card class="heatmap-card mw-shell-card" content-style="padding: 18px 20px;">
-            <n-flex vertical :size="10">
-              <n-text depth="3" class="stats-kicker">Trade Activity</n-text>
-              <Heatmap :data="heatmapData" />
+          <n-card class="heatmap-card mw-shell-card" content-style="padding: 12px 16px;">
+            <n-flex vertical :size="6">
+              <div class="heatmap-header">
+                <n-text depth="3" class="stats-kicker">Trade Activity</n-text>
+                <span class="heatmap-summary">{{ heatmapSummary }}</span>
+              </div>
+              <div class="heatmap-body">
+                <Heatmap :data="heatmapData" />
+                <dl class="heatmap-metrics" aria-label="Trade activity summary">
+                  <div>
+                    <dt>Closes</dt>
+                    <dd>{{ heatmapMetrics.closedTrades }}</dd>
+                  </div>
+                  <div>
+                    <dt>Active days</dt>
+                    <dd>{{ heatmapMetrics.activeDays }}</dd>
+                  </div>
+                  <div>
+                    <dt>Peak day</dt>
+                    <dd>{{ heatmapMetrics.peakCount }} · {{ heatmapMetrics.peakDate }}</dd>
+                  </div>
+                </dl>
+              </div>
             </n-flex>
           </n-card>
         </n-flex>
@@ -470,6 +515,59 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
   width: 100%;
 }
 
+.heatmap-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 16px;
+  flex-wrap: wrap;
+}
+
+.heatmap-summary {
+  color: var(--mw-color-text-secondary);
+  font-size: 0.82rem;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.25;
+}
+
+.heatmap-body {
+  display: grid;
+  grid-template-columns: minmax(220px, max-content) minmax(220px, 1fr);
+  align-items: start;
+  gap: 16px;
+}
+
+.heatmap-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+}
+
+.heatmap-metrics div {
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--mw-color-border);
+  border-radius: var(--mw-radius-sm, 6px);
+  background: rgba(29, 92, 73, 0.05);
+}
+
+.heatmap-metrics dt {
+  color: var(--mw-color-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.2;
+}
+
+.heatmap-metrics dd {
+  margin: 3px 0 0;
+  color: var(--mw-color-text-primary);
+  font-size: 0.95rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
 .duration-panel {
   padding: 12px;
 }
@@ -498,6 +596,14 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 
    .distribution-stats {
     flex-wrap: wrap;
+   }
+
+   .heatmap-body {
+    grid-template-columns: 1fr;
+   }
+
+   .heatmap-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
    }
 
    .dist-stat {

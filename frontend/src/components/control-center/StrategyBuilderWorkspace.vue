@@ -97,6 +97,7 @@ const reteHost = ref<HTMLElement | null>(null)
 const reteReady = ref(false)
 const reteError = ref<string | null>(null)
 let reteTeardown: (() => void) | null = null
+const RETE_FIT_SCALE = 0.98
 
 const comparisonOperatorOptions = [
     { label: 'greater than', value: 'greater_than' },
@@ -897,7 +898,7 @@ async function renderReteGraph(): Promise<void> {
         AreaExtensions.simpleNodesOrder(area)
         const reteNodes = editor.getNodes()
         if (reteNodes.length) {
-            await AreaExtensions.zoomAt(area, reteNodes)
+            await AreaExtensions.zoomAt(area, reteNodes, { scale: RETE_FIT_SCALE })
         }
         reteTeardown = () => {
             area.destroy()
@@ -1496,8 +1497,8 @@ function destroyRete(): void {
 
 /* Rete injects a classic theme; keep Moonwalker overrides scoped to this canvas. */
 .rete-host :deep(.node) {
-    width: 248px;
-    min-height: 76px;
+    width: 292px;
+    min-height: 86px;
     border: 1px solid var(--mw-color-border);
     border-radius: 6px;
     background: var(--mw-color-surface-raised);
@@ -1524,11 +1525,11 @@ function destroyRete(): void {
     border-bottom: 1px solid rgba(29, 92, 73, 0.14);
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-body);
-    font-size: 0.84rem;
+    font-size: 0.96rem;
     font-weight: 700;
     line-height: 1.25;
-    min-height: 44px;
-    padding: 8px 10px 7px;
+    min-height: 48px;
+    padding: 9px 12px 8px;
     white-space: normal;
     overflow-wrap: anywhere;
 }
@@ -1594,8 +1595,8 @@ function destroyRete(): void {
     background: var(--mw-color-surface-panel);
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-mono);
-    font-size: 0.75rem;
-    padding: 4px 7px;
+    font-size: 0.8rem;
+    padding: 5px 8px;
 }
 
 .rete-host :deep(.node .control input[readonly]) {
@@ -1608,7 +1609,7 @@ function destroyRete(): void {
     color: var(--mw-color-primary-strong);
     cursor: default;
     font-family: var(--mw-font-mono);
-    font-size: 0.75rem;
+    font-size: 0.8rem;
     font-weight: 700;
     padding: 4px 7px;
 }

@@ -2,40 +2,6 @@
 
 ## Deferred
 
-### Right-size the Statistics trade activity heatmap panel
-
-**Impact:** Polish / Design review
-
-**Category:** Spacing and visual hierarchy
-
-**What:** The Statistics page's Trade Activity heatmap currently sits inside a
-large panel with more empty space than useful signal. Tighten the panel height,
-or pair the heatmap with nearby summary context so the section earns its visual
-weight.
-
-**Why:** The chart is functional, but the oversized empty area makes the page
-feel less deliberate than the rest of the operator console.
-
-**Context:** Found during /design-review on 2026-05-31. Evidence is in
-`~/.gstack/projects/TBMoonwalker-moonwalker/designs/design-audit-20260531/screenshots/statistics.png`.
-
-### Improve Strategy Builder graph default readability
-
-**Impact:** Polish / Design review
-
-**Category:** Typography and interaction states
-
-**What:** The Strategy Builder graph fits the full strategy structure on load,
-but the node labels are small enough that the first impression reads as
-structure before content. Tune the initial zoom, label scale, or node sizing so
-operators can read the graph without immediately zooming.
-
-**Why:** The graph now renders correctly, but the default framing still asks
-operators to do extra work before they can evaluate strategy details.
-
-**Context:** Found during /design-review on 2026-05-31. Evidence is in
-`~/.gstack/projects/TBMoonwalker-moonwalker/designs/design-audit-20260531/screenshots/strategy-builder.png`.
-
 ### Extend sidestep campaign analytics beyond grouped replay polish
 
 **What:** If operators later need deeper reporting, add a campaign-first
@@ -62,6 +28,15 @@ actually warranted.
 current grouped replay and waiting-campaign context are still insufficient.
 
 ## Completed
+
+### Polish Statistics heatmap density and Strategy Builder graph readability
+
+**Completed:** Unreleased (2026-05-31)
+
+**What shipped:** Tightened the Statistics Trade Activity panel with compact
+padding and an inline closed-trade activity summary, removed duplicate heatmap
+computed state, and made Strategy Builder graph labels easier to read by using
+a less aggressive Rete fit scale plus larger node and control typography.
 
 ### Build the operator-facing Backtest UI after backend core stabilizes
 

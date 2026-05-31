@@ -53,7 +53,8 @@ function formatTooltip(timestamp: number, value: number | null | undefined): str
 .heatmap-container {
     width: 100%;
     overflow-x: auto;
-    padding-bottom: 2px;
+    line-height: 1;
+    padding-bottom: 0;
 }
 
 .heatmap-container :deep(.n-heatmap) {
