@@ -44,11 +44,10 @@ comparison math.
 **Completed:** Unreleased (2026-05-12)
 
 **What shipped:** Added one canonical lifecycle normalization seam on each
-side, made `trade_lifecycle_mode` the operator-facing source of truth, kept
-`sidestep_campaign_enabled` as a derived compatibility mirror, routed backend
+side, made `trade_mode` the operator-facing source of truth, routed backend
 capability checks and frontend config load, submit, readiness, and validation
-through the shared helpers, and added regression coverage for legacy
-boolean-only snapshots plus canonical-mode round trips.
+through the shared helpers, and added regression coverage for canonical-mode
+round trips.
 
 ### Confirm waiting sidestep campaigns keep owning capacity while flat
 

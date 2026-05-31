@@ -422,7 +422,7 @@ test('buildConfigSubmitPayload derives the weekly history default from timeframe
     assert.equal(parseField(payload, 'history_lookback_time').value, '5y')
 })
 
-test('buildConfigSubmitPayload normalizes legacy ema swing reverse strategy ids', () => {
+test('buildConfigSubmitPayload leaves strategy ids unchanged', () => {
     const payload = buildConfigSubmitPayload(
         createBaseOptions({
             dca: {
@@ -457,14 +457,14 @@ test('buildConfigSubmitPayload normalizes legacy ema swing reverse strategy ids'
         }),
     )
 
-    assert.equal(parseField(payload, 'dca_strategy').value, 'ema20_swing_reverse')
+    assert.equal(parseField(payload, 'dca_strategy').value, 'ema_swing_reverse')
     assert.equal(
         parseField(payload, 'sidestep_bearish_strategy').value,
-        'ema20_swing_reverse',
+        'ema_swing_reverse',
     )
     assert.equal(
         parseField(payload, 'sidestep_reentry_strategy').value,
-        'ema20_swing_reverse',
+        'ema_swing_reverse',
     )
 })
 

@@ -175,17 +175,6 @@ test('buildLoadedConfigState derives the weekly history default from timeframe',
     assert.equal(state.indicator.history_lookback_time, '5y')
 })
 
-test('buildLoadedConfigState reads legacy entry stretch multiplier', () => {
-    const state = buildLoadedConfigState(
-        {
-            autopilot_entry_stretch_max_multiplier: '1.75',
-        },
-        createLoadDefaults(),
-    )
-
-    assert.equal(state.autopilot.base_order_stretch_max_multiplier, 1.75)
-})
-
 test('buildLoadedConfigState ignores removed legacy autopilot max fund key', () => {
     const state = buildLoadedConfigState(
         {
@@ -211,7 +200,7 @@ test('buildLoadedConfigState ignores removed legacy filter shadow payload', () =
     assert.equal(state.filter.cmc_api_key, null)
 })
 
-test('buildLoadedConfigState normalizes legacy ema swing reverse strategy ids', () => {
+test('buildLoadedConfigState leaves strategy ids unchanged', () => {
     const state = buildLoadedConfigState(
         {
             dca_strategy: 'ema_swing_reverse',
@@ -221,9 +210,9 @@ test('buildLoadedConfigState normalizes legacy ema swing reverse strategy ids', 
         createLoadDefaults(),
     )
 
-    assert.equal(state.dca.strategy, 'ema20_swing_reverse')
-    assert.equal(state.dca.sidestep_reentry_strategy, 'ema20_swing_reverse')
-    assert.equal(state.dca.sidestep_bearish_strategy, 'ema20_swing_reverse')
+    assert.equal(state.dca.strategy, 'ema_swing_reverse')
+    assert.equal(state.dca.sidestep_reentry_strategy, 'ema_swing_reverse')
+    assert.equal(state.dca.sidestep_bearish_strategy, 'ema_swing_reverse')
 })
 
 test('buildLoadedConfigState reads the canonical sidestep trade_mode', () => {

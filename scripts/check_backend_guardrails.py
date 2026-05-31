@@ -70,15 +70,11 @@ def main() -> int:
 
     sys.path.insert(0, str(backend_dir))
     from service.strategy_builder import BUILTIN_STRATEGY_BY_SLUG
-    from service.strategy_capability import (
-        HIDDEN_STRATEGY_ALIASES,
-        REQUIRED_INDICATOR_METHODS,
-    )
+    from service.strategy_capability import REQUIRED_INDICATOR_METHODS
 
     errors: list[str] = []
-    hidden_aliases = set(HIDDEN_STRATEGY_ALIASES)
-    strategy_names = set(BUILTIN_STRATEGY_BY_SLUG) - hidden_aliases
-    mapped_names = set(REQUIRED_INDICATOR_METHODS.keys()) - hidden_aliases
+    strategy_names = set(BUILTIN_STRATEGY_BY_SLUG)
+    mapped_names = set(REQUIRED_INDICATOR_METHODS.keys())
 
     for strategy_name in sorted(strategy_names):
         if strategy_name not in REQUIRED_INDICATOR_METHODS:

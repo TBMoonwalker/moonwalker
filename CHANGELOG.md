@@ -4,6 +4,28 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Remove old-version upgrade bridges. Moonwalker no longer migrates legacy
+  trade-mode config keys (`trade_lifecycle_mode`, `dynamic_dca`,
+  `sidestep_campaign_enabled`), legacy Strategy Builder custom graph shapes,
+  old EMA strategy state tables, old campaign close-row percentage repairs, or
+  the `ema_swing_reverse` compatibility alias.
+- Remove legacy Autopilot and Backtest shims:
+  `autopilot_entry_stretch_max_multiplier` is no longer read as a fallback for
+  `autopilot_base_order_stretch_max_multiplier`, and direct `Backtest(...)`
+  callers may no longer pass `step_scale`.
+- This version intentionally breaks direct upgrades from old releases that
+  still depend on those bridges. Upgrade through `3.3.0.0` first, save the
+  current configuration, and export a fresh backup before installing this
+  version.
+
+### Removed
+
+- Delete obsolete EMA strategy-state models and Strategy Builder legacy
+  migration code so the runtime only supports the current graph IR and canonical
+  config keys.
+
 ## [3.3.0.0] - 2026-05-28
 
 ### Added

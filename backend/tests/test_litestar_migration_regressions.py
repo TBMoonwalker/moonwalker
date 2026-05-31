@@ -498,11 +498,11 @@ def test_config_multiple_rejects_removed_trade_mode_bridge_keys(monkeypatch) -> 
     assert response.status_code == 409
     assert response.json() == {
         "error": (
-            "Config key 'dynamic_dca' is no longer supported. "
+            "Config key 'dynamic_dca' was removed in this release. "
             "Use 'trade_mode' instead."
         ),
         "message": (
-            "Config key 'dynamic_dca' is no longer supported. "
+            "Config key 'dynamic_dca' was removed in this release. "
             "Use 'trade_mode' instead."
         ),
     }

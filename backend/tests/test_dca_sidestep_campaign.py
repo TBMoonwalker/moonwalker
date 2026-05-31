@@ -22,7 +22,7 @@ def test_sidestep_campaign_service_only_enables_on_spot_market() -> None:
     assert (
         SpotSidestepCampaignService.is_enabled(
             {
-                "sidestep_campaign_enabled": True,
+                "trade_mode": "sidestep",
                 "market": "spot",
             }
         )
@@ -31,7 +31,7 @@ def test_sidestep_campaign_service_only_enables_on_spot_market() -> None:
     assert (
         SpotSidestepCampaignService.is_enabled(
             {
-                "sidestep_campaign_enabled": True,
+                "trade_mode": "sidestep",
                 "market": "future",
             }
         )
@@ -120,7 +120,7 @@ async def test_process_ticker_data_uses_bearish_sidestep_exit_before_dca(
         {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 95.0}},
         {
             "dca": True,
-            "sidestep_campaign_enabled": True,
+            "trade_mode": "sidestep",
             "sidestep_bearish_strategy": "ema_down",
             "tp": 10.0,
         },
@@ -187,7 +187,7 @@ async def test_process_ticker_data_logs_waiting_statistics_for_flat_sidestep_tra
     await dca.process_ticker_data(
         {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 100.0}},
         {
-            "trade_lifecycle_mode": "sidestep_reentry",
+            "trade_mode": "sidestep",
             "market": "spot",
         },
     )
@@ -272,7 +272,7 @@ async def test_process_ticker_data_skips_waiting_reentry_when_mission_paused(
     await dca.process_ticker_data(
         {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 100.0}},
         {
-            "trade_lifecycle_mode": "sidestep_reentry",
+            "trade_mode": "sidestep",
             "market": "spot",
         },
     )
@@ -367,7 +367,7 @@ async def test_process_ticker_data_logs_sidestep_gate_without_active_trade(
     await dca.process_ticker_data(
         {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 100.0}},
         {
-            "trade_lifecycle_mode": "sidestep_reentry",
+            "trade_mode": "sidestep",
             "market": "spot",
         },
     )
@@ -411,7 +411,7 @@ async def test_attempt_waiting_reentry_uses_reserved_quote_from_waiting_trade(
     monkeypatch.setattr(dca.orders, "receive_buy_order", fake_receive_buy_order)
 
     dca.config = {
-        "trade_lifecycle_mode": "sidestep_reentry",
+        "trade_mode": "sidestep",
         "market": "spot",
         "sidestep_reentry_strategy": "ema20_swing",
         "timeframe": "4h",
@@ -515,7 +515,7 @@ async def test_process_ticker_data_logs_exit_tp_gate_before_bearish_strategy(
     await dca.process_ticker_data(
         {"type": "ticker_price", "ticker": {"symbol": "BTC/USDT", "price": 111.0}},
         {
-            "trade_lifecycle_mode": "sidestep_reentry",
+            "trade_mode": "sidestep",
             "market": "spot",
             "tp": 10.0,
         },
@@ -704,7 +704,7 @@ async def test_activate_campaign_submits_manual_reentry_buy(
 
     service = SpotSidestepCampaignService()
     service.config = {
-        "trade_lifecycle_mode": "sidestep_reentry",
+        "trade_mode": "sidestep",
         "market": "spot",
         "timeframe": "4h",
         "bo": 50.0,
@@ -764,7 +764,7 @@ async def test_ensure_campaign_for_open_trade_repairs_stale_runtime_state(
     campaign_id = await service.ensure_campaign_for_open_trade(
         {"symbol": "BTC/USDT", "deal_id": "deal-stale-1"},
         {
-            "trade_lifecycle_mode": "sidestep_reentry",
+            "trade_mode": "sidestep",
             "market": "spot",
         },
     )

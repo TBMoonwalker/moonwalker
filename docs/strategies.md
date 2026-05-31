@@ -14,8 +14,7 @@ already-consumed signal.
 
 Comparison input ports are named `value1` and `value2`. For example,
 `value1 greater_than value2` means the first connected value must be above the
-second connected value. Legacy graphs that still contain `left` and `right`
-ports are normalized to `value1` and `value2`.
+second connected value.
 
 ## Indicator
 
@@ -55,7 +54,7 @@ Reads a close price from recent candle history.
 Parameters:
 - `lookback`: number of candles to load.
 - `sample`: `current` for the latest closed value, or `previous` for the prior
-  closed value. Some migrated built-ins also use `two_back` for the candle before
+  closed value. Some built-ins also use `two_back` for the candle before
   `previous`.
 
 ## Low Price
@@ -103,12 +102,6 @@ setup is already qualified.
 
 Parameters:
 - `state_key`: persisted state namespace for this graph.
-
-## EMA Swing State
-
-Legacy compatibility node for old EMA swing graphs. New editable graphs should
-prefer explicit indicator, close price, comparison, higher swing-low state, and
-all-conditions nodes.
 
 ## Fresh Signal State
 

@@ -188,13 +188,13 @@ def test_capital_budget_buffer_accepts_ui_percent_and_api_ratio() -> None:
     assert ratio_input.required_quote == 108.0
 
 
-def test_capital_budget_buffer_is_ignored_for_static_dca() -> None:
+def test_capital_budget_buffer_is_ignored_for_sidestep_mode() -> None:
     result = capital_budget_logic.evaluate_capital_budget(
         {
             "capital_max_fund": 10_000,
             "capital_reserve_safety_orders": True,
             "capital_budget_buffer_pct": 50,
-            "dynamic_dca": False,
+            "trade_mode": "sidestep",
             "so": 10,
             "mstc": 2,
             "os": 2,

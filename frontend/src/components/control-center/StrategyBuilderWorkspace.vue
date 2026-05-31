@@ -528,7 +528,6 @@ function isValueNode(node: StrategyNode): boolean {
         'high_price',
         'constant_value',
         'indicator',
-        'ema_indicator',
     ].includes(node.type)
 }
 
@@ -542,10 +541,8 @@ function nodeTitle(node: StrategyNode): string {
             return `${value1} ${operator} ${value2}`
         }
     }
-    if (node.type === 'indicator' || node.type === 'ema_indicator') {
-        const indicator = String(
-            node.type === 'ema_indicator' ? 'ema' : node.params?.indicator ?? 'indicator',
-        )
+    if (node.type === 'indicator') {
+        const indicator = String(node.params?.indicator ?? 'indicator')
         const length = node.params?.length ? ` ${node.params.length}` : ''
         const sample = indicatorUsesSample(node) ? ` ${sampleLabel(node.params?.sample)}` : ''
         return `${indicatorLabel(indicator)}${length}${sample}`

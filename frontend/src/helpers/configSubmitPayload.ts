@@ -176,13 +176,6 @@ export interface BuildConfigSubmitPayloadOptions {
 
 export type ConfigSubmitPayload = Record<string, ConfigUpdatePayload>
 
-function normalizeStrategyName(value: string | null): string | null {
-    if (value === 'ema_swing_reverse') {
-        return 'ema20_swing_reverse'
-    }
-    return value
-}
-
 export function buildConfigSubmitPayload(
     options: BuildConfigSubmitPayloadOptions,
 ): ConfigSubmitPayload {
@@ -292,10 +285,7 @@ export function buildConfigSubmitPayload(
         watcher_ohlcv: serializeConfigValue(exchange.watcher_ohlcv || false, 'bool'),
         dca: serializeConfigValue(dca.enabled || false, 'bool'),
         trade_mode: serializeConfigValue(tradeMode, 'str'),
-        dca_strategy: serializeConfigValue(
-            normalizeStrategyName(toNullableConfigString(dca.strategy)),
-            'str',
-        ),
+        dca_strategy: serializeConfigValue(toNullableConfigString(dca.strategy), 'str'),
         trailing_tp: serializeConfigValue(dca.trailing_tp || false, 'float'),
         max_bots: serializeConfigValue(dca.max_bots || false, 'int'),
         bo: serializeConfigValue(dca.bo || false, 'int'),
@@ -342,15 +332,11 @@ export function buildConfigSubmitPayload(
             'float',
         ),
         sidestep_bearish_strategy: serializeConfigValue(
-            normalizeStrategyName(
-                toNullableConfigString(dca.sidestep_bearish_strategy),
-            ),
+            toNullableConfigString(dca.sidestep_bearish_strategy),
             'str',
         ),
         sidestep_reentry_strategy: serializeConfigValue(
-            normalizeStrategyName(
-                toNullableConfigString(dca.sidestep_reentry_strategy),
-            ),
+            toNullableConfigString(dca.sidestep_reentry_strategy),
             'str',
         ),
         sidestep_reentry_cooldown_candles: serializeConfigValue(

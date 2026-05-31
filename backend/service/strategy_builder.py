@@ -95,16 +95,6 @@ BUILTIN_STRATEGIES: tuple[BuiltinStrategySpec, ...] = (
         required_methods=("calculate_ema", "get_close_price"),
     ),
     BuiltinStrategySpec(
-        slug="ema_swing_reverse",
-        name="EMA swing reverse",
-        description="Compatibility alias for EMA20 swing reverse.",
-        node_type="all",
-        params={"direction": "bearish", "state_key": "ema20_swing_reverse:v3"},
-        min_history_candles=200,
-        required_methods=("calculate_ema", "get_close_price"),
-        hidden=True,
-    ),
-    BuiltinStrategySpec(
         slug="bollinger_buy",
         name="Bollinger Buy",
         description=(
@@ -234,7 +224,7 @@ def _json_loads(value: str | None, fallback: Any) -> Any:
 
 def build_builtin_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
     """Return the Moonwalker IR for a built-in strategy."""
-    if spec.slug in {"ema20_swing", "ema20_swing_reverse", "ema_swing_reverse"}:
+    if spec.slug in {"ema20_swing", "ema20_swing_reverse"}:
         return _build_ema20_swing_ir(spec)
     if spec.slug == "ema_down":
         return _build_ema_down_ir(spec)
@@ -903,17 +893,12 @@ def validate_strategy_ir(ir: dict[str, Any]) -> dict[str, Any]:
     node_by_id: dict[str, dict[str, Any]] = {}
     required_methods: set[str] = set()
     min_history_candles = 0
-    legacy_node_types = {
-        "ema_indicator",
-        "ema_swing",
-    }
-    palette_types = {node["type"] for node in NODE_PALETTE} | legacy_node_types
+    palette_types = {node["type"] for node in NODE_PALETTE}
     data_node_types = {
         "constant_value",
         "close_price",
         "low_price",
         "high_price",
-        "ema_indicator",
         "indicator",
     }
     for raw_node in nodes:
@@ -1158,8 +1143,6 @@ def _node_runtime_requirements(node: dict[str, Any]) -> tuple[tuple[str, ...], i
         return (("get_high_price",), lookback)
     if node_type in {"fresh_signal_state", "swing_low_state"}:
         return (("calculate_ema", "get_close_price"), 200)
-    if node_type == "ema_swing":
-        return (("calculate_ema", "get_close_price"), 200)
     return ((), 0)
 
 
@@ -1230,7 +1213,6 @@ async def seed_builtin_strategies() -> None:
             if version.activated_at is None:
                 version.activated_at = datetime.now(timezone.utc)
             await version.save()
-    await migrate_legacy_custom_strategy_graphs()
 
 
 async def _delete_retired_builtin_strategies() -> None:
@@ -1252,74 +1234,6 @@ async def _delete_retired_builtin_strategies() -> None:
         invalidate_strategy_runtime_cache(slug)
 
 
-async def migrate_legacy_custom_strategy_graphs() -> None:
-    """Promote old generated custom graphs to the current editable IR shape."""
-    rows = await model.StrategyDefinition.filter(is_builtin=False)
-    for definition in rows:
-        active_version = await _get_active_version(definition)
-        if active_version is None:
-            continue
-        active_ir = _json_loads(active_version.ir_json, {})
-        if not isinstance(active_ir, dict):
-            continue
-
-        next_ir: dict[str, Any] | None = None
-        source_slug = str(
-            definition.duplicated_from
-            or active_ir.get("metadata", {}).get("duplicated_from")
-            or ""
-        )
-        if (
-            source_slug in BUILTIN_STRATEGY_BY_SLUG
-            and not _is_legacy_builtin_copy_ir(
-                build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG[source_slug]),
-                BUILTIN_STRATEGY_BY_SLUG[source_slug],
-            )
-            and (
-                _is_legacy_builtin_copy_ir(
-                    active_ir,
-                    BUILTIN_STRATEGY_BY_SLUG[source_slug],
-                )
-                or _is_legacy_ema_down_relation_ir(active_ir, source_slug)
-                or _is_legacy_ema_low_rebound_ir(active_ir, source_slug)
-                or _is_legacy_ema20_single_node_ir(active_ir, source_slug)
-                or _is_legacy_ema20_semantic_ir(active_ir, source_slug)
-                or _is_legacy_ema20_if_logic_ir(active_ir, source_slug)
-                or _is_legacy_ema20_left_right_port_ir(active_ir, source_slug)
-            )
-        ):
-            next_ir = _customize_builtin_ir_for_definition(
-                build_builtin_ir(BUILTIN_STRATEGY_BY_SLUG[source_slug]),
-                definition,
-                source_slug,
-            )
-        elif _is_legacy_blank_starter_ir(active_ir):
-            next_ir = _empty_custom_ir(definition.slug, definition.name)
-        else:
-            next_ir = _migrate_legacy_indicator_nodes_ir(active_ir)
-
-        if next_ir is None:
-            continue
-
-        await _promote_migrated_custom_ir(definition, next_ir)
-
-
-def _customize_builtin_ir_for_definition(
-    ir: dict[str, Any],
-    definition: model.StrategyDefinition,
-    source_slug: str,
-) -> dict[str, Any]:
-    """Return a built-in IR copied into a custom definition identity."""
-    next_ir = copy.deepcopy(ir)
-    next_ir["slug"] = definition.slug
-    next_ir["name"] = definition.name
-    next_ir["description"] = definition.description or next_ir.get("description") or ""
-    next_ir["kind"] = STRATEGY_KIND_CUSTOM
-    next_ir.setdefault("metadata", {})["duplicated_from"] = source_slug
-    next_ir["metadata"]["migration"] = "legacy_custom_graph_decomposition"
-    return next_ir
-
-
 def _empty_custom_ir(slug: str, name: str) -> dict[str, Any]:
     """Return an empty custom strategy graph."""
     return {
@@ -1335,224 +1249,6 @@ def _empty_custom_ir(slug: str, name: str) -> dict[str, Any]:
     }
 
 
-def _migrate_legacy_indicator_nodes_ir(ir: dict[str, Any]) -> dict[str, Any] | None:
-    """Return an IR with old indicator nodes converted to the generic node."""
-    nodes = ir.get("nodes")
-    if not isinstance(nodes, list):
-        return None
-
-    changed = False
-    next_ir = copy.deepcopy(ir)
-    next_nodes = next_ir.get("nodes")
-    if not isinstance(next_nodes, list):
-        return None
-
-    for node in next_nodes:
-        if not isinstance(node, dict):
-            continue
-        node_type = str(node.get("type") or "")
-        raw_params = node.get("params")
-        params: dict[str, Any] = raw_params if isinstance(raw_params, dict) else {}
-        if node_type == "ema_indicator":
-            node["type"] = "indicator"
-            node["params"] = {"indicator": "ema", **params}
-            changed = True
-
-    if not changed:
-        return None
-    metadata = next_ir.setdefault("metadata", {})
-    if isinstance(metadata, dict):
-        metadata["migration"] = "generic_indicator_node"
-    return next_ir
-
-
-async def _promote_migrated_custom_ir(
-    definition: model.StrategyDefinition,
-    next_ir: dict[str, Any],
-) -> None:
-    """Persist a migrated custom graph as a new active version."""
-    validation = validate_strategy_ir(next_ir)
-    active_version = definition.active_version or 0
-    next_version = active_version + 1
-    existing = await model.StrategyVersion.get_or_none(
-        strategy_slug=definition.slug,
-        version=next_version,
-    )
-    if existing is not None:
-        return
-    await model.StrategyVersion.create(
-        strategy_slug=definition.slug,
-        version=next_version,
-        ir_json=_json_dumps(next_ir),
-        validation_json=_json_dumps(validation),
-        explanation=build_strategy_explanation(next_ir, validation),
-        activated_at=datetime.now(timezone.utc),
-    )
-    definition.active_version = next_version
-    definition.draft_version = max(definition.draft_version, next_version)
-    definition.validation_status = validation["status"]
-    definition.lock_version += 1
-    await definition.save()
-
-
-def _is_legacy_builtin_copy_ir(
-    ir: dict[str, Any],
-    source_spec: BuiltinStrategySpec,
-) -> bool:
-    """Return whether a custom copy still uses the old single-node seed."""
-    nodes = ir.get("nodes")
-    if not isinstance(nodes, list) or len(nodes) != 1:
-        return False
-    node = nodes[0]
-    if not isinstance(node, dict):
-        return False
-    return (
-        str(ir.get("root") or "") == "decision"
-        and str(node.get("id") or "") == "decision"
-        and str(node.get("type") or "") == source_spec.node_type
-        and (node.get("params") if isinstance(node.get("params"), dict) else {})
-        == source_spec.params
-    )
-
-
-def _is_legacy_blank_starter_ir(ir: dict[str, Any]) -> bool:
-    """Return whether a blank strategy was created with the old starter node."""
-    metadata = ir.get("metadata") if isinstance(ir.get("metadata"), dict) else {}
-    if metadata.get("source") != "strategy_builder_blank":
-        return False
-    nodes = ir.get("nodes")
-    if not isinstance(nodes, list) or len(nodes) != 1:
-        return False
-    node = nodes[0]
-    if not isinstance(node, dict):
-        return False
-    return (
-        str(ir.get("root") or "") == "decision"
-        and str(node.get("id") or "") == "decision"
-        and str(node.get("type") or "") in {"indicator_compare", "comparison"}
-    )
-
-
-def _is_legacy_ema_down_relation_ir(ir: dict[str, Any], source_slug: str) -> bool:
-    """Return whether a custom EMA down copy uses the removed relation node."""
-    if source_slug != "ema_down":
-        return False
-    nodes = ir.get("nodes")
-    if not isinstance(nodes, list) or len(nodes) != 1:
-        return False
-    node = nodes[0]
-    if not isinstance(node, dict):
-        return False
-    params = node.get("params") if isinstance(node.get("params"), dict) else {}
-    return (
-        str(ir.get("root") or "") == "decision"
-        and str(node.get("id") or "") == "decision"
-        and str(node.get("type") or "") == "ema_relation"
-        and params == {"left": 20, "operator": "less_than", "right": 50}
-    )
-
-
-def _is_legacy_ema_low_rebound_ir(ir: dict[str, Any], source_slug: str) -> bool:
-    """Return whether a custom EMA low copy uses the removed shortcut node."""
-    if source_slug != "ema_low":
-        return False
-    nodes = ir.get("nodes")
-    if not isinstance(nodes, list) or len(nodes) != 1:
-        return False
-    node = nodes[0]
-    if not isinstance(node, dict):
-        return False
-    params = node.get("params") if isinstance(node.get("params"), dict) else {}
-    return (
-        str(ir.get("root") or "") == "decision"
-        and str(node.get("id") or "") == "decision"
-        and str(node.get("type") or "") == "ema_low_rebound"
-        and params == {}
-    )
-
-
-def _is_legacy_ema20_single_node_ir(ir: dict[str, Any], source_slug: str) -> bool:
-    """Return whether a custom EMA20 copy uses the removed shortcut node."""
-    if source_slug not in {"ema20_swing", "ema20_swing_reverse", "ema_swing_reverse"}:
-        return False
-    nodes = ir.get("nodes")
-    if not isinstance(nodes, list) or len(nodes) != 1:
-        return False
-    node = nodes[0]
-    if not isinstance(node, dict):
-        return False
-    return (
-        str(ir.get("root") or "") == "decision"
-        and str(node.get("id") or "") == "decision"
-        and str(node.get("type") or "") == "ema20_swing"
-    )
-
-
-def _is_legacy_ema20_semantic_ir(ir: dict[str, Any], source_slug: str) -> bool:
-    """Return whether a custom EMA20 copy uses the prior semantic-node graph."""
-    if source_slug not in {"ema20_swing", "ema20_swing_reverse", "ema_swing_reverse"}:
-        return False
-    nodes = ir.get("nodes")
-    if not isinstance(nodes, list):
-        return False
-    node_by_id = {str(node.get("id")): node for node in nodes if isinstance(node, dict)}
-    required_types = {
-        "ema20": "ema_indicator",
-        "close": "close_price",
-        "ema20_trend": "ema_trend",
-        "price_position": "price_indicator_relation",
-        "fresh_state": "fresh_signal_state",
-        "decision": "all",
-    }
-    return all(
-        node_id in node_by_id
-        and str(node_by_id[node_id].get("type") or "") == node_type
-        for node_id, node_type in required_types.items()
-    )
-
-
-def _is_legacy_ema20_if_logic_ir(ir: dict[str, Any], source_slug: str) -> bool:
-    """Return whether a custom EMA20 copy uses the prior JSON IF node."""
-    if source_slug not in {"ema20_swing", "ema20_swing_reverse", "ema_swing_reverse"}:
-        return False
-    nodes = ir.get("nodes")
-    if not isinstance(nodes, list):
-        return False
-    node_by_id = {str(node.get("id")): node for node in nodes if isinstance(node, dict)}
-    required_types = {
-        "ema20_previous": "ema_indicator",
-        "ema20_current": "ema_indicator",
-        "close_current": "close_price",
-        "decision": "if_logic",
-    }
-    return all(
-        node_id in node_by_id
-        and str(node_by_id[node_id].get("type") or "") == node_type
-        for node_id, node_type in required_types.items()
-    )
-
-
-def _is_legacy_ema20_left_right_port_ir(
-    ir: dict[str, Any],
-    source_slug: str,
-) -> bool:
-    """Return whether an EMA20 copy uses prior left/right comparison ports."""
-    if source_slug not in {"ema20_swing", "ema20_swing_reverse", "ema_swing_reverse"}:
-        return False
-    nodes = ir.get("nodes")
-    connections = ir.get("connections")
-    if not isinstance(nodes, list) or not isinstance(connections, list):
-        return False
-    node_by_id = {str(node.get("id")): node for node in nodes if isinstance(node, dict)}
-    if str(node_by_id.get("decision", {}).get("type") or "") != "all":
-        return False
-    return any(
-        isinstance(connection, dict)
-        and str(connection.get("target_input") or "") in {"left", "right"}
-        for connection in connections
-    )
-
-
 async def list_strategy_summaries(include_hidden: bool = False) -> list[dict[str, Any]]:
     """Return strategy summaries for selectors and the builder list."""
     await seed_builtin_strategies()
@@ -1566,7 +1262,7 @@ async def list_strategy_summaries(include_hidden: bool = False) -> list[dict[str
 
 
 async def list_strategy_options() -> list[str]:
-    """Return public strategy slugs for legacy selector compatibility."""
+    """Return public strategy slugs for selectors."""
     summaries = await list_strategy_summaries(include_hidden=False)
     return [str(summary["slug"]) for summary in summaries if summary["available"]]
 

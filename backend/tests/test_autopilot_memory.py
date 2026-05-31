@@ -30,7 +30,7 @@ def _config(**overrides):
     return payload
 
 
-def test_base_order_stretch_multiplier_uses_new_key_with_legacy_fallback() -> None:
+def test_base_order_stretch_multiplier_uses_canonical_key_only() -> None:
     assert (
         _base_order_delta_limit(
             12.0,
@@ -50,7 +50,7 @@ def test_base_order_stretch_multiplier_uses_new_key_with_legacy_fallback() -> No
                 "autopilot_entry_stretch_max_multiplier": 1.75,
             }
         )
-        == 1.75
+        == 1.0
     )
     assert (
         _base_order_stretch_multiplier(

@@ -258,12 +258,10 @@ async def test_seed_removes_retired_builtin_strategy_rows(strategy_db) -> None:
 
 
 @pytest.mark.asyncio
-async def test_seed_migrates_legacy_blank_custom_starter_to_empty_graph(
-    strategy_db,
-) -> None:
+async def test_seed_leaves_legacy_custom_graphs_unmigrated(strategy_db) -> None:
     definition = await model.StrategyDefinition.create(
-        slug="custom_legacy_blank",
-        name="Legacy blank",
+        slug="custom_legacy_graph",
+        name="Legacy graph",
         description="",
         is_builtin=False,
         active_version=1,
@@ -285,13 +283,13 @@ async def test_seed_migrates_legacy_blank_custom_starter_to_empty_graph(
                     {
                         "id": "decision",
                         "type": "indicator_compare",
-                        "label": "Legacy starter condition",
+                        "label": "Legacy condition",
                         "params": {
                             "indicator": "legacy_signal",
                             "operator": "equals",
                             "value": "up",
                         },
-                    }
+                    },
                 ],
                 "connections": [],
                 "metadata": {"source": "strategy_builder_blank"},
@@ -305,325 +303,11 @@ async def test_seed_migrates_legacy_blank_custom_starter_to_empty_graph(
     detail = await get_strategy_detail(definition.slug)
 
     assert detail is not None
-    assert detail["active_version"] == 2
-    assert detail["ir"]["nodes"] == []
-    assert detail["validation"]["status"] == "invalid"
-
-
-@pytest.mark.asyncio
-async def test_seed_migrates_legacy_custom_indicator_nodes_to_generic_indicator(
-    strategy_db,
-) -> None:
-    definition = await model.StrategyDefinition.create(
-        slug="custom_legacy_indicators",
-        name="Legacy indicators",
-        description="",
-        is_builtin=False,
-        active_version=1,
-        draft_version=1,
-        validation_status="valid",
+    assert detail["active_version"] == 1
+    assert detail["ir"]["nodes"][0]["type"] == "indicator_compare"
+    assert (
+        await model.StrategyVersion.filter(strategy_slug=definition.slug).count() == 1
     )
-    await model.StrategyVersion.create(
-        strategy_slug=definition.slug,
-        version=1,
-        ir_json=json.dumps(
-            {
-                "schema_version": 1,
-                "slug": definition.slug,
-                "name": definition.name,
-                "description": "",
-                "kind": "custom",
-                "root": "decision",
-                "nodes": [
-                    {
-                        "id": "ema20",
-                        "type": "ema_indicator",
-                        "label": "EMA 20 current",
-                        "params": {"length": 20, "sample": "current"},
-                    },
-                    {
-                        "id": "ema50",
-                        "type": "ema_indicator",
-                        "label": "EMA 50 current",
-                        "params": {"length": 50, "sample": "current"},
-                    },
-                    {
-                        "id": "decision",
-                        "type": "comparison",
-                        "label": "EMA 20 above EMA 50",
-                        "params": {"comparison": "greater_than"},
-                    },
-                ],
-                "connections": [
-                    {
-                        "source": "ema20",
-                        "target": "decision",
-                        "target_input": "value1",
-                    },
-                    {
-                        "source": "ema50",
-                        "target": "decision",
-                        "target_input": "value2",
-                    },
-                ],
-                "metadata": {"source": "custom"},
-            }
-        ),
-        validation_json=json.dumps({"status": "valid"}),
-        explanation="legacy",
-    )
-
-    await seed_builtin_strategies()
-    detail = await get_strategy_detail(definition.slug)
-
-    assert detail is not None
-    assert detail["active_version"] == 2
-    assert {node["type"] for node in detail["ir"]["nodes"]} == {
-        "comparison",
-        "indicator",
-    }
-    indicator_params = {
-        node["id"]: node["params"]
-        for node in detail["ir"]["nodes"]
-        if node["type"] == "indicator"
-    }
-    assert indicator_params["ema20"] == {
-        "indicator": "ema",
-        "length": 20,
-        "sample": "current",
-    }
-    assert indicator_params["ema50"] == {
-        "indicator": "ema",
-        "length": 50,
-        "sample": "current",
-    }
-
-
-@pytest.mark.asyncio
-async def test_seed_migrates_legacy_custom_ema_down_relation_to_decomposed_graph(
-    strategy_db,
-) -> None:
-    definition = await model.StrategyDefinition.create(
-        slug="custom_legacy_ema_down",
-        name="Legacy EMA down",
-        description="",
-        is_builtin=False,
-        duplicated_from="ema_down",
-        active_version=1,
-        draft_version=1,
-        validation_status="valid",
-    )
-    await model.StrategyVersion.create(
-        strategy_slug=definition.slug,
-        version=1,
-        ir_json=json.dumps(
-            {
-                "schema_version": 1,
-                "slug": definition.slug,
-                "name": definition.name,
-                "description": "",
-                "kind": "custom",
-                "root": "decision",
-                "nodes": [
-                    {
-                        "id": "decision",
-                        "type": "ema_relation",
-                        "label": "EMA down",
-                        "params": {"left": 20, "operator": "less_than", "right": 50},
-                    }
-                ],
-                "connections": [],
-                "metadata": {"duplicated_from": "ema_down"},
-            }
-        ),
-        validation_json=json.dumps({"status": "valid"}),
-        explanation="legacy",
-    )
-
-    await seed_builtin_strategies()
-    detail = await get_strategy_detail(definition.slug)
-
-    assert detail is not None
-    assert detail["active_version"] == 2
-    assert detail["duplicated_from"] == "ema_down"
-    assert {node["type"] for node in detail["ir"]["nodes"]} >= {
-        "indicator",
-        "comparison",
-    }
-    assert "ema_relation" not in {node["type"] for node in detail["ir"]["nodes"]}
-
-
-@pytest.mark.asyncio
-async def test_seed_migrates_legacy_custom_ema_low_rebound_to_decomposed_graph(
-    strategy_db,
-) -> None:
-    definition = await model.StrategyDefinition.create(
-        slug="custom_legacy_ema_low",
-        name="Legacy EMA low",
-        description="",
-        is_builtin=False,
-        duplicated_from="ema_low",
-        active_version=1,
-        draft_version=1,
-        validation_status="valid",
-    )
-    await model.StrategyVersion.create(
-        strategy_slug=definition.slug,
-        version=1,
-        ir_json=json.dumps(
-            {
-                "schema_version": 1,
-                "slug": definition.slug,
-                "name": definition.name,
-                "description": "",
-                "kind": "custom",
-                "root": "decision",
-                "nodes": [
-                    {
-                        "id": "decision",
-                        "type": "ema_low_rebound",
-                        "label": "EMA low rebound",
-                        "params": {},
-                    }
-                ],
-                "connections": [],
-                "metadata": {"duplicated_from": "ema_low"},
-            }
-        ),
-        validation_json=json.dumps({"status": "valid"}),
-        explanation="legacy",
-    )
-
-    await seed_builtin_strategies()
-    detail = await get_strategy_detail(definition.slug)
-
-    assert detail is not None
-    assert detail["active_version"] == 2
-    assert detail["duplicated_from"] == "ema_low"
-    assert {node["type"] for node in detail["ir"]["nodes"]} >= {
-        "indicator",
-        "close_price",
-        "comparison",
-        "all",
-    }
-    assert "ema_low_rebound" not in {node["type"] for node in detail["ir"]["nodes"]}
-
-
-@pytest.mark.asyncio
-async def test_seed_migrates_legacy_custom_ema20_copy_to_decomposed_graph(
-    strategy_db,
-) -> None:
-    definition = await model.StrategyDefinition.create(
-        slug="custom_legacy_ema20",
-        name="Legacy EMA20",
-        description="",
-        is_builtin=False,
-        duplicated_from="ema20_swing",
-        active_version=1,
-        draft_version=1,
-        validation_status="valid",
-    )
-    await model.StrategyVersion.create(
-        strategy_slug=definition.slug,
-        version=1,
-        ir_json=json.dumps(
-            {
-                "schema_version": 1,
-                "slug": definition.slug,
-                "name": definition.name,
-                "description": "",
-                "kind": "custom",
-                "root": "decision",
-                "nodes": [
-                    {
-                        "id": "decision",
-                        "type": "ema20_swing",
-                        "label": "EMA20 swing",
-                        "params": {
-                            "direction": "bullish",
-                            "state_key": "ema20_swing:v2",
-                        },
-                    }
-                ],
-                "connections": [],
-                "metadata": {"duplicated_from": "ema20_swing"},
-            }
-        ),
-        validation_json=json.dumps({"status": "valid"}),
-        explanation="legacy",
-    )
-
-    await seed_builtin_strategies()
-    detail = await get_strategy_detail(definition.slug)
-
-    assert detail is not None
-    assert detail["active_version"] == 2
-    assert detail["duplicated_from"] == "ema20_swing"
-    assert {node["type"] for node in detail["ir"]["nodes"]} >= {
-        "indicator",
-        "close_price",
-        "comparison",
-        "fresh_signal_state",
-        "all",
-    }
-    assert "ema20_swing" not in {node["type"] for node in detail["ir"]["nodes"]}
-
-
-@pytest.mark.asyncio
-async def test_seed_migrates_legacy_custom_ema_swing_copy_to_decomposed_graph(
-    strategy_db,
-) -> None:
-    definition = await model.StrategyDefinition.create(
-        slug="custom_legacy_ema_swing",
-        name="Legacy EMA swing",
-        description="",
-        is_builtin=False,
-        duplicated_from="ema_swing",
-        active_version=1,
-        draft_version=1,
-        validation_status="valid",
-    )
-    await model.StrategyVersion.create(
-        strategy_slug=definition.slug,
-        version=1,
-        ir_json=json.dumps(
-            {
-                "schema_version": 1,
-                "slug": definition.slug,
-                "name": definition.name,
-                "description": "",
-                "kind": "custom",
-                "root": "decision",
-                "nodes": [
-                    {
-                        "id": "decision",
-                        "type": "ema_swing",
-                        "label": "EMA swing",
-                        "params": {"state_key": "ema_swing"},
-                    }
-                ],
-                "connections": [],
-                "metadata": {"duplicated_from": "ema_swing"},
-            }
-        ),
-        validation_json=json.dumps({"status": "valid"}),
-        explanation="legacy",
-    )
-
-    await seed_builtin_strategies()
-    detail = await get_strategy_detail(definition.slug)
-
-    assert detail is not None
-    assert detail["active_version"] == 2
-    assert detail["duplicated_from"] == "ema_swing"
-    assert {node["type"] for node in detail["ir"]["nodes"]} >= {
-        "indicator",
-        "close_price",
-        "comparison",
-        "swing_low_state",
-        "all",
-    }
-    assert "ema_swing" not in {node["type"] for node in detail["ir"]["nodes"]}
 
 
 @pytest.mark.asyncio

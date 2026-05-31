@@ -1,7 +1,6 @@
 import os
 import sqlite3
 
-import model
 import pytest
 from service.database import (
     Database,
@@ -34,65 +33,6 @@ class _FakeConnection:
         if self._error is not None:
             raise self._error
         return len(self._rows), self._rows
-
-
-@pytest.mark.asyncio
-async def test_backfill_legacy_campaign_closed_trade_percentages_repairs_zero_cost_rows(
-    tmp_path, monkeypatch
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    await model.ClosedTrades.create(
-        symbol="BTC/USDT",
-        deal_id="deal-legacy-closed-1",
-        campaign_id="campaign-legacy-closed-1",
-        execution_history_complete=True,
-        so_count=0,
-        profit=15.0,
-        profit_percent=0.0,
-        amount=1.0,
-        cost=0.0,
-        tp_price=115.0,
-        avg_price=110.0,
-        open_date="2026-05-01 00:00:00+00:00",
-        close_date="2026-05-02 12:00:00+00:00",
-        duration="{}",
-        close_reason="take_profit",
-    )
-    await model.ClosedTrades.create(
-        symbol="ETH/USDT",
-        deal_id="deal-small-profit-1",
-        campaign_id="campaign-small-profit-1",
-        execution_history_complete=True,
-        so_count=0,
-        profit=0.01,
-        profit_percent=0.0,
-        amount=0.0,
-        cost=100.0,
-        tp_price=0.0,
-        avg_price=100.0,
-        open_date="2026-05-01 00:00:00+00:00",
-        close_date="2026-05-02 12:00:00+00:00",
-        duration="{}",
-        close_reason="take_profit",
-    )
-
-    database = Database()
-    database.db_url = f"sqlite://{db_path}"
-    await database._backfill_legacy_campaign_closed_trade_percentages()
-
-    repaired = await model.ClosedTrades.get(deal_id="deal-legacy-closed-1")
-    assert repaired.cost == pytest.approx(100.0)
-    assert repaired.profit_percent == pytest.approx(15.0)
-
-    untouched = await model.ClosedTrades.get(deal_id="deal-small-profit-1")
-    assert untouched.cost == pytest.approx(100.0)
-    assert untouched.profit_percent == pytest.approx(0.0)
-
-    await Tortoise.close_connections()
 
 
 @pytest.mark.parametrize(
@@ -435,12 +375,6 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
     monkeypatch.setattr(
         Database, "_backfill_trade_ledger_rows", _record("backfill_trade_ledger_rows")
     )
-    monkeypatch.setattr(
-        Database,
-        "_backfill_legacy_campaign_closed_trade_percentages",
-        _record("backfill_legacy_campaign_closed_trade_percentages"),
-    )
-
     await database.init()
 
     assert calls == [
@@ -454,7 +388,6 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "ensure_indexes",
         "repair_index_only_corruption_if_needed",
         "backfill_trade_ledger_rows",
-        "backfill_legacy_campaign_closed_trade_percentages",
     ]
 
 

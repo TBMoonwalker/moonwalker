@@ -70,9 +70,10 @@ def test_watcher_runtime_config_view_reuses_exchange_connection_settings() -> No
 def test_sidestep_campaign_config_view_normalizes_market_and_values() -> None:
     config = SidestepCampaignConfigView.from_config(
         {
-            "sidestep_campaign_enabled": True,
+            "trade_mode": "sidestep",
             "market": "  future  ",
             "sidestep_bearish_strategy": "  ema_down  ",
+            "sidestep_reentry_strategy": "ema20_swing",
             "sidestep_reentry_cooldown_candles": "3",
             "sidestep_reentry_requires_fresh_long_signal": False,
         }
@@ -89,9 +90,6 @@ def test_trade_lifecycle_config_view_prefers_canonical_mode() -> None:
     config = TradeLifecycleConfigView.from_config(
         {
             "trade_mode": " dynamic_dca ",
-            "trade_lifecycle_mode": " classic_dca ",
-            "dynamic_dca": True,
-            "sidestep_campaign_enabled": False,
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
             "sidestep_reentry_strategy": "ema20_swing",
@@ -129,10 +127,10 @@ def test_trade_lifecycle_config_view_prefers_canonical_mode() -> None:
     )
 
 
-def test_trade_lifecycle_config_view_falls_back_to_legacy_sidestep_flag() -> None:
+def test_trade_lifecycle_config_view_uses_canonical_sidestep_mode() -> None:
     config = TradeLifecycleConfigView.from_config(
         {
-            "sidestep_campaign_enabled": True,
+            "trade_mode": "sidestep",
             "market": "spot",
             "sidestep_bearish_strategy": "ema_down",
             "dca_strategy": "ema20_swing",
@@ -144,37 +142,17 @@ def test_trade_lifecycle_config_view_falls_back_to_legacy_sidestep_flag() -> Non
     assert config.reentry_strategy == "ema20_swing"
     assert (
         resolve_trade_mode_config(
-            {"sidestep_campaign_enabled": True},
+            {"trade_mode": "sidestep"},
             source="startup",
         ).lifecycle_mode
         == "sidestep_reentry"
     )
     assert (
         resolve_trade_mode_config(
-            {"sidestep_campaign_enabled": True},
+            {"trade_mode": "sidestep"},
             source="startup",
         ).sidestep_enabled
         is True
-    )
-
-
-def test_trade_lifecycle_config_view_parses_legacy_boolean_strings() -> None:
-    config = TradeLifecycleConfigView.from_config(
-        {
-            "trade_lifecycle_mode": None,
-            "sidestep_campaign_enabled": "false",
-        }
-    )
-
-    assert config.trade_mode == "dynamic_dca"
-    assert config.mode == "classic_dca"
-    assert config.enabled is False
-    assert (
-        resolve_trade_mode_config(
-            {"sidestep_campaign_enabled": "true"},
-            source="startup",
-        ).lifecycle_mode
-        == "sidestep_reentry"
     )
 
 
@@ -208,38 +186,10 @@ def test_dca_runtime_config_view_applies_tp_confirmation_defaults() -> None:
     assert config.trade_safety_order_budget_ratio == 0.95
 
 
-def test_trade_mode_config_rejects_deprecated_static_mode() -> None:
-    with pytest.raises(TradeModeConfigError, match="Static DCA mode"):
-        resolve_trade_mode_config(
-            {
-                "trade_lifecycle_mode": "classic_dca",
-                "dynamic_dca": False,
-            },
-            source="startup",
-        )
-
-
-def test_trade_mode_config_rejects_canonical_legacy_contradiction() -> None:
-    with pytest.raises(
-        TradeModeConfigError,
-        match="trade_mode contradicts the legacy compatibility fields",
-    ):
-        resolve_trade_mode_config(
-            {
-                "trade_mode": "sidestep",
-                "trade_lifecycle_mode": "classic_dca",
-                "dynamic_dca": True,
-                "sidestep_campaign_enabled": False,
-            },
-            source="startup",
-        )
-
-
 def test_trade_mode_config_requires_explicit_sidestep_reentry_on_save() -> None:
     startup_view = resolve_trade_mode_config(
         {
-            "trade_lifecycle_mode": "sidestep_reentry",
-            "sidestep_campaign_enabled": True,
+            "trade_mode": "sidestep",
             "dca_strategy": "ema20_swing",
         },
         source="startup",
@@ -255,8 +205,7 @@ def test_trade_mode_config_requires_explicit_sidestep_reentry_on_save() -> None:
     ):
         resolve_trade_mode_config(
             {
-                "trade_lifecycle_mode": "sidestep_reentry",
-                "sidestep_campaign_enabled": True,
+                "trade_mode": "sidestep",
                 "dca_strategy": "ema20_swing",
             },
             source="save",
@@ -279,7 +228,6 @@ def test_dca_runtime_config_view_normalizes_dynamic_dca_fields() -> None:
             "sl": "6.0",
             "trailing_tp": "1.25",
             "mstc": "5",
-            "dynamic_dca": True,
             "os": "1.5",
             "ss": "0.8",
             "sos": "2.5",

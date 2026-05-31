@@ -574,54 +574,6 @@ class Database:
                 )
                 existing_signatures.add(signature)
 
-    async def _backfill_legacy_campaign_closed_trade_percentages(self) -> None:
-        """Repair legacy campaign close summaries that lost principal quote."""
-        if not self.db_url.startswith("sqlite://"):
-            return
-
-        candidate_rows = await model.ClosedTrades.all().values(
-            "id",
-            "campaign_id",
-            "profit",
-            "profit_percent",
-            "cost",
-            "amount",
-            "tp_price",
-        )
-        repaired_count = 0
-        for row in candidate_rows:
-            campaign_id = str(row.get("campaign_id") or "").strip()
-            if not campaign_id:
-                continue
-
-            stored_profit_percent = float(row.get("profit_percent") or 0.0)
-            stored_cost = float(row.get("cost") or 0.0)
-            if abs(stored_profit_percent) > 1e-12 or stored_cost > 0:
-                continue
-
-            amount = float(row.get("amount") or 0.0)
-            sell_price = float(row.get("tp_price") or 0.0)
-            profit = float(row.get("profit") or 0.0)
-            if amount <= 0 or sell_price <= 0 or abs(profit) <= 1e-12:
-                continue
-
-            inferred_principal_quote = (amount * sell_price) - profit
-            if inferred_principal_quote <= 0:
-                continue
-
-            inferred_profit_percent = (profit / inferred_principal_quote) * 100
-            await model.ClosedTrades.filter(id=row["id"]).update(
-                cost=inferred_principal_quote,
-                profit_percent=inferred_profit_percent,
-            )
-            repaired_count += 1
-
-        if repaired_count > 0:
-            logging.info(
-                "Repaired %s legacy campaign closed-trade percentage rows.",
-                repaired_count,
-            )
-
     async def _backfill_trade_replay_candles(self) -> None:
         """Backfill or repair per-deal replay candles for existing closed trades."""
         if not self.db_url.startswith("sqlite://"):
@@ -800,67 +752,7 @@ class Database:
 
     async def _run_backfill_init_steps(self) -> None:
         """Run init-time backfills required before the runtime starts."""
-        await self._migrate_legacy_strategy_state()
         await self._backfill_trade_ledger_rows()
-        await self._backfill_legacy_campaign_closed_trade_percentages()
-
-    async def _migrate_legacy_strategy_state(self) -> None:
-        """Copy legacy EMA strategy state into typed Strategy Builder graph state."""
-        try:
-            if await model.StrategyGraphState.all().limit(1).count() > 0:
-                return
-        except RuntimeError as exc:
-            if "No TortoiseContext" not in str(exc):
-                raise
-            return
-
-        migrated = 0
-        ema_swing_rows = await model.EmaSwingState.all()
-        for row in ema_swing_rows:
-            await model.StrategyGraphState.update_or_create(
-                defaults={"value_json": str(float(row.previous_swing_low))},
-                strategy_slug="ema_swing",
-                state_key="ema_swing",
-                symbol=row.symbol,
-                timeframe=row.timeframe,
-            )
-            migrated += 1
-
-        ema20_rows = await model.Ema20SwingState.all()
-        for row in ema20_rows:
-            timeframe = str(row.timeframe).removesuffix(":v2")
-            await model.StrategyGraphState.update_or_create(
-                defaults={
-                    "value_json": (
-                        f"[{float(row.previous_swing_low)},"
-                        f"{float(row.previous_ema20)}]"
-                    )
-                },
-                strategy_slug="ema20_swing",
-                state_key="ema20_swing:v2",
-                symbol=row.symbol,
-                timeframe=timeframe,
-            )
-            migrated += 1
-
-        reverse_rows = await model.EmaSwingReverseState.all()
-        for row in reverse_rows:
-            timeframe = str(row.timeframe).removesuffix(":v3")
-            value_json = (
-                f"[{float(row.previous_swing_low)}," f"{float(row.previous_ema20)}]"
-            )
-            for slug in ("ema20_swing_reverse", "ema_swing_reverse"):
-                await model.StrategyGraphState.update_or_create(
-                    defaults={"value_json": value_json},
-                    strategy_slug=slug,
-                    state_key="ema20_swing_reverse:v3",
-                    symbol=row.symbol,
-                    timeframe=timeframe,
-                )
-            migrated += 1
-
-        if migrated:
-            logging.info("Migrated %s legacy strategy state rows.", migrated)
 
     async def init(self) -> None:
         """Initialize the database connection and generate schemas.

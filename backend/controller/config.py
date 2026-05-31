@@ -14,9 +14,7 @@ from model import AppConfig, OpenTrades
 from service.backup_restore import BackupService
 from service.config import (
     Config,
-    build_legacy_trade_mode_key_message,
     build_removed_config_key_message,
-    is_legacy_trade_mode_key,
     is_removed_config_key,
 )
 from service.config_persistence import should_persist_config_value
@@ -24,8 +22,6 @@ from service.config_views import TradeLifecycleConfigView
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.strategy_builder import list_strategy_options, list_strategy_summaries
 from service.trade_lifecycle_config import (
-    TRADE_MODE_COMPATIBILITY_KEYS,
-    TRADE_MODE_LEGACY_KEYS,
     TradeModeConfigError,
     TradeModeSwitchGuard,
     build_blocked_live_mode_switch_error,
@@ -105,7 +101,7 @@ def _get_config_snapshot(config: Config) -> dict[str, Any]:
 
 
 def _get_raw_config_snapshot(config: Config) -> dict[str, Any]:
-    """Return the persisted config snapshot without derived trade-mode fields."""
+    """Return the persisted config snapshot."""
     raw_snapshot = getattr(config, "raw_snapshot", None)
     if callable(raw_snapshot):
         return raw_snapshot()
@@ -130,19 +126,15 @@ def _merge_config_snapshot_with_updates(
 
 def _updates_touch_trade_mode(updates: ConfigUpdateMap) -> bool:
     """Return whether the request mutates the canonical trade-mode field."""
-    return any(key in TRADE_MODE_COMPATIBILITY_KEYS for key in updates)
+    return "trade_mode" in updates
 
 
 def _requested_trade_mode_snapshot(
     config_snapshot: dict[str, Any],
     updates: ConfigUpdateMap,
 ) -> dict[str, Any]:
-    """Return the mode-resolution snapshot after dropping stale legacy bridge keys."""
-    merged_snapshot = _merge_config_snapshot_with_updates(config_snapshot, updates)
-    if "trade_mode" in updates:
-        for key in TRADE_MODE_LEGACY_KEYS:
-            merged_snapshot.pop(key, None)
-    return merged_snapshot
+    """Return the mode-resolution snapshot with typed API updates applied."""
+    return _merge_config_snapshot_with_updates(config_snapshot, updates)
 
 
 async def _get_trade_mode_switch_guard(
@@ -352,8 +344,6 @@ def _validate_live_activation_boundary(
 def _validate_removed_config_keys(updates: ConfigUpdateMap) -> str | None:
     """Return an error when the payload references a removed config key."""
     for key in updates:
-        if is_legacy_trade_mode_key(key):
-            return build_legacy_trade_mode_key_message(key)
         if is_removed_config_key(key):
             return build_removed_config_key_message(key)
     return None

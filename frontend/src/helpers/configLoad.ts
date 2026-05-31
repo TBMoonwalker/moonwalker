@@ -95,13 +95,6 @@ function toNullableString(value: unknown): string | null {
     return normalized.length > 0 ? normalized : null
 }
 
-function normalizeStrategyName(value: string | null): string | null {
-    if (value === 'ema_swing_reverse') {
-        return 'ema20_swing_reverse'
-    }
-    return value
-}
-
 function isUrlValue(value: unknown): boolean {
     const normalized = toNullableString(value)
     return normalized ? /^https?:\/\//i.test(normalized.trim()) : false
@@ -196,9 +189,7 @@ export function buildLoadedConfigState(
 ): LoadedConfigState {
     const signalSettings = parseStructuredConfigValue(response.signal_settings)
     const signalValue = toNullableString(response.signal)
-    const signalStrategy = normalizeStrategyName(
-        toNullableString(response.signal_strategy),
-    )
+    const signalStrategy = toNullableString(response.signal_strategy)
     const timeframe = toNullableString(response.timeframe)
     const symbolList = toNullableString(response.symbol_list)
     const asapUseUrl = isUrlValue(response.symbol_list)
@@ -304,7 +295,7 @@ export function buildLoadedConfigState(
         dca: {
             enabled: dcaEnabled,
             trade_mode: tradeMode,
-            strategy: normalizeStrategyName(toNullableString(response.dca_strategy)),
+            strategy: toNullableString(response.dca_strategy),
             timeframe,
             trailing_tp: toNumberOrNull(response.trailing_tp),
             max_bots: toNumberOrNull(response.max_bots),
@@ -333,11 +324,11 @@ export function buildLoadedConfigState(
             os: toNumberOrNull(response.os),
             trade_safety_order_budget_ratio:
                 toNumberOrNull(response.trade_safety_order_budget_ratio) ?? 0.95,
-            sidestep_bearish_strategy: normalizeStrategyName(
-                toNullableString(response.sidestep_bearish_strategy),
+            sidestep_bearish_strategy: toNullableString(
+                response.sidestep_bearish_strategy,
             ),
-            sidestep_reentry_strategy: normalizeStrategyName(
-                toNullableString(response.sidestep_reentry_strategy),
+            sidestep_reentry_strategy: toNullableString(
+                response.sidestep_reentry_strategy,
             ),
             sidestep_reentry_cooldown_candles:
                 toNumberOrNull(response.sidestep_reentry_cooldown_candles) ?? 0,
@@ -377,7 +368,6 @@ export function buildLoadedConfigState(
                 toNumberOrNull(
                     response.autopilot_base_order_stretch_max_multiplier
                 ) ??
-                toNumberOrNull(response.autopilot_entry_stretch_max_multiplier) ??
                 defaults.defaultAutopilotBaseOrderStretchMaxMultiplier,
             high_mad: toNumberOrNull(response.autopilot_high_mad),
             high_tp: toNumberOrNull(response.autopilot_high_tp),

@@ -12,8 +12,6 @@ from service.trade_lifecycle_config import TradeLifecycleConfigView
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_capability")
 
-HIDDEN_STRATEGY_ALIASES = frozenset({"ema_swing_reverse"})
-
 # Strategy -> indicator methods required by its implementation.
 REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {
     "ema_down": ("calculate_ema",),
@@ -21,7 +19,6 @@ REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {
     "ema20_swing_reverse": ("calculate_ema", "get_close_price"),
     "ema_low": ("calculate_ema", "get_close_price"),
     "ema_swing": ("calculate_ema", "get_close_price"),
-    "ema_swing_reverse": ("calculate_ema", "get_close_price"),
     "bollinger_buy": (
         "calculate_bollinger_bands_series",
         "calculate_ema",
@@ -37,7 +34,6 @@ MIN_HISTORY_CANDLES_BY_STRATEGY: dict[str, int] = {
     "ema20_swing_reverse": 200,
     "ema_low": 200,
     "ema_swing": 200,
-    "ema_swing_reverse": 200,
     "bollinger_buy": 202,
 }
 
@@ -196,8 +192,6 @@ def filter_supported_strategies(strategy_names: Iterable[str]) -> list[str]:
     """Filter and return only currently supported strategies."""
     supported: list[str] = []
     for name in strategy_names:
-        if name in HIDDEN_STRATEGY_ALIASES:
-            continue
         error = get_strategy_support_error(name)
         if error:
             logging.warning(error)
