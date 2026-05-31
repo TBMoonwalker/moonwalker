@@ -20,10 +20,18 @@ test('createAppRouter keeps only canonical Control Center entry routes', () => {
     assert.equal(routePaths.includes('/control-center/autopilot'), true)
     assert.equal(routePaths.includes('/backtest'), true)
     assert.equal(routePaths.includes('/monitoring'), true)
+    assert.equal(routePaths.includes('/statistics'), true)
     assert.equal(routePaths.includes('/settings'), false)
     assert.equal(routePaths.includes('/config'), false)
     assert.equal(routeNames.includes('legacySettings'), false)
     assert.equal(routeNames.includes('legacyConfig'), false)
+})
+
+test('createAppRouter redirects the readable statistics URL to stats', () => {
+    const router = createAppRouter()
+    const route = router.getRoutes().find((candidate) => candidate.path === '/statistics')
+
+    assert.deepEqual(route.redirect, { name: 'stats' })
 })
 
 test('resolveControlCenterNavigation normalizes invalid control-center query state', () => {
