@@ -4,6 +4,8 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.0.0.0] - 2026-05-31
+
 ### Breaking Changes
 
 - Remove old-version upgrade bridges. Moonwalker no longer migrates legacy
@@ -25,6 +27,25 @@ All notable changes to Moonwalker are documented in this file.
 - Delete obsolete EMA strategy-state models and Strategy Builder legacy
   migration code so the runtime only supports the current graph IR and canonical
   config keys.
+
+### Changed
+
+- Tighten the Statistics trade activity panel so sparse closed-trade heatmaps
+  use the space for compact activity metrics instead of leaving a large empty
+  surface.
+- Improve Strategy Builder graph readability with larger node typography,
+  wider nodes, and a less aggressive default graph fit.
+- Calm the open-trade row action area so Sell and More remain readable without
+  dominating the trading table.
+
+### Fixed
+
+- Restore direct navigation to the Statistics route and Strategy Builder route
+  so browser refreshes and deep links land on the intended workspace.
+- Render the Strategy Builder graph after async strategy loading by waiting for
+  the canvas host before initializing Rete.
+- Keep the mobile app wordmark and Strategy Builder action buttons contained on
+  narrow screens.
 
 ## [3.3.0.0] - 2026-05-28
 

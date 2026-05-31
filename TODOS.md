@@ -31,7 +31,7 @@ current grouped replay and waiting-campaign context are still insufficient.
 
 ### Polish Statistics heatmap density and Strategy Builder graph readability
 
-**Completed:** Unreleased (2026-05-31)
+**Completed:** v4.0.0.0 (2026-05-31)
 
 **What shipped:** Tightened the Statistics Trade Activity panel with compact
 padding and an inline closed-trade activity summary, removed duplicate heatmap
