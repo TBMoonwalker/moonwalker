@@ -4,6 +4,15 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.0.1.0] - 2026-06-01
+
+### Fixed
+
+- Make the Sidestep waiting tab readable on mobile by replacing the squeezed
+  desktop trade table with a compact waiting-campaign card layout.
+- Add regression coverage that keeps the mobile waiting-campaign layout on its
+  dedicated summary column instead of falling back to the full desktop table.
+
 ## [4.0.0.0] - 2026-05-31
 
 ### Breaking Changes

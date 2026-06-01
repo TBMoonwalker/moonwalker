@@ -146,3 +146,32 @@ test('waiting sidestep campaigns get their own surface and explicit waiting acti
         'expected control-center monitoring summaries to count the waiting campaign stream',
     )
 })
+
+test('waiting sidestep campaigns use a dedicated mobile card layout', () => {
+    assert.ok(
+        waitingCampaignsSource.includes('if (isMobile.value)'),
+        'expected waiting campaigns to switch column definitions on mobile',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes("key: 'mobile_summary'"),
+        'expected mobile waiting campaigns to render one summary column instead of the desktop table',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes('renderMobileCampaign'),
+        'expected mobile waiting campaigns to use the compact campaign renderer',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes('waiting-campaign-mobile-card'),
+        'expected mobile waiting campaigns to render a readable card surface',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes(
+            '.waiting-campaigns-table :deep(.n-data-table-thead)',
+        ),
+        'expected the one-column mobile table header to stay hidden',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes('grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)'),
+        'expected mobile PNL and cost values to keep stable two-column spacing',
+    )
+})

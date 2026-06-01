@@ -1,11 +1,13 @@
 <template>
     <n-data-table
+        class="waiting-campaigns-table"
         size="small"
         remote
         :columns="columns"
         :data="displayed_waiting_campaigns || []"
         :loading="isTableLoading"
         :row-class-name="rowClasses"
+        :single-line="false"
         :locale="{ emptyText: tableEmptyText }"
         aria-label="Waiting sidestep trades table"
         @update:sorter="handleSorterChange"
@@ -104,6 +106,12 @@ const {
 } = useMissionPauseActions({
     message,
 })
+
+const tradeActionButtonStyle = {
+    minHeight: '44px',
+    minWidth: '56px',
+    padding: '0 12px',
+}
 
 function isReentryBlocked(rowData: WaitingCampaignRow): boolean {
     return Boolean(rowData.automation_paused) || Boolean(props.globalTradingPaused)
@@ -236,340 +244,426 @@ function handleSorterChange(sorter: unknown): void {
     sortState.value = resolveTradeTableSortState(sorter)
 }
 
-const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
-    {
-        title: 'Symbol',
-        key: 'symbol',
-        render: (rowData, index) => {
-            const [token] = rowData.symbol.split('/')
-            const rows = [
-                h('div', `#${index + 1}`),
-                h(NDivider, { dashed: true }),
-                h('div', token),
-                h(NDivider, { dashed: true }),
-                h('div', 'Flat / waiting'),
-            ]
-            if (Number(rowData.sidestep_count ?? 0) > 0) {
-                rows.push(h(NDivider, { dashed: true }))
-                rows.push(
-                    h(
-                        NTag,
-                        {
-                            size: 'small',
-                            bordered: false,
-                            type: 'warning',
-                        },
-                        {
-                            default: () =>
-                                `Sidestep x${Number(rowData.sidestep_count ?? 0)}`,
-                        },
-                    ),
-                )
-            }
-            if (rowData.automation_paused) {
-                rows.push(h(NDivider, { dashed: true }))
-                rows.push(
-                    h(
-                        NTag,
-                        {
-                            size: 'small',
-                            bordered: false,
-                            type: 'warning',
-                        },
-                        {
-                            default: () => 'Automation paused',
-                        },
-                    ),
-                )
-            }
-            return rows
-        },
-        sorter: true,
-        sortOrder: resolveTradeTableColumnOrder(sortState.value, 'symbol'),
-    },
-    {
-        title: 'Cost',
-        key: 'waiting_reference_quote',
-        render: (rowData) => {
-            const [token, currency] = rowData.symbol.split('/')
-            const amount = `${formatAssetAmount(Number(rowData.waiting_reference_amount ?? 0))} ${token}`
-            const reserve = `${formatFixed(Number(rowData.reserved_reentry_quote ?? 0))} ${currency}`
-            return [
-                h('div', amount),
-                h(NDivider, { dashed: true }),
-                h('div', reserve),
-            ]
-        },
-        sorter: true,
-        sortOrder: resolveTradeTableColumnOrder(
-            sortState.value,
-            'waiting_reference_quote',
-        ),
-    },
-    {
-        title: 'PNL',
-        key: 'display_profit_percent',
-        render: (rowData) => {
-            const [, currency] = rowData.symbol.split('/')
-            const profitPercent = `${formatFixed(Number(rowData.display_profit_percent ?? 0))} %`
-            const pnl = `${formatFixed(Number(rowData.display_profit ?? 0))} ${currency}`
-            return [
-                h('div', { class: 'profit' }, profitPercent),
-                h(NDivider, { dashed: true }),
-                h('div', pnl),
-            ]
-        },
-        sorter: true,
-        sortOrder: resolveTradeTableColumnOrder(
-            sortState.value,
-            'display_profit_percent',
-        ),
-    },
-    {
-        title: 'Re-entry',
-        key: 'waiting_reference_price',
-        render: (rowData) => {
-            const referencePrice = Number(rowData.waiting_reference_price ?? 0)
-            const currentPrice = Number(rowData.current_price ?? 0)
-            const sliderMin = Math.max(
-                0,
-                Math.min(referencePrice, currentPrice) * 0.993,
-            )
-            const sliderMax = Math.max(
-                referencePrice,
-                currentPrice,
-                1,
-            ) * 1.007
-            return [
-                h(NSlider, {
-                    value: [currentPrice, referencePrice],
-                    range: true,
-                    min: sliderMin,
-                    max: sliderMax,
-                    disabled: true,
-                    themeOverrides: {
-                        fillColor:
-                            currentPrice <= referencePrice
-                                 ? '#2E7D5B'
-                                 : '#B4443F',
-                        handleSize: '8px',
-                        opacityDisabled: '1',
-                    },
-                }),
-                h(NDivider, { dashed: true }),
-                h(
-                    'div',
-                    `Now ${formatFixed(currentPrice)} / Exit ${formatFixed(referencePrice)}`,
-                ),
-            ]
-        },
-        align: 'center',
-    },
-    {
-        title: 'Status',
-        key: 'reentry_status',
-        render: (rowData) => {
-            const status = rowData.automation_paused
-                ? 'Automation paused'
-                : rowData.reentry_status ?? 'Watching for re-entry signal'
-            const statusRows = [
-                h(
-                    NTag,
-                    {
-                        size: 'small',
-                        bordered: false,
-                        type: resolveReentryStatusType(rowData),
-                    },
-                    {
-                        default: () => status,
-                    },
-                ),
-                h(NDivider, { dashed: true }),
-                h('div', `Last exit: ${formatCloseReason(rowData.last_exit_reason)}`),
-            ]
-
-            if (
-                status === 'Cooldown active' &&
-                rowData.cooldown_until
-            ) {
-                const cooldown = resolveTradeDateTime(rowData.cooldown_until)
-                statusRows.push(h(NDivider, { dashed: true }))
-                statusRows.push(
-                    h('div', `Cooldown until ${cooldown.date} ${cooldown.time}`),
-                )
-            } else if (rowData.last_long_signal_at) {
-                const lastSignal = resolveTradeDateTime(rowData.last_long_signal_at)
-                statusRows.push(h(NDivider, { dashed: true }))
-                statusRows.push(
-                    h('div', `Last long signal ${lastSignal.date} ${lastSignal.time}`),
-                )
-            }
-
-            return statusRows
-        },
-        align: 'center',
-        sorter: true,
-        sortOrder: resolveTradeTableColumnOrder(
-            sortState.value,
-            'reentry_status',
-        ),
-    },
-    {
-        title: 'Action',
-        key: 'action',
-        align: 'center',
-        render: (rowData) => {
-            const actionError =
-                missionActionErrors[String(rowData.symbol)] ?? null
-            const pauseAction = rowData.automation_paused
-                ? () => handleResumeMission(rowData.symbol)
-                : () => handlePauseMission(rowData.symbol)
-            const pauseLabel = rowData.automation_paused
-                ? 'Resume automation'
-                : 'Pause automation'
-            const pauseLoading = isMissionActionLoading(
-                rowData.symbol,
-                rowData.automation_paused ? 'resume' : 'pause',
-            )
-            const desktopActions = h(
-                NButtonGroup,
-                { size: 'medium', vertical: true },
+function renderSymbolRows(rowData: WaitingCampaignRow, index: number) {
+    const [token] = rowData.symbol.split('/')
+    const rows = [
+        h('div', `#${index + 1}`),
+        h(NDivider, { dashed: true }),
+        h('div', token),
+        h(NDivider, { dashed: true }),
+        h('div', 'Flat / waiting'),
+    ]
+    if (Number(rowData.sidestep_count ?? 0) > 0) {
+        rows.push(h(NDivider, { dashed: true }))
+        rows.push(
+            h(
+                NTag,
                 {
-                    default: () => [
-                        h(
-                            NButton,
-                            {
-                                type: 'success',
-                                ghost: true,
-                                disabled: isReentryBlocked(rowData),
-                                onClick: () => handleActivateCampaign(rowData),
-                            },
-                            { default: () => 'Switch to active' },
-                        ),
-                        h(
-                            NButton,
-                            {
-                                type: 'warning',
-                                ghost: !rowData.automation_paused,
-                                loading: pauseLoading,
-                                onClick: pauseAction,
-                            },
-                            { default: () => pauseLabel },
-                        ),
-                        h(
-                            NButton,
-                            {
-                                type: 'warning',
-                                ghost: true,
-                                onClick: () => handleStopCampaign(rowData),
-                            },
-                            { default: () => 'Stop' },
-                        ),
+                    size: 'small',
+                    bordered: false,
+                    type: 'warning',
+                },
+                {
+                    default: () =>
+                        `Sidestep x${Number(rowData.sidestep_count ?? 0)}`,
+                },
+            ),
+        )
+    }
+    if (rowData.automation_paused) {
+        rows.push(h(NDivider, { dashed: true }))
+        rows.push(
+            h(
+                NTag,
+                {
+                    size: 'small',
+                    bordered: false,
+                    type: 'warning',
+                },
+                {
+                    default: () => 'Automation paused',
+                },
+            ),
+        )
+    }
+    return rows
+}
+
+function renderCostRows(rowData: WaitingCampaignRow) {
+    const [token, currency] = rowData.symbol.split('/')
+    const amount = `${formatAssetAmount(Number(rowData.waiting_reference_amount ?? 0))} ${token}`
+    const reserve = `${formatFixed(Number(rowData.reserved_reentry_quote ?? 0))} ${currency}`
+    return [
+        h('div', amount),
+        h(NDivider, { dashed: true }),
+        h('div', reserve),
+    ]
+}
+
+function renderPnlRows(rowData: WaitingCampaignRow) {
+    const [, currency] = rowData.symbol.split('/')
+    const profitPercent = `${formatFixed(Number(rowData.display_profit_percent ?? 0))} %`
+    const pnl = `${formatFixed(Number(rowData.display_profit ?? 0))} ${currency}`
+    return [
+        h('div', { class: 'profit' }, profitPercent),
+        h(NDivider, { dashed: true }),
+        h('div', pnl),
+    ]
+}
+
+function renderReentryRows(rowData: WaitingCampaignRow) {
+    const referencePrice = Number(rowData.waiting_reference_price ?? 0)
+    const currentPrice = Number(rowData.current_price ?? 0)
+    const sliderMin = Math.max(
+        0,
+        Math.min(referencePrice, currentPrice) * 0.993,
+    )
+    const sliderMax = Math.max(
+        referencePrice,
+        currentPrice,
+        1,
+    ) * 1.007
+    return [
+        h(NSlider, {
+            value: [currentPrice, referencePrice],
+            range: true,
+            min: sliderMin,
+            max: sliderMax,
+            disabled: true,
+            themeOverrides: {
+                fillColor:
+                    currentPrice <= referencePrice
+                         ? '#2E7D5B'
+                         : '#B4443F',
+                handleSize: '8px',
+                opacityDisabled: '1',
+            },
+        }),
+        h(NDivider, { dashed: true }),
+        h(
+            'div',
+            `Now ${formatFixed(currentPrice)} / Exit ${formatFixed(referencePrice)}`,
+        ),
+    ]
+}
+
+function renderStatusRows(rowData: WaitingCampaignRow) {
+    const status = rowData.automation_paused
+        ? 'Automation paused'
+        : rowData.reentry_status ?? 'Watching for re-entry signal'
+    const statusRows = [
+        h(
+            NTag,
+            {
+                size: 'small',
+                bordered: false,
+                type: resolveReentryStatusType(rowData),
+            },
+            {
+                default: () => status,
+            },
+        ),
+        h(NDivider, { dashed: true }),
+        h('div', `Last exit: ${formatCloseReason(rowData.last_exit_reason)}`),
+    ]
+
+    if (
+        status === 'Cooldown active' &&
+        rowData.cooldown_until
+    ) {
+        const cooldown = resolveTradeDateTime(rowData.cooldown_until)
+        statusRows.push(h(NDivider, { dashed: true }))
+        statusRows.push(
+            h('div', `Cooldown until ${cooldown.date} ${cooldown.time}`),
+        )
+    } else if (rowData.last_long_signal_at) {
+        const lastSignal = resolveTradeDateTime(rowData.last_long_signal_at)
+        statusRows.push(h(NDivider, { dashed: true }))
+        statusRows.push(
+            h('div', `Last long signal ${lastSignal.date} ${lastSignal.time}`),
+        )
+    }
+
+    return statusRows
+}
+
+function renderCompactActions(rowData: WaitingCampaignRow) {
+    const actionError = missionActionErrors[String(rowData.symbol)] ?? null
+    const pauseAction = rowData.automation_paused
+        ? () => handleResumeMission(rowData.symbol)
+        : () => handlePauseMission(rowData.symbol)
+    const pauseLabel = rowData.automation_paused
+        ? 'Resume automation'
+        : 'Pause automation'
+    const pauseLoading = isMissionActionLoading(
+        rowData.symbol,
+        rowData.automation_paused ? 'resume' : 'pause',
+    )
+    const desktopActions = h(
+        NButtonGroup,
+        { size: 'medium', vertical: true },
+        {
+            default: () => [
+                h(
+                    NButton,
+                    {
+                        type: 'success',
+                        ghost: true,
+                        disabled: isReentryBlocked(rowData),
+                        onClick: () => handleActivateCampaign(rowData),
+                    },
+                    { default: () => 'Switch to active' },
+                ),
+                h(
+                    NButton,
+                    {
+                        type: 'warning',
+                        ghost: !rowData.automation_paused,
+                        loading: pauseLoading,
+                        onClick: pauseAction,
+                    },
+                    { default: () => pauseLabel },
+                ),
+                h(
+                    NButton,
+                    {
+                        type: 'warning',
+                        ghost: true,
+                        onClick: () => handleStopCampaign(rowData),
+                    },
+                    { default: () => 'Stop' },
+                ),
+            ],
+        },
+    )
+    const compactActions = h(
+        'div',
+        {
+            class: 'waiting-campaign-compact-actions',
+        },
+        [
+            h(
+                NButton,
+                {
+                    type: 'success',
+                    ghost: true,
+                    style: tradeActionButtonStyle,
+                    disabled: isReentryBlocked(rowData),
+                    onClick: () => handleActivateCampaign(rowData),
+                },
+                { default: () => 'Switch to active' },
+            ),
+            h(
+                NDropdown,
+                {
+                    trigger: 'click',
+                    options: [
+                        {
+                            key: rowData.automation_paused ? 'resume' : 'pause',
+                            label: pauseLabel,
+                        },
+                        {
+                            key: 'stop',
+                            label: 'Stop',
+                        },
                     ],
+                    onSelect: (key: string | number) => {
+                        if (key === 'stop') {
+                            void handleStopCampaign(rowData)
+                            return
+                        }
+                        void pauseAction()
+                    },
                 },
-            )
-            const compactActions = h(
-                'div',
                 {
-                    style: 'display:flex; justify-content:center; gap:8px;',
-                },
-                [
-                    h(
-                        NButton,
-                        {
-                            type: 'success',
-                            ghost: true,
-                            disabled: isReentryBlocked(rowData),
-                            onClick: () => handleActivateCampaign(rowData),
-                        },
-                        { default: () => 'Switch to active' },
-                    ),
-                    h(
-                        NDropdown,
-                        {
-                            trigger: 'click',
-                            options: [
-                                {
-                                    key: rowData.automation_paused
-                                        ? 'resume'
-                                        : 'pause',
-                                    label: pauseLabel,
-                                },
-                                {
-                                    key: 'stop',
-                                    label: 'Stop',
-                                },
-                            ],
-                            onSelect: (key: string | number) => {
-                                if (key === 'stop') {
-                                    void handleStopCampaign(rowData)
-                                    return
-                                }
-                                void pauseAction()
+                    default: () =>
+                        h(
+                            NButton,
+                            {
+                                ghost: true,
+                                style: tradeActionButtonStyle,
                             },
-                        },
-                        {
-                            default: () =>
-                                h(
-                                    NButton,
-                                    {
-                                        ghost: true,
-                                    },
-                                    {
-                                        icon: () =>
-                                            h(
-                                                NIcon,
-                                                { size: 18 },
-                                                {
-                                                    default: () =>
-                                                        h(EllipsisHorizontal),
-                                                },
-                                            ),
-                                        default: () => 'More',
-                                    },
-                                ),
-                        },
-                    ),
-                ],
-            )
+                            {
+                                icon: () =>
+                                    h(
+                                        NIcon,
+                                        { size: 18 },
+                                        {
+                                            default: () =>
+                                                h(EllipsisHorizontal),
+                                        },
+                                    ),
+                                default: () => 'More',
+                            },
+                        ),
+                },
+            ),
+        ],
+    )
 
-            return [
-                isMobile.value || isTablet.value
-                    ? compactActions
-                    : desktopActions,
-                actionError
-                    ? h(
-                          'div',
-                          {
-                              style: 'margin-top:8px; max-width:220px; font-size:12px; color:#B4443F; text-wrap:pretty;',
-                          },
-                          actionError,
-                      )
-                    : null,
-            ]
+    return [
+        isMobile.value || isTablet.value ? compactActions : desktopActions,
+        actionError
+            ? h(
+                  'div',
+                  {
+                      class: 'waiting-campaign-action-error',
+                  },
+                  actionError,
+              )
+            : null,
+    ]
+}
+
+function renderOpenedRows(rowData: WaitingCampaignRow) {
+    const opened = resolveTradeDateTime(
+        rowData.campaign_started_at || rowData.open_date,
+    )
+    const waitingSince = resolveTradeDateTime(
+        rowData.last_transition_at || rowData.open_date,
+    )
+    return [
+        h('div', opened.date),
+        h(NDivider, { dashed: true }),
+        h('div', waitingSince.time),
+    ]
+}
+
+function renderMobileCampaign(rowData: WaitingCampaignRow, index: number) {
+    const [token] = rowData.symbol.split('/')
+    return h('div', { class: 'waiting-campaign-mobile-card' }, [
+        h('div', { class: 'waiting-campaign-mobile-topline' }, [
+            h('div', { class: 'waiting-campaign-mobile-symbol' }, [
+                h('span', `#${index + 1}`),
+                h('strong', token),
+                h('span', 'Flat / waiting'),
+            ]),
+            Number(rowData.sidestep_count ?? 0) > 0
+                ? h(
+                      NTag,
+                      {
+                          size: 'small',
+                          bordered: false,
+                          type: 'warning',
+                      },
+                      {
+                          default: () =>
+                              `Sidestep x${Number(rowData.sidestep_count ?? 0)}`,
+                      },
+                  )
+                : null,
+            rowData.automation_paused
+                ? h(
+                      NTag,
+                      {
+                          size: 'small',
+                          bordered: false,
+                          type: 'warning',
+                      },
+                      {
+                          default: () => 'Automation paused',
+                      },
+                  )
+                : null,
+        ]),
+        h('div', { class: 'waiting-campaign-mobile-grid' }, [
+            h('div', [
+                h('span', { class: 'waiting-campaign-mobile-label' }, 'PNL'),
+                ...renderPnlRows(rowData),
+            ]),
+            h('div', [
+                h('span', { class: 'waiting-campaign-mobile-label' }, 'Cost'),
+                ...renderCostRows(rowData),
+            ]),
+        ]),
+        h('div', { class: 'waiting-campaign-mobile-section' }, [
+            h('span', { class: 'waiting-campaign-mobile-label' }, 'Re-entry'),
+            ...renderReentryRows(rowData),
+        ]),
+        h('div', { class: 'waiting-campaign-mobile-section' }, [
+            h('span', { class: 'waiting-campaign-mobile-label' }, 'Status'),
+            ...renderStatusRows(rowData),
+        ]),
+        h(
+            'div',
+            { class: 'waiting-campaign-mobile-actions' },
+            renderCompactActions(rowData),
+        ),
+    ])
+}
+
+const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => {
+    if (isMobile.value) {
+        return [
+            {
+                title: 'Waiting campaign',
+                key: 'mobile_summary',
+                render: renderMobileCampaign,
+            },
+        ]
+    }
+
+    return [
+        {
+            title: 'Symbol',
+            key: 'symbol',
+            render: renderSymbolRows,
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'symbol'),
         },
-    },
-    {
-        title: 'Opened',
-        key: 'open_date',
-        align: 'center',
-        render: (rowData) => {
-            const opened = resolveTradeDateTime(
-                rowData.campaign_started_at || rowData.open_date,
-            )
-            const waitingSince = resolveTradeDateTime(
-                rowData.last_transition_at || rowData.open_date,
-            )
-            return [
-                h('div', opened.date),
-                h(NDivider, { dashed: true }),
-                h('div', waitingSince.time),
-            ]
+        {
+            title: 'Cost',
+            key: 'waiting_reference_quote',
+            render: renderCostRows,
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'waiting_reference_quote',
+            ),
         },
-        sorter: true,
-        sortOrder: resolveTradeTableColumnOrder(sortState.value, 'open_date'),
-    },
-])
+        {
+            title: 'PNL',
+            key: 'display_profit_percent',
+            render: renderPnlRows,
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'display_profit_percent',
+            ),
+        },
+        {
+            title: 'Re-entry',
+            key: 'waiting_reference_price',
+            render: renderReentryRows,
+            align: 'center',
+        },
+        {
+            title: 'Status',
+            key: 'reentry_status',
+            render: renderStatusRows,
+            align: 'center',
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(
+                sortState.value,
+                'reentry_status',
+            ),
+        },
+        {
+            title: 'Action',
+            key: 'action',
+            align: 'center',
+            render: renderCompactActions,
+        },
+        {
+            title: 'Opened',
+            key: 'open_date',
+            align: 'center',
+            render: renderOpenedRows,
+            sorter: true,
+            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'open_date'),
+        },
+    ]
+})
 </script>
 
 <style scoped>
@@ -579,5 +673,94 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => [
 
 :deep(.green .profit) {
     color: #2E7D5B !important;
+}
+
+:deep(.waiting-campaign-compact-actions) {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+}
+
+:deep(.waiting-campaign-action-error) {
+    margin-top: 8px;
+    max-width: 220px;
+    color: #B4443F;
+    font-size: 12px;
+    text-wrap: pretty;
+}
+
+@media (max-width: 767px) {
+    .waiting-campaigns-table :deep(.n-data-table-td) {
+        padding: 0;
+    }
+
+    .waiting-campaigns-table :deep(.n-data-table-thead) {
+        display: none;
+    }
+
+    :deep(.waiting-campaign-mobile-card) {
+        display: grid;
+        min-width: 0;
+        gap: 12px;
+        padding: 14px 12px;
+        color: var(--mw-color-text-primary);
+    }
+
+    :deep(.waiting-campaign-mobile-topline) {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+        min-width: 0;
+    }
+
+    :deep(.waiting-campaign-mobile-symbol) {
+        display: grid;
+        flex: 1 1 120px;
+        min-width: 0;
+        gap: 2px;
+    }
+
+    :deep(.waiting-campaign-mobile-symbol strong) {
+        font-family: 'IBM Plex Mono', monospace;
+        font-size: 16px;
+    }
+
+    :deep(.waiting-campaign-mobile-symbol span) {
+        color: var(--mw-color-text-secondary);
+    }
+
+    :deep(.waiting-campaign-mobile-grid) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+        gap: 12px;
+    }
+
+    :deep(.waiting-campaign-mobile-label) {
+        display: block;
+        margin-bottom: 4px;
+        color: var(--mw-color-text-muted);
+        font-size: 12px;
+        font-weight: 600;
+    }
+
+    :deep(.waiting-campaign-mobile-section) {
+        min-width: 0;
+    }
+
+    :deep(.waiting-campaign-mobile-section .n-divider),
+    :deep(.waiting-campaign-mobile-grid .n-divider) {
+        margin: 6px 0;
+    }
+
+    :deep(.waiting-campaign-mobile-actions) {
+        display: grid;
+        gap: 8px;
+    }
+
+    :deep(.waiting-campaign-mobile-actions .waiting-campaign-compact-actions) {
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
 }
 </style>
