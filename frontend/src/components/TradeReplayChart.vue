@@ -1,13 +1,22 @@
 <template>
     <n-card class="expand-chart-card" content-style="padding: 0;">
         <div class="expand-chart-frame">
-            <div ref="chartRef" class="expand-chart" />
+            <div v-if="loadError" class="expand-chart-empty">
+                {{ loadError }}
+            </div>
+            <div v-else-if="isEmpty" class="expand-chart-empty">
+                No candle data available for this replay window.
+            </div>
+            <div v-else-if="isLoading && !chartReady" class="expand-chart-empty">
+                Loading chart...
+            </div>
+            <div v-show="chartReady" ref="chartRef" class="expand-chart" />
         </div>
     </n-card>
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
     CandlestickSeries,
     LineSeries,
@@ -48,6 +57,7 @@ type NormalizedTradeReplayMarker = {
 }
 
 type ExactTradeReplayMarker = NormalizedTradeReplayMarker & {
+    position: 'inBar'
     price: number
 }
 
@@ -72,8 +82,13 @@ const props = defineProps<{
 const MAX_VISIBLE_CANDLES = 500
 const PRE_ROLL_CANDLES = 2
 const POST_ROLL_CANDLES = 4
+const MAX_PRICE_FORMAT_PRECISION = 8
 
 const chartRef = ref<HTMLElement | null>(null)
+const isLoading = ref(true)
+const isEmpty = ref(false)
+const loadError = ref('')
+const chartReady = ref(false)
 const ohlcvStore = useOhlcvStore()
 let chart: ReturnType<typeof createChart> | null = null
 
@@ -96,6 +111,20 @@ function toTimestampMs(value: number | string | null | undefined): number | null
 
 function normalizeCandleRows(payload: unknown): Array<Record<string, number>> {
     return Array.isArray(payload) ? payload : []
+}
+
+function normalizePriceFormatPrecision(value: number): number {
+    const normalized = Math.trunc(Number(value))
+    if (!Number.isFinite(normalized) || normalized < 0) {
+        return 2
+    }
+    return Math.min(normalized, MAX_PRICE_FORMAT_PRECISION)
+}
+
+function nextAnimationFrame(): Promise<void> {
+    return new Promise((resolve) => {
+        requestAnimationFrame(() => resolve())
+    })
 }
 
 function selectTimeframe(): TimeframeChoice {
@@ -153,18 +182,21 @@ function normalizeExactMarkerTime(
 }
 
 async function initChart(): Promise<void> {
-    if (!chartRef.value) {
-        return
-    }
+    isLoading.value = true
+    isEmpty.value = false
+    loadError.value = ''
+    chartReady.value = false
 
     const beginTimestamp = toTimestampMs(props.startTimestamp)
     if (beginTimestamp === null) {
+        isEmpty.value = true
+        isLoading.value = false
         return
     }
 
     const endTimestamp = toTimestampMs(props.endTimestamp)
     const [symbol, currency] = splitTradeSymbol(props.symbol)
-    const precision = createDecimal(props.precision)
+    const precision = createDecimal(normalizePriceFormatPrecision(props.precision))
     const timeframe = selectTimeframe()
     const historyStart = Math.max(
         0,
@@ -174,40 +206,6 @@ async function initChart(): Promise<void> {
         endTimestamp === null
             ? null
             : endTimestamp + timeframe.seconds * POST_ROLL_CANDLES * 1000
-
-    chart = createChart(chartRef.value, {
-        autoSize: true,
-        layout: {
-            background: { color: 'rgb(24, 24, 28)' },
-            textColor: '#fff',
-        },
-        grid: {
-            vertLines: { visible: false },
-            horzLines: { visible: false },
-        },
-        timeScale: {
-            borderVisible: false,
-            timeVisible: true,
-        },
-        rightPriceScale: {
-            borderVisible: false,
-        },
-        handleScroll: true,
-        handleScale: false,
-    })
-
-    const candlestickSeries = chart.addSeries(CandlestickSeries, {
-        upColor: '#2E7D5B',
-        borderUpColor: '#2E7D5B',
-        wickUpColor: '#2E7D5B',
-        downColor: '#B4443F',
-        borderDownColor: '#B4443F',
-        wickDownColor: '#B4443F',
-        priceFormat: {
-            type: 'price',
-            minMove: precision,
-        },
-    })
 
     const pairSymbol = `${symbol}-${currency.toUpperCase()}`
     const fallbackCacheKey = [
@@ -236,127 +234,186 @@ async function initChart(): Promise<void> {
         : null
 
     let tickerData: Array<Record<string, number>> = []
-    if (archiveUrl && archiveCacheKey) {
-        try {
-            tickerData = normalizeCandleRows(await fetchJson<unknown>(archiveUrl))
-            if (tickerData.length > 0) {
-                ohlcvStore.set(archiveCacheKey, tickerData)
+    try {
+        if (archiveUrl && archiveCacheKey) {
+            try {
+                tickerData = normalizeCandleRows(await fetchJson<unknown>(archiveUrl))
+                if (tickerData.length > 0) {
+                    ohlcvStore.set(archiveCacheKey, tickerData)
+                }
+            } catch (_error) {
+                tickerData = normalizeCandleRows(ohlcvStore.get(archiveCacheKey) ?? [])
             }
-        } catch (_error) {
-            tickerData = normalizeCandleRows(ohlcvStore.get(archiveCacheKey) ?? [])
         }
-    }
 
-    if (tickerData.length === 0) {
-        try {
-            tickerData = normalizeCandleRows(await fetchJson<unknown>(historyUrl))
-            if (tickerData.length > 0) {
-                ohlcvStore.set(fallbackCacheKey, tickerData)
+        if (tickerData.length === 0) {
+            try {
+                tickerData = normalizeCandleRows(await fetchJson<unknown>(historyUrl))
+                if (tickerData.length > 0) {
+                    ohlcvStore.set(fallbackCacheKey, tickerData)
+                }
+            } catch (_error) {
+                tickerData = normalizeCandleRows(ohlcvStore.get(fallbackCacheKey) ?? [])
             }
-        } catch (_error) {
-            tickerData = normalizeCandleRows(ohlcvStore.get(fallbackCacheKey) ?? [])
         }
-    }
 
-    const localOffsetSeconds = getLocalOffsetSeconds()
-    const localTickerData = tickerData.map((entry) => ({
-        ...entry,
-        time: Number(entry.time) + localOffsetSeconds,
-    }))
-    candlestickSeries.setData(localTickerData)
-
-    for (const priceLine of props.priceLines) {
-        const price = toFiniteNumber(priceLine.price)
-        if (price === null || price <= 0) {
-            continue
+        if (tickerData.length === 0) {
+            isEmpty.value = true
+            return
         }
-        candlestickSeries.createPriceLine({
-            price,
-            color: priceLine.color,
-            lineWidth: 2,
-            lineStyle: priceLine.lineStyle,
-            axisLabelVisible: true,
-            title: priceLine.title,
+
+        chartReady.value = true
+        await nextTick()
+        await nextAnimationFrame()
+        if (!chartRef.value) {
+            isEmpty.value = true
+            chartReady.value = false
+            return
+        }
+
+        chart = createChart(chartRef.value, {
+            autoSize: true,
+            layout: {
+                background: { color: 'rgb(24, 24, 28)' },
+                textColor: '#fff',
+            },
+            grid: {
+                vertLines: { visible: false },
+                horzLines: { visible: false },
+            },
+            timeScale: {
+                borderVisible: false,
+                timeVisible: true,
+            },
+            rightPriceScale: {
+                borderVisible: false,
+            },
+            handleScroll: true,
+            handleScale: false,
         })
-    }
 
-    const candleMarkerData = props.markers
-        .map((marker) => {
-            const markerTime = normalizeMarkerTime(
-                marker.timestamp,
-                timeframe.seconds,
-                localOffsetSeconds,
-            )
-            if (markerTime === null) {
-                return null
-            }
-            if (toFiniteNumber(marker.price) !== null) {
-                return null
-            }
-            return {
-                time: markerTime,
-                position: marker.position,
-                color: marker.color,
-                shape: marker.shape,
-                text: marker.text,
-            }
-        })
-        .filter((marker): marker is NormalizedTradeReplayMarker => marker !== null)
-
-    const exactMarkerData = props.markers
-        .map((marker) => {
-            const markerPrice = toFiniteNumber(marker.price)
-            const markerTime = normalizeExactMarkerTime(
-                marker.timestamp,
-                localOffsetSeconds,
-            )
-            if (markerTime === null || markerPrice === null) {
-                return null
-            }
-            return {
-                time: markerTime,
-                position: marker.position,
-                color: marker.color,
-                shape: marker.shape,
-                text: marker.text,
-                price: markerPrice,
-            }
-        })
-        .filter((marker): marker is ExactTradeReplayMarker => marker !== null)
-        .sort((left, right) => left.time - right.time)
-
-    if (candleMarkerData.length > 0) {
-        createSeriesMarkers(candlestickSeries, candleMarkerData)
-    }
-
-    if (exactMarkerData.length > 0) {
-        // Exact-price markers need backing series data. Lightweight Charts
-        // snaps markers to existing series points and does not autoscale around
-        // marker-only prices, so we attach these markers to a hidden line
-        // series with real time/value points.
-        const exactMarkerSeries = chart.addSeries(LineSeries, {
-            color: 'rgba(0, 0, 0, 0)',
-            lineVisible: false,
-            pointMarkersVisible: false,
-            crosshairMarkerVisible: false,
-            lastValueVisible: false,
-            priceLineVisible: false,
+        const candlestickSeries = chart.addSeries(CandlestickSeries, {
+            upColor: '#2E7D5B',
+            borderUpColor: '#2E7D5B',
+            wickUpColor: '#2E7D5B',
+            downColor: '#B4443F',
+            borderDownColor: '#B4443F',
+            wickDownColor: '#B4443F',
             priceFormat: {
                 type: 'price',
                 minMove: precision,
             },
         })
-        exactMarkerSeries.setData(
-            exactMarkerData.map((marker) => ({
-                time: marker.time,
-                value: marker.price,
-                color: marker.color,
-            })),
-        )
-        createSeriesMarkers(exactMarkerSeries, exactMarkerData)
-    }
 
-    chart.timeScale().fitContent()
+        const localOffsetSeconds = getLocalOffsetSeconds()
+        const localTickerData = tickerData.map((entry) => ({
+            ...entry,
+            time: Number(entry.time) + localOffsetSeconds,
+        }))
+        await nextAnimationFrame()
+        candlestickSeries.setData(localTickerData)
+
+        for (const priceLine of props.priceLines) {
+            const price = toFiniteNumber(priceLine.price)
+            if (price === null || price <= 0) {
+                continue
+            }
+            candlestickSeries.createPriceLine({
+                price,
+                color: priceLine.color,
+                lineWidth: 2,
+                lineStyle: priceLine.lineStyle,
+                axisLabelVisible: true,
+                title: priceLine.title,
+            })
+        }
+
+        const candleMarkerData = props.markers
+            .map((marker) => {
+                const markerTime = normalizeMarkerTime(
+                    marker.timestamp,
+                    timeframe.seconds,
+                    localOffsetSeconds,
+                )
+                if (markerTime === null) {
+                    return null
+                }
+                if (toFiniteNumber(marker.price) !== null) {
+                    return null
+                }
+                return {
+                    time: markerTime,
+                    position: marker.position,
+                    color: marker.color,
+                    shape: marker.shape,
+                    text: marker.text,
+                }
+            })
+            .filter((marker): marker is NormalizedTradeReplayMarker => marker !== null)
+
+        const exactMarkerData = props.markers
+            .map((marker) => {
+                const markerPrice = toFiniteNumber(marker.price)
+                const markerTime = normalizeExactMarkerTime(
+                    marker.timestamp,
+                    localOffsetSeconds,
+                )
+                if (markerTime === null || markerPrice === null) {
+                    return null
+                }
+                return {
+                    time: markerTime,
+                    position: 'inBar' as const,
+                    color: marker.color,
+                    shape: marker.shape,
+                    text: marker.text,
+                    price: markerPrice,
+                }
+            })
+            .filter((marker): marker is ExactTradeReplayMarker => marker !== null)
+            .sort((left, right) => left.time - right.time)
+
+        if (candleMarkerData.length > 0) {
+            createSeriesMarkers(candlestickSeries, candleMarkerData)
+        }
+
+        if (exactMarkerData.length > 0) {
+            // Exact-price markers need backing series data. Lightweight Charts
+            // snaps markers to existing series points and does not autoscale around
+            // marker-only prices, so we attach these markers to a hidden line
+            // series with real time/value points.
+            const exactMarkerSeries = chart.addSeries(LineSeries, {
+                color: 'rgba(0, 0, 0, 0)',
+                lineVisible: false,
+                pointMarkersVisible: false,
+                crosshairMarkerVisible: false,
+                lastValueVisible: false,
+                priceLineVisible: false,
+                priceFormat: {
+                    type: 'price',
+                    minMove: precision,
+                },
+            })
+            exactMarkerSeries.setData(
+                exactMarkerData.map((marker) => ({
+                    time: marker.time,
+                    value: marker.price,
+                    color: marker.color,
+                })),
+            )
+            createSeriesMarkers(exactMarkerSeries, exactMarkerData)
+        }
+
+        await nextAnimationFrame()
+        chart.timeScale().fitContent()
+    } catch (error) {
+        loadError.value = error instanceof Error
+            ? error.message
+            : 'Failed loading replay chart.'
+        chartReady.value = false
+    } finally {
+        isLoading.value = false
+    }
 }
 
 onMounted(() => {
@@ -387,8 +444,22 @@ onUnmounted(() => {
     width: 100%;
 }
 
+.expand-chart-empty {
+    align-items: center;
+    background: rgb(24, 24, 28);
+    color: #ECEFEA;
+    display: flex;
+    font-size: 14px;
+    height: 400px;
+    justify-content: center;
+    padding: 16px;
+    text-align: center;
+    width: 100%;
+}
+
 @media (max-width: 768px) {
-    .expand-chart {
+    .expand-chart,
+    .expand-chart-empty {
         height: 300px;
     }
 }
