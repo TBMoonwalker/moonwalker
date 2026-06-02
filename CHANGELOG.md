@@ -4,6 +4,17 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.0.2.0] - 2026-06-02
+
+### Fixed
+
+- Restore closed-trade replay charts for high-precision trades so rows such as
+  `VIRTUAL/USDC` render candles instead of an empty dark chart frame.
+- Keep the closed-trade replay timeline and chart in stable desktop columns,
+  while preserving the stacked mobile layout.
+- Add regression coverage for replay chart precision, layout-ready painting,
+  explicit empty and error states, and exact sell marker placement.
+
 ## [4.0.1.0] - 2026-06-01
 
 ### Fixed
