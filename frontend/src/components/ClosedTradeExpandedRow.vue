@@ -41,17 +41,18 @@
             </n-text>
         </n-card>
 
-        <TradeReplayChart
-            v-if="canRenderChart"
-            :symbol="props.rowData.symbol"
-            :precision="chartPrecision"
-            :start-timestamp="startTimestamp"
-            :end-timestamp="endTimestamp"
-            :archive-deal-id="props.rowData.deal_id"
-            :min-timeframe="props.minTimeframe"
-            :markers="chartMarkers"
-            :price-lines="chartPriceLines"
-        />
+        <div v-if="canRenderChart" class="closed-trade-chart-panel">
+            <TradeReplayChart
+                :symbol="props.rowData.symbol"
+                :precision="chartPrecision"
+                :start-timestamp="startTimestamp"
+                :end-timestamp="endTimestamp"
+                :archive-deal-id="props.rowData.deal_id"
+                :min-timeframe="props.minTimeframe"
+                :markers="chartMarkers"
+                :price-lines="chartPriceLines"
+            />
+        </div>
     </n-flex>
 </template>
 
@@ -488,11 +489,17 @@ onMounted(() => {
 .closed-trade-replay-shell {
     gap: 16px;
     align-items: stretch;
+    flex-wrap: nowrap;
 }
 
 .closed-trade-timeline-card {
     flex: 0 0 340px;
     max-width: 360px;
+}
+
+.closed-trade-chart-panel {
+    flex: 1 1 0;
+    min-width: 0;
 }
 
 .replay-notice {
@@ -507,6 +514,10 @@ onMounted(() => {
     .closed-trade-timeline-card {
         flex-basis: auto;
         max-width: none;
+        width: 100%;
+    }
+
+    .closed-trade-chart-panel {
         width: 100%;
     }
 }
