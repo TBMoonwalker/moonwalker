@@ -394,6 +394,54 @@ async def test_config_load_all_ignores_removed_trade_mode_rows(
 
 
 @pytest.mark.asyncio
+async def test_config_load_all_derives_sidestep_from_legacy_upgrade_rows(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    import model
+
+    await model.AppConfig.create(
+        key="trade_lifecycle_mode",
+        value="sidestep_reentry",
+        value_type="str",
+    )
+    await model.AppConfig.create(
+        key="sidestep_campaign_enabled",
+        value=True,
+        value_type="bool",
+    )
+    await model.AppConfig.create(
+        key="sidestep_bearish_strategy",
+        value="ema20_swing_reverse",
+        value_type="str",
+    )
+    await model.AppConfig.create(
+        key="sidestep_reentry_strategy",
+        value="ema20_swing",
+        value_type="str",
+    )
+
+    config = Config()
+    await config.load_all()
+
+    assert config.get("trade_mode") == "sidestep"
+    assert config.snapshot()["trade_mode"] == "sidestep"
+    assert "trade_lifecycle_mode" not in config.snapshot()
+    assert "sidestep_campaign_enabled" not in config.snapshot()
+    assert "trade_lifecycle_mode" not in config.raw_snapshot()
+    assert "sidestep_campaign_enabled" not in config.raw_snapshot()
+    assert await model.AppConfig.filter(key="trade_mode").exists() is False
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_config_set_rejects_removed_trade_mode_bridge_key(
     tmp_path, monkeypatch
 ) -> None:
