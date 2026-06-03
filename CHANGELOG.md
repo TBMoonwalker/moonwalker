@@ -4,6 +4,17 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.0.3.0] - 2026-06-03
+
+### Fixed
+
+- Keep upgraded sidestep installations in `trade_mode = sidestep` when legacy
+  3.3-era trade-mode rows are still present, so the Control Center no longer
+  falls back to dynamic DCA setup after a 4.0 upgrade.
+- Add regression coverage that proves the legacy sidestep bridge is runtime-only:
+  removed compatibility keys stay hidden, and Moonwalker does not write a new
+  `trade_mode` row while loading the upgraded config.
+
 ## [4.0.2.0] - 2026-06-02
 
 ### Fixed
