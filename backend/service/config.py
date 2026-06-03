@@ -34,6 +34,13 @@ REMOVED_CONFIG_KEY_REPLACEMENTS = {
         "this release",
     ),
 }
+LEGACY_TRADE_MODE_KEYS = frozenset(
+    {
+        "trade_lifecycle_mode",
+        "dynamic_dca",
+        "sidestep_campaign_enabled",
+    }
+)
 
 HISTORY_LOOKBACK_DEFAULTS_BY_TIMEFRAME = {
     "1m": "30d",
@@ -101,6 +108,56 @@ def build_removed_config_key_message(key: str) -> str:
             f"Use '{replacement}' instead."
         )
     return f"Config key '{normalized_key}' was removed in {version}."
+
+
+def _optional_config_string(value: Any) -> str | None:
+    """Return a stripped config string when the value is meaningful."""
+    normalized = str(value or "").strip()
+    return normalized or None
+
+
+def _bool_config_value(value: Any) -> bool:
+    """Normalize mixed bool-like config values safely."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off", ""}:
+            return False
+    return bool(value)
+
+
+def _resolve_legacy_trade_mode(legacy_snapshot: dict[str, Any]) -> str | None:
+    """Return a runtime-only canonical trade mode from legacy upgrade rows."""
+    lifecycle_mode = _optional_config_string(
+        legacy_snapshot.get("trade_lifecycle_mode")
+    )
+    sidestep_enabled = _bool_config_value(
+        legacy_snapshot.get("sidestep_campaign_enabled", False)
+    )
+
+    if lifecycle_mode == "sidestep_reentry" or sidestep_enabled:
+        return "sidestep"
+    if _bool_config_value(legacy_snapshot.get("dynamic_dca", False)):
+        return "dynamic_dca"
+    return None
+
+
+def _apply_legacy_trade_mode_entry(
+    entries: list[ConfigEntry],
+    legacy_snapshot: dict[str, Any],
+) -> None:
+    """Add a runtime-only trade_mode entry for pre-4.0 upgrade configs."""
+    if any(entry.key == "trade_mode" for entry in entries):
+        return
+
+    trade_mode = _resolve_legacy_trade_mode(legacy_snapshot)
+    if trade_mode is None:
+        return
+
+    entries.append(ConfigEntry(key="trade_mode", value_type="str", value=trade_mode))
 
 
 def resolve_timeframe(config: dict[str, Any], default: str = "1m") -> str:
@@ -239,11 +296,19 @@ class Config:
         based on the value_type field. Also loads strategies and signal plugins.
         """
         entries: list[ConfigEntry] = []
+        legacy_snapshot: dict[str, Any] = {}
         rows = await AppConfig.all()
         for row in rows:
+            if row.key in LEGACY_TRADE_MODE_KEYS:
+                legacy_snapshot[row.key] = deserialize_config_value(
+                    row.value,
+                    row.value_type,
+                )
+                continue
             if is_removed_config_key(row.key):
                 continue
             entries.append(self.__build_entry(row.key, row.value, row.value_type))
+        _apply_legacy_trade_mode_entry(entries, legacy_snapshot)
         self.__validate_trade_mode_snapshot(
             self.__build_snapshot_from_entries(entries),
             source="startup",
