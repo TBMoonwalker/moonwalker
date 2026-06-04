@@ -4,6 +4,25 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.0.4.0] - 2026-06-04
+
+### Fixed
+
+- **P1** Bound `_sell_locks` in `Orders` to a fixed-size cache (max 1000 entries)
+  with LRU eviction, preventing unbounded memory growth over the process lifetime.
+- **P1** Sanitize exchange connection config in `ExchangeConnectionConfigView` by
+  introducing `to_identity_dict()` which replaces raw API key/secret values with a
+  redacted hash, so credential rotation is still detected without exposing secrets.
+- **P2** Replace `time.sleep()` in `start_redis()` with `asyncio.sleep()` so the
+  Redis subprocess startup no longer blocks the event loop.
+- **P2** Replace `asyncio.to_thread()` calls in `Indicators` with
+  `loop.run_in_executor()` using a shared bounded `ThreadPoolExecutor(max_workers=4)`
+  to reduce thread churn during indicator calculations.
+- **P2** Restrict CORS `allow_origins` from wildcard (`*`) to localhost/127.0.0.1
+  and tighten allowed methods and headers.
+- **P2** Suppress `misc` mypy error code for pre-existing lambda type-inference
+  warnings in indicator calculations.
+
 ## [4.0.3.0] - 2026-06-03
 
 ### Fixed

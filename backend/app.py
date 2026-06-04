@@ -44,7 +44,7 @@ runtime_state = RuntimeState()
 
 async def startup() -> None:
     """Initialize core services and start background tasks before serving."""
-    runtime_state.redis_proc = await asyncio.to_thread(start_redis)
+    runtime_state.redis_proc = await start_redis()
     runtime_state.watcher_queue = asyncio.Queue()
 
     runtime_state.database = Database()

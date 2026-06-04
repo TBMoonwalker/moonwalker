@@ -115,7 +115,11 @@ async def test_startup_schedules_replay_backfill_as_background_task(
 ) -> None:
     fake_database = _FakeDatabase()
     monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
-    monkeypatch.setattr(app_module, "start_redis", lambda: object())
+
+    async def _fake_start_redis():
+        return None
+
+    monkeypatch.setattr(app_module, "start_redis", _fake_start_redis)
     monkeypatch.setattr(app_module, "stop_redis", lambda _proc: None)
     monkeypatch.setattr(app_module, "Database", lambda: fake_database)
     monkeypatch.setattr(app_module, "Config", _FakeConfigFactory)

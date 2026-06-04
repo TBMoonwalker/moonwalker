@@ -1,10 +1,10 @@
 """Redis client and local subprocess lifecycle helpers."""
 
+import asyncio
 import atexit
 import os
 import socket
 import subprocess
-import time
 import uuid
 
 import redis.asyncio as redis
@@ -36,7 +36,7 @@ def stop_redis(proc: subprocess.Popen | None) -> None:
         proc.wait(timeout=2)
 
 
-def start_redis() -> subprocess.Popen | None:
+async def start_redis() -> subprocess.Popen | None:
     """Start a local Redis server when no Redis instance is already available."""
     if _is_redis_running():
         return None
@@ -47,8 +47,9 @@ def start_redis() -> subprocess.Popen | None:
         stderr=subprocess.DEVNULL,
     )
 
-    # Reap immediately if startup failed (e.g. address in use).
-    time.sleep(0.2)
+    # Yield to the event loop briefly to allow the child to initialize,
+    # then reap immediately if startup failed (e.g. address in use).
+    await asyncio.sleep(0.2)
     if proc.poll() is not None:
         proc.wait()
         return None

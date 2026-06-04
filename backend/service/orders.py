@@ -57,6 +57,7 @@ class Orders:
     """Handle incoming buy/sell signals and persist trades."""
 
     _sell_locks: dict[str, asyncio.Lock] = {}
+    _SELL_LOCKS_MAX = 1000
     _ENTRY_SIZING_RETRY_REASONS = {
         "capital_budget_exceeded",
         "insufficient_quote_balance",

@@ -1,6 +1,7 @@
 """Indicator calculations based on OHLCV data."""
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import helper
@@ -19,6 +20,10 @@ INDICATOR_CALCULATION_EXCEPTIONS = (
     TypeError,
     ValueError,
 )
+
+# Shared thread pool for CPU-bound indicator calculations (TA-Lib, pandas resample).
+# Bounded to avoid thread churn while still allowing parallel computation.
+_indicator_executor = ThreadPoolExecutor(max_workers=4)
 
 
 class Indicators:
@@ -242,8 +247,12 @@ class Indicators:
             df_raw = await self._get_indicator_source_data(
                 symbol, timerange, max(max_length * 2, 200)
             )
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
-            ema = await asyncio.to_thread(self._calculate_ema_sync, df, lengths)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
+            ema = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self._calculate_ema_sync, df, lengths
+            )
             self._ema_cache[cache_key] = (latest_timestamp, ema)
         except INDICATOR_CALCULATION_EXCEPTIONS as e:
             self._log_indicator_error("EMA", symbol, e)
@@ -265,9 +274,12 @@ class Indicators:
             df_raw = await self._get_indicator_source_data(
                 symbol, timerange, max(length * 2, 200)
             )
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
-            series = await asyncio.to_thread(
-                lambda: talib.EMA(df["close"].dropna(), timeperiod=length)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
+            series = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor,
+                lambda: talib.EMA(df["close"].dropna(), timeperiod=length),
             )
             self._ema_series_cache[cache_key] = (latest_timestamp, series)
             return series
@@ -289,7 +301,9 @@ class Indicators:
             df_raw = await self._get_indicator_source_data(
                 symbol, timerange, max(length * 2, 50)
             )
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
             close = df["close"]
             self._close_cache[cache_key] = (latest_timestamp, close)
             return close
@@ -311,7 +325,9 @@ class Indicators:
             df_raw = await self._get_indicator_source_data(
                 symbol, timerange, max(length * 2, 50)
             )
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
             low = df["low"]
             self._low_cache[cache_key] = (latest_timestamp, low)
             return low
@@ -333,7 +349,9 @@ class Indicators:
             df_raw = await self._get_indicator_source_data(
                 symbol, timerange, max(length * 2, 50)
             )
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
             high = df["high"]
             self._high_cache[cache_key] = (latest_timestamp, high)
             return high
@@ -353,8 +371,12 @@ class Indicators:
         symbol = f"BTC/{currency}"
         try:
             df_raw = await self.data.get_data_for_pair(symbol, timerange, 60)
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
-            result = await asyncio.to_thread(self._calculate_btc_pulse_sync, df)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
+            result = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self._calculate_btc_pulse_sync, df
+            )
         except INDICATOR_CALCULATION_EXCEPTIONS as e:
             self._log_indicator_error("BTC Pulse", symbol, e)
             result = True
@@ -369,8 +391,12 @@ class Indicators:
             df_raw = await self.data.get_data_for_pair(symbol, timerange, length)
             if df_raw is None:
                 return None
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
-            return await asyncio.to_thread(self._calculate_rsi_sync, df, length)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
+            return await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self._calculate_rsi_sync, df, length
+            )
         except INDICATOR_CALCULATION_EXCEPTIONS as e:
             self._log_indicator_error("RSI", symbol, e)
             return None
@@ -389,9 +415,12 @@ class Indicators:
             df_raw = await self._get_indicator_source_data(
                 symbol, timerange, max(length * 3, 50)
             )
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
-            series = await asyncio.to_thread(
-                lambda: talib.RSI(df["close"].dropna(), timeperiod=length)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
+            series = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor,
+                lambda: talib.RSI(df["close"].dropna(), timeperiod=length),
             )
             self._rsi_series_cache[cache_key] = (latest_timestamp, series)
             return series
@@ -451,7 +480,9 @@ class Indicators:
             df_raw = await self._get_indicator_source_data(
                 symbol, timerange, max(length * 3, 50)
             )
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
 
             def _build_series() -> dict[str, Any]:
                 upper, middle, lower = talib.BBANDS(
@@ -469,7 +500,9 @@ class Indicators:
                     "bandwidth": bandwidth,
                 }
 
-            series = await asyncio.to_thread(_build_series)
+            series = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, _build_series
+            )
             self._bollinger_series_cache[cache_key] = (latest_timestamp, series)
             return series
         except INDICATOR_CALCULATION_EXCEPTIONS as e:
@@ -528,7 +561,9 @@ class Indicators:
             df_raw = await self._get_indicator_source_data(
                 symbol, timerange, max(slow_period * 3, 100)
             )
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
 
             def _build_series() -> dict[str, Any]:
                 macd, signal, histogram = talib.MACD(
@@ -539,7 +574,9 @@ class Indicators:
                 )
                 return {"macd": macd, "signal": signal, "histogram": histogram}
 
-            series = await asyncio.to_thread(_build_series)
+            series = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, _build_series
+            )
             self._macd_series_cache[cache_key] = (latest_timestamp, series)
             return series
         except INDICATOR_CALCULATION_EXCEPTIONS as e:
@@ -555,8 +592,12 @@ class Indicators:
             df_raw = await self.data.get_data_for_pair(symbol, "1m", 1500)
             if df_raw is None:
                 return None
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, "1h")
-            return await asyncio.to_thread(self._calculate_24h_volume_sync, df)
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, "1h"
+            )
+            return await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self._calculate_24h_volume_sync, df
+            )
         except INDICATOR_CALCULATION_EXCEPTIONS as e:
             self._log_indicator_error("24h volume", symbol, e)
             return None
@@ -593,8 +634,11 @@ class Indicators:
             if df_raw is None:
                 return 1.0, {"regime": "mid", "atr_percent": 0.0}
 
-            df = await asyncio.to_thread(self.data.resample_data, df_raw, timerange)
-            return await asyncio.to_thread(
+            df = await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor, self.data.resample_data, df_raw, timerange
+            )
+            return await asyncio.get_running_loop().run_in_executor(
+                _indicator_executor,
                 self._calculate_atr_regime_sync,
                 df,
                 length,

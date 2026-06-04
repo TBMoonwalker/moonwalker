@@ -29,6 +29,18 @@ current grouped replay and waiting-campaign context are still insufficient.
 
 ## Completed
 
+### Address performance and stability findings from engineering review
+
+**Completed:** v4.0.4.0 (2026-06-04)
+
+**What shipped:** Bounded the per-symbol sell-lock cache to prevent unbounded
+memory growth, sanitized exchange connection config to avoid logging raw API
+credentials, replaced blocking `time.sleep()` in Redis startup with
+non-blocking `asyncio.sleep()`, replaced per-call `asyncio.to_thread()` in
+indicator calculations with a shared bounded `ThreadPoolExecutor` via
+`run_in_executor()`, restricted CORS from wildcard to localhost-only, and
+suppressed pre-existing lambda type-inference mypy warnings.
+
 ### Polish Statistics heatmap density and Strategy Builder graph readability
 
 **Completed:** v4.0.0.0 (2026-05-31)
