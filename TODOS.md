@@ -2,6 +2,33 @@
 
 ## Deferred
 
+### Fix Statistics pagination (ISSUE-001)
+
+**Found by:** /qa on main, 2026-06-05
+**Severity:** High
+**Category:** Functional
+**What:** Clicking pagination numbers (2, 3, 23) on /stats does not change the displayed data — page 1 content stays visible.
+**Repro:** Go to /stats → click "2" or "23" → observe same symbols (ALLO/USDC, FLUX/USDC) still shown.
+**Report:** .gstack/qa-reports/qa-report-192-168-6-5-8160-2026-06-05.md
+
+### Fix Statistics sort column data reduction (ISSUE-002)
+
+**Found by:** /qa on main, 2026-06-05
+**Severity:** High
+**Category:** Functional
+**What:** Clicking a sort column header (e.g., "Trades") on /stats reduces the table from 10 rows to 3 rows and pagination from 23 pages to 3.
+**Repro:** Go to /stats → click "Trades" column header → observe only 3 rows remain.
+**Report:** .gstack/qa-reports/qa-report-192-168-6-5-8160-2026-06-05.md
+
+### Fix mobile text truncation (ISSUE-003, ISSUE-004)
+
+**Found by:** /qa on main, 2026-06-05
+**Severity:** Low (ISSUE-003), Medium (ISSUE-004)
+**Category:** Visual
+**What:** On 375px mobile viewport: (a) "less/more" below stats heatmap truncates to "les mo"; (b) Control Center heading "Safe dry-run setup is ready" truncates to "Safe dry-run set".
+**Repro:** Set viewport to 375x812 → visit /stats and /control-center → observe truncated text.
+**Report:** .gstack/qa-reports/qa-report-192-168-6-5-8160-2026-06-05.md
+
 ### Extend sidestep campaign analytics beyond grouped replay polish
 
 **What:** If operators later need deeper reporting, add a campaign-first
