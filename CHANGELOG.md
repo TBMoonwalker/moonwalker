@@ -4,6 +4,22 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.0.4.0] - 2026-06-05
+
+### Fixed
+
+- Clicking pagination numbers on the Statistics page now correctly updates the
+  symbol table data instead of showing the same first-page results.
+- Clicking a sort column header on the Statistics page no longer reduces the
+  visible rows; the table now shows the full page of sorted results.
+- All sortable columns (Trades, Win Rate, Total Profit, Avg Profit) now
+  display the correct sort indicator arrow on the active column only.
+
+### Added
+
+- Regression test coverage for Statistics pagination, column sorting, data
+  formatting, and sort indicator behavior.
+
 ## [4.0.3.0] - 2026-06-03
 
 ### Fixed
