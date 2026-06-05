@@ -277,6 +277,42 @@ adding deeper controls, not by restating the same fields.
 - Do not duplicate normal editable settings between Setup and Advanced.
 - Prefer explicit task ownership over component reuse when reuse harms clarity.
 
+## Verified Baseline (Live-Measured, 2026-06-05)
+
+These values were extracted from the running site at http://192.168.6.5:8160/stats — not from source code. They confirm what actually renders.
+
+### Fonts Rendered
+| Font | Where | Matches Design System? |
+|------|-------|----------------------|
+| Space Grotesk | Display/Hero | Yes |
+| Source Sans 3 | Body, UI labels | Yes |
+| IBM Plex Mono | Data/Tables (declared) | Yes |
+
+### Colors Rendered
+| Value | Role | Matches? |
+|-------|------|----------|
+| #1D5C49 | Primary (operator green) | Yes |
+| #2E7D5B | Success | Yes |
+| #B4443F | Error | Yes |
+| #18211D | Primary text | Yes |
+| #33403A | Strong secondary text | Yes |
+| #8A948D | Muted text | Yes |
+| #F7F8F6 | Surface base | Yes |
+
+### Known Deviations
+| Issue | Current | Should Be | Severity |
+|-------|---------|-----------|----------|
+| Body font size | 14px (Naive UI default) | 16px per scale | Medium |
+| Pagination touch targets | 28x28px on mobile | 44x44px minimum | Medium |
+| Mobile text truncation | “les mo” at 375px | Full text with ellipsis | Low |
+
+### Performance Baseline
+| Metric | Value |
+|--------|-------|
+| TTFB | 10ms |
+| DOM Ready | 70ms |
+| Full Load | 72ms |
+
 ## Decisions Log
 | Date | Decision | Rationale |
 |------|----------|-----------|
@@ -286,3 +322,4 @@ adding deeper controls, not by restating the same fields.
 | 2026-03-21 | Declared restore a first-run entry workflow and a later utility, not an advanced setting | Restore is lifecycle-dependent, not expertise-dependent |
 | 2026-03-21 | Declared one-home rule for editable settings | Duplicate fields between Setup and Advanced destroy operator focus |
 | 2026-03-21 | Reserved gradients for atmosphere and rare emphasis, not core work surfaces | Flat panels preserve calm hierarchy and keep dark mode from feeling noisy |
+| 2026-06-05 | Added verified baseline section | Live-measured values confirm design system compliance; deviations tracked for remediation |
