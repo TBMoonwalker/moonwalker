@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import type { DataTableColumns, PaginationProps } from 'naive-ui'
+import type { DataTableColumns, PaginationProps, SorterResult } from 'naive-ui'
 import Heatmap from '../components/Heatmap.vue'
 import { useAnalyticsStore } from '../stores/analytics'
 import type { AnalyticsOverview } from '../stores/analytics'
@@ -8,12 +8,32 @@ import type { AnalyticsOverview } from '../stores/analytics'
 const analytics = useAnalyticsStore()
 const activeTab = ref('symbols')
 const isMobile = ref(false)
+const symbolSortState = ref<{ columnKey: string; order: 'ascend' | 'descend' } | null>({
+   columnKey: 'trades',
+   order: 'descend',
+})
 const symbolPagination = reactive<PaginationProps>({
    page: 1,
    pageSize: 10,
    pageSlot: 5,
    prefix: ({ itemCount }) => `Total ${itemCount} symbols`,
 })
+
+function handleSymbolPageChange(page: number) {
+   symbolPagination.page = page
+}
+
+function handleSymbolSorterChange(sorter: SorterResult | null) {
+   if (sorter) {
+      symbolSortState.value = {
+         columnKey: sorter.columnKey ?? sorter.key,
+         order: sorter.order as 'ascend' | 'descend' | undefined ?? undefined,
+      }
+   } else {
+      symbolSortState.value = null
+   }
+   symbolPagination.page = 1
+}
 
 function handleResize() {
    isMobile.value = window.innerWidth < 768
@@ -43,8 +63,26 @@ const drawdown = computed(
       () => (d.value as AnalyticsOverview | null)?.drawdown ?? null,
  )
 const distribution = computed(
-      () => (d.value as AnalyticsOverview | null)?.distribution ?? null,
+        () => (d.value as AnalyticsOverview | null)?.distribution ?? null,
  )
+
+const sortedAndPaginatedSymbols = computed(() => {
+   let rows = [...perSymbol.value]
+   const ss = symbolSortState.value
+   if (ss) {
+      rows.sort((a: any, b: any) => {
+         let aVal = a[ss.columnKey]
+         let bVal = b[ss.columnKey]
+         if (typeof aVal === 'string') aVal = aVal.toLowerCase()
+         if (typeof bVal === 'string') bVal = bVal.toLowerCase()
+         if (aVal < bVal) return ss.order === 'ascend' ? -1 : 1
+         if (aVal > bVal) return ss.order === 'ascend' ? 1 : -1
+         return 0
+         })
+      }
+   const start = ((symbolPagination.page ?? 1) - 1) * (symbolPagination.pageSize ?? 10)
+   return rows.slice(start, start + (symbolPagination.pageSize ?? 10))
+})
 
 const heatmapData = computed(
        () => (d.value as AnalyticsOverview | null)?.heatmap_daily ?? [],
@@ -130,13 +168,14 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        key: 'trades',
        width: 80,
        sorter: 'default',
-       defaultSortOrder: 'descend',
+       sortOrder: symbolSortState.value?.order ?? 'descend',
       },
       {
        title: 'Win Rate',
        key: 'win_rate',
        width: 100,
        sorter: 'default',
+       sortOrder: symbolSortState.value?.columnKey === 'win_rate' ? symbolSortState.value.order : null,
        render(row: any) {
         return `${row.win_rate}%`
         },
@@ -146,6 +185,7 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        key: 'total_profit',
        width: 120,
        sorter: 'default',
+       sortOrder: symbolSortState.value?.columnKey === 'total_profit' ? symbolSortState.value.order : null,
        render(row: any) {
         const color = row.total_profit >= 0
               ? '#2E7D5B'
@@ -338,15 +378,18 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
               <n-tab-pane v-for="tab in tabNames" :key="tab.name" :name="tab.name" :tab="tab.label">
                 <div v-show="activeTab === tab.name" class="tab-content">
                   <!-- Symbols Tab -->
-                  <template v-if="tab.name === 'symbols' && perSymbol.length">
-                    <n-data-table
-                        :columns="getSymbolColumns()"
-                        :data="perSymbol"
-                        :pagination="symbolPagination"
-                        :scroll-x="500"
-                       size="small"
-                    />
-                  </template>
+                                      <template v-if="tab.name === 'symbols' && perSymbol.length">
+                      <n-data-table
+                         remote
+                         :columns="getSymbolColumns()"
+                         :data="sortedAndPaginatedSymbols"
+                         :pagination="symbolPagination"
+                         :scroll-x="500"
+                         size="small"
+                         @update:page="handleSymbolPageChange"
+                         @update:sorter="handleSymbolSorterChange"
+                      />
+                    </template>
                   <n-empty v-else-if="tab.name === 'symbols'" description="No symbol data available" />
 
                   <!-- Duration Tab -->
