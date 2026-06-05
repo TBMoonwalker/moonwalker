@@ -24,15 +24,21 @@ function handleSymbolPageChange(page: number) {
 }
 
 function handleSymbolSorterChange(sorter: SorterResult | null) {
-   if (sorter) {
+   if (sorter && sorter.order !== false) {
       symbolSortState.value = {
          columnKey: sorter.columnKey ?? sorter.key,
-         order: sorter.order as 'ascend' | 'descend' | undefined ?? undefined,
+         order: sorter.order as 'ascend' | 'descend',
       }
    } else {
       symbolSortState.value = null
    }
    symbolPagination.page = 1
+}
+
+function columnSortOrder(key: string): string | null {
+   return symbolSortState.value?.columnKey === key
+     ? symbolSortState.value.order
+     : null
 }
 
 function handleResize() {
@@ -48,6 +54,8 @@ onMounted(() => {
 onUnmounted(() => {
    window.removeEventListener('resize', handleResize)
  })
+
+const SYMBOL_PAGE_SIZE = 10
 
 const d = computed(() => analytics.data)
 const summary = computed(
@@ -78,10 +86,10 @@ const sortedAndPaginatedSymbols = computed(() => {
          if (aVal < bVal) return ss.order === 'ascend' ? -1 : 1
          if (aVal > bVal) return ss.order === 'ascend' ? 1 : -1
          return 0
-         })
-      }
-   const start = ((symbolPagination.page ?? 1) - 1) * (symbolPagination.pageSize ?? 10)
-   return rows.slice(start, start + (symbolPagination.pageSize ?? 10))
+      })
+   }
+   const start = ((symbolPagination.page ?? 1) - 1) * (symbolPagination.pageSize ?? SYMBOL_PAGE_SIZE)
+   return rows.slice(start, start + (symbolPagination.pageSize ?? SYMBOL_PAGE_SIZE))
 })
 
 const heatmapData = computed(
@@ -121,7 +129,8 @@ const heatmapMetrics = computed(() => {
 })
 
 watch(perSymbol, (rows) => {
-   const pageSize = symbolPagination.pageSize ?? 10
+   const pageSize = symbolPagination.pageSize ?? SYMBOL_PAGE_SIZE
+   symbolPagination.itemCount = rows.length
    const maxPage = Math.max(1, Math.ceil(rows.length / pageSize))
    if ((symbolPagination.page ?? 1) > maxPage) {
      symbolPagination.page = maxPage
@@ -168,14 +177,14 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        key: 'trades',
        width: 80,
        sorter: 'default',
-       sortOrder: symbolSortState.value?.order ?? 'descend',
+       sortOrder: columnSortOrder('trades'),
       },
       {
        title: 'Win Rate',
        key: 'win_rate',
        width: 100,
        sorter: 'default',
-       sortOrder: symbolSortState.value?.columnKey === 'win_rate' ? symbolSortState.value.order : null,
+       sortOrder: columnSortOrder('win_rate'),
        render(row: any) {
         return `${row.win_rate}%`
         },
@@ -185,7 +194,7 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        key: 'total_profit',
        width: 120,
        sorter: 'default',
-       sortOrder: symbolSortState.value?.columnKey === 'total_profit' ? symbolSortState.value.order : null,
+       sortOrder: columnSortOrder('total_profit'),
        render(row: any) {
         const color = row.total_profit >= 0
               ? '#2E7D5B'
@@ -198,6 +207,7 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        key: 'avg_profit',
        width: 100,
        sorter: 'default',
+       sortOrder: columnSortOrder('avg_profit'),
         render(row: any) {
          const color = row.avg_profit >= 0
                ? '#2E7D5B'
@@ -378,7 +388,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
               <n-tab-pane v-for="tab in tabNames" :key="tab.name" :name="tab.name" :tab="tab.label">
                 <div v-show="activeTab === tab.name" class="tab-content">
                   <!-- Symbols Tab -->
-                                      <template v-if="tab.name === 'symbols' && perSymbol.length">
+                    <template v-if="tab.name === 'symbols' && perSymbol.length">
                       <n-data-table
                          remote
                          :columns="getSymbolColumns()"
