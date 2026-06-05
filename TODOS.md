@@ -2,6 +2,15 @@
 
 ## Deferred
 
+### Fix mobile text truncation (ISSUE-003, ISSUE-004)
+
+**Found by:** /qa on main, 2026-06-05
+**Severity:** Low (ISSUE-003), Medium (ISSUE-004)
+**Category:** Visual
+**What:** On 375px mobile viewport: (a) "less/more" below stats heatmap truncates to "les mo"; (b) Control Center heading "Safe dry-run setup is ready" truncates to "Safe dry-run set".
+**Repro:** Set viewport to 375x812 → visit /stats and /control-center → observe truncated text.
+**Report:** .gstack/qa-reports/qa-report-192-168-6-5-8160-2026-06-05.md
+
 ### Extend sidestep campaign analytics beyond grouped replay polish
 
 **What:** If operators later need deeper reporting, add a campaign-first
@@ -28,6 +37,24 @@ actually warranted.
 current grouped replay and waiting-campaign context are still insufficient.
 
 ## Completed
+
+### Fix Statistics pagination (ISSUE-001)
+
+**Completed:** v4.0.4.0 (2026-06-05)
+
+**What shipped:** Added `sortedAndPaginatedSymbols` computed property that correctly
+sorts and slices the symbol data based on pagination state. The data table now
+uses `remote` mode with explicit `@update:page` and `@update:sorter` handlers,
+so clicking pagination numbers actually changes the displayed data.
+
+### Fix Statistics sort column data reduction (ISSUE-002)
+
+**Completed:** v4.0.4.0 (2026-06-05)
+
+**What shipped:** Rewired the sort handler to work with the new computed pagination
+pipeline. Clicking a sort column header now correctly sorts the full dataset and
+shows a full page of results instead of reducing to 3 rows. Added `columnSortOrder`
+helper to keep sort indicator logic DRY across all sortable columns.
 
 ### Polish Statistics heatmap density and Strategy Builder graph readability
 
