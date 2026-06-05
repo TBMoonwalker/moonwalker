@@ -12,8 +12,13 @@ const source = fs.readFileSync(
 // Functional mirror of handleSymbolSorterChange
 // ---------------------------------------------------------------------------
 
-let symbolSortState = { columnKey: 'trades', order: 'descend' }
-let symbolPagination = { page: 1, pageSize: 10 }
+const SYMBOL_PAGE_SIZE = 10
+
+const DEFAULT_SORT_STATE = { columnKey: 'trades', order: 'descend' }
+const DEFAULT_PAGINATION = { page: 1, pageSize: SYMBOL_PAGE_SIZE }
+
+let symbolSortState = DEFAULT_SORT_STATE
+let symbolPagination = DEFAULT_PAGINATION
 
 function handleSymbolSorterChange(sorter) {
     if (sorter && sorter.order !== false) {
@@ -29,8 +34,8 @@ function handleSymbolSorterChange(sorter) {
 
 // Reset state before each test
 function resetState() {
-    symbolSortState = { columnKey: 'trades', order: 'descend' }
-    symbolPagination = { page: 1, pageSize: 10 }
+    symbolSortState = { ...DEFAULT_SORT_STATE }
+    symbolPagination = { ...DEFAULT_PAGINATION }
 }
 
 // ---------------------------------------------------------------------------
@@ -71,6 +76,18 @@ test('handleSymbolSorterChange sets sortState to null when sorter is undefined',
     resetState()
     handleSymbolSorterChange(undefined)
     assert.strictEqual(symbolSortState, null)
+})
+
+// ---------------------------------------------------------------------------
+
+test('handleSymbolSorterChange handles empty sorter object', () => {
+    resetState()
+    handleSymbolSorterChange({})
+    // Empty {} passes the guard (truthy, order !== false), resulting in undefined values
+    // This is expected — Naive UI always provides columnKey/key + order
+    assert.equal(symbolSortState.columnKey, undefined)
+    assert.equal(symbolSortState.order, undefined)
+    assert.equal(symbolPagination.page, 1)
 })
 
 // ---------------------------------------------------------------------------
