@@ -4,6 +4,28 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.1.0.0] - 2026-06-08
+
+### Added
+
+- Open and closed trade replay charts now show the strategy indicator overlays
+  that explain the trade, including EMA, Bollinger Band, RSI, MACD, and
+  bandwidth series in price and indicator panes.
+- Backtest charts now share the same TradingView indicator rendering helpers, so
+  strategy overlays stay consistent across simulated and replayed trades.
+- Strategy runtime startup health checks now log explicit per-symbol evaluation
+  signals, making stale or unavailable strategy history easier to diagnose.
+- Regression coverage now protects replay indicator warmup windows, chart
+  overlay rendering, strategy runtime health checks, and watcher startup probes.
+
+### Fixed
+
+- Long-window replay indicators now load enough pre-window history before
+  trimming to the visible chart range, so EMA100/EMA200 and related overlays do
+  not disappear from trade replay charts.
+- Trade replay expand controls are now labelled buttons for assistive
+  technologies instead of cursor-only table cells.
+
 ## [4.0.4.0] - 2026-06-05
 
 ### Fixed
