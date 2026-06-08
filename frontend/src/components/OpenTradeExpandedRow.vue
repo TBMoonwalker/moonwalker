@@ -27,6 +27,7 @@
             :symbol="props.rowData.symbol"
             :precision="Number(props.rowData.precision ?? 0)"
             :start-timestamp="replayStartTimestamp"
+            :deal-id="props.rowData.deal_id"
             :min-timeframe="props.minTimeframe"
             :markers="chartMarkers"
             :price-lines="chartPriceLines"

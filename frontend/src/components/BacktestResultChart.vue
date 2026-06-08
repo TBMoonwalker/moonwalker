@@ -44,7 +44,6 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import {
     CandlestickSeries,
-    HistogramSeries,
     LineSeries,
     createChart,
     createSeriesMarkers,
@@ -54,10 +53,16 @@ import {
     normalizeBacktestMarkerShape,
     normalizeBacktestTimestampSeconds,
     type BacktestCandle,
-    type BacktestIndicatorPane,
     type BacktestIndicatorSeries,
     type BacktestMarker,
 } from '../helpers/backtest'
+import {
+    getIndicatorPanes,
+    getPriceIndicatorSeries,
+    renderIndicatorSeries,
+    withDistinctIndicatorColors,
+    type IndicatorPane,
+} from '../helpers/tradingViewIndicators'
 
 const props = defineProps<{
     candles: BacktestCandle[]
@@ -65,36 +70,22 @@ const props = defineProps<{
     indicators: BacktestIndicatorSeries[]
 }>()
 
-interface IndicatorPane {
-    key: Exclude<BacktestIndicatorPane, 'price'>
-    label: string
-    series: BacktestIndicatorSeries[]
-}
-
 const chartRef = ref<HTMLElement | null>(null)
 const indicatorChartRefs = new Map<string, HTMLElement>()
 let chart: ReturnType<typeof createChart> | null = null
 let indicatorCharts: Array<ReturnType<typeof createChart>> = []
 let isSynchronizingTimeScale = false
 
+const displayIndicators = computed<BacktestIndicatorSeries[]>(() =>
+    withDistinctIndicatorColors(props.indicators),
+)
+
 const priceIndicators = computed(() =>
-    props.indicators.filter((series) => series.pane === 'price'),
+    getPriceIndicatorSeries(displayIndicators.value),
 )
 
 const indicatorPanes = computed<IndicatorPane[]>(() =>
-    (
-        [
-            ['rsi', 'RSI'],
-            ['bandwidth', 'Bandwidth %'],
-            ['macd', 'MACD'],
-        ] as const
-    )
-        .map(([key, label]) => ({
-            key,
-            label,
-            series: props.indicators.filter((series) => series.pane === key),
-        }))
-        .filter((pane) => pane.series.length > 0),
+    getIndicatorPanes(displayIndicators.value),
 )
 
 function setIndicatorChartRef(key: string, element: unknown): void {
@@ -139,36 +130,6 @@ function chartOptions() {
         handleScroll: true,
         handleScale: true,
     }
-}
-
-function normalizedValues(series: BacktestIndicatorSeries) {
-    return series.values.map((value) => ({
-        time: normalizeBacktestTimestampSeconds(value.time),
-        value: Number(value.value),
-    }))
-}
-
-function renderIndicatorSeries(
-    targetChart: ReturnType<typeof createChart>,
-    series: BacktestIndicatorSeries,
-) {
-    if (series.renderer === 'histogram') {
-        const histogram = targetChart.addSeries(HistogramSeries, {
-            color: series.color,
-            priceLineVisible: false,
-            lastValueVisible: false,
-        })
-        histogram.setData(normalizedValues(series) as any[])
-        return histogram
-    }
-    const line = targetChart.addSeries(LineSeries, {
-        color: series.color,
-        lineWidth: 2,
-        priceLineVisible: false,
-        lastValueVisible: false,
-    })
-    line.setData(normalizedValues(series) as any[])
-    return line
 }
 
 function synchronizeTimeScales(charts: Array<ReturnType<typeof createChart>>): void {

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -18,6 +19,12 @@ logging = helper.LoggerFactory.get_logger("logs/strategies.log", "strategy_runti
 
 EMA20_LOOKBACK_LENGTH = 50
 EMA20_REQUIRED_CLOSED_CANDLES = 22
+STRATEGY_LOG_HEARTBEAT_SECONDS = 30 * 60
+
+
+def _monotonic() -> float:
+    """Return monotonic time for strategy log throttling."""
+    return time.monotonic()
 
 
 @dataclass
@@ -45,6 +52,15 @@ class EvaluationContext:
     memo: dict[tuple[Any, ...], Any] = field(default_factory=dict)
 
 
+@dataclass
+class StrategyLogState:
+    """Track deduplicated strategy logs for one symbol and side."""
+
+    payload: dict[str, Any]
+    last_log_at: float
+    unchanged_evaluations: int = 0
+
+
 class GraphStrategyAdapter:
     """Compatibility adapter replacing old Python strategy plugins."""
 
@@ -53,6 +69,7 @@ class GraphStrategyAdapter:
         self.timeframe = timeframe
         self.indicators = Indicators()
         self._last_log_by_symbol: dict[str, dict[str, Any]] = {}
+        self._log_state_by_key: dict[tuple[str, str], StrategyLogState] = {}
 
     async def run(self, symbol: str, side: str) -> bool:
         """Evaluate the active graph for one symbol."""
@@ -71,10 +88,40 @@ class GraphStrategyAdapter:
             "creating_order": result.matched,
             "reason": result.reason,
         }
-        if self._last_log_by_symbol.get(symbol) != payload:
-            logging.debug("%s", payload)
-            self._last_log_by_symbol[symbol] = payload
+        self._log_payload(symbol, side, payload)
         return result.matched
+
+    def _log_payload(self, symbol: str, side: str, payload: dict[str, Any]) -> None:
+        """Log changed strategy results and periodic unchanged heartbeats."""
+        now = _monotonic()
+        log_key = (symbol, side)
+        log_state = self._log_state_by_key.get(log_key)
+        if log_state is None or log_state.payload != payload:
+            logging.debug("%s", payload)
+            self._log_state_by_key[log_key] = StrategyLogState(
+                payload=dict(payload),
+                last_log_at=now,
+            )
+            self._last_log_by_symbol[symbol] = payload
+            return
+
+        log_state.unchanged_evaluations += 1
+        seconds_since_last_log = now - log_state.last_log_at
+        if seconds_since_last_log < STRATEGY_LOG_HEARTBEAT_SECONDS:
+            return
+
+        logging.debug(
+            "%s",
+            {
+                **payload,
+                "heartbeat": True,
+                "unchanged_evaluations": log_state.unchanged_evaluations,
+                "seconds_since_last_log": round(seconds_since_last_log, 1),
+            },
+        )
+        log_state.last_log_at = now
+        log_state.unchanged_evaluations = 0
+        self._last_log_by_symbol[symbol] = payload
 
 
 @dataclass(frozen=True)
@@ -84,6 +131,15 @@ class StrategyEvaluationResult:
     matched: bool
     version: int | None
     reason: str
+
+
+@dataclass(frozen=True)
+class StrategyHealthCheckSummary:
+    """Summary for a strategy runtime health check pass."""
+
+    evaluated: int
+    matched: int
+    failed: int
 
 
 _SNAPSHOT_CACHE: dict[str, StrategySnapshot] = {}
@@ -107,6 +163,79 @@ async def get_strategy_adapter(slug: str, timeframe: str) -> GraphStrategyAdapte
             f"{', '.join(missing_hooks)}."
         )
     return GraphStrategyAdapter(slug, timeframe)
+
+
+async def run_strategy_health_check(
+    slug: str,
+    timeframe: str,
+    symbols: list[str],
+    *,
+    side: str = "buy",
+) -> StrategyHealthCheckSummary:
+    """Evaluate a strategy for active symbols and log an INFO health signal.
+
+    The runtime may use stateful graph nodes, so health checks use an in-memory
+    state store to avoid mutating persisted strategy state.
+    """
+    unique_symbols = sorted({symbol for symbol in symbols if symbol})
+    state_store: dict[tuple[str, str, str, str], Any] = {}
+    evaluated = 0
+    matched = 0
+    failed = 0
+
+    for symbol in unique_symbols:
+        try:
+            result = await evaluate_strategy_graph(
+                slug,
+                timeframe,
+                symbol,
+                side,
+                state_store=state_store,
+            )
+        except Exception as exc:  # noqa: BLE001 - health checks must fail closed.
+            failed += 1
+            logging.error(
+                "Strategy health check failed for %s/%s on %s: %s",
+                slug,
+                side,
+                symbol,
+                exc,
+                exc_info=True,
+            )
+            continue
+
+        evaluated += 1
+        if result.matched:
+            matched += 1
+        logging.info(
+            "%s",
+            {
+                "source": "startup_health_check",
+                "symbol": symbol,
+                "strategy": slug,
+                "version": result.version,
+                "side": side,
+                "creating_order": result.matched,
+                "reason": result.reason,
+                "timeframe": timeframe,
+            },
+        )
+
+    logging.info(
+        "Strategy health check completed for %s/%s "
+        "(timeframe=%s, evaluated=%s, matched=%s, failed=%s).",
+        slug,
+        side,
+        timeframe,
+        evaluated,
+        matched,
+        failed,
+    )
+    return StrategyHealthCheckSummary(
+        evaluated=evaluated,
+        matched=matched,
+        failed=failed,
+    )
 
 
 async def evaluate_strategy_graph(

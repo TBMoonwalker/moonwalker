@@ -6,7 +6,10 @@ import { NIcon } from 'naive-ui/es/icon'
 import { NSlider } from 'naive-ui/es/slider'
 import { NTag } from 'naive-ui/es/tag'
 import { NTooltip } from 'naive-ui/es/tooltip'
-import { type DataTableColumns } from 'naive-ui/es/data-table'
+import {
+    type DataTableColumns,
+    type RenderExpandIcon,
+} from 'naive-ui/es/data-table'
 import {
     ArrowForwardCircleOutline,
     EllipsisHorizontal,
@@ -154,11 +157,27 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         return 'red'
     }
 
-    function renderExpandIcon() {
+    const renderExpandIcon: RenderExpandIcon = ({ expanded, rowData }) => {
+        const symbol = String(rowData.symbol ?? 'trade')
         return h(
-            NIcon,
-            { size: 24, color: '#63e2b7' },
-            { default: () => h(ArrowForwardCircleOutline) },
+            NButton,
+            {
+                circle: true,
+                quaternary: true,
+                size: 'small',
+                class: 'trade-expand-button',
+                'aria-label': `${
+                    expanded ? 'Collapse' : 'Expand'
+                } trade details for ${symbol}`,
+            },
+            {
+                icon: () =>
+                    h(
+                        NIcon,
+                        { size: 24, color: '#63e2b7' },
+                        { default: () => h(ArrowForwardCircleOutline) },
+                    ),
+            },
         )
     }
 

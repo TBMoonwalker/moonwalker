@@ -119,6 +119,9 @@ export type TradeExecutionRow = {
   order_type?: string | null
   order_count?: number | null
   so_percentage?: number | null
+  signal_name?: string | null
+  strategy_name?: string | null
+  timeframe?: string | null
 }
 
 function isFloat(val: any): boolean {

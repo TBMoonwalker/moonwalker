@@ -1026,6 +1026,16 @@ class Dca:
                         "ordertype": trades["ordertype"],
                         "so_percentage": next_so_percentage,
                         "side": "buy",
+                        "strategy_name": (
+                            runtime_config.dca_strategy
+                            if dynamic_dca and runtime_config.dca_strategy
+                            else None
+                        ),
+                        "timeframe": (
+                            resolve_timeframe(self.config or {})
+                            if dynamic_dca and runtime_config.dca_strategy
+                            else None
+                        ),
                     }
                     placed_new_so = await self.orders.receive_buy_order(
                         order, self.config

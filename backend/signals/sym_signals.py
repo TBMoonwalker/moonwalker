@@ -409,7 +409,7 @@ class SignalPlugin:
         await sidestep_campaigns.record_long_signal(
             symbol_full,
             signal_name=f"sym_signals:{event.get('signal_name_id')}",
-            strategy_name=None,
+            strategy_name=str(self.config.get("signal_strategy") or "") or None,
             timeframe=self._strategy_timeframe,
             metadata_json=None,
             source="sym_signals",
@@ -461,7 +461,7 @@ class SignalPlugin:
                 self.autopilot,
                 [symbol_full],
                 signal_name=f"sym_signals:{event.get('signal_name_id')}",
-                strategy_name=None,
+                strategy_name=str(self.config.get("signal_strategy") or "") or None,
                 timeframe=self._strategy_timeframe,
             )
             log_signal_entry_order_decisions(entry_orders.values())

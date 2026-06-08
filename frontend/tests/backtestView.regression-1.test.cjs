@@ -11,6 +11,10 @@ const backtestChartSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'BacktestResultChart.vue'),
     'utf8',
 )
+const indicatorHelperSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'helpers', 'tradingViewIndicators.ts'),
+    'utf8',
+)
 const appHeaderSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'AppHeader.vue'),
     'utf8',
@@ -63,8 +67,8 @@ test('backtest view is wired to the backend replay endpoint and chart markers', 
         'expected the Backtest result to pass strategy indicators to the chart',
     )
     assert.ok(
-        backtestChartSource.includes('LineSeries') &&
-            backtestChartSource.includes('HistogramSeries') &&
+        indicatorHelperSource.includes('LineSeries') &&
+            indicatorHelperSource.includes('HistogramSeries') &&
             backtestChartSource.includes('indicatorPanes'),
         'expected the Backtest chart to render price overlays and oscillator panels',
     )

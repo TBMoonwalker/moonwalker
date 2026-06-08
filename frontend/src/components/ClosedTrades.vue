@@ -19,7 +19,11 @@
 import { computed, h, onMounted, ref } from 'vue'
 import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
 import { NButton } from 'naive-ui/es/button'
-import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
+import {
+    NDataTable,
+    type DataTableColumns,
+    type RenderExpandIcon,
+} from 'naive-ui/es/data-table'
 import { useDialog } from 'naive-ui/es/dialog'
 import { NIcon } from 'naive-ui/es/icon'
 import { useMessage } from 'naive-ui/es/message'
@@ -129,11 +133,27 @@ async function handleDeleteClosedTrade(rowData: ClosedTradeRow): Promise<void> {
     })
 }
 
-function renderExpandIcon() {
+const renderExpandIcon: RenderExpandIcon = ({ expanded, rowData }) => {
+    const symbol = String(rowData.symbol ?? 'trade')
     return h(
-        NIcon,
-        { size: 24, color: '#63e2b7' },
-        { default: () => h(ArrowForwardCircleOutline) },
+        NButton,
+        {
+            circle: true,
+            quaternary: true,
+            size: 'small',
+            class: 'trade-expand-button',
+            'aria-label': `${
+                expanded ? 'Collapse' : 'Expand'
+            } trade details for ${symbol}`,
+        },
+        {
+            icon: () =>
+                h(
+                    NIcon,
+                    { size: 24, color: '#63e2b7' },
+                    { default: () => h(ArrowForwardCircleOutline) },
+                ),
+        },
     )
 }
 
@@ -327,5 +347,11 @@ onMounted(async () => {
 
 :deep(.n-data-table-expand-trigger) {
     height: 16px;
+}
+
+:deep(.trade-expand-button) {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
 }
 </style>

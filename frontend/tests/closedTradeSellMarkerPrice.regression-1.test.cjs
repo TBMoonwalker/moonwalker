@@ -36,7 +36,9 @@ test('closed trade replay backs exact sell markers with overlay series data', ()
             tradeReplayChartSource.includes('function normalizeExactMarkerTime(') &&
             tradeReplayChartSource.includes('const exactMarkerData = props.markers') &&
             tradeReplayChartSource.includes("position: 'inBar' as const") &&
-            tradeReplayChartSource.includes('const exactMarkerSeries = chart.addSeries(LineSeries, {') &&
+            tradeReplayChartSource.includes(
+                'const exactMarkerSeries = activeChart.addSeries(LineSeries, {',
+            ) &&
             tradeReplayChartSource.includes('exactMarkerSeries.setData(') &&
             tradeReplayChartSource.includes(
                 'createSeriesMarkers(exactMarkerSeries, exactMarkerData)',

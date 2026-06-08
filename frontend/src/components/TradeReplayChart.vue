@@ -10,13 +10,46 @@
             <div v-else-if="isLoading && !chartReady" class="expand-chart-empty">
                 Loading chart...
             </div>
-            <div v-show="chartReady" ref="chartRef" class="expand-chart" />
+            <div v-show="chartReady" class="expand-chart-stack">
+                <div v-if="priceIndicators.length > 0" class="chart-legend">
+                    <span
+                        v-for="series in priceIndicators"
+                        :key="series.key"
+                        class="legend-item"
+                    >
+                        <i :style="{ background: series.color }" />
+                        {{ series.label }}
+                    </span>
+                </div>
+                <div ref="chartRef" class="expand-chart" />
+                <section
+                    v-for="pane in indicatorPanes"
+                    :key="pane.key"
+                    class="indicator-pane"
+                >
+                    <header class="indicator-pane-header">
+                        <strong>{{ pane.label }}</strong>
+                        <span
+                            v-for="series in pane.series"
+                            :key="series.key"
+                            class="legend-item"
+                        >
+                            <i :style="{ background: series.color }" />
+                            {{ series.label }}
+                        </span>
+                    </header>
+                    <div
+                        :ref="(element) => setIndicatorChartRef(pane.key, element)"
+                        class="indicator-chart"
+                    />
+                </section>
+            </div>
         </div>
     </n-card>
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref } from 'vue'
 import {
     CandlestickSeries,
     LineSeries,
@@ -25,12 +58,20 @@ import {
 } from 'lightweight-charts'
 
 import { fetchJson } from '../api/client'
+import type { BacktestIndicatorSeries } from '../helpers/backtest'
 import { createDecimal } from '../helpers/validators'
 import {
     TIMEFRAME_CHOICES,
     splitTradeSymbol,
     type TimeframeChoice,
 } from '../helpers/openTrades'
+import {
+    getIndicatorPanes,
+    getPriceIndicatorSeries,
+    renderIndicatorSeries,
+    withDistinctIndicatorColors,
+    type IndicatorPane,
+} from '../helpers/tradingViewIndicators'
 import { useOhlcvStore } from '../stores/ohlcv'
 
 type TradeReplayMarker = {
@@ -73,11 +114,18 @@ const props = defineProps<{
     precision: number
     startTimestamp: number | string
     endTimestamp?: number | string | null
+    dealId?: string | null
     archiveDealId?: string | null
     minTimeframe: TimeframeChoice
     markers: TradeReplayMarker[]
     priceLines: TradeReplayPriceLine[]
 }>()
+
+type ReplayIndicatorResponse = {
+    result?: {
+        indicators?: BacktestIndicatorSeries[]
+    }
+}
 
 const MAX_VISIBLE_CANDLES = 500
 const PRE_ROLL_CANDLES = 2
@@ -89,8 +137,24 @@ const isLoading = ref(true)
 const isEmpty = ref(false)
 const loadError = ref('')
 const chartReady = ref(false)
+const replayIndicators = ref<BacktestIndicatorSeries[]>([])
 const ohlcvStore = useOhlcvStore()
+const indicatorChartRefs = new Map<string, HTMLElement>()
 let chart: ReturnType<typeof createChart> | null = null
+let indicatorCharts: Array<ReturnType<typeof createChart>> = []
+let isSynchronizingTimeScale = false
+
+const displayIndicators = computed<BacktestIndicatorSeries[]>(() =>
+    withDistinctIndicatorColors(replayIndicators.value),
+)
+
+const priceIndicators = computed(() =>
+    getPriceIndicatorSeries(displayIndicators.value),
+)
+
+const indicatorPanes = computed<IndicatorPane[]>(() =>
+    getIndicatorPanes(displayIndicators.value),
+)
 
 function toFiniteNumber(value: number | string | null | undefined): number | null {
     const parsed = Number(value)
@@ -125,6 +189,88 @@ function nextAnimationFrame(): Promise<void> {
     return new Promise((resolve) => {
         requestAnimationFrame(() => resolve())
     })
+}
+
+function setIndicatorChartRef(key: string, element: unknown): void {
+    if (element instanceof HTMLElement) {
+        indicatorChartRefs.set(key, element)
+    } else {
+        indicatorChartRefs.delete(key)
+    }
+}
+
+function chartOptions() {
+    return {
+        autoSize: true,
+        layout: {
+            background: { color: 'rgb(24, 24, 28)' },
+            textColor: '#fff',
+        },
+        grid: {
+            vertLines: { visible: false },
+            horzLines: { visible: false },
+        },
+        timeScale: {
+            borderVisible: false,
+            timeVisible: true,
+        },
+        rightPriceScale: {
+            borderVisible: false,
+        },
+        handleScroll: true,
+        handleScale: false,
+    }
+}
+
+function removeCharts(): void {
+    if (chart) {
+        chart.remove()
+        chart = null
+    }
+    for (const indicatorChart of indicatorCharts) {
+        indicatorChart.remove()
+    }
+    indicatorCharts = []
+}
+
+function synchronizeTimeScales(charts: Array<ReturnType<typeof createChart>>): void {
+    for (const sourceChart of charts) {
+        sourceChart.timeScale().subscribeVisibleTimeRangeChange((range) => {
+            if (!range || isSynchronizingTimeScale) {
+                return
+            }
+            isSynchronizingTimeScale = true
+            for (const targetChart of charts) {
+                if (targetChart !== sourceChart) {
+                    targetChart.timeScale().setVisibleRange(range)
+                }
+            }
+            isSynchronizingTimeScale = false
+        })
+    }
+}
+
+async function loadReplayIndicators(
+    timeframe: TimeframeChoice,
+    historyStart: number,
+    historyEnd: number | null,
+): Promise<void> {
+    replayIndicators.value = []
+    const dealId = props.dealId ?? props.archiveDealId
+    if (!dealId) {
+        return
+    }
+    const indicatorEnd = historyEnd ?? Date.now()
+    try {
+        const payload = await fetchJson<ReplayIndicatorResponse>(
+            `/trades/replay/indicators/${dealId}/${timeframe.timerange}/${historyStart}/${indicatorEnd}`,
+        )
+        replayIndicators.value = Array.isArray(payload.result?.indicators)
+            ? payload.result.indicators
+            : []
+    } catch (_error) {
+        replayIndicators.value = []
+    }
 }
 
 function selectTimeframe(): TimeframeChoice {
@@ -182,10 +328,12 @@ function normalizeExactMarkerTime(
 }
 
 async function initChart(): Promise<void> {
+    removeCharts()
     isLoading.value = true
     isEmpty.value = false
     loadError.value = ''
     chartReady.value = false
+    replayIndicators.value = []
 
     const beginTimestamp = toTimestampMs(props.startTimestamp)
     if (beginTimestamp === null) {
@@ -262,6 +410,7 @@ async function initChart(): Promise<void> {
             return
         }
 
+        await loadReplayIndicators(timeframe, historyStart, historyEnd)
         chartReady.value = true
         await nextTick()
         await nextAnimationFrame()
@@ -271,28 +420,10 @@ async function initChart(): Promise<void> {
             return
         }
 
-        chart = createChart(chartRef.value, {
-            autoSize: true,
-            layout: {
-                background: { color: 'rgb(24, 24, 28)' },
-                textColor: '#fff',
-            },
-            grid: {
-                vertLines: { visible: false },
-                horzLines: { visible: false },
-            },
-            timeScale: {
-                borderVisible: false,
-                timeVisible: true,
-            },
-            rightPriceScale: {
-                borderVisible: false,
-            },
-            handleScroll: true,
-            handleScale: false,
-        })
+        chart = createChart(chartRef.value, chartOptions())
+        const activeChart = chart
 
-        const candlestickSeries = chart.addSeries(CandlestickSeries, {
+        const candlestickSeries = activeChart.addSeries(CandlestickSeries, {
             upColor: '#2E7D5B',
             borderUpColor: '#2E7D5B',
             wickUpColor: '#2E7D5B',
@@ -312,6 +443,12 @@ async function initChart(): Promise<void> {
         }))
         await nextAnimationFrame()
         candlestickSeries.setData(localTickerData)
+
+        for (const series of priceIndicators.value) {
+            renderIndicatorSeries(activeChart, series, localOffsetSeconds, {
+                priceMarkersVisible: true,
+            })
+        }
 
         for (const priceLine of props.priceLines) {
             const price = toFiniteNumber(priceLine.price)
@@ -382,7 +519,7 @@ async function initChart(): Promise<void> {
             // snaps markers to existing series points and does not autoscale around
             // marker-only prices, so we attach these markers to a hidden line
             // series with real time/value points.
-            const exactMarkerSeries = chart.addSeries(LineSeries, {
+            const exactMarkerSeries = activeChart.addSeries(LineSeries, {
                 color: 'rgba(0, 0, 0, 0)',
                 lineVisible: false,
                 pointMarkersVisible: false,
@@ -404,8 +541,59 @@ async function initChart(): Promise<void> {
             createSeriesMarkers(exactMarkerSeries, exactMarkerData)
         }
 
+        for (const pane of indicatorPanes.value) {
+            const element = indicatorChartRefs.get(pane.key)
+            if (!element) {
+                continue
+            }
+            const indicatorChart = createChart(element, chartOptions())
+            const firstSeries = pane.series[0]
+            const anchorValue = firstSeries.values[0]?.value
+            if (anchorValue !== undefined && localTickerData.length > 0) {
+                const timelineAnchor = indicatorChart.addSeries(LineSeries, {
+                    color: 'transparent',
+                    lineVisible: false,
+                    pointMarkersVisible: false,
+                    crosshairMarkerVisible: false,
+                    priceLineVisible: false,
+                    lastValueVisible: false,
+                })
+                timelineAnchor.setData(
+                    [
+                        {
+                            time: localTickerData[0].time,
+                            value: anchorValue,
+                        },
+                        {
+                            time: localTickerData[localTickerData.length - 1].time,
+                            value: anchorValue,
+                        },
+                    ] as any[],
+                )
+            }
+            const renderedSeries = pane.series.map((series) =>
+                renderIndicatorSeries(indicatorChart, series, localOffsetSeconds, {
+                    priceMarkersVisible: true,
+                }),
+            )
+            const referenceValue =
+                pane.key === 'rsi' ? 50 : pane.key === 'macd' ? 0 : null
+            if (referenceValue !== null && renderedSeries.length > 0) {
+                renderedSeries[0].createPriceLine({
+                    price: referenceValue,
+                    color: 'rgba(138, 148, 141, 0.7)',
+                    lineWidth: 1,
+                    lineStyle: 2,
+                    axisLabelVisible: true,
+                    title: pane.key === 'rsi' ? '50' : '0',
+                })
+            }
+            indicatorCharts.push(indicatorChart)
+        }
+
         await nextAnimationFrame()
-        chart.timeScale().fitContent()
+        synchronizeTimeScales([activeChart, ...indicatorCharts])
+        activeChart.timeScale().fitContent()
     } catch (error) {
         loadError.value = error instanceof Error
             ? error.message
@@ -421,10 +609,7 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
-    if (chart) {
-        chart.remove()
-        chart = null
-    }
+    removeCharts()
 })
 </script>
 
@@ -441,6 +626,45 @@ onUnmounted(() => {
 
 .expand-chart {
     height: 400px;
+    width: 100%;
+}
+
+.expand-chart-stack {
+    background: rgb(24, 24, 28);
+}
+
+.chart-legend,
+.indicator-pane-header {
+    align-items: center;
+    color: #ECEFEA;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 10px 14px 0;
+}
+
+.indicator-pane-header {
+    border-top: 1px solid rgba(138, 148, 141, 0.16);
+    font-size: 12px;
+    justify-content: flex-start;
+}
+
+.legend-item {
+    align-items: center;
+    display: inline-flex;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.legend-item i {
+    border-radius: 999px;
+    display: inline-block;
+    height: 8px;
+    width: 8px;
+}
+
+.indicator-chart {
+    height: 150px;
     width: 100%;
 }
 
@@ -461,6 +685,10 @@ onUnmounted(() => {
     .expand-chart,
     .expand-chart-empty {
         height: 300px;
+    }
+
+    .indicator-chart {
+        height: 120px;
     }
 }
 </style>

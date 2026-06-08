@@ -7,7 +7,6 @@ and returns synthetic trade results with chart markers and analytics stats.
 
 from __future__ import annotations
 
-import math
 from datetime import UTC, datetime, timezone
 from typing import Any
 
@@ -29,6 +28,7 @@ from service.dca_math import (
 from service.exchange import Exchange
 from service.indicators import Indicators
 from service.strategy_capability import get_strategy_min_history_candles
+from service.strategy_chart_indicators import StrategyChartIndicatorBuilder
 from service.strategy_runtime import evaluate_strategy_graph
 
 logging = helper.LoggerFactory.get_logger("logs/backtest.log", "backtest")
@@ -40,19 +40,6 @@ OHLCV_PAGE_DELAY = 0.5
 TRADE_MODE_DYNAMIC_DCA = "dynamic_dca"
 TRADE_MODE_SIDESTEP = "sidestep"
 SUPPORTED_TRADE_MODES = frozenset({TRADE_MODE_DYNAMIC_DCA, TRADE_MODE_SIDESTEP})
-
-CHART_INDICATOR_STYLES: dict[str, tuple[str, str, str]] = {
-    "ema": ("price", "line", "#B7791F"),
-    "bollinger_upper": ("price", "line", "#356D86"),
-    "bollinger_middle": ("price", "line", "#8A948D"),
-    "bollinger_lower": ("price", "line", "#2E7D5B"),
-    "bollinger_bandwidth": ("bandwidth", "line", "#356D86"),
-    "rsi": ("rsi", "line", "#B7791F"),
-    "macd_line": ("macd", "line", "#356D86"),
-    "macd_signal": ("macd", "line", "#B7791F"),
-    "macd_histogram": ("macd", "histogram", "#8A948D"),
-}
-
 
 TIMEFRAME_TO_MS = {
     "1m": 60_000,
@@ -515,7 +502,10 @@ class Backtest:
         self._still_open_at_end: bool = False
         self._sidestep_waiting_at_end: bool = False
         self._state_store: dict[tuple[str, str, str, str], Any] = {}
-        self._chart_indicator_requirements: dict[str, dict[str, Any]] = {}
+        self._chart_indicator_builder = StrategyChartIndicatorBuilder(
+            self.symbol,
+            self.timeframe,
+        )
         self._chart_indicators: list[dict[str, Any]] = []
 
     async def run(self) -> dict[str, Any]:
@@ -753,68 +743,7 @@ class Backtest:
 
     async def _preload_strategy_snapshots(self, *slugs: str) -> None:
         """Preload strategy snapshots once before candle replay."""
-        from service.strategy_runtime import _load_strategy_snapshot as _lsnap
-
-        for slug in dict.fromkeys(
-            str(slug).strip() for slug in slugs if str(slug).strip()
-        ):
-            snapshot = await _lsnap(slug)
-            ir = getattr(snapshot, "ir", None)
-            if isinstance(ir, dict):
-                self._collect_chart_indicator_requirements(ir)
-
-    def _collect_chart_indicator_requirements(self, ir: dict[str, Any]) -> None:
-        """Collect display series required to explain a strategy graph."""
-        nodes = ir.get("nodes")
-        if not isinstance(nodes, list):
-            return
-        for node in nodes:
-            if not isinstance(node, dict):
-                continue
-            node_type = str(node.get("type") or "")
-            params = node.get("params") if isinstance(node.get("params"), dict) else {}
-            if node_type == "indicator":
-                self._add_chart_indicator(str(params.get("indicator") or ""), params)
-            elif node_type in {"fresh_signal_state", "swing_low_state"}:
-                for length in (
-                    (20,) if node_type == "fresh_signal_state" else (20, 50, 100, 200)
-                ):
-                    self._add_chart_indicator("ema", {"length": length})
-
-    def _add_chart_indicator(self, indicator: str, params: dict[str, Any]) -> None:
-        """Add normalized indicator requirements, including useful band context."""
-        if indicator.startswith("bollinger_"):
-            for component in ("upper", "middle", "lower"):
-                self._store_chart_indicator(f"bollinger_{component}", params)
-            if indicator == "bollinger_bandwidth":
-                self._store_chart_indicator(indicator, params)
-            return
-        if indicator.startswith("macd_"):
-            for component in ("line", "signal", "histogram"):
-                self._store_chart_indicator(f"macd_{component}", params)
-            return
-        self._store_chart_indicator(indicator, params)
-
-    def _store_chart_indicator(self, indicator: str, params: dict[str, Any]) -> None:
-        """Store one unique display indicator requirement."""
-        if indicator not in CHART_INDICATOR_STYLES:
-            return
-        requirement = {"indicator": indicator}
-        if indicator == "ema":
-            requirement["length"] = int(params.get("length") or 20)
-        elif indicator == "rsi":
-            requirement["length"] = int(params.get("length") or 14)
-        elif indicator.startswith("bollinger_"):
-            requirement["length"] = int(params.get("length") or 20)
-            requirement["standard_deviations"] = float(
-                params.get("standard_deviations") or 2.0
-            )
-        elif indicator.startswith("macd_"):
-            requirement["fast_period"] = int(params.get("fast_period") or 12)
-            requirement["slow_period"] = int(params.get("slow_period") or 26)
-            requirement["signal_period"] = int(params.get("signal_period") or 9)
-        key = ":".join(str(requirement[field]) for field in requirement)
-        self._chart_indicator_requirements.setdefault(key, requirement)
+        await self._chart_indicator_builder.collect_strategy_requirements(*slugs)
 
     async def _build_chart_indicators(
         self,
@@ -823,92 +752,11 @@ class Backtest:
         replay_start_index: int,
     ) -> list[dict[str, Any]]:
         """Build chart series from the same causal series used for evaluation."""
-        result: list[dict[str, Any]] = []
-        for requirement in self._chart_indicator_requirements.values():
-            series = await self._load_chart_indicator_series(indicators, requirement)
-            points = self._chart_indicator_points(series, candles, replay_start_index)
-            if not points:
-                continue
-            indicator = str(requirement["indicator"])
-            pane, renderer, color = CHART_INDICATOR_STYLES[indicator]
-            result.append(
-                {
-                    "key": self._chart_indicator_key(requirement),
-                    "label": self._chart_indicator_label(requirement),
-                    "pane": pane,
-                    "renderer": renderer,
-                    "color": color,
-                    "values": points,
-                }
-            )
-        return result
-
-    async def _load_chart_indicator_series(
-        self, indicators: Indicators, requirement: dict[str, Any]
-    ) -> Any:
-        """Load one indicator component for chart output."""
-        indicator = str(requirement["indicator"])
-        if indicator == "ema":
-            return await indicators.calculate_ema_series(
-                self.symbol, self.timeframe, int(requirement["length"])
-            )
-        if indicator == "rsi":
-            return await indicators.calculate_rsi_series(
-                self.symbol, self.timeframe, int(requirement["length"])
-            )
-        if indicator.startswith("bollinger_"):
-            series = await indicators.calculate_bollinger_bands_series(
-                self.symbol,
-                self.timeframe,
-                int(requirement["length"]),
-                float(requirement["standard_deviations"]),
-            )
-            component = indicator.removeprefix("bollinger_")
-            return series.get(component) if isinstance(series, dict) else None
-        if indicator.startswith("macd_"):
-            series = await indicators.calculate_macd_series(
-                self.symbol,
-                self.timeframe,
-                int(requirement["fast_period"]),
-                int(requirement["slow_period"]),
-                int(requirement["signal_period"]),
-            )
-            component = indicator.removeprefix("macd_")
-            key = "macd" if component == "line" else component
-            return series.get(key) if isinstance(series, dict) else None
-        return None
-
-    def _chart_indicator_points(
-        self, series: Any, candles: list[OhlcvCandle], replay_start_index: int
-    ) -> list[dict[str, float | int]]:
-        """Return finite display points within the visible replay range."""
-        points: list[dict[str, float | int]] = []
-        for index in range(replay_start_index, len(candles)):
-            try:
-                value = float(series.iloc[index])
-            except (AttributeError, IndexError, TypeError, ValueError):
-                continue
-            if not math.isfinite(value):
-                continue
-            points.append({"time": candles[index].timestamp, "value": value})
-        return points
-
-    def _chart_indicator_key(self, requirement: dict[str, Any]) -> str:
-        """Return a stable UI key for one indicator series."""
-        return ":".join(str(value) for value in requirement.values())
-
-    def _chart_indicator_label(self, requirement: dict[str, Any]) -> str:
-        """Return a compact legend label for one indicator series."""
-        indicator = str(requirement["indicator"])
-        if indicator == "ema":
-            return f"EMA {requirement['length']}"
-        if indicator == "rsi":
-            return f"RSI {requirement['length']}"
-        if indicator.startswith("bollinger_"):
-            component = indicator.removeprefix("bollinger_").capitalize()
-            return f"BB {component} {requirement['length']}"
-        component = indicator.removeprefix("macd_").capitalize()
-        return f"MACD {component}"
+        return await self._chart_indicator_builder.build(
+            indicators,
+            candles,
+            replay_start_index,
+        )
 
     async def _evaluate_strategy(
         self,

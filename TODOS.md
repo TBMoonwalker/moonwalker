@@ -2,6 +2,17 @@
 
 ## Deferred
 
+### Fix mobile Backtest chart marker label clipping (ISSUE-002)
+
+**Found by:** /qa on main, 2026-06-08
+**Severity:** Low
+**Category:** Visual
+**What:** On a 375px mobile viewport, the Backtest chart can clip the left edge
+of the `take_profit` marker label after a run, showing `ke_profit`.
+**Repro:** Set viewport to 375x812 -> visit `/backtest` -> run the default
+replay -> observe the take-profit marker at the left chart edge.
+**Report:** .gstack/qa-reports/qa-report-localhost-8130-2026-06-08.md
+
 ### Fix mobile text truncation (ISSUE-003, ISSUE-004)
 
 **Found by:** /qa on main, 2026-06-05
