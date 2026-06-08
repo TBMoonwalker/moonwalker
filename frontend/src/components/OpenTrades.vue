@@ -163,4 +163,10 @@ onMounted(async () => {
 :deep(.n-data-table-expand-trigger) {
     height: 16px;
 }
+
+:deep(.trade-expand-button) {
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+}
 </style>
