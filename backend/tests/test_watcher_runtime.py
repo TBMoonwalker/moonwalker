@@ -207,6 +207,80 @@ async def test_strategy_history_warmup_timeout_leaves_task_running(
 
 
 @pytest.mark.asyncio
+async def test_active_trade_strategy_health_check_runs_for_dynamic_dca(
+    monkeypatch,
+) -> None:
+    watcher = Watcher()
+    calls: list[tuple[str, str, list[str], str]] = []
+
+    async def fake_run_strategy_health_check(
+        slug: str,
+        timeframe: str,
+        symbols: list[str],
+        *,
+        side: str = "buy",
+    ) -> None:
+        calls.append((slug, timeframe, symbols, side))
+
+    monkeypatch.setattr(
+        watcher_module,
+        "run_strategy_health_check",
+        fake_run_strategy_health_check,
+    )
+
+    await watcher._run_active_trade_strategy_health_check(
+        {
+            "trade_mode": "dynamic_dca",
+            "dca_strategy": "ema_swing",
+            "dca": True,
+        },
+        timeframe="4h",
+        symbols=["BARD/USDC", "BREV/USDC"],
+    )
+
+    assert calls == [
+        ("ema_swing", "4h", ["BARD/USDC", "BREV/USDC"], "buy"),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_active_trade_strategy_health_check_skips_without_dynamic_strategy(
+    monkeypatch,
+) -> None:
+    watcher = Watcher()
+    calls: list[str] = []
+
+    async def fake_run_strategy_health_check(*_args, **_kwargs) -> None:
+        calls.append("called")
+
+    monkeypatch.setattr(
+        watcher_module,
+        "run_strategy_health_check",
+        fake_run_strategy_health_check,
+    )
+
+    await watcher._run_active_trade_strategy_health_check(
+        {
+            "trade_mode": "sidestep",
+            "dca_strategy": "ema_swing",
+            "dca": True,
+        },
+        timeframe="4h",
+        symbols=["BARD/USDC"],
+    )
+    await watcher._run_active_trade_strategy_health_check(
+        {
+            "trade_mode": "dynamic_dca",
+            "dca": True,
+        },
+        timeframe="4h",
+        symbols=["BARD/USDC"],
+    )
+
+    assert calls == []
+
+
+@pytest.mark.asyncio
 async def test_shutdown_cleans_up_internal_tasks_and_is_idempotent() -> None:
     watcher = Watcher()
     close_calls: list[str] = []

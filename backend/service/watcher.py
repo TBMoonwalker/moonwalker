@@ -7,7 +7,11 @@ import ccxt.pro as ccxtpro
 import helper
 import model
 from service.config import Config, resolve_history_lookback_days, resolve_timeframe
-from service.config_views import ExchangeConnectionConfigView, WatcherRuntimeConfigView
+from service.config_views import (
+    DcaRuntimeConfigView,
+    ExchangeConnectionConfigView,
+    WatcherRuntimeConfigView,
+)
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
@@ -15,6 +19,7 @@ from service.strategy_capability import (
     get_configured_strategy_history_lookback_days,
     get_configured_strategy_min_history_candles,
 )
+from service.strategy_runtime import run_strategy_health_check
 from service.trades import Trades
 from service.watcher_queue import (
     pop_pending_dca_payload,
@@ -427,6 +432,7 @@ class Watcher:
 
             warmed_symbols = 0
             refreshed_symbols = 0
+            strategy_ready_symbols: list[str] = []
             still_short_symbols: list[str] = []
             for symbol in trade_symbols:
                 had_history = await data.has_sufficient_resampled_history(
@@ -451,6 +457,7 @@ class Watcher:
                         refreshed_symbols += 1
                     else:
                         warmed_symbols += 1
+                    strategy_ready_symbols.append(symbol)
                     continue
 
                 still_short_symbols.append(symbol)
@@ -480,6 +487,11 @@ class Watcher:
                     timeframe,
                     required_candles,
                 )
+            await self._run_active_trade_strategy_health_check(
+                config,
+                timeframe=timeframe,
+                symbols=strategy_ready_symbols,
+            )
         except asyncio.CancelledError:
             raise
         except (RuntimeError, TypeError, ValueError) as exc:
@@ -490,6 +502,26 @@ class Watcher:
             )
         finally:
             await data.close()
+
+    async def _run_active_trade_strategy_health_check(
+        self,
+        config: dict[str, Any],
+        *,
+        timeframe: str,
+        symbols: list[str],
+    ) -> None:
+        """Log a startup health signal for active-trade strategy evaluation."""
+        if not symbols:
+            return
+        runtime_config = DcaRuntimeConfigView.from_config(config)
+        if not runtime_config.dynamic_dca or not runtime_config.dca_strategy:
+            return
+        await run_strategy_health_check(
+            runtime_config.dca_strategy,
+            timeframe,
+            symbols,
+            side="buy",
+        )
 
     # ------------------------------------------------------------------- #
     #                Queue-based symbol updates from app.py               #

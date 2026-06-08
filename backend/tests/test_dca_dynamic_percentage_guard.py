@@ -44,6 +44,8 @@ async def test_dynamic_dca_skips_so_when_pnl_is_above_last_so_percentage(
 
     dca.config = {
         "dynamic_dca": True,
+        "dca_strategy": "ema_swing",
+        "timeframe": "4h",
         "os": 1.0,
         "ss": 0.5,
         "mstc": 5,
@@ -110,6 +112,8 @@ async def test_dynamic_dca_allows_so_when_pnl_is_deeper_than_last_so_percentage(
 
     dca.config = {
         "dynamic_dca": True,
+        "dca_strategy": "ema_swing",
+        "timeframe": "4h",
         "os": 1.0,
         "ss": 0.5,
         "mstc": 5,
@@ -133,6 +137,8 @@ async def test_dynamic_dca_allows_so_when_pnl_is_deeper_than_last_so_percentage(
 
     assert len(buy_calls) == 1
     assert buy_calls[0]["so_percentage"] == -3.6
+    assert buy_calls[0]["strategy_name"] == "ema_swing"
+    assert buy_calls[0]["timeframe"] == "4h"
 
 
 @pytest.mark.asyncio

@@ -13,6 +13,7 @@ from litestar.params import FromPath, FromQuery
 from service.config import Config
 from service.order_requests import normalize_order_symbol
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
+from service.trade_replay_indicators import TradeReplayIndicatorService
 from service.trades import Trades
 from service.trading_controls import TradingControlsService
 from service.websocket_fanout import WebSocketFanout
@@ -20,6 +21,7 @@ from service.websocket_fanout import WebSocketFanout
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_trades")
 trades = Trades()
 trading_controls = TradingControlsService()
+trade_replay_indicators = TradeReplayIndicatorService(trades)
 
 
 def _json_dumps(payload: Any) -> str:
@@ -185,6 +187,25 @@ async def trade_executions(deal_id: FromPath[str]) -> dict[str, Any]:
     return {"result": response}
 
 
+@get(
+    path="/trades/replay/indicators/{deal_id:str}/{timerange:str}/{start:str}/{end:str}"
+)
+async def trade_replay_indicator_series(
+    deal_id: FromPath[str],
+    timerange: FromPath[str],
+    start: FromPath[str],
+    end: FromPath[str],
+) -> dict[str, Any]:
+    """Get strategy indicator overlays for one trade replay chart."""
+    response = await trade_replay_indicators.get_indicators(
+        deal_id,
+        timerange,
+        start,
+        end,
+    )
+    return {"result": response}
+
+
 @post(path="/trades/closed/delete/{trade_id:str}")
 async def closed_trade_delete(trade_id: FromPath[str]) -> Any:
     """Delete a closed trade by ID."""
@@ -311,6 +332,7 @@ route_handlers = [
     closed_trades_length,
     closed_trades_pagination,
     trade_executions,
+    trade_replay_indicator_series,
     unsellable_trades_delete_all,
     closed_trade_delete,
     unsellable_trade_delete,

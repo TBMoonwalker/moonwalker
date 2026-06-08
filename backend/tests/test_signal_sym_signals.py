@@ -63,6 +63,7 @@ def _entry_order_decisions(
     *,
     order_size: float = 10.0,
     baseline_order_size: float = 10.0,
+    strategy_name: str | None = None,
 ) -> dict[str, types.SimpleNamespace]:
     entry_size_applied = order_size != baseline_order_size
     return {
@@ -77,7 +78,7 @@ def _entry_order_decisions(
             trust_direction="favored" if entry_size_applied else "neutral",
             trust_score=72.0 if entry_size_applied else 50.0,
             signal_name="sym_signals:1",
-            strategy_name=None,
+            strategy_name=strategy_name,
             timeframe="1m",
             metadata_json=(
                 '{"entry_sizing":{"applied":true}}'
@@ -130,6 +131,7 @@ async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
     config = {
         "currency": "USDT",
         "bo": 10,
+        "signal_strategy": "ema_swing",
         "signal_settings": (
             '{"api_url":"https://example.com","api_key":"x",'
             '"api_version":"v1","allowed_signals":[1]}'
@@ -176,11 +178,12 @@ async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
     ) -> dict[str, types.SimpleNamespace]:
         assert admitted_symbols == ["BTC/USDT"]
         assert signal_name == "sym_signals:1"
-        assert strategy_name is None
+        assert strategy_name == "ema_swing"
         assert timeframe == "1m"
         return _entry_order_decisions(
             order_size=17.5,
             baseline_order_size=10.0,
+            strategy_name=strategy_name,
         )
 
     monkeypatch.setattr(
@@ -222,6 +225,7 @@ async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
     assert len(orders) == 1
     assert orders[0]["symbol"] == "BTC/USDT"
     assert orders[0]["ordersize"] == 17.5
+    assert orders[0]["strategy_name"] == "ema_swing"
     assert orders[0]["baseline_order_size"] == 10.0
     assert orders[0]["entry_size_applied"] is True
     queued_symbols = await watcher_queue.get()
