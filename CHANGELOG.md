@@ -25,6 +25,20 @@ All notable changes to Moonwalker are documented in this file.
   not disappear from trade replay charts.
 - Trade replay expand controls are now labelled buttons for assistive
   technologies instead of cursor-only table cells.
+## [4.0.4.1] - 2026-06-05
+
+### Added
+
+- Additional regression test coverage for StatisticsView edge cases: empty sorter
+  objects, watch-based page correction on data shrink, and columnSortOrder function
+  behavior with null/undefined state.
+- Verified design baseline to DESIGN.md with live-measured fonts, colors, performance
+  metrics, and known deviations tracked for future remediation.
+
+### Changed
+
+- Extract named constants (DEFAULT_SORT_STATE, DEFAULT_PAGINATION, SYMBOL_PAGE_SIZE)
+  in test files to improve maintainability and eliminate duplicated literals.
 
 ## [4.0.4.0] - 2026-06-05
 
