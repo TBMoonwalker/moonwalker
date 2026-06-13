@@ -126,6 +126,11 @@ async def test_persist_buy_trade_creates_open_trade_when_requested(
         "TradeExecutions",
         _DummyTradeExecutionsModel,
     )
+    monkeypatch.setattr(
+        persistence_module,
+        "is_entry_observation_enabled",
+        lambda: _async_value(False),
+    )
 
     await persistence_module.persist_buy_trade(
         "BTC/USDC",
@@ -146,6 +151,74 @@ async def test_persist_buy_trade_creates_open_trade_when_requested(
     )
     assert _DummyTradeExecutionsModel.created_payload is not None
     assert _DummyTradeExecutionsModel.created_payload["role"] == "buy"
+
+
+async def _async_value(value: Any) -> Any:
+    return value
+
+
+@pytest.mark.asyncio
+async def test_persist_buy_trade_schedules_ai_trust_after_open_trade_persistence(
+    monkeypatch,
+) -> None:
+    _DummyTradesModel.created_payload = None
+    _DummyOpenTradesCreateModel.created_symbol = None
+    _DummyOpenTradesCreateModel.created_payload = None
+    scheduled: list[dict[str, Any]] = []
+
+    async def fake_run_sqlite(operation, _name) -> None:
+        await operation()
+
+    def fake_schedule(symbol: str, payload: dict[str, Any]) -> None:
+        scheduled.append(
+            {
+                "symbol": symbol,
+                "deal_id": payload.get("deal_id"),
+                "open_trade_created": _DummyOpenTradesCreateModel.created_payload
+                is not None,
+            }
+        )
+
+    monkeypatch.setattr(
+        persistence_module, "run_sqlite_write_with_retry", fake_run_sqlite
+    )
+    monkeypatch.setattr(persistence_module, "in_transaction", lambda: _DummyTx())
+    monkeypatch.setattr(persistence_module.model, "Trades", _DummyTradesModel)
+    monkeypatch.setattr(
+        persistence_module.model,
+        "OpenTrades",
+        _DummyOpenTradesCreateModel,
+    )
+    monkeypatch.setattr(
+        persistence_module.model,
+        "TradeExecutions",
+        _DummyTradeExecutionsModel,
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "is_entry_observation_enabled",
+        lambda: _async_value(True),
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "schedule_entry_observation",
+        fake_schedule,
+    )
+
+    await persistence_module.persist_buy_trade(
+        "BTC/USDC",
+        {"symbol": "BTC/USDC", "price": 100.0},
+        create_open_trade=True,
+    )
+
+    assert _DummyOpenTradesCreateModel.created_payload is not None
+    assert scheduled == [
+        {
+            "symbol": "BTC/USDC",
+            "deal_id": _DummyOpenTradesCreateModel.created_payload["deal_id"],
+            "open_trade_created": True,
+        }
+    ]
 
 
 @pytest.mark.asyncio
@@ -208,6 +281,11 @@ async def test_persist_buy_trade_preserves_original_open_date_on_sidestep_reentr
         persistence_module.model,
         "TradeExecutions",
         _DummyTradeExecutionsModel,
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "is_entry_observation_enabled",
+        lambda: _async_value(False),
     )
 
     await persistence_module.persist_buy_trade(

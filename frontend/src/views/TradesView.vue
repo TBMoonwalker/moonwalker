@@ -4,6 +4,7 @@ import Statistics from '@/components/Statistics.vue'
 import { AlertCircleOutline } from '@vicons/ionicons5'
 import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
+import { useSharedConfigSnapshot } from '@/control-center/configSnapshotStore'
 import { useTradingPauseStatus } from '@/composables/useTradingPauseStatus'
 
 const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
@@ -17,6 +18,7 @@ const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
 const unsellableTradesState = storeToRefs(unsellableTradesStore)
 const waitingCampaignsStore = useWebSocketDataStore('waitingCampaigns')
 const waitingCampaignsState = storeToRefs(waitingCampaignsStore)
+const configSnapshotStore = useSharedConfigSnapshot()
 const viewportWidth = ref(window.innerWidth)
 const { tradingPaused } = useTradingPauseStatus()
 const isMobile = computed(() => viewportWidth.value < 768)
@@ -28,6 +30,43 @@ const unsellableTradesCount = computed(() =>
 )
 const waitingCampaignsCount = computed(() =>
   Array.isArray(waitingCampaignsState.data.value) ? waitingCampaignsState.data.value.length : 0
+)
+const aiTrustRuntimeStatus = computed(() =>
+  String(configSnapshotStore.snapshot.value?.ai_trust_runtime_status ?? 'ok')
+)
+const aiTrustRuntimeProviderStatus = computed(() =>
+  String(configSnapshotStore.snapshot.value?.ai_trust_runtime_provider_status ?? '')
+)
+const aiTrustProviderUnavailable = computed(
+  () => aiTrustRuntimeStatus.value === 'provider_unavailable'
+)
+const aiTrustWarningBlocked = computed(
+  () => aiTrustRuntimeStatus.value === 'warning_blocked'
+)
+const tradeAdmissionWarning = computed(
+  () => aiTrustProviderUnavailable.value || aiTrustWarningBlocked.value
+)
+const admissionStatusLabel = computed(() => {
+  if (tradingPaused.value) return 'Moonwalker paused'
+  if (aiTrustProviderUnavailable.value) return 'AI unavailable'
+  if (aiTrustWarningBlocked.value) return 'AI blocked entry'
+  return 'Moonwalker open'
+})
+const admissionStatusCopy = computed(() => {
+  if (tradingPaused.value) {
+    return 'New trades and re-entries are paused. Existing exits can keep running.'
+  }
+  if (aiTrustProviderUnavailable.value) {
+    const provider = aiTrustRuntimeProviderStatus.value || 'unscored'
+    return `AI enforcement is active, but the local model did not return a scored response (${provider}). New entries are blocked until AI answers successfully.`
+  }
+  if (aiTrustWarningBlocked.value) {
+    return 'AI enforcement blocked the latest warned entry. New entries continue only after AI returns no warning.'
+  }
+  return 'New trades and re-entries are currently allowed.'
+})
+const admissionStatusTagType = computed(() =>
+  tradingPaused.value || tradeAdmissionWarning.value ? 'warning' : 'success'
 )
 
 function handleResize() {
@@ -54,27 +93,23 @@ onUnmounted(() => {
           <div class="header-statistics">
             <Statistics />
           </div>
-          <div
-            class="trading-pause-strip"
-            :class="{
-              'trading-pause-strip-active': tradingPaused,
-            }"
-            aria-live="polite"
-          >
-            <n-tag
-              :type="tradingPaused ? 'warning' : 'success'"
-              :bordered="false"
+            <div
+              class="trading-pause-strip"
+              :class="{
+                'trading-pause-strip-active': tradingPaused || tradeAdmissionWarning,
+              }"
+              aria-live="polite"
             >
-              {{ tradingPaused ? 'Moonwalker paused' : 'Moonwalker open' }}
-            </n-tag>
-            <span class="trading-pause-copy">
-              {{
-                tradingPaused
-                  ? 'New trades and re-entries are paused. Existing exits can keep running.'
-                  : 'New trades and re-entries are currently allowed.'
-              }}
-            </span>
-          </div>
+              <n-tag
+                :type="admissionStatusTagType"
+                :bordered="false"
+              >
+                {{ admissionStatusLabel }}
+              </n-tag>
+              <span class="trading-pause-copy">
+                {{ admissionStatusCopy }}
+              </span>
+            </div>
         </n-flex>
       </n-card>
     </n-flex>

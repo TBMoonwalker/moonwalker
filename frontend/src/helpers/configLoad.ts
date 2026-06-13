@@ -35,6 +35,9 @@ export interface ConfigLoadDefaults {
     advancedWsHealthcheckIntervalMs: number
     advancedWsStaleTimeoutMs: number
     advancedWsReconnectDebounceMs: number
+    defaultAiTrustOllamaBaseUrl: string
+    defaultAiTrustTimeoutMs: number
+    defaultAiTrustMaxRetries: number
     defaultSymSignalUrl: string
     defaultSymSignalVersion: string
     defaultTpSpikeConfirmSeconds: number
@@ -224,6 +227,21 @@ export function buildLoadedConfigState(
         ws_reconnect_debounce_ms:
             toNumberOrNull(response.ws_reconnect_debounce_ms) ??
             defaults.advancedWsReconnectDebounceMs,
+        ai_trust_enabled:
+            parseBooleanString(response.ai_trust_enabled) ?? false,
+        ai_trust_enforce_warnings:
+            parseBooleanString(response.ai_trust_enforce_warnings) ?? false,
+        ai_trust_ollama_base_url:
+            toNullableString(response.ai_trust_ollama_base_url) ||
+            defaults.defaultAiTrustOllamaBaseUrl,
+        ai_trust_ollama_model:
+            toNullableString(response.ai_trust_ollama_model) || null,
+        ai_trust_timeout_ms:
+            toNumberOrNull(response.ai_trust_timeout_ms) ??
+            defaults.defaultAiTrustTimeoutMs,
+        ai_trust_max_retries:
+            toNumberOrNull(response.ai_trust_max_retries) ??
+            defaults.defaultAiTrustMaxRetries,
     }
 
     const exchange: ExchangeConfigSection = {

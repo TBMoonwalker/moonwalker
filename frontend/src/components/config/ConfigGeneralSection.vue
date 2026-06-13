@@ -71,6 +71,57 @@
                         :min="500"
                     />
                 </n-form-item>
+                <n-divider />
+                <n-form-item
+                    label="AI Trust Cockpit enabled"
+                    path="ai_trust_enabled"
+                    label-placement="left"
+                >
+                    <n-checkbox v-model:checked="general.ai_trust_enabled" />
+                </n-form-item>
+                <n-form-item
+                    label="Block AI warning entries"
+                    path="ai_trust_enforce_warnings"
+                    label-placement="left"
+                >
+                    <n-switch
+                        v-model:value="general.ai_trust_enforce_warnings"
+                        :disabled="!general.ai_trust_enabled"
+                    />
+                </n-form-item>
+                <n-form-item
+                    label="Ollama base URL"
+                    path="ai_trust_ollama_base_url"
+                >
+                    <n-input
+                        v-model:value="general.ai_trust_ollama_base_url"
+                        placeholder="http://localhost:11434"
+                    />
+                </n-form-item>
+                <n-form-item label="Ollama model" path="ai_trust_ollama_model">
+                    <n-input
+                        v-model:value="general.ai_trust_ollama_model"
+                        placeholder="qwen3:8b"
+                    />
+                </n-form-item>
+                <n-form-item label="AI timeout (ms)" path="ai_trust_timeout_ms">
+                    <n-input-number
+                        v-model:value="general.ai_trust_timeout_ms"
+                        :min="250"
+                        :step="250"
+                    />
+                </n-form-item>
+                <n-form-item
+                    label="AI retry budget"
+                    path="ai_trust_max_retries"
+                >
+                    <n-input-number
+                        v-model:value="general.ai_trust_max_retries"
+                        :min="0"
+                        :max="2"
+                        :step="1"
+                    />
+                </n-form-item>
             </template>
         </n-form>
     </n-card>

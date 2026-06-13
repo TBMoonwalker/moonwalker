@@ -9,6 +9,7 @@ from typing import Any
 
 import helper
 import model
+from service.ai_trust import build_analytics_payload
 
 logging = helper.LoggerFactory.get_logger("logs/analytics.log", "analytics")
 
@@ -30,9 +31,13 @@ class Analytics:
         rows = await model.ClosedTrades.filter(close_date__gte=cutoff.isoformat())
 
         if not rows:
-            return self._empty()
+            overview = self._empty()
+            overview["ai_trust"] = await build_analytics_payload()
+            return overview
 
-        return compute_stats_from_trades(rows)
+        overview = compute_stats_from_trades(rows)
+        overview["ai_trust"] = await build_analytics_payload()
+        return overview
 
     @staticmethod
     def compute_stats_from_trades(rows: list[Any]) -> dict[str, Any]:

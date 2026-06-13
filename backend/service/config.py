@@ -88,6 +88,13 @@ DEFAULT_CONFIG_VALUES = {
     "autopilot_green_phase_confirm_cycles": 2,
     "autopilot_green_phase_release_cycles": 4,
     "autopilot_green_phase_max_locked_fund_percent": 85.0,
+    "ai_trust_enabled": False,
+    "ai_trust_enforce_warnings": False,
+    "ai_trust_ollama_base_url": "http://localhost:11434",
+    "ai_trust_ollama_model": "",
+    "ai_trust_timeout_ms": 10000,
+    "ai_trust_max_retries": 0,
+    "ai_trust_runtime_status": "ok",
 }
 
 
@@ -578,11 +585,19 @@ class Config:
 
         return True
 
-    async def batch_set(self, updates: dict[str, Any]) -> bool:
+    async def batch_set(
+        self,
+        updates: dict[str, Any],
+        *,
+        notify_subscribers: bool = True,
+    ) -> bool:
         """Update multiple configuration keys in the database at once.
 
         Args:
             updates: Dictionary of key-value pairs with typed update payloads.
+            notify_subscribers: Whether to notify local and Redis subscribers.
+                Runtime status writes can skip notifications to avoid restarting
+                trading services.
 
         Returns:
             True if the operation succeeded
@@ -620,7 +635,7 @@ class Config:
             else:
                 self._store.remove_entry(action.key)
 
-        if changed_keys:
+        if changed_keys and notify_subscribers:
             self.__notify_subscribers()
             await self.__publish_change(changed_keys)
 

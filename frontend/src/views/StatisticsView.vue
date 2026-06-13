@@ -3,7 +3,7 @@ import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import type { DataTableColumns, PaginationProps, SorterResult } from 'naive-ui'
 import Heatmap from '../components/Heatmap.vue'
 import { useAnalyticsStore } from '../stores/analytics'
-import type { AnalyticsOverview } from '../stores/analytics'
+import type { AiTrustPrediction, AnalyticsOverview } from '../stores/analytics'
 
 const analytics = useAnalyticsStore()
 const activeTab = ref('symbols')
@@ -72,6 +72,9 @@ const drawdown = computed(
  )
 const distribution = computed(
         () => (d.value as AnalyticsOverview | null)?.distribution ?? null,
+ )
+const aiTrust = computed(
+      () => (d.value as AnalyticsOverview | null)?.ai_trust ?? null,
  )
 
 const sortedAndPaginatedSymbols = computed(() => {
@@ -156,6 +159,42 @@ function fmtProfitRange(row: { min: number; max: number }) {
    }
    return `${fmtRangePct(row.min)} to ${fmtRangePct(row.max)}`
 }
+
+function fmtTrustRate(value: number | null | undefined) {
+   return `${Number(value ?? 0).toFixed(1)}%`
+}
+
+function fmtConfidence(value: number | null) {
+   if (value === null) {
+     return '-'
+   }
+   return `${Math.round(value * 100)}%`
+}
+
+function fmtTrustDate(value: string | null) {
+   return value ? new Date(value).toLocaleString() : '-'
+}
+
+const aiTrustStatusText = computed(() => {
+   const trust = aiTrust.value
+   if (!trust || trust.status === 'disabled') {
+     return 'AI observed is disabled'
+   }
+   if (trust.status === 'missing_model') {
+     return 'AI observed is waiting for an Ollama model'
+   }
+   if (!trust.coverage.total) {
+     return 'AI observed is waiting for entry observations'
+   }
+   const suffix = trust.enforce_warnings
+     ? ' · warning entries are blocked'
+     : ''
+   return `${trust.coverage.scored} scored of ${trust.coverage.total} observations${suffix}`
+})
+
+const aiTrustUnscoredCount = computed(() => (
+   aiTrust.value?.coverage.unscored ?? 0
+))
 
 const tabNames = [
       { name: 'symbols', label: 'Symbols' },
@@ -291,6 +330,80 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
       },
     ]
 }
+
+function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
+   return [
+      {
+       title: 'Symbol',
+       key: 'symbol',
+       width: 130,
+       fixed: 'left',
+        render(row) {
+         return h('span', { class: 'ai-trust-symbol' }, row.symbol)
+        },
+      },
+      {
+       title: 'Observed',
+       key: 'created_at',
+       width: 160,
+        render(row) {
+         return fmtTrustDate(row.created_at)
+        },
+      },
+      {
+       title: 'Risk',
+       key: 'risk_score',
+       width: 86,
+        render(row) {
+         return row.risk_score === null ? '-' : `${row.risk_score}`
+        },
+      },
+      {
+       title: 'Confidence',
+       key: 'confidence',
+       width: 110,
+        render(row) {
+         return fmtConfidence(row.confidence)
+        },
+      },
+      {
+       title: 'AI would have warned',
+       key: 'would_warn',
+       width: 150,
+        render(row) {
+         if (row.would_warn === null) {
+           return 'Unscored'
+         }
+         return row.would_warn ? row.warning_severity : 'No'
+        },
+      },
+      {
+       title: 'Reasons',
+       key: 'reason_codes',
+       width: 220,
+        render(row) {
+         return row.reason_codes.length ? row.reason_codes.join(', ') : row.provider_status
+        },
+      },
+      {
+       title: 'Outcome',
+       key: 'outcome_status',
+       width: 150,
+        render(row) {
+         if (row.outcome_status === 'blocked') {
+           return 'Blocked'
+         }
+         if (row.outcome_status === 'preflight') {
+           return 'Preflight'
+         }
+         if (row.outcome_status !== 'closed') {
+           return 'Open'
+         }
+         return row.bad_entry ? 'Bad entry' : 'Closed ok'
+        },
+      },
+   ]
+}
 </script>
 
 <template>
@@ -377,6 +490,102 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                   </div>
                 </dl>
               </div>
+            </n-flex>
+          </n-card>
+        </n-flex>
+
+        <!-- AI Trust Cockpit -->
+        <n-flex class="page-section" vertical>
+          <n-card class="ai-trust-card mw-shell-card" content-style="padding: 14px 16px;">
+            <n-flex vertical :size="12">
+              <div class="ai-trust-header">
+                <div>
+                  <n-text depth="3" class="stats-kicker">AI Trust Cockpit</n-text>
+                  <div class="ai-trust-status">{{ aiTrustStatusText }}</div>
+                </div>
+                <n-tag
+                    size="small"
+                    :type="aiTrust?.status === 'ready' ? 'success' : aiTrust?.status === 'missing_model' ? 'warning' : 'default'"
+                >
+                  {{ aiTrust?.provider ?? 'ollama' }}
+                </n-tag>
+              </div>
+
+              <div class="ai-trust-grid" aria-label="AI trust calibration">
+                <div class="stat-cell ai-trust-stat">
+                  <n-statistic
+                      label="Coverage"
+                      :value="fmtTrustRate(aiTrust?.coverage.coverage_rate)"
+                  />
+                  <span class="stat-detail">{{ aiTrust?.coverage.scored ?? 0 }} scored</span>
+                </div>
+                <div class="stat-cell ai-trust-stat">
+                  <n-statistic
+                      label="Bad-entry capture"
+                      :value="fmtTrustRate(aiTrust?.quality.bad_entry_capture_rate)"
+                  />
+                  <span class="stat-detail">{{ aiTrust?.quality.bad_entries ?? 0 }} bad entries</span>
+                </div>
+                <div class="stat-cell ai-trust-stat">
+                  <n-statistic
+                      label="False warnings"
+                      :value="fmtTrustRate(aiTrust?.quality.false_warning_rate)"
+                  />
+                  <span class="stat-detail">{{ aiTrust?.quality.warnings ?? 0 }} warnings</span>
+                </div>
+                <div class="stat-cell ai-trust-stat">
+                  <n-statistic label="Unscored" :value="aiTrustUnscoredCount" />
+                  <span class="stat-detail">{{ aiTrust?.status ?? 'disabled' }}</span>
+                </div>
+              </div>
+
+              <n-alert
+                  v-if="aiTrust?.status === 'disabled'"
+                  type="default"
+                  :show-icon="false"
+              >
+                AI observed is off. No entry observations are being recorded.
+              </n-alert>
+              <n-alert
+                  v-else-if="aiTrust?.status === 'missing_model'"
+                  type="warning"
+                  :show-icon="false"
+              >
+                AI observed is enabled, but no Ollama model is configured.
+              </n-alert>
+
+              <n-flex :size="12" class="ai-trust-tables" vertical>
+                <n-flex vertical :size="6">
+                  <n-text strong>Recent Predictions</n-text>
+                  <n-data-table
+                      v-if="aiTrust?.recent_predictions.length"
+                      :columns="getAiTrustColumns()"
+                      :data="aiTrust.recent_predictions"
+                      :pagination="false"
+                      :scroll-x="1000"
+                      size="small"
+                  />
+                  <n-empty
+                      v-else
+                      description="No AI observed entries yet"
+                  />
+                </n-flex>
+                <n-flex vertical :size="6">
+                  <n-text strong>Bad-entry Review</n-text>
+                  <n-data-table
+                      v-if="aiTrust?.bad_entry_review.length"
+                      :columns="getAiTrustColumns()"
+                      :data="aiTrust.bad_entry_review"
+                      :pagination="false"
+                      :scroll-x="1000"
+                      size="small"
+                  />
+                  <n-empty
+                      v-else
+                      description="No calibrated bad-entry review yet"
+                  />
+                </n-flex>
+              </n-flex>
             </n-flex>
           </n-card>
         </n-flex>
@@ -621,6 +830,49 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
   overflow-wrap: anywhere;
 }
 
+.ai-trust-card {
+  width: 100%;
+}
+
+.ai-trust-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-trust-status {
+  color: var(--mw-color-text-primary);
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.ai-trust-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-trust-stat {
+  flex-direction: column;
+  gap: 4px;
+  min-height: 82px;
+}
+
+.ai-trust-symbol {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+:deep(.ai-trust-card .n-data-table-td) {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
 .duration-panel {
   padding: 12px;
 }
@@ -659,6 +911,15 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
     grid-template-columns: repeat(3, minmax(0, 1fr));
    }
 
+   .ai-trust-header {
+    align-items: stretch;
+    flex-direction: column;
+   }
+
+   .ai-trust-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+   }
+
    .dist-stat {
     min-width: calc(50% - 6px);
    }
@@ -690,6 +951,10 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 
 @media (min-width: 769px) and (max-width: 1200px) {
     .statistics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ai-trust-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }

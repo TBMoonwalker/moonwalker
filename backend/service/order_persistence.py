@@ -7,6 +7,12 @@ from typing import Any
 from uuid import uuid4
 
 import model
+from service.ai_trust import (
+    has_prediction_for_deal,
+    is_entry_observation_enabled,
+    schedule_entry_observation,
+    schedule_outcome_attribution,
+)
 from service.database import run_sqlite_write_with_retry
 from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
 from service.replay_candles import archive_replay_candles_for_deal
@@ -408,6 +414,8 @@ async def persist_buy_trade(
     await run_sqlite_write_with_retry(
         _persist_buy, f"persisting buy order for {symbol}"
     )
+    if create_open_trade and await is_entry_observation_enabled():
+        schedule_entry_observation(symbol, payload)
 
 
 async def persist_closed_trade(
@@ -418,9 +426,13 @@ async def persist_closed_trade(
 ) -> None:
     """Persist a closed trade and remove its open-trade rows."""
 
+    closed_deal_id: str | None = None
+
     async def _persist_sell() -> None:
+        nonlocal closed_deal_id
         async with in_transaction() as conn:
             deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
+            closed_deal_id = deal_id
             summary_payload = {
                 key: value
                 for key, value in payload.items()
@@ -482,6 +494,8 @@ async def persist_closed_trade(
     await run_sqlite_write_with_retry(
         _persist_sell, f"persisting sell order for {symbol}"
     )
+    if await has_prediction_for_deal(closed_deal_id):
+        schedule_outcome_attribution(closed_deal_id)
 
 
 async def persist_sidestep_transition(

@@ -353,3 +353,62 @@ async def test_watcher_reload_ignores_sandbox_in_dry_run(monkeypatch) -> None:
     )
 
     assert calls == ["demo"]
+
+
+@pytest.mark.asyncio
+async def test_strategy_history_warmup_reload_cancel_does_not_cancel_startup(
+    monkeypatch,
+) -> None:
+    watcher = Watcher()
+    warnings: list[tuple[object, ...]] = []
+
+    async def warmup() -> None:
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(
+        watcher_module.logging,
+        "warning",
+        lambda *args, **_kwargs: warnings.append(args),
+    )
+
+    warmup_task = asyncio.create_task(warmup())
+    watcher._strategy_history_warmup_task = warmup_task
+    warmup_task.cancel()
+
+    await watcher._await_strategy_history_warmup_if_needed()
+
+    assert warnings == [
+        (
+            "Strategy history warmup was replaced during watcher startup; "
+            "continuing startup.",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_btc_warmup_reload_cancel_does_not_cancel_startup(monkeypatch) -> None:
+    watcher = Watcher()
+    watcher.config = {"btc_pulse": True}
+    warnings: list[tuple[object, ...]] = []
+
+    async def warmup() -> None:
+        await asyncio.sleep(10)
+
+    monkeypatch.setattr(
+        watcher_module.logging,
+        "warning",
+        lambda *args, **_kwargs: warnings.append(args),
+    )
+
+    warmup_task = asyncio.create_task(warmup())
+    watcher._btc_warmup_task = warmup_task
+    warmup_task.cancel()
+
+    await watcher._await_btc_warmup_if_needed()
+
+    assert warnings == [
+        (
+            "BTC pulse warmup was replaced during watcher startup; "
+            "continuing startup.",
+        )
+    ]

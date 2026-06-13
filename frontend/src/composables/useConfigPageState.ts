@@ -141,6 +141,12 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         ws_stale_timeout_ms: options.defaults.advancedWsStaleTimeoutMs,
         ws_reconnect_debounce_ms:
             options.defaults.advancedWsReconnectDebounceMs,
+        ai_trust_enabled: false,
+        ai_trust_enforce_warnings: false,
+        ai_trust_ollama_base_url: options.defaults.defaultAiTrustOllamaBaseUrl,
+        ai_trust_ollama_model: null,
+        ai_trust_timeout_ms: options.defaults.defaultAiTrustTimeoutMs,
+        ai_trust_max_retries: options.defaults.defaultAiTrustMaxRetries,
     })
 
     const signal = ref<SignalEditorModel>({

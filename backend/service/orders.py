@@ -7,6 +7,7 @@ from datetime import datetime, timezone
 from typing import Any, TypeGuard
 
 import helper
+from service.ai_trust import evaluate_entry_enforcement
 from service.capital_budget import CapitalBudgetService
 from service.exchange import Exchange
 from service.exchange_types import (
@@ -952,6 +953,30 @@ class Orders:
                 gate.reason_code,
                 gate.message,
             )
+            return False
+
+        ai_gate = await evaluate_entry_enforcement(
+            str(order.get("symbol") or ""),
+            order,
+            config,
+        )
+        if not ai_gate.allowed:
+            if ai_gate.reason_code == "ai_trust_unavailable":
+                logging.warning(
+                    "Skipping entry order for %s: AI trust enforcement requires "
+                    "a scored response but provider_status=%s.",
+                    order["symbol"],
+                    ai_gate.provider_status,
+                )
+            else:
+                logging.warning(
+                    "Skipping entry order for %s: AI trust warning enforcement "
+                    "blocked the entry (risk=%s severity=%s note=%s).",
+                    order["symbol"],
+                    ai_gate.risk_score,
+                    ai_gate.warning_severity,
+                    ai_gate.operator_note,
+                )
             return False
 
         try:

@@ -454,6 +454,7 @@ class Dca:
             "ordertype": "market",
             "so_percentage": None,
             "side": "buy",
+            "current_price": current_price,
             "campaign_id": trades.get("campaign_id"),
             "signal_name": None,
             "strategy_name": SidestepCampaignConfigView.from_config(

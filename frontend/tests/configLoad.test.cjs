@@ -14,6 +14,9 @@ function createLoadDefaults(overrides = {}) {
         advancedWsHealthcheckIntervalMs: 30000,
         advancedWsStaleTimeoutMs: 45000,
         advancedWsReconnectDebounceMs: 5000,
+        defaultAiTrustOllamaBaseUrl: 'http://ollama.test:11434',
+        defaultAiTrustTimeoutMs: 10000,
+        defaultAiTrustMaxRetries: 0,
         defaultSymSignalUrl: 'https://signals.example/api',
         defaultSymSignalVersion: 'v2',
         defaultTpSpikeConfirmSeconds: 20,
@@ -48,6 +51,12 @@ test(
                 ws_healthcheck_interval_ms: '9000',
                 ws_stale_timeout_ms: '8000',
                 ws_reconnect_debounce_ms: '7000',
+                ai_trust_enabled: 'true',
+                ai_trust_enforce_warnings: 'true',
+                ai_trust_ollama_base_url: 'http://ollama.local:11434',
+                ai_trust_ollama_model: 'qwen3:8b',
+                ai_trust_timeout_ms: '3000',
+                ai_trust_max_retries: '1',
                 exchange_hostname: 'api.exchange.test',
                 dca: 'true',
                 trade_mode: 'dynamic_dca',
@@ -74,6 +83,15 @@ test(
         assert.equal(state.general.ws_healthcheck_interval_ms, 9000)
         assert.equal(state.general.ws_stale_timeout_ms, 8000)
         assert.equal(state.general.ws_reconnect_debounce_ms, 7000)
+        assert.equal(state.general.ai_trust_enabled, true)
+        assert.equal(state.general.ai_trust_enforce_warnings, true)
+        assert.equal(
+            state.general.ai_trust_ollama_base_url,
+            'http://ollama.local:11434',
+        )
+        assert.equal(state.general.ai_trust_ollama_model, 'qwen3:8b')
+        assert.equal(state.general.ai_trust_timeout_ms, 3000)
+        assert.equal(state.general.ai_trust_max_retries, 1)
         assert.equal(state.exchange.exchange_hostname, 'api.exchange.test')
         assert.equal(state.signal.csvsignal_mode, 'inline')
         assert.equal(

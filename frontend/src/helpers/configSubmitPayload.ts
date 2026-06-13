@@ -19,6 +19,12 @@ export interface GeneralConfigSection {
     ws_healthcheck_interval_ms: number | null
     ws_stale_timeout_ms: number | null
     ws_reconnect_debounce_ms: number | null
+    ai_trust_enabled: boolean
+    ai_trust_enforce_warnings: boolean
+    ai_trust_ollama_base_url: string | null
+    ai_trust_ollama_model: string | null
+    ai_trust_timeout_ms: number | null
+    ai_trust_max_retries: number | null
 }
 
 export interface SignalConfigSection {
@@ -143,6 +149,9 @@ export interface ConfigSubmitPayloadDefaults {
     advancedWsHealthcheckIntervalMs: number
     advancedWsStaleTimeoutMs: number
     advancedWsReconnectDebounceMs: number
+    defaultAiTrustOllamaBaseUrl: string
+    defaultAiTrustTimeoutMs: number
+    defaultAiTrustMaxRetries: number
     defaultTpSpikeConfirmSeconds: number
     defaultTpSpikeConfirmTicks: number
     defaultGreenPhaseRampDays: number
@@ -231,6 +240,31 @@ export function buildConfigSubmitPayload(
         ws_reconnect_debounce_ms: serializeConfigValue(
             general.ws_reconnect_debounce_ms ??
                 defaults.advancedWsReconnectDebounceMs,
+            'int',
+        ),
+        ai_trust_enabled: serializeConfigValue(
+            general.ai_trust_enabled ?? false,
+            'bool',
+        ),
+        ai_trust_enforce_warnings: serializeConfigValue(
+            general.ai_trust_enforce_warnings ?? false,
+            'bool',
+        ),
+        ai_trust_ollama_base_url: serializeConfigValue(
+            toNullableConfigString(general.ai_trust_ollama_base_url) ||
+                defaults.defaultAiTrustOllamaBaseUrl,
+            'str',
+        ),
+        ai_trust_ollama_model: serializeConfigValue(
+            toNullableConfigString(general.ai_trust_ollama_model),
+            'str',
+        ),
+        ai_trust_timeout_ms: serializeConfigValue(
+            general.ai_trust_timeout_ms ?? defaults.defaultAiTrustTimeoutMs,
+            'int',
+        ),
+        ai_trust_max_retries: serializeConfigValue(
+            general.ai_trust_max_retries ?? defaults.defaultAiTrustMaxRetries,
             'int',
         ),
         signal: serializeConfigValue(toNullableConfigString(signal.signal), 'str'),

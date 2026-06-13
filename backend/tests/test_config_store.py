@@ -144,6 +144,39 @@ async def test_config_batch_set_updates_cache_without_reload(
 
 
 @pytest.mark.asyncio
+async def test_config_batch_set_can_skip_subscriber_notifications(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    redis = DummyRedis()
+    monkeypatch.setattr(config_module, "redis_client", redis)
+
+    notified_snapshots: list[dict[str, object]] = []
+    config = Config()
+    config.subscribe(lambda snapshot: notified_snapshots.append(snapshot))
+
+    await config.batch_set(
+        {"ai_trust_runtime_status": {"value": "provider_unavailable", "type": "str"}},
+        notify_subscribers=False,
+    )
+
+    assert config.get("ai_trust_runtime_status") == "provider_unavailable"
+    assert notified_snapshots == []
+    assert redis.messages == []
+
+    import model
+
+    row = await model.AppConfig.get(key="ai_trust_runtime_status")
+    assert row.value == "provider_unavailable"
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_config_handle_change_message_ignores_same_instance(
     tmp_path, monkeypatch
 ) -> None:

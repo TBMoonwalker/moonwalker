@@ -12,6 +12,9 @@ function createPayloadDefaults(overrides = {}) {
         advancedWsHealthcheckIntervalMs: 30000,
         advancedWsStaleTimeoutMs: 45000,
         advancedWsReconnectDebounceMs: 5000,
+        defaultAiTrustOllamaBaseUrl: 'http://ollama.test:11434',
+        defaultAiTrustTimeoutMs: 10000,
+        defaultAiTrustMaxRetries: 0,
         defaultTpSpikeConfirmSeconds: 20,
         defaultTpSpikeConfirmTicks: 5,
         defaultGreenPhaseRampDays: 7,
@@ -44,6 +47,12 @@ function createBaseOptions(overrides = {}) {
             ws_healthcheck_interval_ms: null,
             ws_stale_timeout_ms: null,
             ws_reconnect_debounce_ms: null,
+            ai_trust_enabled: false,
+            ai_trust_enforce_warnings: false,
+            ai_trust_ollama_base_url: null,
+            ai_trust_ollama_model: null,
+            ai_trust_timeout_ms: null,
+            ai_trust_max_retries: null,
         },
         signal: {
             symbol_list: null,
@@ -238,6 +247,30 @@ test(
         assert.equal(parseField(payload, 'history_lookback_time').value, '180d')
         assert.equal(parseField(payload, 'pair_denylist').value, 'BTC/USDT,ETH/USDT')
         assert.equal(parseField(payload, 'trade_mode').value, 'dynamic_dca')
+        assert.deepEqual(parseField(payload, 'ai_trust_enabled'), {
+            value: false,
+            type: 'bool',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_enforce_warnings'), {
+            value: false,
+            type: 'bool',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_ollama_base_url'), {
+            value: 'http://ollama.test:11434',
+            type: 'str',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_ollama_model'), {
+            value: null,
+            type: 'str',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_timeout_ms'), {
+            value: 10000,
+            type: 'int',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_max_retries'), {
+            value: 0,
+            type: 'int',
+        })
         assert.equal('dynamic_dca' in payload, false)
         assert.equal('trade_lifecycle_mode' in payload, false)
         assert.equal('sidestep_campaign_enabled' in payload, false)
@@ -258,6 +291,52 @@ test(
         )
     },
 )
+
+test('buildConfigSubmitPayload persists AI Trust Ollama settings', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            general: {
+                timezone: 'Europe/Vienna',
+                debug: false,
+                ws_watchdog_enabled: true,
+                ws_healthcheck_interval_ms: 9000,
+                ws_stale_timeout_ms: 18000,
+                ws_reconnect_debounce_ms: 3000,
+                ai_trust_enabled: true,
+                ai_trust_enforce_warnings: true,
+                ai_trust_ollama_base_url: 'http://ollama.local:11434',
+                ai_trust_ollama_model: 'qwen3:8b',
+                ai_trust_timeout_ms: 3500,
+                ai_trust_max_retries: 1,
+            },
+        }),
+    )
+
+    assert.deepEqual(parseField(payload, 'ai_trust_enabled'), {
+        value: true,
+        type: 'bool',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_enforce_warnings'), {
+        value: true,
+        type: 'bool',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_ollama_base_url'), {
+        value: 'http://ollama.local:11434',
+        type: 'str',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_ollama_model'), {
+        value: 'qwen3:8b',
+        type: 'str',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_timeout_ms'), {
+        value: 3500,
+        type: 'int',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_max_retries'), {
+        value: 1,
+        type: 'int',
+    })
+})
 
 test('buildConfigSubmitPayload normalizes ASAP symbol selections', () => {
     const payload = buildConfigSubmitPayload(

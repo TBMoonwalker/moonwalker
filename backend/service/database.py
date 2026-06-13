@@ -257,6 +257,31 @@ class Database:
                 "idx_autopilot_symbol_memory_updated_at",
                 ("updated_at",),
             ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_created_at",
+                ("created_at",),
+            ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_deal_id",
+                ("deal_id",),
+            ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_symbol_created_at",
+                ("symbol", "created_at"),
+            ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_status_provider",
+                ("status", "provider_status"),
+            ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_outcome_bad",
+                ("outcome_status", "bad_entry"),
+            ),
             ("tickers", "idx_tickers_symbol_timestamp", ("symbol", "timestamp")),
             ("tickers", "idx_tickers_timestamp", ("timestamp",)),
             ("trades", "idx_trades_symbol", ("symbol",)),

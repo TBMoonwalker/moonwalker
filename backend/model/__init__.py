@@ -1,5 +1,6 @@
 """Tortoise ORM model exports."""
 
+from .aitrustprediction import AiTrustPrediction as AiTrustPrediction
 from .appconfig import AppConfig as AppConfig
 from .athcache import AthCache as AthCache
 from .autopilot import Autopilot as Autopilot
@@ -23,6 +24,7 @@ from .upnlhistory import UpnlHistory as UpnlHistory
 __all__ = [
     "AppConfig",
     "AthCache",
+    "AiTrustPrediction",
     "Autopilot",
     "AutopilotMemoryEvent",
     "AutopilotMemoryState",
@@ -45,6 +47,7 @@ __all__ = [
 if __name__ == "__main__":
     __models__ = [
         "Autopilot",
+        "AiTrustPrediction",
         "AutopilotMemoryEvent",
         "AutopilotMemoryState",
         "AutopilotSymbolMemory",

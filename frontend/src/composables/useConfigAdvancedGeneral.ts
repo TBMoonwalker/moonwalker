@@ -36,6 +36,10 @@ export function useConfigAdvancedGeneral(
             advancedWsStaleTimeoutMs: options.defaults.advancedWsStaleTimeoutMs,
             advancedWsReconnectDebounceMs:
                 options.defaults.advancedWsReconnectDebounceMs,
+            defaultAiTrustOllamaBaseUrl:
+                options.defaults.defaultAiTrustOllamaBaseUrl,
+            defaultAiTrustTimeoutMs: options.defaults.defaultAiTrustTimeoutMs,
+            defaultAiTrustMaxRetries: options.defaults.defaultAiTrustMaxRetries,
             defaultSymSignalUrl: options.defaultSymSignalUrl,
             defaultSymSignalVersion: options.defaultSymSignalVersion,
             defaultTpSpikeConfirmSeconds:

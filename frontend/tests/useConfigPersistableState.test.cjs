@@ -18,6 +18,12 @@ function createPersistableStateOptions() {
             ws_healthcheck_interval_ms: 30000,
             ws_stale_timeout_ms: 45000,
             ws_reconnect_debounce_ms: 5000,
+            ai_trust_enabled: false,
+            ai_trust_enforce_warnings: false,
+            ai_trust_ollama_base_url: 'http://localhost:11434',
+            ai_trust_ollama_model: null,
+            ai_trust_timeout_ms: 10000,
+            ai_trust_max_retries: 0,
         }),
         signal: ref({
             symbol_list: 'BTC/USDT',
