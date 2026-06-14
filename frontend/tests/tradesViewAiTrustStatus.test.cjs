@@ -9,10 +9,26 @@ const tradesViewSource = fs.readFileSync(
 )
 
 test('trades page status strip surfaces AI provider unavailable state', () => {
+    assert.match(tradesViewSource, /aiTrustEnforcementActive/)
     assert.match(tradesViewSource, /aiTrustRuntimeStatus/)
     assert.match(tradesViewSource, /provider_unavailable/)
     assert.match(tradesViewSource, /AI unavailable/)
     assert.match(tradesViewSource, /New entries are blocked until AI answers successfully/)
+})
+
+test('trades page ignores stale AI runtime status when enforcement is disabled', () => {
+    assert.match(
+        tradesViewSource,
+        /configFlagEnabled\(configSnapshotStore\.snapshot\.value\?\.ai_trust_enabled\) &&\s+configFlagEnabled\(configSnapshotStore\.snapshot\.value\?\.ai_trust_enforce_warnings\)/,
+    )
+    assert.match(
+        tradesViewSource,
+        /aiTrustEnforcementActive\.value &&\s+aiTrustRuntimeStatus\.value === 'provider_unavailable'/,
+    )
+    assert.match(
+        tradesViewSource,
+        /aiTrustEnforcementActive\.value &&\s+aiTrustRuntimeStatus\.value === 'warning_blocked'/,
+    )
 })
 
 test('trades page status strip keeps global pause as highest priority', () => {

@@ -31,6 +31,15 @@ const unsellableTradesCount = computed(() =>
 const waitingCampaignsCount = computed(() =>
   Array.isArray(waitingCampaignsState.data.value) ? waitingCampaignsState.data.value.length : 0
 )
+function configFlagEnabled(value: unknown): boolean {
+  return value === true || value === 'true'
+}
+
+const aiTrustEnforcementActive = computed(
+  () =>
+    configFlagEnabled(configSnapshotStore.snapshot.value?.ai_trust_enabled) &&
+    configFlagEnabled(configSnapshotStore.snapshot.value?.ai_trust_enforce_warnings)
+)
 const aiTrustRuntimeStatus = computed(() =>
   String(configSnapshotStore.snapshot.value?.ai_trust_runtime_status ?? 'ok')
 )
@@ -38,10 +47,14 @@ const aiTrustRuntimeProviderStatus = computed(() =>
   String(configSnapshotStore.snapshot.value?.ai_trust_runtime_provider_status ?? '')
 )
 const aiTrustProviderUnavailable = computed(
-  () => aiTrustRuntimeStatus.value === 'provider_unavailable'
+  () =>
+    aiTrustEnforcementActive.value &&
+    aiTrustRuntimeStatus.value === 'provider_unavailable'
 )
 const aiTrustWarningBlocked = computed(
-  () => aiTrustRuntimeStatus.value === 'warning_blocked'
+  () =>
+    aiTrustEnforcementActive.value &&
+    aiTrustRuntimeStatus.value === 'warning_blocked'
 )
 const tradeAdmissionWarning = computed(
   () => aiTrustProviderUnavailable.value || aiTrustWarningBlocked.value
