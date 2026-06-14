@@ -58,6 +58,7 @@ onMounted(() => {
     if (typeof window !== 'undefined') {
         window.addEventListener('resize', handleResize)
     }
+    void profit_store.load_profit_history_data(range['period'])
 })
 
 onBeforeUnmount(() => {
@@ -67,12 +68,12 @@ onBeforeUnmount(() => {
 })
 
 // Get new statistics data
-watch([statistics_data.data, profit_store_refs.data], async ([newData]) => {
+watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile], async ([newData]) => {
     let labels = []
     let datasets = []
 
-    const hasHistoricProfitData =
-        !!profit_store_refs.data.value && Object.keys(profit_store_refs.data.value).length > 0
+    const historicProfitData = profit_store.get_profit_history_data(range['period'])
+    const hasHistoricProfitData = Object.keys(historicProfitData).length > 0
     const websocketData = newData as any
     const profitWeekCount =
         websocketData && websocketData.profit_week
@@ -84,27 +85,32 @@ watch([statistics_data.data, profit_store_refs.data], async ([newData]) => {
 
     if (shouldRefreshHistory) {
         isLoadingHistory = true
-        profit_store.$patch({ data: {} })
         await profit_store.load_profit_history_data(range['period'])
         historic_data = true
         isLoadingHistory = false
     }
 
-    if (newData !== undefined && newData !== null) {
-        if (profit_store_refs.data.value && Object.keys(profit_store_refs.data.value).length > 0) {
+    const profit = profit_store.get_profit_history_data(range['period'])
+    if (
+        (newData !== undefined && newData !== null) ||
+        Object.keys(profit).length > 0
+    ) {
+        if (Object.keys(profit).length > 0) {
             showNoProfit.value = false
             emptyStateText.value = ''
-            const profit = profit_store_refs.data.value as Record<string, number>
             for (let key in profit) {
                 let value = profit[key]
                 labels.push(key)
                 datasets.push(chart_classes(value))
             }
 
-            if (range['period'] == "daily") {
-                let websocket_data = newData as any
-                let profit_week: number = websocket_data["profit_week"]
-                let actual_day_value = Number(Object.values(profit_week)[Object.values(profit_week).length - 1])
+            const liveProfitWeek = websocketData?.profit_week
+            if (
+                range['period'] == "daily" &&
+                liveProfitWeek &&
+                Object.keys(liveProfitWeek).length > 0
+            ) {
+                let actual_day_value = Number(Object.values(liveProfitWeek)[Object.values(liveProfitWeek).length - 1])
                 datasets.splice(datasets.length - 1, 1, chart_classes(actual_day_value))
             }
 

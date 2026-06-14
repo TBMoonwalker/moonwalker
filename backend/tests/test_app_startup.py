@@ -105,8 +105,40 @@ class _FailIfUsedSidestepCampaignFactory:
         )
 
 
+class _FakeStartupLogger:
+    def __init__(self) -> None:
+        self.info_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.exception_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def info(self, message: str, *args: object) -> None:
+        self.info_calls.append((message, args))
+
+    def exception(self, message: str, *args: object) -> None:
+        self.exception_calls.append((message, args))
+
+
 async def _noop_async(*_args, **_kwargs) -> None:
     return None
+
+
+@pytest.mark.asyncio
+async def test_startup_step_logs_readiness_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake_logger = _FakeStartupLogger()
+    monkeypatch.setattr(app_module, "logging", fake_logger)
+
+    async def operation() -> str:
+        return "ready"
+
+    result = await app_module._run_startup_step("test step", operation)
+
+    assert result == "ready"
+    assert fake_logger.info_calls[0][0] == "Startup step started: %s"
+    assert fake_logger.info_calls[0][1] == ("test step",)
+    assert fake_logger.info_calls[1][0] == "Startup step finished: %s in %.3fs"
+    assert fake_logger.info_calls[1][1][0] == "test step"
+    assert isinstance(fake_logger.info_calls[1][1][1], float)
 
 
 @pytest.mark.asyncio

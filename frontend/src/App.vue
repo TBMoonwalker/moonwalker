@@ -352,7 +352,11 @@ watch(
             <div class="app-layout">
               <AppHeader />
               <main class="app-content">
-                <RouterView />
+                <RouterView v-slot="{ Component }">
+                  <KeepAlive>
+                    <component :is="Component" />
+                  </KeepAlive>
+                </RouterView>
               </main>
             </div>
           </n-dialog-provider>

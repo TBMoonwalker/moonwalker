@@ -4,9 +4,12 @@ import asyncio
 import importlib.util
 import os
 import subprocess
+import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+import helper
 import uvicorn
 from controller import route_handlers
 from controller import statistics as statistics_controller
@@ -22,6 +25,8 @@ from service.housekeeper import Housekeeper
 from service.redis import redis_client, start_redis, stop_redis
 from service.signal import Signal
 from service.watcher import Watcher
+
+logging = helper.LoggerFactory.get_logger("logs/startup.log", "startup")
 
 
 @dataclass
@@ -42,54 +47,124 @@ class RuntimeState:
 runtime_state = RuntimeState()
 
 
+async def _run_startup_step(
+    name: str,
+    operation: Callable[[], Awaitable[Any]],
+) -> Any:
+    """Run one startup operation and log how long it blocks readiness."""
+    started_at = time.perf_counter()
+    logging.info("Startup step started: %s", name)
+    try:
+        result = await operation()
+    except Exception:
+        logging.exception(
+            "Startup step failed: %s after %.3fs",
+            name,
+            time.perf_counter() - started_at,
+        )
+        raise
+
+    logging.info(
+        "Startup step finished: %s in %.3fs",
+        name,
+        time.perf_counter() - started_at,
+    )
+    return result
+
+
 async def startup() -> None:
     """Initialize core services and start background tasks before serving."""
-    runtime_state.redis_proc = await asyncio.to_thread(start_redis)
-    runtime_state.watcher_queue = asyncio.Queue()
+    started_at = time.perf_counter()
+    logging.info("Moonwalker startup sequence started.")
+    try:
+        runtime_state.redis_proc = await _run_startup_step(
+            "redis start",
+            lambda: asyncio.to_thread(start_redis),
+        )
+        runtime_state.watcher_queue = asyncio.Queue()
 
-    runtime_state.database = Database()
-    await runtime_state.database.init()
+        runtime_state.database = Database()
+        await _run_startup_step("database init", runtime_state.database.init)
 
-    await runtime_state.database.run_with_context(Config.instance)
+        await _run_startup_step(
+            "config load",
+            lambda: runtime_state.database.run_with_context(Config.instance),
+        )
 
-    runtime_state.watcher = Watcher()
-    await runtime_state.watcher.init()
+        runtime_state.watcher = Watcher()
+        await _run_startup_step("watcher init", runtime_state.watcher.init)
 
-    runtime_state.housekeeper = Housekeeper()
-    await runtime_state.housekeeper.init()
+        runtime_state.housekeeper = Housekeeper()
+        await _run_startup_step("housekeeper init", runtime_state.housekeeper.init)
 
-    runtime_state.green_phase_service = await GreenPhaseService.instance()
-    await runtime_state.green_phase_service.start()
+        runtime_state.green_phase_service = await _run_startup_step(
+            "green phase init",
+            GreenPhaseService.instance,
+        )
+        await _run_startup_step(
+            "green phase start",
+            runtime_state.green_phase_service.start,
+        )
 
-    runtime_state.autopilot_memory_service = await AutopilotMemoryService.instance()
-    await runtime_state.autopilot_memory_service.start()
+        runtime_state.autopilot_memory_service = await _run_startup_step(
+            "autopilot memory init",
+            AutopilotMemoryService.instance,
+        )
+        await _run_startup_step(
+            "autopilot memory start",
+            runtime_state.autopilot_memory_service.start,
+        )
 
-    runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
-    await runtime_state.database.run_with_context(runtime_state.signal_plugin.init)
-    await trades_controller.start_websocket_fanout()
-    await statistics_controller.start_websocket_fanout()
+        runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
+        await _run_startup_step(
+            "signal plugin init",
+            lambda: runtime_state.database.run_with_context(
+                runtime_state.signal_plugin.init
+            ),
+        )
+        await _run_startup_step(
+            "trades websocket fanout start",
+            trades_controller.start_websocket_fanout,
+        )
+        await _run_startup_step(
+            "statistics websocket fanout start",
+            statistics_controller.start_websocket_fanout,
+        )
 
-    runtime_state.background_tasks = [
-        asyncio.create_task(
-            runtime_state.database.run_with_context(
-                runtime_state.watcher.watch_incoming_symbols,
-                runtime_state.watcher_queue,
-            )
-        ),
-        asyncio.create_task(
-            runtime_state.database.run_with_context(
-                runtime_state.housekeeper.cleanup_ticker_database
-            )
-        ),
-        asyncio.create_task(
-            runtime_state.database.run_with_context(runtime_state.watcher.watch_tickers)
-        ),
-        asyncio.create_task(
-            runtime_state.database.run_with_context(
-                runtime_state.database.backfill_trade_replay_candles_if_needed
-            )
-        ),
-    ]
+        runtime_state.background_tasks = [
+            asyncio.create_task(
+                runtime_state.database.run_with_context(
+                    runtime_state.watcher.watch_incoming_symbols,
+                    runtime_state.watcher_queue,
+                )
+            ),
+            asyncio.create_task(
+                runtime_state.database.run_with_context(
+                    runtime_state.housekeeper.cleanup_ticker_database
+                )
+            ),
+            asyncio.create_task(
+                runtime_state.database.run_with_context(
+                    runtime_state.watcher.watch_tickers
+                )
+            ),
+            asyncio.create_task(
+                runtime_state.database.run_with_context(
+                    runtime_state.database.backfill_trade_replay_candles_if_needed
+                )
+            ),
+        ]
+    except Exception:
+        logging.exception(
+            "Moonwalker startup sequence failed after %.3fs",
+            time.perf_counter() - started_at,
+        )
+        raise
+
+    logging.info(
+        "Moonwalker startup sequence finished in %.3fs",
+        time.perf_counter() - started_at,
+    )
 
 
 async def shutdown() -> None:
