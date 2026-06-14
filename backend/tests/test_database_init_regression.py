@@ -3,6 +3,7 @@ import sqlite3
 
 import pytest
 from service.database import (
+    SQLITE_STARTUP_INTEGRITY_TABLES,
     Database,
     _build_sqlite_corruption_message,
     _extract_added_column_names,
@@ -27,9 +28,10 @@ class _FakeConnection:
     ) -> None:
         self._rows = rows or []
         self._error = error
+        self.queries: list[str] = []
 
     async def execute_query(self, query: str) -> tuple[int, list[tuple[str]]]:
-        assert query == "PRAGMA integrity_check"
+        self.queries.append(query)
         if self._error is not None:
             raise self._error
         return len(self._rows), self._rows
@@ -169,21 +171,46 @@ async def test_run_sqlite_integrity_check_returns_trimmed_messages(
 ) -> None:
     database = Database()
     database.db_url = "sqlite:///tmp/broken.sqlite"
+    connection = _FakeConnection(
+        rows=[
+            (" row 1 missing from index idx_trades_deal_id_88bd51 ",),
+            ("",),
+            ("row 2 missing from index idx_trades_deal_id_88bd51",),
+        ]
+    )
 
     monkeypatch.setattr(
         "service.database.Tortoise.get_connection",
-        lambda *_args, **_kwargs: _FakeConnection(
-            rows=[
-                (" row 1 missing from index idx_trades_deal_id_88bd51 ",),
-                ("",),
-                ("row 2 missing from index idx_trades_deal_id_88bd51",),
-            ]
-        ),
+        lambda *_args, **_kwargs: connection,
     )
 
     assert await database._run_sqlite_integrity_check() == [
         "row 1 missing from index idx_trades_deal_id_88bd51",
         "row 2 missing from index idx_trades_deal_id_88bd51",
+    ]
+    assert connection.queries == ["PRAGMA integrity_check"]
+
+
+@pytest.mark.asyncio
+async def test_run_sqlite_integrity_check_accepts_startup_table_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    database.db_url = "sqlite:///tmp/healthy.sqlite"
+    connection = _FakeConnection(rows=[("ok",)])
+
+    monkeypatch.setattr(
+        "service.database.Tortoise.get_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+
+    assert await database._run_sqlite_integrity_check(["trades", "opentrades"]) == [
+        "ok",
+        "ok",
+    ]
+    assert connection.queries == [
+        "PRAGMA integrity_check('trades')",
+        "PRAGMA integrity_check('opentrades')",
     ]
 
 
@@ -397,6 +424,7 @@ async def test_repair_index_only_corruption_reindexes_until_integrity_is_clean(
 ) -> None:
     database = Database()
     database.db_url = "sqlite:///tmp/broken.sqlite"
+    quick_runs = iter([["ok"], ["ok"]])
     integrity_runs = iter(
         [
             [
@@ -408,19 +436,33 @@ async def test_repair_index_only_corruption_reindexes_until_integrity_is_clean(
     )
     calls: list[str] = []
 
-    async def fake_integrity_check(*_args, **_kwargs) -> list[str]:
+    async def fake_quick_check(*_args, **_kwargs) -> list[str]:
+        calls.append("quick_check")
+        return next(quick_runs)
+
+    async def fake_integrity_check(
+        _self, table_names=None, *_args, **_kwargs
+    ) -> list[str]:
         calls.append("integrity_check")
+        assert tuple(table_names or ()) == SQLITE_STARTUP_INTEGRITY_TABLES
         return next(integrity_runs)
 
     async def fake_reindex(*_args, **_kwargs) -> None:
         calls.append("reindex")
 
+    monkeypatch.setattr(Database, "_run_sqlite_quick_check", fake_quick_check)
     monkeypatch.setattr(Database, "_run_sqlite_integrity_check", fake_integrity_check)
     monkeypatch.setattr(Database, "_reindex_sqlite_database", fake_reindex)
 
     await database._repair_index_only_corruption_if_needed()
 
-    assert calls == ["integrity_check", "reindex", "integrity_check"]
+    assert calls == [
+        "quick_check",
+        "integrity_check",
+        "reindex",
+        "quick_check",
+        "integrity_check",
+    ]
 
 
 @pytest.mark.asyncio
@@ -430,10 +472,10 @@ async def test_repair_index_only_corruption_raises_for_generic_damage(
     database = Database()
     database.db_url = "sqlite:///tmp/broken.sqlite"
 
-    async def fake_integrity_check(*_args, **_kwargs) -> list[str]:
+    async def fake_quick_check(*_args, **_kwargs) -> list[str]:
         return ["*** in database main ***\nPage 5 is never used"]
 
-    monkeypatch.setattr(Database, "_run_sqlite_integrity_check", fake_integrity_check)
+    monkeypatch.setattr(Database, "_run_sqlite_quick_check", fake_quick_check)
 
     with pytest.raises(
         RuntimeError, match="SQLite corruption detected in /tmp/broken.sqlite"

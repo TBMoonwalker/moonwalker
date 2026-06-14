@@ -6,7 +6,7 @@ import random
 import re
 import sqlite3
 from asyncio import sleep
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 from uuid import uuid4
 
@@ -21,6 +21,23 @@ logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
 SQLITE_LOCK_RETRIES = 5
 SQLITE_RETRY_BASE_DELAY_SECONDS = 0.02
 SQLITE_RETRY_MAX_DELAY_SECONDS = 0.2
+SQLITE_STARTUP_INTEGRITY_TABLES = (
+    "trades",
+    "opentrades",
+    "closedtrades",
+    "tradeexecutions",
+    "spotcampaigns",
+    "unsellabletrades",
+    "ai_trust_predictions",
+    "strategy_definitions",
+    "strategy_versions",
+    "strategy_graph_state",
+    "autopilot_memory_state",
+    "autopilot_symbol_memory",
+    "autopilot_memory_events",
+    "upnl_history",
+    "token_listings",
+)
 _SQLITE_INDEX_CORRUPTION_PATTERNS = (
     re.compile(r"row \d+ missing from index (?P<index>\S+)"),
     re.compile(r"rowid \d+ missing from index (?P<index>\S+)"),
@@ -86,6 +103,11 @@ def _integrity_check_is_clean(messages: list[str]) -> bool:
     if not messages:
         return False
     return all(str(message).strip().lower() == "ok" for message in messages)
+
+
+def _quote_sqlite_pragma_string(value: str) -> str:
+    """Return a SQL string literal for SQLite PRAGMA arguments."""
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _plan_additive_column_statements(
@@ -707,14 +729,47 @@ class Database:
         """Run SQLite planner/index maintenance."""
         await optimize_sqlite_connection(self.db_url)
 
-    async def _run_sqlite_integrity_check(self) -> list[str]:
+    async def _run_sqlite_quick_check(self) -> list[str]:
+        """Return SQLite quick_check messages for the active database."""
+        if not self.db_url.startswith("sqlite://"):
+            return []
+
+        try:
+            connection = Tortoise.get_connection("default")
+            _, rows = await connection.execute_query("PRAGMA quick_check")
+        except Exception as exc:  # noqa: BLE001 - diagnostic only
+            logging.warning(
+                "Failed to run SQLite quick_check during corruption diagnosis: %s",
+                exc,
+                exc_info=True,
+            )
+            return []
+
+        return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+
+    async def _run_sqlite_integrity_check(
+        self,
+        table_names: Iterable[str] | None = None,
+    ) -> list[str]:
         """Return SQLite integrity_check messages for the active database."""
         if not self.db_url.startswith("sqlite://"):
             return []
 
         try:
             connection = Tortoise.get_connection("default")
-            _, rows = await connection.execute_query("PRAGMA integrity_check")
+            if table_names is None:
+                _, rows = await connection.execute_query("PRAGMA integrity_check")
+                return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+
+            messages: list[str] = []
+            for table_name in table_names:
+                quoted_table = _quote_sqlite_pragma_string(table_name)
+                _, rows = await connection.execute_query(
+                    f"PRAGMA integrity_check({quoted_table})"
+                )
+                messages.extend(
+                    str(row[0]).strip() for row in rows if str(row[0]).strip()
+                )
         except Exception as exc:  # noqa: BLE001 - diagnostic only
             logging.warning(
                 "Failed to run SQLite integrity_check during corruption diagnosis: %s",
@@ -723,7 +778,7 @@ class Database:
             )
             return []
 
-        return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+        return messages
 
     async def _reindex_sqlite_database(self) -> None:
         """Rebuild all indexes for the active SQLite database."""
@@ -735,7 +790,15 @@ class Database:
 
     async def _repair_index_only_corruption_if_needed(self) -> None:
         """Repair index-only SQLite corruption before runtime services start."""
-        integrity_messages = await self._run_sqlite_integrity_check()
+        quick_messages = await self._run_sqlite_quick_check()
+        if not quick_messages:
+            return
+
+        integrity_messages = quick_messages
+        if _integrity_check_is_clean(quick_messages):
+            integrity_messages = await self._run_sqlite_integrity_check(
+                SQLITE_STARTUP_INTEGRITY_TABLES
+            )
         if not integrity_messages:
             return
         if _integrity_check_is_clean(integrity_messages):
@@ -755,7 +818,11 @@ class Database:
             ", ".join(corrupted_index_names),
         )
         await self._reindex_sqlite_database()
-        repaired_messages = await self._run_sqlite_integrity_check()
+        repaired_messages = await self._run_sqlite_quick_check()
+        if _integrity_check_is_clean(repaired_messages):
+            repaired_messages = await self._run_sqlite_integrity_check(
+                SQLITE_STARTUP_INTEGRITY_TABLES
+            )
         if _integrity_check_is_clean(repaired_messages):
             logging.warning(
                 "SQLite index corruption repaired successfully via REINDEX."
