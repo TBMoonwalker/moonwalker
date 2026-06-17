@@ -1,5 +1,14 @@
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import {
+   computed,
+   h,
+   onActivated,
+   onMounted,
+   onUnmounted,
+   reactive,
+   ref,
+   watch,
+} from 'vue'
 import type { DataTableColumns, PaginationProps, SorterResult } from 'naive-ui'
 import Heatmap from '../components/Heatmap.vue'
 import { useAnalyticsStore } from '../stores/analytics'
@@ -48,8 +57,11 @@ function handleResize() {
 onMounted(() => {
    handleResize()
    window.addEventListener('resize', handleResize)
-   void analytics.load()
  })
+
+onActivated(() => {
+   void analytics.load()
+})
 
 onUnmounted(() => {
    window.removeEventListener('resize', handleResize)

@@ -174,9 +174,13 @@ test('handleResize sets isMobile based on window width', () => {
     assert.match(source, /isMobile\.value = window\.innerWidth < 768/)
 })
 
-test('onMounted adds resize listener and calls analytics.load', () => {
+test('onMounted adds resize listener', () => {
     assert.match(source, /addEventListener\('resize', handleResize\)/)
-    assert.match(source, /analytics\.load/)
+})
+
+test('onActivated refreshes analytics for kept-alive route visits', () => {
+    assert.match(source, /onActivated\(\(\) => \{/)
+    assert.match(source, /void analytics\.load\(\)/)
 })
 
 test('onUnmounted removes resize listener', () => {
