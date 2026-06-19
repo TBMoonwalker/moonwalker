@@ -681,5 +681,57 @@ onUnmounted(() => {
     padding-inline: 10px;
     white-space: normal;
   }
+
+  .ledger-panel :deep(.n-data-table-th),
+  .ledger-panel :deep(.n-data-table-td) {
+    padding-inline: 6px;
+  }
+
+  .ledger-panel :deep(.n-data-table-th[data-col-key="symbol"]),
+  .ledger-panel :deep(.n-data-table-td[data-col-key="symbol"]) {
+    min-width: 112px;
+    width: 112px;
+  }
+
+  .ledger-panel :deep(.n-data-table-th[data-col-key="display_profit_percent"]),
+  .ledger-panel :deep(.n-data-table-td[data-col-key="display_profit_percent"]) {
+    min-width: 76px;
+    width: 76px;
+  }
+
+  .ledger-panel :deep(.n-data-table-th[data-col-key="action"]),
+  .ledger-panel :deep(.n-data-table-td[data-col-key="action"]) {
+    min-width: 128px;
+    width: 128px;
+  }
+
+  .ledger-panel :deep(.trade-symbol-main) {
+    white-space: nowrap;
+  }
+
+  .ledger-panel :deep(.n-data-table-td[data-col-key="display_profit_percent"] .trade-cell-main),
+  .ledger-panel :deep(.n-data-table-td[data-col-key="display_profit_percent"] .trade-cell-sub) {
+    white-space: nowrap;
+  }
+
+  .ledger-panel :deep(.trade-row-actions) {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    width: 116px;
+    gap: 6px;
+  }
+
+  .ledger-panel :deep(.trade-row-actions .n-button) {
+    min-height: 44px !important;
+  }
+
+  .ledger-panel :deep(.trade-row-actions .n-button:nth-child(n + 3)) {
+    flex: 1 1 100%;
+  }
+
+  .ledger-panel :deep(.trade-expand-button) {
+    min-width: 36px !important;
+    min-height: 36px !important;
+  }
 }
 </style>

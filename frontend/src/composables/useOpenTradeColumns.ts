@@ -348,7 +348,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 render: (rowData) => {
                     const [, currency] = splitTradeSymbol(rowData.symbol)
                     const profitPercent =
-                        `${formatFixed(getDisplayedProfitPercent(rowData))} %`
+                        `${formatFixed(getDisplayedProfitPercent(rowData))}%`
                     const pnl = `${formatFixed(getDisplayedProfit(rowData))} ${currency}`
                     return renderCellStack(
                         profitPercent,
