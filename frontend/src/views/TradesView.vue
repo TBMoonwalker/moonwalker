@@ -693,6 +693,12 @@ onUnmounted(() => {
     width: 112px;
   }
 
+  .ledger-panel :deep(.n-data-table-th[data-col-key="__n_expand__"]),
+  .ledger-panel :deep(.n-data-table-td[data-col-key="__n_expand__"]) {
+    min-width: 44px;
+    width: 44px;
+  }
+
   .ledger-panel :deep(.n-data-table-th[data-col-key="display_profit_percent"]),
   .ledger-panel :deep(.n-data-table-td[data-col-key="display_profit_percent"]) {
     min-width: 76px;
@@ -730,8 +736,8 @@ onUnmounted(() => {
   }
 
   .ledger-panel :deep(.trade-expand-button) {
-    min-width: 36px !important;
-    min-height: 36px !important;
+    min-width: 44px !important;
+    min-height: 44px !important;
   }
 }
 </style>
