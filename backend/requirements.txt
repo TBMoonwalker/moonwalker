@@ -15,6 +15,6 @@ httpx==0.28.1
 uvicorn==0.48.0
 
 # Explicit security pins for transitives used by the HTTP/exchange stack.
-cryptography==46.0.7
+cryptography==48.0.1
 idna==3.16
 urllib3==2.7.0
