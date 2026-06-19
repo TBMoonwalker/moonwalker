@@ -6,7 +6,9 @@
         :data="paged_closed_trades || []"
         :loading="isTableLoading"
         :row-class-name="row_classes"
-        :render-expand-icon="renderExpandIcon"
+        :row-key="getClosedTradeRowKey"
+        :row-props="getClosedTradeRowProps"
+        v-model:expanded-row-keys="expandedClosedTradeRowKeys"
         :pagination="pageReactive"
         :locale="{ emptyText: tableEmptyText }"
         aria-label="Closed trades table"
@@ -17,15 +19,13 @@
 
 <script setup lang="ts">
 import { computed, h, onMounted, ref } from 'vue'
-import { ArrowForwardCircleOutline } from '@vicons/ionicons5'
 import { NButton } from 'naive-ui/es/button'
 import {
     NDataTable,
     type DataTableColumns,
-    type RenderExpandIcon,
+    type DataTableRowKey,
 } from 'naive-ui/es/data-table'
 import { useDialog } from 'naive-ui/es/dialog'
-import { NIcon } from 'naive-ui/es/icon'
 import { useMessage } from 'naive-ui/es/message'
 import ClosedTradeExpandedRow from './ClosedTradeExpandedRow.vue'
 import { fetchJson } from '../api/client'
@@ -53,6 +53,7 @@ const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
 const dialog = useDialog()
 const message = useMessage()
 const sortState = ref<TradeTableSortState | null>(null)
+const expandedClosedTradeRowKeys = ref<DataTableRowKey[]>([])
 
 const {
     rows: closed_trades,
@@ -133,32 +134,70 @@ async function handleDeleteClosedTrade(rowData: ClosedTradeRow): Promise<void> {
     })
 }
 
-const renderExpandIcon: RenderExpandIcon = ({ expanded, rowData }) => {
-    const symbol = String(rowData.symbol ?? 'trade')
-    return h(
-        NButton,
-        {
-            circle: true,
-            quaternary: true,
-            size: 'small',
-            class: 'trade-expand-button',
-            'aria-label': `${
-                expanded ? 'Collapse' : 'Expand'
-            } trade details for ${symbol}`,
-        },
-        {
-            icon: () =>
-                h(
-                    NIcon,
-                    { size: 24, color: '#63e2b7' },
-                    { default: () => h(ArrowForwardCircleOutline) },
-                ),
-        },
+function handleSorterChange(sorter: unknown): void {
+    sortState.value = resolveTradeTableSortState(sorter)
+}
+
+function getClosedTradeRowKey(rowData: ClosedTradeRow): DataTableRowKey {
+    return rowData.deal_id || rowData.campaign_id || rowData.id
+}
+
+function isInteractiveRowTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) {
+        return false
+    }
+    return Boolean(
+        target.closest(
+            [
+                'a',
+                'button',
+                'input',
+                'select',
+                'textarea',
+                '[contenteditable="true"]',
+                '[role="button"]',
+                '[role="menuitem"]',
+                '.n-button',
+                '.n-base-selection',
+                '.n-checkbox',
+                '.n-dropdown',
+                '.n-input',
+                '.n-switch',
+            ].join(','),
+        ),
     )
 }
 
-function handleSorterChange(sorter: unknown): void {
-    sortState.value = resolveTradeTableSortState(sorter)
+function toggleClosedTradeRow(rowData: ClosedTradeRow): void {
+    const rowKey = getClosedTradeRowKey(rowData)
+    expandedClosedTradeRowKeys.value =
+        expandedClosedTradeRowKeys.value.includes(rowKey)
+            ? expandedClosedTradeRowKeys.value.filter((key) => key !== rowKey)
+            : [...expandedClosedTradeRowKeys.value, rowKey]
+}
+
+function getClosedTradeRowProps(rowData: ClosedTradeRow) {
+    const rowKey = getClosedTradeRowKey(rowData)
+    return {
+        class: 'trade-row-clickable',
+        tabindex: 0,
+        'aria-expanded': expandedClosedTradeRowKeys.value.includes(rowKey),
+        'aria-label': `Toggle trade details for ${rowData.symbol}`,
+        onClick: (event: MouseEvent) => {
+            if (!isInteractiveRowTarget(event.target)) {
+                toggleClosedTradeRow(rowData)
+            }
+        },
+        onKeydown: (event: KeyboardEvent) => {
+            if (
+                (event.key === 'Enter' || event.key === ' ') &&
+                !isInteractiveRowTarget(event.target)
+            ) {
+                event.preventDefault()
+                toggleClosedTradeRow(rowData)
+            }
+        },
+    }
 }
 
 function formatCloseReason(reason: string | null | undefined): string {
@@ -182,10 +221,38 @@ function formatCloseReason(reason: string | null | undefined): string {
     }
 }
 
+function renderCellStack(
+    main: string,
+    secondary?: string,
+    mainClass = 'trade-cell-main',
+) {
+    return h('div', { class: 'trade-cell-stack' }, [
+        h('span', { class: mainClass }, main),
+        secondary
+            ? h('span', { class: 'trade-cell-sub' }, secondary)
+            : null,
+    ])
+}
+
+function renderSymbolCell(rowData: ClosedTradeRow, index: number) {
+    const [symbol, currency] = String(rowData.symbol ?? '').split('/')
+    return h('div', { class: 'trade-symbol-cell' }, [
+        h('span', { class: 'trade-symbol-main' }, `${symbol}/${currency ?? ''}`),
+        h('div', { class: 'trade-symbol-meta' }, [
+            h('span', { class: 'trade-cell-sub' }, `#${index + 1}`),
+            h('span', { class: 'trade-cell-sub' }, formatCloseReason(rowData.close_reason)),
+        ]),
+    ])
+}
+
 const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
     const columns: DataTableColumns<ClosedTradeRow> = [
         {
             type: 'expand',
+            width: 0,
+            minWidth: 0,
+            maxWidth: 0,
+            className: 'trade-hidden-expand-cell',
             expandable: () => true,
             renderExpand: (rowData) =>
                 h(ClosedTradeExpandedRow, {
@@ -194,14 +261,9 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
                 }),
         },
         {
-            title: '#',
-            key: 'id',
-            sorter: true,
-            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'id'),
-        },
-        {
-            title: 'Pair',
+            title: 'Symbol',
             key: 'symbol',
+            render: (rowData, index) => renderSymbolCell(rowData, index),
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(sortState.value, 'symbol'),
         },
@@ -209,7 +271,10 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             title: 'Amount',
             key: 'amount',
             render: (rowData) => {
-                return formatAssetAmount(rowData.amount)
+                const [symbol] = String(rowData.symbol ?? '').split('/')
+                return renderCellStack(
+                    `${formatAssetAmount(rowData.amount)} ${symbol}`,
+                )
             },
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(sortState.value, 'amount'),
@@ -218,7 +283,11 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             title: 'Profit',
             key: 'profit',
             render: (rowData) => {
-                return formatFixed(rowData.profit)
+                return renderCellStack(
+                    formatFixed(rowData.profit),
+                    undefined,
+                    'trade-cell-main profit',
+                )
             },
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(sortState.value, 'profit'),
@@ -227,7 +296,7 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             title: 'Cost',
             key: 'cost',
             render: (rowData) => {
-                return formatFixed(rowData.cost)
+                return renderCellStack(formatFixed(rowData.cost))
             },
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(sortState.value, 'cost'),
@@ -237,7 +306,11 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             key: 'profit_percent',
             className: 'profit',
             render: (rowData) => {
-                return `${formatFixed(rowData.profit_percent)} %`
+                return renderCellStack(
+                    `${formatFixed(rowData.profit_percent)}%`,
+                    undefined,
+                    'trade-cell-main profit',
+                )
             },
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(
@@ -255,7 +328,8 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
         {
             title: 'Outcome',
             key: 'close_reason',
-            render: (rowData) => formatCloseReason(rowData.close_reason),
+            render: (rowData) =>
+                renderCellStack(formatCloseReason(rowData.close_reason)),
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(
                 sortState.value,
@@ -271,10 +345,7 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             key: 'close_date',
             render: (rowData) => {
                 const { date, time } = resolveTradeDateTime(rowData.close_date)
-                return [
-                    h('div', date),
-                    h('div', time),
-                ]
+                return renderCellStack(date, time)
             },
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(
@@ -287,16 +358,18 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             key: 'action',
             align: 'center',
             render: (rowData) => {
-                return h(
-                    NButton,
-                    {
-                        size: 'small',
-                        type: 'error',
-                        ghost: true,
-                        onClick: () => handleDeleteClosedTrade(rowData),
-                    },
-                    { default: () => 'Delete' }
-                )
+                return h('div', { class: 'trade-row-actions' }, [
+                    h(
+                        NButton,
+                        {
+                            size: 'medium',
+                            type: 'error',
+                            ghost: true,
+                            onClick: () => handleDeleteClosedTrade(rowData),
+                        },
+                        { default: () => 'Delete' }
+                    ),
+                ])
             },
         },
     ]
@@ -345,13 +418,34 @@ onMounted(async () => {
     color: #2E7D5B !important;
 }
 
-:deep(.n-data-table-expand-trigger) {
-    height: 16px;
+:deep(.trade-row-clickable) {
+    cursor: pointer;
 }
 
-:deep(.trade-expand-button) {
-    min-width: 28px;
-    min-height: 28px;
+:deep(.trade-row-clickable:focus-visible) {
+    outline: 2px solid var(--mw-color-primary);
+    outline-offset: -2px;
+}
+
+:deep(.trade-hidden-expand-cell),
+:deep(.n-data-table-td--expand) {
+    display: none;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
     padding: 0;
+    border: 0;
+    overflow: hidden;
+}
+
+:deep(.n-data-table-table colgroup col:first-child) {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+}
+
+:deep(.trade-hidden-expand-cell .n-data-table-expand-trigger),
+:deep(.n-data-table-td--expand .n-data-table-expand-trigger) {
+    display: none;
 }
 </style>

@@ -4,14 +4,8 @@ import { NDropdown } from 'naive-ui/es/dropdown'
 import { NIcon } from 'naive-ui/es/icon'
 import { NTag } from 'naive-ui/es/tag'
 import { NTooltip } from 'naive-ui/es/tooltip'
-import {
-    type DataTableColumns,
-    type RenderExpandIcon,
-} from 'naive-ui/es/data-table'
-import {
-    ArrowForwardCircleOutline,
-    EllipsisHorizontal,
-} from '@vicons/ionicons5'
+import { type DataTableColumns } from 'naive-ui/es/data-table'
+import { EllipsisHorizontal } from '@vicons/ionicons5'
 
 import OpenTradeExpandedRow from '../components/OpenTradeExpandedRow.vue'
 import {
@@ -45,7 +39,6 @@ interface UseOpenTradeColumnsOptions {
     isTablet: Ref<boolean>
     missionActionErrors: Record<string, string | null>
     onAddManualBuy: (rowData: OpenTradeRow) => void
-    onDealBuy: (rowData: OpenTradeRow) => void
     onDealSell: (rowData: OpenTradeRow) => void
     onDealStop: (rowData: OpenTradeRow) => void
     onPauseMission: (rowData: OpenTradeRow) => void | Promise<void>
@@ -59,12 +52,22 @@ const tradeActionButtonStyle = {
     minWidth: '48px',
     padding: '0 11px',
 }
+const TPSO_PRICE_PADDING_PERCENT = 0.7
+const MIN_TPSO_STATUS_FILL_PERCENT = 3
 
 function clampPercent(value: number): number {
     if (!Number.isFinite(value)) {
         return 0
     }
     return Math.max(0, Math.min(100, value))
+}
+
+function resolveRangePercent(value: number, min: number, max: number): number {
+    const range = max - min
+    if (!Number.isFinite(range) || range <= 0) {
+        return 0
+    }
+    return clampPercent(((value - min) / range) * 100)
 }
 
 export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
@@ -80,35 +83,40 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
     }
 
     function renderOverflowActions(rowData: OpenTradeRow) {
+        const automationAction = rowData.automation_paused ? 'resume' : 'pause'
         return h(
             NDropdown,
             {
                 trigger: 'click',
                 options: [
                     {
-                        key: 'sell',
-                        label: 'Sell',
+                        key: automationAction,
+                        label: rowData.automation_paused
+                            ? 'Resume automation'
+                            : 'Pause automation',
+                        disabled: options.isMissionActionLoading(
+                            rowData.symbol,
+                            automationAction,
+                        ),
                     },
                     {
                         key: 'manual-buy',
                         label: 'Add manual buy',
-                    },
-                    {
-                        key: 'stop',
-                        label: 'Stop and close',
+                        disabled: isBuyBlocked(rowData),
                     },
                 ],
                 onSelect: (key: string | number) => {
-                    if (key === 'sell') {
-                        options.onDealSell(rowData)
+                    if (key === 'resume') {
+                        void options.onResumeMission(rowData)
+                        return
+                    }
+                    if (key === 'pause') {
+                        void options.onPauseMission(rowData)
                         return
                     }
                     if (key === 'manual-buy') {
                         options.onAddManualBuy(rowData)
                         return
-                    }
-                    if (key === 'stop') {
-                        options.onDealStop(rowData)
                     }
                 },
             },
@@ -152,30 +160,6 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
             return 'green'
         }
         return 'red'
-    }
-
-    const renderExpandIcon: RenderExpandIcon = ({ expanded, rowData }) => {
-        const symbol = String(rowData.symbol ?? 'trade')
-        return h(
-            NButton,
-            {
-                circle: true,
-                quaternary: true,
-                size: 'small',
-                class: 'trade-expand-button',
-                'aria-label': `${
-                    expanded ? 'Collapse' : 'Expand'
-                } trade details for ${symbol}`,
-            },
-            {
-                icon: () =>
-                    h(
-                        NIcon,
-                        { size: 24, color: '#63e2b7' },
-                        { default: () => h(ArrowForwardCircleOutline) },
-                    ),
-            },
-        )
     }
 
     function getReentryLabel(rowData: OpenTradeRow): string | null {
@@ -243,51 +227,41 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         ])
     }
 
-    function renderAutomationButton(rowData: OpenTradeRow) {
-        const action = rowData.automation_paused ? 'resume' : 'pause'
-        return h(
-            NButton,
-            {
-                size: 'medium',
-                ghost: true,
-                style: tradeActionButtonStyle,
-                loading: options.isMissionActionLoading(
-                    rowData.symbol,
-                    action,
-                ),
-                'aria-label': rowData.automation_paused
-                    ? 'Resume automation'
-                    : 'Pause automation',
-                onClick: () => {
-                    if (rowData.automation_paused) {
-                        void options.onResumeMission(rowData)
-                        return
-                    }
-                    void options.onPauseMission(rowData)
-                },
-            },
-            {
-                default: () =>
-                    rowData.automation_paused ? 'Resume' : 'Pause',
-            },
-        )
-    }
-
     function renderTpSoCell(rowData: OpenTradeRow) {
         const safetyOrderCount = getSafetyOrderCount(rowData)
         const maxSafetyOrders = Math.max(
             safetyOrderCount,
             Math.trunc(Number(options.maxSafetyOrders.value) || 0),
         )
-        const fillWidth = maxSafetyOrders
-            ? clampPercent((safetyOrderCount / maxSafetyOrders) * 100)
+        const avgPrice = Number(rowData.avg_price)
+        const tpPrice = Number(rowData.tp_price)
+        const currentPrice = Number(rowData.current_price)
+        const hasPriceStatus =
+            avgPrice > 0 && tpPrice > 0 && currentPrice > 0
+        const minPrice =
+            avgPrice - (avgPrice / 100) * TPSO_PRICE_PADDING_PERCENT
+        const maxPrice =
+            tpPrice + (tpPrice / 100) * TPSO_PRICE_PADDING_PERCENT
+        const avgPercent = resolveRangePercent(avgPrice, minPrice, maxPrice)
+        const currentPercent = resolveRangePercent(
+            currentPrice,
+            minPrice,
+            maxPrice,
+        )
+        const fillStart = hasPriceStatus
+            ? Math.min(avgPercent, currentPercent)
             : 0
-        const toneClass =
-            safetyOrderCount <= 0
-                ? 'is-idle'
-                : getDisplayedProfitPercent(rowData) < 0
-                  ? 'is-warning'
-                  : 'is-active'
+        const fillWidth = hasPriceStatus
+            ? Math.max(
+                  Math.abs(currentPercent - avgPercent),
+                  MIN_TPSO_STATUS_FILL_PERCENT,
+              )
+            : 0
+        const toneClass = !hasPriceStatus
+            ? 'is-idle'
+            : currentPrice < avgPrice
+              ? 'is-warning'
+              : 'is-active'
         const label = maxSafetyOrders
             ? `SO ${safetyOrderCount} / ${maxSafetyOrders}`
             : `SO ${safetyOrderCount}`
@@ -297,6 +271,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 h('span', {
                     class: 'trade-tpso-fill',
                     style: {
+                        left: `${fillStart}%`,
                         width: `${fillWidth}%`,
                     },
                 }),
@@ -309,6 +284,10 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         const columns: DataTableColumns<OpenTradeRow> = [
             {
                 type: 'expand',
+                width: 0,
+                minWidth: 0,
+                maxWidth: 0,
+                className: 'trade-hidden-expand-cell',
                 expandable: (rowData) => rowData.symbol != '',
                 renderExpand: (rowData) =>
                     h(OpenTradeExpandedRow, {
@@ -408,12 +387,11 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                     primary: true,
                                     size: 'medium',
                                     ghost: true,
-                                    disabled: isBuyBlocked(rowData),
                                     color: '#2E7D5B',
                                     style: tradeActionButtonStyle,
-                                    onClick: () => options.onDealBuy(rowData),
+                                    onClick: () => options.onDealSell(rowData),
                                 },
-                                { default: () => 'Buy' },
+                                { default: () => 'Sell' },
                             ),
                             h(
                                 NButton,
@@ -426,7 +404,6 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                 },
                                 { default: () => 'Stop' },
                             ),
-                            renderAutomationButton(rowData),
                             renderOverflowActions(rowData),
                         ],
                     )
@@ -494,7 +471,6 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
 
     return {
         columnsOpenTrades,
-        renderExpandIcon,
         rowClasses,
     }
 }

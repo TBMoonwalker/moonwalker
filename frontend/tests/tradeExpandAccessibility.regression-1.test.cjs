@@ -16,27 +16,43 @@ const closedTradesSource = fs.readFileSync(
     'utf8',
 )
 
-test('trade replay expand controls expose accessible labels', () => {
-    // Regression: ISSUE-001 - row replay expanders were cursor-only icons.
+test('trade replay expansion is available from the whole row', () => {
+    // Regression: visible arrow-only expanders added noise and a tiny hit target.
     // Found by /qa on 2026-06-08.
     // Report: .gstack/qa-reports/qa-report-localhost-8130-2026-06-08.md
     assert.ok(
-        openTradeColumnsSource.includes('type RenderExpandIcon') &&
-            closedTradesSource.includes('type RenderExpandIcon'),
-        'expected open and closed trade tables to type their custom expand icon renderer',
+        openTradeColumnsSource.includes("type: 'expand'") &&
+            closedTradesSource.includes("type: 'expand'") &&
+            openTradeColumnsSource.includes('trade-hidden-expand-cell') &&
+            closedTradesSource.includes('trade-hidden-expand-cell'),
+        'expected open and closed trade tables to keep hidden expansion renderers',
     )
     assert.ok(
-        openTradeColumnsSource.includes("'aria-label': `${") &&
-            closedTradesSource.includes("'aria-label': `${") &&
-            openTradeColumnsSource.includes("} trade details for ${symbol}`") &&
-            closedTradesSource.includes("} trade details for ${symbol}`"),
-        'expected open and closed trade expand controls to expose stateful accessible labels',
+        openTradesSource.includes('v-model:expanded-row-keys="expandedTradeRowKeys"') &&
+            closedTradesSource.includes('v-model:expanded-row-keys="expandedClosedTradeRowKeys"') &&
+            openTradesSource.includes(':row-props="getOpenTradeRowProps"') &&
+            closedTradesSource.includes(':row-props="getClosedTradeRowProps"'),
+        'expected open and closed trade expansion to be controlled by row props',
     )
     assert.ok(
-        openTradeColumnsSource.includes("class: 'trade-expand-button'") &&
-            closedTradesSource.includes("class: 'trade-expand-button'") &&
-            openTradesSource.includes('.trade-expand-button') &&
-            closedTradesSource.includes('.trade-expand-button'),
-        'expected labelled expand buttons to keep a stable compact table footprint',
+        openTradesSource.includes("'aria-expanded': expandedTradeRowKeys.value.includes(rowKey)") &&
+            closedTradesSource.includes("'aria-expanded': expandedClosedTradeRowKeys.value.includes(rowKey)") &&
+            openTradesSource.includes("'aria-label': `Toggle trade details for ${rowData.symbol}`") &&
+            closedTradesSource.includes("'aria-label': `Toggle trade details for ${rowData.symbol}`"),
+        'expected keyboard-focusable trade rows to expose their expanded state',
+    )
+    assert.ok(
+        !openTradeColumnsSource.includes('RenderExpandIcon') &&
+            !closedTradesSource.includes('RenderExpandIcon') &&
+            !openTradeColumnsSource.includes('trade-expand-button') &&
+            !closedTradesSource.includes('trade-expand-button'),
+        'expected visible arrow expand buttons to be removed from trade rows',
+    )
+    assert.ok(
+        openTradesSource.includes('.n-data-table-table colgroup col:first-child') &&
+            closedTradesSource.includes('.n-data-table-table colgroup col:first-child') &&
+            openTradesSource.includes('display: none;') &&
+            closedTradesSource.includes('display: none;'),
+        'expected the internal expand column to collapse without leaving a left gutter',
     )
 })

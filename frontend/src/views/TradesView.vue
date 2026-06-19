@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import Statistics from '@/components/Statistics.vue'
-import { AlertCircleOutline, PulseOutline } from '@vicons/ionicons5'
 import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
 import { useSharedConfigSnapshot } from '@/control-center/configSnapshotStore'
@@ -100,19 +99,6 @@ onUnmounted(() => {
 
 <template>
   <div class="page-shell trades-page">
-    <section class="page-title-row" aria-labelledby="trades-page-title">
-      <div>
-        <h1 id="trades-page-title">Trades</h1>
-        <p>Live trade ledger and replay control</p>
-      </div>
-      <span class="live-context-pill">
-        <n-icon size="16">
-          <PulseOutline />
-        </n-icon>
-        Live trades
-      </span>
-    </section>
-
     <section class="page-section trades-metrics" aria-label="Trade metrics">
       <Statistics />
     </section>
@@ -137,15 +123,7 @@ onUnmounted(() => {
       </span>
     </section>
 
-    <section class="dashboard-panel chart-panel" aria-labelledby="profit-context-title">
-      <div class="panel-heading">
-        <div>
-          <h2 id="profit-context-title">Profit context</h2>
-          <p>
-            Overall trajectory with take-profit threshold. Kept separate from queue status to avoid duplicated signals.
-          </p>
-        </div>
-      </div>
+    <section class="dashboard-panel chart-panel" aria-label="Profit charts">
       <n-tabs
         v-model:value="activeProfitTab"
         class="calm-tabs profit-tabs"
@@ -201,9 +179,6 @@ onUnmounted(() => {
         <n-tab-pane name="unsellable-trades">
           <template #tab>
             <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': unsellableTradesCount > 0 }">
-              <n-icon v-if="unsellableTradesCount > 0" size="16">
-                <AlertCircleOutline />
-              </n-icon>
               <span>Unsellable</span>
               <span v-if="unsellableTradesCount > 0" class="trade-tab-count">{{ unsellableTradesCount }}</span>
             </span>
@@ -226,48 +201,6 @@ onUnmounted(() => {
 
 .page-section {
   min-width: 0;
-}
-
-.page-title-row {
-  display: flex;
-  align-items: flex-end;
-  justify-content: space-between;
-  gap: 16px;
-  min-width: 0;
-}
-
-.page-title-row h1 {
-  color: var(--mw-color-text-primary);
-  font-family: var(--mw-font-display);
-  font-size: 32px;
-  font-weight: 450;
-  letter-spacing: 0;
-  line-height: 1.1;
-  margin: 0;
-}
-
-.page-title-row p,
-.panel-heading p {
-  color: var(--mw-color-text-secondary);
-  font-size: 15px;
-  line-height: 1.35;
-  margin: 4px 0 0;
-}
-
-.live-context-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  width: max-content;
-  max-width: 100%;
-  padding: 6px 10px;
-  border: 1px solid rgba(46, 125, 91, 0.36);
-  border-radius: 999px;
-  background: rgba(46, 125, 91, 0.1);
-  color: var(--mw-color-success);
-  font-size: 13px;
-  line-height: 1;
-  white-space: nowrap;
 }
 
 .trades-metrics {
@@ -317,30 +250,10 @@ onUnmounted(() => {
   color: var(--mw-color-text-primary);
 }
 
-.panel-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 24px;
-  padding: 16px 16px 0;
-  padding-right: min(420px, 40vw);
-}
-
-.panel-heading h2 {
-  color: var(--mw-color-text-primary);
-  font-family: var(--mw-font-display);
-  font-size: 20px;
-  font-weight: 450;
-  line-height: 1.2;
-  margin: 0;
-}
-
 .chart-panel :deep(.n-tabs-nav) {
-  position: absolute;
-  top: 28px;
-  right: 16px;
-  z-index: 1;
-  padding-inline: 0;
+  min-height: 58px;
+  padding-inline: 16px;
+  border-bottom: 0;
 }
 
 .chart-panel :deep(.n-tab-pane) {
@@ -373,7 +286,7 @@ onUnmounted(() => {
 }
 
 .ledger-panel :deep(.n-tab-pane) {
-  padding: 0;
+  padding: 0 16px 16px;
 }
 
 .calm-tabs :deep(.n-tabs-tab) {
@@ -483,7 +396,8 @@ onUnmounted(() => {
 }
 
 .ledger-panel :deep(.n-data-table-base-table) {
-  border-radius: 0;
+  overflow: hidden;
+  border-radius: 9px;
 }
 
 .ledger-panel :deep(.n-data-table-th) {
@@ -503,6 +417,10 @@ onUnmounted(() => {
   background: var(--mw-color-surface-panel);
   border-bottom-color: rgba(213, 219, 213, 0.7);
   vertical-align: middle;
+}
+
+.ledger-panel :deep(.n-data-table-tr--expanded > .n-data-table-td) {
+  padding-inline: 0;
 }
 
 .ledger-panel :deep(.n-data-table-tr:hover .n-data-table-td) {
@@ -537,6 +455,18 @@ onUnmounted(() => {
   color: var(--mw-color-text-primary);
   font-size: 14px;
   line-height: 1.2;
+}
+
+.ledger-panel :deep(.trade-cell-main.is-active) {
+  color: var(--mw-color-success);
+}
+
+.ledger-panel :deep(.trade-cell-main.is-warning) {
+  color: var(--mw-color-warning);
+}
+
+.ledger-panel :deep(.trade-cell-main.is-info) {
+  color: var(--mw-color-info);
 }
 
 .ledger-panel :deep(.trade-cell-sub) {
@@ -616,22 +546,9 @@ onUnmounted(() => {
     gap: 10px;
   }
 
-  .page-title-row,
   .admission-strip {
     align-items: flex-start;
     grid-template-columns: 1fr;
-  }
-
-  .page-title-row {
-    flex-direction: column;
-  }
-
-  .page-title-row h1 {
-    font-size: 30px;
-  }
-
-  .panel-heading {
-    padding: 14px 14px 0;
   }
 
   .chart-panel :deep(.n-tabs-nav),
@@ -639,13 +556,12 @@ onUnmounted(() => {
     padding-inline: 12px;
   }
 
-  .chart-panel :deep(.n-tabs-nav) {
-    position: static;
-    margin-top: 8px;
-  }
-
   .chart-panel :deep(.n-tab-pane) {
     padding-inline: 12px;
+  }
+
+  .ledger-panel :deep(.n-tab-pane) {
+    padding: 0 12px 12px;
   }
 
   .chart-panel :deep(.chart-wrap),
@@ -693,12 +609,6 @@ onUnmounted(() => {
     width: 112px;
   }
 
-  .ledger-panel :deep(.n-data-table-th[data-col-key="__n_expand__"]),
-  .ledger-panel :deep(.n-data-table-td[data-col-key="__n_expand__"]) {
-    min-width: 44px;
-    width: 44px;
-  }
-
   .ledger-panel :deep(.n-data-table-th[data-col-key="display_profit_percent"]),
   .ledger-panel :deep(.n-data-table-td[data-col-key="display_profit_percent"]) {
     min-width: 76px;
@@ -735,9 +645,5 @@ onUnmounted(() => {
     flex: 1 1 100%;
   }
 
-  .ledger-panel :deep(.trade-expand-button) {
-    min-width: 44px !important;
-    min-height: 44px !important;
-  }
 }
 </style>

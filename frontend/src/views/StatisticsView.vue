@@ -420,14 +420,6 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
 <template>
    <div class="page-shell stats-page">
-      <section class="stats-title-row" aria-labelledby="statistics-page-title">
-        <div>
-          <p class="stats-kicker">Statistics</p>
-          <h1 id="statistics-page-title">Statistics</h1>
-          <p>Closed-trade analytics, AI trust, and historical performance.</p>
-        </div>
-      </section>
-
       <!-- Empty / error state -->
       <template v-if="!summary">
         <n-flex class="page-section" vertical>
@@ -740,31 +732,6 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
   text-transform: uppercase;
 }
 
-.stats-title-row {
-  margin: 0 10px 10px;
-}
-
-.stats-title-row h1 {
-  color: var(--mw-color-text-primary);
-  font-family: var(--mw-font-display);
-  font-size: 32px;
-  font-weight: 450;
-  letter-spacing: 0;
-  line-height: 1.1;
-  margin: 0;
-}
-
-.stats-title-row p {
-  color: var(--mw-color-text-secondary);
-  font-size: 15px;
-  line-height: 1.35;
-  margin: 4px 0 0;
-}
-
-.stats-title-row .stats-kicker {
-  margin: 0 0 8px;
-}
-
 .tab-content {
   padding: 12px;
 }
@@ -942,14 +909,6 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
    .stats-intro-card {
     margin-inline: 6px;
-   }
-
-   .stats-title-row {
-    margin-inline: 6px;
-   }
-
-   .stats-title-row h1 {
-    font-size: 30px;
    }
 
    .distribution-stats {

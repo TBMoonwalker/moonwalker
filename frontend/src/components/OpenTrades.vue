@@ -7,7 +7,9 @@
         :data="displayed_open_trades || []"
         :loading="isTableLoading"
         :row-class-name="row_classes"
-        :render-expand-icon="renderExpandIcon"
+        :row-key="getOpenTradeRowKey"
+        :row-props="getOpenTradeRowProps"
+        v-model:expanded-row-keys="expandedTradeRowKeys"
         :locale="{ emptyText: tableEmptyText }"
         aria-label="Open trades table"
         @update:sorter="handleSorterChange"
@@ -16,7 +18,10 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { NDataTable } from 'naive-ui/es/data-table'
+import {
+    NDataTable,
+    type DataTableRowKey,
+} from 'naive-ui/es/data-table'
 import { useDialog } from 'naive-ui/es/dialog'
 import { useMessage } from 'naive-ui/es/message'
 import { useWebSocketDataStore } from '../stores/websocket'
@@ -61,6 +66,7 @@ const configSnapshotStore = useSharedConfigSnapshot()
 const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
     useConfiguredMinTimeframe()
 const sortState = ref<TradeTableSortState | null>(null)
+const expandedTradeRowKeys = ref<DataTableRowKey[]>([])
 
 const {
     rows: open_trades,
@@ -109,7 +115,6 @@ const maxSafetyOrders = computed(() =>
 )
 const {
     handleAddManualBuy,
-    handleDealBuy,
     handleDealSell,
     handleDealStop,
 } = useOpenTradeActions({
@@ -128,7 +133,6 @@ const {
 
 const {
     columnsOpenTrades: columns_open_trades,
-    renderExpandIcon,
     rowClasses: row_classes,
 } = useOpenTradeColumns({
     configuredMinTimeframe,
@@ -138,7 +142,6 @@ const {
     isTablet,
     missionActionErrors,
     onAddManualBuy: handleAddManualBuy,
-    onDealBuy: handleDealBuy,
     onDealSell: handleDealSell,
     onDealStop: handleDealStop,
     onPauseMission: (rowData) => handlePauseMission(rowData.symbol),
@@ -149,6 +152,70 @@ const {
 
 function handleSorterChange(sorter: unknown): void {
     sortState.value = resolveTradeTableSortState(sorter)
+}
+
+function getOpenTradeRowKey(rowData: OpenTradeRow): DataTableRowKey {
+    return rowData.deal_id || rowData.campaign_id || rowData.id
+}
+
+function isInteractiveRowTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) {
+        return false
+    }
+    return Boolean(
+        target.closest(
+            [
+                'a',
+                'button',
+                'input',
+                'select',
+                'textarea',
+                '[contenteditable="true"]',
+                '[role="button"]',
+                '[role="menuitem"]',
+                '.n-button',
+                '.n-base-selection',
+                '.n-checkbox',
+                '.n-dropdown',
+                '.n-input',
+                '.n-switch',
+            ].join(','),
+        ),
+    )
+}
+
+function toggleOpenTradeRow(rowData: OpenTradeRow): void {
+    if (!rowData.symbol) {
+        return
+    }
+    const rowKey = getOpenTradeRowKey(rowData)
+    expandedTradeRowKeys.value = expandedTradeRowKeys.value.includes(rowKey)
+        ? expandedTradeRowKeys.value.filter((key) => key !== rowKey)
+        : [...expandedTradeRowKeys.value, rowKey]
+}
+
+function getOpenTradeRowProps(rowData: OpenTradeRow) {
+    const rowKey = getOpenTradeRowKey(rowData)
+    return {
+        class: 'trade-row-clickable',
+        tabindex: 0,
+        'aria-expanded': expandedTradeRowKeys.value.includes(rowKey),
+        'aria-label': `Toggle trade details for ${rowData.symbol}`,
+        onClick: (event: MouseEvent) => {
+            if (!isInteractiveRowTarget(event.target)) {
+                toggleOpenTradeRow(rowData)
+            }
+        },
+        onKeydown: (event: KeyboardEvent) => {
+            if (
+                (event.key === 'Enter' || event.key === ' ') &&
+                !isInteractiveRowTarget(event.target)
+            ) {
+                event.preventDefault()
+                toggleOpenTradeRow(rowData)
+            }
+        },
+    }
 }
 
 onMounted(async () => {
@@ -166,13 +233,34 @@ onMounted(async () => {
     color: #2E7D5B !important;
 }
 
-:deep(.n-data-table-expand-trigger) {
-    height: 16px;
+:deep(.trade-row-clickable) {
+    cursor: pointer;
 }
 
-:deep(.trade-expand-button) {
-    min-width: 28px;
-    min-height: 28px;
+:deep(.trade-row-clickable:focus-visible) {
+    outline: 2px solid var(--mw-color-primary);
+    outline-offset: -2px;
+}
+
+:deep(.trade-hidden-expand-cell),
+:deep(.n-data-table-td--expand) {
+    display: none;
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
     padding: 0;
+    border: 0;
+    overflow: hidden;
+}
+
+:deep(.n-data-table-table colgroup col:first-child) {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+}
+
+:deep(.trade-hidden-expand-cell .n-data-table-expand-trigger),
+:deep(.n-data-table-td--expand .n-data-table-expand-trigger) {
+    display: none;
 }
 </style>

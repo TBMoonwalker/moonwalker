@@ -7,7 +7,6 @@
         :data="displayed_waiting_campaigns || []"
         :loading="isTableLoading"
         :row-class-name="rowClasses"
-        :single-line="false"
         :locale="{ emptyText: tableEmptyText }"
         aria-label="Waiting sidestep trades table"
         @update:sorter="handleSorterChange"
@@ -18,14 +17,11 @@
 import { computed, h, ref } from 'vue'
 import { EllipsisHorizontal } from '@vicons/ionicons5'
 import { NButton } from 'naive-ui/es/button'
-import { NButtonGroup } from 'naive-ui/es/button-group'
 import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
-import { NDivider } from 'naive-ui/es/divider'
 import { NDropdown } from 'naive-ui/es/dropdown'
 import { useDialog } from 'naive-ui/es/dialog'
 import { NIcon } from 'naive-ui/es/icon'
 import { useMessage } from 'naive-ui/es/message'
-import { NSlider } from 'naive-ui/es/slider'
 import { NTag } from 'naive-ui/es/tag'
 import { fetchJson } from '../api/client'
 import { useMissionPauseActions } from '../composables/useMissionPauseActions'
@@ -108,9 +104,26 @@ const {
 })
 
 const tradeActionButtonStyle = {
-    minHeight: '44px',
-    minWidth: '56px',
-    padding: '0 12px',
+    minHeight: '36px',
+    minWidth: '48px',
+    padding: '0 11px',
+}
+const REENTRY_PRICE_PADDING_PERCENT = 0.7
+const MIN_REENTRY_STATUS_FILL_PERCENT = 3
+
+function clampPercent(value: number): number {
+    if (!Number.isFinite(value)) {
+        return 0
+    }
+    return Math.max(0, Math.min(100, value))
+}
+
+function resolveRangePercent(value: number, min: number, max: number): number {
+    const range = max - min
+    if (!Number.isFinite(range) || range <= 0) {
+        return 0
+    }
+    return clampPercent(((value - min) / range) * 100)
 }
 
 function isReentryBlocked(rowData: WaitingCampaignRow): boolean {
@@ -222,40 +235,28 @@ function formatCloseReason(reason: string | null | undefined): string {
     }
 }
 
-function resolveReentryStatusType(
-    rowData: WaitingCampaignRow,
-): 'default' | 'info' | 'success' | 'warning' {
-    if (rowData.automation_paused) {
-        return 'warning'
-    }
-    switch (rowData.reentry_status) {
-        case 'Cooldown active':
-            return 'warning'
-        case 'Fresh long signal recorded':
-            return 'success'
-        case 'Retrying after re-entry error':
-            return 'info'
-        default:
-            return 'default'
-    }
-}
-
 function handleSorterChange(sorter: unknown): void {
     sortState.value = resolveTradeTableSortState(sorter)
 }
 
+function renderCellStack(
+    main: string,
+    secondary?: string,
+    mainClass = 'trade-cell-main',
+) {
+    return h('div', { class: 'trade-cell-stack' }, [
+        h('span', { class: mainClass }, main),
+        secondary
+            ? h('span', { class: 'trade-cell-sub' }, secondary)
+            : null,
+    ])
+}
+
 function renderSymbolRows(rowData: WaitingCampaignRow, index: number) {
-    const [token] = rowData.symbol.split('/')
-    const rows = [
-        h('div', `#${index + 1}`),
-        h(NDivider, { dashed: true }),
-        h('div', token),
-        h(NDivider, { dashed: true }),
-        h('div', 'Flat / waiting'),
-    ]
+    const [token, currency] = rowData.symbol.split('/')
+    const tags = []
     if (Number(rowData.sidestep_count ?? 0) > 0) {
-        rows.push(h(NDivider, { dashed: true }))
-        rows.push(
+        tags.push(
             h(
                 NTag,
                 {
@@ -271,8 +272,7 @@ function renderSymbolRows(rowData: WaitingCampaignRow, index: number) {
         )
     }
     if (rowData.automation_paused) {
-        rows.push(h(NDivider, { dashed: true }))
-        rows.push(
+        tags.push(
             h(
                 NTag,
                 {
@@ -286,105 +286,128 @@ function renderSymbolRows(rowData: WaitingCampaignRow, index: number) {
             ),
         )
     }
-    return rows
+    return h('div', { class: 'trade-symbol-cell' }, [
+        h('span', { class: 'trade-symbol-main' }, `${token}/${currency ?? ''}`),
+        h('div', { class: 'trade-symbol-meta' }, [
+            h('span', { class: 'trade-cell-sub' }, `#${index + 1}`),
+            h('span', { class: 'trade-cell-sub' }, 'Flat / waiting'),
+            tags.length ? h('div', { class: 'trade-cell-tags' }, tags) : null,
+        ]),
+    ])
 }
 
 function renderCostRows(rowData: WaitingCampaignRow) {
     const [token, currency] = rowData.symbol.split('/')
     const amount = `${formatAssetAmount(Number(rowData.waiting_reference_amount ?? 0))} ${token}`
     const reserve = `${formatFixed(Number(rowData.reserved_reentry_quote ?? 0))} ${currency}`
-    return [
-        h('div', amount),
-        h(NDivider, { dashed: true }),
-        h('div', reserve),
-    ]
+    return renderCellStack(amount, reserve)
 }
 
 function renderPnlRows(rowData: WaitingCampaignRow) {
     const [, currency] = rowData.symbol.split('/')
     const profitPercent = `${formatFixed(Number(rowData.display_profit_percent ?? 0))} %`
     const pnl = `${formatFixed(Number(rowData.display_profit ?? 0))} ${currency}`
-    return [
-        h('div', { class: 'profit' }, profitPercent),
-        h(NDivider, { dashed: true }),
-        h('div', pnl),
-    ]
+    return renderCellStack(profitPercent, pnl, 'trade-cell-main profit')
 }
 
 function renderReentryRows(rowData: WaitingCampaignRow) {
     const referencePrice = Number(rowData.waiting_reference_price ?? 0)
     const currentPrice = Number(rowData.current_price ?? 0)
-    const sliderMin = Math.max(
-        0,
-        Math.min(referencePrice, currentPrice) * 0.993,
-    )
-    const sliderMax = Math.max(
+    const hasPriceStatus = referencePrice > 0 && currentPrice > 0
+    const minPrice =
+        Math.min(referencePrice, currentPrice) *
+        (1 - REENTRY_PRICE_PADDING_PERCENT / 100)
+    const maxPrice =
+        Math.max(referencePrice, currentPrice) *
+        (1 + REENTRY_PRICE_PADDING_PERCENT / 100)
+    const referencePercent = resolveRangePercent(
         referencePrice,
+        minPrice,
+        maxPrice,
+    )
+    const currentPercent = resolveRangePercent(
         currentPrice,
-        1,
-    ) * 1.007
-    return [
-        h(NSlider, {
-            value: [currentPrice, referencePrice],
-            range: true,
-            min: sliderMin,
-            max: sliderMax,
-            disabled: true,
-            themeOverrides: {
-                fillColor:
-                    currentPrice <= referencePrice
-                         ? '#2E7D5B'
-                         : '#B4443F',
-                handleSize: '8px',
-                opacityDisabled: '1',
-            },
-        }),
-        h(NDivider, { dashed: true }),
-        h(
-            'div',
-            `Now ${formatFixed(currentPrice)} / Exit ${formatFixed(referencePrice)}`,
-        ),
-    ]
+        minPrice,
+        maxPrice,
+    )
+    const fillStart = hasPriceStatus
+        ? Math.min(referencePercent, currentPercent)
+        : 0
+    const fillWidth = hasPriceStatus
+        ? Math.max(
+              Math.abs(currentPercent - referencePercent),
+              MIN_REENTRY_STATUS_FILL_PERCENT,
+          )
+        : 0
+    const toneClass = !hasPriceStatus
+        ? 'is-idle'
+        : currentPrice <= referencePrice
+          ? 'is-active'
+          : 'is-warning'
+
+    return h(
+        'div',
+        { class: ['trade-tpso-cell', 'waiting-reentry-cell', toneClass] },
+        [
+            h('div', { class: 'trade-tpso-track' }, [
+                h('span', {
+                    class: 'trade-tpso-fill',
+                    style: {
+                        left: `${fillStart}%`,
+                        width: `${fillWidth}%`,
+                    },
+                }),
+            ]),
+            h(
+                'span',
+                { class: 'trade-progress-label' },
+                currentPrice <= referencePrice ? 'Re-entry ready' : 'Waiting',
+            ),
+            h(
+                'span',
+                { class: 'trade-cell-sub' },
+                `Now ${formatFixed(currentPrice)} / Exit ${formatFixed(referencePrice)}`,
+            ),
+        ],
+    )
+}
+
+function getStatusToneClass(rowData: WaitingCampaignRow): string {
+    if (
+        rowData.automation_paused ||
+        rowData.reentry_status === 'Cooldown active'
+    ) {
+        return 'trade-cell-main is-warning'
+    }
+    if (rowData.reentry_status === 'Fresh long signal recorded') {
+        return 'trade-cell-main is-active'
+    }
+    if (rowData.reentry_status === 'Retrying after re-entry error') {
+        return 'trade-cell-main is-info'
+    }
+    return 'trade-cell-main'
 }
 
 function renderStatusRows(rowData: WaitingCampaignRow) {
     const status = rowData.automation_paused
         ? 'Automation paused'
         : rowData.reentry_status ?? 'Watching for re-entry signal'
-    const statusRows = [
-        h(
-            NTag,
-            {
-                size: 'small',
-                bordered: false,
-                type: resolveReentryStatusType(rowData),
-            },
-            {
-                default: () => status,
-            },
-        ),
-        h(NDivider, { dashed: true }),
-        h('div', `Last exit: ${formatCloseReason(rowData.last_exit_reason)}`),
-    ]
+    const details = [`Last exit: ${formatCloseReason(rowData.last_exit_reason)}`]
 
-    if (
-        status === 'Cooldown active' &&
-        rowData.cooldown_until
-    ) {
+    if (status === 'Cooldown active' && rowData.cooldown_until) {
         const cooldown = resolveTradeDateTime(rowData.cooldown_until)
-        statusRows.push(h(NDivider, { dashed: true }))
-        statusRows.push(
-            h('div', `Cooldown until ${cooldown.date} ${cooldown.time}`),
-        )
+        details.push(`Cooldown until ${cooldown.date} ${cooldown.time}`)
     } else if (rowData.last_long_signal_at) {
         const lastSignal = resolveTradeDateTime(rowData.last_long_signal_at)
-        statusRows.push(h(NDivider, { dashed: true }))
-        statusRows.push(
-            h('div', `Last long signal ${lastSignal.date} ${lastSignal.time}`),
-        )
+        details.push(`Last long signal ${lastSignal.date} ${lastSignal.time}`)
     }
 
-    return statusRows
+    return h('div', { class: 'trade-cell-stack' }, [
+        h('span', { class: getStatusToneClass(rowData) }, status),
+        ...details.map((detail) =>
+            h('span', { class: 'trade-cell-sub' }, detail),
+        ),
+    ])
 }
 
 function renderCompactActions(rowData: WaitingCampaignRow) {
@@ -399,47 +422,10 @@ function renderCompactActions(rowData: WaitingCampaignRow) {
         rowData.symbol,
         rowData.automation_paused ? 'resume' : 'pause',
     )
-    const desktopActions = h(
-        NButtonGroup,
-        { size: 'medium', vertical: true },
-        {
-            default: () => [
-                h(
-                    NButton,
-                    {
-                        type: 'success',
-                        ghost: true,
-                        disabled: isReentryBlocked(rowData),
-                        onClick: () => handleActivateCampaign(rowData),
-                    },
-                    { default: () => 'Switch to active' },
-                ),
-                h(
-                    NButton,
-                    {
-                        type: 'warning',
-                        ghost: !rowData.automation_paused,
-                        loading: pauseLoading,
-                        onClick: pauseAction,
-                    },
-                    { default: () => pauseLabel },
-                ),
-                h(
-                    NButton,
-                    {
-                        type: 'warning',
-                        ghost: true,
-                        onClick: () => handleStopCampaign(rowData),
-                    },
-                    { default: () => 'Stop' },
-                ),
-            ],
-        },
-    )
     const compactActions = h(
         'div',
         {
-            class: 'waiting-campaign-compact-actions',
+            class: 'trade-row-actions waiting-campaign-compact-actions',
         },
         [
             h(
@@ -451,7 +437,17 @@ function renderCompactActions(rowData: WaitingCampaignRow) {
                     disabled: isReentryBlocked(rowData),
                     onClick: () => handleActivateCampaign(rowData),
                 },
-                { default: () => 'Switch to active' },
+                { default: () => 'Activate' },
+            ),
+            h(
+                NButton,
+                {
+                    type: 'warning',
+                    ghost: true,
+                    style: tradeActionButtonStyle,
+                    onClick: () => handleStopCampaign(rowData),
+                },
+                { default: () => 'Stop' },
             ),
             h(
                 NDropdown,
@@ -461,17 +457,11 @@ function renderCompactActions(rowData: WaitingCampaignRow) {
                         {
                             key: rowData.automation_paused ? 'resume' : 'pause',
                             label: pauseLabel,
-                        },
-                        {
-                            key: 'stop',
-                            label: 'Stop',
+                            disabled: pauseLoading,
                         },
                     ],
                     onSelect: (key: string | number) => {
-                        if (key === 'stop') {
-                            void handleStopCampaign(rowData)
-                            return
-                        }
+                        if (key !== 'pause' && key !== 'resume') return
                         void pauseAction()
                     },
                 },
@@ -502,7 +492,7 @@ function renderCompactActions(rowData: WaitingCampaignRow) {
     )
 
     return [
-        isMobile.value || isTablet.value ? compactActions : desktopActions,
+        compactActions,
         actionError
             ? h(
                   'div',
@@ -522,11 +512,7 @@ function renderOpenedRows(rowData: WaitingCampaignRow) {
     const waitingSince = resolveTradeDateTime(
         rowData.last_transition_at || rowData.open_date,
     )
-    return [
-        h('div', opened.date),
-        h(NDivider, { dashed: true }),
-        h('div', waitingSince.time),
-    ]
+    return renderCellStack(opened.date, waitingSince.time)
 }
 
 function renderMobileCampaign(rowData: WaitingCampaignRow, index: number) {
@@ -569,20 +555,20 @@ function renderMobileCampaign(rowData: WaitingCampaignRow, index: number) {
         h('div', { class: 'waiting-campaign-mobile-grid' }, [
             h('div', [
                 h('span', { class: 'waiting-campaign-mobile-label' }, 'PNL'),
-                ...renderPnlRows(rowData),
+                renderPnlRows(rowData),
             ]),
             h('div', [
                 h('span', { class: 'waiting-campaign-mobile-label' }, 'Cost'),
-                ...renderCostRows(rowData),
+                renderCostRows(rowData),
             ]),
         ]),
         h('div', { class: 'waiting-campaign-mobile-section' }, [
             h('span', { class: 'waiting-campaign-mobile-label' }, 'Re-entry'),
-            ...renderReentryRows(rowData),
+            renderReentryRows(rowData),
         ]),
         h('div', { class: 'waiting-campaign-mobile-section' }, [
             h('span', { class: 'waiting-campaign-mobile-label' }, 'Status'),
-            ...renderStatusRows(rowData),
+            renderStatusRows(rowData),
         ]),
         h(
             'div',

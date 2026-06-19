@@ -176,7 +176,7 @@ export function getUnsellableMessage(rowData: OpenTradeRow): string {
             `Minimum notional required: ${Number(minNotional).toFixed(8)}.`,
         )
     }
-    parts.push('Use Stop and close the remainder manually on the exchange.')
+    parts.push('Use Stop and handle the remainder manually on the exchange.')
     return parts.join(' ')
 }
 

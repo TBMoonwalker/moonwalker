@@ -1,6 +1,6 @@
 <template>
-    <n-flex justify="space-around">
-        <n-card>
+    <n-flex class="expanded-trade-layout">
+        <n-card class="expanded-order-card">
             <n-timeline :horizontal="false">
                 <n-timeline-item
                     v-for="item in timelineItems"
@@ -13,7 +13,8 @@
             </n-timeline>
             <div class="manual-order-actions">
                 <n-button
-                    tertiary
+                    class="manual-order-button"
+                    secondary
                     size="small"
                     type="primary"
                     @click="emitAddOrderManually"
@@ -24,6 +25,7 @@
         </n-card>
         <TradeReplayChart
             v-if="chartReady"
+            class="expanded-replay-chart"
             :symbol="props.rowData.symbol"
             :precision="Number(props.rowData.precision ?? 0)"
             :start-timestamp="replayStartTimestamp"
@@ -437,9 +439,53 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.expanded-trade-layout {
+    align-items: stretch;
+    gap: 16px;
+    width: 100%;
+}
+
+.expanded-order-card {
+    flex: 0 1 340px;
+    min-width: 280px;
+}
+
+.expanded-replay-chart {
+    flex: 1 1 520px;
+    min-width: 0;
+}
+
 .manual-order-actions {
     display: flex;
     justify-content: flex-end;
     margin-top: 10px;
+}
+
+.manual-order-actions :deep(.manual-order-button) {
+    --n-color: var(--mw-color-primary-soft) !important;
+    --n-color-hover: color-mix(
+        in srgb,
+        var(--mw-color-primary-soft) 84%,
+        var(--mw-color-text-primary)
+    ) !important;
+    --n-color-pressed: color-mix(
+        in srgb,
+        var(--mw-color-primary-soft) 74%,
+        var(--mw-color-text-primary)
+    ) !important;
+    --n-border: 1px solid var(--mw-color-border-strong) !important;
+    --n-border-hover: 1px solid var(--mw-color-primary) !important;
+    --n-border-pressed: 1px solid var(--mw-color-primary-strong) !important;
+    --n-text-color: var(--mw-color-text-primary) !important;
+    --n-text-color-hover: var(--mw-color-text-primary) !important;
+    --n-text-color-pressed: var(--mw-color-text-primary) !important;
+    font-weight: 450;
+}
+
+@media (max-width: 900px) {
+    .expanded-order-card,
+    .expanded-replay-chart {
+        flex-basis: 100%;
+    }
 }
 </style>
