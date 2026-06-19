@@ -59,15 +59,15 @@ const themeOverrides = computed(() => {
         tabTextColorHoverLine: '#b7ead8',
         tabTextColorDisabledLine: 'rgba(213, 219, 213, 0.5)',
         barColor: '#8fd9bb',
-        tabFontWeight: '600',
-        tabFontWeightActive: '700',
+        tabFontWeight: '450',
+        tabFontWeightActive: '500',
       },
       Button: {
         textColorPrimary: '#f7f8f6',
         textColorHoverPrimary: '#f7f8f6',
         textColorPressedPrimary: '#f7f8f6',
         textColorFocusPrimary: '#f7f8f6',
-        fontWeightStrong: '700',
+        fontWeightStrong: '500',
       },
     }
   }
@@ -105,15 +105,15 @@ const themeOverrides = computed(() => {
       tabTextColorHoverLine: '#18413a',
       tabTextColorDisabledLine: '#8a948d',
       barColor: '#1d5c49',
-      tabFontWeight: '600',
-      tabFontWeightActive: '700',
+      tabFontWeight: '450',
+      tabFontWeightActive: '500',
     },
     Button: {
       textColorPrimary: '#f7f8f6',
       textColorHoverPrimary: '#f7f8f6',
       textColorPressedPrimary: '#f7f8f6',
       textColorFocusPrimary: '#f7f8f6',
-      fontWeightStrong: '700',
+      fontWeightStrong: '500',
     },
   }
 })
@@ -371,12 +371,12 @@ watch(
   width: 100%;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 4px;
 }
 
 .app-content {
   width: 100%;
-  max-width: var(--mw-content-width);
+  max-width: 1392px;
   margin: 0 auto;
 }
 </style>

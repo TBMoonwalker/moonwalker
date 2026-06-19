@@ -22,6 +22,7 @@ import { useMessage } from 'naive-ui/es/message'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
+import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 import { useConfiguredMinTimeframe } from '../composables/useConfiguredMinTimeframe'
 import { useMissionPauseActions } from '../composables/useMissionPauseActions'
 import { useOpenTradeActions } from '../composables/useOpenTradeActions'
@@ -56,6 +57,7 @@ const dialog = useDialog()
 const message = useMessage()
 
 const { isMobile, isTablet } = useViewport()
+const configSnapshotStore = useSharedConfigSnapshot()
 const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
     useConfiguredMinTimeframe()
 const sortState = ref<TradeTableSortState | null>(null)
@@ -102,6 +104,9 @@ const availableFunds = computed(() => {
     const payload = statistics_data.data.value as Record<string, unknown> | null
     return toFiniteNonNegative(payload?.funds_available)
 })
+const maxSafetyOrders = computed(() =>
+    Math.trunc(toFiniteNonNegative(configSnapshotStore.snapshot.value?.mstc)),
+)
 const {
     handleAddManualBuy,
     handleDealBuy,
@@ -139,6 +144,7 @@ const {
     onPauseMission: (rowData) => handlePauseMission(rowData.symbol),
     onResumeMission: (rowData) => handleResumeMission(rowData.symbol),
     sortState,
+    maxSafetyOrders,
 })
 
 function handleSorterChange(sorter: unknown): void {

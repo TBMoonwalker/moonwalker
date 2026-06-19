@@ -1,9 +1,7 @@
 import { computed, h, type Ref } from 'vue'
 import { NButton } from 'naive-ui/es/button'
-import { NDivider } from 'naive-ui/es/divider'
 import { NDropdown } from 'naive-ui/es/dropdown'
 import { NIcon } from 'naive-ui/es/icon'
-import { NSlider } from 'naive-ui/es/slider'
 import { NTag } from 'naive-ui/es/tag'
 import { NTooltip } from 'naive-ui/es/tooltip'
 import {
@@ -53,12 +51,20 @@ interface UseOpenTradeColumnsOptions {
     onPauseMission: (rowData: OpenTradeRow) => void | Promise<void>
     onResumeMission: (rowData: OpenTradeRow) => void | Promise<void>
     sortState: Ref<TradeTableSortState | null>
+    maxSafetyOrders: Ref<number>
 }
 
 const tradeActionButtonStyle = {
-    minHeight: '44px',
-    minWidth: '56px',
-    padding: '0 12px',
+    minHeight: '36px',
+    minWidth: '48px',
+    padding: '0 11px',
+}
+
+function clampPercent(value: number): number {
+    if (!Number.isFinite(value)) {
+        return 0
+    }
+    return Math.max(0, Math.min(100, value))
 }
 
 export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
@@ -80,38 +86,29 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 trigger: 'click',
                 options: [
                     {
-                        key: 'buy',
-                        label: 'Buy',
-                        disabled: isBuyBlocked(rowData),
+                        key: 'sell',
+                        label: 'Sell',
+                    },
+                    {
+                        key: 'manual-buy',
+                        label: 'Add manual buy',
                     },
                     {
                         key: 'stop',
-                        label: 'Stop',
-                    },
-                    {
-                        key: rowData.automation_paused
-                            ? 'resume'
-                            : 'pause',
-                        label: rowData.automation_paused
-                            ? 'Resume automation'
-                            : 'Pause automation',
+                        label: 'Stop and close',
                     },
                 ],
                 onSelect: (key: string | number) => {
-                    if (key === 'buy') {
-                        options.onDealBuy(rowData)
+                    if (key === 'sell') {
+                        options.onDealSell(rowData)
+                        return
+                    }
+                    if (key === 'manual-buy') {
+                        options.onAddManualBuy(rowData)
                         return
                     }
                     if (key === 'stop') {
                         options.onDealStop(rowData)
-                        return
-                    }
-                    if (key === 'resume') {
-                        options.onResumeMission(rowData)
-                        return
-                    }
-                    if (key === 'pause') {
-                        options.onPauseMission(rowData)
                     }
                 },
             },
@@ -192,6 +189,122 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         return `Re-entered x${sidestepCount}`
     }
 
+    function renderCellStack(
+        main: string,
+        secondary?: string,
+        mainClass = 'trade-cell-main',
+    ) {
+        return h('div', { class: 'trade-cell-stack' }, [
+            h('span', { class: mainClass }, main),
+            secondary
+                ? h('span', { class: 'trade-cell-sub' }, secondary)
+                : null,
+        ])
+    }
+
+    function renderSymbolCell(rowData: OpenTradeRow, index: number) {
+        const [symbol, currency] = splitTradeSymbol(rowData.symbol)
+        const reentryLabel = getReentryLabel(rowData)
+        const tags = []
+        if (reentryLabel) {
+            tags.push(
+                h(
+                    NTag,
+                    {
+                        size: 'small',
+                        bordered: false,
+                        type: 'warning',
+                    },
+                    { default: () => reentryLabel },
+                ),
+            )
+        }
+        if (rowData.automation_paused) {
+            tags.push(
+                h(
+                    NTag,
+                    {
+                        size: 'small',
+                        bordered: false,
+                        type: 'warning',
+                    },
+                    { default: () => 'Automation paused' },
+                ),
+            )
+        }
+        return h('div', { class: 'trade-symbol-cell' }, [
+            h('span', { class: 'trade-symbol-main' }, `${symbol}/${currency}`),
+            h('div', { class: 'trade-symbol-meta' }, [
+                h('span', { class: 'trade-cell-sub' }, `#${index + 1}`),
+                tags.length
+                    ? h('div', { class: 'trade-cell-tags' }, tags)
+                    : null,
+            ]),
+        ])
+    }
+
+    function renderAutomationButton(rowData: OpenTradeRow) {
+        const action = rowData.automation_paused ? 'resume' : 'pause'
+        return h(
+            NButton,
+            {
+                size: 'medium',
+                ghost: true,
+                style: tradeActionButtonStyle,
+                loading: options.isMissionActionLoading(
+                    rowData.symbol,
+                    action,
+                ),
+                'aria-label': rowData.automation_paused
+                    ? 'Resume automation'
+                    : 'Pause automation',
+                onClick: () => {
+                    if (rowData.automation_paused) {
+                        void options.onResumeMission(rowData)
+                        return
+                    }
+                    void options.onPauseMission(rowData)
+                },
+            },
+            {
+                default: () =>
+                    rowData.automation_paused ? 'Resume' : 'Pause',
+            },
+        )
+    }
+
+    function renderTpSoCell(rowData: OpenTradeRow) {
+        const safetyOrderCount = getSafetyOrderCount(rowData)
+        const maxSafetyOrders = Math.max(
+            safetyOrderCount,
+            Math.trunc(Number(options.maxSafetyOrders.value) || 0),
+        )
+        const fillWidth = maxSafetyOrders
+            ? clampPercent((safetyOrderCount / maxSafetyOrders) * 100)
+            : 0
+        const toneClass =
+            safetyOrderCount <= 0
+                ? 'is-idle'
+                : getDisplayedProfitPercent(rowData) < 0
+                  ? 'is-warning'
+                  : 'is-active'
+        const label = maxSafetyOrders
+            ? `SO ${safetyOrderCount} / ${maxSafetyOrders}`
+            : `SO ${safetyOrderCount}`
+
+        return h('div', { class: ['trade-tpso-cell', toneClass] }, [
+            h('div', { class: 'trade-tpso-track' }, [
+                h('span', {
+                    class: 'trade-tpso-fill',
+                    style: {
+                        width: `${fillWidth}%`,
+                    },
+                }),
+            ]),
+            h('span', { class: 'trade-progress-label' }, label),
+        ])
+    }
+
     function columnsTrades(): DataTableColumns<OpenTradeRow> {
         const columns: DataTableColumns<OpenTradeRow> = [
             {
@@ -207,44 +320,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
             {
                 title: 'Symbol',
                 key: 'symbol',
-                render: (rowData, index) => {
-                    const [symbol] = splitTradeSymbol(rowData.symbol)
-                    const reentryLabel = getReentryLabel(rowData)
-                    const rows = [
-                        h('div', `#${index + 1}`),
-                        h(NDivider, { dashed: true }),
-                        h('div', symbol),
-                    ]
-                    if (reentryLabel) {
-                        rows.push(h(NDivider, { dashed: true }))
-                        rows.push(
-                            h(
-                                NTag,
-                                {
-                                    size: 'small',
-                                    bordered: false,
-                                    type: 'warning',
-                                },
-                                { default: () => reentryLabel },
-                            ),
-                        )
-                    }
-                    if (rowData.automation_paused) {
-                        rows.push(h(NDivider, { dashed: true }))
-                        rows.push(
-                            h(
-                                NTag,
-                                {
-                                    size: 'small',
-                                    bordered: false,
-                                    type: 'warning',
-                                },
-                                { default: () => 'Automation paused' },
-                            ),
-                        )
-                    }
-                    return rows
-                },
+                render: (rowData, index) => renderSymbolCell(rowData, index),
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
                     options.sortState.value,
@@ -258,11 +334,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     const [symbol, currency] = splitTradeSymbol(rowData.symbol)
                     const amount = `${formatAssetAmount(rowData.amount)} ${symbol}`
                     const cost = `${formatFixed(rowData.cost)} ${currency}`
-                    return [
-                        h('div', amount),
-                        h(NDivider, { dashed: true }),
-                        h('div', cost),
-                    ]
+                    return renderCellStack(amount, cost)
                 },
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
@@ -278,11 +350,11 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     const profitPercent =
                         `${formatFixed(getDisplayedProfitPercent(rowData))} %`
                     const pnl = `${formatFixed(getDisplayedProfit(rowData))} ${currency}`
-                    return [
-                        h('div', { class: 'profit' }, profitPercent),
-                        h(NDivider, { dashed: true }),
-                        h('div', pnl),
-                    ]
+                    return renderCellStack(
+                        profitPercent,
+                        pnl,
+                        'trade-cell-main profit',
+                    )
                 },
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
@@ -293,33 +365,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
             {
                 title: 'TP/SO',
                 key: 'so_count',
-                render: (rowData) => {
-                    const avgPrice = rowData.avg_price
-                    const tpPrice = rowData.tp_price
-                    const currentPrice = rowData.current_price
-                    const minPrice = avgPrice - (avgPrice / 100) * 0.7
-                    const maxPrice = (tpPrice / 100) * 0.7 + Number(tpPrice)
-                    const fillColor =
-                        currentPrice < avgPrice
-                              ? '#B4443F'
-                              : '#2E7D5B'
-                    return [
-                        h(NSlider, {
-                            value: [currentPrice, avgPrice],
-                            range: true,
-                            min: minPrice,
-                            max: maxPrice,
-                            disabled: true,
-                            themeOverrides: {
-                                fillColor,
-                                handleSize: '8px',
-                                opacityDisabled: '1',
-                            },
-                        }),
-                        h(NDivider, { dashed: true }),
-                        h('div', String(getSafetyOrderCount(rowData))),
-                    ]
-                },
+                render: (rowData) => renderTpSoCell(rowData),
                 align: 'center',
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
@@ -354,9 +400,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     const actionError = resolveActionError(rowData)
                     const compactActions = h(
                         'div',
-                        {
-                            style: 'display:flex; justify-content:center; gap:8px;',
-                        },
+                        { class: 'trade-row-actions' },
                         [
                             h(
                                 NButton,
@@ -364,12 +408,25 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                     primary: true,
                                     size: 'medium',
                                     ghost: true,
-                                    color: '#63e2b7',
+                                    disabled: isBuyBlocked(rowData),
+                                    color: '#2E7D5B',
                                     style: tradeActionButtonStyle,
-                                    onClick: () => options.onDealSell(rowData),
+                                    onClick: () => options.onDealBuy(rowData),
                                 },
-                                { default: () => 'Sell' },
+                                { default: () => 'Buy' },
                             ),
+                            h(
+                                NButton,
+                                {
+                                    type: 'error',
+                                    size: 'medium',
+                                    ghost: true,
+                                    style: tradeActionButtonStyle,
+                                    onClick: () => options.onDealStop(rowData),
+                                },
+                                { default: () => 'Stop' },
+                            ),
+                            renderAutomationButton(rowData),
                             renderOverflowActions(rowData),
                         ],
                     )
@@ -396,11 +453,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     const { date, time } = resolveTradeDateTime(
                         getOpenTradeOpenedAt(rowData),
                     )
-                    return [
-                        h('div', date),
-                        h(NDivider, { dashed: true }),
-                        h('div', time),
-                    ]
+                    return renderCellStack(date, time)
                 },
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(

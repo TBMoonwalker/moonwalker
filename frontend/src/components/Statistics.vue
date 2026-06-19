@@ -30,16 +30,12 @@
                 <div class="stacked-stat autopilot-stat">
                     <span class="autopilot-label">Autopilot mode</span>
                     <span
-                        class="autopilot-icon"
+                        class="autopilot-value"
                         :class="autopilot_class"
-                        role="img"
-                        :aria-label="autopilot_aria_label"
                     >
-                        <n-icon size="34">
-                            <component :is="autopilot_icon" />
-                        </n-icon>
+                        {{ autopilot_mode_label }}
                     </span>
-                    <span class="autopilot-subtext">{{ autopilot_summary }}</span>
+                    <span v-if="autopilot_summary" class="autopilot-subtext">{{ autopilot_summary }}</span>
                     <span v-if="green_phase_hint" class="autopilot-detail">{{ green_phase_hint }}</span>
                 </div>
             </RouterLink>
@@ -69,12 +65,6 @@ import { computed, ref, watch } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
-import {
-    AlertCircleOutline,
-    CheckmarkCircleOutline,
-    PauseCircleOutline,
-    WarningOutline,
-} from '@vicons/ionicons5'
 import { formatAutopilotMemoryHint } from '../autopilot/presentation'
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
@@ -102,9 +92,16 @@ const autopilot_memory_required_closes = ref(0)
 
 const autopilot_summary = computed(() => {
     if (autopilot_state.value === 'none') {
-        return 'Disabled'
+        return ''
     }
     return `Effective max bots ${autopilot_effective_max_bots.value}`
+})
+
+const autopilot_mode_label = computed(() => {
+    if (autopilot_state.value === 'none') {
+        return 'Disabled'
+    }
+    return autopilot_state.value.charAt(0).toUpperCase() + autopilot_state.value.slice(1)
 })
 
 const green_phase_hint = computed(() => {
@@ -127,32 +124,6 @@ const green_phase_hint = computed(() => {
         return `Green phase blocked: ${formatBlockReason(autopilot_green_phase_block_reason.value)}`
     }
     return 'Green phase idle'
-})
-
-const autopilot_icon = computed(() => {
-    if (autopilot_state.value === 'high') {
-        return AlertCircleOutline
-    }
-    if (autopilot_state.value === 'medium') {
-        return WarningOutline
-    }
-    if (autopilot_state.value === 'low') {
-        return CheckmarkCircleOutline
-    }
-    return PauseCircleOutline
-})
-
-const autopilot_aria_label = computed(() => {
-    if (autopilot_state.value === 'high') {
-        return 'Autopilot mode high'
-    }
-    if (autopilot_state.value === 'medium') {
-        return 'Autopilot mode medium'
-    }
-    if (autopilot_state.value === 'low') {
-        return 'Autopilot mode low'
-    }
-    return 'Autopilot disabled'
 })
 
 // Get new statistics data
@@ -288,30 +259,51 @@ function formatBlockReason(value: string): string {
 
 .stat-cell {
     min-width: 0;
-    padding: 6px 10px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: var(--mw-radius-sm, 6px);
-    background: rgba(255, 255, 255, 0.02);
+    min-height: 92px;
+    padding: 16px;
+    border: 1px solid var(--mw-color-border);
+    border-radius: var(--mw-radius-md, 10px);
+    background: var(--mw-surface-card);
     display: flex;
-    align-items: center;
-    justify-content: center;
+    align-items: stretch;
+    justify-content: flex-start;
+    box-shadow: var(--mw-shadow-card);
 }
 
 .stat-detail {
-    color: rgba(255, 255, 255, 0.72);
+    color: var(--mw-color-text-muted);
     font-size: 12px;
     line-height: 1.25;
-    text-align: center;
+    text-align: left;
     overflow-wrap: anywhere;
 }
 
 :deep(.n-statistic) {
     width: 100%;
-    text-align: center;
+    text-align: left;
+}
+
+:deep(.n-statistic__label) {
+    color: var(--mw-color-text-muted);
+    font-size: 12px;
+    font-weight: 450;
+    letter-spacing: 0.075em;
+    line-height: 1.2;
+    text-transform: uppercase;
 }
 
 :deep(.n-statistic-value) {
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-mono);
+    font-size: 23px;
+    font-weight: 450;
     font-variant-numeric: tabular-nums;
+    line-height: 1.12;
+    margin-top: 6px;
+}
+
+:deep(.n-statistic-value__content) {
+    font-weight: 450;
 }
 
 .red {
@@ -329,9 +321,9 @@ function formatBlockReason(value: string): string {
 .stacked-stat {
     display: flex;
     flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    text-align: center;
+    align-items: flex-start;
+    justify-content: flex-start;
+    text-align: left;
     gap: 6px;
     height: 100%;
     width: 100%;
@@ -339,10 +331,20 @@ function formatBlockReason(value: string): string {
 
 .funds-value {
     color: var(--n-value-text-color);
-    font-size: 24px;
-    font-weight: 600;
+    font-family: var(--mw-font-mono);
+    font-size: 23px;
+    font-weight: 450;
     font-variant-numeric: tabular-nums;
     line-height: 1.15;
+}
+
+.autopilot-value {
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
+    font-size: 23px;
+    font-weight: 450;
+    line-height: 1.12;
+    margin-top: 6px;
 }
 
 .autopilot-cell {
@@ -367,41 +369,33 @@ function formatBlockReason(value: string): string {
 
 .autopilot-label,
 .funds-label {
-    font-size: 14px;
-    color: var(--n-label-text-color, rgba(255, 255, 255, 0.65));
+    color: var(--mw-color-text-muted);
+    font-size: 12px;
+    font-weight: 450;
+    letter-spacing: 0.075em;
+    line-height: 1.2;
+    text-transform: uppercase;
 }
 
 .autopilot-subtext,
 .autopilot-detail {
     font-size: 12px;
-    color: rgba(255, 255, 255, 0.72);
+    color: var(--mw-color-text-muted);
 }
 
-.autopilot-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    line-height: 1;
-}
-
-.autopilot-icon.red {
+.autopilot-value.red {
     color: #B4443F;
 }
 
-.autopilot-icon.orange {
+.autopilot-value.orange {
     color: #B7791F;
 }
 
 .muted {
-    color: rgba(255, 255, 255, 0.5);
+    color: var(--mw-color-text-muted);
 }
 
 @media (max-width: 768px) {
-    .autopilot-cell {
-        display: none;
-    }
-
     .statistics-grid {
         grid-template-columns: repeat(2, minmax(0, 1fr));
         overflow: visible;
@@ -411,11 +405,11 @@ function formatBlockReason(value: string): string {
     .stat-cell {
         min-width: 0;
         min-height: 82px;
-        padding: 8px 6px;
+        padding: 12px;
         border-radius: 6px;
     }
 
-    :deep(.n-statistic-label) {
+    :deep(.n-statistic__label) {
         font-size: 12px;
         line-height: 1.2;
     }
@@ -431,16 +425,18 @@ function formatBlockReason(value: string): string {
         line-height: 1.2;
     }
 
-    .autopilot-icon :deep(svg) {
-        width: 28px;
-        height: 28px;
-    }
-
 }
 
 @media (min-width: 769px) and (max-width: 1200px) {
       .statistics-grid {
          grid-template-columns: repeat(2, minmax(0, 1fr));
       }
+}
+
+@media (max-width: 520px) {
+    .statistics-grid {
+        grid-template-columns: 1fr;
+        gap: 12px;
+    }
 }
 </style>

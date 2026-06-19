@@ -90,7 +90,7 @@ function handleMenuSelect(key: string | number): void {
 <style scoped>
 .app-header {
   width: 100%;
-  max-width: var(--mw-content-width);
+  max-width: 1392px;
   margin: 0 auto;
 }
 
@@ -145,8 +145,8 @@ function handleMenuSelect(key: string | number): void {
   color: var(--mw-color-text-primary);
   font-family: var(--mw-font-display);
   font-size: 1.3rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
+  font-weight: 450;
+  letter-spacing: 0.01em;
   white-space: nowrap;
 }
 
@@ -182,7 +182,7 @@ function handleMenuSelect(key: string | number): void {
 :deep(.header-menu .n-menu-item-content-header) {
   color: var(--mw-color-text-secondary);
   font-family: var(--mw-font-body);
-  font-weight: 600;
+  font-weight: 450;
 }
 
 :deep(.header-menu .n-menu-item-content__icon) {
@@ -197,7 +197,7 @@ function handleMenuSelect(key: string | number): void {
 
 :deep(.header-menu .n-menu-item-content--selected .n-menu-item-content-header) {
   color: var(--mw-color-text-primary);
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.01em;
 }
 

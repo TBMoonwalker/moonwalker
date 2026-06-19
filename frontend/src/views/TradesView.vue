@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
 import Statistics from '@/components/Statistics.vue'
-import { AlertCircleOutline } from '@vicons/ionicons5'
+import { AlertCircleOutline, PulseOutline } from '@vicons/ionicons5'
 import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
 import { useSharedConfigSnapshot } from '@/control-center/configSnapshotStore'
@@ -81,6 +81,9 @@ const admissionStatusCopy = computed(() => {
 const admissionStatusTagType = computed(() =>
   tradingPaused.value || tradeAdmissionWarning.value ? 'warning' : 'success'
 )
+const admissionToneClass = computed(() =>
+  tradingPaused.value || tradeAdmissionWarning.value ? 'is-warning' : 'is-open'
+)
 
 function handleResize() {
   viewportWidth.value = window.innerWidth
@@ -97,184 +100,586 @@ onUnmounted(() => {
 
 <template>
   <div class="page-shell trades-page">
-    <n-flex class="page-section" vertical>
-      <n-card
-        class="dashboard-header-card mw-shell-card"
-        content-style="padding: 14px 16px;"
+    <section class="page-title-row" aria-labelledby="trades-page-title">
+      <div>
+        <h1 id="trades-page-title">Trades</h1>
+        <p>Live trade ledger and replay control</p>
+      </div>
+      <span class="live-context-pill">
+        <n-icon size="16">
+          <PulseOutline />
+        </n-icon>
+        Live trades
+      </span>
+    </section>
+
+    <section class="page-section trades-metrics" aria-label="Trade metrics">
+      <Statistics />
+    </section>
+
+    <section
+      class="admission-strip"
+      :class="admissionToneClass"
+      aria-live="polite"
+    >
+      <n-tag
+        class="admission-pill"
+        :type="admissionStatusTagType"
+        :bordered="false"
       >
-        <n-flex class="page-header trades-header" vertical :size="12">
-          <div class="header-statistics">
-            <Statistics />
-          </div>
-            <div
-              class="trading-pause-strip"
-              :class="{
-                'trading-pause-strip-active': tradingPaused || tradeAdmissionWarning,
-              }"
-              aria-live="polite"
-            >
-              <n-tag
-                :type="admissionStatusTagType"
-                :bordered="false"
-              >
-                {{ admissionStatusLabel }}
-              </n-tag>
-              <span class="trading-pause-copy">
-                {{ admissionStatusCopy }}
-              </span>
-            </div>
-        </n-flex>
-      </n-card>
-    </n-flex>
+        {{ admissionStatusLabel }}
+      </n-tag>
+      <span class="admission-copy">
+        {{ admissionStatusCopy }}
+        <template v-if="!tradingPaused && !tradeAdmissionWarning">
+          Queue counts live only in the trade tabs below.
+        </template>
+      </span>
+    </section>
 
-    <n-flex class="page-section" vertical>
-      <n-card class="dashboard-surface-card mw-shell-card" content-style="padding: 0;">
-        <n-tabs
-          v-model:value="activeProfitTab"
-          type="line"
-          size="large"
-          :tabs-padding="tabPadding"
-        >
-          <n-tab-pane name="profit-overall" tab="Profit overall">
-            <UpnlChart v-if="activeProfitTab === 'profit-overall'" />
-          </n-tab-pane>
-          <n-tab-pane name="daily-profit" tab="Daily profit">
-            <Charts v-if="activeProfitTab === 'daily-profit'" period="daily" />
-          </n-tab-pane>
-          <n-tab-pane name="monthly-profit" tab="Monthly profit">
-            <Charts v-if="activeProfitTab === 'monthly-profit'" period="monthly" />
-          </n-tab-pane>
-          <n-tab-pane name="yearly-profit" tab="Yearly profit">
-            <Charts v-if="activeProfitTab === 'yearly-profit'" period="yearly" />
-          </n-tab-pane>
-        </n-tabs>
-      </n-card>
-    </n-flex>
+    <section class="dashboard-panel chart-panel" aria-labelledby="profit-context-title">
+      <div class="panel-heading">
+        <div>
+          <h2 id="profit-context-title">Profit context</h2>
+          <p>
+            Overall trajectory with take-profit threshold. Kept separate from queue status to avoid duplicated signals.
+          </p>
+        </div>
+      </div>
+      <n-tabs
+        v-model:value="activeProfitTab"
+        class="calm-tabs profit-tabs"
+        type="line"
+        size="large"
+        :tabs-padding="tabPadding"
+        pane-class="chart-pane"
+      >
+        <n-tab-pane name="profit-overall" tab="Overall">
+          <UpnlChart v-if="activeProfitTab === 'profit-overall'" />
+        </n-tab-pane>
+        <n-tab-pane name="daily-profit" tab="Daily">
+          <Charts v-if="activeProfitTab === 'daily-profit'" period="daily" />
+        </n-tab-pane>
+        <n-tab-pane name="monthly-profit" tab="Monthly">
+          <Charts v-if="activeProfitTab === 'monthly-profit'" period="monthly" />
+        </n-tab-pane>
+        <n-tab-pane name="yearly-profit" tab="Yearly">
+          <Charts v-if="activeProfitTab === 'yearly-profit'" period="yearly" />
+        </n-tab-pane>
+      </n-tabs>
+    </section>
 
-    <n-flex class="page-section" vertical>
-      <n-card class="dashboard-surface-card mw-shell-card" content-style="padding: 0;">
-        <n-tabs
-          v-model:value="activeTradesTab"
-          type="line"
-          size="large"
-          :tabs-padding="tabPadding"
-        >
-          <n-tab-pane name="open-trades" tab="Open Trades">
-            <OpenTrades
-              v-if="activeTradesTab === 'open-trades'"
-              :global-trading-paused="tradingPaused"
-            />
-          </n-tab-pane>
-          <n-tab-pane name="waiting-campaigns">
-            <template #tab>
-              <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': waitingCampaignsCount > 0 }">
-                <span>Waiting</span>
-                <span v-if="waitingCampaignsCount > 0" class="trade-tab-count">{{ waitingCampaignsCount }}</span>
-              </span>
-            </template>
-            <WaitingCampaigns
-              v-if="activeTradesTab === 'waiting-campaigns'"
-              :global-trading-paused="tradingPaused"
-            />
-          </n-tab-pane>
-          <n-tab-pane name="unsellable-trades">
-            <template #tab>
-              <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': unsellableTradesCount > 0 }">
-                <n-icon v-if="unsellableTradesCount > 0" size="16">
-                  <AlertCircleOutline />
-                </n-icon>
-                <span>Unsellable</span>
-                <span v-if="unsellableTradesCount > 0" class="trade-tab-count">{{ unsellableTradesCount }}</span>
-              </span>
-            </template>
-            <UnsellableTrades v-if="activeTradesTab === 'unsellable-trades'" />
-          </n-tab-pane>
-          <n-tab-pane name="closed-trades" tab="Closed Trades">
-            <ClosedTrades v-if="activeTradesTab === 'closed-trades'" />
-          </n-tab-pane>
-        </n-tabs>
-      </n-card>
-    </n-flex>
+    <section class="dashboard-panel ledger-panel" aria-labelledby="trade-ledger-title">
+      <n-tabs
+        v-model:value="activeTradesTab"
+        class="calm-tabs ledger-tabs"
+        type="line"
+        size="large"
+        :tabs-padding="tabPadding"
+      >
+        <n-tab-pane name="open-trades">
+          <template #tab>
+            <span id="trade-ledger-title" class="trade-tab-label">Open Trades</span>
+          </template>
+          <OpenTrades
+            v-if="activeTradesTab === 'open-trades'"
+            :global-trading-paused="tradingPaused"
+          />
+        </n-tab-pane>
+        <n-tab-pane name="waiting-campaigns">
+          <template #tab>
+            <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': waitingCampaignsCount > 0 }">
+              <span>Waiting</span>
+              <span v-if="waitingCampaignsCount > 0" class="trade-tab-count">{{ waitingCampaignsCount }}</span>
+            </span>
+          </template>
+          <WaitingCampaigns
+            v-if="activeTradesTab === 'waiting-campaigns'"
+            :global-trading-paused="tradingPaused"
+          />
+        </n-tab-pane>
+        <n-tab-pane name="unsellable-trades">
+          <template #tab>
+            <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': unsellableTradesCount > 0 }">
+              <n-icon v-if="unsellableTradesCount > 0" size="16">
+                <AlertCircleOutline />
+              </n-icon>
+              <span>Unsellable</span>
+              <span v-if="unsellableTradesCount > 0" class="trade-tab-count">{{ unsellableTradesCount }}</span>
+            </span>
+          </template>
+          <UnsellableTrades v-if="activeTradesTab === 'unsellable-trades'" />
+        </n-tab-pane>
+        <n-tab-pane name="closed-trades" tab="Closed Trades">
+          <ClosedTrades v-if="activeTradesTab === 'closed-trades'" />
+        </n-tab-pane>
+      </n-tabs>
+    </section>
   </div>
 </template>
 
 <style scoped>
 .trades-page {
-  gap: 0;
+  gap: 12px;
+  max-width: 1392px;
 }
 
 .page-section {
-  margin-inline: 10px;
-  margin-bottom: 10px;
+  min-width: 0;
 }
 
-.page-section:last-child {
-  margin-bottom: 0;
-}
-
-.trades-header {
-  align-items: stretch;
-}
-
-.dashboard-header-card {
-  width: 100%;
-}
-
-.dashboard-surface-card {
-  width: 100%;
-}
-
-.header-statistics {
-  width: 100%;
-}
-
-.trading-pause-strip {
+.page-title-row {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 10px;
-  background: rgba(29, 92, 73, 0.05);
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  min-width: 0;
 }
 
-.trading-pause-strip-active {
+.page-title-row h1 {
+  color: var(--mw-color-text-primary);
+  font-family: var(--mw-font-display);
+  font-size: 32px;
+  font-weight: 450;
+  letter-spacing: 0;
+  line-height: 1.1;
+  margin: 0;
+}
+
+.page-title-row p,
+.panel-heading p {
+  color: var(--mw-color-text-secondary);
+  font-size: 15px;
+  line-height: 1.35;
+  margin: 4px 0 0;
+}
+
+.live-context-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  width: max-content;
+  max-width: 100%;
+  padding: 6px 10px;
+  border: 1px solid rgba(46, 125, 91, 0.36);
+  border-radius: 999px;
+  background: rgba(46, 125, 91, 0.1);
+  color: var(--mw-color-success);
+  font-size: 13px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.trades-metrics {
+  width: 100%;
+}
+
+.trades-metrics :deep(.n-alert) {
+  display: none;
+}
+
+.admission-strip {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(29, 92, 73, 0.14);
+  border-radius: var(--mw-radius-md);
+  background: rgba(29, 92, 73, 0.05);
+  box-shadow: var(--mw-shadow-card);
+}
+
+.admission-strip.is-warning {
   border-color: rgba(183, 138, 46, 0.24);
   background: rgba(183, 138, 46, 0.08);
 }
 
-.trading-pause-copy {
+.admission-pill {
+  width: max-content;
+}
+
+.admission-copy {
   color: var(--mw-color-text-secondary);
   font-size: 0.92rem;
+  line-height: 1.35;
+}
+
+.dashboard-panel {
+  position: relative;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--mw-color-border);
+  border-radius: var(--mw-radius-md);
+  background: var(--mw-color-surface-panel);
+  box-shadow: var(--mw-shadow-card);
+  color: var(--mw-color-text-primary);
+}
+
+.panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 16px 16px 0;
+  padding-right: min(420px, 40vw);
+}
+
+.panel-heading h2 {
+  color: var(--mw-color-text-primary);
+  font-family: var(--mw-font-display);
+  font-size: 20px;
+  font-weight: 450;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.chart-panel :deep(.n-tabs-nav) {
+  position: absolute;
+  top: 28px;
+  right: 16px;
+  z-index: 1;
+  padding-inline: 0;
+}
+
+.chart-panel :deep(.n-tab-pane) {
+  padding: 0 16px 16px;
+}
+
+.chart-panel :deep(.n-tabs-nav-scroll-wrapper) {
+  box-shadow: none;
+}
+
+.chart-panel :deep(.chart-wrap) {
+  height: 190px;
+  min-height: 190px;
+  overflow: hidden;
+  border: 1px solid var(--mw-color-border);
+  border-radius: 9px;
+  background: linear-gradient(180deg, var(--mw-color-surface-panel), var(--mw-surface-card-muted));
+}
+
+.chart-panel :deep(.chart),
+.chart-panel :deep(.chart-placeholder) {
+  height: 190px !important;
+  min-height: 190px;
+}
+
+.ledger-panel :deep(.n-tabs-nav) {
+  min-height: 74px;
+  padding-inline: 16px;
+  border-bottom: 0;
+}
+
+.ledger-panel :deep(.n-tab-pane) {
+  padding: 0;
+}
+
+.calm-tabs :deep(.n-tabs-tab) {
+  position: relative;
+  min-height: 36px;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--mw-color-text-secondary);
+  font-weight: 400;
+}
+
+.calm-tabs :deep(.n-tabs-wrapper) {
+  display: flex;
+  gap: 8px;
+}
+
+.calm-tabs :deep(.n-tabs-nav),
+.calm-tabs :deep(.n-tabs-nav-scroll-wrapper),
+.calm-tabs :deep(.n-tabs-nav-scroll-content),
+.calm-tabs :deep(.n-tabs-wrapper),
+.calm-tabs :deep(.n-tabs-tab-wrapper),
+.calm-tabs :deep(.n-tabs-tab) {
+  border-bottom: 0 !important;
+  box-shadow: none !important;
+}
+
+.calm-tabs :deep(.n-tabs-nav::before),
+.calm-tabs :deep(.n-tabs-nav::after),
+.calm-tabs :deep(.n-tabs-nav-scroll-wrapper::before),
+.calm-tabs :deep(.n-tabs-nav-scroll-wrapper::after),
+.calm-tabs :deep(.n-tabs-nav-scroll-content::before),
+.calm-tabs :deep(.n-tabs-nav-scroll-content::after),
+.calm-tabs :deep(.n-tabs-wrapper::before),
+.calm-tabs :deep(.n-tabs-wrapper::after) {
+  display: none !important;
+  content: none !important;
+}
+
+.calm-tabs :deep(.n-tabs-scroll-padding),
+.calm-tabs :deep(.n-tabs-tab-pad) {
+  display: none;
+}
+
+.calm-tabs :deep(.n-tabs-tab--active) {
+  background: transparent;
+  color: var(--mw-color-primary);
+}
+
+.calm-tabs :deep(.n-tabs-tab--active::after) {
+  position: absolute;
+  right: 6px;
+  bottom: 0;
+  left: 6px;
+  height: 2px;
+  border-radius: 999px;
+  background: var(--mw-color-primary);
+  content: "";
+}
+
+.calm-tabs :deep(.n-tabs-bar) {
+  display: none;
+}
+
+.calm-tabs :deep(.n-tabs-tab__label) {
+  font-weight: 450;
+}
+
+.chart-pane {
+  min-width: 0;
 }
 
 .trade-tab-label {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  font-weight: 450;
 }
 
 .trade-tab-label-warning {
-  color: #d97706;
+  color: var(--mw-color-warning);
 }
 
 .trade-tab-count {
+  display: inline-flex;
+  align-items: center;
+  min-width: 20px;
+  justify-content: center;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: rgba(183, 138, 46, 0.14);
+  color: var(--mw-color-warning);
+  font-family: var(--mw-font-mono);
   font-size: 12px;
-  font-weight: 600;
+  font-weight: 400;
+  line-height: 1.2;
+}
+
+.ledger-panel :deep(.n-data-table) {
+  --n-th-font-weight: 500;
+  --n-font-size: 14px;
+}
+
+.ledger-panel :deep(.n-data-table-wrapper) {
+  border: 0;
+}
+
+.ledger-panel :deep(.n-data-table-base-table) {
+  border-radius: 0;
+}
+
+.ledger-panel :deep(.n-data-table-th) {
+  height: 44px;
+  background: var(--mw-color-surface-panel);
+  border-top: 0;
+  color: var(--mw-color-text-muted);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.ledger-panel :deep(.n-data-table-td) {
+  font-family: var(--mw-font-mono);
+  font-variant-numeric: tabular-nums;
+  padding: 13px 12px;
+  background: var(--mw-color-surface-panel);
+  border-bottom-color: rgba(213, 219, 213, 0.7);
+  vertical-align: middle;
+}
+
+.ledger-panel :deep(.n-data-table-tr:hover .n-data-table-td) {
+  background: var(--mw-surface-card-muted);
+}
+
+.ledger-panel :deep(.trade-symbol-cell),
+.ledger-panel :deep(.trade-cell-stack) {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ledger-panel :deep(.trade-symbol-main) {
+  color: var(--mw-color-text-primary);
+  font-family: var(--mw-font-body);
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0;
+}
+
+.ledger-panel :deep(.trade-symbol-meta) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ledger-panel :deep(.trade-cell-main) {
+  color: var(--mw-color-text-primary);
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.ledger-panel :deep(.trade-cell-sub) {
+  color: var(--mw-color-text-muted);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.ledger-panel :deep(.trade-cell-tags) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ledger-panel :deep(.trade-tpso-cell) {
+  display: inline-grid;
+  justify-items: start;
+  gap: 5px;
+  min-width: 132px;
+}
+
+.ledger-panel :deep(.trade-tpso-track) {
+  position: relative;
+  width: 132px;
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--mw-color-border) 72%, transparent);
+}
+
+.ledger-panel :deep(.trade-tpso-fill) {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 999px;
+  background: var(--mw-color-success);
+}
+
+.ledger-panel :deep(.trade-tpso-cell.is-warning .trade-tpso-fill) {
+  background: var(--mw-color-warning);
+}
+
+.ledger-panel :deep(.trade-tpso-cell.is-idle .trade-tpso-fill) {
+  background: transparent;
+}
+
+.ledger-panel :deep(.trade-progress-label) {
+  color: var(--mw-color-text-muted);
+  font-family: var(--mw-font-mono);
+  font-size: 12px;
+  line-height: 1.2;
+}
+
+.ledger-panel :deep(.trade-row-actions) {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.ledger-panel :deep(.trade-row-actions .n-button) {
+  min-height: 36px !important;
+  min-width: 48px !important;
+  border-radius: 8px !important;
+}
+
+.ledger-panel :deep(.trade-expand-button) {
+  color: var(--mw-color-primary);
+}
+
+.ledger-panel :deep(.n-divider) {
+  display: none;
 }
 
 @media (max-width: 768px) {
-  .page-section {
-    margin-inline: 6px;
+  .trades-page {
+    gap: 10px;
   }
 
-  .trades-header {
+  .page-title-row,
+  .admission-strip {
     align-items: flex-start;
+    grid-template-columns: 1fr;
   }
 
-  .trading-pause-strip {
+  .page-title-row {
+    flex-direction: column;
+  }
+
+  .page-title-row h1 {
+    font-size: 30px;
+  }
+
+  .panel-heading {
+    padding: 14px 14px 0;
+  }
+
+  .chart-panel :deep(.n-tabs-nav),
+  .ledger-panel :deep(.n-tabs-nav) {
+    padding-inline: 12px;
+  }
+
+  .chart-panel :deep(.n-tabs-nav) {
+    position: static;
+    margin-top: 8px;
+  }
+
+  .chart-panel :deep(.n-tab-pane) {
+    padding-inline: 12px;
+  }
+
+  .chart-panel :deep(.chart-wrap),
+  .chart-panel :deep(.chart),
+  .chart-panel :deep(.chart-placeholder) {
+    height: 240px !important;
+    min-height: 240px;
+  }
+}
+
+@media (max-width: 520px) {
+  .admission-strip,
+  .dashboard-panel {
+    border-radius: var(--mw-radius-sm);
+  }
+
+  .profit-tabs :deep(.n-tabs-wrapper) {
+    display: flex;
     width: 100%;
+  }
+
+  .profit-tabs :deep(.n-tabs-tab-wrapper) {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .profit-tabs :deep(.n-tabs-tab) {
+    justify-content: center;
+    width: 100%;
+  }
+
+  .calm-tabs :deep(.n-tabs-tab) {
+    padding-inline: 10px;
+    white-space: normal;
   }
 }
 </style>
