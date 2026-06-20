@@ -692,8 +692,8 @@ onMounted(() => {
 
 .backtest-workspace {
     display: grid;
-    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
-    gap: 16px;
+    grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+    gap: 12px;
     align-items: start;
 }
 
@@ -786,7 +786,7 @@ onMounted(() => {
 
 .empty-result {
     display: grid;
-    min-height: 520px;
+    min-height: 320px;
     place-items: center;
     align-content: center;
     gap: 10px;

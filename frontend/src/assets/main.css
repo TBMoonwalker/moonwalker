@@ -239,6 +239,11 @@ body {
   vertical-align: middle;
 }
 
+.ledger-panel .n-data-table-td.n-data-table-td--sorting,
+.ledger-panel .n-data-table-th.n-data-table-th--sorting {
+  background: var(--mw-color-surface-panel);
+}
+
 .ledger-panel
   .n-data-table-tr--expanded:not(.trade-row-clickable)
   > .n-data-table-td[colspan] {

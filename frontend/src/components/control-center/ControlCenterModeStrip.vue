@@ -11,7 +11,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <n-card class="mode-strip-card dashboard-panel" content-style="padding: 12px 14px;">
+    <n-card class="mode-strip-card dashboard-panel" content-style="padding: 10px 14px;">
         <div class="mode-strip-shell">
             <div class="mode-group">
                 <n-text depth="3" class="mode-group-label">Operate</n-text>
@@ -78,19 +78,19 @@ const emit = defineEmits<{
 .mode-strip-shell {
     display: flex;
     flex-wrap: wrap;
-    gap: 18px;
+    gap: 16px 28px;
     justify-content: space-between;
 }
 
 .mode-group {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 4px;
 }
 
 .mode-group-label {
     font-size: 0.78rem;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
 }
 
@@ -98,10 +98,50 @@ const emit = defineEmits<{
     align-items: center;
 }
 
+.mode-strip :deep(.n-button) {
+    --n-border: 0 !important;
+    --n-border-hover: 0 !important;
+    --n-border-pressed: 0 !important;
+    --n-border-focus: 0 !important;
+    min-height: 36px;
+    padding-inline: 6px;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.mode-strip :deep(.n-button::before),
+.mode-strip :deep(.n-button::after) {
+    display: none;
+}
+
+.mode-strip :deep(.n-button .n-button__content) {
+    color: var(--mw-color-text-secondary);
+    font-weight: 450;
+}
+
+.mode-strip :deep(.n-button--primary-type) {
+    position: relative;
+    background: transparent;
+}
+
+.mode-strip :deep(.n-button--primary-type::after) {
+    display: block;
+    position: absolute;
+    right: 6px;
+    bottom: 0;
+    left: 6px;
+    height: 2px;
+    border-radius: 999px;
+    background: var(--mw-color-primary);
+    content: "";
+}
+
 .mode-strip :deep(.n-button--primary-type .n-button__content) {
-    color: #f7f8f6;
-    font-weight: 500;
-    letter-spacing: 0.01em;
+    color: var(--mw-color-primary);
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 @media (max-width: 768px) {

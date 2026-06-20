@@ -124,97 +124,125 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div
-    class="stream-card-grid"
+  <n-card
+    class="stream-ledger dashboard-panel ledger-panel"
+    content-style="padding: 0;"
     role="status"
     aria-live="polite"
     aria-atomic="true"
   >
-    <n-card
+    <div class="stream-ledger-header" aria-hidden="true">
+      <span>Realtime stream</span>
+      <span>Status</span>
+      <span>Payload</span>
+      <span>Last message</span>
+      <span>Reconnects</span>
+    </div>
+    <div
       v-for="stream in streamCards"
       :key="stream.key"
-      size="small"
-      class="stream-card dashboard-panel"
-      content-style="padding: 16px;"
+      class="stream-row"
     >
-      <n-flex vertical :size="16">
-        <n-flex justify="space-between" align="start" :wrap="false" :size="12">
-          <n-flex vertical :size="4" class="stream-heading">
-            <n-text depth="3" class="stream-kicker">Realtime stream</n-text>
-            <n-text strong class="stream-title">{{ stream.label }}</n-text>
-            <n-text depth="3">{{ stream.description }}</n-text>
-          </n-flex>
-          <n-tag :type="stream.tagType" size="medium">
-            {{ stream.status }}
-          </n-tag>
-        </n-flex>
-        <div class="stream-stats">
-          <div class="stream-stat">
-            <n-text depth="3">Payload</n-text>
-            <n-text>{{ stream.hasReceivedData ? 'Receiving data' : 'Waiting for first payload' }}</n-text>
-          </div>
-          <div class="stream-stat">
-            <n-text depth="3">Last message</n-text>
-            <n-text>{{ stream.lastMessageLabel }}</n-text>
-          </div>
-          <div class="stream-stat">
-            <n-text depth="3">Last status change</n-text>
-            <n-text>{{ stream.lastStatusLabel }}</n-text>
-          </div>
-          <div class="stream-stat">
-            <n-text depth="3">Reconnects</n-text>
-            <n-text>{{ stream.reconnectCount }}</n-text>
-          </div>
-        </div>
-      </n-flex>
-    </n-card>
-  </div>
+      <div class="stream-heading">
+        <n-text strong class="stream-title">{{ stream.label }}</n-text>
+        <n-text depth="3" class="stream-description">{{ stream.description }}</n-text>
+      </div>
+      <n-tag :type="stream.tagType" size="small">
+        {{ stream.status }}
+      </n-tag>
+      <div class="stream-stat">
+        <n-text>{{ stream.hasReceivedData ? 'Receiving data' : 'Waiting for first payload' }}</n-text>
+      </div>
+      <div class="stream-stat">
+        <n-text>{{ stream.lastMessageLabel }}</n-text>
+        <n-text depth="3">{{ stream.lastStatusLabel }}</n-text>
+      </div>
+      <div class="stream-stat">
+        <n-text>{{ stream.reconnectCount }}</n-text>
+      </div>
+    </div>
+  </n-card>
 </template>
 
 <style scoped>
-.stream-card-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px;
+.stream-ledger {
+  width: 100%;
 }
 
-.stream-card {
-  min-height: 100%;
+.stream-ledger-header,
+.stream-row {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.4fr) 108px minmax(160px, 1fr) minmax(150px, 1fr) 96px;
+  gap: 12px;
+  align-items: center;
+}
+
+.stream-ledger-header {
+  min-height: 44px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--mw-color-border);
+  color: var(--mw-color-text-muted);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.stream-row {
+  min-height: 66px;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(213, 219, 213, 0.7);
+}
+
+.stream-row:last-child {
+  border-bottom: 0;
+}
+
+.stream-row:hover {
+  background: var(--mw-surface-card-muted);
 }
 
 .stream-heading {
   min-width: 0;
 }
 
-.stream-kicker {
-  font-size: 0.76rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
 .stream-title {
-  font-size: 1rem;
+  display: block;
+  color: var(--mw-color-text-primary);
+  font-family: var(--mw-font-mono);
+  font-size: 0.95rem;
+  font-weight: 600;
 }
 
-.stream-stats {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+.stream-description {
+  display: block;
+  margin-top: 3px;
+  font-size: 0.9rem;
+  line-height: 1.35;
 }
 
 .stream-stat {
   display: flex;
+  min-width: 0;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
+  font-family: var(--mw-font-mono);
+  font-size: 0.9rem;
+  font-variant-numeric: tabular-nums;
 }
 
-@media (max-width: 768px) {
-  .stream-card-grid {
-    grid-template-columns: 1fr;
+@media (max-width: 900px) {
+  .stream-ledger-header {
+    display: none;
   }
 
-  .stream-stats {
-    grid-template-columns: 1fr;
+  .stream-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px 12px;
+  }
+
+  .stream-stat {
+    grid-column: 1 / -1;
   }
 }
 </style>

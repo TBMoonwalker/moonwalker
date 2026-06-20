@@ -329,11 +329,24 @@ function formatTrustBoardSymbol(symbol: string): string {
 }
 
 .autopilot-status-row {
-    margin-bottom: 4px;
+    margin-bottom: 0;
+    padding: 14px 16px;
+    border: 1px solid rgba(29, 92, 73, 0.14);
+    border-radius: var(--mw-radius-md);
+    background: rgba(29, 92, 73, 0.05);
+    box-shadow: var(--mw-shadow-card);
 }
 
 .autopilot-shell {
     width: 100%;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
+}
+
+.autopilot-shell :deep(.n-card__content) {
+    padding: 0 !important;
 }
 
 .autopilot-status-copy {
@@ -343,10 +356,10 @@ function formatTrustBoardSymbol(symbol: string): string {
 }
 
 .autopilot-status-title {
-    margin: 6px 0 8px;
+    margin: 4px 0 4px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
-    font-size: 1.35rem;
+    font-size: 1.12rem;
     font-weight: 450;
     letter-spacing: 0;
     line-height: 1.2;
@@ -356,7 +369,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     margin: 0;
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-body);
-    font-size: 0.95rem;
+    font-size: 0.92rem;
     line-height: 1.45;
 }
 
@@ -377,11 +390,14 @@ function formatTrustBoardSymbol(symbol: string): string {
 .autopilot-section-card {
     height: auto;
     align-self: start;
+    border-radius: var(--mw-radius-md);
+    background: var(--mw-color-surface-panel);
+    box-shadow: var(--mw-shadow-card);
 }
 
 .grid-shell {
     display: grid;
-    gap: 16px;
+    gap: 12px;
     align-items: start;
     grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
 }
@@ -396,16 +412,16 @@ function formatTrustBoardSymbol(symbol: string): string {
     display: grid;
     gap: 10px;
     align-content: start;
-    padding: 14px;
-    border-radius: var(--mw-radius-lg, 12px);
+    padding: 12px;
+    border-radius: var(--mw-radius-sm);
     background: var(--mw-surface-card-subtle);
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
 }
 
 .trust-row {
     width: 100%;
-    padding: 11px 12px;
-    border-radius: 10px;
+    padding: 10px 12px;
+    border-radius: var(--mw-radius-sm);
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
     background: var(--mw-surface-card-muted);
     color: var(--mw-color-text-primary);
@@ -418,13 +434,11 @@ function formatTrustBoardSymbol(symbol: string): string {
     transition:
         border-color 140ms ease,
         background-color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
+        box-shadow 140ms ease;
 }
 
 .trust-row:hover {
-    box-shadow: 0 10px 20px rgba(24, 46, 38, 0.08);
-    transform: translateY(-1px);
+    box-shadow: inset 0 0 0 1px rgba(29, 92, 73, 0.08);
 }
 
 .trust-row:focus-visible {
@@ -452,7 +466,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-mono);
     font-size: 0.98rem;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 0.01em;
     line-height: 1.25;
 }
@@ -556,18 +570,31 @@ function formatTrustBoardSymbol(symbol: string): string {
 
 .event-list {
     display: grid;
-    gap: 10px;
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--mw-color-border);
+    border-radius: 9px;
 }
 
 .event-row {
+    min-height: 48px;
     padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--mw-surface-card-muted);
-    border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    border: 0;
+    border-bottom: 1px solid rgba(213, 219, 213, 0.7);
+    border-radius: 0;
+    background: var(--mw-color-surface-panel);
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 16px;
+}
+
+.event-row:last-child {
+    border-bottom: 0;
+}
+
+.event-row:hover {
+    background: var(--mw-surface-card-muted);
 }
 
 .event-copy {

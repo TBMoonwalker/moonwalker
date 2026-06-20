@@ -108,8 +108,8 @@ const monitoring = useControlCenterMonitoringSummary()
 }
 
 .operator-insight {
-    padding-left: 14px;
-    border-left: 3px solid rgba(29, 92, 73, 0.24);
+    padding-top: 10px;
+    border-top: 1px solid var(--mw-color-border);
 }
 
 .operator-insight-copy {

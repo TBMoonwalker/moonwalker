@@ -444,36 +444,31 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
       <template v-else>
         <!-- KPI Cards -->
         <n-flex class="page-section" vertical>
-          <n-card
-              class="statistics-overview-card dashboard-panel"
-              content-style="padding: 14px 16px;"
-          >
-            <div class="statistics-grid" aria-label="Statistics overview">
-              <div class="stat-cell">
-                <n-statistic label="Total Trades" :value="summary.total_trades" />
-              </div>
-              <div class="stat-cell">
-                <n-statistic label="Win Rate" :value="fmtPct(summary.win_rate)" />
-              </div>
-              <div class="stat-cell">
-                <n-statistic
-                    :class="summary.total_profit >= 0 ? 'green' : 'red'"
-                  label="Total Profit"
-                    :value="fmt2(summary.total_profit)"
-                />
-              </div>
-              <div class="stat-cell">
-                <n-statistic
-                    :class="summary.avg_profit >= 0 ? 'green' : 'red'"
-                  label="Avg Profit"
-                    :value="fmt2(summary.avg_profit)"
-                />
-              </div>
-              <div class="stat-cell">
-                <n-statistic label="Avg Duration" :value="summary.avg_duration_formatted" />
-              </div>
+          <div class="statistics-grid" aria-label="Statistics overview">
+            <div class="stat-cell dashboard-panel">
+              <n-statistic label="Total Trades" :value="summary.total_trades" />
             </div>
-          </n-card>
+            <div class="stat-cell dashboard-panel">
+              <n-statistic label="Win Rate" :value="fmtPct(summary.win_rate)" />
+            </div>
+            <div class="stat-cell dashboard-panel">
+              <n-statistic
+                  :class="summary.total_profit >= 0 ? 'green' : 'red'"
+                label="Total Profit"
+                  :value="fmt2(summary.total_profit)"
+              />
+            </div>
+            <div class="stat-cell dashboard-panel">
+              <n-statistic
+                  :class="summary.avg_profit >= 0 ? 'green' : 'red'"
+                label="Avg Profit"
+                  :value="fmt2(summary.avg_profit)"
+              />
+            </div>
+            <div class="stat-cell dashboard-panel">
+              <n-statistic label="Avg Duration" :value="summary.avg_duration_formatted" />
+            </div>
+          </div>
         </n-flex>
 
         <!-- Heatmap -->
@@ -748,14 +743,12 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 }
 
 .stat-cell {
+  min-height: 112px;
   min-width: 0;
-  padding: 6px 10px;
-  border: 1px solid var(--mw-color-border);
-  border-radius: var(--mw-radius-sm, 6px);
-  background: var(--mw-surface-card-subtle);
+  padding: 14px 16px;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
 }
 
 .stat-detail {
@@ -768,7 +761,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
 :deep(.n-statistic) {
   width: 100%;
-  text-align: center;
+  text-align: left;
 }
 
 :deep(.n-statistic-value) {
