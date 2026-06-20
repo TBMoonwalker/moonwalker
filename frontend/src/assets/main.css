@@ -211,19 +211,22 @@ body {
   --n-font-size: 14px;
 }
 
+.ledger-panel .n-data-table.n-data-table--bordered .n-data-table-wrapper,
 .ledger-panel .n-data-table-wrapper {
-  border: 0;
+  border: 0 !important;
+  border-radius: 0 !important;
 }
 
 .ledger-panel .n-data-table-base-table {
-  overflow: hidden;
-  border-radius: 9px;
+  overflow: visible;
+  border-radius: 0 !important;
 }
 
 .ledger-panel .n-data-table-th {
   height: 44px;
   background: var(--mw-color-surface-panel);
   border-top: 0;
+  border-bottom-color: rgba(213, 219, 213, 0.72);
   color: var(--mw-color-text-muted);
   font-size: 12px;
   letter-spacing: 0.06em;
@@ -233,7 +236,7 @@ body {
 .ledger-panel .n-data-table-td {
   font-family: var(--mw-font-mono);
   font-variant-numeric: tabular-nums;
-  padding: 13px 12px;
+  padding: 15px 12px;
   background: var(--mw-color-surface-panel);
   border-bottom-color: rgba(213, 219, 213, 0.7);
   vertical-align: middle;
