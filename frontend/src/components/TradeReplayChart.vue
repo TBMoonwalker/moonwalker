@@ -616,16 +616,19 @@ onUnmounted(() => {
 <style scoped>
 .expand-chart-card {
     display: flex;
+    flex: 1 1 auto;
     flex-direction: column;
     min-height: 400px;
     overflow: hidden;
     width: 100%;
 }
 
-.expand-chart-card :deep(.n-card__content) {
+.expand-chart-card :deep(.n-card-content) {
     display: flex;
     flex: 1 1 auto;
+    height: 100%;
     min-height: 0;
+    width: 100%;
 }
 
 .expand-chart-frame {
@@ -635,6 +638,7 @@ onUnmounted(() => {
     min-height: 0;
     overflow: hidden;
     border-radius: inherit;
+    width: 100%;
 }
 
 .expand-chart {
@@ -649,6 +653,7 @@ onUnmounted(() => {
     flex: 1 1 auto;
     flex-direction: column;
     min-height: 0;
+    width: 100%;
 }
 
 .chart-legend,

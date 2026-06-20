@@ -45,6 +45,12 @@ function hasExpandedDetailInset(source) {
     )
 }
 
+function extractCssBlock(source, selector) {
+    const escapedSelector = selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const match = source.match(new RegExp(`${escapedSelector}\\s*\\{[^}]+\\}`))
+    return match ? match[0] : ''
+}
+
 test('trade replay expansion is available from the whole row', () => {
     // Regression: visible arrow-only expanders added noise and a tiny hit target.
     // Found by /qa on 2026-06-08.
@@ -105,11 +111,20 @@ test('expanded open trade layout stays stable and stretches replay chart', () =>
         'expected the open-trade replay column to stretch beside taller order timelines',
     )
     assert.ok(
-        tradeReplayChartSource.includes('.expand-chart-card :deep(.n-card__content)') &&
+        tradeReplayChartSource.includes('.expand-chart-card :deep(.n-card-content)') &&
+            !tradeReplayChartSource.includes('.expand-chart-card :deep(.n-card__content)') &&
+            !extractCssBlock(tradeReplayChartSource, '.expand-chart-card').includes(
+                'height: 100%;',
+            ) &&
+            extractCssBlock(
+                tradeReplayChartSource,
+                '.expand-chart-card :deep(.n-card-content)',
+            ).includes('height: 100%;') &&
+            tradeReplayChartSource.includes('width: 100%;') &&
             tradeReplayChartSource.includes('flex: 1 1 auto') &&
             tradeReplayChartSource.includes('flex: 1 1 400px') &&
             tradeReplayChartSource.includes('min-height: 400px'),
-        'expected the TradingView replay chart stack to fill the expanded row height',
+        'expected the TradingView replay chart stack to fill the real Naive card content height',
     )
 })
 
