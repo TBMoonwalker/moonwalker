@@ -141,7 +141,7 @@ test('monitoring preview exposes the required Monitoring action and health copy'
     assert.match(monitoringPreviewSource, /<n-button\s+secondary/i)
     assert.doesNotMatch(monitoringPreviewSource, /<n-card/i)
     assert.doesNotMatch(monitoringPreviewSource, /<n-alert/i)
-    assert.match(monitoringPreviewSource, /hero-insight/)
+    assert.match(monitoringPreviewSource, /operator-insight/)
     assert.doesNotMatch(monitoringPreviewSource, /preview-alert/)
     assert.doesNotMatch(monitoringPreviewSource, />Monitoring</)
 })

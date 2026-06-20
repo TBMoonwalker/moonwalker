@@ -24,6 +24,18 @@ const controlCenterViewSource = fs.readFileSync(
     path.join(rootDir, 'src/views/ControlCenterView.vue'),
     'utf8',
 )
+const configViewSource = fs.readFileSync(
+    path.join(rootDir, 'src/views/ConfigView.vue'),
+    'utf8',
+)
+const monitoringViewSource = fs.readFileSync(
+    path.join(rootDir, 'src/views/MonitoringView.vue'),
+    'utf8',
+)
+const autopilotMemoryViewSource = fs.readFileSync(
+    path.join(rootDir, 'src/views/AutopilotMemoryView.vue'),
+    'utf8',
+)
 
 test('operator pages share the trades-page shell blueprint', () => {
     for (const token of [
@@ -32,6 +44,8 @@ test('operator pages share the trades-page shell blueprint', () => {
         '.admission-strip',
         '.calm-tabs',
         '.ledger-panel',
+        '.operator-card',
+        '.operator-subpanel',
     ]) {
         assert.ok(
             mainCssSource.includes(token),
@@ -44,11 +58,44 @@ test('operator pages share the trades-page shell blueprint', () => {
         ['statistics', statisticsViewSource],
         ['backtest', backtestViewSource],
         ['control center', controlCenterViewSource],
+        ['config', configViewSource],
+        ['monitoring', monitoringViewSource],
+        ['autopilot memory', autopilotMemoryViewSource],
     ]) {
         assert.ok(
             source.includes('operator-console-page'),
             `expected ${name} to use the shared operator page shell`,
         )
+    }
+})
+
+test('operator views do not reintroduce legacy page shells', () => {
+    const legacyTokens = [
+        'mw-shell-card',
+        'mw-muted-card',
+        'settings-intro-card',
+        'monitoring-intro-card',
+        'stats-intro-card',
+        'backtest-hero',
+        'hero-insight',
+        'page-title',
+    ]
+
+    for (const [name, source] of [
+        ['trades', tradesViewSource],
+        ['statistics', statisticsViewSource],
+        ['backtest', backtestViewSource],
+        ['control center', controlCenterViewSource],
+        ['config', configViewSource],
+        ['monitoring', monitoringViewSource],
+        ['autopilot memory', autopilotMemoryViewSource],
+    ]) {
+        for (const token of legacyTokens) {
+            assert.ok(
+                !source.includes(token),
+                `expected ${name} to avoid legacy operator layout token ${token}`,
+            )
+        }
     }
 })
 
@@ -67,5 +114,11 @@ test('secondary operator pages reuse panel tabs and ledger table rhythm', () => 
     assert.ok(
         controlCenterViewSource.includes('operator-console-page'),
         'expected Control Center to use the shared operator page shell',
+    )
+    assert.ok(
+        monitoringViewSource.includes('operator-console-page') &&
+            configViewSource.includes('operator-console-page') &&
+            autopilotMemoryViewSource.includes('operator-console-page'),
+        'expected legacy utility views to use the shared operator page shell',
     )
 })

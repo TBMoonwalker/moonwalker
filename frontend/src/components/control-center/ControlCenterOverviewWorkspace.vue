@@ -60,7 +60,7 @@ const emit = defineEmits<{
                     v-for="blocker in visibleBlockers"
                     :key="blocker.key"
                     size="small"
-                    class="status-card mw-muted-card"
+                    class="status-card operator-subpanel"
                 >
                     <n-flex vertical :size="10">
                         <div>

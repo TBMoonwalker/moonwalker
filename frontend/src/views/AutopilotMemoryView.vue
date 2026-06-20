@@ -76,18 +76,18 @@ function formatTrustBoardSymbol(symbol: string): string {
 </script>
 
 <template>
-    <div class="page-shell autopilot-memory-page">
-        <n-card class="autopilot-shell mw-shell-card" content-style="padding: 18px 20px;">
+    <div class="page-shell autopilot-memory-page operator-console-page">
+        <n-card class="autopilot-shell dashboard-panel" content-style="padding: 18px 20px;">
             <n-flex vertical :size="16">
-                <n-flex class="page-header" justify="space-between" align="start" :wrap="true" :size="[12, 12]">
-                    <div class="page-copy">
+                <n-flex class="autopilot-status-row" justify="space-between" align="start" :wrap="true" :size="[12, 12]">
+                    <div class="autopilot-status-copy">
                         <n-text depth="3">Control Center / Autopilot</n-text>
-                        <h1 class="page-title">{{ formatAutopilotStatusTitle(data) }}</h1>
-                        <p class="page-summary">
+                        <h1 class="autopilot-status-title">{{ formatAutopilotStatusTitle(data) }}</h1>
+                        <p class="autopilot-status-summary">
                             {{ formatAutopilotStatusBody(data) }}
                         </p>
                     </div>
-                    <div class="page-actions">
+                    <div class="autopilot-status-actions">
                         <n-button secondary @click="openControlCenterOverview">
                             Back to Control Center
                         </n-button>
@@ -110,7 +110,7 @@ function formatTrustBoardSymbol(symbol: string): string {
                 </n-alert>
 
                 <template v-else-if="loading && !data">
-                    <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                    <n-card class="autopilot-section-card operator-subpanel" content-style="padding: 18px 20px;">
                         <n-skeleton text :repeat="6" />
                     </n-card>
                 </template>
@@ -139,7 +139,7 @@ function formatTrustBoardSymbol(symbol: string): string {
 
                     <n-card
                         v-if="data.status === 'warming_up'"
-                        class="page-section-card mw-muted-card"
+                        class="autopilot-section-card operator-subpanel"
                         content-style="padding: 18px 20px;"
                     >
                         <n-flex vertical :size="10">
@@ -160,7 +160,7 @@ function formatTrustBoardSymbol(symbol: string): string {
                     </n-card>
 
                     <div class="grid-shell">
-                        <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                        <n-card class="autopilot-section-card operator-subpanel" content-style="padding: 18px 20px;">
                             <n-flex vertical :size="14">
                                 <div>
                                     <h2 class="section-title">Trust board</h2>
@@ -230,7 +230,7 @@ function formatTrustBoardSymbol(symbol: string): string {
                             </n-flex>
                         </n-card>
 
-                        <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                        <n-card class="autopilot-section-card operator-subpanel" content-style="padding: 18px 20px;">
                             <n-flex vertical :size="14">
                                 <div>
                                     <h2 class="section-title">Selected symbol</h2>
@@ -290,7 +290,7 @@ function formatTrustBoardSymbol(symbol: string): string {
                         </n-card>
                     </div>
 
-                    <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                    <n-card class="autopilot-section-card operator-subpanel" content-style="padding: 18px 20px;">
                         <n-flex vertical :size="14">
                             <div>
                                 <h2 class="section-title">Latest Autopilot moves</h2>
@@ -325,12 +325,10 @@ function formatTrustBoardSymbol(symbol: string): string {
 
 <style scoped>
 .autopilot-memory-page {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
+    gap: 12px;
 }
 
-.page-header {
+.autopilot-status-row {
     margin-bottom: 4px;
 }
 
@@ -338,31 +336,31 @@ function formatTrustBoardSymbol(symbol: string): string {
     width: 100%;
 }
 
-.page-copy {
+.autopilot-status-copy {
     flex: 1 1 min(40rem, 100%);
     min-width: min(40rem, 100%);
     max-width: none;
 }
 
-.page-title {
+.autopilot-status-title {
     margin: 6px 0 8px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
-    font-size: 2rem;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    white-space: nowrap;
+    font-size: 1.35rem;
+    font-weight: 450;
+    letter-spacing: 0;
+    line-height: 1.2;
 }
 
-.page-summary {
+.autopilot-status-summary {
     margin: 0;
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-body);
-    font-size: 1rem;
-    line-height: 1.6;
+    font-size: 0.95rem;
+    line-height: 1.45;
 }
 
-.page-actions {
+.autopilot-status-actions {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
@@ -376,7 +374,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     letter-spacing: -0.02em;
 }
 
-.page-section-card {
+.autopilot-section-card {
     height: auto;
     align-self: start;
 }
@@ -592,19 +590,15 @@ function formatTrustBoardSymbol(symbol: string): string {
         grid-template-columns: 1fr;
     }
 
-    .page-copy {
+    .autopilot-status-copy {
         min-width: 0;
     }
 
-    .page-title {
-        white-space: normal;
-    }
-
-    .page-actions {
+    .autopilot-status-actions {
         width: 100%;
     }
 
-    .page-actions :deep(.n-button) {
+    .autopilot-status-actions :deep(.n-button) {
         flex: 1 1 auto;
     }
 

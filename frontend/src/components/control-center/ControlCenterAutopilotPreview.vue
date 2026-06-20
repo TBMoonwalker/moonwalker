@@ -103,9 +103,9 @@ const trustSummary = computed(() => {
                     }}
                 </n-alert>
 
-                <div class="hero-insight">
-                    <p class="hero-insight-copy">{{ featuredInsight }}</p>
-                    <p class="hero-insight-meta">
+                <div class="operator-insight">
+                    <p class="operator-insight-copy">{{ featuredInsight }}</p>
+                    <p class="operator-insight-meta">
                         {{ trustSummary }}
                     </p>
                 </div>
@@ -181,12 +181,12 @@ const trustSummary = computed(() => {
     text-wrap: pretty;
 }
 
-.hero-insight {
+.operator-insight {
     padding-left: 14px;
     border-left: 3px solid rgba(29, 92, 73, 0.24);
 }
 
-.hero-insight-copy {
+.operator-insight-copy {
     margin: 0 0 6px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
@@ -195,7 +195,7 @@ const trustSummary = computed(() => {
     letter-spacing: 0;
 }
 
-.hero-insight-meta {
+.operator-insight-meta {
     margin: 0;
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-body);

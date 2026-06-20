@@ -142,16 +142,13 @@ test('expanded ledger padding applies only to the detail row cell', () => {
         'expected expanded data rows to keep their normal cell padding',
     )
     assert.ok(
-        tradesViewSource.includes(
-            ':deep(.n-data-table-tr--expanded:not(.trade-row-clickable) > .n-data-table-td[colspan])',
+        mainCssSource.includes(
+            '.n-data-table-tr--expanded:not(.trade-row-clickable)\n  > .n-data-table-td[colspan]',
         ),
-        'expected the trades page detail row spacing to exclude clicked data rows',
+        'expected the shared ledger detail row spacing to exclude clicked data rows',
     )
     assert.ok(
-        hasExpandedDetailInset(mainCssSource) &&
-            tradesViewSource.includes(
-                ':deep(.n-data-table-tr--expanded:not(.trade-row-clickable) > .n-data-table-td[colspan]) {\n  padding-inline: 12px;',
-            ),
+        hasExpandedDetailInset(mainCssSource),
         'expected the expanded detail row content to align with normal table cell insets',
     )
     assert.ok(

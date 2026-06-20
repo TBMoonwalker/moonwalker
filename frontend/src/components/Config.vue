@@ -89,7 +89,7 @@
         <n-card
             title="Backup & Restore"
             size="small"
-            class="backup-restore-card mw-shell-card"
+            class="backup-restore-card dashboard-panel"
         >
             <n-flex vertical :size="12">
                 <ConfigBackupDownloadControls
@@ -260,12 +260,47 @@ onUnmounted(() => {
 .config-form-shell {
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: 12px;
     width: 100%;
+}
+
+.config-form-shell :deep(.n-card) {
+    border: 1px solid var(--mw-color-border);
+    border-radius: var(--mw-radius-md);
+    background: var(--mw-color-surface-panel);
+    box-shadow: var(--mw-shadow-card);
+    color: var(--mw-color-text-primary);
+}
+
+.config-form-shell :deep(.n-card-header) {
+    min-height: 52px;
+    padding: 16px 18px 8px;
+}
+
+.config-form-shell :deep(.n-card-header__main) {
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
+    font-size: 1.08rem;
+    font-weight: 450;
+    letter-spacing: 0;
+}
+
+.config-form-shell :deep(.n-card__content) {
+    padding: 14px 18px 18px;
 }
 
 .backup-restore-card {
     width: 100%;
+}
+
+.backup-restore-card :deep(.n-divider) {
+    display: none;
+}
+
+.submit-button {
+    align-self: flex-end;
+    min-height: 44px;
+    border-radius: 8px;
 }
 
 @media (max-width: 768px) {

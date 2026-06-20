@@ -26,9 +26,9 @@ const monitoring = useControlCenterMonitoringSummary()
                 </div>
             </div>
 
-            <div class="hero-insight">
-                <p class="hero-insight-copy">{{ monitoring.featuredInsight }}</p>
-                <p class="hero-insight-meta">
+            <div class="operator-insight">
+                <p class="operator-insight-copy">{{ monitoring.featuredInsight }}</p>
+                <p class="operator-insight-meta">
                     {{ monitoring.receivingCount }} of
                     {{ monitoring.totalStreams }} streams receiving payloads
                 </p>
@@ -107,12 +107,12 @@ const monitoring = useControlCenterMonitoringSummary()
     text-wrap: pretty;
 }
 
-.hero-insight {
+.operator-insight {
     padding-left: 14px;
     border-left: 3px solid rgba(29, 92, 73, 0.24);
 }
 
-.hero-insight-copy {
+.operator-insight-copy {
     margin: 0 0 6px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
@@ -121,7 +121,7 @@ const monitoring = useControlCenterMonitoringSummary()
     letter-spacing: 0;
 }
 
-.hero-insight-meta {
+.operator-insight-meta {
     margin: 0;
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-body);

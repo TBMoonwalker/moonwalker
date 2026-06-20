@@ -423,11 +423,10 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
       <!-- Empty / error state -->
       <template v-if="!summary">
         <n-flex class="page-section" vertical>
-          <n-card class="stats-intro-card dashboard-panel" content-style="padding: 18px 20px;">
+          <n-card class="dashboard-panel ledger-panel" content-style="padding: 18px 20px;">
             <n-flex vertical :size="6">
-              <n-text depth="3" class="stats-kicker">Statistics</n-text>
               <n-text>
-                <template v-if="analytics.loading">Loading analytics...</template>
+                <template v-if="analytics.loading">Loading analytics…</template>
                 <template v-else-if="analytics.error">
                    <n-alert type="error" :show-icon="false">
                      {{ analytics.error }}
@@ -666,7 +665,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                         />
                         <span class="stat-detail">{{ fmtPct(drawdown.max_drawdown_percent) }}</span>
                       </div>
-                      <n-card content-style="padding: 12px;">
+                      <div class="risk-note operator-subpanel">
                         <n-flex vertical :size="4">
                           <n-text depth="3" style="font-size: 12px;">How to read this</n-text>
                           <n-text depth="3" style="font-size: 12px;">
@@ -675,7 +674,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                            profit fell by 10 USDT from its highest point.
                           </n-text>
                         </n-flex>
-                      </n-card>
+                      </div>
                     </n-flex>
                   </template>
 
@@ -787,6 +786,10 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 .risk-stat {
   flex-direction: column;
   gap: 4px;
+}
+
+.risk-note {
+  padding: 12px;
 }
 
 .heatmap-card {
@@ -909,10 +912,6 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
    :deep(.n-tabs-tab) {
     white-space: nowrap;
-   }
-
-   .stats-intro-card {
-    margin-inline: 6px;
    }
 
    .distribution-stats {
