@@ -98,7 +98,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="page-shell trades-page">
+  <div class="page-shell trades-page operator-console-page">
     <section class="page-section trades-metrics" aria-label="Trade metrics">
       <Statistics />
     </section>
@@ -419,8 +419,9 @@ onUnmounted(() => {
   vertical-align: middle;
 }
 
-.ledger-panel :deep(.n-data-table-tr--expanded > .n-data-table-td) {
-  padding-inline: 0;
+.ledger-panel
+  :deep(.n-data-table-tr--expanded:not(.trade-row-clickable) > .n-data-table-td[colspan]) {
+  padding-inline: 12px;
 }
 
 .ledger-panel :deep(.n-data-table-tr:hover .n-data-table-td) {

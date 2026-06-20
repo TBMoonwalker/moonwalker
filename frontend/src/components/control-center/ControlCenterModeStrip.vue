@@ -11,7 +11,7 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <n-card class="mode-strip-card mw-shell-card" content-style="padding: 12px 14px;">
+    <n-card class="mode-strip-card dashboard-panel" content-style="padding: 12px 14px;">
         <div class="mode-strip-shell">
             <div class="mode-group">
                 <n-text depth="3" class="mode-group-label">Operate</n-text>
@@ -75,10 +75,6 @@ const emit = defineEmits<{
 </template>
 
 <style scoped>
-.mode-strip-card {
-    border: 1px solid var(--color-border-hover);
-}
-
 .mode-strip-shell {
     display: flex;
     flex-wrap: wrap;
@@ -104,7 +100,7 @@ const emit = defineEmits<{
 
 .mode-strip :deep(.n-button--primary-type .n-button__content) {
     color: #f7f8f6;
-    font-weight: 700;
+    font-weight: 500;
     letter-spacing: 0.01em;
 }
 

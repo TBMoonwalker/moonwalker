@@ -441,17 +441,23 @@ onMounted(() => {
 <style scoped>
 .expanded-trade-layout {
     align-items: stretch;
+    flex-wrap: nowrap;
     gap: 16px;
+    min-width: 0;
     width: 100%;
 }
 
 .expanded-order-card {
-    flex: 0 1 340px;
+    flex: 0 0 340px;
+    max-width: 360px;
     min-width: 280px;
 }
 
 .expanded-replay-chart {
-    flex: 1 1 520px;
+    align-self: stretch;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
     min-width: 0;
 }
 
@@ -483,9 +489,15 @@ onMounted(() => {
 }
 
 @media (max-width: 900px) {
+    .expanded-trade-layout {
+        flex-direction: column;
+    }
+
     .expanded-order-card,
     .expanded-replay-chart {
-        flex-basis: 100%;
+        flex-basis: auto;
+        max-width: none;
+        width: 100%;
     }
 }
 </style>

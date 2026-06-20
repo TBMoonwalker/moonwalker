@@ -149,8 +149,8 @@ const trustSummary = computed(() => {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.12rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .preview-copy {
@@ -191,8 +191,8 @@ const trustSummary = computed(() => {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1rem;
-    font-weight: 600;
-    letter-spacing: -0.015em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .hero-insight-meta {

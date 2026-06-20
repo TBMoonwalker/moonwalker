@@ -31,7 +31,7 @@ defineEmits<{
 </script>
 
 <template>
-    <n-card class="mission-panel" content-style="padding: 22px 24px;">
+    <n-card class="mission-panel dashboard-panel" content-style="padding: 18px 20px;">
         <n-flex vertical :size="18">
             <n-flex
                 justify="space-between"
@@ -150,8 +150,6 @@ defineEmits<{
 .mission-panel {
     border: 1px solid rgba(29, 92, 73, 0.26);
     background: var(--mw-surface-mission);
-    box-shadow: var(--mw-shadow-card);
-    color: var(--mw-color-text-primary);
 }
 
 .mission-heading-group {
@@ -203,8 +201,8 @@ defineEmits<{
     font-family: var(--mw-font-display);
     font-size: clamp(1.5rem, 3vw, 2.25rem);
     line-height: 1.1;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .mission-summary {
@@ -215,7 +213,7 @@ defineEmits<{
 
 .mission-panel :deep(.n-button--primary-type .n-button__content) {
     color: #f7f8f6;
-    font-weight: 700;
+    font-weight: 500;
     letter-spacing: 0.01em;
 }
 

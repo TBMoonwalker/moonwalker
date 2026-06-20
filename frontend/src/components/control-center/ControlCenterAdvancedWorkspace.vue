@@ -57,7 +57,7 @@ defineProps<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 </style>

@@ -615,22 +615,40 @@ onUnmounted(() => {
 
 <style scoped>
 .expand-chart-card {
+    display: flex;
+    flex-direction: column;
+    min-height: 400px;
     overflow: hidden;
     width: 100%;
 }
 
+.expand-chart-card :deep(.n-card__content) {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
 .expand-chart-frame {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
     overflow: hidden;
     border-radius: inherit;
 }
 
 .expand-chart {
-    height: 400px;
+    flex: 1 1 400px;
+    min-height: 400px;
     width: 100%;
 }
 
 .expand-chart-stack {
     background: rgb(24, 24, 28);
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .chart-legend,
@@ -664,6 +682,7 @@ onUnmounted(() => {
 }
 
 .indicator-chart {
+    flex: 0 0 150px;
     height: 150px;
     width: 100%;
 }
@@ -674,8 +693,9 @@ onUnmounted(() => {
     color: #ECEFEA;
     display: flex;
     font-size: 14px;
-    height: 400px;
+    flex: 1 1 400px;
     justify-content: center;
+    min-height: 400px;
     padding: 16px;
     text-align: center;
     width: 100%;
@@ -684,10 +704,12 @@ onUnmounted(() => {
 @media (max-width: 768px) {
     .expand-chart,
     .expand-chart-empty {
-        height: 300px;
+        flex-basis: 300px;
+        min-height: 300px;
     }
 
     .indicator-chart {
+        flex-basis: 120px;
         height: 120px;
     }
 }

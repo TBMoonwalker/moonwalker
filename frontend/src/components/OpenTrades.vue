@@ -242,14 +242,18 @@ onMounted(async () => {
     outline-offset: -2px;
 }
 
+:deep(.n-data-table-table) {
+    table-layout: fixed;
+    width: 100%;
+}
+
 :deep(.trade-hidden-expand-cell),
 :deep(.n-data-table-td--expand) {
-    display: none;
     width: 0 !important;
     min-width: 0 !important;
     max-width: 0 !important;
-    padding: 0;
-    border: 0;
+    padding: 0 !important;
+    border: 0 !important;
     overflow: hidden;
 }
 

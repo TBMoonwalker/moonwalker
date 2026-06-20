@@ -419,11 +419,11 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 </script>
 
 <template>
-   <div class="page-shell stats-page">
+   <div class="page-shell stats-page operator-console-page">
       <!-- Empty / error state -->
       <template v-if="!summary">
         <n-flex class="page-section" vertical>
-          <n-card class="stats-intro-card mw-shell-card" content-style="padding: 18px 20px;">
+          <n-card class="stats-intro-card dashboard-panel" content-style="padding: 18px 20px;">
             <n-flex vertical :size="6">
               <n-text depth="3" class="stats-kicker">Statistics</n-text>
               <n-text>
@@ -446,7 +446,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
         <!-- KPI Cards -->
         <n-flex class="page-section" vertical>
           <n-card
-              class="statistics-overview-card mw-shell-card"
+              class="statistics-overview-card dashboard-panel"
               content-style="padding: 14px 16px;"
           >
             <div class="statistics-grid" aria-label="Statistics overview">
@@ -479,7 +479,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
         <!-- Heatmap -->
         <n-flex class="page-section" vertical>
-          <n-card class="heatmap-card mw-shell-card" content-style="padding: 12px 16px;">
+          <n-card class="heatmap-card dashboard-panel" content-style="padding: 12px 16px;">
             <n-flex vertical :size="6">
               <div class="heatmap-header">
                 <n-text depth="3" class="stats-kicker">Trade Activity</n-text>
@@ -508,7 +508,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
         <!-- AI Trust Cockpit -->
         <n-flex class="page-section" vertical>
-          <n-card class="ai-trust-card mw-shell-card" content-style="padding: 14px 16px;">
+          <n-card class="ai-trust-card dashboard-panel ledger-panel" content-style="padding: 14px 16px;">
             <n-flex vertical :size="12">
               <div class="ai-trust-header">
                 <div>
@@ -604,8 +604,13 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
         <!-- Analytics Tabs -->
         <n-flex class="page-section" vertical>
-          <n-card content-style="padding: 0;">
-            <n-tabs v-model:value="activeTab" type="line" :tabs-padding="isMobile ? 12 : 20">
+          <n-card class="dashboard-panel ledger-panel" content-style="padding: 0;">
+            <n-tabs
+                v-model:value="activeTab"
+                class="calm-tabs statistics-tabs"
+                type="line"
+                :tabs-padding="isMobile ? 12 : 20"
+            >
               <n-tab-pane v-for="tab in tabNames" :key="tab.name" :name="tab.name" :tab="tab.label">
                 <div v-show="activeTab === tab.name" class="tab-content">
                   <!-- Symbols Tab -->
@@ -714,12 +719,11 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
 <style scoped>
 .stats-page {
-  gap: 0;
+  gap: 12px;
 }
 
 .page-section {
-  margin-inline: 10px;
-  margin-bottom: 10px;
+  min-width: 0;
 }
 
 .page-section:last-child {
@@ -733,7 +737,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 }
 
 .tab-content {
-  padding: 12px;
+  padding: 0;
 }
 
 /* KPI grid */
@@ -747,9 +751,9 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 .stat-cell {
   min-width: 0;
   padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--mw-color-border);
   border-radius: var(--mw-radius-sm, 6px);
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--mw-surface-card-subtle);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -837,7 +841,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
   color: var(--mw-color-text-primary);
   font-size: 0.95rem;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.25;
   overflow-wrap: anywhere;
 }
@@ -856,7 +860,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 .ai-trust-status {
   color: var(--mw-color-text-primary);
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.25;
   margin-top: 2px;
   overflow-wrap: anywhere;
@@ -891,11 +895,11 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
 @media (max-width: 768px) {
    .tab-content {
-    padding: 8px;
+    padding: 0;
    }
 
    .page-section {
-    margin-inline: 6px;
+    min-width: 0;
    }
 
    :deep(.n-tabs-tab-bar) {

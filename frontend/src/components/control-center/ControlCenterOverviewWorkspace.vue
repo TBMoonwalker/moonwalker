@@ -42,7 +42,7 @@ const emit = defineEmits<{
 <template>
     <n-card
         :ref="visibleBlockers.length === 0 ? liveActivationRef : undefined"
-        class="workspace-card mw-shell-card"
+        class="workspace-card dashboard-panel"
         content-style="padding: 18px 20px;"
         id="control-center-live-activation"
     >
@@ -181,13 +181,13 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.12rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .systems-workspace {
     border: 1px solid var(--mw-color-border-strong);
-    border-radius: 14px;
+    border-radius: 9px;
     background: var(--mw-surface-card-muted);
     overflow: hidden;
 }
@@ -214,8 +214,8 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .systems-workspace-summary {
@@ -247,13 +247,13 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .status-card :deep(.n-button--primary-type .n-button__content) {
     color: #f7f8f6;
-    font-weight: 700;
+    font-weight: 500;
     letter-spacing: 0.01em;
 }
 

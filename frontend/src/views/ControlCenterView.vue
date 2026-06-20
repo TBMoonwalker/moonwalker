@@ -411,7 +411,7 @@ async function handleToggleAutopilot(): Promise<void> {
 </script>
 
 <template>
-    <div class="page-shell control-center-page">
+    <div class="page-shell control-center-page operator-console-page">
         <div class="sr-only" aria-live="polite" aria-atomic="true">
             {{ liveRegionMessage }}
         </div>
@@ -595,11 +595,11 @@ async function handleToggleAutopilot(): Promise<void> {
 
 <style scoped>
 .control-center-page {
-    gap: 0;
+    gap: 12px;
 }
 
 .page-section {
-    margin-bottom: 12px;
+    min-width: 0;
 }
 
 .page-section:last-child {
@@ -607,11 +607,11 @@ async function handleToggleAutopilot(): Promise<void> {
 }
 
 .workspace-section {
-    gap: 16px;
+    gap: 12px;
 }
 
 :deep(.utility-action-button:not(.n-button--disabled) .n-button__content) {
-    font-weight: 700;
+    font-weight: 500;
     letter-spacing: 0.01em;
 }
 
@@ -638,7 +638,7 @@ async function handleToggleAutopilot(): Promise<void> {
 
 @media (max-width: 768px) {
     .page-section {
-        margin-inline: 6px;
+        min-width: 0;
     }
 }
 </style>
