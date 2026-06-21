@@ -603,6 +603,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                 v-model:value="activeTab"
                 class="calm-tabs statistics-tabs"
                 type="line"
+                size="large"
                 :tabs-padding="isMobile ? 12 : 20"
             >
               <n-tab-pane v-for="tab in tabNames" :key="tab.name" :name="tab.name" :tab="tab.label">

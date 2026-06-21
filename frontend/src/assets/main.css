@@ -123,7 +123,9 @@ body {
   border-radius: 0;
   background: transparent;
   color: var(--mw-color-text-secondary);
+  font-size: 16px;
   font-weight: 400;
+  line-height: 1.25;
 }
 
 .calm-tabs .n-tabs-wrapper {
@@ -203,7 +205,7 @@ body {
 }
 
 .ledger-panel .n-tab-pane {
-  padding: 0 16px 16px;
+  padding: 12px 16px 16px !important;
 }
 
 .ledger-panel .n-data-table {
@@ -297,7 +299,7 @@ body {
   }
 
   .ledger-panel .n-tab-pane {
-    padding: 0 12px 12px;
+    padding: 10px 12px 12px !important;
   }
 }
 
