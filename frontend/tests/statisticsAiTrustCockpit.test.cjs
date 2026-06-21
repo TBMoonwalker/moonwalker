@@ -46,3 +46,19 @@ test('analytics store exposes AI trust states and calibration rows', () => {
     assert.match(analyticsStoreSource, /bad_entry_review: AiTrustPrediction\[\]/)
     assert.match(analyticsStoreSource, /provider_status_counts: Record<string, number>/)
 })
+
+test('AI Trust Cockpit tables use the shared statistics pagination rhythm', () => {
+    assert.match(statisticsSource, /const recentPredictionsPagination = reactive<PaginationProps>/)
+    assert.match(statisticsSource, /const badEntryReviewPagination = reactive<PaginationProps>/)
+    assert.match(statisticsSource, /:pagination="recentPredictionsPagination"/)
+    assert.match(statisticsSource, /:pagination="badEntryReviewPagination"/)
+    assert.match(statisticsSource, /@update:page="handleRecentPredictionsPageChange"/)
+    assert.match(statisticsSource, /@update:page="handleBadEntryReviewPageChange"/)
+
+    const aiTrustSection = statisticsSource.slice(
+        statisticsSource.indexOf('<!-- AI Trust Cockpit -->'),
+        statisticsSource.indexOf('<!-- Analytics Tabs -->'),
+    )
+
+    assert.doesNotMatch(aiTrustSection, /:pagination="false"/)
+})

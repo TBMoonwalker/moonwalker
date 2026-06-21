@@ -17,19 +17,40 @@ import type { AiTrustPrediction, AnalyticsOverview } from '../stores/analytics'
 const analytics = useAnalyticsStore()
 const activeTab = ref('symbols')
 const isMobile = ref(false)
+const SYMBOL_PAGE_SIZE = 10
 const symbolSortState = ref<{ columnKey: string; order: 'ascend' | 'descend' } | null>({
    columnKey: 'trades',
    order: 'descend',
 })
 const symbolPagination = reactive<PaginationProps>({
    page: 1,
-   pageSize: 10,
+   pageSize: SYMBOL_PAGE_SIZE,
    pageSlot: 5,
    prefix: ({ itemCount }) => `Total ${itemCount} symbols`,
+})
+const recentPredictionsPagination = reactive<PaginationProps>({
+   page: 1,
+   pageSize: SYMBOL_PAGE_SIZE,
+   pageSlot: 5,
+   prefix: ({ itemCount }) => `Total ${itemCount} predictions`,
+})
+const badEntryReviewPagination = reactive<PaginationProps>({
+   page: 1,
+   pageSize: SYMBOL_PAGE_SIZE,
+   pageSlot: 5,
+   prefix: ({ itemCount }) => `Total ${itemCount} reviews`,
 })
 
 function handleSymbolPageChange(page: number) {
    symbolPagination.page = page
+}
+
+function handleRecentPredictionsPageChange(page: number) {
+   recentPredictionsPagination.page = page
+}
+
+function handleBadEntryReviewPageChange(page: number) {
+   badEntryReviewPagination.page = page
 }
 
 function handleSymbolSorterChange(sorter: SorterResult | null) {
@@ -67,8 +88,6 @@ onUnmounted(() => {
    window.removeEventListener('resize', handleResize)
  })
 
-const SYMBOL_PAGE_SIZE = 10
-
 const d = computed(() => analytics.data)
 const summary = computed(
       () => (d.value as AnalyticsOverview | null)?.summary ?? null,
@@ -88,6 +107,8 @@ const distribution = computed(
 const aiTrust = computed(
       () => (d.value as AnalyticsOverview | null)?.ai_trust ?? null,
  )
+const recentPredictions = computed(() => aiTrust.value?.recent_predictions ?? [])
+const badEntryReview = computed(() => aiTrust.value?.bad_entry_review ?? [])
 
 const sortedAndPaginatedSymbols = computed(() => {
    let rows = [...perSymbol.value]
@@ -143,6 +164,15 @@ const heatmapMetrics = computed(() => {
    }
 })
 
+function syncPaginationBounds(pagination: PaginationProps, itemCount: number) {
+   const pageSize = pagination.pageSize ?? SYMBOL_PAGE_SIZE
+   pagination.itemCount = itemCount
+   const maxPage = Math.max(1, Math.ceil(itemCount / pageSize))
+   if ((pagination.page ?? 1) > maxPage) {
+     pagination.page = maxPage
+   }
+}
+
 watch(perSymbol, (rows) => {
    const pageSize = symbolPagination.pageSize ?? SYMBOL_PAGE_SIZE
    symbolPagination.itemCount = rows.length
@@ -151,6 +181,18 @@ watch(perSymbol, (rows) => {
      symbolPagination.page = maxPage
    }
 })
+
+watch(
+   recentPredictions,
+   (rows) => syncPaginationBounds(recentPredictionsPagination, rows.length),
+   { immediate: true },
+)
+
+watch(
+   badEntryReview,
+   (rows) => syncPaginationBounds(badEntryReviewPagination, rows.length),
+   { immediate: true },
+)
 
 function fmt2(val: number) {
    return val.toFixed(2)
@@ -564,12 +606,13 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                 <n-flex vertical :size="6">
                   <n-text strong>Recent Predictions</n-text>
                   <n-data-table
-                      v-if="aiTrust?.recent_predictions.length"
+                      v-if="recentPredictions.length"
                       :columns="getAiTrustColumns()"
-                      :data="aiTrust.recent_predictions"
-                      :pagination="false"
+                      :data="recentPredictions"
+                      :pagination="recentPredictionsPagination"
                       :scroll-x="1000"
                       size="small"
+                      @update:page="handleRecentPredictionsPageChange"
                   />
                   <n-empty
                       v-else
@@ -579,12 +622,13 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                 <n-flex vertical :size="6">
                   <n-text strong>Bad-entry Review</n-text>
                   <n-data-table
-                      v-if="aiTrust?.bad_entry_review.length"
+                      v-if="badEntryReview.length"
                       :columns="getAiTrustColumns()"
-                      :data="aiTrust.bad_entry_review"
-                      :pagination="false"
+                      :data="badEntryReview"
+                      :pagination="badEntryReviewPagination"
                       :scroll-x="1000"
                       size="small"
+                      @update:page="handleBadEntryReviewPageChange"
                   />
                   <n-empty
                       v-else
