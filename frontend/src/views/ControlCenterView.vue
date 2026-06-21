@@ -640,5 +640,9 @@ async function handleToggleAutopilot(): Promise<void> {
     .page-section {
         min-width: 0;
     }
+
+    .control-center-page :deep(.n-button) {
+        min-height: 44px !important;
+    }
 }
 </style>
