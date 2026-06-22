@@ -75,69 +75,79 @@
         </n-form>
     </n-card>
 
-    <n-card v-if="showAdvancedGeneral" title="AI Trust settings">
-        <n-form
-            ref="aiFormRef"
-            :model="general"
-            :rules="rules"
-            label-width="auto"
-            require-mark-placement="right-hanging"
-            :style="{
-                maxWidth: '640px',
-            }"
-        >
-            <n-form-item
-                label="AI Trust Cockpit enabled"
-                path="ai_trust_enabled"
-                label-placement="left"
+    <template v-if="showAdvancedGeneral">
+        <div class="config-section-header">
+            <h3>AI Trust settings</h3>
+            <n-text depth="3">
+                Ollama provider and warning enforcement controls for AI-reviewed
+                entry admission.
+            </n-text>
+        </div>
+
+        <n-card>
+            <n-form
+                ref="aiFormRef"
+                :model="general"
+                :rules="rules"
+                label-width="auto"
+                require-mark-placement="right-hanging"
+                :style="{
+                    maxWidth: '640px',
+                }"
             >
-                <n-checkbox v-model:checked="general.ai_trust_enabled" />
-            </n-form-item>
-            <n-form-item
-                label="Block AI warning entries"
-                path="ai_trust_enforce_warnings"
-                label-placement="left"
-            >
-                <n-switch
-                    v-model:value="general.ai_trust_enforce_warnings"
-                    :disabled="!general.ai_trust_enabled"
-                />
-            </n-form-item>
-            <n-form-item
-                label="Ollama base URL"
-                path="ai_trust_ollama_base_url"
-            >
-                <n-input
-                    v-model:value="general.ai_trust_ollama_base_url"
-                    placeholder="http://localhost:11434"
-                />
-            </n-form-item>
-            <n-form-item label="Ollama model" path="ai_trust_ollama_model">
-                <n-input
-                    v-model:value="general.ai_trust_ollama_model"
-                    placeholder="qwen3:8b"
-                />
-            </n-form-item>
-            <n-form-item label="AI timeout (ms)" path="ai_trust_timeout_ms">
-                <n-input-number
-                    v-model:value="general.ai_trust_timeout_ms"
-                    :min="250"
-                    :step="250"
-                />
-            </n-form-item>
-            <n-form-item
-                label="AI retry budget"
-                path="ai_trust_max_retries"
-            >
-                <n-input-number
-                    v-model:value="general.ai_trust_max_retries"
-                    :min="0"
-                    :max="2"
-                    :step="1"
-                />
-            </n-form-item>
-        </n-form>
-    </n-card>
+                <n-form-item
+                    label="AI Trust Cockpit enabled"
+                    path="ai_trust_enabled"
+                    label-placement="left"
+                >
+                    <n-checkbox v-model:checked="general.ai_trust_enabled" />
+                </n-form-item>
+                <n-form-item
+                    label="Block AI warning entries"
+                    path="ai_trust_enforce_warnings"
+                    label-placement="left"
+                >
+                    <n-switch
+                        v-model:value="general.ai_trust_enforce_warnings"
+                        :disabled="!general.ai_trust_enabled"
+                    />
+                </n-form-item>
+                <n-form-item
+                    label="Ollama base URL"
+                    path="ai_trust_ollama_base_url"
+                >
+                    <n-input
+                        v-model:value="general.ai_trust_ollama_base_url"
+                        placeholder="http://localhost:11434"
+                    />
+                </n-form-item>
+                <n-form-item label="Ollama model" path="ai_trust_ollama_model">
+                    <n-input
+                        v-model:value="general.ai_trust_ollama_model"
+                        placeholder="qwen3:8b"
+                    />
+                </n-form-item>
+                <n-form-item label="AI timeout (ms)" path="ai_trust_timeout_ms">
+                    <n-input-number
+                        v-model:value="general.ai_trust_timeout_ms"
+                        :min="250"
+                        :step="250"
+                    />
+                </n-form-item>
+                <n-form-item
+                    label="AI retry budget"
+                    path="ai_trust_max_retries"
+                >
+                    <n-input-number
+                        v-model:value="general.ai_trust_max_retries"
+                        :min="0"
+                        :max="2"
+                        :step="1"
+                    />
+                </n-form-item>
+            </n-form>
+        </n-card>
+    </template>
 </template>
 
 <script setup lang="ts">
@@ -188,3 +198,21 @@ defineExpose({
     validate,
 })
 </script>
+
+<style scoped>
+.config-section-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.config-section-header h3 {
+    margin: 0;
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
+    font-size: 1.05rem;
+    font-weight: 450;
+    letter-spacing: 0;
+    line-height: 1.2;
+}
+</style>

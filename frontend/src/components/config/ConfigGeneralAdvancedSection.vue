@@ -50,7 +50,15 @@
         </n-form>
     </n-card>
 
-    <n-card title="AI Trust settings">
+    <div class="config-section-header">
+        <h3>AI Trust settings</h3>
+        <n-text depth="3">
+            Ollama provider and warning enforcement controls for AI-reviewed
+            entry admission.
+        </n-text>
+    </div>
+
+    <n-card>
         <n-form
             ref="aiFormRef"
             :model="general"
@@ -146,3 +154,21 @@ defineExpose({
     validate,
 })
 </script>
+
+<style scoped>
+.config-section-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.config-section-header h3 {
+    margin: 0;
+    color: var(--mw-color-text-primary);
+    font-family: var(--mw-font-display);
+    font-size: 1.05rem;
+    font-weight: 450;
+    letter-spacing: 0;
+    line-height: 1.2;
+}
+</style>
