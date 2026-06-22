@@ -239,6 +239,10 @@ const trustSummary = computed(() => {
     line-height: 1.5;
 }
 
+.preview-actions :deep(.n-button) {
+    min-width: max-content;
+}
+
 @media (max-width: 768px) {
     .preview-header {
         flex-wrap: wrap;
@@ -251,6 +255,7 @@ const trustSummary = computed(() => {
 
     .preview-actions :deep(.n-button) {
         flex: 1 1 auto;
+        min-width: max-content;
     }
 
     .preview-metrics {
