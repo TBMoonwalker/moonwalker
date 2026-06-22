@@ -1,7 +1,7 @@
 <template>
     <n-card>
         <n-form
-            ref="formRef"
+            ref="runtimeFormRef"
             :model="general"
             :rules="rules"
             label-width="auto"
@@ -47,7 +47,20 @@
                     :min="500"
                 />
             </n-form-item>
-            <n-divider />
+        </n-form>
+    </n-card>
+
+    <n-card title="AI Trust settings">
+        <n-form
+            ref="aiFormRef"
+            :model="general"
+            :rules="rules"
+            label-width="auto"
+            require-mark-placement="right-hanging"
+            :style="{
+                maxWidth: '640px',
+            }"
+        >
             <n-form-item
                 label="AI Trust Cockpit enabled"
                 path="ai_trust_enabled"
@@ -109,15 +122,24 @@ defineProps<{
     rules: FormRules
 }>()
 
-const formRef = ref<FormInst | null>(null)
+const runtimeFormRef = ref<FormInst | null>(null)
+const aiFormRef = ref<FormInst | null>(null)
+
+function validateForm(form: FormInst | null): Promise<boolean> {
+    if (!form) {
+        return Promise.resolve(true)
+    }
+    return new Promise<boolean>((resolve) => {
+        form.validate((errors) => resolve(!errors))
+    })
+}
 
 async function validate(): Promise<boolean> {
-    if (!formRef.value) {
-        return true
-    }
-    return await new Promise<boolean>((resolve) => {
-        formRef.value?.validate((errors) => resolve(!errors))
-    })
+    const [runtimeValid, aiValid] = await Promise.all([
+        validateForm(runtimeFormRef.value),
+        validateForm(aiFormRef.value),
+    ])
+    return runtimeValid && aiValid
 }
 
 defineExpose({
