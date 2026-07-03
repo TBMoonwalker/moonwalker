@@ -1,6 +1,7 @@
 <template>
     <n-data-table
         remote
+        class="closed-trades-table"
         ref="table"
         :columns="columns_closed_trades"
         :data="paged_closed_trades || []"
@@ -26,7 +27,9 @@ import {
     type DataTableRowKey,
 } from 'naive-ui/es/data-table'
 import { useDialog } from 'naive-ui/es/dialog'
+import { NIcon } from 'naive-ui/es/icon'
 import { useMessage } from 'naive-ui/es/message'
+import { TrashBinOutline } from '@vicons/ionicons5'
 import ClosedTradeExpandedRow from './ClosedTradeExpandedRow.vue'
 import { fetchJson } from '../api/client'
 import { useConfiguredMinTimeframe } from '../composables/useConfiguredMinTimeframe'
@@ -54,6 +57,11 @@ const dialog = useDialog()
 const message = useMessage()
 const sortState = ref<TradeTableSortState | null>(null)
 const expandedClosedTradeRowKeys = ref<DataTableRowKey[]>([])
+const deleteButtonStyle = {
+    minHeight: '36px',
+    minWidth: '48px',
+    padding: '0 11px',
+}
 
 const {
     rows: closed_trades,
@@ -302,10 +310,17 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             sortOrder: resolveTradeTableColumnOrder(sortState.value, 'cost'),
         },
         {
-            title: 'PNL %',
+            title: isMobile.value ? 'PNL' : 'PNL %',
             key: 'profit_percent',
             className: 'profit',
             render: (rowData) => {
+                if (isMobile.value) {
+                    return renderCellStack(
+                        `${formatFixed(rowData.profit_percent)}%`,
+                        formatFixed(rowData.profit),
+                        'trade-cell-main profit',
+                    )
+                }
                 return renderCellStack(
                     `${formatFixed(rowData.profit_percent)}%`,
                     undefined,
@@ -354,20 +369,36 @@ const columns_trades = (): DataTableColumns<ClosedTradeRow> => {
             ),
         },
         {
-            title: 'Action',
+            title: isMobile.value ? '' : 'Action',
             key: 'action',
             align: 'center',
             render: (rowData) => {
-                return h('div', { class: 'trade-row-actions' }, [
+                return h('div', { class: 'trade-row-actions trade-row-actions-delete' }, [
                     h(
                         NButton,
                         {
+                            class: 'trade-action-button trade-action-delete',
+                            'aria-label': `Delete ${rowData.symbol}`,
                             size: 'medium',
                             type: 'error',
                             ghost: true,
+                            style: deleteButtonStyle,
                             onClick: () => handleDeleteClosedTrade(rowData),
                         },
-                        { default: () => 'Delete' }
+                        {
+                            icon: () =>
+                                h(
+                                    NIcon,
+                                    { size: 18 },
+                                    { default: () => h(TrashBinOutline) },
+                                ),
+                            default: () =>
+                                h(
+                                    'span',
+                                    { class: 'trade-action-label' },
+                                    'Delete',
+                                ),
+                        }
                     ),
                 ])
             },

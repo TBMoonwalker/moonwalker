@@ -28,7 +28,6 @@ export const OPEN_TRADES_TABLET_COLUMN_KEYS = [
 
 export const CLOSED_TRADES_MOBILE_COLUMN_KEYS = [
     'symbol',
-    'profit',
     'profit_percent',
     'close_date',
     'action',

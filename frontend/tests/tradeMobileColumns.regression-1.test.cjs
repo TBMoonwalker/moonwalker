@@ -58,7 +58,6 @@ test('tablet open trades keeps cost and PnL columns visible', () => {
 test('mobile closed trades keeps PnL visible without the cost column', () => {
     assert.deepEqual(CLOSED_TRADES_MOBILE_COLUMN_KEYS, [
         'symbol',
-        'profit',
         'profit_percent',
         'close_date',
         'action',
@@ -97,4 +96,35 @@ test('mobile trade ledger keeps action controls in a compact touch grid', () => 
     assert.match(tradesViewSource, /min-width: 44px !important;/)
     assert.match(tradesViewSource, /grid-column: 1 \/ -1;/)
     assert.match(tradesViewSource, /clip: rect\(0 0 0 0\);/)
+})
+
+test('mobile trade ledger reduces first column indentation', () => {
+    assert.match(tradesViewSource, /data-col-key="__n_expand__"/)
+    assert.match(tradesViewSource, /n-data-table-table colgroup col:first-child/)
+    assert.match(tradesViewSource, /padding-left: 2px !important;/)
+    assert.match(tradesViewSource, /min-width: 116px;/)
+})
+
+test('mobile trade ledger tabs avoid clipped horizontal scroll labels', () => {
+    assert.match(tradesViewSource, /\.ledger-tabs :deep\(\.n-tabs-wrapper\)/)
+    assert.match(tradesViewSource, /\.ledger-tabs :deep\(\.n-tabs-tab-wrapper\)/)
+    assert.match(tradesViewSource, /isMobile \? 'Open' : 'Open Trades'/)
+    assert.match(tradesViewSource, /isMobile \? 'Unsell\.' : 'Unsellable'/)
+    assert.match(tradesViewSource, /isMobile \? 'Closed' : 'Closed Trades'/)
+    assert.match(tradesViewSource, /\.ledger-tabs \.trade-tab-label/)
+    assert.match(tradesViewSource, /text-overflow: ellipsis;/)
+})
+
+test('mobile closed trade delete action is compact and accessible', () => {
+    const closedTradesSource = fs.readFileSync(
+        path.join(rootDir, 'src/components/ClosedTrades.vue'),
+        'utf8',
+    )
+    assert.match(closedTradesSource, /class="closed-trades-table"/)
+    assert.match(closedTradesSource, /TrashBinOutline/)
+    assert.match(closedTradesSource, /title: isMobile\.value \? '' : 'Action'/)
+    assert.match(closedTradesSource, /'aria-label': `Delete \$\{rowData\.symbol\}`/)
+    assert.match(closedTradesSource, /class: 'trade-row-actions trade-row-actions-delete'/)
+    assert.match(tradesViewSource, /closed-trades-table \.n-data-table-th\[data-col-key="action"\]/)
+    assert.match(tradesViewSource, /width: 52px;/)
 })

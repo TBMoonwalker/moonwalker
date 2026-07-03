@@ -157,7 +157,7 @@ onUnmounted(() => {
       >
         <n-tab-pane name="open-trades">
           <template #tab>
-            <span id="trade-ledger-title" class="trade-tab-label">Open Trades</span>
+            <span id="trade-ledger-title" class="trade-tab-label">{{ isMobile ? 'Open' : 'Open Trades' }}</span>
           </template>
           <OpenTrades
             v-if="activeTradesTab === 'open-trades'"
@@ -179,13 +179,16 @@ onUnmounted(() => {
         <n-tab-pane name="unsellable-trades">
           <template #tab>
             <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': unsellableTradesCount > 0 }">
-              <span>Unsellable</span>
+              <span>{{ isMobile ? 'Unsell.' : 'Unsellable' }}</span>
               <span v-if="unsellableTradesCount > 0" class="trade-tab-count">{{ unsellableTradesCount }}</span>
             </span>
           </template>
           <UnsellableTrades v-if="activeTradesTab === 'unsellable-trades'" />
         </n-tab-pane>
-        <n-tab-pane name="closed-trades" tab="Closed Trades">
+        <n-tab-pane name="closed-trades">
+          <template #tab>
+            <span class="trade-tab-label">{{ isMobile ? 'Closed' : 'Closed Trades' }}</span>
+          </template>
           <ClosedTrades v-if="activeTradesTab === 'closed-trades'" />
         </n-tab-pane>
       </n-tabs>
@@ -373,25 +376,63 @@ onUnmounted(() => {
     padding-right: 6px !important;
   }
 
+  .ledger-panel :deep(.n-data-table-th[data-col-key="__n_expand__"]),
+  .ledger-panel :deep(.n-data-table-td[data-col-key="__n_expand__"]) {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: hidden;
+  }
+
+  .ledger-panel :deep(.n-data-table-table colgroup col:first-child) {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+  }
+
   .profit-tabs :deep(.n-tabs-wrapper) {
     display: flex;
     width: 100%;
   }
 
-  .profit-tabs :deep(.n-tabs-tab-wrapper) {
+  .ledger-tabs :deep(.n-tabs-wrapper) {
+    display: flex;
+    width: 100%;
+  }
+
+  .profit-tabs :deep(.n-tabs-tab-wrapper),
+  .ledger-tabs :deep(.n-tabs-tab-wrapper) {
     flex: 1 1 0;
     min-width: 0;
   }
 
-  .profit-tabs :deep(.n-tabs-tab) {
+  .profit-tabs :deep(.n-tabs-tab),
+  .ledger-tabs :deep(.n-tabs-tab) {
     justify-content: center;
     width: 100%;
   }
 
+  .ledger-tabs :deep(.n-tabs-tab) {
+    padding-left: 4px;
+    padding-right: 4px;
+  }
+
+  .ledger-tabs .trade-tab-label {
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .ledger-panel :deep(.n-data-table-th[data-col-key="symbol"]),
   .ledger-panel :deep(.n-data-table-td[data-col-key="symbol"]) {
-    min-width: 122px;
-    width: 122px;
+    min-width: 116px;
+    width: 116px;
+    padding-left: 2px !important;
+    padding-right: 4px !important;
   }
 
   .ledger-panel :deep(.n-data-table-th[data-col-key="display_profit_percent"]),
@@ -404,6 +445,12 @@ onUnmounted(() => {
   .ledger-panel :deep(.n-data-table-td[data-col-key="action"]) {
     min-width: 96px;
     width: 96px;
+  }
+
+  .ledger-panel :deep(.closed-trades-table .n-data-table-th[data-col-key="action"]),
+  .ledger-panel :deep(.closed-trades-table .n-data-table-td[data-col-key="action"]) {
+    min-width: 52px;
+    width: 52px;
   }
 
   .ledger-panel :deep(.trade-symbol-main) {
@@ -435,6 +482,12 @@ onUnmounted(() => {
   .ledger-panel :deep(.trade-row-actions .trade-action-more) {
     grid-column: 1 / -1;
     width: 92px !important;
+  }
+
+  .ledger-panel :deep(.trade-row-actions-delete) {
+    display: flex;
+    justify-content: center;
+    width: 44px;
   }
 
   .ledger-panel :deep(.trade-action-label) {
