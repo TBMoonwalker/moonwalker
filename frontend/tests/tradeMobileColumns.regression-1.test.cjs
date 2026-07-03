@@ -13,6 +13,10 @@ const tradesViewSource = fs.readFileSync(
     path.join(rootDir, 'src/views/TradesView.vue'),
     'utf8',
 )
+const openTradesSource = fs.readFileSync(
+    path.join(rootDir, 'src/components/OpenTrades.vue'),
+    'utf8',
+)
 
 const {
     CLOSED_TRADES_MOBILE_COLUMN_KEYS,
@@ -101,8 +105,16 @@ test('mobile trade ledger keeps action controls in a compact touch grid', () => 
 test('mobile trade ledger reduces first column indentation', () => {
     assert.match(tradesViewSource, /data-col-key="__n_expand__"/)
     assert.match(tradesViewSource, /n-data-table-table colgroup col:first-child/)
-    assert.match(tradesViewSource, /padding-left: 2px !important;/)
-    assert.match(tradesViewSource, /min-width: 116px;/)
+    assert.match(openTradeColumnsSource, /OPEN_TRADES_MOBILE_COLUMN_WIDTHS/)
+    assert.match(openTradeColumnsSource, /symbol: 96/)
+    assert.match(openTradeColumnsSource, /action: 161/)
+    assert.match(openTradesSource, /class="open-trades-table"/)
+    assert.match(tradesViewSource, /open-trades-table \.n-data-table-table colgroup col:nth-child\(2\)/)
+    assert.match(tradesViewSource, /open-trades-table \.n-data-table-table colgroup col:nth-child\(3\)/)
+    assert.match(tradesViewSource, /open-trades-table \.n-data-table-table colgroup col:nth-child\(4\)/)
+    assert.match(tradesViewSource, /padding-left: 0 !important;/)
+    assert.match(tradesViewSource, /min-width: 96px;/)
+    assert.match(tradesViewSource, /max-width: 96px;/)
 })
 
 test('mobile trade ledger tabs avoid clipped horizontal scroll labels', () => {

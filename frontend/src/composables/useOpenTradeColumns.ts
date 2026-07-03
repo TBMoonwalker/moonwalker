@@ -56,6 +56,11 @@ const tradeActionButtonStyle = {
     minWidth: '48px',
     padding: '0 11px',
 }
+const OPEN_TRADES_MOBILE_COLUMN_WIDTHS: Record<string, number> = {
+    symbol: 96,
+    display_profit_percent: 68,
+    action: 161,
+}
 const TPSO_PRICE_PADDING_PERCENT = 0.7
 const MIN_TPSO_STATUS_FILL_PERCENT = 3
 
@@ -506,14 +511,28 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         ]
 
         if (options.isMobile.value) {
-            return columns.filter((column) => {
+            return columns.flatMap((column) => {
                 if (!('key' in column)) {
-                    return true
+                    return [column]
                 }
-                return shouldShowTradeTableColumn(
+                if (!shouldShowTradeTableColumn(
                     column.key,
                     OPEN_TRADES_MOBILE_COLUMN_KEYS,
-                )
+                )) {
+                    return []
+                }
+                const mobileWidth =
+                    OPEN_TRADES_MOBILE_COLUMN_WIDTHS[String(column.key)]
+                return [
+                    mobileWidth
+                        ? {
+                              ...column,
+                              width: mobileWidth,
+                              minWidth: mobileWidth,
+                              maxWidth: mobileWidth,
+                          }
+                        : column,
+                ]
             })
         }
 

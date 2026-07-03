@@ -2,6 +2,7 @@
     <n-data-table
         size="small"
         remote
+        class="open-trades-table"
         ref="table"
         :columns="columns_open_trades"
         :data="displayed_open_trades || []"

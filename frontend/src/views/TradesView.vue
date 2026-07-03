@@ -392,6 +392,18 @@ onUnmounted(() => {
     max-width: 0 !important;
   }
 
+  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(2)) {
+    width: 96px !important;
+    min-width: 96px !important;
+    max-width: 96px !important;
+  }
+
+  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(3)) {
+    width: 68px !important;
+    min-width: 68px !important;
+    max-width: 68px !important;
+  }
+
   .profit-tabs :deep(.n-tabs-wrapper) {
     display: flex;
     width: 100%;
@@ -431,20 +443,43 @@ onUnmounted(() => {
   .ledger-panel :deep(.n-data-table-td[data-col-key="symbol"]) {
     min-width: 116px;
     width: 116px;
-    padding-left: 2px !important;
+    max-width: 116px;
+    padding-left: 0 !important;
     padding-right: 4px !important;
+  }
+
+  .ledger-panel :deep(.open-trades-table .n-data-table-th[data-col-key="symbol"]),
+  .ledger-panel :deep(.open-trades-table .n-data-table-td[data-col-key="symbol"]) {
+    min-width: 96px;
+    width: 96px;
+    max-width: 96px;
   }
 
   .ledger-panel :deep(.n-data-table-th[data-col-key="display_profit_percent"]),
   .ledger-panel :deep(.n-data-table-td[data-col-key="display_profit_percent"]) {
-    min-width: 72px;
-    width: 72px;
+    min-width: 68px;
+    width: 68px;
+    max-width: 68px;
   }
 
   .ledger-panel :deep(.n-data-table-th[data-col-key="action"]),
   .ledger-panel :deep(.n-data-table-td[data-col-key="action"]) {
     min-width: 96px;
     width: 96px;
+    max-width: 96px;
+  }
+
+  .ledger-panel :deep(.open-trades-table .n-data-table-th[data-col-key="action"]),
+  .ledger-panel :deep(.open-trades-table .n-data-table-td[data-col-key="action"]) {
+    min-width: 161px;
+    width: 161px;
+    max-width: 161px;
+  }
+
+  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(4)) {
+    width: 161px !important;
+    min-width: 161px !important;
+    max-width: 161px !important;
   }
 
   .ledger-panel :deep(.closed-trades-table .n-data-table-th[data-col-key="action"]),
