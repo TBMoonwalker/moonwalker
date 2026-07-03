@@ -1,7 +1,18 @@
 const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
 const test = require('node:test')
 
 const { loadFrontendModule } = require('./helpers/loadFrontendModule.cjs')
+const rootDir = path.resolve(__dirname, '..')
+const openTradeColumnsSource = fs.readFileSync(
+    path.join(rootDir, 'src/composables/useOpenTradeColumns.ts'),
+    'utf8',
+)
+const tradesViewSource = fs.readFileSync(
+    path.join(rootDir, 'src/views/TradesView.vue'),
+    'utf8',
+)
 
 const {
     CLOSED_TRADES_MOBILE_COLUMN_KEYS,
@@ -70,4 +81,20 @@ test('tablet closed trades keeps cost and PnL columns visible', () => {
         'close_date',
         'action',
     ])
+})
+
+test('mobile open trade actions expose icon buttons with accessible labels', () => {
+    assert.match(openTradeColumnsSource, /class: 'trade-action-button trade-action-sell'/)
+    assert.match(openTradeColumnsSource, /'aria-label': `Sell \$\{rowData\.symbol\}`/)
+    assert.match(openTradeColumnsSource, /class: 'trade-action-button trade-action-stop'/)
+    assert.match(openTradeColumnsSource, /'aria-label': `Stop \$\{rowData\.symbol\}`/)
+    assert.match(openTradeColumnsSource, /class: 'trade-action-label'/)
+})
+
+test('mobile trade ledger keeps action controls in a compact touch grid', () => {
+    assert.match(tradesViewSource, /grid-template-columns: repeat\(2, 44px\);/)
+    assert.match(tradesViewSource, /width: 92px;/)
+    assert.match(tradesViewSource, /min-width: 44px !important;/)
+    assert.match(tradesViewSource, /grid-column: 1 \/ -1;/)
+    assert.match(tradesViewSource, /clip: rect\(0 0 0 0\);/)
 })

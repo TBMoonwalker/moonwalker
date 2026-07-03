@@ -20,7 +20,8 @@ const helpersSource = fs.readFileSync(
 test('open trade row actions prioritize sell and avoid duplicate buy controls', () => {
     assert.ok(
         columnsSource.includes("onClick: () => options.onDealSell(rowData)") &&
-            columnsSource.includes("{ default: () => 'Sell' }"),
+            columnsSource.includes("'aria-label': `Sell ${rowData.symbol}`") &&
+            columnsSource.includes("'Sell'"),
         'the primary open-trade row action should sell the trade',
     )
     assert.ok(
@@ -41,7 +42,8 @@ test('open trade overflow actions keep secondary actions without duplicating sto
         'manual buy should remain in the overflow menu and respect buy blocking',
     )
     assert.ok(
-        columnsSource.includes("{ default: () => 'Stop' }"),
+        columnsSource.includes("'aria-label': `Stop ${rowData.symbol}`") &&
+            columnsSource.includes("'Stop'"),
         'the row action strip should keep the visible stop action',
     )
     assert.ok(

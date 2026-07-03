@@ -5,7 +5,11 @@ import { NIcon } from 'naive-ui/es/icon'
 import { NTag } from 'naive-ui/es/tag'
 import { NTooltip } from 'naive-ui/es/tooltip'
 import { type DataTableColumns } from 'naive-ui/es/data-table'
-import { EllipsisHorizontal } from '@vicons/ionicons5'
+import {
+    CashOutline,
+    EllipsisHorizontal,
+    StopCircleOutline,
+} from '@vicons/ionicons5'
 
 import OpenTradeExpandedRow from '../components/OpenTradeExpandedRow.vue'
 import {
@@ -125,6 +129,8 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     h(
                         NButton,
                         {
+                            class: 'trade-action-button trade-action-more',
+                            'aria-label': 'More trade actions',
                             size: 'medium',
                             ghost: true,
                             style: tradeActionButtonStyle,
@@ -138,7 +144,12 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                         default: () => h(EllipsisHorizontal),
                                     },
                                 ),
-                            default: () => 'More',
+                            default: () =>
+                                h(
+                                    'span',
+                                    { class: 'trade-action-label' },
+                                    'More',
+                                ),
                         },
                     ),
             },
@@ -363,6 +374,9 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                     h(
                                         NButton,
                                         {
+                                            class: 'trade-action-button trade-action-stop',
+                                            'aria-label':
+                                                'Stop unsellable trade',
                                             type: 'error',
                                             size: 'medium',
                                             ghost: true,
@@ -370,7 +384,25 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                             onClick: () =>
                                                 options.onDealStop(rowData),
                                         },
-                                        { default: () => 'Stop (Unsellable)' },
+                                        {
+                                            icon: () =>
+                                                h(
+                                                    NIcon,
+                                                    { size: 18 },
+                                                    {
+                                                        default: () =>
+                                                            h(StopCircleOutline),
+                                                    },
+                                                ),
+                                            default: () =>
+                                                h(
+                                                    'span',
+                                                    {
+                                                        class: 'trade-action-label',
+                                                    },
+                                                    'Stop',
+                                                ),
+                                        },
                                     ),
                                 default: () => getUnsellableMessage(rowData),
                             }),
@@ -384,6 +416,8 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                             h(
                                 NButton,
                                 {
+                                    class: 'trade-action-button trade-action-sell',
+                                    'aria-label': `Sell ${rowData.symbol}`,
                                     primary: true,
                                     size: 'medium',
                                     ghost: true,
@@ -391,18 +425,49 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                     style: tradeActionButtonStyle,
                                     onClick: () => options.onDealSell(rowData),
                                 },
-                                { default: () => 'Sell' },
+                                {
+                                    icon: () =>
+                                        h(
+                                            NIcon,
+                                            { size: 18 },
+                                            { default: () => h(CashOutline) },
+                                        ),
+                                    default: () =>
+                                        h(
+                                            'span',
+                                            { class: 'trade-action-label' },
+                                            'Sell',
+                                        ),
+                                },
                             ),
                             h(
                                 NButton,
                                 {
+                                    class: 'trade-action-button trade-action-stop',
+                                    'aria-label': `Stop ${rowData.symbol}`,
                                     type: 'error',
                                     size: 'medium',
                                     ghost: true,
                                     style: tradeActionButtonStyle,
                                     onClick: () => options.onDealStop(rowData),
                                 },
-                                { default: () => 'Stop' },
+                                {
+                                    icon: () =>
+                                        h(
+                                            NIcon,
+                                            { size: 18 },
+                                            {
+                                                default: () =>
+                                                    h(StopCircleOutline),
+                                            },
+                                        ),
+                                    default: () =>
+                                        h(
+                                            'span',
+                                            { class: 'trade-action-label' },
+                                            'Stop',
+                                        ),
+                                },
                             ),
                             renderOverflowActions(rowData),
                         ],

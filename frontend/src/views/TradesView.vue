@@ -367,6 +367,12 @@ onUnmounted(() => {
 }
 
 @media (max-width: 520px) {
+  .ledger-panel :deep(.n-data-table-td),
+  .ledger-panel :deep(.n-data-table-th) {
+    padding-left: 6px !important;
+    padding-right: 6px !important;
+  }
+
   .profit-tabs :deep(.n-tabs-wrapper) {
     display: flex;
     width: 100%;
@@ -384,24 +390,26 @@ onUnmounted(() => {
 
   .ledger-panel :deep(.n-data-table-th[data-col-key="symbol"]),
   .ledger-panel :deep(.n-data-table-td[data-col-key="symbol"]) {
-    min-width: 112px;
-    width: 112px;
+    min-width: 122px;
+    width: 122px;
   }
 
   .ledger-panel :deep(.n-data-table-th[data-col-key="display_profit_percent"]),
   .ledger-panel :deep(.n-data-table-td[data-col-key="display_profit_percent"]) {
-    min-width: 76px;
-    width: 76px;
+    min-width: 72px;
+    width: 72px;
   }
 
   .ledger-panel :deep(.n-data-table-th[data-col-key="action"]),
   .ledger-panel :deep(.n-data-table-td[data-col-key="action"]) {
-    min-width: 128px;
-    width: 128px;
+    min-width: 96px;
+    width: 96px;
   }
 
   .ledger-panel :deep(.trade-symbol-main) {
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .ledger-panel :deep(.n-data-table-td[data-col-key="display_profit_percent"] .trade-cell-main),
@@ -410,18 +418,32 @@ onUnmounted(() => {
   }
 
   .ledger-panel :deep(.trade-row-actions) {
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    width: 116px;
-    gap: 6px;
+    display: grid;
+    grid-template-columns: repeat(2, 44px);
+    justify-content: end;
+    width: 92px;
+    gap: 4px;
   }
 
   .ledger-panel :deep(.trade-row-actions .n-button) {
+    min-width: 44px !important;
+    width: 44px !important;
     min-height: 44px !important;
+    padding: 0 !important;
   }
 
-  .ledger-panel :deep(.trade-row-actions .n-button:nth-child(n + 3)) {
-    flex: 1 1 100%;
+  .ledger-panel :deep(.trade-row-actions .trade-action-more) {
+    grid-column: 1 / -1;
+    width: 92px !important;
+  }
+
+  .ledger-panel :deep(.trade-action-label) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
 }
