@@ -15,6 +15,7 @@ export type TradeTableSortValueKind = 'number' | 'date' | 'text'
 export const OPEN_TRADES_MOBILE_COLUMN_KEYS = [
     'symbol',
     'display_profit_percent',
+    'open_date',
     'action',
 ] as const
 

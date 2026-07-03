@@ -57,9 +57,10 @@ const tradeActionButtonStyle = {
     padding: '0 11px',
 }
 const OPEN_TRADES_MOBILE_COLUMN_WIDTHS: Record<string, number> = {
-    symbol: 96,
-    display_profit_percent: 68,
-    action: 161,
+    symbol: 86,
+    display_profit_percent: 64,
+    open_date: 79,
+    action: 96,
 }
 const TPSO_PRICE_PADDING_PERCENT = 0.7
 const MIN_TPSO_STATUS_FILL_PERCENT = 3
@@ -493,7 +494,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 align: 'center',
             },
             {
-                title: 'Opened',
+                title: options.isMobile.value ? 'Open' : 'Opened',
                 key: 'open_date',
                 align: 'center',
                 render: (rowData) => {
@@ -511,29 +512,38 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         ]
 
         if (options.isMobile.value) {
-            return columns.flatMap((column) => {
-                if (!('key' in column)) {
-                    return [column]
-                }
-                if (!shouldShowTradeTableColumn(
-                    column.key,
-                    OPEN_TRADES_MOBILE_COLUMN_KEYS,
-                )) {
-                    return []
-                }
+            const hiddenColumns = columns.filter((column) => !('key' in column))
+            const mobileColumns = OPEN_TRADES_MOBILE_COLUMN_KEYS.flatMap(
+                (columnKey) => {
+                    const column = columns.find(
+                        (candidate) =>
+                            'key' in candidate &&
+                            String(candidate.key) === columnKey,
+                    )
+                    if (
+                        !column ||
+                        !shouldShowTradeTableColumn(
+                            columnKey,
+                            OPEN_TRADES_MOBILE_COLUMN_KEYS,
+                        )
+                    ) {
+                        return []
+                    }
                 const mobileWidth =
-                    OPEN_TRADES_MOBILE_COLUMN_WIDTHS[String(column.key)]
-                return [
-                    mobileWidth
-                        ? {
-                              ...column,
-                              width: mobileWidth,
-                              minWidth: mobileWidth,
-                              maxWidth: mobileWidth,
-                          }
-                        : column,
-                ]
-            })
+                        OPEN_TRADES_MOBILE_COLUMN_WIDTHS[String(column.key)]
+                    return [
+                        mobileWidth
+                            ? {
+                                  ...column,
+                                  width: mobileWidth,
+                                  minWidth: mobileWidth,
+                                  maxWidth: mobileWidth,
+                              }
+                            : column,
+                    ]
+                },
+            )
+            return [...hiddenColumns, ...mobileColumns]
         }
 
         if (options.isTablet.value) {
