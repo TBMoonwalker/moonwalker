@@ -18,6 +18,23 @@ const analytics = useAnalyticsStore()
 const activeTab = ref('symbols')
 const isMobile = ref(false)
 const SYMBOL_PAGE_SIZE = 10
+const SYMBOL_MOBILE_COLUMN_KEYS = new Set([
+   'symbol',
+   'trades',
+   'win_rate',
+   'total_profit',
+])
+const DURATION_MOBILE_COLUMN_KEYS = new Set([
+   'symbol',
+   'duration_formatted',
+   'profit',
+])
+const AI_TRUST_MOBILE_COLUMN_KEYS = new Set([
+   'symbol',
+   'created_at',
+   'risk_score',
+   'outcome_status',
+])
 const symbolSortState = ref<{ columnKey: string; order: 'ascend' | 'descend' } | null>({
    columnKey: 'trades',
    order: 'descend',
@@ -73,6 +90,10 @@ function columnSortOrder(key: string): string | null {
 
 function handleResize() {
    isMobile.value = window.innerWidth < 768
+   const pageSlot = isMobile.value ? 3 : 5
+   symbolPagination.pageSlot = pageSlot
+   recentPredictionsPagination.pageSlot = pageSlot
+   badEntryReviewPagination.pageSlot = pageSlot
 }
 
 onMounted(() => {
@@ -258,24 +279,24 @@ const tabNames = [
  ]
 
 function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][number]> {
-   return [
+   const columns: DataTableColumns<AnalyticsOverview['per_symbol'][number]> = [
       {
        title: 'Symbol',
        key: 'symbol',
-       width: 120,
-       fixed: 'left',
+       width: isMobile.value ? 112 : 120,
+       fixed: isMobile.value ? undefined : 'left',
       },
       {
        title: 'Trades',
        key: 'trades',
-       width: 80,
+       width: isMobile.value ? 64 : 80,
        sorter: 'default',
        sortOrder: columnSortOrder('trades'),
       },
       {
        title: 'Win Rate',
        key: 'win_rate',
-       width: 100,
+       width: isMobile.value ? 78 : 100,
        sorter: 'default',
        sortOrder: columnSortOrder('win_rate'),
        render(row: any) {
@@ -285,7 +306,7 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
       {
        title: 'Total Profit',
        key: 'total_profit',
-       width: 120,
+       width: isMobile.value ? 92 : 120,
        sorter: 'default',
        sortOrder: columnSortOrder('total_profit'),
        render(row: any) {
@@ -314,14 +335,23 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        width: 100,
       },
     ]
+   if (isMobile.value) {
+      return columns.filter((column) => {
+         if (!('key' in column)) {
+            return true
+         }
+         return SYMBOL_MOBILE_COLUMN_KEYS.has(String(column.key))
+      })
+   }
+   return columns
 }
 
 function getDurationColumns(): DataTableColumns<AnalyticsOverview['duration_extremes']['longest'][number]> {
-   return [
+   const columns: DataTableColumns<AnalyticsOverview['duration_extremes']['longest'][number]> = [
       {
        title: 'Symbol',
        key: 'symbol',
-       width: 120,
+       width: isMobile.value ? 112 : 120,
       },
       {
        title: 'Duration',
@@ -361,6 +391,15 @@ function getDurationColumns(): DataTableColumns<AnalyticsOverview['duration_extr
         },
       },
     ]
+   if (isMobile.value) {
+      return columns.filter((column) => {
+         if (!('key' in column)) {
+            return true
+         }
+         return DURATION_MOBILE_COLUMN_KEYS.has(String(column.key))
+      })
+   }
+   return columns
 }
 
 function getDistributionColumns(): DataTableColumns<{ label: string; min: number; max: number; count: number }> {
@@ -386,12 +425,12 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 }
 
 function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
-   return [
+   const columns: DataTableColumns<AiTrustPrediction> = [
       {
        title: 'Symbol',
        key: 'symbol',
-       width: 130,
-       fixed: 'left',
+       width: isMobile.value ? 112 : 130,
+       fixed: isMobile.value ? undefined : 'left',
         render(row) {
          return h('span', { class: 'ai-trust-symbol' }, row.symbol)
         },
@@ -457,6 +496,15 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
         },
       },
    ]
+   if (isMobile.value) {
+      return columns.filter((column) => {
+         if (!('key' in column)) {
+            return true
+         }
+         return AI_TRUST_MOBILE_COLUMN_KEYS.has(String(column.key))
+      })
+   }
+   return columns
 }
 </script>
 
@@ -610,7 +658,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                       :columns="getAiTrustColumns()"
                       :data="recentPredictions"
                       :pagination="recentPredictionsPagination"
-                      :scroll-x="1000"
+                      :scroll-x="isMobile ? 382 : 1000"
                       size="small"
                       @update:page="handleRecentPredictionsPageChange"
                   />
@@ -626,7 +674,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                       :columns="getAiTrustColumns()"
                       :data="badEntryReview"
                       :pagination="badEntryReviewPagination"
-                      :scroll-x="1000"
+                      :scroll-x="isMobile ? 382 : 1000"
                       size="small"
                       @update:page="handleBadEntryReviewPageChange"
                   />
@@ -659,7 +707,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                          :columns="getSymbolColumns()"
                          :data="sortedAndPaginatedSymbols"
                          :pagination="symbolPagination"
-                         :scroll-x="500"
+                         :scroll-x="isMobile ? 346 : 500"
                          size="small"
                          @update:page="handleSymbolPageChange"
                          @update:sorter="handleSymbolSorterChange"
@@ -676,7 +724,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                             :columns="getDurationColumns()"
                             :data="durationExtremes.longest"
                             :pagination="false"
-                            :scroll-x="500"
+                            :scroll-x="isMobile ? 312 : 500"
                            size="small"
                         />
                       </n-flex>
@@ -686,7 +734,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                             :columns="getDurationColumns()"
                             :data="durationExtremes.shortest"
                             :pagination="false"
-                            :scroll-x="500"
+                            :scroll-x="isMobile ? 312 : 500"
                            size="small"
                         />
                       </n-flex>
@@ -727,7 +775,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                             :columns="getDistributionColumns()"
                             :data="distribution.bins"
                             :pagination="false"
-                            :scroll-x="400"
+                            :scroll-x="isMobile ? 320 : 400"
                            size="small"
                         />
                         <n-flex :size="12" class="distribution-stats">
@@ -943,13 +991,56 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
     min-width: 0;
    }
 
-   :deep(.n-tabs-tab-bar) {
-    flex-direction: row;
-    overflow-x: auto;
+   .statistics-tabs :deep(.n-tabs-wrapper) {
+    display: flex;
+    width: 100%;
    }
 
-   :deep(.n-tabs-tab) {
+   .statistics-tabs :deep(.n-tabs-nav-scroll-content) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+   }
+
+   .statistics-tabs :deep(.n-tabs-tab-wrapper),
+   .statistics-tabs :deep(.n-tabs-tab) {
+    min-width: 0;
+    width: 100%;
+   }
+
+   .statistics-tabs :deep(.n-tabs-tab) {
+    justify-content: center;
     white-space: nowrap;
+   }
+
+   .ledger-panel :deep(.n-data-table-th),
+   .ledger-panel :deep(.n-data-table-td),
+   .ai-trust-card :deep(.n-data-table-th),
+   .ai-trust-card :deep(.n-data-table-td) {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+   }
+
+   .ledger-panel :deep(.n-data-table-wrapper),
+   .ai-trust-card :deep(.n-data-table-wrapper) {
+    max-width: 100%;
+   }
+
+   .ledger-panel :deep(.n-pagination),
+   .ai-trust-card :deep(.n-pagination) {
+    justify-content: flex-end;
+    gap: 4px;
+   }
+
+   .ledger-panel :deep(.n-pagination-prefix),
+   .ai-trust-card :deep(.n-pagination-prefix) {
+    display: none;
+   }
+
+   .ledger-panel :deep(.n-pagination-item),
+   .ai-trust-card :deep(.n-pagination-item) {
+    min-width: 34px;
+    height: 34px;
    }
 
    .distribution-stats {

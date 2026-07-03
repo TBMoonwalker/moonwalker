@@ -213,8 +213,8 @@ test('getSymbolColumns defines 6 columns: symbol, trades, win_rate, total_profit
     assert.match(source, /title: 'Avg Duration'/)
 })
 
-test('getSymbolColumns symbol column is fixed left', () => {
-    assert.match(source, /fixed: 'left'/)
+test('getSymbolColumns symbol column is fixed left on desktop only', () => {
+    assert.match(source, /fixed: isMobile\.value \? undefined : 'left'/)
 })
 
 test('getSymbolColumns profit columns use color coding', () => {

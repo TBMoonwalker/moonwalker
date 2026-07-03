@@ -174,6 +174,13 @@ test('handleResize sets isMobile based on window width', () => {
     assert.match(source, /isMobile\.value = window\.innerWidth < 768/)
 })
 
+test('handleResize reduces pagination slots on mobile', () => {
+    assert.match(source, /const pageSlot = isMobile\.value \? 3 : 5/)
+    assert.match(source, /symbolPagination\.pageSlot = pageSlot/)
+    assert.match(source, /recentPredictionsPagination\.pageSlot = pageSlot/)
+    assert.match(source, /badEntryReviewPagination\.pageSlot = pageSlot/)
+})
+
 test('onMounted adds resize listener', () => {
     assert.match(source, /addEventListener\('resize', handleResize\)/)
 })
@@ -185,4 +192,33 @@ test('onActivated refreshes analytics for kept-alive route visits', () => {
 
 test('onUnmounted removes resize listener', () => {
     assert.match(source, /removeEventListener\('resize', handleResize\)/)
+})
+
+// ---------------------------------------------------------------------------
+// 13. Mobile table shape
+// ---------------------------------------------------------------------------
+
+test('statistics view defines compact mobile column sets', () => {
+    assert.match(source, /const SYMBOL_MOBILE_COLUMN_KEYS = new Set/)
+    assert.match(source, /const DURATION_MOBILE_COLUMN_KEYS = new Set/)
+    assert.match(source, /const AI_TRUST_MOBILE_COLUMN_KEYS = new Set/)
+})
+
+test('statistics view removes fixed first columns on mobile', () => {
+    assert.match(source, /fixed: isMobile\.value \? undefined : 'left'/)
+})
+
+test('statistics view uses shorter mobile scroll widths', () => {
+    assert.match(source, /:scroll-x="isMobile \? 346 : 500"/)
+    assert.match(source, /:scroll-x="isMobile \? 382 : 1000"/)
+})
+
+test('statistics tabs wrap into a two-column mobile grid', () => {
+    assert.match(source, /\.statistics-tabs :deep\(\.n-tabs-nav-scroll-content\)/)
+    assert.match(source, /grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/)
+})
+
+test('statistics pagination hides the wrapping count prefix on mobile', () => {
+    assert.match(source, /\.ledger-panel :deep\(\.n-pagination-prefix\)/)
+    assert.match(source, /display: none;/)
 })
