@@ -57,10 +57,10 @@ const tradeActionButtonStyle = {
     padding: '0 11px',
 }
 const OPEN_TRADES_MOBILE_COLUMN_WIDTHS: Record<string, number> = {
-    symbol: 86,
-    display_profit_percent: 64,
-    open_date: 79,
-    action: 96,
+    symbol: 104,
+    display_profit_percent: 72,
+    open_date: 85,
+    action: 64,
 }
 const TPSO_PRICE_PADDING_PERCENT = 0.7
 const MIN_TPSO_STATUS_FILL_PERCENT = 3
@@ -94,28 +94,40 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
 
     function renderOverflowActions(rowData: OpenTradeRow) {
         const automationAction = rowData.automation_paused ? 'resume' : 'pause'
+        const overflowOptions = [
+            {
+                key: automationAction,
+                label: rowData.automation_paused
+                    ? 'Resume automation'
+                    : 'Pause automation',
+                disabled: options.isMissionActionLoading(
+                    rowData.symbol,
+                    automationAction,
+                ),
+            },
+            {
+                key: 'manual-buy',
+                label: 'Add manual buy',
+                disabled: isBuyBlocked(rowData),
+            },
+        ]
+        if (options.isMobile.value) {
+            overflowOptions.unshift({
+                key: 'stop',
+                label: 'Stop trade',
+                disabled: false,
+            })
+        }
         return h(
             NDropdown,
             {
                 trigger: 'click',
-                options: [
-                    {
-                        key: automationAction,
-                        label: rowData.automation_paused
-                            ? 'Resume automation'
-                            : 'Pause automation',
-                        disabled: options.isMissionActionLoading(
-                            rowData.symbol,
-                            automationAction,
-                        ),
-                    },
-                    {
-                        key: 'manual-buy',
-                        label: 'Add manual buy',
-                        disabled: isBuyBlocked(rowData),
-                    },
-                ],
+                options: overflowOptions,
                 onSelect: (key: string | number) => {
+                    if (key === 'stop') {
+                        options.onDealStop(rowData)
+                        return
+                    }
                     if (key === 'resume') {
                         void options.onResumeMission(rowData)
                         return
@@ -415,68 +427,71 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                         ]
                     }
                     const actionError = resolveActionError(rowData)
+                    const sellAction = h(
+                        NButton,
+                        {
+                            class: 'trade-action-button trade-action-sell',
+                            'aria-label': `Sell ${rowData.symbol}`,
+                            primary: true,
+                            size: 'medium',
+                            ghost: true,
+                            color: '#2E7D5B',
+                            style: tradeActionButtonStyle,
+                            onClick: () => options.onDealSell(rowData),
+                        },
+                        {
+                            icon: () =>
+                                h(
+                                    NIcon,
+                                    { size: 18 },
+                                    { default: () => h(CashOutline) },
+                                ),
+                            default: () =>
+                                h(
+                                    'span',
+                                    { class: 'trade-action-label' },
+                                    'Sell',
+                                ),
+                        },
+                    )
+                    const stopAction = h(
+                        NButton,
+                        {
+                            class: 'trade-action-button trade-action-stop',
+                            'aria-label': `Stop ${rowData.symbol}`,
+                            type: 'error',
+                            size: 'medium',
+                            ghost: true,
+                            style: tradeActionButtonStyle,
+                            onClick: () => options.onDealStop(rowData),
+                        },
+                        {
+                            icon: () =>
+                                h(
+                                    NIcon,
+                                    { size: 18 },
+                                    {
+                                        default: () => h(StopCircleOutline),
+                                    },
+                                ),
+                            default: () =>
+                                h(
+                                    'span',
+                                    { class: 'trade-action-label' },
+                                    'Stop',
+                                ),
+                        },
+                    )
                     const compactActions = h(
                         'div',
                         { class: 'trade-row-actions' },
-                        [
-                            h(
-                                NButton,
-                                {
-                                    class: 'trade-action-button trade-action-sell',
-                                    'aria-label': `Sell ${rowData.symbol}`,
-                                    primary: true,
-                                    size: 'medium',
-                                    ghost: true,
-                                    color: '#2E7D5B',
-                                    style: tradeActionButtonStyle,
-                                    onClick: () => options.onDealSell(rowData),
-                                },
-                                {
-                                    icon: () =>
-                                        h(
-                                            NIcon,
-                                            { size: 18 },
-                                            { default: () => h(CashOutline) },
-                                        ),
-                                    default: () =>
-                                        h(
-                                            'span',
-                                            { class: 'trade-action-label' },
-                                            'Sell',
-                                        ),
-                                },
-                            ),
-                            h(
-                                NButton,
-                                {
-                                    class: 'trade-action-button trade-action-stop',
-                                    'aria-label': `Stop ${rowData.symbol}`,
-                                    type: 'error',
-                                    size: 'medium',
-                                    ghost: true,
-                                    style: tradeActionButtonStyle,
-                                    onClick: () => options.onDealStop(rowData),
-                                },
-                                {
-                                    icon: () =>
-                                        h(
-                                            NIcon,
-                                            { size: 18 },
-                                            {
-                                                default: () =>
-                                                    h(StopCircleOutline),
-                                            },
-                                        ),
-                                    default: () =>
-                                        h(
-                                            'span',
-                                            { class: 'trade-action-label' },
-                                            'Stop',
-                                        ),
-                                },
-                            ),
-                            renderOverflowActions(rowData),
-                        ],
+                        options.isMobile.value
+                            ? [sellAction, renderOverflowActions(rowData)]
+                            : [
+                                  sellAction,
+                                  stopAction,
+                                  renderOverflowActions(rowData),
+                              ],
                     )
                     return [
                         compactActions,

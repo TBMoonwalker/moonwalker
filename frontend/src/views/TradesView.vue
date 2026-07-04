@@ -393,15 +393,15 @@ onUnmounted(() => {
   }
 
   .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(2)) {
-    width: 86px !important;
-    min-width: 86px !important;
-    max-width: 86px !important;
+    width: 104px !important;
+    min-width: 104px !important;
+    max-width: 104px !important;
   }
 
   .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(3)) {
-    width: 64px !important;
-    min-width: 64px !important;
-    max-width: 64px !important;
+    width: 72px !important;
+    min-width: 72px !important;
+    max-width: 72px !important;
   }
 
   .profit-tabs :deep(.n-tabs-wrapper) {
@@ -450,16 +450,16 @@ onUnmounted(() => {
 
   .ledger-panel :deep(.open-trades-table .n-data-table-th[data-col-key="symbol"]),
   .ledger-panel :deep(.open-trades-table .n-data-table-td[data-col-key="symbol"]) {
-    min-width: 86px;
-    width: 86px;
-    max-width: 86px;
+    min-width: 104px;
+    width: 104px;
+    max-width: 104px;
   }
 
   .ledger-panel :deep(.n-data-table-th[data-col-key="display_profit_percent"]),
   .ledger-panel :deep(.n-data-table-td[data-col-key="display_profit_percent"]) {
-    min-width: 64px;
-    width: 64px;
-    max-width: 64px;
+    min-width: 72px;
+    width: 72px;
+    max-width: 72px;
   }
 
   .ledger-panel :deep(.n-data-table-th[data-col-key="action"]),
@@ -471,28 +471,28 @@ onUnmounted(() => {
 
   .ledger-panel :deep(.open-trades-table .n-data-table-th[data-col-key="action"]),
   .ledger-panel :deep(.open-trades-table .n-data-table-td[data-col-key="action"]) {
-    min-width: 96px;
-    width: 96px;
-    max-width: 96px;
+    min-width: 64px;
+    width: 64px;
+    max-width: 64px;
   }
 
   .ledger-panel :deep(.open-trades-table .n-data-table-th[data-col-key="open_date"]),
   .ledger-panel :deep(.open-trades-table .n-data-table-td[data-col-key="open_date"]) {
-    min-width: 79px;
-    width: 79px;
-    max-width: 79px;
+    min-width: 85px;
+    width: 85px;
+    max-width: 85px;
   }
 
   .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(4)) {
-    width: 79px !important;
-    min-width: 79px !important;
-    max-width: 79px !important;
+    width: 85px !important;
+    min-width: 85px !important;
+    max-width: 85px !important;
   }
 
   .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(5)) {
-    width: 96px !important;
-    min-width: 96px !important;
-    max-width: 96px !important;
+    width: 64px !important;
+    min-width: 64px !important;
+    max-width: 64px !important;
   }
 
   .ledger-panel :deep(.closed-trades-table .n-data-table-th[data-col-key="action"]),
@@ -520,6 +520,11 @@ onUnmounted(() => {
     gap: 4px;
   }
 
+  .ledger-panel :deep(.open-trades-table .trade-row-actions) {
+    grid-template-columns: 44px;
+    width: 44px;
+  }
+
   .ledger-panel :deep(.trade-row-actions .n-button) {
     min-width: 44px !important;
     width: 44px !important;
@@ -530,6 +535,11 @@ onUnmounted(() => {
   .ledger-panel :deep(.trade-row-actions .trade-action-more) {
     grid-column: 1 / -1;
     width: 92px !important;
+  }
+
+  .ledger-panel :deep(.open-trades-table .trade-row-actions .trade-action-more) {
+    grid-column: auto;
+    width: 44px !important;
   }
 
   .ledger-panel :deep(.trade-row-actions-delete) {

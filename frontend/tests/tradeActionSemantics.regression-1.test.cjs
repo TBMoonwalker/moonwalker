@@ -35,7 +35,7 @@ test('open trade row actions prioritize sell and avoid duplicate buy controls', 
     )
 })
 
-test('open trade overflow actions keep secondary actions without duplicating stop', () => {
+test('open trade overflow actions keep secondary actions and move stop on mobile only', () => {
     assert.ok(
         columnsSource.includes("label: 'Add manual buy'") &&
             columnsSource.includes('disabled: isBuyBlocked(rowData)'),
@@ -47,10 +47,18 @@ test('open trade overflow actions keep secondary actions without duplicating sto
         'the row action strip should keep the visible stop action',
     )
     assert.ok(
-        !columnsSource.includes("key: 'stop'") &&
-            !columnsSource.includes("key === 'stop'") &&
-            !columnsSource.includes("label: 'Stop'"),
-        'the overflow menu should not duplicate the visible stop action',
+        columnsSource.includes('if (options.isMobile.value)') &&
+            columnsSource.includes("key: 'stop'") &&
+            columnsSource.includes("key === 'stop'"),
+        'mobile overflow should carry stop after the visible mobile strip is compacted',
+    )
+    assert.ok(
+        columnsSource.includes(
+            '? [sellAction, renderOverflowActions(rowData)]',
+        ) &&
+            columnsSource.includes('stopAction,') &&
+            columnsSource.includes('renderOverflowActions(rowData),'),
+        'desktop and tablet should keep the visible stop action out of overflow',
     )
     assert.ok(
         !columnsSource.includes('Stop and close') &&
