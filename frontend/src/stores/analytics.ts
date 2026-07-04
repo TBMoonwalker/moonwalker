@@ -77,9 +77,51 @@ export interface AnalyticsOverview {
         warnings: number
      }
      provider_status_counts: Record<string, number>
+     calibration: AiTrustCalibration
      recent_predictions: AiTrustPrediction[]
      bad_entry_review: AiTrustPrediction[]
   }
+}
+
+export interface AiTrustCalibrationBucket {
+   bucket_type: string
+   bucket_key: string
+   sample_count: number
+   closed_count: number
+   bad_entry_count: number
+   warned_count: number
+   warning_hit_count: number
+   false_warning_count: number
+   bad_entry_capture_count: number
+   bad_entry_rate: number
+   warning_hit_rate: number
+   false_warning_rate: number
+   bad_entry_capture_rate: number
+   confidence: 'cold' | 'warming' | 'usable' | 'confident' | string
+   usable: boolean
+}
+
+export interface AiTrustMissedBadEntryCluster {
+   symbol: string
+   reason_code: string
+   missed_bad_entries: number
+}
+
+export interface AiTrustCalibration {
+   enabled: boolean
+   confidence: 'cold' | 'warming' | 'usable' | 'confident' | string
+   confidence_thresholds: {
+      warming: number
+      usable: number
+      confident: number
+      symbol_usable: number
+   }
+   lookback_days: number
+   sample_cap: number
+   closed_samples: number
+   shadow_effective_warning_threshold: number
+   buckets: AiTrustCalibrationBucket[]
+   missed_bad_entry_clusters: AiTrustMissedBadEntryCluster[]
 }
 
 export interface AiTrustPrediction {
@@ -103,6 +145,15 @@ export interface AiTrustPrediction {
    outcome_profit_percent: number | null
    outcome_duration_hours: number | null
    outcome_so_count: number | null
+   shadow_effective_risk_score?: number | null
+   calibration_reason?: string | null
+   calibration_buckets?: Array<{
+      bucket_type: string
+      bucket_key: string
+      bad_entry_rate: number
+      closed_count: number
+      confidence: string
+   }>
 }
 
 export const useAnalyticsStore = defineStore('analytics', () => {

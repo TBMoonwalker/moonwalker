@@ -21,6 +21,11 @@ test('statistics page renders the AI Trust Cockpit shadow-observation section', 
     assert.match(statisticsSource, /Preflight/)
     assert.match(statisticsSource, /Recent Predictions/)
     assert.match(statisticsSource, /Bad-entry Review/)
+    assert.match(statisticsSource, /Local Calibration/)
+    assert.match(statisticsSource, /Moonwalker learned this pattern locally/)
+    assert.match(statisticsSource, /Calibrated warning would have applied/)
+    assert.match(statisticsSource, /Top Risk Reasons/)
+    assert.match(statisticsSource, /Missed Bad-entry Clusters/)
     assert.match(statisticsSource, /aiTrust\?\.status === 'missing_model'/)
 })
 
@@ -45,6 +50,11 @@ test('analytics store exposes AI trust states and calibration rows', () => {
     assert.match(analyticsStoreSource, /recent_predictions: AiTrustPrediction\[\]/)
     assert.match(analyticsStoreSource, /bad_entry_review: AiTrustPrediction\[\]/)
     assert.match(analyticsStoreSource, /provider_status_counts: Record<string, number>/)
+    assert.match(analyticsStoreSource, /calibration: AiTrustCalibration/)
+    assert.match(analyticsStoreSource, /export interface AiTrustCalibrationBucket/)
+    assert.match(analyticsStoreSource, /shadow_effective_warning_threshold: number/)
+    assert.match(analyticsStoreSource, /missed_bad_entry_clusters: AiTrustMissedBadEntryCluster\[\]/)
+    assert.match(analyticsStoreSource, /shadow_effective_risk_score\?: number \| null/)
 })
 
 test('AI Trust Cockpit tables use the shared statistics pagination rhythm', () => {
@@ -61,4 +71,14 @@ test('AI Trust Cockpit tables use the shared statistics pagination rhythm', () =
     )
 
     assert.doesNotMatch(aiTrustSection, /:pagination="false"/)
+})
+
+test('AI Trust Cockpit renders compact mobile-safe calibration diagnostics', () => {
+    assert.match(statisticsSource, /const topCalibrationBuckets = computed/)
+    assert.match(statisticsSource, /const missedBadEntryClusters = computed/)
+    assert.match(statisticsSource, /\.ai-calibration-grid/)
+    assert.match(statisticsSource, /\.ai-calibration-lists/)
+    assert.match(statisticsSource, /\.ai-calibration-item/)
+    assert.match(statisticsSource, /overflow-wrap: anywhere/)
+    assert.match(statisticsSource, /grid-template-columns: 1fr/)
 })

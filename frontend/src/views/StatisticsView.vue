@@ -128,8 +128,15 @@ const distribution = computed(
 const aiTrust = computed(
       () => (d.value as AnalyticsOverview | null)?.ai_trust ?? null,
  )
+const aiTrustCalibration = computed(() => aiTrust.value?.calibration ?? null)
 const recentPredictions = computed(() => aiTrust.value?.recent_predictions ?? [])
 const badEntryReview = computed(() => aiTrust.value?.bad_entry_review ?? [])
+const topCalibrationBuckets = computed(() => (
+   aiTrustCalibration.value?.buckets ?? []
+).slice(0, 4))
+const missedBadEntryClusters = computed(() => (
+   aiTrustCalibration.value?.missed_bad_entry_clusters ?? []
+).slice(0, 4))
 
 const sortedAndPaginatedSymbols = computed(() => {
    let rows = [...perSymbol.value]
@@ -248,6 +255,10 @@ function fmtConfidence(value: number | null) {
 
 function fmtTrustDate(value: string | null) {
    return value ? new Date(value).toLocaleString() : '-'
+}
+
+function fmtTrustLabel(value: string | null | undefined) {
+   return String(value || 'cold').replace(/_/g, ' ')
 }
 
 const aiTrustStatusText = computed(() => {
@@ -448,7 +459,13 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
        key: 'risk_score',
        width: 86,
         render(row) {
-         return row.risk_score === null ? '-' : `${row.risk_score}`
+         if (row.risk_score === null) {
+           return '-'
+         }
+         const effective = row.shadow_effective_risk_score
+         return effective && effective > row.risk_score
+           ? `${row.risk_score} -> ${effective}`
+           : `${row.risk_score}`
         },
       },
       {
@@ -632,6 +649,85 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
                 <div class="stat-cell ai-trust-stat">
                   <n-statistic label="Unscored" :value="aiTrustUnscoredCount" />
                   <span class="stat-detail">{{ aiTrust?.status ?? 'disabled' }}</span>
+                </div>
+              </div>
+
+              <div class="ai-calibration-panel" aria-label="AI trust local calibration">
+                <div class="ai-calibration-summary">
+                  <div>
+                    <n-text depth="3" class="stats-kicker">Local Calibration</n-text>
+                    <div class="ai-calibration-status">
+                      Moonwalker learned this pattern locally:
+                      {{ fmtTrustLabel(aiTrustCalibration?.confidence) }}
+                    </div>
+                  </div>
+                  <n-tag size="small" type="info">
+                    {{ aiTrustCalibration?.closed_samples ?? 0 }} closed samples
+                  </n-tag>
+                </div>
+                <div class="ai-calibration-grid">
+                  <div class="stat-cell ai-trust-stat">
+                    <n-statistic
+                        label="Confidence"
+                        :value="fmtTrustLabel(aiTrustCalibration?.confidence)"
+                    />
+                    <span class="stat-detail">
+                      usable at {{ aiTrustCalibration?.confidence_thresholds.usable ?? 30 }}
+                    </span>
+                  </div>
+                  <div class="stat-cell ai-trust-stat">
+                    <n-statistic
+                        label="Shadow threshold"
+                        :value="aiTrustCalibration?.shadow_effective_warning_threshold ?? 75"
+                    />
+                    <span class="stat-detail">Calibrated warning would have applied</span>
+                  </div>
+                  <div class="stat-cell ai-trust-stat">
+                    <n-statistic
+                        label="Top reasons"
+                        :value="topCalibrationBuckets.length"
+                    />
+                    <span class="stat-detail">bounded local review</span>
+                  </div>
+                  <div class="stat-cell ai-trust-stat">
+                    <n-statistic
+                        label="Missed clusters"
+                        :value="missedBadEntryClusters.length"
+                    />
+                    <span class="stat-detail">AI observed after outcome</span>
+                  </div>
+                </div>
+                <div class="ai-calibration-lists">
+                  <div class="ai-calibration-list">
+                    <n-text strong>Top Risk Reasons</n-text>
+                    <div v-if="topCalibrationBuckets.length" class="ai-calibration-items">
+                      <div
+                          v-for="bucket in topCalibrationBuckets"
+                          :key="`${bucket.bucket_type}:${bucket.bucket_key}`"
+                          class="ai-calibration-item"
+                      >
+                        <span>{{ bucket.bucket_key }}</span>
+                        <span>{{ fmtTrustRate(bucket.bad_entry_rate) }} bad-entry</span>
+                        <span>{{ fmtTrustLabel(bucket.confidence) }}</span>
+                      </div>
+                    </div>
+                    <n-empty v-else description="No local calibration buckets yet" />
+                  </div>
+                  <div class="ai-calibration-list">
+                    <n-text strong>Missed Bad-entry Clusters</n-text>
+                    <div v-if="missedBadEntryClusters.length" class="ai-calibration-items">
+                      <div
+                          v-for="cluster in missedBadEntryClusters"
+                          :key="`${cluster.symbol}:${cluster.reason_code}`"
+                          class="ai-calibration-item"
+                      >
+                        <span>{{ cluster.symbol }}</span>
+                        <span>{{ cluster.reason_code }}</span>
+                        <span>{{ cluster.missed_bad_entries }} missed</span>
+                      </div>
+                    </div>
+                    <n-empty v-else description="No missed bad-entry clusters yet" />
+                  </div>
                 </div>
               </div>
 
@@ -967,6 +1063,78 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
   min-height: 82px;
 }
 
+.ai-calibration-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--mw-color-border);
+  border-radius: var(--mw-radius-sm, 6px);
+  background: rgba(53, 109, 134, 0.05);
+}
+
+.ai-calibration-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-calibration-status {
+  color: var(--mw-color-text-primary);
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.25;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.ai-calibration-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-calibration-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-calibration-list {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.ai-calibration-items {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-calibration-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(53, 109, 134, 0.2);
+  border-radius: var(--mw-radius-sm, 6px);
+  color: var(--mw-color-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+.ai-calibration-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-calibration-item span:first-child {
+  color: var(--mw-color-text-primary);
+  font-weight: 600;
+}
+
 .ai-trust-symbol {
   display: inline-block;
   max-width: 100%;
@@ -1064,6 +1232,19 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
     grid-template-columns: repeat(2, minmax(0, 1fr));
    }
 
+   .ai-calibration-grid,
+   .ai-calibration-lists {
+    grid-template-columns: 1fr;
+   }
+
+   .ai-calibration-summary {
+    flex-direction: column;
+   }
+
+   .ai-calibration-item {
+    grid-template-columns: minmax(0, 1fr);
+   }
+
    .dist-stat {
     min-width: calc(50% - 6px);
    }
@@ -1099,6 +1280,10 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
     }
 
     .ai-trust-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ai-calibration-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }
