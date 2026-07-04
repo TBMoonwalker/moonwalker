@@ -527,7 +527,6 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         ]
 
         if (options.isMobile.value) {
-            const hiddenColumns = columns.filter((column) => !('key' in column))
             const mobileColumns = OPEN_TRADES_MOBILE_COLUMN_KEYS.flatMap(
                 (columnKey) => {
                     const column = columns.find(
@@ -554,11 +553,11 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                   minWidth: mobileWidth,
                                   maxWidth: mobileWidth,
                               }
-                            : column,
+                        : column,
                     ]
                 },
             )
-            return [...hiddenColumns, ...mobileColumns]
+            return mobileColumns
         }
 
         if (options.isTablet.value) {

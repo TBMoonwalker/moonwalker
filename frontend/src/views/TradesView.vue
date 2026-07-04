@@ -392,13 +392,13 @@ onUnmounted(() => {
     max-width: 0 !important;
   }
 
-  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(2)) {
+  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(1)) {
     width: 104px !important;
     min-width: 104px !important;
     max-width: 104px !important;
   }
 
-  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(3)) {
+  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(2)) {
     width: 72px !important;
     min-width: 72px !important;
     max-width: 72px !important;
@@ -483,13 +483,13 @@ onUnmounted(() => {
     max-width: 85px;
   }
 
-  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(4)) {
+  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(3)) {
     width: 85px !important;
     min-width: 85px !important;
     max-width: 85px !important;
   }
 
-  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(5)) {
+  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(4)) {
     width: 64px !important;
     min-width: 64px !important;
     max-width: 64px !important;
