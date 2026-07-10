@@ -50,7 +50,7 @@ are not exposed in the UI and must be set via the API.
 | --- | --- | --- | --- |
 | `timezone` | `string` | Timezone used for logging. | `Europe/London` |
 | `debug` | `bool` | Enable debug logging. | `true` |
-| `signal` | `string` | Signal plugin to use (e.g. `sym_signals`, `asap`, `csv_signal`). | `sym_signals` |
+| `signal` | `string` | Signal plugin to use (e.g. `sym_signals`, `asap`, `csv_signal`, `websocket_signal`). | `sym_signals` |
 | `signal_settings` | `string (json)` | Plugin settings per selected signal plugin. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |
 | `symbol_list` | `string` | CSV list or URL for ASAP symbol list. | `BTC/USDT,ETH/USDT` |
 | `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema20_swing` |
@@ -154,7 +154,7 @@ are not exposed in the UI and must be set via the API.
 | `monitoring_timeout_sec` | `int` | Telegram send timeout in seconds. | `5` |
 | `monitoring_retry_count` | `int` | Number of retries after a failed Telegram send. | `1` |
 | `strategies` | `array[string]` | Available strategies (read-only). | `["ema_down","ema20_swing","ema20_swing_reverse","ema_low","ema_swing"]` |
-| `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals"]` |
+| `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals","websocket_signal"]` |
 
 Read-only metadata keys such as `strategies` and `signal_plugins` are returned
 in config snapshots for the dashboard and should not be treated as persisted

@@ -41,6 +41,13 @@ export interface SignalConfigSection {
     csvsignal_mode: string | null
     csvsignal_source: string | null
     csvsignal_inline: string | null
+    websocket_url?: string | null
+    websocket_headers?: string | null
+    websocket_subscribe_message?: string | null
+    websocket_required_decision?: string | null
+    websocket_min_confidence?: number | null
+    websocket_accepted_exchanges?: string | null
+    websocket_accepted_market_states?: string | null
 }
 
 export interface FilterConfigSection {
@@ -286,6 +293,14 @@ export function buildConfigSubmitPayload(
                 csvsignal_mode: signal.csvsignal_mode,
                 csvsignal_source: signal.csvsignal_source,
                 csvsignal_inline: signal.csvsignal_inline,
+                websocket_url: signal.websocket_url,
+                websocket_headers: signal.websocket_headers,
+                websocket_subscribe_message: signal.websocket_subscribe_message,
+                websocket_required_decision: signal.websocket_required_decision,
+                websocket_min_confidence: signal.websocket_min_confidence,
+                websocket_accepted_exchanges: signal.websocket_accepted_exchanges,
+                websocket_accepted_market_states:
+                    signal.websocket_accepted_market_states,
             }),
             'str',
         ),

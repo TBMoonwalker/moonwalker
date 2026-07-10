@@ -175,6 +175,48 @@ test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () =>
     ])
 })
 
+test('buildLoadedConfigState hydrates websocket signal settings for the GUI', () => {
+    const state = buildLoadedConfigState(
+        {
+            signal: 'websocket_signal',
+            signal_settings: {
+                websocket_url:
+                    'ws://localhost:8000/v1/signals/stream?token=dev-token',
+                headers: { Authorization: 'Bearer token' },
+                subscribe_message: {
+                    type: 'subscribe',
+                    symbols: ['DYMUSDC'],
+                },
+                required_decision: 'take_trade',
+                min_confidence: 78,
+                accepted_exchanges: ['binance'],
+                accepted_market_states: ['healthy', 'recovering'],
+            },
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(
+        state.signal.websocket_url,
+        'ws://localhost:8000/v1/signals/stream?token=dev-token',
+    )
+    assert.equal(
+        state.signal.websocket_headers,
+        '{\n  "Authorization": "Bearer token"\n}',
+    )
+    assert.equal(
+        state.signal.websocket_subscribe_message,
+        '{\n  "type": "subscribe",\n  "symbols": [\n    "DYMUSDC"\n  ]\n}',
+    )
+    assert.equal(state.signal.websocket_required_decision, 'take_trade')
+    assert.equal(state.signal.websocket_min_confidence, 78)
+    assert.equal(state.signal.websocket_accepted_exchanges, 'binance')
+    assert.equal(
+        state.signal.websocket_accepted_market_states,
+        'healthy,recovering',
+    )
+})
+
 test('buildLoadedConfigState defaults safety-order reserve to disabled', () => {
     const state = buildLoadedConfigState({}, createLoadDefaults())
 

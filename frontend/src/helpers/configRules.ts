@@ -22,6 +22,9 @@ interface SignalRulesState {
     csvsignal_source: string | null
     signal: string | null
     symbol_list: string | null
+    websocket_headers: string | null
+    websocket_min_confidence: number | null
+    websocket_url: string | null
 }
 
 interface BuildConfigRulesOptions {
@@ -111,6 +114,22 @@ function createPositiveNumberAfterSubmitValidator(
         }
         return true
     }
+}
+
+function parseOptionalJsonObject(value: string | null): boolean {
+    if (value === null || value === undefined || value.trim().length === 0) {
+        return true
+    }
+    try {
+        const parsed = JSON.parse(value)
+        return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+    } catch {
+        return false
+    }
+}
+
+function isWebsocketUrlValue(value: string | null): boolean {
+    return value !== null && /^wss?:\/\//i.test(value.trim())
 }
 
 export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
@@ -223,6 +242,59 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
                     String(options.signal.value.csvsignal_inline).trim().length === 0
                 ) {
                     return new Error('Please paste CSV text or upload a CSV file')
+                }
+                return true
+            },
+            trigger: ['submit', 'change'],
+        },
+        websocket_url: {
+            validator: () => {
+                if (
+                    !options.submitAttempted.value ||
+                    options.signal.value.signal !== 'websocket_signal'
+                ) {
+                    return true
+                }
+                if (
+                    options.signal.value.websocket_url === null ||
+                    options.signal.value.websocket_url === undefined ||
+                    String(options.signal.value.websocket_url).trim().length === 0
+                ) {
+                    return new Error('Please add websocket URL')
+                }
+                if (!isWebsocketUrlValue(options.signal.value.websocket_url)) {
+                    return new Error('Please provide a valid WebSocket URL (ws/wss)')
+                }
+                return true
+            },
+            trigger: ['submit', 'change'],
+        },
+        websocket_headers: {
+            validator: () => {
+                if (
+                    !options.submitAttempted.value ||
+                    options.signal.value.signal !== 'websocket_signal'
+                ) {
+                    return true
+                }
+                if (!parseOptionalJsonObject(options.signal.value.websocket_headers)) {
+                    return new Error('Headers must be a JSON object')
+                }
+                return true
+            },
+            trigger: ['submit', 'change'],
+        },
+        websocket_min_confidence: {
+            validator: () => {
+                if (
+                    !options.submitAttempted.value ||
+                    options.signal.value.signal !== 'websocket_signal'
+                ) {
+                    return true
+                }
+                const value = Number(options.signal.value.websocket_min_confidence ?? 0)
+                if (!Number.isFinite(value) || value < 0 || value > 100) {
+                    return new Error('Confidence must be between 0 and 100')
                 }
                 return true
             },

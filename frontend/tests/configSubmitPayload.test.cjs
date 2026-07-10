@@ -366,6 +366,53 @@ test('buildConfigSubmitPayload normalizes ASAP symbol selections', () => {
     assert.equal(parseField(payload, 'signal_strategy').value, 'ema20_swing')
 })
 
+test('buildConfigSubmitPayload persists websocket signal settings without headers', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            signal: {
+                symbol_list: null,
+                asap_use_url: false,
+                asap_symbol_select: [],
+                signal: 'websocket_signal',
+                strategy: null,
+                strategy_enabled: false,
+                symsignal_url: null,
+                symsignal_key: null,
+                symsignal_version: null,
+                symsignal_allowedsignals: [],
+                csvsignal_mode: 'source',
+                csvsignal_source: null,
+                csvsignal_inline: null,
+                websocket_url:
+                    'ws://localhost:8000/v1/signals/stream?token=dev-token',
+                websocket_headers: '',
+                websocket_subscribe_message:
+                    '{"type":"subscribe","symbols":["DYMUSDC"]}',
+                websocket_required_decision: 'take_trade',
+                websocket_min_confidence: 78,
+                websocket_accepted_exchanges: 'binance',
+                websocket_accepted_market_states: 'healthy',
+            },
+        }),
+    )
+
+    assert.deepEqual(parseField(payload, 'signal_settings'), {
+        value: {
+            websocket_url:
+                'ws://localhost:8000/v1/signals/stream?token=dev-token',
+            subscribe_message: {
+                type: 'subscribe',
+                symbols: ['DYMUSDC'],
+            },
+            min_confidence: 78,
+            accepted_exchanges: 'binance',
+            accepted_market_states: 'healthy',
+        },
+        type: 'str',
+    })
+    assert.equal('headers' in parseField(payload, 'signal_settings').value, false)
+})
+
 test('buildConfigSubmitPayload persists configured capital budget and stretch settings', () => {
     const payload = buildConfigSubmitPayload(
         createBaseOptions({

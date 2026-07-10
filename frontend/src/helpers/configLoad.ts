@@ -117,6 +117,26 @@ function toConfigOptions(values: unknown): ConfigOption[] {
         }))
 }
 
+function stringifyOptionalStructuredValue(value: unknown): string | null {
+    if (value === null || value === undefined || value === false) {
+        return null
+    }
+    if (typeof value === 'string') {
+        return value.length > 0 ? value : null
+    }
+    return JSON.stringify(value, null, 2)
+}
+
+function stringifyOptionalList(value: unknown): string | null {
+    if (value === null || value === undefined || value === false) {
+        return null
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => String(entry).trim()).filter(Boolean).join(',')
+    }
+    return toNullableString(value)
+}
+
 function toStrategyConfigOptions(
     values: unknown,
     details: unknown,
@@ -298,6 +318,26 @@ export function buildLoadedConfigState(
             csvsignal_source: csvsignalSource,
             csvsignal_inline: csvsignalInline,
             csvsignal_file_name: null,
+            websocket_url:
+                toNullableString(signalSettings?.websocket_url) ??
+                toNullableString(signalSettings?.api_url),
+            websocket_headers: stringifyOptionalStructuredValue(
+                signalSettings?.headers,
+            ),
+            websocket_subscribe_message: stringifyOptionalStructuredValue(
+                signalSettings?.subscribe_message,
+            ),
+            websocket_required_decision:
+                toNullableString(signalSettings?.required_decision) ||
+                'take_trade',
+            websocket_min_confidence:
+                toNumberOrNull(signalSettings?.min_confidence) ?? 0,
+            websocket_accepted_exchanges: stringifyOptionalList(
+                signalSettings?.accepted_exchanges,
+            ),
+            websocket_accepted_market_states: stringifyOptionalList(
+                signalSettings?.accepted_market_states,
+            ),
         },
         filter: {
             rsi: toNumberOrNull(response.rsi_max),

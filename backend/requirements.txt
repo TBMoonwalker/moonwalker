@@ -3,6 +3,7 @@ ccxt==4.5.59
 pandas==3.0.3
 litestar==2.22.0
 python-socketio==5.16.3
+websockets==16.0
 Telethon==1.44.0
 ta-lib==0.6.8
 tenacity==9.1.4

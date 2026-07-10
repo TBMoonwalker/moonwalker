@@ -59,6 +59,18 @@ function buildPersistableState(
             csvsignal_mode: options.signal.value.csvsignal_mode,
             csvsignal_source: options.signal.value.csvsignal_source,
             csvsignal_inline: options.signal.value.csvsignal_inline,
+            websocket_url: options.signal.value.websocket_url,
+            websocket_headers: options.signal.value.websocket_headers,
+            websocket_subscribe_message:
+                options.signal.value.websocket_subscribe_message,
+            websocket_required_decision:
+                options.signal.value.websocket_required_decision,
+            websocket_min_confidence:
+                options.signal.value.websocket_min_confidence,
+            websocket_accepted_exchanges:
+                options.signal.value.websocket_accepted_exchanges,
+            websocket_accepted_market_states:
+                options.signal.value.websocket_accepted_market_states,
         },
         filter: { ...options.filter.value },
         exchange: { ...options.exchange.value },

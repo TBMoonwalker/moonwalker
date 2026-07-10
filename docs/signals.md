@@ -1,10 +1,11 @@
 # Signal Plugins
 
-Moonwalker currently supports three signal plugins selected via the `signal`
+Moonwalker currently supports four signal plugins selected via the `signal`
 config key:
 - `sym_signals`
 - `asap`
 - `csv_signal`
+- `websocket_signal`
 
 Plugin-specific settings are passed through `signal_settings`.
 
@@ -55,3 +56,38 @@ Rules:
   `csv_signal` is also blocked while open trades still exist.
 - The plugin prefills missing history for imported symbols before it creates the
   restored trade rows.
+
+## WebSocket Signal Setup
+Select `websocket_signal` in the signal field for a plain WebSocket feed that
+publishes JSON trade decisions. Set `signal_settings` like:
+
+```json
+{
+  "websocket_url": "wss://signals.example.com/stream",
+  "accepted_market_states": ["healthy"],
+  "min_confidence": 50
+}
+```
+
+Optional settings:
+- `headers`: JSON object with additional connection headers. Omit this when
+  authentication is carried in the URL, for example
+  `ws://localhost:8000/v1/signals/stream?token=dev-token`.
+- `subscribe_message`: JSON object, array, or string sent once after connect.
+- `required_decision`: decision value that opens a trade. Defaults to
+  `take_trade`.
+- `accepted_exchanges`: exchange ids accepted from payloads. Defaults to the
+  configured `exchange`.
+- `accepted_market_states`: allowed `market_state` values. Omit to accept all.
+- `reconnect_delay_seconds` and `max_error_reconnect_delay_seconds`: reconnect
+  tuning.
+
+Incoming payloads must include a compact or slash-separated `symbol`, a matching
+`exchange`, `decision: "take_trade"`, numeric `confidence`, and a non-expired
+`expires_at` when that field is present. The plugin records the signal payload in
+trade metadata, de-duplicates `signal_id` or `sequence`, and uses the same
+Moonwalker admission, max-bot, BTC pulse, allowlist, denylist, history warmup,
+and order-sizing flow as the other signal plugins.
+
+Messages with `type: "keepalive"` are treated as connection control messages and
+do not trigger trade validation.

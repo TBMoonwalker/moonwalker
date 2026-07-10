@@ -131,6 +131,92 @@ test('config rules gate CSV validation by mode and submit state', () => {
     assert.equal(untouchedContext.rules.signal.validator({}, null), true)
 })
 
+test('config rules validate websocket signal fields only in websocket mode', () => {
+    const missingUrlContext = createRuleContext({
+        signal: {
+            value: {
+                asap_symbol_select: [],
+                asap_use_url: false,
+                csvsignal_inline: null,
+                csvsignal_mode: null,
+                csvsignal_source: null,
+                signal: 'websocket_signal',
+                symbol_list: null,
+                websocket_headers: null,
+                websocket_min_confidence: 50,
+                websocket_url: '',
+            },
+        },
+    })
+    assert.equal(
+        missingUrlContext.rules.websocket_url.validator().message,
+        'Please add websocket URL',
+    )
+
+    const invalidUrlContext = createRuleContext({
+        signal: {
+            value: {
+                asap_symbol_select: [],
+                asap_use_url: false,
+                csvsignal_inline: null,
+                csvsignal_mode: null,
+                csvsignal_source: null,
+                signal: 'websocket_signal',
+                symbol_list: null,
+                websocket_headers: null,
+                websocket_min_confidence: 50,
+                websocket_url: 'http://localhost:8000/signals',
+            },
+        },
+    })
+    assert.equal(
+        invalidUrlContext.rules.websocket_url.validator().message,
+        'Please provide a valid WebSocket URL (ws/wss)',
+    )
+
+    const invalidHeadersContext = createRuleContext({
+        signal: {
+            value: {
+                asap_symbol_select: [],
+                asap_use_url: false,
+                csvsignal_inline: null,
+                csvsignal_mode: null,
+                csvsignal_source: null,
+                signal: 'websocket_signal',
+                symbol_list: null,
+                websocket_headers: '[]',
+                websocket_min_confidence: 50,
+                websocket_url:
+                    'ws://localhost:8000/v1/signals/stream?token=dev-token',
+            },
+        },
+    })
+    assert.equal(
+        invalidHeadersContext.rules.websocket_headers.validator().message,
+        'Headers must be a JSON object',
+    )
+
+    const validContext = createRuleContext({
+        signal: {
+            value: {
+                asap_symbol_select: [],
+                asap_use_url: false,
+                csvsignal_inline: null,
+                csvsignal_mode: null,
+                csvsignal_source: null,
+                signal: 'websocket_signal',
+                symbol_list: null,
+                websocket_headers: '',
+                websocket_min_confidence: 50,
+                websocket_url:
+                    'ws://localhost:8000/v1/signals/stream?token=dev-token',
+            },
+        },
+    })
+    assert.equal(validContext.rules.websocket_url.validator(), true)
+    assert.equal(validContext.rules.websocket_headers.validator(), true)
+})
+
 test('config rules require only dynamic DCA fields in dynamic mode', () => {
     const disabledContext = createRuleContext({
         dca: {

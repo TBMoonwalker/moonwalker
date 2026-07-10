@@ -170,6 +170,13 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         csvsignal_source: null,
         csvsignal_inline: null,
         csvsignal_file_name: null,
+        websocket_url: null,
+        websocket_headers: null,
+        websocket_subscribe_message: null,
+        websocket_required_decision: 'take_trade',
+        websocket_min_confidence: 0,
+        websocket_accepted_exchanges: null,
+        websocket_accepted_market_states: null,
     })
 
     const filter = ref<FilterConfigSection>({

@@ -149,6 +149,66 @@
                 </template>
             </template>
 
+            <template v-if="signal.signal === 'websocket_signal'">
+                <n-form-item label="WebSocket URL" path="websocket_url">
+                    <n-input
+                        v-model:value="signal.websocket_url"
+                        placeholder="ws://localhost:8000/v1/signals/stream?token=dev-token"
+                    />
+                </n-form-item>
+                <n-form-item label="Headers" path="websocket_headers">
+                    <n-input
+                        v-model:value="signal.websocket_headers"
+                        type="textarea"
+                        :autosize="{
+                            minRows: 2,
+                            maxRows: 8,
+                        }"
+                        placeholder='{"Authorization":"Bearer token"}'
+                    />
+                </n-form-item>
+                <n-form-item label="Subscribe message" path="websocket_subscribe_message">
+                    <n-input
+                        v-model:value="signal.websocket_subscribe_message"
+                        type="textarea"
+                        :autosize="{
+                            minRows: 2,
+                            maxRows: 8,
+                        }"
+                        placeholder='{"type":"subscribe","symbols":["DYMUSDC"]}'
+                    />
+                </n-form-item>
+                <n-form-item label="Decision" path="websocket_required_decision">
+                    <n-input
+                        v-model:value="signal.websocket_required_decision"
+                        placeholder="take_trade"
+                    />
+                </n-form-item>
+                <n-form-item label="Min confidence" path="websocket_min_confidence">
+                    <n-input-number
+                        v-model:value="signal.websocket_min_confidence"
+                        :min="0"
+                        :max="100"
+                        :step="1"
+                    />
+                </n-form-item>
+                <n-form-item label="Accepted exchanges" path="websocket_accepted_exchanges">
+                    <n-input
+                        v-model:value="signal.websocket_accepted_exchanges"
+                        placeholder="binance"
+                    />
+                </n-form-item>
+                <n-form-item
+                    label="Accepted market states"
+                    path="websocket_accepted_market_states"
+                >
+                    <n-input
+                        v-model:value="signal.websocket_accepted_market_states"
+                        placeholder="healthy"
+                    />
+                </n-form-item>
+            </template>
+
             <template v-if="signal.signal !== 'csv_signal'">
                 <n-form-item
                     label="Signal initial buy strategy"
