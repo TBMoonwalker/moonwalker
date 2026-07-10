@@ -288,10 +288,11 @@ async def test_websocket_signal_ignores_expired_signal(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_websocket_signal_ignores_keepalive_message(monkeypatch):
+async def test_websocket_signal_acknowledges_keepalive_message(monkeypatch):
     watcher_queue = asyncio.Queue()
     plugin = SignalPlugin(watcher_queue)
     orders = []
+    sent_messages: list[str] = []
 
     async def fake_receive_buy_order(order, _config) -> None:
         orders.append(order)
@@ -308,10 +309,14 @@ async def test_websocket_signal_ignores_keepalive_message(monkeypatch):
             "connection_id": "ws-ca5df5f62515",
             "last_sent_sequence": 0,
         },
+        sent_messages=sent_messages,
     )
 
     assert orders == []
     assert watcher_queue.empty()
+    assert [json.loads(message) for message in sent_messages] == [
+        {"type": "keepalive_ack", "id": "ws-ca5df5f62515"}
+    ]
 
 
 @pytest.mark.asyncio

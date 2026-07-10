@@ -89,5 +89,6 @@ trade metadata, de-duplicates `signal_id` or `sequence`, and uses the same
 Moonwalker admission, max-bot, BTC pulse, allowlist, denylist, history warmup,
 and order-sizing flow as the other signal plugins.
 
-Messages with `type: "keepalive"` are treated as connection control messages and
-do not trigger trade validation.
+Messages with `type: "keepalive"` are treated as connection control messages,
+acknowledged with `{"type":"keepalive_ack","id":"<keepalive id>"}`, and do not
+trigger trade validation.

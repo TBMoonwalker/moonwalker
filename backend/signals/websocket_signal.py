@@ -285,7 +285,7 @@ class SignalPlugin:
 
                     while self.status:
                         raw_message = await websocket.recv()
-                        await self.__process_raw_message(raw_message)
+                        await self.__process_raw_message(raw_message, websocket)
             except ConnectionClosed as exc:
                 logging.warning(
                     "Websocket signal connection closed. Reconnecting in %s seconds. "
@@ -327,7 +327,7 @@ class SignalPlugin:
             message = json.dumps(message, sort_keys=True)
         await websocket.send(message)
 
-    async def __process_raw_message(self, raw_message: Any) -> None:
+    async def __process_raw_message(self, raw_message: Any, websocket: Any) -> None:
         """Decode a websocket frame and process every signal payload inside it."""
         try:
             payload = self.__decode_message(raw_message)
@@ -338,13 +338,13 @@ class SignalPlugin:
         if isinstance(payload, list):
             for item in payload:
                 if isinstance(item, dict):
-                    await self.__process_signal_payload(item)
+                    await self.__process_signal_payload(item, websocket)
                 else:
                     logging.debug("Ignoring non-object websocket signal item.")
             return
 
         if isinstance(payload, dict):
-            await self.__process_signal_payload(payload)
+            await self.__process_signal_payload(payload, websocket)
             return
 
         logging.debug("Ignoring websocket signal payload that is not an object.")
@@ -360,9 +360,14 @@ class SignalPlugin:
             return raw_message
         raise TypeError("Unsupported websocket message type")
 
-    async def __process_signal_payload(self, payload: dict[str, Any]) -> None:
+    async def __process_signal_payload(
+        self,
+        payload: dict[str, Any],
+        websocket: Any,
+    ) -> None:
         """Validate and process one decoded websocket signal object."""
         if str(payload.get("type", "")).strip().lower() == "keepalive":
+            await self.__acknowledge_keepalive(payload, websocket)
             logging.debug(
                 "Received websocket signal keepalive %s.",
                 payload.get("connection_id") or "without connection id",
@@ -380,6 +385,22 @@ class SignalPlugin:
 
         self._max_bots_blocked = False
         await self.__open_trade(candidate)
+
+    @staticmethod
+    async def __acknowledge_keepalive(
+        payload: dict[str, Any],
+        websocket: Any,
+    ) -> None:
+        """Send the provider's expected acknowledgement for a keepalive frame."""
+        keepalive_id = payload.get("id") or payload.get("connection_id")
+        await websocket.send(
+            json.dumps(
+                {
+                    "type": "keepalive_ack",
+                    "id": "" if keepalive_id is None else str(keepalive_id),
+                }
+            )
+        )
 
     async def __build_trade_candidate(
         self,
