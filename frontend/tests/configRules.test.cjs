@@ -324,6 +324,46 @@ test('config rules do not require retired ladder fields in canonical dynamic mod
     assert.equal(dynamicContext.rules.os.validator({}, null), true)
 })
 
+test('config rules fail closed for an unsafe recovery target policy', () => {
+    const context = createRuleContext({
+        dca: {
+            value: {
+                enabled: true,
+                trade_mode: 'dynamic_dca',
+                dynamic_so_sizing_mode: 'recovery_target',
+                dynamic_so_recovery_min_pct: 12,
+            },
+        },
+    })
+
+    assert.equal(
+        context.rules.ss.validator({}, 0).message,
+        'Please add a positive recovery spacing scale',
+    )
+    assert.equal(
+        context.rules.dynamic_so_atr_length.validator({}, 1).message,
+        'ATR length must be at least 2',
+    )
+    assert.equal(
+        context.rules.dynamic_so_max_deal_quote.validator({}, 0).message,
+        'Please add a positive max deal budget',
+    )
+    assert.equal(
+        context.rules.dynamic_so_recovery_max_pct.validator({}, 10).message,
+        'Maximum recovery must be at least the minimum recovery',
+    )
+    assert.equal(context.rules.ss.validator({}, 1.6), true)
+    assert.equal(context.rules.dynamic_so_atr_length.validator({}, 14), true)
+    assert.equal(
+        context.rules.dynamic_so_max_deal_quote.validator({}, 250),
+        true,
+    )
+    assert.equal(
+        context.rules.dynamic_so_recovery_max_pct.validator({}, 30),
+        true,
+    )
+})
+
 test('config rules require a positive global max fund after submit', () => {
     const missingContext = createRuleContext()
     assert.equal(

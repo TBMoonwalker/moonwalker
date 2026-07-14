@@ -378,10 +378,30 @@ export function buildLoadedConfigState(
             so: toNumberOrNull(response.so),
             mstc: toNumberOrNull(response.mstc),
             sos: toNumberOrNull(response.sos),
-            ss: toNumberOrNull(response.ss),
+            ss: toNumberOrNull(response.ss) ?? 1.6,
             os: toNumberOrNull(response.os),
             trade_safety_order_budget_ratio:
                 toNumberOrNull(response.trade_safety_order_budget_ratio) ?? 0.95,
+            dynamic_so_sizing_mode:
+                toNullableString(response.dynamic_so_sizing_mode) ||
+                'legacy_factors',
+            dynamic_so_atr_timeframe:
+                toNullableString(response.dynamic_so_atr_timeframe) || 'trading',
+            dynamic_so_atr_length:
+                toNumberOrNull(response.dynamic_so_atr_length) ?? 14,
+            dynamic_so_spacing_atr_multiplier:
+                toNumberOrNull(response.dynamic_so_spacing_atr_multiplier) ?? 3,
+            dynamic_so_recovery_atr_multiplier:
+                toNumberOrNull(response.dynamic_so_recovery_atr_multiplier) ??
+                5.5,
+            dynamic_so_recovery_min_pct:
+                toNumberOrNull(response.dynamic_so_recovery_min_pct) ?? 12,
+            dynamic_so_recovery_max_pct:
+                toNumberOrNull(response.dynamic_so_recovery_max_pct) ?? 30,
+            dynamic_so_max_deal_quote:
+                toNumberOrNull(response.dynamic_so_max_deal_quote) ?? 0,
+            dynamic_so_min_tp_improvement_pct:
+                toNumberOrNull(response.dynamic_so_min_tp_improvement_pct) ?? 5,
             sidestep_bearish_strategy: toNullableString(
                 response.sidestep_bearish_strategy,
             ),

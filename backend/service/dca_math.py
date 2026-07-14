@@ -26,6 +26,9 @@ class BacktestTradeState:
     sell_reason: str | None = None
     tp_limit_order_price: float | None = None
     sl_limit_order_price: float | None = None
+    dca_reference_price: float = 0.0
+    dca_reference_atr_percent: float = 0.0
+    dca_next_trigger_price: float = 0.0
 
 
 def calculate_take_profit_price(

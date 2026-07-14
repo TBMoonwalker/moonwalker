@@ -1,6 +1,47 @@
 <template>
     <n-flex class="expanded-trade-layout">
         <n-card class="expanded-order-card">
+            <section
+                v-if="showRecoveryDiagnostics"
+                class="recovery-dca-status"
+                aria-label="Recovery DCA status"
+            >
+                <div class="recovery-dca-heading">
+                    <span>Recovery DCA</span>
+                    <n-tag size="small" :type="recoveryModeTagType">
+                        {{ recoveryModeLabel }}
+                    </n-tag>
+                </div>
+                <div class="recovery-dca-grid">
+                    <div>
+                        <span class="recovery-dca-label">Next trigger</span>
+                        <span class="recovery-dca-value">
+                            {{ formatDiagnosticPrice(rowData.dca_next_trigger_price) }}
+                        </span>
+                    </div>
+                    <div>
+                        <span class="recovery-dca-label">Reference ATR</span>
+                        <span class="recovery-dca-value">
+                            {{ formatOptionalPercent(rowData.dca_reference_atr_percent) }}
+                        </span>
+                    </div>
+                    <div>
+                        <span class="recovery-dca-label">Projected TP</span>
+                        <span class="recovery-dca-value">
+                            {{ formatDiagnosticPrice(recoveryDecision.projected_tp_price) }}
+                        </span>
+                    </div>
+                    <div>
+                        <span class="recovery-dca-label">Last sized SO</span>
+                        <span class="recovery-dca-value">
+                            {{ formatOptionalQuote(recoveryDecision.final_quote) }}
+                        </span>
+                    </div>
+                </div>
+                <p v-if="recoveryDecision.reason" class="recovery-dca-reason">
+                    {{ formatDecisionReason(recoveryDecision.reason) }}
+                </p>
+            </section>
             <n-timeline :horizontal="false">
                 <n-timeline-item
                     v-for="item in timelineItems"
@@ -66,6 +107,11 @@ type RowData = {
     tp_price: number
     precision: number
     current_price?: number
+    dca_sizing_mode?: string | null
+    dca_reference_price?: number
+    dca_reference_atr_percent?: number
+    dca_next_trigger_price?: number
+    dca_last_decision_json?: string | null
     baseorder: OrderData
     safetyorder?: OrderData[]
 }
@@ -90,6 +136,40 @@ type TimelineItem = {
 }
 
 const executions = ref<TradeExecutionRow[]>([])
+
+type RecoveryDecision = {
+    final_quote?: number
+    projected_tp_price?: number
+    reason?: string
+}
+
+const recoveryDecision = computed<RecoveryDecision>(() => {
+    const raw = props.rowData.dca_last_decision_json
+    if (!raw) {
+        return {}
+    }
+    try {
+        const parsed = JSON.parse(raw)
+        return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch {
+        return {}
+    }
+})
+const showRecoveryDiagnostics = computed(() =>
+    ['recovery_shadow', 'recovery_target'].includes(
+        String(props.rowData.dca_sizing_mode ?? ''),
+    ),
+)
+const recoveryModeLabel = computed(() =>
+    props.rowData.dca_sizing_mode === 'recovery_target'
+        ? 'Live'
+        : 'Shadow',
+)
+const recoveryModeTagType = computed(() =>
+    props.rowData.dca_sizing_mode === 'recovery_target'
+        ? ('warning' as const)
+        : ('info' as const),
+)
 
 const safetyOrders = computed(() =>
     Array.isArray(props.rowData.safetyorder) ? props.rowData.safetyorder : [],
@@ -409,6 +489,30 @@ function formatPercent(value: unknown): string {
     return `${toNumberOrZero(value).toFixed(2)} %`
 }
 
+function formatDiagnosticPrice(value: unknown): string {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0 ? formatPrice(parsed) : '—'
+}
+
+function formatOptionalPercent(value: unknown): string {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0
+        ? `${parsed.toFixed(2)} %`
+        : '—'
+}
+
+function formatOptionalQuote(value: unknown): string {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(2) : '—'
+}
+
+function formatDecisionReason(value: unknown): string {
+    const normalized = String(value ?? '').trim().replaceAll('_', ' ')
+    return normalized
+        ? normalized.charAt(0).toUpperCase() + normalized.slice(1)
+        : ''
+}
+
 function emitAddOrderManually(): void {
     if (typeof props.onAddOrderManually === 'function') {
         props.onAddOrderManually(props.rowData)
@@ -451,6 +555,49 @@ onMounted(() => {
     flex: 0 0 340px;
     max-width: 360px;
     min-width: 280px;
+}
+
+.recovery-dca-status {
+    border-bottom: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    margin-bottom: 18px;
+    padding-bottom: 16px;
+}
+
+.recovery-dca-heading {
+    align-items: center;
+    display: flex;
+    font-weight: 600;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.recovery-dca-grid {
+    display: grid;
+    gap: 10px 16px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.recovery-dca-grid > div {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.recovery-dca-label {
+    color: var(--mw-color-text-muted);
+    font-size: 12px;
+}
+
+.recovery-dca-value {
+    font-family: var(--mw-font-mono);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.recovery-dca-reason {
+    color: var(--mw-color-text-secondary);
+    font-size: 12px;
+    margin: 10px 0 0;
 }
 
 .expanded-replay-chart {

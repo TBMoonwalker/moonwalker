@@ -12,6 +12,11 @@ export type OpenTradeRow = {
   automation_paused?: boolean
   automation_paused_at?: string | null
   automation_pause_source?: string | null
+  dca_sizing_mode?: string | null
+  dca_reference_price?: number
+  dca_reference_atr_percent?: number
+  dca_next_trigger_price?: number
+  dca_last_decision_json?: string | null
   execution_history_complete?: boolean
   amount: number | string
   cost: number | string
@@ -209,6 +214,13 @@ export const useTradesStore = defineStore('trades', {
         automation_paused: Boolean(val.automation_paused ?? false),
         automation_paused_at: val.automation_paused_at ?? null,
         automation_pause_source: val.automation_pause_source ?? null,
+        dca_sizing_mode: val.dca_sizing_mode ?? 'legacy_factors',
+        dca_reference_price: Number(val.dca_reference_price ?? 0),
+        dca_reference_atr_percent: Number(
+          val.dca_reference_atr_percent ?? 0
+        ),
+        dca_next_trigger_price: Number(val.dca_next_trigger_price ?? 0),
+        dca_last_decision_json: val.dca_last_decision_json ?? null,
         execution_history_complete: Boolean(val.execution_history_complete ?? true),
         safetyorder: Array.isArray(val.safetyorders) ? val.safetyorders : [],
         precision: currentPrecision,

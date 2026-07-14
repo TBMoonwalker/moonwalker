@@ -41,6 +41,12 @@ class OpenTrades(Model):
     tp_limit_order_price = fields.FloatField(null=True)
     tp_limit_order_amount = fields.FloatField(null=True)
     tp_limit_order_armed_at = fields.TextField(null=True)
+    dca_sizing_mode = fields.CharField(max_length=32, default="legacy_factors")
+    dca_policy_json = fields.TextField(null=True)
+    dca_reference_price = fields.FloatField(default=0.0)
+    dca_reference_atr_percent = fields.FloatField(default=0.0)
+    dca_next_trigger_price = fields.FloatField(default=0.0)
+    dca_last_decision_json = fields.TextField(null=True)
     automation_paused = fields.BooleanField(default=False)
     automation_paused_at = fields.TextField(null=True)
     reserved_reentry_quote = fields.FloatField(default=0.0)
@@ -73,6 +79,10 @@ class OpenTrades(Model):
             f"'tp_limit_order_price': {self.tp_limit_order_price}, "
             f"'tp_limit_order_amount': {self.tp_limit_order_amount}, "
             f"'tp_limit_order_armed_at': {self.tp_limit_order_armed_at}, "
+            f"'dca_sizing_mode': {self.dca_sizing_mode}, "
+            f"'dca_reference_price': {self.dca_reference_price}, "
+            f"'dca_reference_atr_percent': {self.dca_reference_atr_percent}, "
+            f"'dca_next_trigger_price': {self.dca_next_trigger_price}, "
             f"'automation_paused': {self.automation_paused}, "
             f"'automation_paused_at': {self.automation_paused_at}, "
             f"'reserved_reentry_quote': {self.reserved_reentry_quote}, "

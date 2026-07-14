@@ -645,6 +645,24 @@ class Exchange:
             force_refresh=force_refresh,
         )
 
+    async def get_minimum_buy_notional(
+        self,
+        config: dict[str, Any],
+        symbol: str,
+        *,
+        is_market_order: bool = True,
+    ) -> float | None:
+        """Return the exchange minimum quote notional for a buy order."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
+        if resolved_symbol is None:
+            return None
+        return self.__get_min_notional_for_symbol(
+            resolved_symbol,
+            is_market_order=is_market_order,
+        )
+
     async def __preflight_buy_funds(
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> bool:

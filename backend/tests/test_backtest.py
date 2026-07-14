@@ -21,11 +21,13 @@ from service.backtest import (
     BacktestValidationError,
     DcaSimulator,
     OhlcvCandle,
+    calculate_atr_percent_series,
     candles_to_dataframe,
     estimate_candle_count,
     validate_backtest_range,
 )
 from service.dca_math import BacktestTradeState
+from service.dca_recovery_sizing import RECOVERY_TARGET_MODE, RecoverySizingPolicy
 from service.exchange import Exchange
 from service.strategy_builder import BUILTIN_STRATEGY_BY_SLUG, build_builtin_ir
 from service.strategy_runtime import EvaluationContext
@@ -652,6 +654,92 @@ def test_dca_simulator_places_dynamic_safety_order() -> None:
     assert trade.safety_orders[0]["so_percentage"] == pytest.approx(-11.0)
 
 
+def test_dca_simulator_recovery_target_matches_0g_example() -> None:
+    policy = RecoverySizingPolicy(
+        mode=RECOVERY_TARGET_MODE,
+        minimum_spacing_percent=5.0,
+        spacing_step_scale=1.6,
+        spacing_atr_multiplier=3.0,
+        recovery_atr_multiplier=5.5,
+        minimum_recovery_percent=12.0,
+        maximum_recovery_percent=30.0,
+        maximum_deal_quote=250.0,
+        minimum_tp_improvement_percent=5.0,
+    )
+    simulator = DcaSimulator(
+        base_order_size=11.99,
+        take_profit_pct=0.75,
+        stop_loss_pct=None,
+        max_safety_orders=5,
+        fee=0.0,
+        recovery_policy=policy,
+    )
+    trade = simulator.try_enter("0G/USDC", 0.568, 1_000)
+    assert trade is not None
+
+    simulator.evaluate(
+        trade,
+        OhlcvCandle(2_000, 0.556, 0.556, 0.556, 0.556, 1.0),
+        atr_percent=1.802,
+    )
+    assert trade.safety_orders_count == 0
+
+    simulator.evaluate(
+        trade,
+        OhlcvCandle(3_000, 0.495, 0.495, 0.495, 0.495, 1.0),
+        atr_percent=1.588,
+    )
+    assert trade.safety_orders_count == 1
+    assert trade.safety_orders[0]["cost"] == pytest.approx(3.3512, rel=1e-4)
+
+    simulator.evaluate(
+        trade,
+        OhlcvCandle(4_000, 0.306, 0.306, 0.306, 0.306, 1.0),
+        atr_percent=3.138,
+    )
+    assert trade.safety_orders_count == 2
+    assert trade.safety_orders[1]["cost"] == pytest.approx(33.0294, rel=1e-4)
+
+
+def test_calculate_atr_percent_series_uses_true_range_gaps() -> None:
+    candles = [
+        OhlcvCandle(1, 100.0, 101.0, 99.0, 100.0, 1.0),
+        OhlcvCandle(2, 110.0, 112.0, 109.0, 110.0, 1.0),
+    ]
+
+    atr_percentages = calculate_atr_percent_series(candles, length=2)
+
+    assert atr_percentages[0] == pytest.approx(2.0)
+    assert atr_percentages[1] == pytest.approx((7.0 / 110.0) * 100)
+
+
+def test_resampled_recovery_atr_is_causal_without_future_bucket_data() -> None:
+    candles = [
+        OhlcvCandle(0, 100.0, 101.0, 99.0, 100.0, 1.0),
+        OhlcvCandle(3_600_000, 100.0, 103.0, 98.0, 102.0, 1.0),
+        OhlcvCandle(7_200_000, 102.0, 110.0, 97.0, 108.0, 1.0),
+        OhlcvCandle(10_800_000, 108.0, 112.0, 95.0, 96.0, 1.0),
+        OhlcvCandle(14_400_000, 96.0, 98.0, 90.0, 92.0, 1.0),
+    ]
+
+    prefix_values = calculate_atr_percent_series(
+        candles[:2],
+        length=2,
+        source_timeframe="1h",
+        atr_timeframe="4h",
+    )
+    full_values = calculate_atr_percent_series(
+        candles,
+        length=2,
+        source_timeframe="1h",
+        atr_timeframe="4h",
+    )
+
+    assert full_values[:2] == pytest.approx(prefix_values)
+    assert full_values[0] == pytest.approx(2.0)
+    assert full_values[1] == pytest.approx(5.0 / 102.0 * 100)
+
+
 def test_dca_simulator_ignores_disabled_stop_loss() -> None:
     sim = DcaSimulator(
         base_order_size=100.0,
@@ -706,6 +794,24 @@ def test_backtest_fetch_start_includes_strategy_warmup() -> None:
 
     assert engine._warmup_candle_count == 200
     assert engine._fetch_start_date == engine.start_date - 200 * 7 * 86_400_000
+
+
+def test_backtest_recovery_policy_uses_replay_spacing_override() -> None:
+    engine = Backtest(
+        config={
+            "dynamic_so_sizing_mode": "recovery_target",
+            "dynamic_so_max_deal_quote": 250,
+            "sos": 9,
+        },
+        symbol="0G/USDC",
+        strategy_slug="ema20_swing",
+        timeframe="4h",
+        start_date=datetime(2026, 2, 1, tzinfo=UTC),
+        end_date=datetime(2026, 2, 3, tzinfo=UTC),
+        safety_order_step_pct=5,
+    )
+
+    assert engine.recovery_policy.minimum_spacing_percent == 5
 
 
 @pytest.mark.asyncio

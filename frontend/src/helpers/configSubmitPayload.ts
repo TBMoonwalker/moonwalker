@@ -93,6 +93,15 @@ export interface DcaConfigSection {
     ss: number | null
     os: number | null
     trade_safety_order_budget_ratio: number | null
+    dynamic_so_sizing_mode: string | null
+    dynamic_so_atr_timeframe: string | null
+    dynamic_so_atr_length: number | null
+    dynamic_so_spacing_atr_multiplier: number | null
+    dynamic_so_recovery_atr_multiplier: number | null
+    dynamic_so_recovery_min_pct: number | null
+    dynamic_so_recovery_max_pct: number | null
+    dynamic_so_max_deal_quote: number | null
+    dynamic_so_min_tp_improvement_pct: number | null
     sidestep_bearish_strategy: string | null
     sidestep_reentry_strategy: string | null
     sidestep_reentry_cooldown_candles: number | null
@@ -374,10 +383,46 @@ export function buildConfigSubmitPayload(
         so: serializeConfigValue(dca.so || false, 'int'),
         mstc: serializeConfigValue(dca.mstc || false, 'int'),
         sos: serializeConfigValue(dca.sos || false, 'float'),
-        ss: serializeConfigValue(dca.ss || false, 'float'),
+        ss: serializeConfigValue(dca.ss ?? 1.6, 'float'),
         os: serializeConfigValue(dca.os || false, 'float'),
         trade_safety_order_budget_ratio: serializeConfigValue(
             dca.trade_safety_order_budget_ratio ?? 0.95,
+            'float',
+        ),
+        dynamic_so_sizing_mode: serializeConfigValue(
+            dca.dynamic_so_sizing_mode || 'legacy_factors',
+            'str',
+        ),
+        dynamic_so_atr_timeframe: serializeConfigValue(
+            dca.dynamic_so_atr_timeframe || 'trading',
+            'str',
+        ),
+        dynamic_so_atr_length: serializeConfigValue(
+            dca.dynamic_so_atr_length ?? 14,
+            'int',
+        ),
+        dynamic_so_spacing_atr_multiplier: serializeConfigValue(
+            dca.dynamic_so_spacing_atr_multiplier ?? 3,
+            'float',
+        ),
+        dynamic_so_recovery_atr_multiplier: serializeConfigValue(
+            dca.dynamic_so_recovery_atr_multiplier ?? 5.5,
+            'float',
+        ),
+        dynamic_so_recovery_min_pct: serializeConfigValue(
+            dca.dynamic_so_recovery_min_pct ?? 12,
+            'float',
+        ),
+        dynamic_so_recovery_max_pct: serializeConfigValue(
+            dca.dynamic_so_recovery_max_pct ?? 30,
+            'float',
+        ),
+        dynamic_so_max_deal_quote: serializeConfigValue(
+            dca.dynamic_so_max_deal_quote ?? 0,
+            'float',
+        ),
+        dynamic_so_min_tp_improvement_pct: serializeConfigValue(
+            dca.dynamic_so_min_tp_improvement_pct ?? 5,
             'float',
         ),
         sidestep_bearish_strategy: serializeConfigValue(

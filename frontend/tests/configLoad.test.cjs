@@ -127,7 +127,36 @@ test('buildLoadedConfigState keeps dynamic mode canonical and preserves the dyna
     )
 
     assert.equal(state.dca.trade_mode, 'dynamic_dca')
+    assert.equal(state.dca.ss, 1.6)
+    assert.equal(state.dca.dynamic_so_atr_timeframe, 'trading')
     assert.equal(state.capital.budget_buffer_pct, 50)
+})
+
+test('buildLoadedConfigState hydrates recovery DCA policy settings', () => {
+    const state = buildLoadedConfigState(
+        {
+            dynamic_so_sizing_mode: 'recovery_target',
+            dynamic_so_atr_timeframe: '4h',
+            dynamic_so_atr_length: '21',
+            dynamic_so_spacing_atr_multiplier: '3.5',
+            dynamic_so_recovery_atr_multiplier: '6',
+            dynamic_so_recovery_min_pct: '10',
+            dynamic_so_recovery_max_pct: '28',
+            dynamic_so_max_deal_quote: '250',
+            dynamic_so_min_tp_improvement_pct: '4',
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(state.dca.dynamic_so_sizing_mode, 'recovery_target')
+    assert.equal(state.dca.dynamic_so_atr_timeframe, '4h')
+    assert.equal(state.dca.dynamic_so_atr_length, 21)
+    assert.equal(state.dca.dynamic_so_spacing_atr_multiplier, 3.5)
+    assert.equal(state.dca.dynamic_so_recovery_atr_multiplier, 6)
+    assert.equal(state.dca.dynamic_so_recovery_min_pct, 10)
+    assert.equal(state.dca.dynamic_so_recovery_max_pct, 28)
+    assert.equal(state.dca.dynamic_so_max_deal_quote, 250)
+    assert.equal(state.dca.dynamic_so_min_tp_improvement_pct, 4)
 })
 
 test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () => {

@@ -117,6 +117,11 @@ class _FakeStartupLogger:
         self.exception_calls.append((message, args))
 
 
+class _FakeRedisClient:
+    async def aclose(self) -> None:
+        return None
+
+
 async def _noop_async(*_args, **_kwargs) -> None:
     return None
 
@@ -149,6 +154,7 @@ async def test_startup_schedules_replay_backfill_as_background_task(
     monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
     monkeypatch.setattr(app_module, "start_redis", lambda: object())
     monkeypatch.setattr(app_module, "stop_redis", lambda _proc: None)
+    monkeypatch.setattr(app_module, "redis_client", _FakeRedisClient())
     monkeypatch.setattr(app_module, "Database", lambda: fake_database)
     monkeypatch.setattr(app_module, "Config", _FakeConfigFactory)
     monkeypatch.setattr(app_module, "Watcher", _FakeWatcher)

@@ -9,6 +9,7 @@ from typing import Any, TypeGuard
 import helper
 from service.ai_trust import evaluate_entry_enforcement
 from service.capital_budget import CapitalBudgetService
+from service.dca_recovery_sizing import build_recovery_sizing_policy
 from service.exchange import Exchange
 from service.exchange_types import (
     ExchangeOrderPayload,
@@ -162,6 +163,10 @@ class Orders:
         ):
             if order_status.get(key) is None and original_order.get(key) is not None:
                 order_status[key] = original_order[key]
+        if bool(order_status.get("baseorder")):
+            metadata = self._parse_metadata_json(order_status.get("metadata_json"))
+            metadata["dca_policy"] = build_recovery_sizing_policy(config).to_dict()
+            order_status["metadata_json"] = json.dumps(metadata, sort_keys=True)
         payload = build_buy_trade_payload(order_status)
         sidestep_campaigns = await self._get_sidestep_campaigns()
         campaign_context = await sidestep_campaigns.resolve_buy_context(

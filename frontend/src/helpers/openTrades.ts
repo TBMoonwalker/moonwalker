@@ -29,6 +29,11 @@ export type OpenTradeRow = {
     automation_paused?: boolean
     automation_paused_at?: string | null
     automation_pause_source?: string | null
+    dca_sizing_mode?: string | null
+    dca_reference_price?: number
+    dca_reference_atr_percent?: number
+    dca_next_trigger_price?: number
+    dca_last_decision_json?: string | null
     amount: number
     cost: number
     profit: number

@@ -110,6 +110,15 @@ function createBaseOptions(overrides = {}) {
             ss: 1.2,
             os: 1.4,
             trade_safety_order_budget_ratio: 0.95,
+            dynamic_so_sizing_mode: 'recovery_target',
+            dynamic_so_atr_timeframe: '4h',
+            dynamic_so_atr_length: 14,
+            dynamic_so_spacing_atr_multiplier: 3,
+            dynamic_so_recovery_atr_multiplier: 5.5,
+            dynamic_so_recovery_min_pct: 12,
+            dynamic_so_recovery_max_pct: 30,
+            dynamic_so_max_deal_quote: 250,
+            dynamic_so_min_tp_improvement_pct: 5,
             sidestep_bearish_strategy: null,
             sidestep_reentry_strategy: null,
             sidestep_reentry_cooldown_candles: 0,
@@ -235,6 +244,16 @@ test(
             value: null,
             type: 'str',
         })
+        assert.deepEqual(parseField(payload, 'dynamic_so_sizing_mode'), {
+            value: 'legacy_factors',
+            type: 'str',
+        })
+        assert.equal(
+            parseField(payload, 'dynamic_so_atr_timeframe').value,
+            'trading',
+        )
+        assert.equal(parseField(payload, 'ss').value, 1.2)
+        assert.equal(parseField(payload, 'dynamic_so_max_deal_quote').value, 0)
         assert.deepEqual(parseField(payload, 'exchange_hostname'), {
             value: 'api.exchange.test',
             type: 'str',
@@ -291,6 +310,18 @@ test(
         )
     },
 )
+
+test('buildConfigSubmitPayload persists bounded recovery DCA settings', () => {
+    const payload = buildConfigSubmitPayload(createBaseOptions())
+
+    assert.deepEqual(parseField(payload, 'dynamic_so_sizing_mode'), {
+        value: 'recovery_target',
+        type: 'str',
+    })
+    assert.equal(parseField(payload, 'dynamic_so_atr_timeframe').value, '4h')
+    assert.equal(parseField(payload, 'dynamic_so_atr_length').value, 14)
+    assert.equal(parseField(payload, 'dynamic_so_max_deal_quote').value, 250)
+})
 
 test('buildConfigSubmitPayload persists AI Trust Ollama settings', () => {
     const payload = buildConfigSubmitPayload(

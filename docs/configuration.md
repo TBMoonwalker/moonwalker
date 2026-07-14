@@ -94,10 +94,19 @@ are not exposed in the UI and must be set via the API.
 | `tp_spike_confirm_ticks` | `int` | Minimum number of qualifying ticker updates above TP required before the sell is confirmed. `0` disables the tick requirement. | `0` |
 | `so` | `float` | Safety order size. | `20` |
 | `sos` | `float` | Price deviation for first safety order (percent). | `1.5` |
-| `ss` | `float` | Safety order step scale. | `1.05` |
+| `ss` | `float` | Safety order step scale. Recovery DCA defaults to a materially expanding ladder instead of leaving the value unset. | `1.6` |
 | `os` | `float` | Safety order volume scale. | `1.2` |
 | `mstc` | `int` | Max safety order count. | `5` |
 | `trade_safety_order_budget_ratio` | `float` | Dynamic-DCA budget cap for a single safety order as a fraction of currently free quote balance. | `0.95` |
+| `dynamic_so_sizing_mode` | `string` | Dynamic-DCA SO policy: `legacy_factors`, diagnostic-only `recovery_shadow`, or live `recovery_target`. The policy is snapshotted when a new deal opens; existing deals are not migrated. | `legacy_factors` |
+| `dynamic_so_atr_timeframe` | `string` | Candle timeframe used to measure ATR for recovery spacing and rebound targets. `trading` inherits the deal/backtest trading candle timeframe; an explicit higher timeframe remains available for deliberate smoothing. | `trading` |
+| `dynamic_so_atr_length` | `int` | Wilder ATR lookback used by recovery sizing. | `14` |
+| `dynamic_so_spacing_atr_multiplier` | `float` | Multiplies ATR% to determine the minimum gap below the preceding filled buy. The actual gap is the larger of this result and `sos`, then grows by `ss` for later SOs. | `3.0` |
+| `dynamic_so_recovery_atr_multiplier` | `float` | Multiplies current ATR% to set the desired distance from the candidate fill to projected TP. | `5.5` |
+| `dynamic_so_recovery_min_pct` | `float` | Lower clamp for the desired post-SO recovery move to TP. | `12.0` |
+| `dynamic_so_recovery_max_pct` | `float` | Upper clamp for the desired post-SO recovery move to TP. | `30.0` |
+| `dynamic_so_max_deal_quote` | `float` | Hard quote-currency cap for total cost of a recovery-target deal. Live activation requires a positive value in `recovery_target` mode. | `0.0` |
+| `dynamic_so_min_tp_improvement_pct` | `float` | Minimum percentage-point improvement to the projected TP distance when balance or deal caps prevent reaching the full target. | `5.0` |
 | `dynamic_so_volume_enabled` | `bool` | Enable dynamic scaling for safety order amount. Trigger logic stays unchanged; only SO size is scaled. | `false` |
 | `dynamic_so_ath_lookback_value` | `int` | ATH lookback amount used by dynamic SO scaling. | `1` |
 | `dynamic_so_ath_lookback_unit` | `string` | Lookback unit for ATH: `day`, `week`, `month`, or `year`. | `month` |

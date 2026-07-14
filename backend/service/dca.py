@@ -1,6 +1,7 @@
 """DCA strategy handling and order logic."""
 
 import asyncio
+import json
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -17,6 +18,16 @@ from service.dca_math import (
     calculate_average_entry_price,
     calculate_stop_loss_price,
     calculate_take_profit_price,
+)
+from service.dca_recovery_sizing import (
+    LEGACY_SIZING_MODE,
+    RECOVERY_SHADOW_MODE,
+    RECOVERY_TARGET_MODE,
+    RecoverySizingPolicy,
+    calculate_recovery_sizing,
+    calculate_recovery_spacing_percent,
+    calculate_recovery_trigger_price,
+    normalize_recovery_sizing_mode,
 )
 from service.dca_safety_orders import (
     SafetyOrderContext,
@@ -645,6 +656,182 @@ class Dca:
 
         return final_cost, details
 
+    def __get_recovery_policy(
+        self,
+        trades: dict[str, Any],
+    ) -> RecoverySizingPolicy:
+        """Return the immutable recovery policy snapshotted for this deal."""
+        mode = normalize_recovery_sizing_mode(trades.get("dca_sizing_mode"))
+        raw_policy = trades.get("dca_policy_json")
+        parsed_policy: dict[str, Any] = {}
+        if isinstance(raw_policy, str) and raw_policy.strip():
+            try:
+                candidate = json.loads(raw_policy)
+            except json.JSONDecodeError:
+                candidate = {}
+            if isinstance(candidate, dict):
+                parsed_policy = candidate
+        elif isinstance(raw_policy, dict):
+            parsed_policy = dict(raw_policy)
+        parsed_policy["mode"] = mode
+        return RecoverySizingPolicy.from_dict(parsed_policy)
+
+    async def __get_recovery_atr_percent(
+        self,
+        symbol: str,
+        policy: RecoverySizingPolicy,
+    ) -> tuple[float, dict[str, float | str]]:
+        """Return the current ATR percentage used by recovery DCA."""
+        runtime_config = self.__runtime_config()
+        _multiplier, details = await self.indicators.calculate_atr_regime_multiplier(
+            symbol=symbol,
+            timerange=policy.atr_timeframe,
+            config=self.config,
+            length=policy.atr_length,
+            low_k=runtime_config.atr_regime_low_k,
+            mid_k=runtime_config.atr_regime_mid_k,
+            high_k=runtime_config.atr_regime_high_k,
+        )
+        return max(0.0, float(details.get("atr_percent", 0.0))), details
+
+    async def __evaluate_recovery_dca_trigger(
+        self,
+        trades: dict[str, Any],
+        current_price: float,
+        actual_pnl: float,
+        policy: RecoverySizingPolicy,
+    ) -> tuple[bool, float, dict[str, Any]]:
+        """Evaluate ATR spacing and the configured fresh recovery signal."""
+        atr_percent, atr_details = await self.__get_recovery_atr_percent(
+            trades["symbol"],
+            policy,
+        )
+        reference_price = float(trades.get("dca_reference_price") or 0.0)
+        if reference_price <= 0:
+            if trades.get("safetyorders"):
+                reference_price = float(trades["safetyorders"][-1]["price"])
+            else:
+                reference_price = float(trades.get("bo_price") or 0.0)
+        reference_atr_percent = float(trades.get("dca_reference_atr_percent") or 0.0)
+        if reference_atr_percent <= 0:
+            reference_atr_percent = atr_percent
+
+        spacing_percent = calculate_recovery_spacing_percent(
+            reference_atr_percent,
+            int(trades.get("safetyorders_count") or 0),
+            policy,
+        )
+        trigger_price = calculate_recovery_trigger_price(
+            reference_price,
+            spacing_percent,
+        )
+        details: dict[str, Any] = {
+            "enabled": "true",
+            "mode": policy.mode,
+            "atr_percent": atr_percent,
+            "atr_regime": str(atr_details.get("regime", "mid")),
+            "reference_atr_percent": reference_atr_percent,
+            "reference_price": reference_price,
+            "spacing_percent": spacing_percent,
+            "trigger_price": trigger_price,
+            "current_price": current_price,
+            "actual_pnl": actual_pnl,
+        }
+
+        persisted_trigger = float(trades.get("dca_next_trigger_price") or 0.0)
+        persisted_reference_atr = float(trades.get("dca_reference_atr_percent") or 0.0)
+        if (
+            abs(persisted_trigger - trigger_price) > 1e-12
+            or persisted_reference_atr <= 0
+        ):
+            await self.trades.update_open_trades(
+                {
+                    "dca_reference_price": reference_price,
+                    "dca_reference_atr_percent": reference_atr_percent,
+                    "dca_next_trigger_price": trigger_price,
+                },
+                trades["symbol"],
+            )
+
+        if trigger_price <= 0 or current_price > trigger_price:
+            details["reason"] = "waiting_for_atr_spacing"
+            return False, round(actual_pnl, 1), details
+
+        strategy_result = await self.__dynamic_dca_strategy(trades["symbol"])
+        payload_changed = True
+        if isinstance(strategy_result, tuple):
+            strategy_buy_signal, payload_changed = strategy_result
+        else:
+            strategy_buy_signal = bool(strategy_result)
+        if not strategy_buy_signal:
+            details["reason"] = "recovery_signal_not_matched"
+            return False, round(actual_pnl, 1), details
+        if not payload_changed:
+            details["reason"] = "recovery_signal_unchanged"
+            return False, round(actual_pnl, 1), details
+
+        details["reason"] = "recovery_trigger_matched"
+        return True, round(actual_pnl, 1), details
+
+    async def __resolve_recovery_safety_order_size(
+        self,
+        trades: dict[str, Any],
+        current_price: float,
+        policy: RecoverySizingPolicy,
+        trigger_details: dict[str, Any],
+    ) -> tuple[float, dict[str, Any]]:
+        """Size a recovery SO to place TP within an ATR-derived rebound."""
+        runtime_config = self.__runtime_config()
+        free_quote_balance = await self.exchange.get_free_quote_balance(
+            self.config or {},
+            trades["symbol"],
+        )
+        budget_ratio = min(
+            1.0,
+            max(0.0, runtime_config.trade_safety_order_budget_ratio or 0.95),
+        )
+        maximum_available_quote = (
+            float(free_quote_balance) * budget_ratio
+            if free_quote_balance is not None
+            else None
+        )
+        minimum_order_quote = await self.exchange.get_minimum_buy_notional(
+            self.config or {},
+            trades["symbol"],
+            is_market_order=True,
+        )
+        sizing = calculate_recovery_sizing(
+            total_cost=float(trades.get("total_cost") or 0.0),
+            total_amount=float(trades.get("total_amount") or 0.0),
+            fill_price=current_price,
+            take_profit_percent=runtime_config.take_profit,
+            fee_ratio=float(trades.get("fee") or 0.0),
+            atr_percent=float(trigger_details.get("atr_percent") or 0.0),
+            policy=policy,
+            minimum_order_quote=float(minimum_order_quote or 0.0),
+            maximum_available_quote=maximum_available_quote,
+        )
+        details = {
+            **trigger_details,
+            **sizing.to_dict(),
+            "mode": policy.mode,
+            "minimum_order_quote": float(minimum_order_quote or 0.0),
+            "free_quote_balance": (
+                float(free_quote_balance) if free_quote_balance is not None else -1.0
+            ),
+            "budget_ratio": budget_ratio,
+            "final_size": round(float(sizing.final_quote), 8),
+            "skip": "false" if sizing.should_place else "true",
+            "error": "" if sizing.should_place else sizing.reason,
+        }
+        await self.trades.update_open_trades(
+            {
+                "dca_last_decision_json": json.dumps(details, sort_keys=True),
+            },
+            trades["symbol"],
+        )
+        return round(float(sizing.final_quote), 8), details
+
     async def __calculate_tp(
         self,
         current_price: float,
@@ -950,7 +1137,9 @@ class Dca:
         safety_order_size = runtime_config.safety_order_size
         new_so = False
         placed_new_so = False
-        dynamic_so_details: dict[str, float | str] = {"enabled": "false"}
+        dynamic_so_details: dict[str, Any] = {"enabled": "false"}
+        recovery_policy = self.__get_recovery_policy(trades)
+        recovery_trigger_details: dict[str, Any] = {}
 
         # Actual PNL in percent
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
@@ -985,9 +1174,26 @@ class Dca:
             new_so = False
 
             if dynamic_dca:
-                new_so, next_so_percentage = await self.__evaluate_dynamic_dca_trigger(
-                    trades, actual_pnl, trigger_threshold, last_so_percentage
-                )
+                if recovery_policy.mode == RECOVERY_TARGET_MODE:
+                    (
+                        new_so,
+                        next_so_percentage,
+                        recovery_trigger_details,
+                    ) = await self.__evaluate_recovery_dca_trigger(
+                        trades,
+                        current_price,
+                        actual_pnl,
+                        recovery_policy,
+                    )
+                else:
+                    new_so, next_so_percentage = (
+                        await self.__evaluate_dynamic_dca_trigger(
+                            trades,
+                            actual_pnl,
+                            trigger_threshold,
+                            last_so_percentage,
+                        )
+                    )
             else:
                 new_so, trigger_threshold, next_so_percentage = (
                     self.__evaluate_static_dca_trigger(
@@ -996,18 +1202,52 @@ class Dca:
                 )
 
             if new_so:
-                (
-                    safety_order_size,
-                    dynamic_so_details,
-                ) = await self.__resolve_safety_order_size(
-                    trades=trades,
-                    current_price=current_price,
-                    actual_pnl=actual_pnl,
-                    volume_scale=volume_scale,
-                    so_index=trades["safetyorders_count"] + 1,
-                    threshold_percentage=trigger_threshold,
-                    dynamic_dca=bool(dynamic_dca),
-                )
+                if recovery_policy.mode == RECOVERY_TARGET_MODE:
+                    safety_order_size, dynamic_so_details = (
+                        await self.__resolve_recovery_safety_order_size(
+                            trades,
+                            current_price,
+                            recovery_policy,
+                            recovery_trigger_details,
+                        )
+                    )
+                else:
+                    (
+                        safety_order_size,
+                        dynamic_so_details,
+                    ) = await self.__resolve_safety_order_size(
+                        trades=trades,
+                        current_price=current_price,
+                        actual_pnl=actual_pnl,
+                        volume_scale=volume_scale,
+                        so_index=trades["safetyorders_count"] + 1,
+                        threshold_percentage=trigger_threshold,
+                        dynamic_dca=bool(dynamic_dca),
+                    )
+                    if recovery_policy.mode == RECOVERY_SHADOW_MODE:
+                        shadow_atr, shadow_atr_details = (
+                            await self.__get_recovery_atr_percent(
+                                trades["symbol"],
+                                recovery_policy,
+                            )
+                        )
+                        _shadow_size, shadow_details = (
+                            await self.__resolve_recovery_safety_order_size(
+                                trades,
+                                current_price,
+                                recovery_policy,
+                                {
+                                    "enabled": "true",
+                                    "mode": RECOVERY_SHADOW_MODE,
+                                    "atr_percent": shadow_atr,
+                                    "atr_regime": str(
+                                        shadow_atr_details.get("regime", "mid")
+                                    ),
+                                    "reason": "legacy_trigger_shadow_evaluation",
+                                },
+                            )
+                        )
+                        dynamic_so_details["recovery_shadow"] = shadow_details
                 if dynamic_so_details.get("skip") == "true":
                     logging.error(
                         "Skipping safety order for %s: %s",
@@ -1035,6 +1275,14 @@ class Dca:
                         "timeframe": (
                             resolve_timeframe(self.config or {})
                             if dynamic_dca and runtime_config.dca_strategy
+                            else None
+                        ),
+                        "metadata_json": (
+                            json.dumps(
+                                {"recovery_so": dynamic_so_details},
+                                sort_keys=True,
+                            )
+                            if recovery_policy.mode == RECOVERY_TARGET_MODE
                             else None
                         ),
                     }
@@ -1327,5 +1575,27 @@ class Dca:
             "dynamic_so_window": dynamic_so_details.get("window", "off"),
             "dynamic_so_drawdown": dynamic_so_details.get("ath_distance", 0.0),
             "dynamic_so_loss": dynamic_so_details.get("loss_factor", 0.0),
+            "dynamic_so_mode": dynamic_so_details.get(
+                "mode",
+                LEGACY_SIZING_MODE,
+            ),
+            "dynamic_so_reason": dynamic_so_details.get("reason"),
+            "dynamic_so_atr_percent": dynamic_so_details.get("atr_percent", 0.0),
+            "dynamic_so_trigger_price": dynamic_so_details.get(
+                "trigger_price",
+                0.0,
+            ),
+            "dynamic_so_target_recovery_percent": dynamic_so_details.get(
+                "target_recovery_percent",
+                0.0,
+            ),
+            "dynamic_so_projected_tp_price": dynamic_so_details.get(
+                "projected_tp_price",
+                0.0,
+            ),
+            "dynamic_so_remaining_deal_quote": dynamic_so_details.get(
+                "remaining_deal_quote",
+                -1.0,
+            ),
         }
         await self.statistic.update_statistic_data(logging_json)

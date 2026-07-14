@@ -669,6 +669,18 @@ class Database:
                 ("tp_limit_order_price", "REAL NULL"),
                 ("tp_limit_order_amount", "REAL NULL"),
                 ("tp_limit_order_armed_at", "TEXT NULL"),
+                (
+                    "dca_sizing_mode",
+                    "TEXT NOT NULL DEFAULT 'legacy_factors'",
+                ),
+                ("dca_policy_json", "TEXT NULL"),
+                ("dca_reference_price", "REAL NOT NULL DEFAULT 0.0"),
+                (
+                    "dca_reference_atr_percent",
+                    "REAL NOT NULL DEFAULT 0.0",
+                ),
+                ("dca_next_trigger_price", "REAL NOT NULL DEFAULT 0.0"),
+                ("dca_last_decision_json", "TEXT NULL"),
                 ("automation_paused", "INTEGER NOT NULL DEFAULT 0"),
                 ("automation_paused_at", "TEXT NULL"),
             ),

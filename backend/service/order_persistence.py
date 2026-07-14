@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Iterable
 from typing import Any
 from uuid import uuid4
@@ -14,6 +15,11 @@ from service.ai_trust import (
     schedule_outcome_attribution,
 )
 from service.database import run_sqlite_write_with_retry
+from service.dca_recovery_sizing import (
+    LEGACY_SIZING_MODE,
+    RecoverySizingPolicy,
+    normalize_recovery_sizing_mode,
+)
 from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
 from service.replay_candles import archive_replay_candles_for_deal
 from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
@@ -43,6 +49,54 @@ SUMMARY_TRADE_KEYS = {
 def _create_deal_id() -> str:
     """Return a fresh stable deal identifier."""
     return str(uuid4())
+
+
+def _parse_order_metadata(payload: dict[str, Any]) -> dict[str, Any]:
+    """Return structured metadata attached to an order payload."""
+    raw_metadata = payload.get("metadata_json")
+    if isinstance(raw_metadata, dict):
+        return dict(raw_metadata)
+    if not isinstance(raw_metadata, str) or not raw_metadata.strip():
+        return {}
+    try:
+        parsed = json.loads(raw_metadata)
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _build_open_trade_dca_defaults(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extract snapshotted DCA policy state for a newly opened deal."""
+    metadata = _parse_order_metadata(payload)
+    raw_policy = metadata.get("dca_policy")
+    policy = RecoverySizingPolicy.from_dict(
+        raw_policy if isinstance(raw_policy, dict) else None
+    )
+    return {
+        "dca_sizing_mode": policy.mode,
+        "dca_policy_json": json.dumps(policy.to_dict(), sort_keys=True),
+        "dca_reference_price": float(payload.get("price") or 0.0),
+        "dca_reference_atr_percent": 0.0,
+        "dca_next_trigger_price": 0.0,
+        "dca_last_decision_json": None,
+    }
+
+
+def _build_safety_order_dca_updates(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extract recovery decision state from a filled safety order."""
+    metadata = _parse_order_metadata(payload)
+    raw_decision = metadata.get("recovery_so")
+    if not isinstance(raw_decision, dict):
+        return {}
+    mode = normalize_recovery_sizing_mode(raw_decision.get("mode"))
+    if mode == LEGACY_SIZING_MODE:
+        return {}
+    return {
+        "dca_reference_price": float(payload.get("price") or 0.0),
+        "dca_reference_atr_percent": float(raw_decision.get("atr_percent") or 0.0),
+        "dca_next_trigger_price": 0.0,
+        "dca_last_decision_json": json.dumps(raw_decision, sort_keys=True),
+    }
 
 
 def _resolve_buy_execution_role(payload: dict[str, Any]) -> str:
@@ -325,6 +379,7 @@ def _build_open_trade_buy_defaults(
         "current_price": current_price,
         "avg_price": avg_price,
         "open_date": open_date_value,
+        **_build_open_trade_dca_defaults(payload),
     }
 
 
@@ -410,6 +465,12 @@ async def persist_buy_trade(
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
                     campaign_id=campaign_id,
                 )
+            if not create_open_trade:
+                dca_updates = _build_safety_order_dca_updates(payload)
+                if dca_updates:
+                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
+                        **dca_updates,
+                    )
 
     await run_sqlite_write_with_retry(
         _persist_buy, f"persisting buy order for {symbol}"

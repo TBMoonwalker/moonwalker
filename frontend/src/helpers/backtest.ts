@@ -118,6 +118,8 @@ export interface BacktestStats {
     trade_mode?: BacktestTradeMode
     sidestep_bearish_strategy?: string
     sidestep_reentry_strategy?: string
+    dca_sizing_mode?: string
+    dca_atr_timeframe?: string
     still_open_at_end?: boolean
     sidestep_waiting_at_end?: boolean
 }

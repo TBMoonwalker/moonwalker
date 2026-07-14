@@ -269,6 +269,11 @@ def _find_live_activation_blockers(
                 )
         else:
             dynamic_dca_enabled = lifecycle.trade_mode == "dynamic_dca"
+            recovery_mode = (
+                str(config_snapshot.get("dynamic_so_sizing_mode") or "legacy_factors")
+                .strip()
+                .lower()
+            )
             dca_required_keys = (
                 [
                     ("mstc", "Set max safety order count."),
@@ -286,6 +291,16 @@ def _find_live_activation_blockers(
             for key, message in dca_required_keys:
                 if not _has_required_value(config_snapshot.get(key)):
                     blockers.append({"key": key, "message": message})
+            if dynamic_dca_enabled and recovery_mode == "recovery_target":
+                for key, message in [
+                    ("ss", "Set a positive recovery SO spacing scale."),
+                    (
+                        "dynamic_so_max_deal_quote",
+                        "Set a positive recovery-mode max deal quote.",
+                    ),
+                ]:
+                    if not _has_positive_number(config_snapshot.get(key)):
+                        blockers.append({"key": key, "message": message})
 
     signal_name = str(config_snapshot.get("signal", "") or "").strip().lower()
     signal_settings = _parse_signal_settings(config_snapshot.get("signal_settings"))

@@ -712,6 +712,44 @@ def test_live_activation_endpoint_blocks_missing_global_max_fund(monkeypatch) ->
     assert service.last_single is None
 
 
+def test_live_activation_blocks_unbounded_recovery_target_policy() -> None:
+    """Recovery target mode must fail closed without positive deal controls."""
+    blockers = config_controller._find_live_activation_blockers(
+        {
+            "dry_run": True,
+            "timezone": "Europe/Vienna",
+            "signal": "asap",
+            "exchange": "binance",
+            "timeframe": "1h",
+            "key": "api-key",
+            "secret": "api-secret",
+            "currency": "USDC",
+            "max_bots": 2,
+            "bo": 12,
+            "tp": 0.75,
+            "capital_max_fund": 1_000,
+            "history_lookback_time": "180d",
+            "symbol_list": "0G/USDC",
+            "dca": True,
+            "trade_mode": "dynamic_dca",
+            "mstc": 5,
+            "sos": 5,
+            "ss": 0,
+            "dynamic_so_sizing_mode": "recovery_target",
+            "dynamic_so_max_deal_quote": 0,
+        }
+    )
+
+    assert {
+        "key": "ss",
+        "message": "Set a positive recovery SO spacing scale.",
+    } in blockers
+    assert {
+        "key": "dynamic_so_max_deal_quote",
+        "message": "Set a positive recovery-mode max deal quote.",
+    } in blockers
+
+
 def test_live_activation_endpoint_uses_sidestep_blockers_instead_of_classic_dca(
     monkeypatch,
 ) -> None:

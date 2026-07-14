@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from service.config import resolve_timeframe
+from service.dca_recovery_sizing import resolve_recovery_atr_timeframe
 from service.trade_lifecycle_config import (
     TradeLifecycleConfigView,
     normalize_trade_mode,
@@ -200,17 +201,18 @@ class DcaRuntimeConfigView:
     atr_regime_mid_k: float
     atr_regime_high_k: float
     trade_safety_order_budget_ratio: float
+    recovery_sizing_mode: str
+    recovery_spacing_atr_multiplier: float
+    recovery_atr_multiplier: float
+    recovery_min_percent: float
+    recovery_max_percent: float
+    recovery_max_deal_quote: float
+    recovery_min_tp_improvement_percent: float
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "DcaRuntimeConfigView":
         """Build normalized DCA settings from the raw config snapshot."""
-        atr_timeframe = str(
-            config.get(
-                "dynamic_so_atr_timeframe",
-                config.get("dynamic_dca_ath_timeframe", "1h"),
-            )
-            or "1h"
-        ).strip()
+        atr_timeframe = resolve_recovery_atr_timeframe(config)
         trade_mode = resolve_trade_mode_config(config, source="runtime")
         return cls(
             tp_spike_confirm_enabled=bool(
@@ -277,8 +279,8 @@ class DcaRuntimeConfigView:
             step_scale=_float_config_value(
                 config,
                 "ss",
-                default=0.0,
-                falsey_fallback=0.0,
+                default=1.6,
+                falsey_fallback=1.6,
             ),
             safety_order_step_percentage=_float_config_value(
                 config,
@@ -332,5 +334,65 @@ class DcaRuntimeConfigView:
                 "trade_safety_order_budget_ratio",
                 default=0.95,
                 falsey_fallback=0.95,
+            ),
+            recovery_sizing_mode=str(
+                config.get("dynamic_so_sizing_mode", "legacy_factors")
+                or "legacy_factors"
+            )
+            .strip()
+            .lower(),
+            recovery_spacing_atr_multiplier=max(
+                0.0,
+                _float_config_value(
+                    config,
+                    "dynamic_so_spacing_atr_multiplier",
+                    default=3.0,
+                    falsey_fallback=3.0,
+                ),
+            ),
+            recovery_atr_multiplier=max(
+                0.0,
+                _float_config_value(
+                    config,
+                    "dynamic_so_recovery_atr_multiplier",
+                    default=5.5,
+                    falsey_fallback=5.5,
+                ),
+            ),
+            recovery_min_percent=max(
+                0.0,
+                _float_config_value(
+                    config,
+                    "dynamic_so_recovery_min_pct",
+                    default=12.0,
+                    falsey_fallback=12.0,
+                ),
+            ),
+            recovery_max_percent=max(
+                0.0,
+                _float_config_value(
+                    config,
+                    "dynamic_so_recovery_max_pct",
+                    default=30.0,
+                    falsey_fallback=30.0,
+                ),
+            ),
+            recovery_max_deal_quote=max(
+                0.0,
+                _float_config_value(
+                    config,
+                    "dynamic_so_max_deal_quote",
+                    default=0.0,
+                    falsey_fallback=0.0,
+                ),
+            ),
+            recovery_min_tp_improvement_percent=max(
+                0.0,
+                _float_config_value(
+                    config,
+                    "dynamic_so_min_tp_improvement_pct",
+                    default=5.0,
+                    falsey_fallback=5.0,
+                ),
             ),
         )

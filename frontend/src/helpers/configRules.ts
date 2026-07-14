@@ -8,6 +8,8 @@ import {
 interface DcaRulesState {
     enabled: boolean
     trade_mode?: string | null
+    dynamic_so_sizing_mode?: string | null
+    dynamic_so_recovery_min_pct?: number | null
 }
 
 interface ExchangeRulesState {
@@ -40,6 +42,14 @@ interface BuildConfigRulesOptions {
 
 function isDynamicDcaMode(dca: Ref<DcaRulesState>): boolean {
     return isDynamicTradeMode(dca.value.trade_mode)
+}
+
+function isRecoveryTargetMode(dca: Ref<DcaRulesState>): boolean {
+    return (
+        dca.value.enabled &&
+        isDynamicDcaMode(dca) &&
+        dca.value.dynamic_so_sizing_mode === 'recovery_target'
+    )
 }
 
 function isSpotMarket(exchange: Ref<ExchangeRulesState>): boolean {
@@ -350,10 +360,15 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
             trigger: ['submit'],
         },
         ss: {
-            validator: dcaFieldValidator(
-                'step scale',
-                () => false,
-            ),
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (!isRecoveryTargetMode(options.dca)) {
+                    return true
+                }
+                const parsed = Number(value)
+                return Number.isFinite(parsed) && parsed > 0
+                    ? true
+                    : new Error('Please add a positive recovery spacing scale')
+            },
             trigger: ['submit'],
         },
         os: {
@@ -362,6 +377,49 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
                 () => false,
             ),
             trigger: ['submit'],
+        },
+        dynamic_so_atr_length: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (!isRecoveryTargetMode(options.dca)) {
+                    return true
+                }
+                const parsed = Number(value)
+                return Number.isInteger(parsed) && parsed >= 2
+                    ? true
+                    : new Error('ATR length must be at least 2')
+            },
+            trigger: ['submit', 'change'],
+        },
+        dynamic_so_max_deal_quote: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (!isRecoveryTargetMode(options.dca)) {
+                    return true
+                }
+                const parsed = Number(value)
+                return Number.isFinite(parsed) && parsed > 0
+                    ? true
+                    : new Error('Please add a positive max deal budget')
+            },
+            trigger: ['submit', 'change'],
+        },
+        dynamic_so_recovery_max_pct: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (!isRecoveryTargetMode(options.dca)) {
+                    return true
+                }
+                const parsed = Number(value)
+                const minimum = Number(
+                    options.dca.value.dynamic_so_recovery_min_pct,
+                )
+                return Number.isFinite(parsed) &&
+                    Number.isFinite(minimum) &&
+                    parsed >= minimum
+                    ? true
+                    : new Error(
+                          'Maximum recovery must be at least the minimum recovery',
+                      )
+            },
+            trigger: ['submit', 'change'],
         },
         tp: {
             validator: requiredAfterSubmit('Please add tp'),
