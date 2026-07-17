@@ -303,11 +303,11 @@ onUnmounted(() => {
         />
         <n-flex align="center" :size="8">
           <n-text depth="3">Pause</n-text>
-          <n-switch v-model:value="paused" />
+          <n-switch v-model:value="paused" aria-label="Pause log polling" />
         </n-flex>
         <n-flex align="center" :size="8">
           <n-text depth="3">Follow tail</n-text>
-          <n-switch v-model:value="followTail" />
+          <n-switch v-model:value="followTail" aria-label="Follow log tail" />
         </n-flex>
         <n-button
           secondary
