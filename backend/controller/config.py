@@ -18,6 +18,12 @@ from service.config import (
     is_removed_config_key,
 )
 from service.config_persistence import should_persist_config_value
+from service.config_redaction import (
+    REDACTED_SECRET_VALUE,
+    SENSITIVE_CONFIG_KEYS,
+    redact_config_value,
+    restore_redacted_config_value,
+)
 from service.config_views import TradeLifecycleConfigView
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.strategy_builder import list_strategy_options, list_strategy_summaries
@@ -98,6 +104,14 @@ def _get_config_snapshot(config: Config) -> dict[str, Any]:
     if callable(snapshot):
         return snapshot()
     return {}
+
+
+def _get_public_config_snapshot(config: Config) -> dict[str, Any]:
+    """Return a public-safe snapshot while supporting legacy test doubles."""
+    public_snapshot = getattr(config, "public_snapshot", None)
+    if callable(public_snapshot):
+        return public_snapshot()
+    return _get_config_snapshot(config)
 
 
 def _get_raw_config_snapshot(config: Config) -> dict[str, Any]:
@@ -476,14 +490,35 @@ async def _validate_config_updates(
     updates: ConfigUpdateMap,
 ) -> tuple[ConfigUpdateMap | None, Any | None]:
     """Validate shared config update invariants before persistence."""
-    error_message = _validate_removed_config_keys(updates)
+    raw_snapshot = _get_raw_config_snapshot(config)
+    prepared_sensitive_updates: ConfigUpdateMap = {}
+    for key, raw_value in updates.items():
+        value = _extract_config_update_value(raw_value)
+        current_value = raw_snapshot.get(key)
+        restored_value = restore_redacted_config_value(key, value, current_value)
+        if (
+            key in SENSITIVE_CONFIG_KEYS
+            and restored_value == current_value
+            and (
+                value == REDACTED_SECRET_VALUE
+                or value is None
+                or (isinstance(value, str) and not value.strip())
+            )
+        ):
+            continue
+        prepared_sensitive_updates[key] = {
+            **raw_value,
+            "value": restored_value,
+        }
+
+    error_message = _validate_removed_config_keys(prepared_sensitive_updates)
     if error_message:
         return None, _config_update_conflict(error_message)
 
     try:
         prepared_updates = await _prepare_trade_mode_updates(
-            _get_raw_config_snapshot(config),
-            updates,
+            raw_snapshot,
+            prepared_sensitive_updates,
         )
     except TradeModeConfigError as exc:
         return None, _config_update_conflict(exc)
@@ -511,7 +546,7 @@ async def get_config() -> Any:
         JSON response containing the full configuration cache.
     """
     config = await Config.instance()
-    snapshot = config.snapshot()
+    snapshot = _get_public_config_snapshot(config)
     snapshot["trade_mode_switch_guard"] = (
         await _get_trade_mode_switch_guard(snapshot, strict=False)
     ).to_dict()
@@ -560,7 +595,7 @@ async def get_config_key(key: FromPath[str]) -> Any:
     value = config.get(key)
     if value is None:
         return json_response({"error": "Key not found"}, 404)
-    return {key: value}
+    return {key: redact_config_value(key, value)}
 
 
 @put(path="/config/single/{key:str}")

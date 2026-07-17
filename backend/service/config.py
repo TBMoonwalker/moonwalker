@@ -11,6 +11,7 @@ from typing import Any, Callable
 import helper
 from model import AppConfig
 from service.config_persistence import should_persist_config_value
+from service.config_redaction import redact_config_snapshot
 from service.config_runtime_store import (
     ConfigEntry,
     ConfigRuntimeStore,
@@ -389,6 +390,10 @@ class Config:
         snapshot = dict(raw_snapshot)
         snapshot["trade_mode"] = trade_mode_state.trade_mode
         return snapshot
+
+    def public_snapshot(self) -> dict[str, Any]:
+        """Return a client-safe config snapshot with credentials redacted."""
+        return redact_config_snapshot(self.snapshot())
 
     def raw_snapshot(self) -> dict[str, Any]:
         """Return the config state before derived trade-mode compatibility fields."""
