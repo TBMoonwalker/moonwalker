@@ -1,5 +1,13 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, onMounted, onUnmounted, ref } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  type HTMLAttributes,
+} from 'vue'
 import Statistics from '@/components/Statistics.vue'
 import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
@@ -24,6 +32,8 @@ const isMobile = computed(() => viewportWidth.value < 768)
 const tabPadding = computed(() => (isMobile.value ? 12 : 20))
 const activeProfitTab = ref('profit-overall')
 const activeTradesTab = ref('open-trades')
+const profitTabsSection = ref<HTMLElement | null>(null)
+const tradeTabsSection = ref<HTMLElement | null>(null)
 const unsellableTradesCount = computed(() =>
   Array.isArray(unsellableTradesState.data.value) ? unsellableTradesState.data.value.length : 0
 )
@@ -88,8 +98,75 @@ function handleResize() {
   viewportWidth.value = window.innerWidth
 }
 
+function buildTabProps(
+  group: 'profit' | 'trade',
+  name: string,
+  activeName: string,
+): HTMLAttributes {
+  const selected = activeName === name
+  return {
+    id: `${group}-tab-${name}`,
+    role: 'tab',
+    tabindex: selected ? 0 : -1,
+    'aria-selected': String(selected),
+    'aria-controls': `${group}-panel-${name}`,
+    onKeydown: handleTabKeydown,
+  }
+}
+
+function getProfitTabProps(name: string): HTMLAttributes {
+  return buildTabProps('profit', name, activeProfitTab.value)
+}
+
+function getTradeTabProps(name: string): HTMLAttributes {
+  return buildTabProps('trade', name, activeTradesTab.value)
+}
+
+function handleTabKeydown(event: KeyboardEvent): void {
+  const currentTab = event.currentTarget as HTMLElement | null
+  const tablist = currentTab?.closest<HTMLElement>('[role="tablist"]')
+  if (!currentTab || !tablist) return
+
+  const tabs = Array.from(
+    tablist.querySelectorAll<HTMLElement>('[role="tab"]:not([aria-disabled="true"])'),
+  )
+  const currentIndex = tabs.indexOf(currentTab)
+  if (currentIndex < 0) return
+
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    currentTab.click()
+    return
+  }
+
+  let nextIndex: number | null = null
+  if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
+  if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
+  if (event.key === 'Home') nextIndex = 0
+  if (event.key === 'End') nextIndex = tabs.length - 1
+  if (nextIndex === null) return
+
+  event.preventDefault()
+  const nextTab = tabs[nextIndex]
+  nextTab.click()
+  void nextTick(() => nextTab.focus())
+}
+
+function syncTablistRoles(): void {
+  const groups = [
+    { root: profitTabsSection.value, label: 'Profit chart range' },
+    { root: tradeTabsSection.value, label: 'Trade state' },
+  ]
+  for (const { root, label } of groups) {
+    const tablist = root?.querySelector<HTMLElement>('.n-tabs-nav')
+    tablist?.setAttribute('role', 'tablist')
+    tablist?.setAttribute('aria-label', label)
+  }
+}
+
 onMounted(() => {
   window.addEventListener('resize', handleResize)
+  void nextTick(syncTablistRoles)
 })
 
 onUnmounted(() => {
@@ -123,7 +200,11 @@ onUnmounted(() => {
       </span>
     </section>
 
-    <section class="dashboard-panel chart-panel" aria-label="Profit charts">
+    <section
+      ref="profitTabsSection"
+      class="dashboard-panel chart-panel"
+      aria-label="Profit charts"
+    >
       <n-tabs
         v-model:value="activeProfitTab"
         class="calm-tabs profit-tabs"
@@ -132,22 +213,54 @@ onUnmounted(() => {
         :tabs-padding="tabPadding"
         pane-class="chart-pane"
       >
-        <n-tab-pane name="profit-overall" tab="Overall">
+        <n-tab-pane
+          id="profit-panel-profit-overall"
+          name="profit-overall"
+          tab="Overall"
+          role="tabpanel"
+          aria-labelledby="profit-tab-profit-overall"
+          :tab-props="getProfitTabProps('profit-overall')"
+        >
           <UpnlChart v-if="activeProfitTab === 'profit-overall'" />
         </n-tab-pane>
-        <n-tab-pane name="daily-profit" tab="Daily">
+        <n-tab-pane
+          id="profit-panel-daily-profit"
+          name="daily-profit"
+          tab="Daily"
+          role="tabpanel"
+          aria-labelledby="profit-tab-daily-profit"
+          :tab-props="getProfitTabProps('daily-profit')"
+        >
           <Charts v-if="activeProfitTab === 'daily-profit'" period="daily" />
         </n-tab-pane>
-        <n-tab-pane name="monthly-profit" tab="Monthly">
+        <n-tab-pane
+          id="profit-panel-monthly-profit"
+          name="monthly-profit"
+          tab="Monthly"
+          role="tabpanel"
+          aria-labelledby="profit-tab-monthly-profit"
+          :tab-props="getProfitTabProps('monthly-profit')"
+        >
           <Charts v-if="activeProfitTab === 'monthly-profit'" period="monthly" />
         </n-tab-pane>
-        <n-tab-pane name="yearly-profit" tab="Yearly">
+        <n-tab-pane
+          id="profit-panel-yearly-profit"
+          name="yearly-profit"
+          tab="Yearly"
+          role="tabpanel"
+          aria-labelledby="profit-tab-yearly-profit"
+          :tab-props="getProfitTabProps('yearly-profit')"
+        >
           <Charts v-if="activeProfitTab === 'yearly-profit'" period="yearly" />
         </n-tab-pane>
       </n-tabs>
     </section>
 
-    <section class="dashboard-panel ledger-panel" aria-labelledby="trade-ledger-title">
+    <section
+      ref="tradeTabsSection"
+      class="dashboard-panel ledger-panel"
+      aria-label="Trades"
+    >
       <n-tabs
         v-model:value="activeTradesTab"
         class="calm-tabs ledger-tabs"
@@ -155,16 +268,28 @@ onUnmounted(() => {
         size="large"
         :tabs-padding="tabPadding"
       >
-        <n-tab-pane name="open-trades">
+        <n-tab-pane
+          id="trade-panel-open-trades"
+          name="open-trades"
+          role="tabpanel"
+          aria-labelledby="trade-tab-open-trades"
+          :tab-props="getTradeTabProps('open-trades')"
+        >
           <template #tab>
-            <span id="trade-ledger-title" class="trade-tab-label">{{ isMobile ? 'Open' : 'Open Trades' }}</span>
+            <span class="trade-tab-label">{{ isMobile ? 'Open' : 'Open Trades' }}</span>
           </template>
           <OpenTrades
             v-if="activeTradesTab === 'open-trades'"
             :global-trading-paused="tradingPaused"
           />
         </n-tab-pane>
-        <n-tab-pane name="waiting-campaigns">
+        <n-tab-pane
+          id="trade-panel-waiting-campaigns"
+          name="waiting-campaigns"
+          role="tabpanel"
+          aria-labelledby="trade-tab-waiting-campaigns"
+          :tab-props="getTradeTabProps('waiting-campaigns')"
+        >
           <template #tab>
             <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': waitingCampaignsCount > 0 }">
               <span>Waiting</span>
@@ -176,7 +301,13 @@ onUnmounted(() => {
             :global-trading-paused="tradingPaused"
           />
         </n-tab-pane>
-        <n-tab-pane name="unsellable-trades">
+        <n-tab-pane
+          id="trade-panel-unsellable-trades"
+          name="unsellable-trades"
+          role="tabpanel"
+          aria-labelledby="trade-tab-unsellable-trades"
+          :tab-props="getTradeTabProps('unsellable-trades')"
+        >
           <template #tab>
             <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': unsellableTradesCount > 0 }">
               <span>{{ isMobile ? 'Unsell.' : 'Unsellable' }}</span>
@@ -185,7 +316,13 @@ onUnmounted(() => {
           </template>
           <UnsellableTrades v-if="activeTradesTab === 'unsellable-trades'" />
         </n-tab-pane>
-        <n-tab-pane name="closed-trades">
+        <n-tab-pane
+          id="trade-panel-closed-trades"
+          name="closed-trades"
+          role="tabpanel"
+          aria-labelledby="trade-tab-closed-trades"
+          :tab-props="getTradeTabProps('closed-trades')"
+        >
           <template #tab>
             <span class="trade-tab-label">{{ isMobile ? 'Closed' : 'Closed Trades' }}</span>
           </template>
