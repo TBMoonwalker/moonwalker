@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref, type Directive } from 'vue'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
     CalendarOutline,
@@ -55,6 +55,24 @@ const configuredCurrency = ref('')
 const strategyOptions = ref<SelectOption[]>([])
 const symbolOptions = ref<SelectOption[]>([])
 const lastRunAt = ref<number | null>(null)
+
+function labelStepperButtons(element: HTMLElement, fieldLabel: string): void {
+    const [decreaseButton, increaseButton] = Array.from(
+        element.querySelectorAll<HTMLButtonElement>('button'),
+    )
+    const normalizedLabel = fieldLabel.toLowerCase()
+    decreaseButton?.setAttribute('aria-label', `Decrease ${normalizedLabel}`)
+    increaseButton?.setAttribute('aria-label', `Increase ${normalizedLabel}`)
+}
+
+const vAccessibleStepper: Directive<HTMLElement, string> = {
+    mounted(element, binding) {
+        labelStepperButtons(element, binding.value)
+    },
+    updated(element, binding) {
+        labelStepperButtons(element, binding.value)
+    },
+}
 
 const timeframeOptions = BACKTEST_TIMEFRAME_OPTIONS.map((option) => ({ ...option }))
 const tradeModeOptions = BACKTEST_TRADE_MODE_OPTIONS.map((option) => ({ ...option }))
@@ -401,6 +419,7 @@ onMounted(() => {
                                 />
                                 <n-button
                                     secondary
+                                    aria-label="Refresh symbols"
                                     :loading="isLoadingSymbols"
                                     @click="loadExchangeSymbols"
                                 >
@@ -506,6 +525,7 @@ onMounted(() => {
                     <div class="control-grid two">
                         <n-form-item label="Base order">
                             <n-input-number
+                                v-accessible-stepper="'Base order'"
                                 v-model:value="form.baseOrderSize"
                                 :min="1"
                                 :precision="2"
@@ -513,6 +533,7 @@ onMounted(() => {
                         </n-form-item>
                         <n-form-item label="Take profit %">
                             <n-input-number
+                                v-accessible-stepper="'Take profit'"
                                 v-model:value="form.takeProfitPct"
                                 :min="0"
                                 :precision="2"
@@ -520,6 +541,7 @@ onMounted(() => {
                         </n-form-item>
                         <n-form-item label="Stop loss %">
                             <n-input-number
+                                v-accessible-stepper="'Stop loss'"
                                 v-model:value="form.stopLossPct"
                                 :min="0"
                                 :precision="2"
@@ -532,6 +554,7 @@ onMounted(() => {
                     <div v-if="!isSidestepMode" class="control-grid two">
                         <n-form-item label="Max safety orders">
                             <n-input-number
+                                v-accessible-stepper="'Max safety orders'"
                                 v-model:value="form.maxSafetyOrders"
                                 :min="0"
                                 :precision="0"
@@ -539,6 +562,7 @@ onMounted(() => {
                         </n-form-item>
                         <n-form-item label="Safety step %">
                             <n-input-number
+                                v-accessible-stepper="'Safety step'"
                                 v-model:value="form.safetyOrderStepPct"
                                 :min="0.1"
                                 :precision="2"
@@ -548,6 +572,7 @@ onMounted(() => {
 
                     <n-form-item label="Fee">
                         <n-input-number
+                            v-accessible-stepper="'Fee'"
                             v-model:value="form.fee"
                             :min="0"
                             :step="0.0001"
