@@ -76,3 +76,15 @@ test('control center blocker helper preserves custom titles for readiness copy',
         target: 'exchange',
     })
 })
+
+test('control center blocker helper routes advanced-only recovery fields to full control', () => {
+    for (const key of ['ss', 'dynamic_so_max_deal_quote']) {
+        const blocker = resolveControlCenterBlocker(
+            key,
+            'Set a positive recovery policy value.',
+        )
+
+        assert.equal(blocker.mode, 'advanced')
+        assert.equal(blocker.target, 'dca')
+    }
+})

@@ -120,6 +120,7 @@ test('deriveControlCenterReadiness blocks an unfunded recovery-target policy', (
         readiness.blockers.map((blocker) => blocker.key),
         ['dynamic_so_max_deal_quote'],
     )
+    assert.equal(readiness.nextMode, 'advanced')
     assert.equal(readiness.nextTarget, 'dca')
 })
 
