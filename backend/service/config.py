@@ -17,6 +17,7 @@ from service.config_runtime_store import (
     ConfigRuntimeStore,
     ConfigUpdateAction,
 )
+from service.dca_recovery_sizing import DEFAULT_RECOVERY_MAX_DEAL_QUOTE
 from service.redis import CONFIG_CHANNEL, redis_client
 from service.strategy_builder import PUBLIC_BUILTIN_SLUGS
 from service.strategy_capability import filter_supported_strategies
@@ -86,7 +87,7 @@ DEFAULT_CONFIG_VALUES = {
     "dynamic_so_recovery_atr_multiplier": 5.5,
     "dynamic_so_recovery_min_pct": 12.0,
     "dynamic_so_recovery_max_pct": 30.0,
-    "dynamic_so_max_deal_quote": 0.0,
+    "dynamic_so_max_deal_quote": DEFAULT_RECOVERY_MAX_DEAL_QUOTE,
     "dynamic_so_min_tp_improvement_pct": 5.0,
     "autopilot_green_phase_enabled": False,
     "autopilot_green_phase_ramp_days": 30,

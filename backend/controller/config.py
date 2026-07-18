@@ -378,6 +378,32 @@ def _validate_removed_config_keys(updates: ConfigUpdateMap) -> str | None:
     return None
 
 
+def _validate_recovery_target_policy_updates(
+    config_snapshot: dict[str, Any],
+    updates: ConfigUpdateMap,
+) -> str | None:
+    """Reject a recovery-target policy that cannot ever place an order."""
+    recovery_keys = {
+        "dynamic_so_sizing_mode",
+        "dynamic_so_max_deal_quote",
+        "ss",
+    }
+    if recovery_keys.isdisjoint(updates):
+        return None
+
+    candidate = _merge_config_snapshot_with_updates(config_snapshot, updates)
+    recovery_mode = (
+        str(candidate.get("dynamic_so_sizing_mode") or "legacy_factors").strip().lower()
+    )
+    if recovery_mode != "recovery_target":
+        return None
+    if not _has_positive_number(candidate.get("ss")):
+        return "Recovery-target DCA requires a positive safety-order step scale."
+    if not _has_positive_number(candidate.get("dynamic_so_max_deal_quote")):
+        return "Recovery-target DCA requires a positive max deal quote."
+    return None
+
+
 async def _validate_csv_signal_switch(
     config: Config, raw_signal_update: Any
 ) -> str | None:
@@ -532,6 +558,13 @@ async def _validate_config_updates(
             return None, _config_update_conflict(error_message)
 
     error_message = _validate_live_activation_boundary(config, prepared_updates)
+    if error_message:
+        return None, _config_update_conflict(error_message)
+
+    error_message = _validate_recovery_target_policy_updates(
+        raw_snapshot,
+        prepared_updates,
+    )
     if error_message:
         return None, _config_update_conflict(error_message)
 

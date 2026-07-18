@@ -336,6 +336,40 @@ def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
     assert service.last_batch == payload
 
 
+def test_config_multiple_rejects_unfunded_recovery_target_policy(
+    monkeypatch,
+) -> None:
+    """Recovery-target saves must not persist a policy that can never buy."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config,
+        "instance",
+        classmethod(_fake_instance),
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {
+        "dynamic_so_sizing_mode": {
+            "value": "recovery_target",
+            "type": "str",
+        },
+        "ss": {"value": 1.6, "type": "float"},
+        "dynamic_so_max_deal_quote": {"value": 0, "type": "float"},
+    }
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 409
+    assert response.json()["error"] == (
+        "Recovery-target DCA requires a positive max deal quote."
+    )
+    assert service.last_batch is None
+
+
 def test_config_single_accepts_success_contract(monkeypatch) -> None:
     """Ensure single-key config updates keep the established success contract."""
     service = _DummyConfigService()

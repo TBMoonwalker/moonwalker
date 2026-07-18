@@ -105,7 +105,7 @@ are not exposed in the UI and must be set via the API.
 | `dynamic_so_recovery_atr_multiplier` | `float` | Multiplies current ATR% to set the desired distance from the candidate fill to projected TP. | `5.5` |
 | `dynamic_so_recovery_min_pct` | `float` | Lower clamp for the desired post-SO recovery move to TP. | `12.0` |
 | `dynamic_so_recovery_max_pct` | `float` | Upper clamp for the desired post-SO recovery move to TP. | `30.0` |
-| `dynamic_so_max_deal_quote` | `float` | Hard quote-currency cap for total cost of a recovery-target deal. Live activation requires a positive value in `recovery_target` mode. | `0.0` |
+| `dynamic_so_max_deal_quote` | `float` | Hard quote-currency cap for total cost of a recovery-target deal. Recovery-target saves and live activation require a positive value. Existing deal snapshots are not changed when this setting changes. | `250.0` |
 | `dynamic_so_min_tp_improvement_pct` | `float` | Minimum percentage-point improvement to the projected TP distance when balance or deal caps prevent reaching the full target. | `5.0` |
 | `dynamic_so_volume_enabled` | `bool` | Enable dynamic scaling for safety order amount. Trigger logic stays unchanged; only SO size is scaled. | `false` |
 | `dynamic_so_ath_lookback_value` | `int` | ATH lookback amount used by dynamic SO scaling. | `1` |

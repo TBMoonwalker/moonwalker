@@ -229,7 +229,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         dynamic_so_recovery_atr_multiplier: 5.5,
         dynamic_so_recovery_min_pct: 12,
         dynamic_so_recovery_max_pct: 30,
-        dynamic_so_max_deal_quote: 0,
+        dynamic_so_max_deal_quote: 250,
         dynamic_so_min_tp_improvement_pct: 5,
         sidestep_bearish_strategy: null,
         sidestep_reentry_strategy: null,

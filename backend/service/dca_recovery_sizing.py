@@ -9,6 +9,7 @@ LEGACY_SIZING_MODE = "legacy_factors"
 RECOVERY_SHADOW_MODE = "recovery_shadow"
 RECOVERY_TARGET_MODE = "recovery_target"
 TRADING_ATR_TIMEFRAME = "trading"
+DEFAULT_RECOVERY_MAX_DEAL_QUOTE = 250.0
 RECOVERY_SIZING_MODES = frozenset(
     {
         LEGACY_SIZING_MODE,
@@ -42,7 +43,7 @@ class RecoverySizingPolicy:
     recovery_atr_multiplier: float = 5.5
     minimum_recovery_percent: float = 12.0
     maximum_recovery_percent: float = 30.0
-    maximum_deal_quote: float = 0.0
+    maximum_deal_quote: float = DEFAULT_RECOVERY_MAX_DEAL_QUOTE
     minimum_tp_improvement_percent: float = 5.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -90,7 +91,10 @@ class RecoverySizingPolicy:
             maximum_recovery_percent=maximum_recovery,
             maximum_deal_quote=max(
                 0.0,
-                _float_value(values.get("maximum_deal_quote"), 0.0),
+                _float_value(
+                    values.get("maximum_deal_quote"),
+                    DEFAULT_RECOVERY_MAX_DEAL_QUOTE,
+                ),
             ),
             minimum_tp_improvement_percent=max(
                 0.0,
@@ -186,7 +190,10 @@ def build_recovery_sizing_policy(
             "dynamic_so_recovery_max_pct",
             30.0,
         ),
-        "maximum_deal_quote": config.get("dynamic_so_max_deal_quote", 0.0),
+        "maximum_deal_quote": config.get(
+            "dynamic_so_max_deal_quote",
+            DEFAULT_RECOVERY_MAX_DEAL_QUOTE,
+        ),
         "minimum_tp_improvement_percent": config.get(
             "dynamic_so_min_tp_improvement_pct",
             5.0,

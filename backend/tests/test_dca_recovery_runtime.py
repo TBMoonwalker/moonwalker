@@ -50,6 +50,7 @@ async def test_recovery_mode_rejects_0g_candidate_inside_atr_spacing(
     dca = Dca()
     dca.config = _config()
     buys: list[dict] = []
+    updates: list[dict] = []
     strategy_calls = 0
 
     async def fake_atr(*_args, **_kwargs):
@@ -60,7 +61,8 @@ async def test_recovery_mode_rejects_0g_candidate_inside_atr_spacing(
         strategy_calls += 1
         return True, True
 
-    async def fake_update(_payload, _symbol):
+    async def fake_update(payload, _symbol):
+        updates.append(payload)
         return None
 
     async def fake_buy(order, _config_snapshot):
@@ -103,6 +105,61 @@ async def test_recovery_mode_rejects_0g_candidate_inside_atr_spacing(
 
     assert strategy_calls == 0
     assert buys == []
+    decision = json.loads(updates[-1]["dca_last_decision_json"])
+    assert decision["reason"] == "waiting_for_atr_spacing"
+
+
+@pytest.mark.asyncio
+async def test_recovery_mode_surfaces_missing_deal_budget_before_signal(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    dca.config = _config()
+    updates: list[dict] = []
+    strategy_calls = 0
+
+    async def fake_atr(*_args, **_kwargs):
+        return 1.0, {"regime": "mid", "atr_percent": 3.0}
+
+    async def fake_strategy(_symbol):
+        nonlocal strategy_calls
+        strategy_calls += 1
+        return True, True
+
+    async def fake_update(payload, _symbol):
+        updates.append(payload)
+        return None
+
+    monkeypatch.setattr(
+        dca.indicators,
+        "calculate_atr_regime_multiplier",
+        fake_atr,
+    )
+    monkeypatch.setattr(dca, "_Dca__dynamic_dca_strategy", fake_strategy)
+    monkeypatch.setattr(dca.trades, "update_open_trades", fake_update)
+
+    invalid_policy = json.loads(_policy_json())
+    invalid_policy["maximum_deal_quote"] = 0
+    matched, _pnl, details = await dca._Dca__evaluate_recovery_dca_trigger(
+        {
+            "symbol": "0G/USDC",
+            "bo_price": 0.568,
+            "safetyorders_count": 0,
+            "safetyorders": [],
+            "dca_reference_price": 0.568,
+            "dca_reference_atr_percent": 3.0,
+            "dca_next_trigger_price": 0.0,
+        },
+        0.5,
+        -12.0,
+        RecoverySizingPolicy.from_dict(invalid_policy),
+    )
+
+    assert matched is False
+    assert strategy_calls == 0
+    assert details["reason"] == "missing_deal_budget"
+    decision = json.loads(updates[-1]["dca_last_decision_json"])
+    assert decision["reason"] == "missing_deal_budget"
 
 
 @pytest.mark.asyncio

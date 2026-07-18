@@ -2,6 +2,7 @@
 
 import pytest
 from service.dca_recovery_sizing import (
+    DEFAULT_RECOVERY_MAX_DEAL_QUOTE,
     RECOVERY_TARGET_MODE,
     RecoverySizingPolicy,
     build_recovery_sizing_policy,
@@ -176,5 +177,6 @@ def test_policy_inherits_trading_timeframe_and_recovery_step_default() -> None:
 
     assert inherited.atr_timeframe == "30m"
     assert inherited.spacing_step_scale == 1.6
+    assert inherited.maximum_deal_quote == DEFAULT_RECOVERY_MAX_DEAL_QUOTE
     assert backtest_override.atr_timeframe == "4h"
     assert explicit.atr_timeframe == "1d"

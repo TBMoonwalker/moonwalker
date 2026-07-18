@@ -694,6 +694,40 @@ class Dca:
         )
         return max(0.0, float(details.get("atr_percent", 0.0))), details
 
+    async def __persist_recovery_dca_diagnostics(
+        self,
+        trades: dict[str, Any],
+        details: dict[str, Any],
+    ) -> None:
+        """Persist a changed recovery decision without writing on every tick."""
+        existing: dict[str, Any] = {}
+        raw_existing = trades.get("dca_last_decision_json")
+        if isinstance(raw_existing, str) and raw_existing.strip():
+            try:
+                candidate = json.loads(raw_existing)
+            except json.JSONDecodeError:
+                candidate = {}
+            if isinstance(candidate, dict):
+                existing = candidate
+
+        stable_keys = (
+            "mode",
+            "reason",
+            "reference_atr_percent",
+            "reference_price",
+            "spacing_percent",
+            "trigger_price",
+        )
+        if existing and all(
+            existing.get(key) == details.get(key) for key in stable_keys
+        ):
+            return
+
+        await self.trades.update_open_trades(
+            {"dca_last_decision_json": json.dumps(details, sort_keys=True)},
+            trades["symbol"],
+        )
+
     async def __evaluate_recovery_dca_trigger(
         self,
         trades: dict[str, Any],
@@ -753,8 +787,14 @@ class Dca:
                 trades["symbol"],
             )
 
+        if policy.mode == RECOVERY_TARGET_MODE and policy.maximum_deal_quote <= 0:
+            details["reason"] = "missing_deal_budget"
+            await self.__persist_recovery_dca_diagnostics(trades, details)
+            return False, round(actual_pnl, 1), details
+
         if trigger_price <= 0 or current_price > trigger_price:
             details["reason"] = "waiting_for_atr_spacing"
+            await self.__persist_recovery_dca_diagnostics(trades, details)
             return False, round(actual_pnl, 1), details
 
         strategy_result = await self.__dynamic_dca_strategy(trades["symbol"])
@@ -765,9 +805,11 @@ class Dca:
             strategy_buy_signal = bool(strategy_result)
         if not strategy_buy_signal:
             details["reason"] = "recovery_signal_not_matched"
+            await self.__persist_recovery_dca_diagnostics(trades, details)
             return False, round(actual_pnl, 1), details
         if not payload_changed:
             details["reason"] = "recovery_signal_unchanged"
+            await self.__persist_recovery_dca_diagnostics(trades, details)
             return False, round(actual_pnl, 1), details
 
         details["reason"] = "recovery_trigger_matched"

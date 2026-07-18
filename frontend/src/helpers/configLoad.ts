@@ -399,7 +399,7 @@ export function buildLoadedConfigState(
             dynamic_so_recovery_max_pct:
                 toNumberOrNull(response.dynamic_so_recovery_max_pct) ?? 30,
             dynamic_so_max_deal_quote:
-                toNumberOrNull(response.dynamic_so_max_deal_quote) ?? 0,
+                toNumberOrNull(response.dynamic_so_max_deal_quote) ?? 250,
             dynamic_so_min_tp_improvement_pct:
                 toNumberOrNull(response.dynamic_so_min_tp_improvement_pct) ?? 5,
             sidestep_bearish_strategy: toNullableString(

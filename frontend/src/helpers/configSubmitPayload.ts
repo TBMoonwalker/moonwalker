@@ -418,7 +418,7 @@ export function buildConfigSubmitPayload(
             'float',
         ),
         dynamic_so_max_deal_quote: serializeConfigValue(
-            dca.dynamic_so_max_deal_quote ?? 0,
+            dca.dynamic_so_max_deal_quote ?? 250,
             'float',
         ),
         dynamic_so_min_tp_improvement_pct: serializeConfigValue(

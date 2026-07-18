@@ -253,7 +253,7 @@ test(
             'trading',
         )
         assert.equal(parseField(payload, 'ss').value, 1.2)
-        assert.equal(parseField(payload, 'dynamic_so_max_deal_quote').value, 0)
+        assert.equal(parseField(payload, 'dynamic_so_max_deal_quote').value, 250)
         assert.deepEqual(parseField(payload, 'exchange_hostname'), {
             value: 'api.exchange.test',
             type: 'str',
