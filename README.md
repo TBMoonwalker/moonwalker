@@ -33,8 +33,8 @@ base orders, and plain-language trust signals in the Control Center.
 - Separate Moonwalker installs are intentionally isolated from each other.
 
 ## Prerequisites
-- Python >= 3.11
-- Node.js (for the frontend build)
+- Python 3.14 (the verified patch release is in `.python-version`)
+- Node.js 24 LTS (the verified patch release is in `.nvmrc`)
 - TA-Lib installed for your OS
 - Configured API access on your exchange
 
@@ -61,6 +61,9 @@ Run the full backend and frontend verification suite with:
 cd scripts && ./ci.sh
 ```
 
+Dependency updates, lock regeneration, supply-chain checks, and the documented
+CCXT exception are covered in `docs/dependencies.md`.
+
 ### TA-Lib dependency
 You also need to install the ta-lib library for your OS. Please see: https://ta-lib.org/install/#linux-debian-packages
 
@@ -75,4 +78,5 @@ You also need to install the ta-lib library for your OS. Please see: https://ta-
 - Signal plugin setup (SymSignals, ASAP, CSV): `docs/signals.md`
 - CI, runtime operations, backups, logs, and dashboard streams:
    `docs/operations.md`
+- Dependency updates and supply-chain policy: `docs/dependencies.md`
 - Statistics dashboard: `/stats` in your browser

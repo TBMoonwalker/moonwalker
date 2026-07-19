@@ -2,14 +2,14 @@ import asyncio
 import os
 import sys
 
-# Add project root to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
+# Add the backend source root to match the test suite's import layout.
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 from _pytest.monkeypatch import MonkeyPatch
 
 
 async def main() -> None:
-    from backend.tests.test_monitoring import (
+    from tests.test_monitoring import (
         test_orders_buy_triggers_monitoring_notification,
     )
 
