@@ -68,6 +68,7 @@ test(
                 autopilot_profit_stretch_max: '75',
                 autopilot_base_order_stretch_max_multiplier: '2',
                 signal: 'csv_signal',
+                delisting_protection_enabled: 'true',
                 signal_settings: {
                     csv_source: 'pair;side\nBTC/USDT;buy',
                 },
@@ -99,6 +100,7 @@ test(
             'pair;side\nBTC/USDT;buy',
         )
         assert.equal(state.signal.csvsignal_source, null)
+        assert.equal(state.signal.delisting_protection_enabled, true)
         assert.equal(state.indicator.history_lookback_time, '180d')
         assert.equal(
             state.autopilot.green_phase_ramp_days,
@@ -144,6 +146,10 @@ test('buildLoadedConfigState hydrates recovery DCA policy settings', () => {
             dynamic_so_recovery_max_pct: '28',
             dynamic_so_max_deal_quote: '250',
             dynamic_so_min_tp_improvement_pct: '4',
+            dynamic_so_execution_guard_enabled: 'true',
+            dynamic_so_execution_drift_atr_fraction: '0.3',
+            dynamic_so_execution_drift_min_pct: '0.2',
+            dynamic_so_execution_drift_max_pct: '0.6',
         },
         createLoadDefaults(),
     )
@@ -157,6 +163,10 @@ test('buildLoadedConfigState hydrates recovery DCA policy settings', () => {
     assert.equal(state.dca.dynamic_so_recovery_max_pct, 28)
     assert.equal(state.dca.dynamic_so_max_deal_quote, 250)
     assert.equal(state.dca.dynamic_so_min_tp_improvement_pct, 4)
+    assert.equal(state.dca.dynamic_so_execution_guard_enabled, true)
+    assert.equal(state.dca.dynamic_so_execution_drift_atr_fraction, 0.3)
+    assert.equal(state.dca.dynamic_so_execution_drift_min_pct, 0.2)
+    assert.equal(state.dca.dynamic_so_execution_drift_max_pct, 0.6)
 })
 
 test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () => {

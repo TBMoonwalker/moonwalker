@@ -110,6 +110,47 @@ class Exchange:
     async def __ensure_markets_loaded(self) -> None:
         await self._client_manager.ensure_markets_loaded()
 
+    async def fetch_market_metadata(
+        self,
+        config: dict[str, Any],
+        *,
+        force_refresh: bool = False,
+    ) -> list[dict[str, Any]]:
+        """Return a defensive snapshot of the exchange market metadata."""
+        await self.__ensure_exchange(config)
+        await self._client_manager.ensure_markets_loaded(force_refresh=force_refresh)
+        if self.exchange is None:
+            return []
+        return [
+            dict(market)
+            for market in self.exchange.markets.values()
+            if isinstance(market, dict)
+        ]
+
+    async def fetch_spot_delist_schedule(
+        self,
+        config: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return an exchange-specific spot delisting schedule when supported."""
+        await self.__ensure_exchange(config)
+        if self.exchange is None:
+            raise RuntimeError("Exchange client is unavailable.")
+
+        fetch_schedule = getattr(
+            self.exchange,
+            "sapi_get_spot_delist_schedule",
+            None,
+        )
+        if not callable(fetch_schedule):
+            raise NotImplementedError(
+                "The configured exchange does not expose a spot delist schedule."
+            )
+
+        response = await fetch_schedule()
+        if not isinstance(response, list):
+            raise ValueError("Exchange returned an invalid spot delist schedule.")
+        return [dict(entry) for entry in response if isinstance(entry, dict)]
+
     @staticmethod
     def __raise_retryable_exchange_error(action: str, exc: Exception) -> None:
         """Log a retryable exchange-related failure and request a retry."""
@@ -417,8 +458,17 @@ class Exchange:
         return sorted(set(symbols))
 
     @retry(wait=wait_fixed(2), stop=stop_after_attempt(10))
-    async def __get_price_for_symbol(self, pair: str) -> str:
-        """Return the current exchange price for a symbol with exchange precision."""
+    async def __get_price_for_symbol(
+        self,
+        pair: str,
+        *,
+        prefer_ask: bool = False,
+    ) -> str:
+        """Return a current exchange price with exchange precision.
+
+        Buy execution paths prefer the best ask because it is the immediately
+        executable price. Other callers retain the last-trade behavior.
+        """
         result = None
 
         try:
@@ -431,13 +481,16 @@ class Exchange:
                 return ""
             # Fetch the ticker data for the trading pair
             ticker = await self.exchange.fetch_ticker(resolved_pair)
-            # Extract the actual price from the ticker data
-            if not ticker["last"]:
+            raw_price = ticker.get("ask") if prefer_ask else ticker.get("last")
+            if not raw_price:
+                raw_price = ticker.get("last")
+            if not raw_price:
                 logging.debug(
-                    "Ticker for %s has no 'last' price yet. Will retry.", resolved_pair
+                    "Ticker for %s has no usable price yet. Will retry.",
+                    resolved_pair,
                 )
                 raise TryAgain
-            actual_price = float(ticker["last"])
+            actual_price = float(raw_price)
             result = self.exchange.price_to_precision(resolved_pair, actual_price)
         except TryAgain:
             raise
@@ -541,7 +594,12 @@ class Exchange:
         return build_parsed_order_status(order, trade)
 
     @retry(wait=wait_fixed(1), stop=stop_after_attempt(10))
-    async def __get_amount_from_symbol(self, ordersize: float, symbol: str) -> str:
+    async def __get_amount_from_symbol(
+        self,
+        ordersize: float,
+        symbol: str,
+        price: float | str | None = None,
+    ) -> str:
         resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
         if resolved_symbol is None:
             logging.debug(
@@ -549,11 +607,15 @@ class Exchange:
                 symbol,
             )
             return ""
-        price = await self.__get_price_for_symbol(resolved_symbol)
+        resolved_price = (
+            price
+            if price is not None and float(price) > 0
+            else await self.__get_price_for_symbol(resolved_symbol, prefer_ask=True)
+        )
         amount = None
         try:
             amount = self.exchange.amount_to_precision(
-                resolved_symbol, float(ordersize) / float(price)
+                resolved_symbol, float(ordersize) / float(resolved_price)
             )
         except (
             ccxt.NetworkError,
@@ -774,10 +836,37 @@ class Exchange:
         await self.__ensure_markets_loaded()
         self._last_buy_precheck_result = None
         order_check_range_seconds = self.__get_order_check_range_seconds(config)
-        order["amount"] = await self.__get_amount_from_symbol(
-            order["ordersize"], order["symbol"]
+        order["price"] = await self.__get_price_for_symbol(
+            order["symbol"],
+            prefer_ask=True,
         )
-        order["price"] = await self.__get_price_for_symbol(order["symbol"])
+        maximum_buy_price = float(order.get("maximum_buy_price") or 0.0)
+        executable_price = float(order.get("price") or 0.0)
+        if maximum_buy_price > 0 and executable_price > maximum_buy_price:
+            self._last_buy_precheck_result = build_buy_precheck_result(
+                ok=False,
+                reason="execution_price_above_maximum",
+                symbol=str(order.get("symbol") or ""),
+                required_quote=self.__resolve_required_buy_quote(order),
+                executable_price=executable_price,
+                maximum_buy_price=maximum_buy_price,
+            )
+            logging.warning(
+                "Skipping recovery buy for %s: executable ask %.12f exceeds "
+                "maximum buy price %.12f.",
+                order.get("symbol"),
+                executable_price,
+                maximum_buy_price,
+            )
+            return None
+        amount_sizing_price = (
+            maximum_buy_price if maximum_buy_price > 0 else order["price"]
+        )
+        order["amount"] = await self.__get_amount_from_symbol(
+            order["ordersize"],
+            order["symbol"],
+            amount_sizing_price,
+        )
         if not order["price"] or not order["amount"] or float(order["amount"]) <= 0:
             self._last_buy_precheck_result = build_buy_precheck_result(
                 ok=False,
@@ -802,8 +891,18 @@ class Exchange:
                 precheck.get("available_quote"),
             )
             return None
-        order = await self.__execute_market_buy(order)
+        submitted_order = order
+        order = await self.__execute_market_buy(submitted_order)
         if not order:
+            if maximum_buy_price > 0:
+                self._last_buy_precheck_result = build_buy_precheck_result(
+                    ok=False,
+                    reason="execution_ceiling_not_filled",
+                    symbol=str(submitted_order.get("symbol") or ""),
+                    required_quote=self.__resolve_required_buy_quote(submitted_order),
+                    executable_price=executable_price,
+                    maximum_buy_price=maximum_buy_price,
+                )
             return None
         return await self._buy_manager.finalize_market_buy(
             order=order,

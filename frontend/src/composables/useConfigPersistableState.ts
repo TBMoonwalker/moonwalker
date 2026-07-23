@@ -49,6 +49,8 @@ function buildPersistableState(
             symbol_list: options.signal.value.symbol_list,
             asap_use_url: options.signal.value.asap_use_url,
             asap_symbol_select: options.signal.value.asap_symbol_select,
+            delisting_protection_enabled:
+                options.signal.value.delisting_protection_enabled,
             signal: options.signal.value.signal,
             strategy: options.signal.value.strategy,
             strategy_enabled: options.signal.value.strategy_enabled,

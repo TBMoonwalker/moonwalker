@@ -286,6 +286,8 @@ export function buildLoadedConfigState(
             symbol_list: symbolList,
             asap_use_url: asapUseUrl,
             asap_symbol_select: configuredSymbols,
+            delisting_protection_enabled:
+                parseBooleanString(response.delisting_protection_enabled) ?? false,
             asap_symbol_fetch_error: null,
             asap_symbol_options: configuredSymbols.map((symbol) => ({
                 label: symbol,
@@ -402,6 +404,20 @@ export function buildLoadedConfigState(
                 toNumberOrNull(response.dynamic_so_max_deal_quote) ?? 250,
             dynamic_so_min_tp_improvement_pct:
                 toNumberOrNull(response.dynamic_so_min_tp_improvement_pct) ?? 5,
+            dynamic_so_execution_guard_enabled:
+                parseBooleanString(
+                    response.dynamic_so_execution_guard_enabled,
+                ) ?? true,
+            dynamic_so_execution_drift_atr_fraction:
+                toNumberOrNull(
+                    response.dynamic_so_execution_drift_atr_fraction,
+                ) ?? 0.25,
+            dynamic_so_execution_drift_min_pct:
+                toNumberOrNull(response.dynamic_so_execution_drift_min_pct) ??
+                0.15,
+            dynamic_so_execution_drift_max_pct:
+                toNumberOrNull(response.dynamic_so_execution_drift_max_pct) ??
+                0.5,
             sidestep_bearish_strategy: toNullableString(
                 response.sidestep_bearish_strategy,
             ),

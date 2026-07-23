@@ -6,6 +6,8 @@ from service.dca_recovery_sizing import (
     RECOVERY_TARGET_MODE,
     RecoverySizingPolicy,
     build_recovery_sizing_policy,
+    calculate_recovery_execution_ceiling,
+    calculate_recovery_execution_drift_percent,
     calculate_recovery_sizing,
     calculate_recovery_spacing_percent,
     calculate_recovery_trigger_price,
@@ -38,6 +40,38 @@ def test_0g_first_candidate_is_rejected_by_atr_spacing() -> None:
     assert spacing == pytest.approx(5.367807)
     assert trigger == pytest.approx(0.53751086)
     assert 0.556 > trigger
+
+
+def test_execution_guard_uses_atr_scaled_drift_with_clamps() -> None:
+    policy = _policy()
+
+    assert calculate_recovery_execution_drift_percent(0.1, policy) == pytest.approx(
+        0.15
+    )
+    assert calculate_recovery_execution_drift_percent(0.929589, policy) == (
+        pytest.approx(0.23239725)
+    )
+    assert calculate_recovery_execution_drift_percent(5.0, policy) == pytest.approx(0.5)
+
+
+def test_cvc_execution_ceiling_rejects_rebound_fill() -> None:
+    policy = _policy()
+    trigger_price = 0.0195491789563
+    ceiling = calculate_recovery_execution_ceiling(
+        trigger_price,
+        0.929589,
+        policy,
+    )
+
+    assert ceiling == pytest.approx(0.01959461324)
+    assert 0.02008 > ceiling
+
+
+def test_execution_guard_can_be_explicitly_disabled() -> None:
+    policy = _policy(execution_guard_enabled="false")
+
+    assert policy.execution_guard_enabled is False
+    assert calculate_recovery_execution_ceiling(0.01955, 1.0, policy) == 0.0
 
 
 def test_0g_recovery_target_counterfactual_preserves_deep_capital() -> None:

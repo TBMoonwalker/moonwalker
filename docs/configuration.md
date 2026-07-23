@@ -54,6 +54,7 @@ are not exposed in the UI and must be set via the API.
 | `signal_settings` | `string (json)` | Plugin settings per selected signal plugin. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |
 | `symbol_list` | `string` | CSV list or URL for ASAP symbol list. | `BTC/USDT,ETH/USDT` |
 | `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema20_swing` |
+| `delisting_protection_enabled` | `bool` | Use exchange delisting schedules when available and otherwise CCXT market status to block new exposure. Existing exits remain enabled. | `false` |
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
 | `pair_denylist` | `string` | Comma-separated denied symbols. | `SCAM,XYZ` |
 | `volume` | `string (json)` | Minimum 24h volume filter. | `{"size":5,"range":"M"}` |
@@ -107,6 +108,10 @@ are not exposed in the UI and must be set via the API.
 | `dynamic_so_recovery_max_pct` | `float` | Upper clamp for the desired post-SO recovery move to TP. | `30.0` |
 | `dynamic_so_max_deal_quote` | `float` | Hard quote-currency cap for total cost of a recovery-target deal. Recovery-target saves and live activation require a positive value. Existing deal snapshots are not changed when this setting changes. | `250.0` |
 | `dynamic_so_min_tp_improvement_pct` | `float` | Minimum percentage-point improvement to the projected TP distance when balance or deal caps prevent reaching the full target. | `5.0` |
+| `dynamic_so_execution_guard_enabled` | `bool` | Protect recovery-target SOs from transient wicks. The exchange ask is checked immediately before execution and the buy uses an immediate-or-cancel limit capped at the calculated ceiling. Missing fields in older recovery policy snapshots inherit the enabled default. | `true` |
+| `dynamic_so_execution_drift_atr_fraction` | `float` | Fraction of ATR% allowed between the recovery trigger and the executable buy price before the SO is rejected. | `0.25` |
+| `dynamic_so_execution_drift_min_pct` | `float` | Minimum execution-price allowance used when the ATR-derived allowance is very small. | `0.15` |
+| `dynamic_so_execution_drift_max_pct` | `float` | Hard maximum execution-price allowance. The effective allowance is clamped between the configured minimum and maximum. | `0.5` |
 | `dynamic_so_volume_enabled` | `bool` | Enable dynamic scaling for safety order amount. Trigger logic stays unchanged; only SO size is scaled. | `false` |
 | `dynamic_so_ath_lookback_value` | `int` | ATH lookback amount used by dynamic SO scaling. | `1` |
 | `dynamic_so_ath_lookback_unit` | `string` | Lookback unit for ATH: `day`, `week`, `month`, or `year`. | `month` |

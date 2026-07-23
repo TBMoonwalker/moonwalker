@@ -10,6 +10,7 @@ import helper
 from service.ai_trust import evaluate_entry_enforcement
 from service.capital_budget import CapitalBudgetService
 from service.dca_recovery_sizing import build_recovery_sizing_policy
+from service.delisting_protection import DelistingProtectionService
 from service.exchange import Exchange
 from service.exchange_types import (
     ExchangeOrderPayload,
@@ -69,6 +70,7 @@ class Orders:
     def __init__(self):
         self.utils = helper.Utils()
         self.capital_budget = CapitalBudgetService()
+        self.delisting_protection = DelistingProtectionService.shared()
         self.exchange = Exchange()
         self.monitoring = MonitoringService()
         self.trades = Trades()
@@ -163,6 +165,27 @@ class Orders:
         ):
             if order_status.get(key) is None and original_order.get(key) is not None:
                 order_status[key] = original_order[key]
+        if bool(order_status.get("safetyorder")):
+            metadata = self._parse_metadata_json(order_status.get("metadata_json"))
+            recovery_so = metadata.get("recovery_so")
+            if isinstance(recovery_so, dict):
+                fill_price = float(order_status.get("price") or 0.0)
+                reference_price = float(recovery_so.get("reference_price") or 0.0)
+                trigger_market_price = float(recovery_so.get("current_price") or 0.0)
+                recovery_so["fill_price"] = fill_price
+                if reference_price > 0 and fill_price > 0:
+                    recovery_so["fill_deviation_percent"] = round(
+                        ((fill_price - reference_price) / reference_price) * 100,
+                        8,
+                    )
+                if trigger_market_price > 0 and fill_price > 0:
+                    recovery_so["fill_vs_trigger_percent"] = round(
+                        ((fill_price - trigger_market_price) / trigger_market_price)
+                        * 100,
+                        8,
+                    )
+                metadata["recovery_so"] = recovery_so
+                order_status["metadata_json"] = json.dumps(metadata, sort_keys=True)
         if bool(order_status.get("baseorder")):
             metadata = self._parse_metadata_json(order_status.get("metadata_json"))
             metadata["dca_policy"] = build_recovery_sizing_policy(config).to_dict()
@@ -957,6 +980,27 @@ class Orders:
                 order["symbol"],
                 gate.reason_code,
                 gate.message,
+            )
+            return False
+
+        delisting_decision = await self.delisting_protection.evaluate_buy(
+            str(order.get("symbol") or ""),
+            config,
+        )
+        if not delisting_decision.allowed:
+            order_role = (
+                "safety_order"
+                if bool(order.get("safetyorder")) and not bool(order.get("baseorder"))
+                else "base_or_reentry"
+            )
+            logging.warning(
+                "Skipping %s buy for %s: %s (%s). source=%s delist_at=%s",
+                order_role,
+                order["symbol"],
+                delisting_decision.reason_code,
+                delisting_decision.message,
+                delisting_decision.source,
+                delisting_decision.delist_at,
             )
             return False
 

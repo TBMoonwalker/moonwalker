@@ -58,6 +58,7 @@ function createBaseOptions(overrides = {}) {
             symbol_list: null,
             asap_use_url: false,
             asap_symbol_select: [],
+            delisting_protection_enabled: false,
             signal: 'asap',
             strategy: null,
             strategy_enabled: false,
@@ -119,6 +120,10 @@ function createBaseOptions(overrides = {}) {
             dynamic_so_recovery_max_pct: 30,
             dynamic_so_max_deal_quote: 250,
             dynamic_so_min_tp_improvement_pct: 5,
+            dynamic_so_execution_guard_enabled: true,
+            dynamic_so_execution_drift_atr_fraction: 0.25,
+            dynamic_so_execution_drift_min_pct: 0.15,
+            dynamic_so_execution_drift_max_pct: 0.5,
             sidestep_bearish_strategy: null,
             sidestep_reentry_strategy: null,
             sidestep_reentry_cooldown_candles: 0,
@@ -192,6 +197,7 @@ test(
                     symbol_list: null,
                     asap_use_url: false,
                     asap_symbol_select: [],
+                    delisting_protection_enabled: true,
                     signal: 'csv_signal',
                     strategy: 'ema20_swing',
                     strategy_enabled: true,
@@ -243,6 +249,10 @@ test(
         assert.deepEqual(parseField(payload, 'signal_strategy'), {
             value: null,
             type: 'str',
+        })
+        assert.deepEqual(parseField(payload, 'delisting_protection_enabled'), {
+            value: true,
+            type: 'bool',
         })
         assert.deepEqual(parseField(payload, 'dynamic_so_sizing_mode'), {
             value: 'legacy_factors',
@@ -321,6 +331,22 @@ test('buildConfigSubmitPayload persists bounded recovery DCA settings', () => {
     assert.equal(parseField(payload, 'dynamic_so_atr_timeframe').value, '4h')
     assert.equal(parseField(payload, 'dynamic_so_atr_length').value, 14)
     assert.equal(parseField(payload, 'dynamic_so_max_deal_quote').value, 250)
+    assert.equal(
+        parseField(payload, 'dynamic_so_execution_guard_enabled').value,
+        true,
+    )
+    assert.equal(
+        parseField(payload, 'dynamic_so_execution_drift_atr_fraction').value,
+        0.25,
+    )
+    assert.equal(
+        parseField(payload, 'dynamic_so_execution_drift_min_pct').value,
+        0.15,
+    )
+    assert.equal(
+        parseField(payload, 'dynamic_so_execution_drift_max_pct').value,
+        0.5,
+    )
 })
 
 test('buildConfigSubmitPayload persists AI Trust Ollama settings', () => {

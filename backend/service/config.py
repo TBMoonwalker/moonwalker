@@ -17,7 +17,12 @@ from service.config_runtime_store import (
     ConfigRuntimeStore,
     ConfigUpdateAction,
 )
-from service.dca_recovery_sizing import DEFAULT_RECOVERY_MAX_DEAL_QUOTE
+from service.dca_recovery_sizing import (
+    DEFAULT_EXECUTION_DRIFT_ATR_FRACTION,
+    DEFAULT_EXECUTION_DRIFT_MAX_PERCENT,
+    DEFAULT_EXECUTION_DRIFT_MIN_PERCENT,
+    DEFAULT_RECOVERY_MAX_DEAL_QUOTE,
+)
 from service.redis import CONFIG_CHANNEL, redis_client
 from service.strategy_builder import PUBLIC_BUILTIN_SLUGS
 from service.strategy_capability import filter_supported_strategies
@@ -63,6 +68,7 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 DEFAULT_CONFIG_VALUES = {
     "trade_mode": "dynamic_dca",
     "trading_paused": False,
+    "delisting_protection_enabled": False,
     "sidestep_bearish_strategy": "",
     "sidestep_reentry_strategy": "",
     "sidestep_reentry_cooldown_candles": 0,
@@ -89,6 +95,10 @@ DEFAULT_CONFIG_VALUES = {
     "dynamic_so_recovery_max_pct": 30.0,
     "dynamic_so_max_deal_quote": DEFAULT_RECOVERY_MAX_DEAL_QUOTE,
     "dynamic_so_min_tp_improvement_pct": 5.0,
+    "dynamic_so_execution_guard_enabled": True,
+    "dynamic_so_execution_drift_atr_fraction": (DEFAULT_EXECUTION_DRIFT_ATR_FRACTION),
+    "dynamic_so_execution_drift_min_pct": DEFAULT_EXECUTION_DRIFT_MIN_PERCENT,
+    "dynamic_so_execution_drift_max_pct": DEFAULT_EXECUTION_DRIFT_MAX_PERCENT,
     "autopilot_green_phase_enabled": False,
     "autopilot_green_phase_ramp_days": 30,
     "autopilot_green_phase_eval_interval_sec": 60,

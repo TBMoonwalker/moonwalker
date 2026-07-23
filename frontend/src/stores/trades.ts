@@ -12,6 +12,10 @@ export type OpenTradeRow = {
   automation_paused?: boolean
   automation_paused_at?: string | null
   automation_pause_source?: string | null
+  delisting_warning?: boolean
+  delisting_at?: string | null
+  delisting_reason?: string | null
+  delisting_source?: string | null
   dca_sizing_mode?: string | null
   dca_reference_price?: number
   dca_reference_atr_percent?: number
@@ -127,6 +131,7 @@ export type TradeExecutionRow = {
   signal_name?: string | null
   strategy_name?: string | null
   timeframe?: string | null
+  metadata_json?: string | null
 }
 
 function isFloat(val: any): boolean {

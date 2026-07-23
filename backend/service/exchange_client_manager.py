@@ -74,7 +74,7 @@ class ExchangeClientManager:
                 or not self._markets_loaded
                 or now - self._markets_loaded_ts >= self.MARKETS_REFRESH_TTL_SECONDS
             ):
-                await self.exchange.load_markets()
+                await self.exchange.load_markets(reload=True)
                 self._markets_loaded = True
                 self._markets_loaded_ts = now
 

@@ -25,6 +25,8 @@ const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
 const unsellableTradesState = storeToRefs(unsellableTradesStore)
 const waitingCampaignsStore = useWebSocketDataStore('waitingCampaigns')
 const waitingCampaignsState = storeToRefs(waitingCampaignsStore)
+const openTradesStore = useWebSocketDataStore('openTrades')
+const openTradesState = storeToRefs(openTradesStore)
 const configSnapshotStore = useSharedConfigSnapshot()
 const viewportWidth = ref(window.innerWidth)
 const { tradingPaused } = useTradingPauseStatus()
@@ -40,6 +42,32 @@ const unsellableTradesCount = computed(() =>
 const waitingCampaignsCount = computed(() =>
   Array.isArray(waitingCampaignsState.data.value) ? waitingCampaignsState.data.value.length : 0
 )
+type DelistingWarningRow = {
+  symbol?: string
+  delisting_warning?: boolean
+  delisting_at?: string | null
+}
+const delistingWarnings = computed(() => {
+  if (!Array.isArray(openTradesState.data.value)) return []
+  return (openTradesState.data.value as DelistingWarningRow[]).filter(
+    (row) => Boolean(row.delisting_warning),
+  )
+})
+const delistingWarningCopy = computed(() => {
+  const affected = delistingWarnings.value.map((row) => {
+    const symbol = String(row.symbol || 'Unknown symbol')
+    if (!row.delisting_at) return `${symbol} (market inactive)`
+    const timestamp = new Date(row.delisting_at)
+    const formatted = Number.isNaN(timestamp.getTime())
+      ? row.delisting_at
+      : new Intl.DateTimeFormat(undefined, {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }).format(timestamp)
+    return `${symbol} (${formatted})`
+  })
+  return `${affected.join(', ')}. New buys are blocked. Existing sell and take-profit orders remain active.`
+})
 function configFlagEnabled(value: unknown): boolean {
   return value === true || value === 'true'
 }
@@ -179,6 +207,17 @@ onUnmounted(() => {
     <section class="page-section trades-metrics" aria-label="Trade metrics">
       <Statistics />
     </section>
+
+    <n-alert
+      v-if="delistingWarnings.length > 0"
+      class="delisting-alert"
+      title="Open trade affected by delisting"
+      type="error"
+      role="alert"
+      aria-live="assertive"
+    >
+      {{ delistingWarningCopy }}
+    </n-alert>
 
     <section
       class="admission-strip"

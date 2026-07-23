@@ -41,3 +41,13 @@ test('trades page status strip keeps global pause as highest priority', () => {
         /tradingPaused\.value \|\| tradeAdmissionWarning\.value/,
     )
 })
+
+test('trades page prominently warns when an open trade is being delisted', () => {
+    assert.match(tradesViewSource, /delistingWarnings/)
+    assert.match(tradesViewSource, /Open trade affected by delisting/)
+    assert.match(
+        tradesViewSource,
+        /New buys are blocked\. Existing sell and take-profit orders remain active\./,
+    )
+    assert.match(tradesViewSource, /aria-live="assertive"/)
+})

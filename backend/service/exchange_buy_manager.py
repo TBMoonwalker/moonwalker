@@ -17,22 +17,59 @@ class ExchangeBuyManager:
     async def execute_market_buy(
         self, order: ExchangeOrderPayload
     ) -> ExchangeOrderPayload | None:
-        """Place a market buy order through the current exchange client."""
+        """Place a market buy or a price-capped IOC recovery buy."""
         exchange = self._get_exchange()
         if exchange is None:
             return None
 
         try:
             self._logger.info("Try to buy %s %s", order["amount"], order["symbol"])
+            maximum_buy_price = float(order.get("maximum_buy_price") or 0.0)
+            order_type = order["ordertype"]
+            order_price = order["price"]
+            params: dict[str, Any] = {}
+            if maximum_buy_price > 0:
+                order_type = "limit"
+                order_price = exchange.price_to_precision(
+                    order["symbol"],
+                    maximum_buy_price,
+                )
+                params["timeInForce"] = "IOC"
+                self._logger.info(
+                    "Using capped IOC recovery buy for %s at maximum price %s.",
+                    order["symbol"],
+                    order_price,
+                )
             trade = await exchange.create_order(
                 order["symbol"],
-                order["ordertype"],
+                order_type,
                 order["side"],
                 order["amount"],
-                order["price"],
-                {},
+                order_price,
+                params,
             )
             order.update(trade)
+            if maximum_buy_price > 0:
+                order["ordertype"] = "limit"
+                filled_amount = float(trade.get("filled") or 0.0)
+                if filled_amount <= 0:
+                    order_id = trade.get("id")
+                    if order_id and str(trade.get("status") or "").lower() == "open":
+                        try:
+                            await exchange.cancel_order(order_id, order["symbol"])
+                        except ccxt.BaseError as exc:
+                            self._logger.warning(
+                                "Canceling unfilled capped buy %s for %s failed: %s",
+                                order_id,
+                                order["symbol"],
+                                exc,
+                            )
+                    self._logger.info(
+                        "Capped recovery buy for %s did not fill at or below %s.",
+                        order["symbol"],
+                        order_price,
+                    )
+                    return None
             return order
         except ccxt.ExchangeError as exc:
             self._logger.error(

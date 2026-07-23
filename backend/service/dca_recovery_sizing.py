@@ -10,6 +10,9 @@ RECOVERY_SHADOW_MODE = "recovery_shadow"
 RECOVERY_TARGET_MODE = "recovery_target"
 TRADING_ATR_TIMEFRAME = "trading"
 DEFAULT_RECOVERY_MAX_DEAL_QUOTE = 250.0
+DEFAULT_EXECUTION_DRIFT_ATR_FRACTION = 0.25
+DEFAULT_EXECUTION_DRIFT_MIN_PERCENT = 0.15
+DEFAULT_EXECUTION_DRIFT_MAX_PERCENT = 0.5
 RECOVERY_SIZING_MODES = frozenset(
     {
         LEGACY_SIZING_MODE,
@@ -30,6 +33,21 @@ def _float_value(value: Any, default: float) -> float:
     return parsed
 
 
+def _bool_value(value: Any, default: bool) -> bool:
+    """Return a normalized bool for typed config and persisted JSON values."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "off"}:
+            return False
+    if value is None:
+        return default
+    return bool(value)
+
+
 @dataclass(frozen=True)
 class RecoverySizingPolicy:
     """Immutable recovery-target DCA policy snapshotted for one deal."""
@@ -45,6 +63,10 @@ class RecoverySizingPolicy:
     maximum_recovery_percent: float = 30.0
     maximum_deal_quote: float = DEFAULT_RECOVERY_MAX_DEAL_QUOTE
     minimum_tp_improvement_percent: float = 5.0
+    execution_guard_enabled: bool = True
+    execution_drift_atr_fraction: float = DEFAULT_EXECUTION_DRIFT_ATR_FRACTION
+    execution_drift_min_percent: float = DEFAULT_EXECUTION_DRIFT_MIN_PERCENT
+    execution_drift_max_percent: float = DEFAULT_EXECUTION_DRIFT_MAX_PERCENT
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible policy snapshot."""
@@ -66,6 +88,20 @@ class RecoverySizingPolicy:
         maximum_recovery = max(
             minimum_recovery,
             _float_value(values.get("maximum_recovery_percent"), 30.0),
+        )
+        execution_drift_min = max(
+            0.0,
+            _float_value(
+                values.get("execution_drift_min_percent"),
+                DEFAULT_EXECUTION_DRIFT_MIN_PERCENT,
+            ),
+        )
+        execution_drift_max = max(
+            execution_drift_min,
+            _float_value(
+                values.get("execution_drift_max_percent"),
+                DEFAULT_EXECUTION_DRIFT_MAX_PERCENT,
+            ),
         )
         return cls(
             mode=normalized_mode,
@@ -103,6 +139,19 @@ class RecoverySizingPolicy:
                     5.0,
                 ),
             ),
+            execution_guard_enabled=_bool_value(
+                values.get("execution_guard_enabled"),
+                True,
+            ),
+            execution_drift_atr_fraction=max(
+                0.0,
+                _float_value(
+                    values.get("execution_drift_atr_fraction"),
+                    DEFAULT_EXECUTION_DRIFT_ATR_FRACTION,
+                ),
+            ),
+            execution_drift_min_percent=execution_drift_min,
+            execution_drift_max_percent=execution_drift_max,
         )
 
 
@@ -198,6 +247,22 @@ def build_recovery_sizing_policy(
             "dynamic_so_min_tp_improvement_pct",
             5.0,
         ),
+        "execution_guard_enabled": config.get(
+            "dynamic_so_execution_guard_enabled",
+            True,
+        ),
+        "execution_drift_atr_fraction": config.get(
+            "dynamic_so_execution_drift_atr_fraction",
+            DEFAULT_EXECUTION_DRIFT_ATR_FRACTION,
+        ),
+        "execution_drift_min_percent": config.get(
+            "dynamic_so_execution_drift_min_pct",
+            DEFAULT_EXECUTION_DRIFT_MIN_PERCENT,
+        ),
+        "execution_drift_max_percent": config.get(
+            "dynamic_so_execution_drift_max_pct",
+            DEFAULT_EXECUTION_DRIFT_MAX_PERCENT,
+        ),
     }
     return RecoverySizingPolicy.from_dict(values)
 
@@ -236,6 +301,35 @@ def calculate_recovery_trigger_price(
         return 0.0
     normalized_spacing = min(99.999999, max(0.0, spacing_percent))
     return reference_price * (1 - (normalized_spacing / 100.0))
+
+
+def calculate_recovery_execution_drift_percent(
+    atr_percent: float,
+    policy: RecoverySizingPolicy,
+) -> float:
+    """Return the ATR-scaled price drift allowed between trigger and execution."""
+    if not policy.execution_guard_enabled:
+        return 0.0
+    atr_drift = max(0.0, atr_percent) * policy.execution_drift_atr_fraction
+    return min(
+        policy.execution_drift_max_percent,
+        max(policy.execution_drift_min_percent, atr_drift),
+    )
+
+
+def calculate_recovery_execution_ceiling(
+    trigger_price: float,
+    atr_percent: float,
+    policy: RecoverySizingPolicy,
+) -> float:
+    """Return the highest acceptable recovery safety-order buy price."""
+    if trigger_price <= 0 or not policy.execution_guard_enabled:
+        return 0.0
+    drift_percent = calculate_recovery_execution_drift_percent(
+        atr_percent,
+        policy,
+    )
+    return trigger_price * (1 + (drift_percent / 100.0))
 
 
 def calculate_projected_average_price(

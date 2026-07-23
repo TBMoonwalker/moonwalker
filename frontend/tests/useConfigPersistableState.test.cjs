@@ -29,6 +29,7 @@ function createPersistableStateOptions() {
             symbol_list: 'BTC/USDT',
             asap_use_url: false,
             asap_symbol_select: ['BTC/USDT'],
+            delisting_protection_enabled: false,
             asap_symbol_fetch_error: null,
             asap_symbol_options: [
                 { label: 'BTC/USDT', value: 'BTC/USDT' },
@@ -176,6 +177,12 @@ test('useConfigPersistableState tracks persistable section changes by label', ()
     assert.equal(tracking.isDirty.value, true)
     assert.deepEqual(tracking.changedSections.value, ['signal'])
     assert.deepEqual(tracking.changedSectionLabels.value, ['Signal'])
+
+    tracking.syncBaselineState()
+    options.signal.value.delisting_protection_enabled = true
+
+    assert.equal(tracking.isDirty.value, true)
+    assert.deepEqual(tracking.changedSections.value, ['signal'])
 
     tracking.syncBaselineState()
     options.signal.value.csvsignal_file_name = 'signals.csv'

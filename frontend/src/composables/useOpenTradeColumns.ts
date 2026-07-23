@@ -88,6 +88,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
     function isBuyBlocked(rowData: OpenTradeRow): boolean {
         return (
             Boolean(rowData.automation_paused) ||
+            Boolean(rowData.delisting_warning) ||
             Boolean(options.globalTradingPaused.value)
         )
     }
@@ -242,6 +243,30 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                         type: 'warning',
                     },
                     { default: () => 'Automation paused' },
+                ),
+            )
+        }
+        if (rowData.delisting_warning) {
+            tags.push(
+                h(
+                    NTooltip,
+                    {},
+                    {
+                        trigger: () =>
+                            h(
+                                NTag,
+                                {
+                                    size: 'small',
+                                    bordered: false,
+                                    type: 'error',
+                                },
+                                { default: () => 'Delisting risk' },
+                            ),
+                        default: () =>
+                            rowData.delisting_at
+                                ? `Scheduled for delisting at ${rowData.delisting_at}`
+                                : 'The exchange marks this market inactive',
+                    },
                 ),
             )
         }

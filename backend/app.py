@@ -20,6 +20,7 @@ from litestar.config.cors import CORSConfig
 from service.autopilot_memory import AutopilotMemoryService
 from service.config import Config
 from service.database import Database
+from service.delisting_protection import DelistingProtectionService
 from service.green_phase import GreenPhaseService
 from service.housekeeper import Housekeeper
 from service.redis import redis_client, start_redis, stop_redis
@@ -39,6 +40,7 @@ class RuntimeState:
     watcher: Watcher | None = None
     housekeeper: Housekeeper | None = None
     green_phase_service: GreenPhaseService | None = None
+    delisting_protection_service: DelistingProtectionService | None = None
     autopilot_memory_service: AutopilotMemoryService | None = None
     signal_plugin: Signal | None = None
     background_tasks: list[asyncio.Task[Any]] = field(default_factory=list)
@@ -115,6 +117,15 @@ async def startup() -> None:
             runtime_state.autopilot_memory_service.start,
         )
 
+        runtime_state.delisting_protection_service = await _run_startup_step(
+            "delisting protection init",
+            DelistingProtectionService.instance,
+        )
+        await _run_startup_step(
+            "delisting protection start",
+            runtime_state.delisting_protection_service.start,
+        )
+
         runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
         await _run_startup_step(
             "signal plugin init",
@@ -188,6 +199,8 @@ async def shutdown() -> None:
         await runtime_state.green_phase_service.shutdown()
     if runtime_state.autopilot_memory_service is not None:
         await runtime_state.autopilot_memory_service.shutdown()
+    if runtime_state.delisting_protection_service is not None:
+        await runtime_state.delisting_protection_service.shutdown()
     if runtime_state.database is not None:
         await runtime_state.database.shutdown()
 

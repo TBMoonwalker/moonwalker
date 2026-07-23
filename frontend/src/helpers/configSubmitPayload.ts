@@ -31,6 +31,7 @@ export interface SignalConfigSection {
     symbol_list: string | null
     asap_use_url: boolean
     asap_symbol_select: string[]
+    delisting_protection_enabled: boolean
     signal: string | null
     strategy: string | null
     strategy_enabled: boolean
@@ -102,6 +103,10 @@ export interface DcaConfigSection {
     dynamic_so_recovery_max_pct: number | null
     dynamic_so_max_deal_quote: number | null
     dynamic_so_min_tp_improvement_pct: number | null
+    dynamic_so_execution_guard_enabled: boolean
+    dynamic_so_execution_drift_atr_fraction: number | null
+    dynamic_so_execution_drift_min_pct: number | null
+    dynamic_so_execution_drift_max_pct: number | null
     sidestep_bearish_strategy: string | null
     sidestep_reentry_strategy: string | null
     sidestep_reentry_cooldown_candles: number | null
@@ -284,6 +289,10 @@ export function buildConfigSubmitPayload(
             'int',
         ),
         signal: serializeConfigValue(toNullableConfigString(signal.signal), 'str'),
+        delisting_protection_enabled: serializeConfigValue(
+            signal.delisting_protection_enabled ?? false,
+            'bool',
+        ),
         signal_strategy: serializeConfigValue(
             signal.signal === 'csv_signal'
                 ? null
@@ -423,6 +432,22 @@ export function buildConfigSubmitPayload(
         ),
         dynamic_so_min_tp_improvement_pct: serializeConfigValue(
             dca.dynamic_so_min_tp_improvement_pct ?? 5,
+            'float',
+        ),
+        dynamic_so_execution_guard_enabled: serializeConfigValue(
+            dca.dynamic_so_execution_guard_enabled ?? true,
+            'bool',
+        ),
+        dynamic_so_execution_drift_atr_fraction: serializeConfigValue(
+            dca.dynamic_so_execution_drift_atr_fraction ?? 0.25,
+            'float',
+        ),
+        dynamic_so_execution_drift_min_pct: serializeConfigValue(
+            dca.dynamic_so_execution_drift_min_pct ?? 0.15,
+            'float',
+        ),
+        dynamic_so_execution_drift_max_pct: serializeConfigValue(
+            dca.dynamic_so_execution_drift_max_pct ?? 0.5,
             'float',
         ),
         sidestep_bearish_strategy: serializeConfigValue(

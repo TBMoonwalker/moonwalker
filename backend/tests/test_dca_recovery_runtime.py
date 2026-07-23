@@ -233,8 +233,11 @@ async def test_recovery_mode_places_target_sized_0g_order(monkeypatch) -> None:
     assert len(buys) == 1
     assert buys[0]["ordersize"] == pytest.approx(34.61260727)
     assert buys[0]["strategy_name"] == "ema_swing"
+    assert buys[0]["maximum_buy_price"] == pytest.approx(0.457677)
     metadata = json.loads(buys[0]["metadata_json"])
     assert metadata["recovery_so"]["target_recovery_percent"] == pytest.approx(
         17.25709299
     )
     assert metadata["recovery_so"]["projected_tp_price"] == pytest.approx(0.35880670)
+    assert metadata["recovery_so"]["execution_guard_enabled"] is True
+    assert metadata["recovery_so"]["execution_drift_percent"] == pytest.approx(0.5)

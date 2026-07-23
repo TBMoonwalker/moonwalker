@@ -10,6 +10,8 @@ interface DcaRulesState {
     trade_mode?: string | null
     dynamic_so_sizing_mode?: string | null
     dynamic_so_recovery_min_pct?: number | null
+    dynamic_so_execution_guard_enabled?: boolean
+    dynamic_so_execution_drift_min_pct?: number | null
 }
 
 interface ExchangeRulesState {
@@ -399,6 +401,58 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
                 return Number.isFinite(parsed) && parsed > 0
                     ? true
                     : new Error('Please add a positive max deal budget')
+            },
+            trigger: ['submit', 'change'],
+        },
+        dynamic_so_execution_drift_atr_fraction: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (
+                    !isRecoveryTargetMode(options.dca) ||
+                    !options.dca.value.dynamic_so_execution_guard_enabled
+                ) {
+                    return true
+                }
+                const parsed = Number(value)
+                return Number.isFinite(parsed) && parsed >= 0
+                    ? true
+                    : new Error('Execution drift ATR fraction cannot be negative')
+            },
+            trigger: ['submit', 'change'],
+        },
+        dynamic_so_execution_drift_min_pct: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (
+                    !isRecoveryTargetMode(options.dca) ||
+                    !options.dca.value.dynamic_so_execution_guard_enabled
+                ) {
+                    return true
+                }
+                const parsed = Number(value)
+                return Number.isFinite(parsed) && parsed >= 0
+                    ? true
+                    : new Error('Minimum execution drift cannot be negative')
+            },
+            trigger: ['submit', 'change'],
+        },
+        dynamic_so_execution_drift_max_pct: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (
+                    !isRecoveryTargetMode(options.dca) ||
+                    !options.dca.value.dynamic_so_execution_guard_enabled
+                ) {
+                    return true
+                }
+                const parsed = Number(value)
+                const minimum = Number(
+                    options.dca.value.dynamic_so_execution_drift_min_pct,
+                )
+                return Number.isFinite(parsed) &&
+                    Number.isFinite(minimum) &&
+                    parsed >= minimum
+                    ? true
+                    : new Error(
+                          'Maximum execution drift must be at least the minimum',
+                      )
             },
             trigger: ['submit', 'change'],
         },

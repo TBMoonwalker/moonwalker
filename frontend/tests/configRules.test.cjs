@@ -332,6 +332,8 @@ test('config rules fail closed for an unsafe recovery target policy', () => {
                 trade_mode: 'dynamic_dca',
                 dynamic_so_sizing_mode: 'recovery_target',
                 dynamic_so_recovery_min_pct: 12,
+                dynamic_so_execution_guard_enabled: true,
+                dynamic_so_execution_drift_min_pct: 0.2,
             },
         },
     })
@@ -352,6 +354,16 @@ test('config rules fail closed for an unsafe recovery target policy', () => {
         context.rules.dynamic_so_recovery_max_pct.validator({}, 10).message,
         'Maximum recovery must be at least the minimum recovery',
     )
+    assert.equal(
+        context.rules.dynamic_so_execution_drift_atr_fraction.validator({}, -1)
+            .message,
+        'Execution drift ATR fraction cannot be negative',
+    )
+    assert.equal(
+        context.rules.dynamic_so_execution_drift_max_pct.validator({}, 0.1)
+            .message,
+        'Maximum execution drift must be at least the minimum',
+    )
     assert.equal(context.rules.ss.validator({}, 1.6), true)
     assert.equal(context.rules.dynamic_so_atr_length.validator({}, 14), true)
     assert.equal(
@@ -360,6 +372,17 @@ test('config rules fail closed for an unsafe recovery target policy', () => {
     )
     assert.equal(
         context.rules.dynamic_so_recovery_max_pct.validator({}, 30),
+        true,
+    )
+    assert.equal(
+        context.rules.dynamic_so_execution_drift_atr_fraction.validator(
+            {},
+            0.25,
+        ),
+        true,
+    )
+    assert.equal(
+        context.rules.dynamic_so_execution_drift_max_pct.validator({}, 0.5),
         true,
     )
 })

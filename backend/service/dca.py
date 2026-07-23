@@ -24,6 +24,8 @@ from service.dca_recovery_sizing import (
     RECOVERY_SHADOW_MODE,
     RECOVERY_TARGET_MODE,
     RecoverySizingPolicy,
+    calculate_recovery_execution_ceiling,
+    calculate_recovery_execution_drift_percent,
     calculate_recovery_sizing,
     calculate_recovery_spacing_percent,
     calculate_recovery_trigger_price,
@@ -1298,6 +1300,35 @@ class Dca:
                     )
                     placed_new_so = False
                 else:
+                    maximum_buy_price = 0.0
+                    if (
+                        recovery_policy.mode == RECOVERY_TARGET_MODE
+                        and recovery_policy.execution_guard_enabled
+                    ):
+                        execution_atr_percent = float(
+                            dynamic_so_details.get("atr_percent") or 0.0
+                        )
+                        execution_trigger_price = float(
+                            dynamic_so_details.get("trigger_price") or 0.0
+                        )
+                        execution_drift_percent = (
+                            calculate_recovery_execution_drift_percent(
+                                execution_atr_percent,
+                                recovery_policy,
+                            )
+                        )
+                        maximum_buy_price = calculate_recovery_execution_ceiling(
+                            execution_trigger_price,
+                            execution_atr_percent,
+                            recovery_policy,
+                        )
+                        dynamic_so_details.update(
+                            {
+                                "execution_guard_enabled": True,
+                                "execution_drift_percent": execution_drift_percent,
+                                "maximum_buy_price": maximum_buy_price,
+                            }
+                        )
                     order = {
                         "ordersize": safety_order_size,
                         "symbol": trades["symbol"],
@@ -1309,6 +1340,9 @@ class Dca:
                         "ordertype": trades["ordertype"],
                         "so_percentage": next_so_percentage,
                         "side": "buy",
+                        "maximum_buy_price": (
+                            maximum_buy_price if maximum_buy_price > 0 else None
+                        ),
                         "strategy_name": (
                             runtime_config.dca_strategy
                             if dynamic_dca and runtime_config.dca_strategy

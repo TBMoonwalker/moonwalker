@@ -20,6 +20,24 @@
                 />
             </n-form-item>
 
+            <n-form-item
+                label="Protect against delisting"
+                path="delisting_protection_enabled"
+                label-placement="left"
+            >
+                <n-flex vertical :size="4">
+                    <n-switch
+                        v-model:value="signal.delisting_protection_enabled"
+                        aria-label="Protect new exposure against delisting"
+                    />
+                    <n-text depth="3">
+                        Blocks base orders, safety orders, and re-entries when
+                        the exchange reports a scheduled delisting or inactive
+                        market. Existing exits remain enabled.
+                    </n-text>
+                </n-flex>
+            </n-form-item>
+
             <template v-if="signal.signal === 'sym_signals'">
                 <n-form-item label="URL" path="url.0">
                     <n-input v-model:value="signal.symsignal_url" placeholder="URL" />

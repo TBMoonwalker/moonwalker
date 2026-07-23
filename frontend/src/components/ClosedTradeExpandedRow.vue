@@ -192,8 +192,19 @@ const timelineItems = computed<TimelineItem[]>(() =>
             `Amount: ${formatAssetAmount(execution.amount)}`,
             `Price: ${formatPrice(execution.price)}`,
         ]
+        const recoveryFill = getRecoveryFillDiagnostics(execution)
         if (isBuy && execution.so_percentage !== null && execution.so_percentage !== undefined) {
-            content.push(`Percentage: ${formatPercent(execution.so_percentage)}`)
+            content.push(
+                `${recoveryFill ? 'Trigger P&L' : 'Percentage'}: ${formatPercent(execution.so_percentage)}`,
+            )
+        }
+        if (
+            recoveryFill?.fillDeviationPercent !== null &&
+            recoveryFill?.fillDeviationPercent !== undefined
+        ) {
+            content.push(
+                `Fill deviation: ${formatPercent(recoveryFill.fillDeviationPercent)}`,
+            )
         }
         return {
             key: `${execution.id ?? index}-${execution.role}-${execution.timestamp}`,
@@ -349,6 +360,29 @@ const chartPriceLines = computed(() => {
     }
     return lines
 })
+
+function getRecoveryFillDiagnostics(execution: TradeExecutionRow): {
+    fillDeviationPercent: number | null
+} | null {
+    if (!execution.metadata_json) {
+        return null
+    }
+    try {
+        const metadata = JSON.parse(execution.metadata_json)
+        const recoverySo = metadata?.recovery_so
+        if (!recoverySo || typeof recoverySo !== 'object') {
+            return null
+        }
+        const fillDeviation = Number(recoverySo.fill_deviation_percent)
+        return {
+            fillDeviationPercent: Number.isFinite(fillDeviation)
+                ? fillDeviation
+                : null,
+        }
+    } catch {
+        return null
+    }
+}
 
 function countExecutionsUntil(
     executionsToCount: TradeExecutionRow[],

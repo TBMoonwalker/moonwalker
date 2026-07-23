@@ -20,7 +20,8 @@ class _DummyExchange:
     async def close(self) -> None:
         self.close_calls += 1
 
-    async def load_markets(self) -> None:
+    async def load_markets(self, reload: bool = False) -> None:
+        assert reload is True
         self.load_markets_calls += 1
 
 

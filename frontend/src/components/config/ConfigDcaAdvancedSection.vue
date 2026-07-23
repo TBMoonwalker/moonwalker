@@ -148,6 +148,64 @@
                             :step="0.5"
                         />
                     </n-form-item>
+                    <n-form-item
+                        label="Wick execution guard"
+                        path="dynamic_so_execution_guard_enabled"
+                        label-placement="left"
+                    >
+                        <n-checkbox
+                            v-model:checked="
+                                dca.dynamic_so_execution_guard_enabled
+                            "
+                        />
+                    </n-form-item>
+                    <template v-if="dca.dynamic_so_execution_guard_enabled">
+                        <n-alert
+                            class="recovery-mode-note"
+                            type="info"
+                            :bordered="false"
+                        >
+                            Recovery SOs use an executable ask check and a capped
+                            immediate-or-cancel buy. Orders above the dynamic
+                            ceiling are skipped.
+                        </n-alert>
+                        <n-form-item
+                            label="Execution drift ATR fraction"
+                            path="dynamic_so_execution_drift_atr_fraction"
+                        >
+                            <n-input-number
+                                v-model:value="
+                                    dca.dynamic_so_execution_drift_atr_fraction
+                                "
+                                :min="0"
+                                :step="0.05"
+                            />
+                        </n-form-item>
+                        <n-form-item
+                            label="Minimum execution drift (%)"
+                            path="dynamic_so_execution_drift_min_pct"
+                        >
+                            <n-input-number
+                                v-model:value="
+                                    dca.dynamic_so_execution_drift_min_pct
+                                "
+                                :min="0"
+                                :step="0.05"
+                            />
+                        </n-form-item>
+                        <n-form-item
+                            label="Maximum execution drift (%)"
+                            path="dynamic_so_execution_drift_max_pct"
+                        >
+                            <n-input-number
+                                v-model:value="
+                                    dca.dynamic_so_execution_drift_max_pct
+                                "
+                                :min="0"
+                                :step="0.05"
+                            />
+                        </n-form-item>
+                    </template>
                 </template>
             </template>
         </n-form>

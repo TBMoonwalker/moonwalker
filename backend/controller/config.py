@@ -386,6 +386,10 @@ def _validate_recovery_target_policy_updates(
     recovery_keys = {
         "dynamic_so_sizing_mode",
         "dynamic_so_max_deal_quote",
+        "dynamic_so_execution_guard_enabled",
+        "dynamic_so_execution_drift_atr_fraction",
+        "dynamic_so_execution_drift_min_pct",
+        "dynamic_so_execution_drift_max_pct",
         "ss",
     }
     if recovery_keys.isdisjoint(updates):
@@ -401,6 +405,26 @@ def _validate_recovery_target_policy_updates(
         return "Recovery-target DCA requires a positive safety-order step scale."
     if not _has_positive_number(candidate.get("dynamic_so_max_deal_quote")):
         return "Recovery-target DCA requires a positive max deal quote."
+    if bool(candidate.get("dynamic_so_execution_guard_enabled", True)):
+        try:
+            drift_fraction = float(
+                candidate.get("dynamic_so_execution_drift_atr_fraction", 0.25)
+            )
+            minimum_drift = float(
+                candidate.get("dynamic_so_execution_drift_min_pct", 0.15)
+            )
+            maximum_drift = float(
+                candidate.get("dynamic_so_execution_drift_max_pct", 0.5)
+            )
+        except (TypeError, ValueError):
+            return "Recovery execution-drift settings must be numeric."
+        if drift_fraction < 0 or minimum_drift < 0:
+            return "Recovery execution-drift settings cannot be negative."
+        if maximum_drift < minimum_drift:
+            return (
+                "Recovery maximum execution drift must be greater than or equal "
+                "to the minimum drift."
+            )
     return None
 
 

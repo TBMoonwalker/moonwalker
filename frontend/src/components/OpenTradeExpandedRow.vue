@@ -242,6 +242,7 @@ const timelineItems = computed<TimelineItem[]>(() => {
             index,
             (candidate) => candidate.side === 'sell',
         )
+        const recoveryFill = getRecoveryFillDiagnostics(execution)
         return {
             key: `${execution.id ?? index}-${execution.role}-${execution.timestamp}`,
             title: isBuy
@@ -254,7 +255,15 @@ const timelineItems = computed<TimelineItem[]>(() => {
                 ...(isBuy &&
                 execution.so_percentage !== null &&
                 execution.so_percentage !== undefined
-                    ? [`Percentage: ${formatPercent(execution.so_percentage)}`]
+                    ? [
+                          `${recoveryFill ? 'Trigger P&L' : 'Percentage'}: ${formatPercent(execution.so_percentage)}`,
+                      ]
+                    : []),
+                ...(recoveryFill?.fillDeviationPercent !== null &&
+                recoveryFill?.fillDeviationPercent !== undefined
+                    ? [
+                          `Fill deviation: ${formatPercent(recoveryFill.fillDeviationPercent)}`,
+                      ]
                     : []),
             ].join(' | '),
             type: isBuy
@@ -465,6 +474,29 @@ function getBuyLineTitle(
 
 function getSafetyOrderContent(order: OrderData): string {
     return `Order size: ${formatQuoteAmount(order.ordersize)} | Amount: ${formatAssetAmount(order.amount)} | Price: ${formatPrice(order.price)} | Percentage: ${formatPercent(order.so_percentage)}`
+}
+
+function getRecoveryFillDiagnostics(execution: TradeExecutionRow): {
+    fillDeviationPercent: number | null
+} | null {
+    if (!execution.metadata_json) {
+        return null
+    }
+    try {
+        const metadata = JSON.parse(execution.metadata_json)
+        const recoverySo = metadata?.recovery_so
+        if (!recoverySo || typeof recoverySo !== 'object') {
+            return null
+        }
+        const fillDeviation = Number(recoverySo.fill_deviation_percent)
+        return {
+            fillDeviationPercent: Number.isFinite(fillDeviation)
+                ? fillDeviation
+                : null,
+        }
+    } catch {
+        return null
+    }
 }
 
 function toNumberOrZero(value: unknown): number {
