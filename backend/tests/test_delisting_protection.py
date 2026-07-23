@@ -9,6 +9,7 @@ from service.delisting_protection import (
     DelistingDecision,
     DelistingProtectionService,
 )
+from service.exchange import Exchange
 from service.orders import Orders
 
 
@@ -154,14 +155,17 @@ async def test_generic_unknown_active_status_is_allowed_as_degraded() -> None:
 
 
 @pytest.mark.asyncio
-async def test_live_binance_fails_closed_when_schedule_is_unavailable() -> None:
+@pytest.mark.parametrize("dry_run", (False, True))
+async def test_binance_fails_closed_when_schedule_is_unavailable(
+    dry_run: bool,
+) -> None:
     service = DelistingProtectionService()
     await _disable_open_trade_notifications(service)
     service.config = {
         "delisting_protection_enabled": True,
         "exchange": "binance",
         "market": "spot",
-        "dry_run": False,
+        "dry_run": dry_run,
     }
     service.exchange = FakeDelistingExchange(  # type: ignore[assignment]
         markets=[
@@ -179,6 +183,142 @@ async def test_live_binance_fails_closed_when_schedule_is_unavailable() -> None:
 
     assert decision.allowed is False
     assert decision.reason_code == "blocked_delisting_check_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_dry_run_schedule_uses_separate_production_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[Any] = []
+
+    class ProductionScheduleExchange:
+        """Capture the isolated CCXT client used for schedule metadata."""
+
+        def __init__(self, params: dict[str, Any]) -> None:
+            self.params = params
+            self.enableRateLimit = False
+            self.closed = False
+            created.append(self)
+
+        async def sapi_get_spot_delist_schedule(self) -> list[dict[str, Any]]:
+            return [
+                {
+                    "delistTime": 1_900_000_000_000,
+                    "symbols": ["CVCUSDC"],
+                }
+            ]
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr("service.exchange.ccxt.binance", ProductionScheduleExchange)
+    exchange = Exchange()
+
+    result = await exchange.fetch_spot_delist_schedule(
+        {
+            "exchange": "binance",
+            "market": "spot",
+            "dry_run": True,
+            "key": "demo-key",
+            "secret": "demo-secret",
+            "delisting_schedule_api_key": "production-read-only-key",
+            "delisting_schedule_api_secret": "production-read-only-secret",
+        }
+    )
+
+    assert result[0]["symbols"] == ["CVCUSDC"]
+    assert len(created) == 1
+    assert created[0].params["apiKey"] == "production-read-only-key"
+    assert created[0].params["secret"] == "production-read-only-secret"
+    assert created[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_dry_run_schedule_can_reuse_trading_credentials(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[Any] = []
+
+    class ProductionScheduleExchange:
+        """Capture trading credentials passed to the production client."""
+
+        def __init__(self, params: dict[str, Any]) -> None:
+            self.params = params
+            self.enableRateLimit = False
+            self.closed = False
+            created.append(self)
+
+        async def sapi_get_spot_delist_schedule(self) -> list[dict[str, Any]]:
+            return [
+                {
+                    "delistTime": 1_900_000_000_000,
+                    "symbols": ["CVCUSDC"],
+                }
+            ]
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr("service.exchange.ccxt.binance", ProductionScheduleExchange)
+    exchange = Exchange()
+
+    result = await exchange.fetch_spot_delist_schedule(
+        {
+            "exchange": "binance",
+            "market": "spot",
+            "dry_run": True,
+            "key": "trading-key",
+            "secret": "trading-secret",
+            "delisting_schedule_use_trading_credentials": True,
+            "delisting_schedule_api_key": "dedicated-key",
+            "delisting_schedule_api_secret": "dedicated-secret",
+        }
+    )
+
+    assert result[0]["symbols"] == ["CVCUSDC"]
+    assert len(created) == 1
+    assert created[0].params["apiKey"] == "trading-key"
+    assert created[0].params["secret"] == "trading-secret"
+    assert created[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_dry_run_schedule_requires_separate_production_credentials() -> None:
+    exchange = Exchange()
+
+    with pytest.raises(
+        RuntimeError,
+        match="dedicated production read-only credentials",
+    ):
+        await exchange.fetch_spot_delist_schedule(
+            {
+                "exchange": "binance",
+                "market": "spot",
+                "dry_run": True,
+                "key": "demo-key",
+                "secret": "demo-secret",
+            }
+        )
+
+
+@pytest.mark.asyncio
+async def test_trading_credential_reuse_requires_exchange_credentials() -> None:
+    exchange = Exchange()
+
+    with pytest.raises(
+        RuntimeError,
+        match="configured trading credentials",
+    ):
+        await exchange.fetch_spot_delist_schedule(
+            {
+                "exchange": "binance",
+                "market": "spot",
+                "dry_run": True,
+                "delisting_schedule_use_trading_credentials": True,
+                "delisting_schedule_api_key": "dedicated-key",
+                "delisting_schedule_api_secret": "dedicated-secret",
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -248,6 +388,51 @@ async def test_open_trade_warning_is_enriched_and_notified_once() -> None:
     assert len(notifications) == 1
     assert notifications[0][0] == "risk.delisting"
     assert notifications[0][1]["symbol"] == "ADA/USDT"
+
+
+@pytest.mark.asyncio
+async def test_unavailable_schedule_warns_open_trades_and_notifies_once() -> None:
+    service = DelistingProtectionService()
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "binance",
+        "market": "spot",
+        "dry_run": True,
+        "monitoring_enabled": True,
+    }
+    service.exchange = FakeDelistingExchange(  # type: ignore[assignment]
+        markets=[
+            {
+                "id": "CVCUSDC",
+                "symbol": "CVC/USDC",
+                "active": True,
+            }
+        ],
+        schedule_error=RuntimeError("schedule unavailable"),
+    )
+    notifications: list[tuple[str, dict[str, Any]]] = []
+
+    async def get_open_trades() -> list[dict[str, Any]]:
+        return [{"id": 1, "symbol": "CVC/USDC"}]
+
+    async def notify(
+        event_type: str,
+        payload: dict[str, Any],
+        _config: dict[str, Any],
+    ) -> None:
+        notifications.append((event_type, payload))
+
+    service.trades.get_open_trades = get_open_trades  # type: ignore[method-assign]
+    service.monitoring.notify_trade = notify  # type: ignore[method-assign]
+
+    await service.refresh(service.config)
+    await service.refresh(service.config)
+    enriched = service.enrich_open_trades([{"id": 1, "symbol": "CVC/USDC"}])
+
+    assert enriched[0]["delisting_check_unavailable"] is True
+    assert "delisting_warning" not in enriched[0]
+    assert len(notifications) == 1
+    assert notifications[0][0] == "risk.delisting_unavailable"
 
 
 @pytest.mark.asyncio

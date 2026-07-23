@@ -288,6 +288,14 @@ export function buildLoadedConfigState(
             asap_symbol_select: configuredSymbols,
             delisting_protection_enabled:
                 parseBooleanString(response.delisting_protection_enabled) ?? false,
+            delisting_schedule_use_trading_credentials:
+                parseBooleanString(
+                    response.delisting_schedule_use_trading_credentials,
+                ) ?? false,
+            delisting_schedule_api_key:
+                toNullableString(response.delisting_schedule_api_key),
+            delisting_schedule_api_secret:
+                toNullableString(response.delisting_schedule_api_secret),
             asap_symbol_fetch_error: null,
             asap_symbol_options: configuredSymbols.map((symbol) => ({
                 label: symbol,

@@ -46,6 +46,8 @@ type DelistingWarningRow = {
   symbol?: string
   delisting_warning?: boolean
   delisting_at?: string | null
+  delisting_check_unavailable?: boolean
+  delisting_check_message?: string | null
 }
 const delistingWarnings = computed(() => {
   if (!Array.isArray(openTradesState.data.value)) return []
@@ -67,6 +69,20 @@ const delistingWarningCopy = computed(() => {
     return `${symbol} (${formatted})`
   })
   return `${affected.join(', ')}. New buys are blocked. Existing sell and take-profit orders remain active.`
+})
+const delistingCheckUnavailable = computed(() => {
+  if (!Array.isArray(openTradesState.data.value)) return false
+  return (openTradesState.data.value as DelistingWarningRow[]).some(
+    (row) => Boolean(row.delisting_check_unavailable),
+  )
+})
+const delistingCheckUnavailableCopy = computed(() => {
+  if (!Array.isArray(openTradesState.data.value)) return ''
+  const row = (openTradesState.data.value as DelistingWarningRow[]).find(
+    (candidate) => Boolean(candidate.delisting_check_unavailable),
+  )
+  return row?.delisting_check_message ||
+    `Moonwalker cannot verify Binance's production delisting schedule. New buys are blocked. Existing sell and take-profit orders remain active.`
 })
 function configFlagEnabled(value: unknown): boolean {
   return value === true || value === 'true'
@@ -94,10 +110,14 @@ const aiTrustWarningBlocked = computed(
     aiTrustRuntimeStatus.value === 'warning_blocked'
 )
 const tradeAdmissionWarning = computed(
-  () => aiTrustProviderUnavailable.value || aiTrustWarningBlocked.value
+  () =>
+    delistingCheckUnavailable.value ||
+    aiTrustProviderUnavailable.value ||
+    aiTrustWarningBlocked.value
 )
 const admissionStatusLabel = computed(() => {
   if (tradingPaused.value) return 'Moonwalker paused'
+  if (delistingCheckUnavailable.value) return 'Delisting check unavailable'
   if (aiTrustProviderUnavailable.value) return 'AI unavailable'
   if (aiTrustWarningBlocked.value) return 'AI blocked entry'
   return 'Moonwalker open'
@@ -105,6 +125,9 @@ const admissionStatusLabel = computed(() => {
 const admissionStatusCopy = computed(() => {
   if (tradingPaused.value) {
     return 'New trades and re-entries are paused. Existing exits can keep running.'
+  }
+  if (delistingCheckUnavailable.value) {
+    return `Binance's production delisting schedule is unavailable. All new buys are blocked until verification succeeds. Existing exits can keep running.`
   }
   if (aiTrustProviderUnavailable.value) {
     const provider = aiTrustRuntimeProviderStatus.value || 'unscored'
@@ -217,6 +240,19 @@ onUnmounted(() => {
       aria-live="assertive"
     >
       {{ delistingWarningCopy }}
+    </n-alert>
+
+    <n-alert
+      v-if="delistingCheckUnavailable"
+      class="delisting-alert"
+      title="Delisting protection cannot verify Binance"
+      type="warning"
+      role="alert"
+      aria-live="assertive"
+    >
+      {{ delistingCheckUnavailableCopy }}
+      Configure production read-only schedule credentials or enable trading
+      credential reuse in Control Center → Signal source.
     </n-alert>
 
     <section

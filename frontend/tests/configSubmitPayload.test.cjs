@@ -198,6 +198,10 @@ test(
                     asap_use_url: false,
                     asap_symbol_select: [],
                     delisting_protection_enabled: true,
+                    delisting_schedule_use_trading_credentials: true,
+                    delisting_schedule_api_key: 'production-read-only-key',
+                    delisting_schedule_api_secret:
+                        'production-read-only-secret',
                     signal: 'csv_signal',
                     strategy: 'ema20_swing',
                     strategy_enabled: true,
@@ -253,6 +257,24 @@ test(
         assert.deepEqual(parseField(payload, 'delisting_protection_enabled'), {
             value: true,
             type: 'bool',
+        })
+        assert.deepEqual(
+            parseField(
+                payload,
+                'delisting_schedule_use_trading_credentials',
+            ),
+            {
+                value: true,
+                type: 'bool',
+            },
+        )
+        assert.deepEqual(parseField(payload, 'delisting_schedule_api_key'), {
+            value: 'production-read-only-key',
+            type: 'str',
+        })
+        assert.deepEqual(parseField(payload, 'delisting_schedule_api_secret'), {
+            value: 'production-read-only-secret',
+            type: 'str',
         })
         assert.deepEqual(parseField(payload, 'dynamic_so_sizing_mode'), {
             value: 'legacy_factors',

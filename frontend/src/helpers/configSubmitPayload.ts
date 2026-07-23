@@ -32,6 +32,9 @@ export interface SignalConfigSection {
     asap_use_url: boolean
     asap_symbol_select: string[]
     delisting_protection_enabled: boolean
+    delisting_schedule_use_trading_credentials?: boolean
+    delisting_schedule_api_key?: string | null
+    delisting_schedule_api_secret?: string | null
     signal: string | null
     strategy: string | null
     strategy_enabled: boolean
@@ -292,6 +295,18 @@ export function buildConfigSubmitPayload(
         delisting_protection_enabled: serializeConfigValue(
             signal.delisting_protection_enabled ?? false,
             'bool',
+        ),
+        delisting_schedule_use_trading_credentials: serializeConfigValue(
+            signal.delisting_schedule_use_trading_credentials ?? false,
+            'bool',
+        ),
+        delisting_schedule_api_key: serializeConfigValue(
+            toNullableConfigString(signal.delisting_schedule_api_key),
+            'str',
+        ),
+        delisting_schedule_api_secret: serializeConfigValue(
+            toNullableConfigString(signal.delisting_schedule_api_secret),
+            'str',
         ),
         signal_strategy: serializeConfigValue(
             signal.signal === 'csv_signal'

@@ -419,6 +419,9 @@ async def test_config_load_all_ignores_removed_trade_mode_rows(
     assert config.get("trade_mode") == "dynamic_dca"
     assert config.snapshot()["trade_mode"] == "dynamic_dca"
     assert config.get("delisting_protection_enabled") is False
+    assert config.get("delisting_schedule_use_trading_credentials") is False
+    assert config.get("delisting_schedule_api_key") == ""
+    assert config.get("delisting_schedule_api_secret") == ""
     assert "dynamic_dca" not in config.snapshot()
     assert "trade_lifecycle_mode" not in config.snapshot()
     assert "dynamic_dca" not in config.raw_snapshot()

@@ -51,3 +51,16 @@ test('trades page prominently warns when an open trade is being delisted', () =>
     )
     assert.match(tradesViewSource, /aria-live="assertive"/)
 })
+
+test('trades page fails closed when the delisting provider is unavailable', () => {
+    assert.match(tradesViewSource, /delistingCheckUnavailable/)
+    assert.match(tradesViewSource, /Delisting protection cannot verify Binance/)
+    assert.match(
+        tradesViewSource,
+        /All new buys are blocked until verification succeeds/,
+    )
+    assert.match(
+        tradesViewSource,
+        /production read-only schedule credentials or enable trading/,
+    )
+})

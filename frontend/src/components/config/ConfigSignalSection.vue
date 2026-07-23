@@ -38,6 +38,63 @@
                 </n-flex>
             </n-form-item>
 
+            <template v-if="signal.delisting_protection_enabled">
+                <n-alert type="info" title="Binance schedule credentials">
+                    Delisting checks always use an isolated production client.
+                    Dedicated read-only credentials are safer. Reused trading
+                    credentials must also be valid on production Binance.
+                </n-alert>
+                <n-form-item
+                    label="Use trading API credentials"
+                    path="delisting_schedule_use_trading_credentials"
+                    label-placement="left"
+                >
+                    <n-flex vertical :size="4">
+                        <n-switch
+                            v-model:value="
+                                signal.delisting_schedule_use_trading_credentials
+                            "
+                            aria-label="Use trading API credentials for delisting checks"
+                        />
+                        <n-text depth="3">
+                            Reuses the API key and secret from Exchange settings.
+                            No trading or withdrawal request is made by the
+                            delisting checker.
+                        </n-text>
+                    </n-flex>
+                </n-form-item>
+                <template
+                    v-if="
+                        !signal.delisting_schedule_use_trading_credentials
+                    "
+                >
+                    <n-form-item
+                        label="Binance schedule API key"
+                        path="delisting_schedule_api_key"
+                    >
+                        <n-input
+                            v-model:value="signal.delisting_schedule_api_key"
+                            type="password"
+                            show-password-on="click"
+                            autocomplete="off"
+                            placeholder="Production read-only API key"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Binance schedule API secret"
+                        path="delisting_schedule_api_secret"
+                    >
+                        <n-input
+                            v-model:value="signal.delisting_schedule_api_secret"
+                            type="password"
+                            show-password-on="click"
+                            autocomplete="off"
+                            placeholder="Production read-only API secret"
+                        />
+                    </n-form-item>
+                </template>
+            </template>
+
             <template v-if="signal.signal === 'sym_signals'">
                 <n-form-item label="URL" path="url.0">
                     <n-input v-model:value="signal.symsignal_url" placeholder="URL" />

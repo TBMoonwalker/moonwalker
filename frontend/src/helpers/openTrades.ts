@@ -33,6 +33,9 @@ export type OpenTradeRow = {
     delisting_at?: string | null
     delisting_reason?: string | null
     delisting_source?: string | null
+    delisting_check_unavailable?: boolean
+    delisting_check_message?: string | null
+    delisting_check_source?: string | null
     dca_sizing_mode?: string | null
     dca_reference_price?: number
     dca_reference_atr_percent?: number

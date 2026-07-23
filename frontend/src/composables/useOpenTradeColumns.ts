@@ -89,6 +89,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         return (
             Boolean(rowData.automation_paused) ||
             Boolean(rowData.delisting_warning) ||
+            Boolean(rowData.delisting_check_unavailable) ||
             Boolean(options.globalTradingPaused.value)
         )
     }

@@ -61,6 +61,11 @@ DEFAULT_LOG_SOURCES: tuple[LogSource, ...] = (
     LogSource("exchange", "Exchange", Path("logs/exchange.log")),
     LogSource("orders", "Orders", Path("logs/orders.log")),
     LogSource("signal", "Signal", Path("logs/signal.log")),
+    LogSource(
+        "delisting_protection",
+        "Delisting Protection",
+        Path("logs/delisting_protection.log"),
+    ),
     LogSource("monitoring", "Monitoring", Path("logs/monitoring.log")),
     LogSource("statistics", "Statistics", Path("logs/statistics.log")),
     LogSource("dca", "DCA", Path("logs/dca.log")),

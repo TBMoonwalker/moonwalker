@@ -207,6 +207,15 @@ class DelistingProtectionService:
             bool(config.get("dry_run", True)),
             str(config.get("exchange_hostname") or "").strip().lower(),
             str(config.get("key") or "").strip(),
+            str(config.get("secret") or "").strip(),
+            bool(
+                config.get(
+                    "delisting_schedule_use_trading_credentials",
+                    False,
+                )
+            ),
+            str(config.get("delisting_schedule_api_key") or "").strip(),
+            str(config.get("delisting_schedule_api_secret") or "").strip(),
         )
 
     def _reset_snapshot(self) -> None:
@@ -428,11 +437,7 @@ class DelistingProtectionService:
             )
 
         provider = _provider_for(config)
-        if (
-            provider is not None
-            and not bool(config.get("dry_run", True))
-            and not self._schedule_verified
-        ):
+        if provider is not None and not self._schedule_verified:
             return DelistingDecision(
                 allowed=False,
                 reason_code="blocked_delisting_check_unavailable",
@@ -487,11 +492,25 @@ class DelistingProtectionService:
         """Annotate open trades affected by a known schedule or inactive market."""
         enriched: list[dict[str, Any]] = []
         enabled = bool(self.config.get("delisting_protection_enabled", False))
+        provider = _provider_for(self.config) if enabled else None
+        schedule_unavailable = provider is not None and not self._schedule_verified
         for source_row in rows:
             row = dict(source_row)
             symbol = str(row.get("symbol") or "")
             event = self._event_for_symbol(symbol) if enabled else None
             market = self._market_for_symbol(symbol) if enabled else None
+            if schedule_unavailable:
+                row.update(
+                    {
+                        "delisting_check_unavailable": True,
+                        "delisting_check_message": (
+                            "Binance's production delisting schedule could not "
+                            "be verified. New buys are blocked while existing "
+                            "exits remain enabled."
+                        ),
+                        "delisting_check_source": provider.source,
+                    }
+                )
             if event is not None:
                 row.update(
                     {
@@ -521,6 +540,37 @@ class DelistingProtectionService:
         if not bool(config.get("delisting_protection_enabled", False)):
             return
         rows = self.enrich_open_trades(await self.trades.get_open_trades())
+        provider = _provider_for(config)
+        if rows and provider is not None and not self._schedule_verified:
+            notification_key = (
+                str(config.get("exchange") or ""),
+                "__schedule__",
+                "unavailable",
+            )
+            if notification_key not in self._notified_events:
+                self._notified_events.add(notification_key)
+                logging.error(
+                    "Delisting schedule is unavailable for exchange=%s. "
+                    "All new buys are blocked; existing exits remain enabled. "
+                    "reason=%s",
+                    config.get("exchange"),
+                    self._degraded_reason or "unknown",
+                )
+                await self.monitoring.notify_trade(
+                    "risk.delisting_unavailable",
+                    {
+                        "symbol": "ALL OPEN TRADES",
+                        "side": "risk",
+                        "reason": "delisting_schedule_unavailable",
+                        "source": provider.source,
+                        "message": (
+                            "Moonwalker cannot verify the production delisting "
+                            "schedule. New buys are blocked. Existing sell and "
+                            "take-profit orders remain enabled."
+                        ),
+                    },
+                    config,
+                )
         for row in rows:
             if not bool(row.get("delisting_warning")):
                 continue
@@ -573,6 +623,32 @@ class DelistingProtectionService:
                     else "ccxt_market_status"
                 ),
                 "degraded_reason": self._degraded_reason,
+                "schedule_credential_mode": (
+                    "trading"
+                    if self.config.get(
+                        "delisting_schedule_use_trading_credentials",
+                        False,
+                    )
+                    else "dedicated"
+                ),
+                "schedule_credentials_configured": bool(
+                    (
+                        self.config.get(
+                            "delisting_schedule_use_trading_credentials",
+                            False,
+                        )
+                        and self.config.get("key")
+                        and self.config.get("secret")
+                    )
+                    or (
+                        not self.config.get(
+                            "delisting_schedule_use_trading_credentials",
+                            False,
+                        )
+                        and self.config.get("delisting_schedule_api_key")
+                        and self.config.get("delisting_schedule_api_secret")
+                    )
+                ),
                 "scheduled_symbols": sorted(self._events_by_market_id),
             }
         )

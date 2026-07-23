@@ -69,6 +69,10 @@ test(
                 autopilot_base_order_stretch_max_multiplier: '2',
                 signal: 'csv_signal',
                 delisting_protection_enabled: 'true',
+                delisting_schedule_use_trading_credentials: 'true',
+                delisting_schedule_api_key: '__MOONWALKER_SECRET_REDACTED__',
+                delisting_schedule_api_secret:
+                    '__MOONWALKER_SECRET_REDACTED__',
                 signal_settings: {
                     csv_source: 'pair;side\nBTC/USDT;buy',
                 },
@@ -101,6 +105,18 @@ test(
         )
         assert.equal(state.signal.csvsignal_source, null)
         assert.equal(state.signal.delisting_protection_enabled, true)
+        assert.equal(
+            state.signal.delisting_schedule_use_trading_credentials,
+            true,
+        )
+        assert.equal(
+            state.signal.delisting_schedule_api_key,
+            '__MOONWALKER_SECRET_REDACTED__',
+        )
+        assert.equal(
+            state.signal.delisting_schedule_api_secret,
+            '__MOONWALKER_SECRET_REDACTED__',
+        )
         assert.equal(state.indicator.history_lookback_time, '180d')
         assert.equal(
             state.autopilot.green_phase_ramp_days,

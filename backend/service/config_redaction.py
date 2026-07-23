@@ -12,6 +12,8 @@ SENSITIVE_CONFIG_KEYS = frozenset(
     {
         "key",
         "secret",
+        "delisting_schedule_api_key",
+        "delisting_schedule_api_secret",
         "marketcap_cmc_api_key",
         "monitoring_telegram_api_hash",
         "monitoring_telegram_bot_token",

@@ -55,6 +55,9 @@ are not exposed in the UI and must be set via the API.
 | `symbol_list` | `string` | CSV list or URL for ASAP symbol list. | `BTC/USDT,ETH/USDT` |
 | `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema20_swing` |
 | `delisting_protection_enabled` | `bool` | Use exchange delisting schedules when available and otherwise CCXT market status to block new exposure. Existing exits remain enabled. | `false` |
+| `delisting_schedule_use_trading_credentials` | `bool` | Reuse the configured exchange trading key and secret for the isolated production Binance delisting schedule request. Dedicated read-only credentials remain the safer default. | `false` |
+| `delisting_schedule_api_key` | `str` | Dedicated production read-only Binance API key used only for delisting schedule checks when trading credential reuse is disabled. | empty |
+| `delisting_schedule_api_secret` | `str` | Secret for the production read-only Binance schedule key. Stored and returned through the same redaction boundary as exchange credentials. | empty |
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
 | `pair_denylist` | `string` | Comma-separated denied symbols. | `SCAM,XYZ` |
 | `volume` | `string (json)` | Minimum 24h volume filter. | `{"size":5,"range":"M"}` |

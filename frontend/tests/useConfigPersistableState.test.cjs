@@ -30,6 +30,9 @@ function createPersistableStateOptions() {
             asap_use_url: false,
             asap_symbol_select: ['BTC/USDT'],
             delisting_protection_enabled: false,
+            delisting_schedule_use_trading_credentials: false,
+            delisting_schedule_api_key: null,
+            delisting_schedule_api_secret: null,
             asap_symbol_fetch_error: null,
             asap_symbol_options: [
                 { label: 'BTC/USDT', value: 'BTC/USDT' },
@@ -180,6 +183,18 @@ test('useConfigPersistableState tracks persistable section changes by label', ()
 
     tracking.syncBaselineState()
     options.signal.value.delisting_protection_enabled = true
+
+    assert.equal(tracking.isDirty.value, true)
+    assert.deepEqual(tracking.changedSections.value, ['signal'])
+
+    tracking.syncBaselineState()
+    options.signal.value.delisting_schedule_use_trading_credentials = true
+
+    assert.equal(tracking.isDirty.value, true)
+    assert.deepEqual(tracking.changedSections.value, ['signal'])
+
+    tracking.syncBaselineState()
+    options.signal.value.delisting_schedule_api_key = 'read-only-key'
 
     assert.equal(tracking.isDirty.value, true)
     assert.deepEqual(tracking.changedSections.value, ['signal'])

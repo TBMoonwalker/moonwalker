@@ -131,25 +131,74 @@ class Exchange:
         self,
         config: dict[str, Any],
     ) -> list[dict[str, Any]]:
-        """Return an exchange-specific spot delisting schedule when supported."""
-        await self.__ensure_exchange(config)
-        if self.exchange is None:
-            raise RuntimeError("Exchange client is unavailable.")
+        """Return the production spot delisting schedule when supported.
 
-        fetch_schedule = getattr(
-            self.exchange,
-            "sapi_get_spot_delist_schedule",
-            None,
-        )
-        if not callable(fetch_schedule):
+        Binance demo trading removes the SAPI URL from its CCXT client. Schedule
+        checks therefore use a short-lived production client that is isolated
+        from order execution. Operators may use either dedicated read-only
+        credentials or explicitly reuse the configured trading credentials.
+        """
+        exchange_id = str(config.get("exchange") or "").strip().lower()
+        if exchange_id != "binance":
             raise NotImplementedError(
                 "The configured exchange does not expose a spot delist schedule."
             )
 
-        response = await fetch_schedule()
-        if not isinstance(response, list):
-            raise ValueError("Exchange returned an invalid spot delist schedule.")
-        return [dict(entry) for entry in response if isinstance(entry, dict)]
+        use_trading_credentials = bool(
+            config.get("delisting_schedule_use_trading_credentials", False)
+        )
+        if use_trading_credentials:
+            api_key = str(config.get("key") or "").strip()
+            api_secret = str(config.get("secret") or "").strip()
+            credential_description = "configured trading"
+        else:
+            api_key = str(config.get("delisting_schedule_api_key") or "").strip()
+            api_secret = str(config.get("delisting_schedule_api_secret") or "").strip()
+            credential_description = "dedicated production read-only"
+
+        if not api_key or not api_secret:
+            raise RuntimeError(
+                f"Binance {credential_description} credentials are required "
+                "for delisting schedule checks."
+            )
+
+        options: dict[str, Any] = {"defaultType": "spot"}
+        hostname = str(config.get("exchange_hostname") or "").strip()
+        if hostname:
+            options["hostname"] = hostname
+
+        exchange_class = getattr(ccxt, exchange_id)
+        schedule_exchange = exchange_class(
+            {
+                "apiKey": api_key,
+                "secret": api_secret,
+                "options": options,
+            }
+        )
+        schedule_exchange.enableRateLimit = True
+        try:
+            fetch_schedule = getattr(
+                schedule_exchange,
+                "sapi_get_spot_delist_schedule",
+                None,
+            )
+            if not callable(fetch_schedule):
+                raise NotImplementedError(
+                    "The configured exchange does not expose a spot delist schedule."
+                )
+
+            response = await fetch_schedule()
+            if not isinstance(response, list):
+                raise ValueError("Exchange returned an invalid spot delist schedule.")
+            return [dict(entry) for entry in response if isinstance(entry, dict)]
+        finally:
+            try:
+                await schedule_exchange.close()
+            except (ccxt.BaseError, OSError, RuntimeError) as exc:
+                logging.warning(
+                    "Failed to close delisting schedule client cleanly: %s",
+                    exc,
+                )
 
     @staticmethod
     def __raise_retryable_exchange_error(action: str, exc: Exception) -> None:

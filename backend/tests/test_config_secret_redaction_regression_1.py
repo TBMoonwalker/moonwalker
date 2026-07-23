@@ -24,6 +24,8 @@ def test_public_config_snapshot_redacts_direct_and_nested_credentials(
             "exchange": "binance",
             "key": "exchange-key",
             "secret": "exchange-secret",
+            "delisting_schedule_api_key": "schedule-key",
+            "delisting_schedule_api_secret": "schedule-secret",
             "marketcap_cmc_api_key": "market-data-key",
             "monitoring_telegram_bot_token": "telegram-token",
             "signal_settings": json.dumps(
@@ -45,6 +47,8 @@ def test_public_config_snapshot_redacts_direct_and_nested_credentials(
     assert snapshot["exchange"] == "binance"
     assert snapshot["key"] == REDACTED_SECRET_VALUE
     assert snapshot["secret"] == REDACTED_SECRET_VALUE
+    assert snapshot["delisting_schedule_api_key"] == REDACTED_SECRET_VALUE
+    assert snapshot["delisting_schedule_api_secret"] == REDACTED_SECRET_VALUE
     assert snapshot["marketcap_cmc_api_key"] == REDACTED_SECRET_VALUE
     assert snapshot["monitoring_telegram_bot_token"] == REDACTED_SECRET_VALUE
     assert signal_settings["api_url"] == "https://signals.example.test"
@@ -62,6 +66,8 @@ def test_redacted_config_updates_restore_existing_credentials() -> None:
         "exchange": "binance",
         "key": "exchange-key",
         "secret": "exchange-secret",
+        "delisting_schedule_api_key": "schedule-key",
+        "delisting_schedule_api_secret": "schedule-secret",
     }
 
     merged = merge_redacted_config_overrides(
@@ -70,6 +76,8 @@ def test_redacted_config_updates_restore_existing_credentials() -> None:
             "exchange": "kraken",
             "key": REDACTED_SECRET_VALUE,
             "secret": "",
+            "delisting_schedule_api_key": REDACTED_SECRET_VALUE,
+            "delisting_schedule_api_secret": "",
         },
     )
 
@@ -77,6 +85,8 @@ def test_redacted_config_updates_restore_existing_credentials() -> None:
         "exchange": "kraken",
         "key": "exchange-key",
         "secret": "exchange-secret",
+        "delisting_schedule_api_key": "schedule-key",
+        "delisting_schedule_api_secret": "schedule-secret",
     }
 
 
