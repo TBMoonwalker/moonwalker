@@ -136,6 +136,59 @@ async def test_create_spot_sell_returns_partial_when_fallback_disabled() -> None
 
 
 @pytest.mark.asyncio
+async def test_create_spot_sell_preserves_tp_floor_after_limit_timeout() -> None:
+    exchange = _DummyExchange()
+    manager = ExchangeSellManager(
+        logger=_DummyLogger(),
+        get_exchange=lambda: exchange,
+    )
+
+    async def fake_limit_sell(
+        _order: dict[str, object], _config: dict[str, object]
+    ) -> dict[str, object]:
+        return {
+            "requires_market_fallback": True,
+            "limit_cancel_confirmed": True,
+            "fallback_reason": "limit_order_timeout",
+            "symbol": "ZK/USDC",
+            "remaining_amount": 1272.4,
+            "partial_filled_amount": 0.0,
+            "partial_avg_price": 0.0,
+        }
+
+    async def fake_market_sell(
+        _order: dict[str, object], _config: dict[str, object]
+    ) -> dict[str, object] | None:
+        raise AssertionError("TP-protected fallback must not become a market sell")
+
+    async def fake_guard(_order: dict[str, object], _config: dict[str, object]) -> bool:
+        raise AssertionError("a live-price check cannot guarantee a market fill floor")
+
+    result = await manager.create_spot_sell(
+        order={
+            "symbol": "ZK/USDC",
+            "fallback_min_price": 0.0095338243,
+        },
+        config={
+            "sell_order_type": "limit",
+            "limit_sell_fallback_to_market": True,
+            "limit_sell_fallback_tp_guard": True,
+        },
+        context=SellRoutingContext(
+            create_spot_limit_sell=fake_limit_sell,
+            create_spot_market_sell=fake_market_sell,
+            can_fallback_to_market_sell=fake_guard,
+        ),
+    )
+
+    assert result is not None
+    assert result["type"] == "partial_sell"
+    assert result["symbol"] == "ZK/USDC"
+    assert result["remaining_amount"] == pytest.approx(1272.4)
+    assert exchange.market_sell_calls == 0
+
+
+@pytest.mark.asyncio
 async def test_create_spot_market_sell_skips_below_notional() -> None:
     exchange = _DummyExchange()
     manager = ExchangeSellManager(
