@@ -22,11 +22,7 @@
                     :value="formatFixed2(upnl)"
                 />
             </div>
-            <RouterLink
-                class="stat-cell autopilot-cell autopilot-link"
-                :to="{ name: 'controlCenterAutopilot' }"
-                aria-label="Open Autopilot page"
-            >
+            <div class="stat-cell autopilot-cell">
                 <div class="stacked-stat autopilot-stat">
                     <span class="autopilot-label">Autopilot mode</span>
                     <span
@@ -37,8 +33,14 @@
                     </span>
                     <span v-if="autopilot_summary" class="autopilot-subtext">{{ autopilot_summary }}</span>
                     <span v-if="green_phase_hint" class="autopilot-detail">{{ green_phase_hint }}</span>
+                    <RouterLink
+                        class="autopilot-action"
+                        :to="{ name: 'controlCenterAutopilot' }"
+                    >
+                        Open Autopilot
+                    </RouterLink>
                 </div>
-            </RouterLink>
+            </div>
             <div class="stat-cell">
                 <n-statistic label="Funds locked" :value="formatFixed2(funds_locked)" />
             </div>
@@ -347,24 +349,19 @@ function formatBlockReason(value: string): string {
     margin-top: 6px;
 }
 
-.autopilot-cell {
-    cursor: pointer;
-    transition:
-        border-color 120ms ease,
-        box-shadow 120ms ease,
-        transform 120ms ease;
+.autopilot-action {
+    color: var(--mw-color-primary);
+    font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
+    text-decoration: underline;
+    text-underline-offset: 3px;
 }
 
-.autopilot-link {
-    color: inherit;
-    text-decoration: none;
-}
-
-.autopilot-cell:hover,
-.autopilot-cell:focus-visible {
-    border-color: rgba(29, 92, 73, 0.26);
-    box-shadow: 0 10px 24px rgba(24, 33, 29, 0.08);
-    transform: translateY(-1px);
+.autopilot-action:focus-visible {
+    border-radius: 2px;
+    outline: 2px solid var(--mw-color-primary);
+    outline-offset: 3px;
 }
 
 .autopilot-label,

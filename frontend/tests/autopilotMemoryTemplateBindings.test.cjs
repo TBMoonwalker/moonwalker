@@ -97,11 +97,12 @@ test('preview exposes the required Autopilot actions and state copy', () => {
     assert.doesNotMatch(previewSource, />Autopilot Memory</)
 })
 
-test('main dashboard Autopilot card opens the Autopilot page', () => {
-    assert.match(statisticsSource, /<RouterLink/)
-    assert.match(statisticsSource, /class="stat-cell autopilot-cell autopilot-link"/)
+test('main dashboard Autopilot navigation uses an explicit action', () => {
+    assert.match(statisticsSource, /<div class="stat-cell autopilot-cell">/)
+    assert.match(statisticsSource, /class="autopilot-action"/)
     assert.match(statisticsSource, /:to="\{ name: 'controlCenterAutopilot' \}"/)
-    assert.match(statisticsSource, /aria-label="Open Autopilot page"/)
+    assert.match(statisticsSource, />\s*Open Autopilot\s*<\/RouterLink>/)
+    assert.doesNotMatch(statisticsSource, /class="stat-cell autopilot-cell autopilot-link"/)
     assert.doesNotMatch(statisticsSource, /role="link"/)
     assert.doesNotMatch(statisticsSource, /tabindex="0"/)
     assert.doesNotMatch(statisticsSource, /@click="openAutopilotPage"/)
