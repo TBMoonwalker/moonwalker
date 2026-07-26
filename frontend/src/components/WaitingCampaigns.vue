@@ -7,6 +7,9 @@
         :data="displayed_waiting_campaigns || []"
         :loading="isTableLoading"
         :row-class-name="rowClasses"
+        :row-key="getWaitingCampaignRowKey"
+        :row-props="getWaitingCampaignRowProps"
+        v-model:expanded-row-keys="expandedWaitingRowKeys"
         :locale="{ emptyText: tableEmptyText }"
         aria-label="Waiting sidestep trades table"
         @update:sorter="handleSorterChange"
@@ -14,16 +17,21 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, ref } from 'vue'
+import { computed, h, onMounted, ref } from 'vue'
 import { EllipsisHorizontal } from '@vicons/ionicons5'
 import { NButton } from 'naive-ui/es/button'
-import { NDataTable, type DataTableColumns } from 'naive-ui/es/data-table'
+import {
+    NDataTable,
+    type DataTableColumns,
+    type DataTableRowKey,
+} from 'naive-ui/es/data-table'
 import { NDropdown } from 'naive-ui/es/dropdown'
 import { useDialog } from 'naive-ui/es/dialog'
 import { NIcon } from 'naive-ui/es/icon'
 import { useMessage } from 'naive-ui/es/message'
 import { NTag } from 'naive-ui/es/tag'
 import { fetchJson } from '../api/client'
+import { useConfiguredMinTimeframe } from '../composables/useConfiguredMinTimeframe'
 import { useMissionPauseActions } from '../composables/useMissionPauseActions'
 import { useTradeTableFeed } from '../composables/useTradeTableFeed'
 import { useViewport } from '../composables/useViewport'
@@ -41,6 +49,7 @@ import {
     useTradesStore,
     type WaitingCampaignRow,
 } from '../stores/trades'
+import WaitingCampaignExpandedRow from './WaitingCampaignExpandedRow.vue'
 
 const props = withDefaults(
     defineProps<{
@@ -55,7 +64,10 @@ const trades_store = useTradesStore()
 const dialog = useDialog()
 const message = useMessage()
 const { isMobile, isTablet } = useViewport()
+const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
+    useConfiguredMinTimeframe()
 const sortState = ref<TradeTableSortState | null>(null)
+const expandedWaitingRowKeys = ref<DataTableRowKey[]>([])
 
 const {
     rows: waiting_campaigns,
@@ -237,6 +249,71 @@ function formatCloseReason(reason: string | null | undefined): string {
 
 function handleSorterChange(sorter: unknown): void {
     sortState.value = resolveTradeTableSortState(sorter)
+}
+
+function getWaitingCampaignRowKey(
+    rowData: WaitingCampaignRow,
+): DataTableRowKey {
+    return rowData.deal_id || rowData.campaign_id || rowData.id
+}
+
+function isInteractiveRowTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) {
+        return false
+    }
+    return Boolean(
+        target.closest(
+            [
+                'a',
+                'button',
+                'input',
+                'select',
+                'textarea',
+                '[contenteditable="true"]',
+                '[role="button"]',
+                '[role="menuitem"]',
+                '.n-button',
+                '.n-base-selection',
+                '.n-checkbox',
+                '.n-dropdown',
+                '.n-input',
+                '.n-switch',
+            ].join(','),
+        ),
+    )
+}
+
+function toggleWaitingCampaignRow(rowData: WaitingCampaignRow): void {
+    const rowKey = getWaitingCampaignRowKey(rowData)
+    expandedWaitingRowKeys.value = expandedWaitingRowKeys.value.includes(
+        rowKey,
+    )
+        ? expandedWaitingRowKeys.value.filter((key) => key !== rowKey)
+        : [...expandedWaitingRowKeys.value, rowKey]
+}
+
+function getWaitingCampaignRowProps(rowData: WaitingCampaignRow) {
+    const rowKey = getWaitingCampaignRowKey(rowData)
+    return {
+        class: 'trade-row-clickable',
+        tabindex: 0,
+        'aria-expanded': expandedWaitingRowKeys.value.includes(rowKey),
+        'aria-label': `Toggle trade replay for ${rowData.symbol}`,
+        onClick: (event: MouseEvent) => {
+            if (!isInteractiveRowTarget(event.target)) {
+                toggleWaitingCampaignRow(rowData)
+            }
+        },
+        onKeydown: (event: KeyboardEvent) => {
+            if (
+                (event.key === 'Enter' || event.key === ' ') &&
+                !isInteractiveRowTarget(event.target)
+            ) {
+                event.preventDefault()
+                toggleWaitingCampaignRow(rowData)
+            }
+        },
+    }
 }
 
 function renderCellStack(
@@ -579,8 +656,22 @@ function renderMobileCampaign(rowData: WaitingCampaignRow, index: number) {
 }
 
 const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => {
+    const replayColumn = {
+        type: 'expand' as const,
+        width: 0,
+        minWidth: 0,
+        maxWidth: 0,
+        className: 'trade-hidden-expand-cell',
+        expandable: () => true,
+        renderExpand: (rowData: WaitingCampaignRow) =>
+            h(WaitingCampaignExpandedRow, {
+                rowData,
+                minTimeframe: configuredMinTimeframe.value,
+            }),
+    }
     if (isMobile.value) {
         return [
+            replayColumn,
             {
                 title: 'Waiting campaign',
                 key: 'mobile_summary',
@@ -590,6 +681,7 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => {
     }
 
     return [
+        replayColumn,
         {
             title: 'Symbol',
             key: 'symbol',
@@ -650,6 +742,10 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => {
         },
     ]
 })
+
+onMounted(async () => {
+    await loadConfiguredMinTimeframe()
+})
 </script>
 
 <style scoped>
@@ -659,6 +755,41 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => {
 
 :deep(.green .profit) {
     color: #2E7D5B !important;
+}
+
+:deep(.trade-row-clickable) {
+    cursor: pointer;
+}
+
+:deep(.trade-row-clickable:focus-visible) {
+    outline: 2px solid var(--mw-color-primary);
+    outline-offset: -2px;
+}
+
+:deep(.n-data-table-table) {
+    table-layout: fixed;
+    width: 100%;
+}
+
+:deep(.trade-hidden-expand-cell),
+:deep(.n-data-table-td--expand) {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    overflow: hidden;
+}
+
+:deep(.n-data-table-table colgroup col:first-child) {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+}
+
+:deep(.trade-hidden-expand-cell .n-data-table-expand-trigger),
+:deep(.n-data-table-td--expand .n-data-table-expand-trigger) {
+    display: none;
 }
 
 :deep(.waiting-campaign-compact-actions) {
@@ -678,6 +809,14 @@ const columns = computed<DataTableColumns<WaitingCampaignRow>>(() => {
 @media (max-width: 767px) {
     .waiting-campaigns-table :deep(.n-data-table-td) {
         padding: 0;
+    }
+
+    .waiting-campaigns-table
+        :deep(
+            .n-data-table-tr--expanded:not(.trade-row-clickable)
+                > .n-data-table-td[colspan]
+        ) {
+        padding: 12px;
     }
 
     .waiting-campaigns-table :deep(.n-data-table-thead) {

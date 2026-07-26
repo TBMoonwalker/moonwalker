@@ -744,6 +744,32 @@ onUnmounted(() => {
     padding: 0 !important;
   }
 
+  .ledger-panel :deep(.waiting-campaign-mobile-actions .trade-row-actions) {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .ledger-panel :deep(.waiting-campaign-mobile-actions .trade-row-actions .n-button) {
+    min-width: max-content !important;
+    width: auto !important;
+    padding: 0 14px !important;
+  }
+
+  .ledger-panel :deep(.unsellable-trades .trade-row-actions) {
+    display: flex;
+    justify-content: center;
+    width: 100%;
+  }
+
+  .ledger-panel :deep(.unsellable-trades .trade-row-actions .n-button) {
+    min-width: 72px !important;
+    width: auto !important;
+    padding: 0 10px !important;
+  }
+
   .ledger-panel :deep(.trade-row-actions .trade-action-more) {
     grid-column: 1 / -1;
     width: 92px !important;
