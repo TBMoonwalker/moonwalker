@@ -9,8 +9,10 @@ from uuid import uuid4
 
 import model
 from service.ai_trust import (
+    AiTrustEntryGate,
     has_prediction_for_deal,
     is_entry_observation_enabled,
+    persist_entry_evaluation,
     schedule_entry_observation,
     schedule_outcome_attribution,
 )
@@ -389,6 +391,7 @@ async def persist_buy_trade(
     *,
     create_open_trade: bool,
     campaign_context: dict[str, Any] | None = None,
+    entry_evaluation: AiTrustEntryGate | None = None,
 ) -> None:
     """Persist a filled buy trade and create the open-trade row when needed."""
 
@@ -475,8 +478,10 @@ async def persist_buy_trade(
     await run_sqlite_write_with_retry(
         _persist_buy, f"persisting buy order for {symbol}"
     )
-    if create_open_trade and await is_entry_observation_enabled():
-        schedule_entry_observation(symbol, payload)
+    if entry_evaluation is not None and entry_evaluation.evaluated:
+        await persist_entry_evaluation(entry_evaluation, payload)
+    elif create_open_trade and await is_entry_observation_enabled():
+        await schedule_entry_observation(symbol, payload)
 
 
 async def persist_closed_trade(
@@ -556,7 +561,7 @@ async def persist_closed_trade(
         _persist_sell, f"persisting sell order for {symbol}"
     )
     if await has_prediction_for_deal(closed_deal_id):
-        schedule_outcome_attribution(closed_deal_id)
+        await schedule_outcome_attribution(closed_deal_id)
 
 
 async def persist_sidestep_transition(

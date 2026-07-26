@@ -5,6 +5,7 @@ import {
     parseVolumeLimitToNumber,
     toTokenOnlyEntries,
 } from './configForm'
+import { getConfigContractDefault } from './configContract'
 import {
     isDynamicTradeMode,
     normalizeTradeMode,
@@ -248,20 +249,34 @@ export function buildLoadedConfigState(
             toNumberOrNull(response.ws_reconnect_debounce_ms) ??
             defaults.advancedWsReconnectDebounceMs,
         ai_trust_enabled:
-            parseBooleanString(response.ai_trust_enabled) ?? false,
+            parseBooleanString(response.ai_trust_enabled) ??
+            getConfigContractDefault(response, 'ai_trust_enabled', false),
         ai_trust_enforce_warnings:
-            parseBooleanString(response.ai_trust_enforce_warnings) ?? false,
+            parseBooleanString(response.ai_trust_enforce_warnings) ??
+            getConfigContractDefault(response, 'ai_trust_enforce_warnings', false),
         ai_trust_ollama_base_url:
             toNullableString(response.ai_trust_ollama_base_url) ||
-            defaults.defaultAiTrustOllamaBaseUrl,
+            getConfigContractDefault(
+                response,
+                'ai_trust_ollama_base_url',
+                defaults.defaultAiTrustOllamaBaseUrl,
+            ),
         ai_trust_ollama_model:
             toNullableString(response.ai_trust_ollama_model) || null,
         ai_trust_timeout_ms:
             toNumberOrNull(response.ai_trust_timeout_ms) ??
-            defaults.defaultAiTrustTimeoutMs,
+            getConfigContractDefault(
+                response,
+                'ai_trust_timeout_ms',
+                defaults.defaultAiTrustTimeoutMs,
+            ),
         ai_trust_max_retries:
             toNumberOrNull(response.ai_trust_max_retries) ??
-            defaults.defaultAiTrustMaxRetries,
+            getConfigContractDefault(
+                response,
+                'ai_trust_max_retries',
+                defaults.defaultAiTrustMaxRetries,
+            ),
     }
 
     const exchange: ExchangeConfigSection = {
@@ -287,11 +302,21 @@ export function buildLoadedConfigState(
             asap_use_url: asapUseUrl,
             asap_symbol_select: configuredSymbols,
             delisting_protection_enabled:
-                parseBooleanString(response.delisting_protection_enabled) ?? false,
+                parseBooleanString(response.delisting_protection_enabled) ??
+                getConfigContractDefault(
+                    response,
+                    'delisting_protection_enabled',
+                    false,
+                ),
             delisting_schedule_use_trading_credentials:
                 parseBooleanString(
                     response.delisting_schedule_use_trading_credentials,
-                ) ?? false,
+                ) ??
+                getConfigContractDefault(
+                    response,
+                    'delisting_schedule_use_trading_credentials',
+                    false,
+                ),
             delisting_schedule_api_key:
                 toNullableString(response.delisting_schedule_api_key),
             delisting_schedule_api_secret:
@@ -388,44 +413,103 @@ export function buildLoadedConfigState(
             so: toNumberOrNull(response.so),
             mstc: toNumberOrNull(response.mstc),
             sos: toNumberOrNull(response.sos),
-            ss: toNumberOrNull(response.ss) ?? 1.6,
+            ss:
+                toNumberOrNull(response.ss) ??
+                getConfigContractDefault(response, 'ss', 1.6),
             os: toNumberOrNull(response.os),
             trade_safety_order_budget_ratio:
                 toNumberOrNull(response.trade_safety_order_budget_ratio) ?? 0.95,
             dynamic_so_sizing_mode:
                 toNullableString(response.dynamic_so_sizing_mode) ||
-                'legacy_factors',
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_sizing_mode',
+                    'legacy_factors',
+                ),
             dynamic_so_atr_timeframe:
-                toNullableString(response.dynamic_so_atr_timeframe) || 'trading',
+                toNullableString(response.dynamic_so_atr_timeframe) ||
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_atr_timeframe',
+                    'trading',
+                ),
             dynamic_so_atr_length:
-                toNumberOrNull(response.dynamic_so_atr_length) ?? 14,
+                toNumberOrNull(response.dynamic_so_atr_length) ??
+                getConfigContractDefault(response, 'dynamic_so_atr_length', 14),
             dynamic_so_spacing_atr_multiplier:
-                toNumberOrNull(response.dynamic_so_spacing_atr_multiplier) ?? 3,
+                toNumberOrNull(response.dynamic_so_spacing_atr_multiplier) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_spacing_atr_multiplier',
+                    3,
+                ),
             dynamic_so_recovery_atr_multiplier:
                 toNumberOrNull(response.dynamic_so_recovery_atr_multiplier) ??
-                5.5,
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_recovery_atr_multiplier',
+                    5.5,
+                ),
             dynamic_so_recovery_min_pct:
-                toNumberOrNull(response.dynamic_so_recovery_min_pct) ?? 12,
+                toNumberOrNull(response.dynamic_so_recovery_min_pct) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_recovery_min_pct',
+                    12,
+                ),
             dynamic_so_recovery_max_pct:
-                toNumberOrNull(response.dynamic_so_recovery_max_pct) ?? 30,
+                toNumberOrNull(response.dynamic_so_recovery_max_pct) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_recovery_max_pct',
+                    30,
+                ),
             dynamic_so_max_deal_quote:
-                toNumberOrNull(response.dynamic_so_max_deal_quote) ?? 250,
+                toNumberOrNull(response.dynamic_so_max_deal_quote) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_max_deal_quote',
+                    250,
+                ),
             dynamic_so_min_tp_improvement_pct:
-                toNumberOrNull(response.dynamic_so_min_tp_improvement_pct) ?? 5,
+                toNumberOrNull(response.dynamic_so_min_tp_improvement_pct) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_min_tp_improvement_pct',
+                    5,
+                ),
             dynamic_so_execution_guard_enabled:
                 parseBooleanString(
                     response.dynamic_so_execution_guard_enabled,
-                ) ?? true,
+                ) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_execution_guard_enabled',
+                    true,
+                ),
             dynamic_so_execution_drift_atr_fraction:
                 toNumberOrNull(
                     response.dynamic_so_execution_drift_atr_fraction,
-                ) ?? 0.25,
+                ) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_execution_drift_atr_fraction',
+                    0.25,
+                ),
             dynamic_so_execution_drift_min_pct:
                 toNumberOrNull(response.dynamic_so_execution_drift_min_pct) ??
-                0.15,
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_execution_drift_min_pct',
+                    0.15,
+                ),
             dynamic_so_execution_drift_max_pct:
                 toNumberOrNull(response.dynamic_so_execution_drift_max_pct) ??
-                0.5,
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_execution_drift_max_pct',
+                    0.5,
+                ),
             sidestep_bearish_strategy: toNullableString(
                 response.sidestep_bearish_strategy,
             ),

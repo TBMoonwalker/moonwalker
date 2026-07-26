@@ -195,7 +195,7 @@ async def test_persist_buy_trade_schedules_ai_trust_after_open_trade_persistence
     async def fake_run_sqlite(operation, _name) -> None:
         await operation()
 
-    def fake_schedule(symbol: str, payload: dict[str, Any]) -> None:
+    async def fake_schedule(symbol: str, payload: dict[str, Any]) -> None:
         scheduled.append(
             {
                 "symbol": symbol,

@@ -50,6 +50,7 @@ from service.spot_campaign_types import TradeCloseReason
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades
+from service.trading_contracts import BuyIntent, SellIntent
 from service.trading_controls import evaluate_buy_like_gate
 from tortoise.exceptions import ConfigurationError
 
@@ -210,6 +211,7 @@ class Orders:
             payload,
             create_open_trade=not bool(order_status["safetyorder"]),
             campaign_context=campaign_context,
+            entry_evaluation=original_order.get("_ai_entry_evaluation"),
         )
         await self._reset_unsellable_state(order_status["symbol"])
         await self.monitoring.notify_trade(
@@ -628,7 +630,7 @@ class Orders:
                 await self.exchange.close()
 
     async def receive_sell_order(
-        self, order: dict[str, Any], config: dict[str, Any]
+        self, order: SellIntent | dict[str, Any], config: dict[str, Any]
     ) -> None:
         """Create a sell order and persist closed trades."""
         logging.info("Incoming sell order for %s", order["symbol"])
@@ -949,7 +951,7 @@ class Orders:
             pass
 
     async def receive_buy_order(
-        self, order: dict[str, Any], config: dict[str, Any]
+        self, order: BuyIntent | dict[str, Any], config: dict[str, Any]
     ) -> bool:
         """Create a buy order and persist open trades."""
 
@@ -1027,6 +1029,7 @@ class Orders:
                     ai_gate.operator_note,
                 )
             return False
+        order["_ai_entry_evaluation"] = ai_gate
 
         try:
             if bool(order.get("safetyorder")) and not bool(order.get("baseorder")):

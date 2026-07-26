@@ -15,6 +15,7 @@ from controller import statistics as statistics_controller
 from controller import trades as trades_controller
 from litestar import Litestar
 from litestar.testing import TestClient
+from service.config_contract import public_config_contract
 from service.log_viewer import LogReadResult
 
 
@@ -703,6 +704,97 @@ def test_live_activation_endpoint_blocks_when_setup_is_incomplete(monkeypatch) -
     assert service.last_single is None
 
 
+@pytest.mark.parametrize(
+    ("route_handler", "path", "field", "payload"),
+    [
+        (
+            config_controller.activate_live_trading,
+            "/config/live/activate",
+            "confirm",
+            {"confirm": "false"},
+        ),
+        (
+            config_controller.pause_trading,
+            "/config/trading/pause",
+            "confirm",
+            {"confirm": 1},
+        ),
+        (
+            config_controller.resume_trading,
+            "/config/trading/resume",
+            "confirm",
+            {"confirm": "true"},
+        ),
+        (
+            config_controller.restore_backup,
+            "/config/backup/restore",
+            "restore_trade_data",
+            {"backup": {}, "restore_trade_data": 1},
+        ),
+    ],
+)
+def test_operational_config_routes_reject_coerced_booleans(
+    route_handler: Any,
+    path: str,
+    field: str,
+    payload: dict[str, Any],
+) -> None:
+    """Operational mutations must accept JSON booleans only."""
+    app = Litestar(route_handlers=[route_handler])
+    with TestClient(app=app) as client:
+        response = client.post(path, json=payload)
+
+    message = f"Field '{field}' must be a JSON boolean."
+    assert response.status_code == 400
+    assert response.json() == {"error": message, "message": message}
+
+
+@pytest.mark.parametrize(
+    ("route_handler", "path", "payload"),
+    [
+        (
+            config_controller.activate_live_trading,
+            "/config/live/activate",
+            {"confirm": True, "unexpected": "value"},
+        ),
+        (
+            config_controller.pause_trading,
+            "/config/trading/pause",
+            {"confirm": True, "unexpected": "value"},
+        ),
+        (
+            config_controller.resume_trading,
+            "/config/trading/resume",
+            {"confirm": True, "unexpected": "value"},
+        ),
+        (
+            config_controller.restore_backup,
+            "/config/backup/restore",
+            {"backup": {}, "restore_trade_data": False, "unexpected": "value"},
+        ),
+    ],
+)
+def test_operational_config_routes_reject_unknown_fields(
+    route_handler: Any,
+    path: str,
+    payload: dict[str, Any],
+) -> None:
+    """Operational mutation DTOs must reject unrecognized input."""
+    app = Litestar(route_handlers=[route_handler])
+    with TestClient(app=app) as client:
+        response = client.post(path, json=payload)
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == f"Validation failed for POST {path}"
+    assert response.json()["extra"] == [
+        {
+            "message": "Object contains unknown field `unexpected`",
+            "key": "data",
+            "source": "body",
+        }
+    ]
+
+
 def test_live_activation_endpoint_blocks_missing_global_max_fund(monkeypatch) -> None:
     """Dedicated live activation must require a positive global max fund."""
     service = _DummyConfigService()
@@ -781,6 +873,21 @@ def test_live_activation_blocks_unbounded_recovery_target_policy() -> None:
     assert {
         "key": "dynamic_so_max_deal_quote",
         "message": "Set a positive recovery-mode max deal quote.",
+    } in blockers
+
+
+def test_live_activation_reports_malformed_signal_settings() -> None:
+    """Malformed persisted settings must be an explicit readiness blocker."""
+    blockers = config_controller._find_live_activation_blockers(
+        {
+            "signal": "sym_signals",
+            "signal_settings": "{'api_key': 'legacy'}",
+        }
+    )
+
+    assert {
+        "key": "signal_settings",
+        "message": "signal_settings must contain valid JSON.",
     } in blockers
 
 
@@ -989,6 +1096,7 @@ def test_config_route_handlers_expose_freshness_and_live_activation(
             "message": None,
         },
         "config_updated_at": freshness_timestamp.isoformat(),
+        "config_contract": public_config_contract(),
     }
 
     app = Litestar(route_handlers=config_controller.route_handlers)

@@ -10,6 +10,7 @@ from typing import Any
 import model
 import pytest
 import service.ai_trust as ai_trust
+import service.ai_trust_analytics as ai_trust_analytics
 from service.ai_trust import AiTrustResponseError
 from tortoise import Tortoise
 
@@ -236,22 +237,20 @@ async def test_ollama_request_bounds_generation_and_disables_thinking(
         def json(self) -> dict[str, Any]:
             return {"message": {"content": raw_content}}
 
-    class _FakeAsyncClient:
-        def __init__(self, timeout: float) -> None:
-            captured["timeout"] = timeout
-
-        async def __aenter__(self) -> "_FakeAsyncClient":
-            return self
-
-        async def __aexit__(self, *_args: Any) -> None:
-            return None
-
-        async def post(self, url: str, json: dict[str, Any]) -> _FakeResponse:
+    class _FakeProviderClient:
+        async def post(
+            self,
+            url: str,
+            *,
+            json: dict[str, Any],
+            timeout_seconds: float,
+        ) -> _FakeResponse:
+            captured["timeout"] = timeout_seconds
             captured["url"] = url
             captured["payload"] = json
             return _FakeResponse()
 
-    monkeypatch.setattr(ai_trust.httpx, "AsyncClient", _FakeAsyncClient)
+    monkeypatch.setattr(ai_trust, "ai_provider_client", _FakeProviderClient())
     monkeypatch.setattr(
         ai_trust.logging,
         "debug",
@@ -561,6 +560,68 @@ async def test_entry_enforcement_fail_blocks_unscored_provider_status(
 
 
 @pytest.mark.asyncio
+async def test_allowed_enforcement_evaluation_persists_once_after_fill(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Successful fills should reuse the preflight result without rescoring."""
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        provider_calls = 0
+
+        async def fake_score(_trust_config: Any, _feature_bundle: dict[str, Any]):
+            nonlocal provider_calls
+            provider_calls += 1
+            return ai_trust.PROVIDER_STATUS_SCORED, {
+                "risk_score": 22,
+                "confidence": 0.75,
+                "would_warn": False,
+                "warning_severity": "low",
+                "reason_codes": ["normal_entry"],
+                "operator_note": "Entry risk remained below the warning policy.",
+            }
+
+        monkeypatch.setattr(ai_trust, "_score_with_provider", fake_score)
+        gate = await ai_trust.evaluate_entry_enforcement(
+            "BTC/USDT",
+            {
+                "symbol": "BTC/USDT",
+                "baseorder": True,
+                "safetyorder": False,
+                "ordersize": 50.0,
+            },
+            {
+                "ai_trust_enabled": True,
+                "ai_trust_enforce_warnings": True,
+                "ai_trust_ollama_model": "qwen3:8b",
+            },
+        )
+        filled_payload = {
+            "symbol": "BTC/USDT",
+            "deal_id": "deal-filled",
+            "timestamp": "123",
+        }
+
+        assert gate.allowed is True
+        assert await ai_trust.persist_entry_evaluation(gate, filled_payload) is True
+        assert await ai_trust.persist_entry_evaluation(gate, filled_payload) is True
+
+        assert provider_calls == 1
+        assert (
+            await model.AiTrustPrediction.filter(
+                evaluation_id=gate.evaluation_id
+            ).count()
+            == 1
+        )
+        row = await model.AiTrustPrediction.get(evaluation_id=gate.evaluation_id)
+        assert row.deal_id == "deal-filled"
+        assert row.source_event == "entry_preflight"
+        assert row.risk_score == 22
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_outcome_attribution_labels_bad_entries(
     tmp_path: Any,
     monkeypatch: pytest.MonkeyPatch,
@@ -640,6 +701,114 @@ async def test_calibration_payload_uses_bounded_closed_scored_rows(
         assert payload["coverage"]["closed"] == 4
         assert payload["calibration"]["closed_samples"] == 2
         assert payload["calibration"]["sample_cap"] == 2
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_analytics_cache_is_keyed_by_persisted_revision(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        _FakeConfig.snapshot = {
+            "ai_trust_enabled": True,
+            "ai_trust_ollama_model": "qwen3:8b",
+        }
+        monkeypatch.setattr(ai_trust, "Config", _FakeConfig)
+        await model.AiTrustPrediction.create(
+            symbol="BTC/USDT",
+            deal_id="cache-1",
+            source_event="open_deal",
+            provider_status="scored",
+            status="scored",
+        )
+        await ai_trust_analytics.bump_analytics_revision()
+
+        first = await ai_trust.build_analytics_payload()
+        aggregate_counts = ai_trust_analytics._aggregate_counts
+
+        async def fail_if_recomputed() -> dict[str, int]:
+            raise AssertionError("unchanged revision must reuse the read model")
+
+        monkeypatch.setattr(
+            ai_trust_analytics,
+            "_aggregate_counts",
+            fail_if_recomputed,
+        )
+        second = await ai_trust.build_analytics_payload()
+
+        assert second["coverage"] == first["coverage"]
+        assert second["provider_status_counts"] == {"scored": 1}
+
+        await model.AiTrustPrediction.create(
+            symbol="ETH/USDT",
+            deal_id="cache-2",
+            source_event="open_deal",
+            provider_status="timeout",
+            status="unscored",
+        )
+        await ai_trust_analytics.bump_analytics_revision()
+        monkeypatch.setattr(
+            ai_trust_analytics,
+            "_aggregate_counts",
+            aggregate_counts,
+        )
+
+        refreshed = await ai_trust.build_analytics_payload()
+
+        assert refreshed["coverage"]["total"] == 2
+        assert refreshed["provider_status_counts"] == {
+            "scored": 1,
+            "timeout": 1,
+        }
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_pending_closed_outcomes_are_recovered_from_durable_rows(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        await model.AiTrustPrediction.create(
+            symbol="BTC/USDT",
+            deal_id="recover-me",
+            source_event="open_deal",
+            outcome_status="open",
+        )
+        await model.AiTrustPrediction.create(
+            symbol="ETH/USDT",
+            deal_id="still-open",
+            source_event="open_deal",
+            outcome_status="open",
+        )
+        await model.AiTrustPrediction.create(
+            symbol="SOL/USDT",
+            deal_id="already-blocked",
+            source_event="entry_blocked",
+            outcome_status="blocked",
+        )
+        await model.ClosedTrades.create(symbol="BTC/USDT", deal_id="recover-me")
+        await model.ClosedTrades.create(
+            symbol="SOL/USDT",
+            deal_id="already-blocked",
+        )
+        scheduled: list[str] = []
+
+        async def fake_schedule(deal_id: str | None) -> bool:
+            scheduled.append(str(deal_id))
+            return True
+
+        monkeypatch.setattr(ai_trust, "schedule_outcome_attribution", fake_schedule)
+
+        recovered = await ai_trust.recover_pending_outcome_attributions()
+
+        assert recovered == 1
+        assert scheduled == ["recover-me"]
     finally:
         await Tortoise.close_connections()
 

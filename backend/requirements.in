@@ -4,6 +4,7 @@ cachetools==7.1.4
 ccxt==4.5.67
 pandas==3.0.3
 litestar==2.24.0
+msgspec==0.21.1
 python-socketio==5.16.3
 websockets==16.1.1
 Telethon==1.44.0

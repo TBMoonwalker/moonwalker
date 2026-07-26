@@ -15,13 +15,30 @@ from service.signal_runtime import (
 
 
 def test_parse_signal_settings_accepts_json_and_dict() -> None:
-    assert parse_signal_settings({"api_key": "x"}) == {"api_key": "x"}
-    assert parse_signal_settings('{"api_key":"x"}') == {"api_key": "x"}
+    expected = {"api_key": "x", "schema_version": 1}
+    assert parse_signal_settings({"api_key": "x"}) == expected
+    assert parse_signal_settings('{"api_key":"x"}') == expected
 
 
 def test_parse_signal_settings_rejects_removed_python_literal_fallback() -> None:
     with pytest.raises(ValueError):
         parse_signal_settings("{'api_key': 'x'}")
+
+
+@pytest.mark.parametrize(
+    "raw_value",
+    [
+        '["not", "an", "object"]',
+        '{"headers":[]}',
+        '{"allowed_signals":[true]}',
+        '{"schema_version":2}',
+        '{"unknown":"field"}',
+    ],
+)
+def test_parse_signal_settings_rejects_invalid_contracts(raw_value: str) -> None:
+    """Malformed settings should never silently become an empty object."""
+    with pytest.raises(ValueError):
+        parse_signal_settings(raw_value)
 
 
 def test_build_common_runtime_settings_parses_shared_filters() -> None:

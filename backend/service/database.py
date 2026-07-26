@@ -29,6 +29,7 @@ SQLITE_STARTUP_INTEGRITY_TABLES = (
     "spotcampaigns",
     "unsellabletrades",
     "ai_trust_predictions",
+    "ai_trust_analytics_revision",
     "strategy_definitions",
     "strategy_versions",
     "strategy_graph_state",
@@ -737,6 +738,29 @@ class Database:
                 ", ".join(_extract_added_column_names(alter_statements)),
             )
 
+    async def _ensure_ai_trust_columns(self) -> None:
+        """Ensure additive AI evaluation identity exists on legacy databases."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query(
+            "PRAGMA table_info('ai_trust_predictions')"
+        )
+        existing = {row["name"] for row in columns}
+        alter_statements = _plan_additive_column_statements(
+            "ai_trust_predictions",
+            existing,
+            (("evaluation_id", "TEXT NULL"),),
+        )
+        if alter_statements:
+            await connection.execute_script("\n".join(alter_statements))
+        await connection.execute_script(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uid_ai_trust_evaluation_id "
+            "ON ai_trust_predictions (evaluation_id);"
+        )
+
     async def optimize_sqlite(self) -> None:
         """Run SQLite planner/index maintenance."""
         await optimize_sqlite_connection(self.db_url)
@@ -852,6 +876,7 @@ class Database:
         await self._ensure_spot_campaign_columns()
         await self._ensure_trade_ledger_columns()
         await self._ensure_upnl_history_columns()
+        await self._ensure_ai_trust_columns()
         await self._ensure_indexes()
 
     async def _run_backfill_init_steps(self) -> None:

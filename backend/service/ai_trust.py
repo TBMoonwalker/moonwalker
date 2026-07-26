@@ -6,6 +6,7 @@ import asyncio
 import json
 import math
 import re
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -13,6 +14,12 @@ from typing import Any
 import helper
 import httpx
 import model
+from service.ai_provider import ai_provider_client
+from service.ai_trust_analytics import (
+    bump_analytics_revision,
+    load_analytics_rows,
+)
+from service.ai_work_queue import ai_work_queue
 from service.config import Config
 
 logging = helper.LoggerFactory.get_logger("logs/ai_trust.log", "ai_trust")
@@ -24,6 +31,7 @@ BAD_ENTRY_SLOW_HOURS = 72.0
 BAD_ENTRY_HEAVY_SAFETY_ORDERS = 3
 MAX_RECENT_PREDICTIONS = 12
 MAX_BAD_ENTRY_REVIEW = 12
+MAX_RECOVERED_OUTCOME_ATTRIBUTIONS = 1000
 AI_TRUST_CALIBRATION_LOOKBACK_DAYS = 180
 AI_TRUST_CALIBRATION_MAX_ROWS = 1000
 AI_TRUST_CALIBRATION_WARMING_SAMPLES = 10
@@ -161,6 +169,10 @@ class AiTrustEntryGate:
     risk_score: int | None = None
     warning_severity: str = "none"
     operator_note: str | None = None
+    evaluation_id: str | None = None
+    trust_config: AiTrustConfig | None = None
+    feature_bundle: dict[str, Any] | None = None
+    scored: dict[str, Any] | None = None
 
 
 class AiTrustResponseError(ValueError):
@@ -826,9 +838,12 @@ async def _call_ollama(
         },
     }
     timeout_seconds = trust_config.timeout_ms / 1000
-    async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-        response = await client.post(url, json=request_payload)
-        response.raise_for_status()
+    response = await ai_provider_client.post(
+        url,
+        json=request_payload,
+        timeout_seconds=timeout_seconds,
+    )
+    response.raise_for_status()
     body = response.json()
     message = body.get("message") if isinstance(body, dict) else None
     if not isinstance(message, dict):
@@ -888,30 +903,64 @@ async def _record_entry_prediction(
     scored: dict[str, Any] | None,
     source_event: str,
     outcome_status: str = "open",
+    evaluation_id: str | None = None,
 ) -> None:
     """Persist one AI trust ledger row for an entry observation or gate."""
     status = "scored" if provider_status == PROVIDER_STATUS_SCORED else "unscored"
-    await model.AiTrustPrediction.create(
-        symbol=str(symbol or payload.get("symbol") or ""),
-        deal_id=str(payload.get("deal_id")) if payload.get("deal_id") else None,
-        trade_id=None,
-        event_timestamp=str(payload.get("timestamp") or "") or None,
-        source_event=source_event,
-        provider=PROVIDER_NAME,
-        model_name=trust_config.ollama_model or None,
-        prompt_version=PROMPT_VERSION,
-        schema_version=SCHEMA_VERSION,
-        status=status,
-        provider_status=provider_status,
-        risk_score=scored.get("risk_score") if scored else None,
-        confidence=scored.get("confidence") if scored else None,
-        would_warn=scored.get("would_warn") if scored else None,
-        warning_severity=scored.get("warning_severity") if scored else "none",
-        reason_codes_json=_json_dumps(scored.get("reason_codes") if scored else []),
-        operator_note=scored.get("operator_note") if scored else None,
-        feature_bundle_json=_json_dumps(feature_bundle),
-        outcome_status=outcome_status,
+    values = {
+        "symbol": str(symbol or payload.get("symbol") or ""),
+        "deal_id": str(payload.get("deal_id")) if payload.get("deal_id") else None,
+        "trade_id": None,
+        "event_timestamp": str(payload.get("timestamp") or "") or None,
+        "source_event": source_event,
+        "provider": PROVIDER_NAME,
+        "model_name": trust_config.ollama_model or None,
+        "prompt_version": PROMPT_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "status": status,
+        "provider_status": provider_status,
+        "risk_score": scored.get("risk_score") if scored else None,
+        "confidence": scored.get("confidence") if scored else None,
+        "would_warn": scored.get("would_warn") if scored else None,
+        "warning_severity": (scored.get("warning_severity") if scored else "none"),
+        "reason_codes_json": _json_dumps(scored.get("reason_codes") if scored else []),
+        "operator_note": scored.get("operator_note") if scored else None,
+        "feature_bundle_json": _json_dumps(feature_bundle),
+        "outcome_status": outcome_status,
+    }
+    if evaluation_id:
+        await model.AiTrustPrediction.update_or_create(
+            evaluation_id=evaluation_id,
+            defaults=values,
+        )
+    else:
+        await model.AiTrustPrediction.create(**values)
+    await bump_analytics_revision()
+
+
+async def persist_entry_evaluation(
+    evaluation: AiTrustEntryGate,
+    payload: dict[str, Any],
+) -> bool:
+    """Persist the exact enforced preflight evaluation after a successful fill."""
+    if (
+        not evaluation.evaluated
+        or not evaluation.evaluation_id
+        or evaluation.trust_config is None
+        or evaluation.feature_bundle is None
+    ):
+        return False
+    await _record_entry_prediction(
+        symbol=str(payload.get("symbol") or ""),
+        payload=payload,
+        trust_config=evaluation.trust_config,
+        feature_bundle=evaluation.feature_bundle,
+        provider_status=evaluation.provider_status,
+        scored=evaluation.scored,
+        source_event="entry_preflight",
+        evaluation_id=evaluation.evaluation_id,
     )
+    return True
 
 
 async def observe_new_deal(symbol: str, payload: dict[str, Any]) -> None:
@@ -1012,6 +1061,7 @@ async def evaluate_entry_enforcement(
     )
     provider_status = PROVIDER_STATUS_MISSING_MODEL
     scored: dict[str, Any] | None = None
+    evaluation_id = str(uuid.uuid4())
     if trust_config.ollama_model:
         provider_status, scored = await _score_with_provider(
             trust_config,
@@ -1036,6 +1086,7 @@ async def evaluate_entry_enforcement(
                 scored=scored,
                 source_event="entry_blocked",
                 outcome_status="blocked",
+                evaluation_id=evaluation_id,
             )
         except Exception as exc:  # noqa: BLE001 - ledger failures must not force buys.
             logging.error(
@@ -1062,6 +1113,10 @@ async def evaluate_entry_enforcement(
             risk_score=scored.get("risk_score") if scored else None,
             warning_severity=scored.get("warning_severity") if scored else "none",
             operator_note=scored.get("operator_note") if scored else None,
+            evaluation_id=evaluation_id,
+            trust_config=trust_config,
+            feature_bundle=feature_bundle,
+            scored=scored,
         )
 
     return AiTrustEntryGate(
@@ -1074,6 +1129,10 @@ async def evaluate_entry_enforcement(
         risk_score=scored.get("risk_score") if scored else None,
         warning_severity=scored.get("warning_severity") if scored else "none",
         operator_note=scored.get("operator_note") if scored else None,
+        evaluation_id=evaluation_id,
+        trust_config=trust_config,
+        feature_bundle=feature_bundle,
+        scored=scored,
     )
 
 
@@ -1105,7 +1164,7 @@ async def attribute_closed_outcome(deal_id: str | None) -> None:
     if closed_trade is None:
         return
     bad_entry, reasons, duration_hours = _bad_entry_label(closed_trade)
-    await model.AiTrustPrediction.filter(deal_id=normalized_deal_id).update(
+    updated = await model.AiTrustPrediction.filter(deal_id=normalized_deal_id).update(
         outcome_status="closed",
         bad_entry=bad_entry,
         bad_entry_reasons_json=_json_dumps(reasons),
@@ -1116,6 +1175,8 @@ async def attribute_closed_outcome(deal_id: str | None) -> None:
         ),
         outcome_so_count=closed_trade.so_count,
     )
+    if updated:
+        await bump_analytics_revision()
 
 
 async def has_prediction_for_deal(deal_id: str | None) -> bool:
@@ -1441,63 +1502,19 @@ def _prediction_to_api(
 async def build_analytics_payload() -> dict[str, Any]:
     """Return the reduced Statistics payload for AI trust calibration."""
     trust_config = await get_ai_trust_config()
-    total = await model.AiTrustPrediction.all().count()
-    scored_count = await model.AiTrustPrediction.filter(status="scored").count()
-    closed_count = await model.AiTrustPrediction.filter(outcome_status="closed").count()
-    warning_count = await model.AiTrustPrediction.filter(
-        status="scored",
-        would_warn=True,
-    ).count()
-    false_warning_count = await model.AiTrustPrediction.filter(
-        status="scored",
-        would_warn=True,
-        outcome_status="closed",
-        bad_entry=False,
-    ).count()
-    bad_entry_count = await model.AiTrustPrediction.filter(
-        outcome_status="closed",
-        bad_entry=True,
-    ).count()
-    captured_bad_entry_count = await model.AiTrustPrediction.filter(
-        outcome_status="closed",
-        bad_entry=True,
-        would_warn=True,
-    ).count()
-    calibration_rows = await _load_calibration_rows()
-    calibration, bucket_index = _build_calibration_payload(calibration_rows)
-    provider_counts: dict[str, int] = {}
-    provider_rows = await model.AiTrustPrediction.all().only("provider_status")
-    for row in provider_rows:
-        provider_counts[row.provider_status] = (
-            provider_counts.get(row.provider_status, 0) + 1
-        )
-
-    recent = (
-        await model.AiTrustPrediction.all()
-        .order_by("-created_at")
-        .limit(MAX_RECENT_PREDICTIONS)
+    cutoff = datetime.now(UTC) - timedelta(days=AI_TRUST_CALIBRATION_LOOKBACK_DAYS)
+    rows = await load_analytics_rows(
+        calibration_cutoff=cutoff,
+        calibration_limit=AI_TRUST_CALIBRATION_MAX_ROWS,
+        recent_limit=MAX_RECENT_PREDICTIONS,
+        review_limit=MAX_BAD_ENTRY_REVIEW,
     )
-    review = (
-        await model.AiTrustPrediction.filter(
-            outcome_status="closed",
-        )
-        .filter(
-            bad_entry=True,
-        )
-        .order_by("-created_at")
-        .limit(MAX_BAD_ENTRY_REVIEW)
-    )
-    if len(review) < MAX_BAD_ENTRY_REVIEW:
-        warned_review = (
-            await model.AiTrustPrediction.filter(
-                outcome_status="closed",
-                would_warn=True,
-            )
-            .order_by("-created_at")
-            .limit(MAX_BAD_ENTRY_REVIEW - len(review))
-        )
-        seen_ids = {row.id for row in review}
-        review = list(review) + [row for row in warned_review if row.id not in seen_ids]
+    counts = rows.counts
+    total = counts["total"]
+    scored_count = counts["scored"]
+    warning_count = counts["warnings"]
+    bad_entry_count = counts["bad_entries"]
+    calibration, bucket_index = _build_calibration_payload(list(rows.calibration))
     return {
         "enabled": trust_config.enabled,
         "enforce_warnings": trust_config.enforce_warnings,
@@ -1513,58 +1530,87 @@ async def build_analytics_payload() -> dict[str, Any]:
             "total": total,
             "scored": scored_count,
             "unscored": total - scored_count,
-            "closed": closed_count,
+            "closed": counts["closed"],
             "coverage_rate": _rate(scored_count, total),
         },
         "quality": {
             "warning_hit_rate": _rate(
-                captured_bad_entry_count,
+                counts["captured_bad_entries"],
                 warning_count,
             ),
-            "false_warning_rate": _rate(false_warning_count, warning_count),
+            "false_warning_rate": _rate(counts["false_warnings"], warning_count),
             "bad_entry_capture_rate": _rate(
-                captured_bad_entry_count,
+                counts["captured_bad_entries"],
                 bad_entry_count,
             ),
             "bad_entries": bad_entry_count,
             "warnings": warning_count,
         },
-        "provider_status_counts": provider_counts,
+        "provider_status_counts": rows.provider_counts,
+        "queue": ai_work_queue.status(),
         "calibration": calibration,
-        "recent_predictions": [_prediction_to_api(row, bucket_index) for row in recent],
-        "bad_entry_review": [_prediction_to_api(row, bucket_index) for row in review],
+        "recent_predictions": [
+            _prediction_to_api(row, bucket_index) for row in rows.recent
+        ],
+        "bad_entry_review": [
+            _prediction_to_api(row, bucket_index) for row in rows.review
+        ],
     }
 
 
-def schedule_entry_observation(symbol: str, payload: dict[str, Any]) -> None:
-    """Schedule entry observation without coupling it to trade persistence."""
-
-    async def _run() -> None:
-        try:
-            await observe_new_deal(symbol, dict(payload))
-        except Exception as exc:  # noqa: BLE001 - shadow observer must never leak.
-            logging.error(
-                "AI trust entry observation failed for %s: %s",
-                symbol,
-                exc,
-                exc_info=True,
-            )
-
-    asyncio.create_task(_run())
+async def schedule_entry_observation(
+    symbol: str,
+    payload: dict[str, Any],
+) -> bool:
+    """Queue a coalescible entry observation."""
+    deal_id = str(payload.get("deal_id") or symbol).strip()
+    return await ai_work_queue.submit(
+        f"entry:{deal_id}",
+        lambda: observe_new_deal(symbol, dict(payload)),
+        backpressure=False,
+    )
 
 
-def schedule_outcome_attribution(deal_id: str | None) -> None:
-    """Schedule closed-outcome attribution without blocking trade closure."""
+async def schedule_outcome_attribution(deal_id: str | None) -> bool:
+    """Queue durable-value outcome attribution with bounded backpressure."""
+    normalized_deal_id = str(deal_id or "").strip()
+    if not normalized_deal_id:
+        return False
+    return await ai_work_queue.submit(
+        f"outcome:{normalized_deal_id}",
+        lambda: attribute_closed_outcome(normalized_deal_id),
+        backpressure=True,
+    )
 
-    async def _run() -> None:
-        try:
-            await attribute_closed_outcome(deal_id)
-        except Exception as exc:  # noqa: BLE001 - calibration must never leak.
-            logging.error(
-                "AI trust outcome attribution failed for %s: %s",
-                deal_id,
-                exc,
-                exc_info=True,
-            )
 
-    asyncio.create_task(_run())
+async def recover_pending_outcome_attributions() -> int:
+    """Requeue durable outcome work implied by persisted predictions and closes."""
+    prediction_deal_ids = (
+        await model.AiTrustPrediction.filter(outcome_status="open")
+        .exclude(deal_id=None)
+        .distinct()
+        .limit(MAX_RECOVERED_OUTCOME_ATTRIBUTIONS)
+        .values_list("deal_id", flat=True)
+    )
+    normalized_ids = [
+        str(deal_id).strip() for deal_id in prediction_deal_ids if str(deal_id).strip()
+    ]
+    if not normalized_ids:
+        return 0
+
+    closed_deal_ids = await model.ClosedTrades.filter(
+        deal_id__in=normalized_ids
+    ).values_list("deal_id", flat=True)
+    recovered = 0
+    for deal_id in closed_deal_ids:
+        if await schedule_outcome_attribution(str(deal_id)):
+            recovered += 1
+    if len(prediction_deal_ids) >= MAX_RECOVERED_OUTCOME_ATTRIBUTIONS:
+        logging.warning(
+            "AI outcome recovery reached its %s-item startup cap; remaining rows "
+            "will be retried on a later startup.",
+            MAX_RECOVERED_OUTCOME_ATTRIBUTIONS,
+        )
+    if recovered:
+        logging.info("Recovered %s pending AI outcome attribution(s).", recovered)
+    return recovered

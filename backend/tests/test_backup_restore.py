@@ -276,7 +276,7 @@ async def test_export_backup_omits_removed_legacy_autopilot_max_fund_key(
 
 
 @pytest.mark.asyncio
-async def test_restore_backup_rejects_removed_trade_mode_rows(
+async def test_restore_backup_migrates_legacy_trade_mode_rows(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
@@ -289,28 +289,33 @@ async def test_restore_backup_rejects_removed_trade_mode_rows(
     Config._instance = None
 
     backup_service = BackupService()
-    with pytest.raises(
-        ValueError,
-        match=(
-            "Config key 'trade_lifecycle_mode' was removed in this release. "
-            "Use 'trade_mode' instead."
-        ),
-    ):
-        await backup_service.restore_backup(
-            {
-                "schema_version": 1,
-                "config": [
-                    {"key": "timezone", "value": "Europe/Vienna", "value_type": "str"},
-                    {
-                        "key": "trade_lifecycle_mode",
-                        "value": "classic_dca",
-                        "value_type": "str",
-                    },
-                    {"key": "dynamic_dca", "value": True, "value_type": "bool"},
-                ],
-            },
-            restore_trade_data=False,
-        )
+    await backup_service.restore_backup(
+        {
+            "schema_version": 1,
+            "config": [
+                {"key": "timezone", "value": "Europe/Vienna", "value_type": "str"},
+                {
+                    "key": "trade_lifecycle_mode",
+                    "value": "classic_dca",
+                    "value_type": "str",
+                },
+                {"key": "dynamic_dca", "value": True, "value_type": "bool"},
+            ],
+        },
+        restore_trade_data=False,
+    )
+
+    import model
+
+    assert await model.AppConfig.filter(key="trade_mode").values_list(
+        "value", flat=True
+    ) == ["dynamic_dca"]
+    assert (
+        await model.AppConfig.filter(
+            key__in=["trade_lifecycle_mode", "dynamic_dca"]
+        ).exists()
+        is False
+    )
 
     await Tortoise.close_connections()
     Config._instance = None

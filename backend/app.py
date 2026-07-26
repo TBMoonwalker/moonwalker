@@ -6,8 +6,9 @@ import os
 import subprocess
 import time
 from collections.abc import Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, AsyncIterator
 
 import helper
 import uvicorn
@@ -17,17 +18,23 @@ from controller import trades as trades_controller
 from litestar import Litestar
 from litestar.config.compression import CompressionConfig
 from litestar.config.cors import CORSConfig
+from litestar.middleware import DefineMiddleware
+from service.ai_provider import ai_provider_client
+from service.ai_trust import recover_pending_outcome_attributions
+from service.ai_work_queue import ai_work_queue
 from service.autopilot_memory import AutopilotMemoryService
 from service.config import Config
 from service.database import Database
 from service.delisting_protection import DelistingProtectionService
 from service.green_phase import GreenPhaseService
 from service.housekeeper import Housekeeper
+from service.origin_policy import WebSocketOriginMiddleware, parse_allowed_origins
 from service.redis import redis_client, start_redis, stop_redis
 from service.signal import Signal
 from service.watcher import Watcher
 
 logging = helper.LoggerFactory.get_logger("logs/startup.log", "startup")
+ALLOWED_ORIGINS = parse_allowed_origins(os.getenv("MOONWALKER_ALLOWED_ORIGINS"))
 
 
 @dataclass
@@ -75,7 +82,7 @@ async def _run_startup_step(
 
 
 async def startup() -> None:
-    """Initialize core services and start background tasks before serving."""
+    """Initialize core services before the lifespan starts runtime tasks."""
     started_at = time.perf_counter()
     logging.info("Moonwalker startup sequence started.")
     try:
@@ -142,29 +149,6 @@ async def startup() -> None:
             statistics_controller.start_websocket_fanout,
         )
 
-        runtime_state.background_tasks = [
-            asyncio.create_task(
-                runtime_state.database.run_with_context(
-                    runtime_state.watcher.watch_incoming_symbols,
-                    runtime_state.watcher_queue,
-                )
-            ),
-            asyncio.create_task(
-                runtime_state.database.run_with_context(
-                    runtime_state.housekeeper.cleanup_ticker_database
-                )
-            ),
-            asyncio.create_task(
-                runtime_state.database.run_with_context(
-                    runtime_state.watcher.watch_tickers
-                )
-            ),
-            asyncio.create_task(
-                runtime_state.database.run_with_context(
-                    runtime_state.database.backfill_trade_replay_candles_if_needed
-                )
-            ),
-        ]
     except Exception:
         logging.exception(
             "Moonwalker startup sequence failed after %.3fs",
@@ -183,14 +167,15 @@ async def shutdown() -> None:
     await trades_controller.stop_websocket_fanout()
     await statistics_controller.stop_websocket_fanout()
 
+    if runtime_state.signal_plugin is not None:
+        await runtime_state.signal_plugin.shutdown()
+
     for task in runtime_state.background_tasks:
         task.cancel()
     if runtime_state.background_tasks:
         await asyncio.gather(*runtime_state.background_tasks, return_exceptions=True)
     runtime_state.background_tasks.clear()
 
-    if runtime_state.signal_plugin is not None:
-        await runtime_state.signal_plugin.shutdown()
     if runtime_state.watcher is not None:
         await runtime_state.watcher.shutdown()
     if runtime_state.housekeeper is not None:
@@ -204,6 +189,7 @@ async def shutdown() -> None:
     if runtime_state.database is not None:
         await runtime_state.database.shutdown()
 
+    await ai_provider_client.close()
     await redis_client.aclose()
 
     if runtime_state.redis_proc is not None:
@@ -211,20 +197,122 @@ async def shutdown() -> None:
         runtime_state.redis_proc = None
 
 
+async def _run_critical_runtime_task(
+    name: str,
+    operation: Callable[[], Awaitable[Any]],
+) -> None:
+    """Run a critical loop and fail the lifespan if it exits unexpectedly."""
+    try:
+        await operation()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logging.exception("Critical runtime task failed: %s", name)
+        raise
+    raise RuntimeError(f"Critical runtime task exited unexpectedly: {name}")
+
+
+async def _run_optional_runtime_task(
+    name: str,
+    operation: Callable[[], Awaitable[Any]],
+) -> None:
+    """Run optional background work without taking down the trading runtime."""
+    try:
+        await operation()
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        logging.exception("Optional runtime task failed: %s", name)
+
+
+@asynccontextmanager
+async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
+    """Own runtime tasks and services for exactly one application lifespan."""
+    await startup()
+    await ai_provider_client.start()
+    assert runtime_state.database is not None
+    assert runtime_state.watcher is not None
+    assert runtime_state.housekeeper is not None
+    assert runtime_state.watcher_queue is not None
+
+    # Ownership:
+    # lifespan
+    # |-- critical: symbol intake, ticker watcher, housekeeping
+    # `-- optional: replay-candle backfill
+    try:
+        async with asyncio.TaskGroup() as task_group:
+            await ai_work_queue.start(task_group)
+            await runtime_state.database.run_with_context(
+                recover_pending_outcome_attributions
+            )
+            runtime_state.background_tasks = [
+                task_group.create_task(
+                    _run_critical_runtime_task(
+                        "symbol-intake",
+                        lambda: runtime_state.database.run_with_context(
+                            runtime_state.watcher.watch_incoming_symbols,
+                            runtime_state.watcher_queue,
+                        ),
+                    ),
+                    name="moonwalker:symbol-intake",
+                ),
+                task_group.create_task(
+                    _run_critical_runtime_task(
+                        "ticker-watcher",
+                        lambda: runtime_state.database.run_with_context(
+                            runtime_state.watcher.watch_tickers
+                        ),
+                    ),
+                    name="moonwalker:ticker-watcher",
+                ),
+                task_group.create_task(
+                    _run_critical_runtime_task(
+                        "housekeeping",
+                        lambda: runtime_state.database.run_with_context(
+                            runtime_state.housekeeper.cleanup_ticker_database
+                        ),
+                    ),
+                    name="moonwalker:housekeeping",
+                ),
+                task_group.create_task(
+                    _run_optional_runtime_task(
+                        "replay-candle-backfill",
+                        lambda: runtime_state.database.run_with_context(
+                            runtime_state.database.backfill_trade_replay_candles_if_needed
+                        ),
+                    ),
+                    name="moonwalker:replay-candle-backfill",
+                ),
+            ]
+            try:
+                yield
+            finally:
+                await ai_work_queue.stop()
+                for task in runtime_state.background_tasks:
+                    task.cancel()
+    finally:
+        await shutdown()
+
+
 app = Litestar(
     route_handlers=route_handlers,
     cors_config=CORSConfig(
-        allow_origins=["*"],
+        allow_origins=list(ALLOWED_ORIGINS),
         allow_methods=["*"],
         allow_headers=["*"],
     ),
+    middleware=[
+        DefineMiddleware(
+            WebSocketOriginMiddleware,
+            allowed_origins=ALLOWED_ORIGINS,
+        )
+    ],
     compression_config=CompressionConfig(
         backend="gzip",
         minimum_size=500,
         gzip_compress_level=6,
     ),
-    on_startup=[startup],
-    on_shutdown=[shutdown],
+    lifespan=[runtime_lifespan],
 )
 
 

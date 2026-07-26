@@ -8,6 +8,7 @@ class AiTrustPrediction(Model):
     """Persist shadow AI observations for later calibration."""
 
     id = fields.IntField(primary_key=True)
+    evaluation_id = fields.CharField(max_length=36, null=True, unique=True)
     symbol = fields.CharField(max_length=50)
     deal_id = fields.CharField(max_length=36, null=True)
     trade_id = fields.IntField(null=True)

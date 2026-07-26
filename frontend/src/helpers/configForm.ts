@@ -48,7 +48,8 @@ export function toNullableConfigString(
         return null
     }
 
-    return value.trim().length > 0 ? value : null
+    const normalized = value.trim()
+    return normalized.length > 0 ? normalized : null
 }
 
 function parseOptionalJsonConfigValue(value: string | null): unknown {

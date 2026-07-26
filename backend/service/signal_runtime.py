@@ -11,8 +11,10 @@ import model
 from service.autopilot import Autopilot
 from service.autopilot_memory import AutopilotMemoryService, SymbolAdmissionProfile
 from service.config import resolve_timeframe
+from service.signal_settings import canonicalize_signal_settings
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
+from service.trading_contracts import BuyIntent
 from service.trading_controls import is_global_trading_paused
 
 logging = helper.LoggerFactory.get_logger("logs/signal.log", "signal_runtime")
@@ -150,6 +152,38 @@ class SignalEntryOrderDecision:
         )
 
 
+def build_signal_buy_intent(
+    decision: SignalEntryOrderDecision,
+    *,
+    botname: str,
+    metadata_json: str | None = None,
+) -> BuyIntent:
+    """Build the one canonical buy contract emitted by signal plugins."""
+    return {
+        "ordersize": decision.order_size,
+        "symbol": decision.symbol,
+        "direction": "long",
+        "botname": botname,
+        "baseorder": True,
+        "safetyorder": False,
+        "order_count": 0,
+        "ordertype": "market",
+        "so_percentage": None,
+        "side": "buy",
+        "signal_name": decision.signal_name,
+        "strategy_name": decision.strategy_name,
+        "timeframe": decision.timeframe,
+        "metadata_json": (
+            decision.metadata_json if metadata_json is None else metadata_json
+        ),
+        "baseline_order_size": decision.baseline_order_size,
+        "entry_size_applied": decision.entry_size_applied,
+        "entry_size_reason_code": decision.reason_code,
+        "entry_size_fallback_applied": False,
+        "entry_size_fallback_reason": None,
+    }
+
+
 def _normalize_symbol(value: Any) -> str:
     """Return a normalized symbol key for runtime comparisons."""
     return str(value or "").strip().upper()
@@ -174,21 +208,7 @@ def _parse_pair_list(raw_value: Any, *, token_only: bool) -> list[str] | None:
 
 def parse_signal_settings(raw_value: Any) -> dict[str, Any]:
     """Parse signal settings from config string/dict payloads."""
-    if isinstance(raw_value, dict):
-        return raw_value
-    if raw_value is None:
-        return {}
-
-    raw_text = str(raw_value).strip()
-    if not raw_text:
-        return {}
-
-    parsed = json.loads(raw_text)
-
-    if not isinstance(parsed, dict):
-        raise TypeError("signal_settings must be a dictionary payload")
-
-    return parsed
+    return canonicalize_signal_settings(raw_value)
 
 
 def build_common_runtime_settings(config: dict[str, Any]) -> CommonSignalRuntime:

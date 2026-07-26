@@ -54,6 +54,43 @@ async def test_config_batch_set_persists_false_bool(tmp_path, monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_config_set_persists_canonical_signal_settings(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Signal settings should have deterministic versioned JSON storage."""
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    config = Config()
+    await config.load_all()
+    await config.set(
+        "signal_settings",
+        {
+            "value": {
+                "allowed_signals": ["LONG", "STRONG_LONG"],
+                "api_key": "secret",
+                "api_url": "https://signals.example",
+            },
+            "type": "str",
+        },
+    )
+
+    import model
+
+    row = await model.AppConfig.get(key="signal_settings")
+    assert row.value == (
+        '{"allowed_signals":["LONG","STRONG_LONG"],"api_key":"secret",'
+        '"api_url":"https://signals.example","schema_version":1}'
+    )
+    assert config.get("signal_settings") == row.value
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_config_batch_set_clears_false_string_value(
     tmp_path, monkeypatch
 ) -> None:
@@ -473,7 +510,7 @@ async def test_config_load_all_derives_sidestep_from_legacy_upgrade_rows(
     assert "sidestep_campaign_enabled" not in config.snapshot()
     assert "trade_lifecycle_mode" not in config.raw_snapshot()
     assert "sidestep_campaign_enabled" not in config.raw_snapshot()
-    assert await model.AppConfig.filter(key="trade_mode").exists() is False
+    assert (await model.AppConfig.get(key="trade_mode")).value == "sidestep"
 
     await Tortoise.close_connections()
 

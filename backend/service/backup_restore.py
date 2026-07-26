@@ -15,6 +15,10 @@ from service.config import (
     is_removed_config_key,
     resolve_history_lookback_days,
 )
+from service.config_migrations import (
+    LEGACY_TRADE_MODE_KEYS,
+    canonicalize_trade_mode_rows,
+)
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.trade_lifecycle_config import (
@@ -76,7 +80,9 @@ class BackupService:
         restore_trade_data: bool,
     ) -> dict[str, Any]:
         """Restore config-only or full backup payloads."""
-        config_rows = self._validate_config_rows(backup_payload.get("config"))
+        config_rows = canonicalize_trade_mode_rows(
+            self._validate_config_rows(backup_payload.get("config"))
+        )
         candidate_config = self._build_config_snapshot(config_rows)
         resolve_trade_mode_config(
             candidate_config,
@@ -184,7 +190,7 @@ class BackupService:
                     message="Backup config rows must include key and value_type.",
                     safe_fields={"key": key or None, "value_type": value_type or None},
                 )
-            if is_removed_config_key(key):
+            if is_removed_config_key(key) and key not in LEGACY_TRADE_MODE_KEYS:
                 raise ValueError(build_removed_config_key_message(key))
             normalized_rows.append(
                 {

@@ -10,6 +10,8 @@ from typing import Any, Callable
 
 import helper
 from model import AppConfig
+from service.config_contract import config_contract_defaults
+from service.config_migrations import run_config_migrations
 from service.config_persistence import should_persist_config_value
 from service.config_redaction import redact_config_snapshot
 from service.config_runtime_store import (
@@ -17,13 +19,8 @@ from service.config_runtime_store import (
     ConfigRuntimeStore,
     ConfigUpdateAction,
 )
-from service.dca_recovery_sizing import (
-    DEFAULT_EXECUTION_DRIFT_ATR_FRACTION,
-    DEFAULT_EXECUTION_DRIFT_MAX_PERCENT,
-    DEFAULT_EXECUTION_DRIFT_MIN_PERCENT,
-    DEFAULT_RECOVERY_MAX_DEAL_QUOTE,
-)
 from service.redis import CONFIG_CHANNEL, redis_client
+from service.signal_settings import serialize_signal_settings
 from service.strategy_builder import PUBLIC_BUILTIN_SLUGS
 from service.strategy_capability import filter_supported_strategies
 from service.trade_lifecycle_config import resolve_trade_mode_config
@@ -68,10 +65,6 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 DEFAULT_CONFIG_VALUES = {
     "trade_mode": "dynamic_dca",
     "trading_paused": False,
-    "delisting_protection_enabled": False,
-    "delisting_schedule_use_trading_credentials": False,
-    "delisting_schedule_api_key": "",
-    "delisting_schedule_api_secret": "",
     "sidestep_bearish_strategy": "",
     "sidestep_reentry_strategy": "",
     "sidestep_reentry_cooldown_candles": 0,
@@ -88,20 +81,6 @@ DEFAULT_CONFIG_VALUES = {
     "tp_spike_confirm_ticks": 0,
     "tp_limit_prearm_enabled": False,
     "tp_limit_prearm_margin_percent": 0.25,
-    "ss": 1.6,
-    "dynamic_so_sizing_mode": "legacy_factors",
-    "dynamic_so_atr_timeframe": "trading",
-    "dynamic_so_atr_length": 14,
-    "dynamic_so_spacing_atr_multiplier": 3.0,
-    "dynamic_so_recovery_atr_multiplier": 5.5,
-    "dynamic_so_recovery_min_pct": 12.0,
-    "dynamic_so_recovery_max_pct": 30.0,
-    "dynamic_so_max_deal_quote": DEFAULT_RECOVERY_MAX_DEAL_QUOTE,
-    "dynamic_so_min_tp_improvement_pct": 5.0,
-    "dynamic_so_execution_guard_enabled": True,
-    "dynamic_so_execution_drift_atr_fraction": (DEFAULT_EXECUTION_DRIFT_ATR_FRACTION),
-    "dynamic_so_execution_drift_min_pct": DEFAULT_EXECUTION_DRIFT_MIN_PERCENT,
-    "dynamic_so_execution_drift_max_pct": DEFAULT_EXECUTION_DRIFT_MAX_PERCENT,
     "autopilot_green_phase_enabled": False,
     "autopilot_green_phase_ramp_days": 30,
     "autopilot_green_phase_eval_interval_sec": 60,
@@ -113,13 +92,7 @@ DEFAULT_CONFIG_VALUES = {
     "autopilot_green_phase_confirm_cycles": 2,
     "autopilot_green_phase_release_cycles": 4,
     "autopilot_green_phase_max_locked_fund_percent": 85.0,
-    "ai_trust_enabled": False,
-    "ai_trust_enforce_warnings": False,
-    "ai_trust_ollama_base_url": "http://localhost:11434",
-    "ai_trust_ollama_model": "",
-    "ai_trust_timeout_ms": 10000,
-    "ai_trust_max_retries": 0,
-    "ai_trust_runtime_status": "ok",
+    **config_contract_defaults(),
 }
 
 
@@ -140,56 +113,6 @@ def build_removed_config_key_message(key: str) -> str:
             f"Use '{replacement}' instead."
         )
     return f"Config key '{normalized_key}' was removed in {version}."
-
-
-def _optional_config_string(value: Any) -> str | None:
-    """Return a stripped config string when the value is meaningful."""
-    normalized = str(value or "").strip()
-    return normalized or None
-
-
-def _bool_config_value(value: Any) -> bool:
-    """Normalize mixed bool-like config values safely."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "off", ""}:
-            return False
-    return bool(value)
-
-
-def _resolve_legacy_trade_mode(legacy_snapshot: dict[str, Any]) -> str | None:
-    """Return a runtime-only canonical trade mode from legacy upgrade rows."""
-    lifecycle_mode = _optional_config_string(
-        legacy_snapshot.get("trade_lifecycle_mode")
-    )
-    sidestep_enabled = _bool_config_value(
-        legacy_snapshot.get("sidestep_campaign_enabled", False)
-    )
-
-    if lifecycle_mode == "sidestep_reentry" or sidestep_enabled:
-        return "sidestep"
-    if _bool_config_value(legacy_snapshot.get("dynamic_dca", False)):
-        return "dynamic_dca"
-    return None
-
-
-def _apply_legacy_trade_mode_entry(
-    entries: list[ConfigEntry],
-    legacy_snapshot: dict[str, Any],
-) -> None:
-    """Add a runtime-only trade_mode entry for pre-4.0 upgrade configs."""
-    if any(entry.key == "trade_mode" for entry in entries):
-        return
-
-    trade_mode = _resolve_legacy_trade_mode(legacy_snapshot)
-    if trade_mode is None:
-        return
-
-    entries.append(ConfigEntry(key="trade_mode", value_type="str", value=trade_mode))
 
 
 def resolve_timeframe(config: dict[str, Any], default: str = "1m") -> str:
@@ -327,20 +250,15 @@ class Config:
         Retrieves all AppConfig entries and converts their values to the appropriate types
         based on the value_type field. Also loads strategies and signal plugins.
         """
+        await run_config_migrations()
         entries: list[ConfigEntry] = []
-        legacy_snapshot: dict[str, Any] = {}
         rows = await AppConfig.all()
         for row in rows:
             if row.key in LEGACY_TRADE_MODE_KEYS:
-                legacy_snapshot[row.key] = deserialize_config_value(
-                    row.value,
-                    row.value_type,
-                )
                 continue
             if is_removed_config_key(row.key):
                 continue
             entries.append(self.__build_entry(row.key, row.value, row.value_type))
-        _apply_legacy_trade_mode_entry(entries, legacy_snapshot)
         self.__validate_trade_mode_snapshot(
             self.__build_snapshot_from_entries(entries),
             source="startup",
@@ -528,7 +446,15 @@ class Config:
                 runtime_value=None,
             )
 
-        serialized_value = self.__serialize_value_for_storage(value_data, value_type)
+        if key == "signal_settings":
+            if value_type != "str":
+                raise ValueError("signal_settings must use config type 'str'.")
+            serialized_value = serialize_signal_settings(value_data)
+        else:
+            serialized_value = self.__serialize_value_for_storage(
+                value_data,
+                value_type,
+            )
         return ConfigUpdateAction(
             key=key,
             value_type=value_type,

@@ -17,12 +17,6 @@ from service.spot_campaign_types import TradeCloseReason
 from tortoise.expressions import Q
 from tortoise.transactions import in_transaction
 
-# Re-export shared datetime helpers for callsite compatibility.
-_utc_now = helper.utc_now
-_ensure_utc = helper.ensure_utc
-_parse_datetime = helper.parse_datetime
-_parse_duration_hours = helper.parse_duration_hours
-
 logging = helper.LoggerFactory.get_logger(
     "logs/autopilot_memory.log",
     "autopilot_memory",
@@ -57,7 +51,7 @@ def _isoformat_or_none(value: datetime | None) -> str | None:
     """Return a stable ISO timestamp string for API responses."""
     if value is None:
         return None
-    return _ensure_utc(value).isoformat().replace("+00:00", "Z")
+    return helper.ensure_utc(value).isoformat().replace("+00:00", "Z")
 
 
 def _round_float(value: float | None, digits: int = 4) -> float | None:
@@ -778,7 +772,7 @@ class AutopilotMemoryService:
     async def _mark_stale(self, reason_code: str) -> None:
         """Persist a stale-state marker without deleting the last good snapshot."""
         state = self._state_with_staleness()
-        now = _utc_now()
+        now = helper.utc_now()
         stale_state = {
             **state,
             "status": "stale",
@@ -839,7 +833,9 @@ class AutopilotMemoryService:
         state = copy.deepcopy(self._state)
         last_success_at = state.get("last_success_at")
         if isinstance(last_success_at, datetime):
-            age_seconds = (_utc_now() - _ensure_utc(last_success_at)).total_seconds()
+            age_seconds = (
+                helper.utc_now() - helper.ensure_utc(last_success_at)
+            ).total_seconds()
             if age_seconds > self.STALE_AFTER_SECONDS and state.get("status") not in {
                 "empty",
                 "warming_up",
@@ -851,16 +847,16 @@ class AutopilotMemoryService:
 
     def _compute_state(self, raw_rows: list[dict[str, Any]]) -> dict[str, Any]:
         """Build the next global state and symbol snapshots from closed trades."""
-        now = _utc_now()
+        now = helper.utc_now()
         closed_rows: list[ClosedTradeMemoryRow] = []
         profitable_durations: list[float] = []
 
         for raw_row in raw_rows:
             symbol = str(raw_row.get("symbol") or "").strip()
-            close_date = _parse_datetime(raw_row.get("close_date"))
+            close_date = helper.parse_datetime(raw_row.get("close_date"))
             if not symbol or close_date is None:
                 continue
-            duration_hours = _parse_duration_hours(
+            duration_hours = helper.parse_duration_hours(
                 raw_row.get("duration"),
                 open_date=raw_row.get("open_date"),
                 close_date=raw_row.get("close_date"),
@@ -924,7 +920,9 @@ class AutopilotMemoryService:
 
             for trade in symbol_rows:
                 age_days = max(
-                    (_ensure_utc(now) - _ensure_utc(trade.close_date)).total_seconds()
+                    (
+                        helper.ensure_utc(now) - helper.ensure_utc(trade.close_date)
+                    ).total_seconds()
                     / 86_400,
                     0.0,
                 )

@@ -34,6 +34,30 @@ requirements installation step before launching `backend/app.py` directly.
 Starting `backend/app.py` from an existing virtual environment bypasses
 dependency synchronization after an upgrade.
 
+## Dashboard origin policy
+
+Moonwalker allows same-origin dashboard HTTP and WebSocket connections by
+default. This is the normal setup when the UI is served by Moonwalker itself.
+
+If a dashboard is hosted at another origin, set a comma-separated explicit
+allowlist before starting Moonwalker:
+
+```bash
+MOONWALKER_ALLOWED_ORIGINS=https://dashboard.example.com ./run.sh start
+```
+
+For a LAN dashboard on another port:
+
+```bash
+MOONWALKER_ALLOWED_ORIGINS=http://192.168.6.5:3000 ./run.sh start
+```
+
+Reverse proxies should serve the dashboard and Moonwalker API from the same
+public origin when possible. Otherwise, add the proxy's public origin to the
+allowlist. Entries must be complete `http://` or `https://` origins without a
+path, query, credentials, or wildcard. Invalid entries stop startup rather than
+silently opening cross-origin access.
+
 ## Logging
 You can see information about DCA and TP status in `statistics.log`. Other logs
 are available as well (for exchange, controller, monitoring, etc.).

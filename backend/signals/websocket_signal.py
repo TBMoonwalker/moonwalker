@@ -16,6 +16,7 @@ from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
     build_common_runtime_settings,
+    build_signal_buy_intent,
     get_active_open_symbols,
     is_max_bots_reached,
     log_signal_admission_decisions,
@@ -699,30 +700,14 @@ class SignalPlugin:
             log_signal_entry_order_decisions(entry_orders.values())
             entry_order = entry_orders[candidate.symbol]
             await self.watcher_queue.put([candidate.symbol])
-            order = {
-                "ordersize": entry_order.order_size,
-                "symbol": candidate.symbol,
-                "direction": "long",
-                "botname": f"websocket_signal_{candidate.source_symbol}",
-                "baseorder": True,
-                "safetyorder": False,
-                "order_count": 0,
-                "ordertype": "market",
-                "so_percentage": None,
-                "side": "buy",
-                "signal_name": entry_order.signal_name,
-                "strategy_name": entry_order.strategy_name,
-                "timeframe": entry_order.timeframe,
-                "metadata_json": self.__merge_metadata(
+            order = build_signal_buy_intent(
+                entry_order,
+                botname=f"websocket_signal_{candidate.source_symbol}",
+                metadata_json=self.__merge_metadata(
                     entry_order.metadata_json,
                     candidate.metadata_json,
                 ),
-                "baseline_order_size": entry_order.baseline_order_size,
-                "entry_size_applied": entry_order.entry_size_applied,
-                "entry_size_reason_code": entry_order.reason_code,
-                "entry_size_fallback_applied": False,
-                "entry_size_fallback_reason": None,
-            }
+            )
             logging.info("Triggering new trade for %s", candidate.symbol)
             await self.orders.receive_buy_order(order, self.config)
         finally:
