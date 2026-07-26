@@ -54,6 +54,14 @@ async def _get_profit_cached() -> dict[str, Any]:
     return await statistic.get_profit_for_dashboard(available_funds)
 
 
+async def invalidate_statistics_read_cache() -> None:
+    """Invalidate cached statistics after a bulk trade-ledger restore."""
+    cache_clear = getattr(_get_profit_cached, "cache_clear", None)
+    if cache_clear is not None:
+        await cache_clear()
+    await statistic.invalidate_profit_caches()
+
+
 async def _build_profit_payload() -> str:
     """Build serialized payload for profit websocket stream."""
     return json.dumps(await _get_profit_cached())

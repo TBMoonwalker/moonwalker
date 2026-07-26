@@ -30,6 +30,25 @@ def test_config_contract_never_exposes_secret_defaults() -> None:
         assert "default" not in field
 
 
+def test_config_contract_matches_runtime_enums_and_bounds() -> None:
+    """Contract metadata should describe the values accepted by the runtime."""
+    contract = public_config_contract()["fields"]
+
+    assert contract["dynamic_so_sizing_mode"]["enum"] == [
+        "legacy_factors",
+        "recovery_shadow",
+        "recovery_target",
+    ]
+    assert contract["dynamic_so_atr_length"]["minimum"] == 2
+    assert contract["ai_trust_timeout_ms"]["minimum"] == 250
+    assert contract["ai_trust_max_retries"]["maximum"] == 2
+    assert contract["ai_trust_runtime_status"]["enum"] == [
+        "ok",
+        "provider_unavailable",
+        "warning_blocked",
+    ]
+
+
 def test_config_schema_endpoint_returns_versioned_contract() -> None:
     """Dashboard clients should be able to fetch the canonical contract."""
     app = Litestar(route_handlers=[get_config_schema])

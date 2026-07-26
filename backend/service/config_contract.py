@@ -51,7 +51,7 @@ CONFIG_FIELDS: dict[str, ConfigFieldContract] = {
         "str",
         "recovery_dca",
         "legacy_factors",
-        enum=("legacy_factors", "recovery_target"),
+        enum=("legacy_factors", "recovery_shadow", "recovery_target"),
         readiness_relevant=True,
     ),
     "dynamic_so_atr_timeframe": ConfigFieldContract(
@@ -63,7 +63,7 @@ CONFIG_FIELDS: dict[str, ConfigFieldContract] = {
         "int",
         "recovery_dca",
         14,
-        minimum=1,
+        minimum=2,
         maximum=500,
     ),
     "dynamic_so_spacing_atr_multiplier": ConfigFieldContract(
@@ -133,16 +133,16 @@ CONFIG_FIELDS: dict[str, ConfigFieldContract] = {
         "str", "ai_trust", "", readiness_relevant=True
     ),
     "ai_trust_timeout_ms": ConfigFieldContract(
-        "int", "ai_trust", 10_000, minimum=100, maximum=120_000
+        "int", "ai_trust", 10_000, minimum=250, maximum=120_000
     ),
     "ai_trust_max_retries": ConfigFieldContract(
-        "int", "ai_trust", 0, minimum=0, maximum=5
+        "int", "ai_trust", 0, minimum=0, maximum=2
     ),
     "ai_trust_runtime_status": ConfigFieldContract(
         "str",
         "ai_trust",
         "ok",
-        enum=("ok", "provider_unavailable"),
+        enum=("ok", "provider_unavailable", "warning_blocked"),
         read_only=True,
     ),
 }

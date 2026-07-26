@@ -7,6 +7,7 @@ import os
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import httpx
 import model
 import pytest
 import service.ai_trust as ai_trust
@@ -811,6 +812,111 @@ async def test_pending_closed_outcomes_are_recovered_from_durable_rows(
         assert scheduled == ["recover-me"]
     finally:
         await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_pending_outcome_recovery_cap_ignores_still_open_deals(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        monkeypatch.setattr(ai_trust, "MAX_RECOVERED_OUTCOME_ATTRIBUTIONS", 2)
+        for deal_id in ("open-a", "open-b"):
+            await model.AiTrustPrediction.create(
+                symbol="ETH/USDT",
+                deal_id=deal_id,
+                source_event="open_deal",
+                outcome_status="open",
+            )
+        await model.AiTrustPrediction.create(
+            symbol="BTC/USDT",
+            deal_id="closed-after-cap",
+            source_event="open_deal",
+            outcome_status="open",
+        )
+        await model.ClosedTrades.create(
+            symbol="BTC/USDT",
+            deal_id="closed-after-cap",
+        )
+        scheduled: list[str] = []
+
+        async def fake_schedule(deal_id: str | None) -> bool:
+            scheduled.append(str(deal_id))
+            return True
+
+        monkeypatch.setattr(ai_trust, "schedule_outcome_attribution", fake_schedule)
+
+        recovered = await ai_trust.recover_pending_outcome_attributions()
+
+        assert recovered == 1
+        assert scheduled == ["closed-after-cap"]
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_provider_retries_only_transient_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trust_config = ai_trust.AiTrustConfig(
+        enabled=True,
+        enforce_warnings=False,
+        ollama_base_url="http://localhost:11434",
+        ollama_model="qwen3:8b",
+        timeout_ms=1000,
+        max_retries=2,
+    )
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def fake_call(*_args: Any) -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise httpx.ConnectError("offline")
+        return {"risk_score": 10}
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(ai_trust, "_call_ollama", fake_call)
+    monkeypatch.setattr(ai_trust.asyncio, "sleep", fake_sleep)
+
+    status, scored = await ai_trust._score_with_provider(trust_config, {})
+
+    assert status == ai_trust.PROVIDER_STATUS_SCORED
+    assert scored == {"risk_score": 10}
+    assert attempts == 3
+    assert sleeps == [0.25, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_provider_does_not_retry_schema_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trust_config = ai_trust.AiTrustConfig(
+        enabled=True,
+        enforce_warnings=False,
+        ollama_base_url="http://localhost:11434",
+        ollama_model="qwen3:8b",
+        timeout_ms=1000,
+        max_retries=2,
+    )
+    attempts = 0
+
+    async def fake_call(*_args: Any) -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        raise ai_trust.AiTrustResponseError(ai_trust.PROVIDER_STATUS_SCHEMA_INVALID)
+
+    monkeypatch.setattr(ai_trust, "_call_ollama", fake_call)
+
+    status, scored = await ai_trust._score_with_provider(trust_config, {})
+
+    assert status == ai_trust.PROVIDER_STATUS_SCHEMA_INVALID
+    assert scored is None
+    assert attempts == 1
 
 
 @pytest.mark.asyncio

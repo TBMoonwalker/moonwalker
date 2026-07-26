@@ -5,8 +5,12 @@
 3. Save your settings (they are persisted in the DB).
 
 Runtime configuration is stored in the `AppConfig` table and served to the UI
-through `/config/all`. Dashboard clients can also poll `/config/freshness` to
-detect whether another browser or tab has changed the saved configuration.
+through `/config/all`, with persisted credential values replaced by redaction
+markers. Dashboard clients can also poll `/config/freshness` to detect whether
+another browser or tab has changed the saved configuration.
+`/config/schema` exposes the versioned frontend-safe contract for high-risk
+settings, including defaults, bounds, enums, sensitivity, and readiness
+metadata.
 `/config/all` now includes a snapshot-native `config_updated_at` field so the
 Control Center can tell whether the snapshot it just loaded is older than the
 latest persisted config timestamp.

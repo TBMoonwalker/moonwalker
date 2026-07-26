@@ -258,3 +258,27 @@ async def test_optional_runtime_task_isolates_failure(
     assert fake_logger.exception_calls == [
         ("Optional runtime task failed: %s", ("replay-candle-backfill",))
     ]
+
+
+@pytest.mark.asyncio
+async def test_lifespan_cleans_up_after_partial_startup_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed startup must still enter the shared shutdown path."""
+    calls: list[str] = []
+
+    async def fail_startup() -> None:
+        calls.append("startup")
+        raise RuntimeError("database init failed")
+
+    async def record_shutdown() -> None:
+        calls.append("shutdown")
+
+    monkeypatch.setattr(app_module, "startup", fail_startup)
+    monkeypatch.setattr(app_module, "shutdown", record_shutdown)
+
+    with pytest.raises(RuntimeError, match="database init failed"):
+        async with app_module.runtime_lifespan(None):
+            pass
+
+    assert calls == ["startup", "shutdown"]

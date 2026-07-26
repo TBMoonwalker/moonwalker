@@ -7,6 +7,7 @@ from collections.abc import Iterable
 from typing import Any
 from uuid import uuid4
 
+import helper
 import model
 from service.ai_trust import (
     AiTrustEntryGate,
@@ -28,6 +29,10 @@ from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from service.trade_math import parse_date_to_ms
 from tortoise.expressions import F
 from tortoise.transactions import in_transaction
+
+logging = helper.LoggerFactory.get_logger(
+    "logs/order_persistence.log", "order_persistence"
+)
 
 SUMMARY_TRADE_KEYS = {
     "symbol",
@@ -478,10 +483,17 @@ async def persist_buy_trade(
     await run_sqlite_write_with_retry(
         _persist_buy, f"persisting buy order for {symbol}"
     )
-    if entry_evaluation is not None and entry_evaluation.evaluated:
-        await persist_entry_evaluation(entry_evaluation, payload)
-    elif create_open_trade and await is_entry_observation_enabled():
-        await schedule_entry_observation(symbol, payload)
+    try:
+        if entry_evaluation is not None and entry_evaluation.evaluated:
+            await persist_entry_evaluation(entry_evaluation, payload)
+        elif create_open_trade and await is_entry_observation_enabled():
+            await schedule_entry_observation(symbol, payload)
+    except Exception:
+        logging.error(
+            "Buy for %s was persisted, but its optional AI trust follow-up failed.",
+            symbol,
+            exc_info=True,
+        )
 
 
 async def persist_closed_trade(

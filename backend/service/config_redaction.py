@@ -33,6 +33,7 @@ _SENSITIVE_NESTED_KEYS = frozenset(
         "x_api_key",
     }
 )
+_WRITE_ONLY_SIGNAL_FIELDS = frozenset({"subscribe_message"})
 
 
 def _normalized_key(key: Any) -> str:
@@ -93,6 +94,36 @@ def _redact_nested_value(value: Any) -> Any:
     return value
 
 
+def _redact_signal_settings(value: Any) -> Any:
+    """Redact signal credentials, headers, and subscription payloads."""
+    if not isinstance(value, Mapping):
+        return _redact_nested_value(value)
+
+    redacted: dict[str, Any] = {}
+    for key, nested_value in value.items():
+        normalized_key = _normalized_key(key)
+        if normalized_key == "headers" and isinstance(nested_value, Mapping):
+            redacted[str(key)] = {
+                str(header): (
+                    REDACTED_SECRET_VALUE
+                    if _has_secret_value(header_value)
+                    else header_value
+                )
+                for header, header_value in nested_value.items()
+            }
+        elif normalized_key in _WRITE_ONLY_SIGNAL_FIELDS:
+            redacted[str(key)] = (
+                REDACTED_SECRET_VALUE
+                if _has_secret_value(nested_value)
+                else nested_value
+            )
+        elif _is_sensitive_nested_key(key) and _has_secret_value(nested_value):
+            redacted[str(key)] = REDACTED_SECRET_VALUE
+        else:
+            redacted[str(key)] = _redact_nested_value(nested_value)
+    return redacted
+
+
 def redact_config_value(key: str, value: Any) -> Any:
     """Return a public-safe representation of one configuration value."""
     normalized_key = _normalized_key(key)
@@ -105,7 +136,7 @@ def redact_config_value(key: str, value: Any) -> Any:
     if decoded is value and isinstance(value, str):
         return REDACTED_SECRET_VALUE if _has_secret_value(value) else value
     return _encode_structured_value(
-        _redact_nested_value(decoded),
+        _redact_signal_settings(decoded),
         encoded_as_string,
     )
 
@@ -120,6 +151,22 @@ def redact_config_snapshot(snapshot: Mapping[str, Any]) -> dict[str, Any]:
 
 def _restore_nested_value(incoming: Any, current: Any, *, key: Any = None) -> Any:
     """Restore redacted or empty credential fields from current server state."""
+    normalized_key = _normalized_key(key)
+    if normalized_key in _WRITE_ONLY_SIGNAL_FIELDS and (
+        incoming == REDACTED_SECRET_VALUE or not _has_secret_value(incoming)
+    ):
+        return current
+    if normalized_key == "headers" and isinstance(incoming, Mapping):
+        current_mapping = current if isinstance(current, Mapping) else {}
+        return {
+            str(header): (
+                current_mapping.get(header)
+                if header_value == REDACTED_SECRET_VALUE
+                or not _has_secret_value(header_value)
+                else header_value
+            )
+            for header, header_value in incoming.items()
+        }
     if _is_sensitive_nested_key(key) and (
         incoming == REDACTED_SECRET_VALUE or not _has_secret_value(incoming)
     ):

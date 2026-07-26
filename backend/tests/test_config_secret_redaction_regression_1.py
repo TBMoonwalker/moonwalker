@@ -34,7 +34,13 @@ def test_public_config_snapshot_redacts_direct_and_nested_credentials(
                     "api_key": "signal-key",
                     "headers": {
                         "Authorization": "Bearer private-token",
+                        "Cookie": "session=private-cookie",
+                        "X-Auth": "custom-private-token",
                         "Accept": "application/json",
+                    },
+                    "subscribe_message": {
+                        "action": "subscribe",
+                        "token": ["nested", "private-token"],
                     },
                 }
             ),
@@ -55,8 +61,11 @@ def test_public_config_snapshot_redacts_direct_and_nested_credentials(
     assert signal_settings["api_key"] == REDACTED_SECRET_VALUE
     assert signal_settings["headers"] == {
         "Authorization": REDACTED_SECRET_VALUE,
-        "Accept": "application/json",
+        "Cookie": REDACTED_SECRET_VALUE,
+        "X-Auth": REDACTED_SECRET_VALUE,
+        "Accept": REDACTED_SECRET_VALUE,
     }
+    assert signal_settings["subscribe_message"] == REDACTED_SECRET_VALUE
 
 
 # Regression: ISSUE-001 — saving unrelated edits must preserve server-side credentials.
@@ -99,7 +108,12 @@ def test_signal_settings_restore_nested_redaction_markers() -> None:
             "api_key": "signal-key",
             "headers": {
                 "Authorization": "Bearer private-token",
+                "Cookie": "session=private-cookie",
                 "Accept": "application/json",
+            },
+            "subscribe_message": {
+                "action": "subscribe",
+                "token": ["nested", "private-token"],
             },
         }
     )
@@ -119,6 +133,11 @@ def test_signal_settings_restore_nested_redaction_markers() -> None:
         "api_key": "signal-key",
         "headers": {
             "Authorization": "Bearer private-token",
+            "Cookie": "session=private-cookie",
             "Accept": "application/json",
+        },
+        "subscribe_message": {
+            "action": "subscribe",
+            "token": ["nested", "private-token"],
         },
     }

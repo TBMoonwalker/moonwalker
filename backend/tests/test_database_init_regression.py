@@ -3,7 +3,6 @@ import sqlite3
 
 import pytest
 from service.database import (
-    SQLITE_STARTUP_INTEGRITY_TABLES,
     Database,
     _build_sqlite_corruption_message,
     _extract_added_column_names,
@@ -451,7 +450,7 @@ async def test_repair_index_only_corruption_reindexes_until_integrity_is_clean(
         _self, table_names=None, *_args, **_kwargs
     ) -> list[str]:
         calls.append("integrity_check")
-        assert tuple(table_names or ()) == SQLITE_STARTUP_INTEGRITY_TABLES
+        assert table_names is None
         return next(integrity_runs)
 
     async def fake_reindex(*_args, **_kwargs) -> None:

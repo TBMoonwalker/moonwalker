@@ -4,7 +4,11 @@ from typing import Any
 
 import pytest
 import signals.asap as asap_module
-from service.signal_runtime import SignalAdmissionBatch, SignalAdmissionDecision
+from service.signal_runtime import (
+    SignalAdmissionBatch,
+    SignalAdmissionDecision,
+    SignalAdmissionLease,
+)
 from signals.asap import SignalPlugin, SymbolSelectionResult
 
 
@@ -145,6 +149,47 @@ async def test_asap_run_uses_shared_admission_batch(monkeypatch) -> None:
     assert orders[0]["metadata_json"] == '{"entry_sizing":{"applied":true}}'
     queued_symbols = await watcher_queue.get()
     assert queued_symbols == ["BTC/USDT"]
+
+
+@pytest.mark.asyncio
+async def test_asap_releases_admission_when_watcher_queue_fails() -> None:
+    """History preparation failures must not reserve a bot slot forever."""
+
+    class FailingQueue(asyncio.Queue):
+        async def put(self, item: Any) -> None:
+            raise RuntimeError(f"queue unavailable for {item}")
+
+    class RecordingLease(SignalAdmissionLease):
+        def __init__(self) -> None:
+            super().__init__(["BTC/USDT"])
+            self.released = False
+
+        async def release(self) -> None:
+            self.released = True
+            await super().release()
+
+    lease = RecordingLease()
+    batch = SignalAdmissionBatch(
+        decisions=[
+            SignalAdmissionDecision(
+                symbol="BTC/USDT",
+                admitted=True,
+                reason_code="admitted_available_slot",
+                memory_status="baseline",
+                trust_direction="neutral",
+                trust_score=None,
+                available_slots=1,
+                competing_candidates=1,
+            )
+        ],
+        lease=lease,
+    )
+    plugin = SignalPlugin(FailingQueue())
+
+    with pytest.raises(RuntimeError, match="queue unavailable"):
+        await plugin._prepare_signal_entry_orders(batch)
+
+    assert lease.released is True
 
 
 def _async_symbols(symbols: list[str]):

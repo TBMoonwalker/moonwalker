@@ -80,8 +80,10 @@ class BackupService:
         restore_trade_data: bool,
     ) -> dict[str, Any]:
         """Restore config-only or full backup payloads."""
-        config_rows = canonicalize_trade_mode_rows(
-            self._validate_config_rows(backup_payload.get("config"))
+        config_rows = self._force_safe_restore_config(
+            canonicalize_trade_mode_rows(
+                self._validate_config_rows(backup_payload.get("config"))
+            )
         )
         candidate_config = self._build_config_snapshot(config_rows)
         resolve_trade_mode_config(
@@ -148,6 +150,28 @@ class BackupService:
             restore_summary["history_failed_symbols"] = failed
 
         return restore_summary
+
+    @staticmethod
+    def _force_safe_restore_config(
+        config_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Return restore rows forced into paused dry-run operation."""
+        safe_rows = [dict(row) for row in config_rows]
+        rows_by_key = {str(row["key"]): row for row in safe_rows}
+        for key in ("dry_run", "trading_paused"):
+            row = rows_by_key.get(key)
+            if row is None:
+                safe_rows.append(
+                    {
+                        "key": key,
+                        "value": "True",
+                        "value_type": "bool",
+                    }
+                )
+                continue
+            row["value"] = "True"
+            row["value_type"] = "bool"
+        return safe_rows
 
     async def _export_trade_data(self) -> dict[str, list[dict[str, Any]]]:
         """Export trade-related tables, excluding ticker OHLCV data."""

@@ -1,5 +1,6 @@
 """Configuration API endpoints."""
 
+import asyncio
 import math
 from typing import Any
 
@@ -36,6 +37,7 @@ from service.trade_lifecycle_config import (
     resolve_trade_mode_config,
 )
 from service.trading_controls import GLOBAL_TRADING_PAUSED_KEY
+from service.trading_maintenance import trading_maintenance_barrier
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
@@ -46,6 +48,7 @@ LIVE_ACTIVATION_DENIED_MESSAGE = (
     "Generic config saves cannot switch dry run off."
 )
 backup_service = BackupService()
+_RESTORE_LOCK = asyncio.Lock()
 ConfigUpdateMap = dict[str, dict[str, Any]]
 
 
@@ -60,6 +63,7 @@ class RestoreBackupRequest(msgspec.Struct, forbid_unknown_fields=True):
 
     backup: dict[str, Any]
     restore_trade_data: object = False
+    confirm: object = False
 
 
 def _require_json_boolean(value: object, field: str) -> tuple[bool | None, Any]:
@@ -361,6 +365,17 @@ def _find_live_activation_blockers(
                 {
                     "key": "signal_settings.csv_source",
                     "message": "Add a CSV source or inline CSV payload.",
+                }
+            )
+    elif signal_name == "websocket_signal":
+        websocket_url = signal_settings.get("websocket_url") or signal_settings.get(
+            "api_url"
+        )
+        if not _has_required_value(websocket_url):
+            blockers.append(
+                {
+                    "key": "signal_settings.websocket_url",
+                    "message": "Add the WebSocket stream URL.",
                 }
             )
 
@@ -902,6 +917,9 @@ async def resume_trading(data: ConfirmMutationRequest) -> Any:
 async def restore_backup(data: RestoreBackupRequest) -> Any:
     """Restore config-only or full backup payloads."""
     backup_payload = data.backup
+    _, error_response = _read_confirm_flag(ConfirmMutationRequest(confirm=data.confirm))
+    if error_response is not None:
+        return error_response
     restore_trade_data, error_response = _require_json_boolean(
         data.restore_trade_data,
         "restore_trade_data",
@@ -909,22 +927,52 @@ async def restore_backup(data: RestoreBackupRequest) -> Any:
     if error_response is not None:
         return error_response
 
-    try:
-        summary = await backup_service.restore_backup(
-            backup_payload,
-            restore_trade_data=restore_trade_data,
+    if _RESTORE_LOCK.locked():
+        return json_response(
+            {
+                "error": "A backup restore is already in progress.",
+                "message": "A backup restore is already in progress.",
+            },
+            409,
         )
-    except TradeModeConfigError as exc:
-        return json_response(exc.to_response_body(), exc.status_code)
-    except ValueError as exc:
-        return json_response({"error": str(exc)}, 400)
-    except Exception as exc:  # noqa: BLE001 - surface restore failures to UI.
-        logging.error("Backup restore failed: %s", exc, exc_info=True)
-        return json_response({"error": "Backup restore failed."}, 500)
+
+    async with _RESTORE_LOCK:
+        async with trading_maintenance_barrier.maintenance():
+            config = await Config.instance()
+            if not bool(config.get(GLOBAL_TRADING_PAUSED_KEY, False)):
+                paused = await config.set(
+                    GLOBAL_TRADING_PAUSED_KEY,
+                    {"value": True, "type": "bool"},
+                )
+                if not paused:
+                    return json_response(
+                        {"error": "Could not pause trading before backup restore."},
+                        500,
+                    )
+            try:
+                summary = await backup_service.restore_backup(
+                    backup_payload,
+                    restore_trade_data=restore_trade_data,
+                )
+                from controller import statistics as statistics_controller
+                from controller import trades as trades_controller
+
+                await trades_controller.invalidate_trade_read_caches()
+                await statistics_controller.invalidate_statistics_read_cache()
+            except TradeModeConfigError as exc:
+                return json_response(exc.to_response_body(), exc.status_code)
+            except ValueError as exc:
+                return json_response({"error": str(exc)}, 400)
+            except Exception as exc:  # noqa: BLE001 - surface restore failures to UI.
+                logging.error("Backup restore failed: %s", exc, exc_info=True)
+                return json_response({"error": "Backup restore failed."}, 500)
 
     restored_scope = "full backup" if restore_trade_data else "configuration"
     return {
-        "message": f"Restored {restored_scope} successfully.",
+        "message": (
+            f"Restored {restored_scope} successfully in paused dry-run mode. "
+            "Review the restored state before activating and resuming trading."
+        ),
         "result": summary,
     }
 

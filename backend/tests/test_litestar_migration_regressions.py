@@ -729,7 +729,7 @@ def test_live_activation_endpoint_blocks_when_setup_is_incomplete(monkeypatch) -
             config_controller.restore_backup,
             "/config/backup/restore",
             "restore_trade_data",
-            {"backup": {}, "restore_trade_data": 1},
+            {"backup": {}, "restore_trade_data": 1, "confirm": True},
         ),
     ],
 )
@@ -770,7 +770,12 @@ def test_operational_config_routes_reject_coerced_booleans(
         (
             config_controller.restore_backup,
             "/config/backup/restore",
-            {"backup": {}, "restore_trade_data": False, "unexpected": "value"},
+            {
+                "backup": {},
+                "restore_trade_data": False,
+                "confirm": True,
+                "unexpected": "value",
+            },
         ),
     ],
 )
@@ -793,6 +798,22 @@ def test_operational_config_routes_reject_unknown_fields(
             "source": "body",
         }
     ]
+
+
+def test_backup_restore_requires_explicit_confirmation() -> None:
+    """Destructive restore must stop before parsing or replacing backup data."""
+    app = Litestar(route_handlers=[config_controller.restore_backup])
+    with TestClient(app=app) as client:
+        response = client.post(
+            "/config/backup/restore",
+            json={"backup": {}, "restore_trade_data": False, "confirm": False},
+        )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "This action requires an explicit confirm flag.",
+        "message": "This action requires an explicit confirm flag.",
+    }
 
 
 def test_live_activation_endpoint_blocks_missing_global_max_fund(monkeypatch) -> None:
@@ -888,6 +909,21 @@ def test_live_activation_reports_malformed_signal_settings() -> None:
     assert {
         "key": "signal_settings",
         "message": "signal_settings must contain valid JSON.",
+    } in blockers
+
+
+def test_live_activation_requires_websocket_signal_url() -> None:
+    """Backend readiness must match the WebSocket signal form requirements."""
+    blockers = config_controller._find_live_activation_blockers(
+        {
+            "signal": "websocket_signal",
+            "signal_settings": "{}",
+        }
+    )
+
+    assert {
+        "key": "signal_settings.websocket_url",
+        "message": "Add the WebSocket stream URL.",
     } in blockers
 
 

@@ -8,6 +8,8 @@ import json
 import re
 from pathlib import Path
 
+from packaging.requirements import InvalidRequirement, Requirement
+
 ROOT_DIR = Path(__file__).resolve().parents[1]
 FRONTEND_DIR = ROOT_DIR / "frontend"
 EXACT_VERSION = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
@@ -22,16 +24,53 @@ PYAE_SHA256 = "97e69519924dde9254b26b20fe37eebb4a6b811d6bda4945a53fba04a4188a83"
 def validate_python_lock(path: Path) -> list[str]:
     """Return errors for unhashed or URL-based Python requirements."""
     errors: list[str] = []
-    blocks = re.split(r"\n(?=[a-zA-Z0-9])", path.read_text())
-    requirements = [block for block in blocks if "==" in block.splitlines()[0]]
+    block_lines: list[str] = []
 
-    for block in requirements:
-        first_line = block.splitlines()[0]
-        package = first_line.split("==", maxsplit=1)[0]
+    def validate_block(lines: list[str]) -> None:
+        if not lines:
+            return
+        first_line = lines[0].removesuffix("\\").strip()
+        block = "\n".join(lines)
+        if first_line.startswith(("-", "http://", "https://", "git+", ".", "/")):
+            errors.append(f"{path.name}: unsupported requirement source {first_line}")
+            return
+        try:
+            requirement = Requirement(first_line)
+        except InvalidRequirement:
+            errors.append(f"{path.name}: invalid requirement {first_line}")
+            return
+        package = requirement.name
+        if requirement.url:
+            errors.append(f"{path.name}: {package} uses a direct URL")
+            return
+        for continuation in lines[1:]:
+            stripped = continuation.strip().removesuffix("\\").strip()
+            if stripped.startswith("--hash=sha256:"):
+                continue
+            errors.append(
+                f"{path.name}: unsupported requirement continuation {stripped}"
+            )
         if " --hash=sha256:" not in block:
             errors.append(f"{path.name}: {package} has no SHA-256 hash")
-        if " @ " in block or "https://" in first_line or "git+" in first_line:
-            errors.append(f"{path.name}: {package} uses a direct URL")
+
+    for raw_line in path.read_text().splitlines():
+        stripped = raw_line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+
+        if raw_line[:1].isspace():
+            if not block_lines:
+                errors.append(
+                    f"{path.name}: unsupported indented requirement line {stripped}"
+                )
+            else:
+                block_lines.append(raw_line)
+            continue
+
+        validate_block(block_lines)
+        block_lines = [raw_line]
+
+    validate_block(block_lines)
     return errors
 
 

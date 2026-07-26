@@ -21,24 +21,6 @@ logging = helper.LoggerFactory.get_logger("logs/database.log", "database")
 SQLITE_LOCK_RETRIES = 5
 SQLITE_RETRY_BASE_DELAY_SECONDS = 0.02
 SQLITE_RETRY_MAX_DELAY_SECONDS = 0.2
-SQLITE_STARTUP_INTEGRITY_TABLES = (
-    "trades",
-    "opentrades",
-    "closedtrades",
-    "tradeexecutions",
-    "spotcampaigns",
-    "unsellabletrades",
-    "ai_trust_predictions",
-    "ai_trust_analytics_revision",
-    "strategy_definitions",
-    "strategy_versions",
-    "strategy_graph_state",
-    "autopilot_memory_state",
-    "autopilot_symbol_memory",
-    "autopilot_memory_events",
-    "upnl_history",
-    "token_listings",
-)
 _SQLITE_INDEX_CORRUPTION_PATTERNS = (
     re.compile(r"row \d+ missing from index (?P<index>\S+)"),
     re.compile(r"rowid \d+ missing from index (?P<index>\S+)"),
@@ -832,9 +814,7 @@ class Database:
 
         integrity_messages = quick_messages
         if _integrity_check_is_clean(quick_messages):
-            integrity_messages = await self._run_sqlite_integrity_check(
-                SQLITE_STARTUP_INTEGRITY_TABLES
-            )
+            integrity_messages = await self._run_sqlite_integrity_check()
         if not integrity_messages:
             return
         if _integrity_check_is_clean(integrity_messages):
@@ -856,9 +836,7 @@ class Database:
         await self._reindex_sqlite_database()
         repaired_messages = await self._run_sqlite_quick_check()
         if _integrity_check_is_clean(repaired_messages):
-            repaired_messages = await self._run_sqlite_integrity_check(
-                SQLITE_STARTUP_INTEGRITY_TABLES
-            )
+            repaired_messages = await self._run_sqlite_integrity_check()
         if _integrity_check_is_clean(repaired_messages):
             logging.warning(
                 "SQLite index corruption repaired successfully via REINDEX."

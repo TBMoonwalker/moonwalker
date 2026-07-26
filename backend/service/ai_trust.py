@@ -21,6 +21,7 @@ from service.ai_trust_analytics import (
 )
 from service.ai_work_queue import ai_work_queue
 from service.config import Config
+from tortoise.expressions import Subquery
 
 logging = helper.LoggerFactory.get_logger("logs/ai_trust.log", "ai_trust")
 
@@ -871,15 +872,22 @@ async def _score_with_provider(
     """Return provider status and scored output if available."""
     attempts = trust_config.max_retries + 1
     for attempt in range(attempts):
+        retryable = False
         try:
             scored = await _call_ollama(trust_config, feature_bundle)
             return PROVIDER_STATUS_SCORED, scored
         except httpx.TimeoutException:
             status = PROVIDER_STATUS_TIMEOUT
+            retryable = True
         except httpx.ConnectError:
             status = PROVIDER_STATUS_CONNECTION_ERROR
-        except httpx.HTTPStatusError:
+            retryable = True
+        except httpx.HTTPStatusError as exc:
             status = PROVIDER_STATUS_PROVIDER_ERROR
+            retryable = (
+                exc.response.status_code in {408, 429}
+                or exc.response.status_code >= 500
+            )
         except json.JSONDecodeError:
             status = PROVIDER_STATUS_MALFORMED_JSON
         except AiTrustResponseError as exc:
@@ -888,8 +896,10 @@ async def _score_with_provider(
             logging.error("AI trust provider call failed: %s", exc, exc_info=True)
             status = PROVIDER_STATUS_UNEXPECTED_ERROR
 
-        if attempt < attempts - 1:
-            await asyncio.sleep(0)
+        if retryable and attempt < attempts - 1:
+            await asyncio.sleep(min(0.25 * (2**attempt), 1.0))
+            continue
+        break
     return status, None
 
 
@@ -1453,20 +1463,6 @@ def _shadow_effective_risk_for_prediction(
     }
 
 
-async def _load_calibration_rows() -> list[model.AiTrustPrediction]:
-    """Return bounded closed scored rows for read-only calibration."""
-    cutoff = datetime.now(UTC) - timedelta(days=AI_TRUST_CALIBRATION_LOOKBACK_DAYS)
-    return (
-        await model.AiTrustPrediction.filter(
-            status="scored",
-            outcome_status="closed",
-            created_at__gte=cutoff,
-        )
-        .order_by("-created_at")
-        .limit(AI_TRUST_CALIBRATION_MAX_ROWS)
-    )
-
-
 def _prediction_to_api(
     row: model.AiTrustPrediction,
     bucket_index: dict[tuple[str, str], dict[str, Any]] | None = None,
@@ -1585,27 +1581,30 @@ async def schedule_outcome_attribution(deal_id: str | None) -> bool:
 
 async def recover_pending_outcome_attributions() -> int:
     """Requeue durable outcome work implied by persisted predictions and closes."""
-    prediction_deal_ids = (
-        await model.AiTrustPrediction.filter(outcome_status="open")
+    closed_deal_subquery = (
+        model.ClosedTrades.exclude(deal_id=None)
+        .exclude(deal_id="")
+        .values_list("deal_id", flat=True)
+    )
+    closed_deal_ids = (
+        await model.AiTrustPrediction.filter(
+            outcome_status="open",
+            deal_id__in=Subquery(closed_deal_subquery),
+        )
         .exclude(deal_id=None)
         .distinct()
+        .order_by("deal_id")
         .limit(MAX_RECOVERED_OUTCOME_ATTRIBUTIONS)
         .values_list("deal_id", flat=True)
     )
-    normalized_ids = [
-        str(deal_id).strip() for deal_id in prediction_deal_ids if str(deal_id).strip()
-    ]
-    if not normalized_ids:
-        return 0
-
-    closed_deal_ids = await model.ClosedTrades.filter(
-        deal_id__in=normalized_ids
-    ).values_list("deal_id", flat=True)
     recovered = 0
     for deal_id in closed_deal_ids:
-        if await schedule_outcome_attribution(str(deal_id)):
+        normalized_deal_id = str(deal_id).strip()
+        if normalized_deal_id and await schedule_outcome_attribution(
+            normalized_deal_id
+        ):
             recovered += 1
-    if len(prediction_deal_ids) >= MAX_RECOVERED_OUTCOME_ATTRIBUTIONS:
+    if len(closed_deal_ids) >= MAX_RECOVERED_OUTCOME_ATTRIBUTIONS:
         logging.warning(
             "AI outcome recovery reached its %s-item startup cap; remaining rows "
             "will be retried on a later startup.",

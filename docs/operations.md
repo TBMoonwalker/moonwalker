@@ -38,6 +38,9 @@ dependency synchronization after an upgrade.
 
 Moonwalker allows same-origin dashboard HTTP and WebSocket connections by
 default. This is the normal setup when the UI is served by Moonwalker itself.
+Every HTTP and WebSocket request validates the Host authority as private,
+loopback, or explicitly allowed so DNS rebinding cannot turn an attacker-owned
+hostname into a trusted dashboard.
 
 If a dashboard is hosted at another origin, set a comma-separated explicit
 allowlist before starting Moonwalker:
@@ -57,6 +60,13 @@ public origin when possible. Otherwise, add the proxy's public origin to the
 allowlist. Entries must be complete `http://` or `https://` origins without a
 path, query, credentials, or wildcard. Invalid entries stop startup rather than
 silently opening cross-origin access.
+
+When Moonwalker is reached through a stable local DNS name or reverse-proxy Host,
+allow that authority explicitly:
+
+```bash
+MOONWALKER_ALLOWED_HOSTS=moonwalker.local,proxy.example.com ./run.sh start
+```
 
 ## Logging
 You can see information about DCA and TP status in `statistics.log`. Other logs
@@ -151,6 +161,12 @@ Two restore modes are available:
 - Restore config only: replaces configuration, leaves current trade data in
   place.
 - Restore full backup: replaces both configuration and the included trade data.
+
+Restore requires explicit confirmation. Before replacing state, Moonwalker
+blocks new exchange-order work and waits for already admitted order work to
+finish. The restored instance remains paused in dry-run mode so the operator can
+review configuration and trade state before deliberately activating and
+resuming trading.
 
 ## Startup Recovery
 

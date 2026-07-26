@@ -248,6 +248,56 @@ async def test_persist_buy_trade_schedules_ai_trust_after_open_trade_persistence
 
 
 @pytest.mark.asyncio
+async def test_persisted_buy_survives_optional_ai_follow_up_failure(
+    monkeypatch,
+) -> None:
+    _DummyTradesModel.created_payload = None
+    _DummyOpenTradesCreateModel.created_payload = None
+
+    async def fake_run_sqlite(operation, _name) -> None:
+        await operation()
+
+    async def fail_ai_persistence(*_args: Any) -> None:
+        raise RuntimeError("AI ledger unavailable")
+
+    monkeypatch.setattr(
+        persistence_module, "run_sqlite_write_with_retry", fake_run_sqlite
+    )
+    monkeypatch.setattr(persistence_module, "in_transaction", lambda: _DummyTx())
+    monkeypatch.setattr(persistence_module.model, "Trades", _DummyTradesModel)
+    monkeypatch.setattr(
+        persistence_module.model,
+        "OpenTrades",
+        _DummyOpenTradesCreateModel,
+    )
+    monkeypatch.setattr(
+        persistence_module.model,
+        "TradeExecutions",
+        _DummyTradeExecutionsModel,
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "persist_entry_evaluation",
+        fail_ai_persistence,
+    )
+    gate = persistence_module.AiTrustEntryGate(
+        allowed=True,
+        evaluated=True,
+        provider_status="scored",
+    )
+
+    await persistence_module.persist_buy_trade(
+        "BTC/USDC",
+        {"symbol": "BTC/USDC", "price": 100.0},
+        create_open_trade=True,
+        entry_evaluation=gate,
+    )
+
+    assert _DummyTradesModel.created_payload is not None
+    assert _DummyOpenTradesCreateModel.created_payload is not None
+
+
+@pytest.mark.asyncio
 async def test_persist_manual_buy_add_requires_matching_open_trade(
     monkeypatch,
 ) -> None:

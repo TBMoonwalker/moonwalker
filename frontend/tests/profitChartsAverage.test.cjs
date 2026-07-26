@@ -37,8 +37,8 @@ test('daily monthly and yearly profit charts render a visible running average li
 })
 
 test('profit charts stay mounted and reuse cached history across navigation', () => {
-    assert.match(appSource, /<RouterView v-slot="\{ Component \}">/)
-    assert.match(appSource, /<KeepAlive>/)
+    assert.match(appSource, /<RouterView v-slot="\{ Component, route \}">/)
+    assert.match(appSource, /<KeepAlive v-else>/)
     assert.match(appSource, /<component :is="Component" \/>/)
     assert.match(upnlStoreSource, /UPNL_HISTORY_CACHE_TTL_MS/)
     assert.match(upnlStoreSource, /pendingLoad/)
@@ -47,4 +47,9 @@ test('profit charts stay mounted and reuse cached history across navigation', ()
     assert.match(profitStoreSource, /pendingLoads/)
     assert.match(profitStoreSource, /dataByPeriod/)
     assert.match(profitStoreSource, /get_profit_history_data/)
+})
+
+test('control center unmounts so hidden listeners and pollers cannot stay active', () => {
+    assert.match(appSource, /v-if="route\.name === 'controlCenter'"/)
+    assert.match(appSource, /<KeepAlive v-else>/)
 })

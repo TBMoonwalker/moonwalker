@@ -53,6 +53,7 @@ from service.statistic import Statistic
 from service.strategy_runtime import get_strategy_adapter
 from service.trades import Trades
 from service.trading_controls import is_mission_automation_paused
+from service.trading_maintenance import trading_maintenance_barrier
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 
@@ -1422,6 +1423,19 @@ class Dca:
         self, ticker: dict[str, Any], config: dict[str, Any]
     ) -> None:
         """Process incoming ticker data and trigger DCA actions."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping ticker evaluation for %s during maintenance.",
+                    ticker.get("ticker", {}).get("symbol"),
+                )
+                return
+            await self._process_ticker_data(ticker, config)
+
+    async def _process_ticker_data(
+        self, ticker: dict[str, Any], config: dict[str, Any]
+    ) -> None:
+        """Evaluate one ticker inside the trading maintenance barrier."""
         # Get config
         self.config = config
 

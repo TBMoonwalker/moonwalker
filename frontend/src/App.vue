@@ -352,8 +352,12 @@ watch(
             <div class="app-layout">
               <AppHeader />
               <main class="app-content">
-                <RouterView v-slot="{ Component }">
-                  <KeepAlive>
+                <RouterView v-slot="{ Component, route }">
+                  <component
+                    :is="Component"
+                    v-if="route.name === 'controlCenter'"
+                  />
+                  <KeepAlive v-else>
                     <component :is="Component" />
                   </KeepAlive>
                 </RouterView>

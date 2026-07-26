@@ -50,6 +50,20 @@ async def _get_waiting_campaigns_cached() -> list[dict[str, Any]]:
     return await trades.get_waiting_trades()
 
 
+async def invalidate_trade_read_caches() -> None:
+    """Invalidate service and controller trade caches after bulk replacement."""
+    await trades.invalidate_trade_caches()
+    for cached_reader in (
+        _get_open_trades_cached,
+        _get_closed_trades_cached,
+        _get_unsellable_trades_cached,
+        _get_waiting_campaigns_cached,
+    ):
+        cache_clear = getattr(cached_reader, "cache_clear", None)
+        if cache_clear is not None:
+            await cache_clear()
+
+
 async def _build_open_trades_payload() -> str:
     """Build serialized payload for open-trades stream."""
     output = await _get_open_trades_cached()

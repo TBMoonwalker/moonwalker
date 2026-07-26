@@ -28,13 +28,19 @@ from service.database import Database
 from service.delisting_protection import DelistingProtectionService
 from service.green_phase import GreenPhaseService
 from service.housekeeper import Housekeeper
-from service.origin_policy import WebSocketOriginMiddleware, parse_allowed_origins
+from service.origin_policy import (
+    TrustedLanHttpMiddleware,
+    WebSocketOriginMiddleware,
+    parse_allowed_hosts,
+    parse_allowed_origins,
+)
 from service.redis import redis_client, start_redis, stop_redis
 from service.signal import Signal
 from service.watcher import Watcher
 
 logging = helper.LoggerFactory.get_logger("logs/startup.log", "startup")
 ALLOWED_ORIGINS = parse_allowed_origins(os.getenv("MOONWALKER_ALLOWED_ORIGINS"))
+ALLOWED_HOSTS = parse_allowed_hosts(os.getenv("MOONWALKER_ALLOWED_HOSTS"))
 
 
 @dataclass
@@ -228,18 +234,18 @@ async def _run_optional_runtime_task(
 @asynccontextmanager
 async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
     """Own runtime tasks and services for exactly one application lifespan."""
-    await startup()
-    await ai_provider_client.start()
-    assert runtime_state.database is not None
-    assert runtime_state.watcher is not None
-    assert runtime_state.housekeeper is not None
-    assert runtime_state.watcher_queue is not None
-
-    # Ownership:
-    # lifespan
-    # |-- critical: symbol intake, ticker watcher, housekeeping
-    # `-- optional: replay-candle backfill
     try:
+        await startup()
+        await ai_provider_client.start()
+        assert runtime_state.database is not None
+        assert runtime_state.watcher is not None
+        assert runtime_state.housekeeper is not None
+        assert runtime_state.watcher_queue is not None
+
+        # Ownership:
+        # lifespan
+        # |-- critical: symbol intake, ticker watcher, housekeeping
+        # `-- optional: replay-candle backfill
         async with asyncio.TaskGroup() as task_group:
             await ai_work_queue.start(task_group)
             await runtime_state.database.run_with_context(
@@ -303,9 +309,15 @@ app = Litestar(
     ),
     middleware=[
         DefineMiddleware(
+            TrustedLanHttpMiddleware,
+            allowed_origins=ALLOWED_ORIGINS,
+            allowed_hosts=ALLOWED_HOSTS,
+        ),
+        DefineMiddleware(
             WebSocketOriginMiddleware,
             allowed_origins=ALLOWED_ORIGINS,
-        )
+            allowed_hosts=ALLOWED_HOSTS,
+        ),
     ],
     compression_config=CompressionConfig(
         backend="gzip",

@@ -13,6 +13,8 @@ from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
+    SignalAdmissionBatch,
+    SignalEntryOrderDecision,
     build_common_runtime_settings,
     build_signal_buy_intent,
     get_active_open_symbols,
@@ -518,19 +520,9 @@ class SignalPlugin:
                         continue
 
                     if admission_batch.admitted_symbols:
-                        await self.watcher_queue.put(admission_batch.admitted_symbols)
-                        entry_orders = await resolve_signal_entry_orders(
-                            self.config,
-                            self.statistic,
-                            self.autopilot,
-                            admission_batch.admitted_symbols,
-                            signal_name="asap",
-                            strategy_name=(
-                                str(self.config.get("signal_strategy") or "") or None
-                            ),
-                            timeframe=self._strategy_timeframe,
+                        entry_orders = await self._prepare_signal_entry_orders(
+                            admission_batch
                         )
-                        log_signal_entry_order_decisions(entry_orders.values())
 
                     try:
                         for symbol in admission_batch.admitted_symbols:
@@ -550,6 +542,31 @@ class SignalPlugin:
             else:
                 self.__log_max_bots_waiting()
             await asyncio.sleep(5)
+
+    async def _prepare_signal_entry_orders(
+        self,
+        admission_batch: SignalAdmissionBatch,
+    ) -> dict[str, SignalEntryOrderDecision]:
+        """Prepare watcher history and entry sizing without leaking reservations."""
+        try:
+            await self.watcher_queue.put(admission_batch.admitted_symbols)
+            entry_orders = await resolve_signal_entry_orders(
+                self.config,
+                self.statistic,
+                self.autopilot,
+                admission_batch.admitted_symbols,
+                signal_name="asap",
+                strategy_name=(str(self.config.get("signal_strategy") or "") or None),
+                timeframe=self._strategy_timeframe,
+            )
+            log_signal_entry_order_decisions(entry_orders.values())
+            return entry_orders
+        except asyncio.CancelledError:
+            await admission_batch.release()
+            raise
+        except Exception:
+            await admission_batch.release()
+            raise
 
     async def shutdown(self) -> None:
         """Shutdown the signal plugin.

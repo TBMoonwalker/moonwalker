@@ -19,8 +19,9 @@ runtime and multiple concurrent dashboard clients.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/config/all` | Return the full config snapshot used by the dashboard, including snapshot-native `config_updated_at` metadata for stale-snapshot detection. |
+| `GET` | `/config/all` | Return the dashboard config snapshot with persisted credentials replaced by redaction markers, including snapshot-native `config_updated_at` metadata for stale-snapshot detection. |
 | `GET` | `/config/freshness` | Return the latest persisted config `updated_at` timestamp so dashboard clients can detect stale local snapshots. |
+| `GET` | `/config/schema` | Return the versioned, frontend-safe contract for high-risk runtime settings, including defaults, bounds, enums, sensitivity, and readiness metadata. |
 | `GET` | `/config/single/{key}` | Return a single config key. |
 | `PUT` | `/config/single/{key}` | Update one config key with a JSON body like `{"value":{"value":"binance","type":"str"}}`. |
 | `POST` | `/config/multiple` | Update multiple config keys in one JSON payload. |
@@ -30,8 +31,17 @@ runtime and multiple concurrent dashboard clients.
 | `POST` | `/config/backup/restore` | Restore config-only or full backup payloads. |
 
 Notes:
+- Every HTTP and WebSocket request must use a trusted private/loopback Host or an
+  explicitly allowed Host. Unsafe browser requests (`POST`, `PUT`, `PATCH`, and
+  `DELETE`) additionally require an allowed same-origin value and the
+  `X-Moonwalker-Client: dashboard` header. Direct trusted-LAN clients without an
+  `Origin` header remain supported. Set `MOONWALKER_ALLOWED_HOSTS` for explicit
+  local DNS names and `MOONWALKER_ALLOWED_ORIGINS` for trusted reverse proxies.
 - Config update payloads use nested typed objects such as
   `{"dry_run":{"value":false,"type":"bool"}}`.
+- Public config reads never return persisted credential values. They use
+  redaction markers that supported config writes restore from server state when
+  an unrelated setting is saved.
 - Dashboard clients can compare `/config/all`'s `config_updated_at` against
   `/config/freshness` so a stale snapshot is not mistaken for a freshly loaded
   one when another tab or client saves between requests.
@@ -44,9 +54,11 @@ Notes:
   transition is rejected unless it goes through `POST /config/live/activate`.
 - `POST /config/live/activate` expects `{"confirm": true}` and returns `409`
   with a `blockers` array when required setup is still incomplete.
-- `POST /config/backup/restore` expects a JSON body with `backup` and optional
-  `restore_trade_data`, and rejects backups that still contain removed legacy
-  config keys.
+- `POST /config/backup/restore` expects a JSON body with `backup`,
+  `confirm: true`, and optional `restore_trade_data`. Restore drains active
+  exchange-order work, rejects new order work until replacement completes, and
+  leaves the restored instance paused in dry-run mode. Backups containing
+  removed legacy config keys are rejected.
 - Switching the signal plugin to `csv_signal` is rejected while open trades
   still exist.
 

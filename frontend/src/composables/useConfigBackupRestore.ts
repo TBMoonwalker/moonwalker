@@ -278,6 +278,7 @@ export function useConfigBackupRestore(
                 {
                     backup: selectedBackupPayload.value,
                     restore_trade_data: mode === 'full',
+                    confirm: true,
                 },
             )
 

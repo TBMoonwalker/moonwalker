@@ -52,6 +52,7 @@ from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades
 from service.trading_contracts import BuyIntent, SellIntent
 from service.trading_controls import evaluate_buy_like_gate
+from service.trading_maintenance import trading_maintenance_barrier
 from tortoise.exceptions import ConfigurationError
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
@@ -477,6 +478,18 @@ class Orders:
         config: dict[str, Any],
     ) -> bool:
         """Close the trade if its proactive TP limit order filled."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info("Skipping proactive TP reconciliation during maintenance.")
+                return False
+            return await self._reconcile_tp_limit_order(trades, config)
+
+    async def _reconcile_tp_limit_order(
+        self,
+        trades: dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Reconcile one proactive TP limit order inside the maintenance barrier."""
         symbol = str(trades.get("symbol") or "")
         if not trades.get("tp_limit_order_id") or not symbol:
             return False
@@ -565,6 +578,21 @@ class Orders:
         config: dict[str, Any],
     ) -> bool:
         """Cancel a persisted proactive TP limit order if one exists."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping proactive TP cancellation for %s during maintenance.",
+                    symbol,
+                )
+                return False
+            return await self._cancel_tp_limit_order(symbol, config)
+
+    async def _cancel_tp_limit_order(
+        self,
+        symbol: str,
+        config: dict[str, Any],
+    ) -> bool:
+        """Cancel one proactive TP order inside the maintenance barrier."""
         sell_lock = self._get_sell_lock(symbol)
         async with sell_lock:
             return await self._cancel_tp_limit_order_locked(symbol, config)
@@ -575,6 +603,21 @@ class Orders:
         config: dict[str, Any],
     ) -> bool:
         """Place and persist a proactive TP limit sell order."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping proactive TP limit order for %s during maintenance.",
+                    order["symbol"],
+                )
+                return False
+            return await self._arm_tp_limit_order(order, config)
+
+    async def _arm_tp_limit_order(
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Arm one proactive TP order inside the maintenance barrier."""
         symbol = str(order["symbol"])
         sell_lock = self._get_sell_lock(symbol)
         async with sell_lock:
@@ -633,6 +676,19 @@ class Orders:
         self, order: SellIntent | dict[str, Any], config: dict[str, Any]
     ) -> None:
         """Create a sell order and persist closed trades."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping sell order for %s during maintenance.",
+                    order["symbol"],
+                )
+                return
+            await self._receive_sell_order(order, config)
+
+    async def _receive_sell_order(
+        self, order: SellIntent | dict[str, Any], config: dict[str, Any]
+    ) -> None:
+        """Execute one sell order inside the maintenance barrier."""
         logging.info("Incoming sell order for %s", order["symbol"])
         if order.get("sell_reason") == TradeCloseReason.SIDESTEP_EXIT.value:
             logging.info(
@@ -954,7 +1010,19 @@ class Orders:
         self, order: BuyIntent | dict[str, Any], config: dict[str, Any]
     ) -> bool:
         """Create a buy order and persist open trades."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping buy order for %s during maintenance.",
+                    order["symbol"],
+                )
+                return False
+            return await self._receive_buy_order(order, config)
 
+    async def _receive_buy_order(
+        self, order: BuyIntent | dict[str, Any], config: dict[str, Any]
+    ) -> bool:
+        """Execute one buy order inside the maintenance barrier."""
         logging.info("Incoming buy order for %s", order["symbol"])
         if str(order.get("campaign_id") or "").strip():
             logging.info(
@@ -1113,6 +1181,26 @@ class Orders:
         config: dict[str, Any],
     ) -> dict[str, Any]:
         """Append a manual buy as a safety-order row without exchange execution."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                raise ValueError("Cannot add a manual buy during backup restore.")
+            return await self._receive_manual_buy_add(
+                symbol,
+                date_input,
+                price_raw,
+                amount_raw,
+                config,
+            )
+
+    async def _receive_manual_buy_add(
+        self,
+        symbol: str,
+        date_input: Any,
+        price_raw: Any,
+        amount_raw: Any,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist one manual buy inside the maintenance barrier."""
         request = parse_manual_buy_add_request(
             symbol=symbol,
             date_input=date_input,
@@ -1245,6 +1333,21 @@ class Orders:
         config: dict[str, Any] | None = None,
     ) -> bool:
         """Stop trading for a symbol."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping stop order for %s during maintenance.",
+                    symbol,
+                )
+                return False
+            return await self._receive_stop_signal(symbol, config)
+
+    async def _receive_stop_signal(
+        self,
+        symbol: str,
+        config: dict[str, Any] | None = None,
+    ) -> bool:
+        """Stop one symbol inside the maintenance barrier."""
         logging.info("Incoming stop order")
         symbol = normalize_order_symbol(symbol)
         try:

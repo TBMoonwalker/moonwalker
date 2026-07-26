@@ -15,6 +15,28 @@ class DummyRedis:
         return 1
 
 
+def test_restore_forces_paused_dry_run_config() -> None:
+    """Restored configuration must require explicit activation and resume."""
+    rows = BackupService._force_safe_restore_config(
+        [
+            {"key": "dry_run", "value": "False", "value_type": "bool"},
+            {"key": "timezone", "value": "UTC", "value_type": "str"},
+        ]
+    )
+    by_key = {row["key"]: row for row in rows}
+
+    assert by_key["dry_run"] == {
+        "key": "dry_run",
+        "value": "True",
+        "value_type": "bool",
+    }
+    assert by_key["trading_paused"] == {
+        "key": "trading_paused",
+        "value": "True",
+        "value_type": "bool",
+    }
+
+
 async def _fake_config_instance(cls) -> Config:
     if cls._instance is None:
         cls._instance = Config()
