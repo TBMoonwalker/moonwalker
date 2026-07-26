@@ -26,6 +26,8 @@ runtime and multiple concurrent dashboard clients.
 | `PUT` | `/config/single/{key}` | Update one config key with a JSON body like `{"value":{"value":"binance","type":"str"}}`. |
 | `POST` | `/config/multiple` | Update multiple config keys in one JSON payload. |
 | `POST` | `/config/live/activate` | Switch the instance from dry run to live mode after backend readiness checks pass. |
+| `POST` | `/config/trading/pause` | Pause new exposure while existing exit management continues. |
+| `POST` | `/config/trading/resume` | Resume admission of new exposure. |
 | `GET` | `/config/backup/export?include_trade_data=false` | Export config-only backup payload. |
 | `GET` | `/config/backup/export?include_trade_data=true` | Export full backup payload including trade data. |
 | `POST` | `/config/backup/restore` | Restore config-only or full backup payloads. |
@@ -54,6 +56,9 @@ Notes:
   transition is rejected unless it goes through `POST /config/live/activate`.
 - `POST /config/live/activate` expects `{"confirm": true}` and returns `409`
   with a `blockers` array when required setup is still incomplete.
+- `POST /config/trading/pause` and `POST /config/trading/resume` both expect
+  `{"confirm": true}`. Pausing blocks new exposure but does not block protective
+  exits for existing positions.
 - `POST /config/backup/restore` expects a JSON body with `backup`,
   `confirm: true`, and optional `restore_trade_data`. Restore drains active
   exchange-order work, rejects new order work until replacement completes, and
@@ -144,6 +149,12 @@ Capital-budget fields include `capital_max_fund`,
 It also carries compact Autopilot Memory status fields for the top statistics
 strip, including freshness or warmup state, stale reason, current vs required
 closed-trade count, and the currently featured symbol when available.
+
+## Analytics
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/analytics/overview` | Return closed-trade analytics plus AI Trust coverage, warning quality, recent predictions, outcome review, and read-only local calibration diagnostics. |
 
 ## Market Data
 

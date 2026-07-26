@@ -1,7 +1,7 @@
 # AI Trust Local Calibration Plan
 
 Date: 2026-07-04
-Status: Draft for plan-eng-review, scope reduced to read-only calibration V1
+Status: Implemented in v4.2.0.0 as read-only calibration V1
 Target feature: Moonwalker AI Trust Cockpit
 
 ## Summary
@@ -458,19 +458,19 @@ view, so parallel worktrees would create more merge coordination than speed.
 Synthesized from this review's findings. Each task derives from a specific
 finding above. Run with Claude Code or Codex; checkbox as you ship.
 
-- [ ] **T1 (P1, human: ~1h / CC: ~20min)** — Backend calibration — Add bounded read-only calibration helpers
+- [x] **T1 (P1, human: ~1h / CC: ~20min)** — Backend calibration — Add bounded read-only calibration helpers
   - Surfaced by: Architecture Review — unbounded `AiTrustPrediction.all()` must not become the calibration query shape.
   - Files: `backend/service/ai_trust.py`, `backend/tests/test_ai_trust.py`
   - Verify: `cd scripts && ./ci.sh`
-- [ ] **T2 (P2, human: ~45min / CC: ~15min)** — Calibration confidence — Implement cold/warming/usable/confident thresholds
+- [x] **T2 (P2, human: ~45min / CC: ~15min)** — Calibration confidence — Implement cold/warming/usable/confident thresholds
   - Surfaced by: Architecture Review — low sample counts can make noisy patterns look meaningful.
   - Files: `backend/service/ai_trust.py`, `backend/tests/test_ai_trust.py`
   - Verify: `cd scripts && ./ci.sh`
-- [ ] **T3 (P2, human: ~45min / CC: ~15min)** — Analytics contract — Return derived calibration diagnostics without ledger migration
+- [x] **T3 (P2, human: ~45min / CC: ~15min)** — Analytics contract — Return derived calibration diagnostics without ledger migration
   - Surfaced by: Code Quality Review — read-only V1 should avoid persisted calibration snapshots.
   - Files: `backend/service/ai_trust.py`, `frontend/src/stores/analytics.ts`
   - Verify: `cd scripts && ./ci.sh`
-- [ ] **T4 (P2, human: ~1h / CC: ~25min)** — Statistics UI — Add compact calibration diagnostics
+- [x] **T4 (P2, human: ~1h / CC: ~25min)** — Statistics UI — Add compact calibration diagnostics
   - Surfaced by: Test Review — operator must see confidence, top risky reasons, missed clusters, and shadow threshold copy.
   - Files: `frontend/src/views/StatisticsView.vue`, `frontend/tests/`
   - Verify: `cd scripts && ./ci.sh`

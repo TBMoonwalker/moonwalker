@@ -54,6 +54,7 @@ are not exposed in the UI and must be set via the API.
 | --- | --- | --- | --- |
 | `timezone` | `string` | Timezone used for logging. | `Europe/London` |
 | `debug` | `bool` | Enable debug logging. | `true` |
+| `trading_paused` | `bool` | Persisted runtime pause state. When true, Moonwalker blocks new exposure while continuing to manage exits for existing positions. Prefer the pause/resume API actions instead of editing this key directly. | `false` |
 | `signal` | `string` | Signal plugin to use (e.g. `sym_signals`, `asap`, `csv_signal`, `websocket_signal`). | `sym_signals` |
 | `signal_settings` | `string (json)` | Plugin settings per selected signal plugin. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |
 | `symbol_list` | `string` | CSV list or URL for ASAP symbol list. | `BTC/USDT,ETH/USDT` |
@@ -167,6 +168,13 @@ are not exposed in the UI and must be set via the API.
 | `autopilot_green_phase_confirm_cycles` | `int` | Number of consecutive evaluation runs that must satisfy the enter condition before Green Phase activates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `2` |
 | `autopilot_green_phase_release_cycles` | `int` | Number of consecutive evaluation runs below the exit condition before Green Phase deactivates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `4` |
 | `autopilot_green_phase_max_locked_fund_percent` | `float` | Hard ceiling for locked funds, in percent of `capital_max_fund`, above which Green Phase may not add extra deals. | `85` |
+| `ai_trust_enabled` | `bool` | Enable local AI Trust entry observations and the Statistics cockpit. | `false` |
+| `ai_trust_enforce_warnings` | `bool` | Block new entries when AI Trust returns a warning or its configured provider is unavailable. Requires AI Trust to be enabled. | `false` |
+| `ai_trust_ollama_base_url` | `string` | Base URL for the local Ollama provider used by AI Trust. | `http://localhost:11434` |
+| `ai_trust_ollama_model` | `string` | Ollama model name used for AI Trust entry evaluation. Live warning enforcement requires a configured model. | empty |
+| `ai_trust_timeout_ms` | `int` | Provider timeout in milliseconds, from `250` through `120000`. | `10000` |
+| `ai_trust_max_retries` | `int` | Retry budget for safe transient provider failures, from `0` through `2`. | `0` |
+| `ai_trust_runtime_status` | `string` | Read-only provider state: `ok`, `provider_unavailable`, or `warning_blocked`. | `ok` |
 | `monitoring_enabled` | `bool` | Enable outbound monitoring notifications for executed buys/sells. | `false` |
 | `monitoring_telegram_api_id` | `int` | Telegram API ID used by Telethon client. | `1234567` |
 | `monitoring_telegram_api_hash` | `string` | Telegram API hash used by Telethon client. | `0123456789abcdef...` |
