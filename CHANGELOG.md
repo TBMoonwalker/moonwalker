@@ -4,6 +4,61 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.2.0.0] - 2026-07-26
+
+### Added
+
+- Added bounded recovery-target DCA sizing with ATR-aware safety-order spacing,
+  configurable recovery budgets, projected take-profit context, shadow mode,
+  and operator-facing diagnostics.
+- Added optional exchange delisting protection for new base orders, safety
+  orders, and sidestep re-entry while preserving exits for existing positions
+  and surfacing prominent open-trade warnings.
+- Added a WebSocket signal source with reconnect handling, keepalive
+  acknowledgement, admission controls, GUI configuration, and runtime health
+  reporting.
+- Added local AI Trust observation, calibration, entry-sizing guidance,
+  analytics, persisted prediction history, and an operator cockpit.
+- Added proactive take-profit limit pre-arming and spike confirmation controls
+  to reduce missed wick exits without selling below the configured profit floor.
+- Added strict Python and npm dependency locks, artifact-integrity checks,
+  vulnerability audits, registry-signature verification, and documented Node 24
+  startup guidance.
+
+### Changed
+
+- Refined the Control Center and trade/statistics surfaces for clearer setup,
+  responsive operation, accessible controls, stable navigation, and shared
+  configuration freshness across multiple dashboard clients.
+- Aligned backend and frontend configuration contracts, readiness validation,
+  backup restore behavior, and WebSocket signal requirements.
+- Updated supported runtime packages and development tooling after advisory,
+  provenance, signature, and compatibility review.
+
+### Fixed
+
+- Prevented take-profit fallback paths from placing an exit below the configured
+  profit floor.
+- Prevented signal admission reservations from leaking when watcher preparation
+  or entry sizing fails.
+- Prevented stale AI outcome recovery, provider retry, post-fill persistence,
+  startup cleanup, SQLite integrity, cache invalidation, and hidden Control
+  Center lifecycle failures from obscuring runtime state.
+- Corrected dynamic DCA deal-cap, delisting, configuration migration, and
+  responsive trade-ledger edge cases found during QA.
+
+### Security
+
+- Enforced trusted private, loopback, or explicitly allowed Host authorities on
+  every HTTP and WebSocket request, plus same-origin and dashboard-header checks
+  for browser mutations.
+- Redacted all WebSocket credential headers and sensitive subscription payloads
+  from public configuration responses.
+- Made backup restore explicitly confirmed, serialized, paused, dry-run safe,
+  cache coherent, and mutually exclusive with complete DCA/order execution.
+- Made Python dependency-lock validation fail closed on direct URLs, VCS/local
+  sources, installer directives, and injected continuation lines.
+
 ## [4.1.0.0] - 2026-06-08
 
 ### Added
