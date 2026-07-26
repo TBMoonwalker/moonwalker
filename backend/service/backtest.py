@@ -7,6 +7,7 @@ and returns synthetic trade results with chart markers and analytics stats.
 
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime, timezone
 from typing import Any
 
@@ -14,6 +15,7 @@ import helper
 import pandas as pd
 from service.analytics import compute_stats_from_trades
 from service.data_ohlcv import resample_ohlcv_data
+from service.data_timeframes import timeframe_bucket_origin_milliseconds
 from service.dca_math import (
     BacktestTradeState,
     calculate_actual_pnl_percent,
@@ -24,6 +26,14 @@ from service.dca_math import (
     check_stop_loss_hit,
     check_take_profit_hit,
     should_place_safety_order,
+)
+from service.dca_recovery_sizing import (
+    RECOVERY_TARGET_MODE,
+    RecoverySizingPolicy,
+    build_recovery_sizing_policy,
+    calculate_recovery_sizing,
+    calculate_recovery_spacing_percent,
+    calculate_recovery_trigger_price,
 )
 from service.exchange import Exchange
 from service.indicators import Indicators
@@ -283,6 +293,177 @@ def candles_to_dataframe(candles: list[OhlcvCandle]) -> pd.DataFrame:
     return df
 
 
+def calculate_atr_percent_series(
+    candles: list[OhlcvCandle],
+    length: int = 14,
+    *,
+    source_timeframe: str | None = None,
+    atr_timeframe: str | None = None,
+) -> list[float]:
+    """Calculate causal Wilder ATR percentages at the requested timeframe."""
+    if not candles:
+        return []
+
+    normalized_length = max(2, int(length))
+    source = _normalize_timeframe(source_timeframe)
+    target = _normalize_timeframe(atr_timeframe)
+    if not source or not target or source == target:
+        return _calculate_native_atr_percent_series(candles, normalized_length)
+
+    source_ms = TIMEFRAME_TO_MS.get(source)
+    target_ms = TIMEFRAME_TO_MS.get(target)
+    if (
+        source_ms is None
+        or target_ms is None
+        or target_ms < source_ms
+        or target_ms % source_ms != 0
+    ):
+        raise BacktestValidationError(
+            "Recovery ATR timeframe must equal or be a clean multiple of the "
+            "backtest timeframe."
+        )
+    return _calculate_resampled_atr_percent_series(
+        candles,
+        normalized_length,
+        target,
+        target_ms,
+    )
+
+
+def _calculate_native_atr_percent_series(
+    candles: list[OhlcvCandle],
+    length: int,
+) -> list[float]:
+    """Calculate Wilder ATR percentages without timeframe resampling."""
+    true_ranges: list[float] = []
+    atr_values: list[float] = []
+    previous_close: float | None = None
+    atr = 0.0
+    for index, candle in enumerate(candles):
+        true_ranges.append(
+            _calculate_true_range(candle.high, candle.low, previous_close)
+        )
+
+        if index + 1 < length:
+            atr = sum(true_ranges) / len(true_ranges)
+        elif index + 1 == length:
+            atr = sum(true_ranges[-length:]) / length
+        else:
+            atr = ((atr * (length - 1)) + true_ranges[-1]) / length
+        atr_values.append((atr / candle.close) * 100 if candle.close > 0 else 0.0)
+        previous_close = candle.close
+    return atr_values
+
+
+def _calculate_resampled_atr_percent_series(
+    candles: list[OhlcvCandle],
+    length: int,
+    atr_timeframe: str,
+    atr_timeframe_ms: int,
+) -> list[float]:
+    """Map causal partial higher-timeframe ATR values to source candles."""
+    bucket_origin = timeframe_bucket_origin_milliseconds(atr_timeframe)
+    current_bucket: int | None = None
+    bucket_high = 0.0
+    bucket_low = 0.0
+    bucket_close = 0.0
+    previous_completed_close: float | None = None
+    completed_true_ranges: list[float] = []
+    completed_atr = 0.0
+    values: list[float] = []
+
+    for candle in candles:
+        bucket = bucket_origin + (
+            ((candle.timestamp - bucket_origin) // atr_timeframe_ms) * atr_timeframe_ms
+        )
+        if current_bucket is None or bucket != current_bucket:
+            if current_bucket is not None:
+                finalized_range = _calculate_true_range(
+                    bucket_high,
+                    bucket_low,
+                    previous_completed_close,
+                )
+                completed_atr = _append_wilder_true_range(
+                    completed_true_ranges,
+                    completed_atr,
+                    finalized_range,
+                    length,
+                )
+                previous_completed_close = bucket_close
+            current_bucket = bucket
+            bucket_high = candle.high
+            bucket_low = candle.low
+        else:
+            bucket_high = max(bucket_high, candle.high)
+            bucket_low = min(bucket_low, candle.low)
+        bucket_close = candle.close
+
+        partial_range = _calculate_true_range(
+            bucket_high,
+            bucket_low,
+            previous_completed_close,
+        )
+        partial_atr = _project_wilder_atr(
+            completed_true_ranges,
+            completed_atr,
+            partial_range,
+            length,
+        )
+        values.append((partial_atr / bucket_close) * 100 if bucket_close > 0 else 0.0)
+    return values
+
+
+def _calculate_true_range(
+    high: float,
+    low: float,
+    previous_close: float | None,
+) -> float:
+    """Return true range for one complete or partial candle."""
+    true_range = high - low
+    if previous_close is not None:
+        true_range = max(
+            true_range,
+            abs(high - previous_close),
+            abs(low - previous_close),
+        )
+    return max(0.0, true_range)
+
+
+def _project_wilder_atr(
+    completed_true_ranges: list[float],
+    completed_atr: float,
+    candidate_true_range: float,
+    length: int,
+) -> float:
+    """Return ATR including a candidate without committing it to state."""
+    candidate_count = len(completed_true_ranges) + 1
+    if candidate_count <= length:
+        return (sum(completed_true_ranges) + candidate_true_range) / candidate_count
+    return ((completed_atr * (length - 1)) + candidate_true_range) / length
+
+
+def _append_wilder_true_range(
+    completed_true_ranges: list[float],
+    completed_atr: float,
+    true_range: float,
+    length: int,
+) -> float:
+    """Commit one completed true range and return the updated Wilder ATR."""
+    updated_atr = _project_wilder_atr(
+        completed_true_ranges,
+        completed_atr,
+        true_range,
+        length,
+    )
+    completed_true_ranges.append(true_range)
+    return updated_atr
+
+
+def _normalize_timeframe(value: str | None) -> str:
+    """Return the canonical timeframe spelling used by replay math."""
+    return str(value or "").strip().lower().replace("min", "m")
+
+
 # ── DCA Simulation ─────────────────────────────────────────────────────────────
 
 
@@ -306,6 +487,7 @@ class DcaSimulator:
         safety_order_step_pct: float = 3.0,
         fee: float = 0.001,
         allow_safety_orders: bool = True,
+        recovery_policy: RecoverySizingPolicy | None = None,
     ) -> None:
         self.base_order_size = base_order_size
         self.take_profit_pct = take_profit_pct
@@ -314,6 +496,7 @@ class DcaSimulator:
         self.safety_order_step_pct = safety_order_step_pct
         self.fee = fee
         self.allow_safety_orders = allow_safety_orders
+        self.recovery_policy = recovery_policy or RecoverySizingPolicy()
 
     def try_enter(
         self, symbol: str, entry_price: float, timestamp: int
@@ -334,10 +517,16 @@ class DcaSimulator:
             fee=self.fee,
             total_amount=amount,
             total_cost=self.base_order_size,
+            dca_reference_price=entry_price,
         )
 
     def evaluate(
-        self, trade: BacktestTradeState, candle: OhlcvCandle
+        self,
+        trade: BacktestTradeState,
+        candle: OhlcvCandle,
+        *,
+        atr_percent: float = 0.0,
+        recovery_signal_matched: bool = True,
     ) -> BacktestTrade | None:
         """Evaluate trade against a candle; may close or add safety orders.
 
@@ -391,7 +580,18 @@ class DcaSimulator:
             candle.close,
         )
 
-        if self.allow_safety_orders and should_place_safety_order(
+        if (
+            self.allow_safety_orders
+            and self.recovery_policy.mode == RECOVERY_TARGET_MODE
+        ):
+            self._place_recovery_safety_order(
+                trade,
+                candle,
+                actual_pnl,
+                atr_percent,
+                recovery_signal_matched,
+            )
+        elif self.allow_safety_orders and should_place_safety_order(
             actual_pnl=actual_pnl,
             trigger_threshold=self._next_safety_order_threshold(trade),
             max_safety_orders=self.max_safety_orders,
@@ -414,6 +614,68 @@ class DcaSimulator:
             )
 
         return None
+
+    def _place_recovery_safety_order(
+        self,
+        trade: BacktestTradeState,
+        candle: OhlcvCandle,
+        actual_pnl: float,
+        atr_percent: float,
+        recovery_signal_matched: bool,
+    ) -> None:
+        """Place one recovery-target SO when spacing and strategy permit it."""
+        if trade.safety_orders_count >= self.max_safety_orders:
+            return
+
+        reference_price = trade.dca_reference_price or trade.entry_price
+        reference_atr = trade.dca_reference_atr_percent or max(0.0, atr_percent)
+        spacing = calculate_recovery_spacing_percent(
+            reference_atr,
+            trade.safety_orders_count,
+            self.recovery_policy,
+        )
+        trigger_price = calculate_recovery_trigger_price(reference_price, spacing)
+        trade.dca_reference_price = reference_price
+        trade.dca_reference_atr_percent = reference_atr
+        trade.dca_next_trigger_price = trigger_price
+        if (
+            trigger_price <= 0
+            or candle.close > trigger_price
+            or not recovery_signal_matched
+        ):
+            return
+
+        sizing = calculate_recovery_sizing(
+            total_cost=trade.total_cost,
+            total_amount=trade.total_amount,
+            fill_price=candle.close,
+            take_profit_percent=self.take_profit_pct,
+            fee_ratio=trade.fee,
+            atr_percent=max(0.0, atr_percent),
+            policy=self.recovery_policy,
+        )
+        if not sizing.should_place:
+            return
+
+        so_size = sizing.final_quote
+        so_amount = so_size / candle.close
+        trade.total_cost += so_size
+        trade.total_amount += so_amount
+        trade.safety_orders_count += 1
+        trade.dca_reference_price = candle.close
+        trade.dca_reference_atr_percent = max(0.0, atr_percent)
+        trade.dca_next_trigger_price = 0.0
+        trade.safety_orders.append(
+            {
+                "index": trade.safety_orders_count,
+                "price": candle.close,
+                "amount": so_amount,
+                "cost": so_size,
+                "timestamp": candle.timestamp,
+                "so_percentage": round(actual_pnl, 1),
+                "recovery_sizing": sizing.to_dict(),
+            }
+        )
 
     def _next_safety_order_threshold(self, trade: BacktestTradeState) -> float:
         """Return the next dynamic DCA trigger threshold."""
@@ -483,6 +745,13 @@ class Backtest:
             safety_order_step_pct, "safety_order_step_pct"
         )
         self.fee = _non_negative_float(fee, "fee")
+        self.recovery_policy = replace(
+            build_recovery_sizing_policy(
+                config,
+                trading_timeframe=self.timeframe,
+            ),
+            minimum_spacing_percent=self.safety_order_step_pct,
+        )
         self.trade_mode = _trade_mode(trade_mode)
         self.sidestep_bearish_strategy = _strategy_slug(
             sidestep_bearish_strategy,
@@ -536,6 +805,7 @@ class Backtest:
             safety_order_step_pct=self.safety_order_step_pct,
             fee=self.fee,
             allow_safety_orders=self.trade_mode == TRADE_MODE_DYNAMIC_DCA,
+            recovery_policy=self.recovery_policy,
         )
 
         if self.trade_mode == TRADE_MODE_SIDESTEP:
@@ -574,6 +844,14 @@ class Backtest:
             indicators,
             replay_start_index,
         )
+        atr_percentages = [0.0] * len(candles)
+        if self.recovery_policy.mode == RECOVERY_TARGET_MODE:
+            atr_percentages = calculate_atr_percent_series(
+                candles,
+                self.recovery_policy.atr_length,
+                source_timeframe=self.timeframe,
+                atr_timeframe=self.recovery_policy.atr_timeframe,
+            )
 
         for idx in range(replay_start_index, len(candles) - 1):
             candle = candles[idx]
@@ -581,8 +859,22 @@ class Backtest:
 
             # 1. Evaluate existing trade against CURRENT candle (eval before signal)
             if self._open_trade:
+                recovery_signal_matched = True
+                if self.recovery_policy.mode == RECOVERY_TARGET_MODE:
+                    recovery_result = await self._evaluate_strategy(
+                        self.strategy_slug,
+                        "buy",
+                        indicators,
+                        idx,
+                    )
+                    recovery_signal_matched = recovery_result.matched
                 previous_safety_orders = self._open_trade.safety_orders_count
-                closed = simulator.evaluate(self._open_trade, candle)
+                closed = simulator.evaluate(
+                    self._open_trade,
+                    candle,
+                    atr_percent=atr_percentages[idx],
+                    recovery_signal_matched=recovery_signal_matched,
+                )
                 if closed:
                     self._closed_trades.append(closed)
                     self._chart_markers.append(
@@ -616,8 +908,22 @@ class Backtest:
                         self._append_buy_marker(next_candle.timestamp, "BO")
 
         if self._open_trade is not None:
+            recovery_signal_matched = True
+            if self.recovery_policy.mode == RECOVERY_TARGET_MODE:
+                recovery_result = await self._evaluate_strategy(
+                    self.strategy_slug,
+                    "buy",
+                    indicators,
+                    len(candles) - 1,
+                )
+                recovery_signal_matched = recovery_result.matched
             previous_safety_orders = self._open_trade.safety_orders_count
-            closed = simulator.evaluate(self._open_trade, candles[-1])
+            closed = simulator.evaluate(
+                self._open_trade,
+                candles[-1],
+                atr_percent=atr_percentages[-1],
+                recovery_signal_matched=recovery_signal_matched,
+            )
             if closed:
                 self._closed_trades.append(closed)
                 self._chart_markers.append(
@@ -860,6 +1166,8 @@ class Backtest:
                 "trade_mode": self.trade_mode,
                 "sidestep_bearish_strategy": self.sidestep_bearish_strategy,
                 "sidestep_reentry_strategy": self.sidestep_reentry_strategy,
+                "dca_sizing_mode": self.recovery_policy.mode,
+                "dca_atr_timeframe": self.recovery_policy.atr_timeframe,
                 "still_open_at_end": False,
                 "sidestep_waiting_at_end": False,
             }
@@ -890,6 +1198,8 @@ class Backtest:
                 "trade_mode": self.trade_mode,
                 "sidestep_bearish_strategy": self.sidestep_bearish_strategy,
                 "sidestep_reentry_strategy": self.sidestep_reentry_strategy,
+                "dca_sizing_mode": self.recovery_policy.mode,
+                "dca_atr_timeframe": self.recovery_policy.atr_timeframe,
                 "still_open_at_end": self._still_open_at_end,
                 "sidestep_waiting_at_end": self._sidestep_waiting_at_end,
             }

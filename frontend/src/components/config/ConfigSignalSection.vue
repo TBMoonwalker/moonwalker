@@ -20,6 +20,81 @@
                 />
             </n-form-item>
 
+            <n-form-item
+                label="Protect against delisting"
+                path="delisting_protection_enabled"
+                label-placement="left"
+            >
+                <n-flex vertical :size="4">
+                    <n-switch
+                        v-model:value="signal.delisting_protection_enabled"
+                        aria-label="Protect new exposure against delisting"
+                    />
+                    <n-text depth="3">
+                        Blocks base orders, safety orders, and re-entries when
+                        the exchange reports a scheduled delisting or inactive
+                        market. Existing exits remain enabled.
+                    </n-text>
+                </n-flex>
+            </n-form-item>
+
+            <template v-if="signal.delisting_protection_enabled">
+                <n-alert type="info" title="Binance schedule credentials">
+                    Delisting checks always use an isolated production client.
+                    Dedicated read-only credentials are safer. Reused trading
+                    credentials must also be valid on production Binance.
+                </n-alert>
+                <n-form-item
+                    label="Use trading API credentials"
+                    path="delisting_schedule_use_trading_credentials"
+                    label-placement="left"
+                >
+                    <n-flex vertical :size="4">
+                        <n-switch
+                            v-model:value="
+                                signal.delisting_schedule_use_trading_credentials
+                            "
+                            aria-label="Use trading API credentials for delisting checks"
+                        />
+                        <n-text depth="3">
+                            Reuses the API key and secret from Exchange settings.
+                            No trading or withdrawal request is made by the
+                            delisting checker.
+                        </n-text>
+                    </n-flex>
+                </n-form-item>
+                <template
+                    v-if="
+                        !signal.delisting_schedule_use_trading_credentials
+                    "
+                >
+                    <n-form-item
+                        label="Binance schedule API key"
+                        path="delisting_schedule_api_key"
+                    >
+                        <n-input
+                            v-model:value="signal.delisting_schedule_api_key"
+                            type="password"
+                            show-password-on="click"
+                            autocomplete="off"
+                            placeholder="Production read-only API key"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Binance schedule API secret"
+                        path="delisting_schedule_api_secret"
+                    >
+                        <n-input
+                            v-model:value="signal.delisting_schedule_api_secret"
+                            type="password"
+                            show-password-on="click"
+                            autocomplete="off"
+                            placeholder="Production read-only API secret"
+                        />
+                    </n-form-item>
+                </template>
+            </template>
+
             <template v-if="signal.signal === 'sym_signals'">
                 <n-form-item label="URL" path="url.0">
                     <n-input v-model:value="signal.symsignal_url" placeholder="URL" />
@@ -147,6 +222,66 @@
                         </n-flex>
                     </n-form-item>
                 </template>
+            </template>
+
+            <template v-if="signal.signal === 'websocket_signal'">
+                <n-form-item label="WebSocket URL" path="websocket_url">
+                    <n-input
+                        v-model:value="signal.websocket_url"
+                        placeholder="ws://localhost:8000/v1/signals/stream?token=dev-token"
+                    />
+                </n-form-item>
+                <n-form-item label="Headers" path="websocket_headers">
+                    <n-input
+                        v-model:value="signal.websocket_headers"
+                        type="textarea"
+                        :autosize="{
+                            minRows: 2,
+                            maxRows: 8,
+                        }"
+                        placeholder='{"Authorization":"Bearer token"}'
+                    />
+                </n-form-item>
+                <n-form-item label="Subscribe message" path="websocket_subscribe_message">
+                    <n-input
+                        v-model:value="signal.websocket_subscribe_message"
+                        type="textarea"
+                        :autosize="{
+                            minRows: 2,
+                            maxRows: 8,
+                        }"
+                        placeholder='{"type":"subscribe","symbols":["DYMUSDC"]}'
+                    />
+                </n-form-item>
+                <n-form-item label="Decision" path="websocket_required_decision">
+                    <n-input
+                        v-model:value="signal.websocket_required_decision"
+                        placeholder="take_trade"
+                    />
+                </n-form-item>
+                <n-form-item label="Min confidence" path="websocket_min_confidence">
+                    <n-input-number
+                        v-model:value="signal.websocket_min_confidence"
+                        :min="0"
+                        :max="100"
+                        :step="1"
+                    />
+                </n-form-item>
+                <n-form-item label="Accepted exchanges" path="websocket_accepted_exchanges">
+                    <n-input
+                        v-model:value="signal.websocket_accepted_exchanges"
+                        placeholder="binance"
+                    />
+                </n-form-item>
+                <n-form-item
+                    label="Accepted market states"
+                    path="websocket_accepted_market_states"
+                >
+                    <n-input
+                        v-model:value="signal.websocket_accepted_market_states"
+                        placeholder="healthy"
+                    />
+                </n-form-item>
             </template>
 
             <template v-if="signal.signal !== 'csv_signal'">

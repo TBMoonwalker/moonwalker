@@ -1,0 +1,1105 @@
+"""Regression coverage for the optional AI trust cockpit."""
+
+from __future__ import annotations
+
+import json
+import os
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+import httpx
+import model
+import pytest
+import service.ai_trust as ai_trust
+import service.ai_trust_analytics as ai_trust_analytics
+from service.ai_trust import AiTrustResponseError
+from tortoise import Tortoise
+
+
+class _FakeConfigService:
+    def __init__(self, snapshot: dict[str, Any]) -> None:
+        self._snapshot = snapshot
+
+    def snapshot(self) -> dict[str, Any]:
+        return self._snapshot
+
+
+class _FakeConfig:
+    snapshot: dict[str, Any] = {}
+
+    @classmethod
+    async def instance(cls) -> _FakeConfigService:
+        return _FakeConfigService(cls.snapshot)
+
+
+async def _init_db(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+
+def test_feature_bundle_excludes_secrets_and_raw_payloads() -> None:
+    payload = {
+        "symbol": "BTC/USDT",
+        "deal_id": "deal-1",
+        "timestamp": "2026-06-10T12:00:00Z",
+        "price": 100.0,
+        "amount": 0.2,
+        "ordersize": 20.0,
+        "fee": 0.01,
+        "baseorder": True,
+        "secret": "do-not-send",
+        "api_key": "do-not-send",
+        "raw_ohlcv": [[1, 2, 3, 4, 5]],
+        "raw_config": {"tp": 1.5},
+    }
+
+    bundle = ai_trust.build_entry_feature_bundle("BTC/USDT", payload)
+    serialized = json.dumps(bundle).lower()
+
+    assert "do-not-send" not in serialized
+    assert "secret" not in serialized
+    assert "api_key" not in serialized
+    assert "raw_ohlcv" not in serialized
+    assert "raw_config" not in serialized
+    assert bundle["position"]["entry_notional"] == pytest.approx(20.0)
+
+
+def test_validate_ai_trust_output_accepts_valid_schema() -> None:
+    result = ai_trust.validate_ai_trust_output(
+        json.dumps(
+            {
+                "risk_score": 72,
+                "confidence": 0.81,
+                "would_warn": True,
+                "warning_severity": "high",
+                "reason_codes": ["late_entry", "thin_context"],
+                "operator_note": "AI observed elevated entry risk.",
+            }
+        )
+    )
+
+    assert result["risk_score"] == 72
+    assert result["confidence"] == pytest.approx(0.81)
+    assert result["would_warn"] is True
+    assert result["warning_severity"] == "high"
+
+
+def test_validate_ai_trust_output_accepts_common_ollama_schema_drift() -> None:
+    result = ai_trust.validate_ai_trust_output(
+        {
+            "risk_score": "72",
+            "confidence": "0.81",
+            "would_warn": "true",
+            "warning_severity": "High ",
+            "reason_codes": "late_entry, thin_context",
+            "operator_note": None,
+        }
+    )
+
+    assert result == {
+        "risk_score": 72,
+        "confidence": 0.81,
+        "would_warn": True,
+        "warning_severity": "high",
+        "reason_codes": ["late_entry", "thin_context"],
+        "operator_note": "",
+    }
+
+
+def test_validate_ai_trust_output_treats_fractional_risk_as_percent() -> None:
+    result = ai_trust.validate_ai_trust_output(
+        {
+            "risk_score": 0.72,
+            "would_warn": True,
+            "warning_severity": "medium",
+            "operator_note": (
+                "Entry occurs during a strong 48-candle downtrend with price "
+                "significantly below recent highs."
+            ),
+        }
+    )
+
+    assert result["risk_score"] == 72
+    assert result["confidence"] == pytest.approx(0.5)
+    assert result["would_warn"] is True
+    assert result["warning_severity"] == "medium"
+    assert result["reason_codes"] == []
+
+
+def test_validate_ai_trust_output_accepts_fenced_nested_aliases() -> None:
+    result = ai_trust.validate_ai_trust_output("""
+        ```json
+        {
+          "result": {
+            "score": "72/100",
+            "confidence_score": "81%",
+            "warning": "yes",
+            "risk_level": "moderate",
+            "reasons": [{"code": "late_entry"}, {"reason": "thin_context"}],
+            "explanation": ["AI observed elevated risk."]
+          }
+        }
+        ```
+        """)
+
+    assert result == {
+        "risk_score": 72,
+        "confidence": 0.81,
+        "would_warn": True,
+        "warning_severity": "medium",
+        "reason_codes": ["late_entry", "thin_context"],
+        "operator_note": "AI observed elevated risk.",
+    }
+
+
+def test_validate_ai_trust_output_derives_optional_warning_fields() -> None:
+    result = ai_trust.validate_ai_trust_output(
+        {
+            "risk": 82,
+            "certainty": 0.6,
+            "reason": {"primary": "volatile_entry"},
+        }
+    )
+
+    assert result["risk_score"] == 82
+    assert result["would_warn"] is True
+    assert result["warning_severity"] == "high"
+    assert result["reason_codes"] == ["volatile_entry"]
+
+
+def test_validate_ai_trust_output_normalizes_score_warning_consistency() -> None:
+    result = ai_trust.validate_ai_trust_output(
+        {
+            "risk_score": 1,
+            "confidence": 0.5,
+            "would_warn": True,
+            "warning_severity": "high",
+            "reason_codes": ["model_inconsistent"],
+            "operator_note": "AI observed high risk.",
+        }
+    )
+
+    assert result["risk_score"] == 1
+    assert result["would_warn"] is False
+    assert result["warning_severity"] == "none"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        "not json",
+        {"risk_score": 101, "confidence": 0.5},
+        {
+            "risk_score": 50,
+            "confidence": 1.2,
+            "would_warn": False,
+            "warning_severity": "none",
+            "reason_codes": [],
+            "operator_note": "AI observed.",
+        },
+        {
+            "risk_score": 50,
+            "confidence": 0.5,
+            "would_warn": "maybe",
+            "warning_severity": "none",
+            "reason_codes": [],
+            "operator_note": "AI observed.",
+        },
+    ],
+)
+def test_validate_ai_trust_output_rejects_malformed_output(payload: Any) -> None:
+    with pytest.raises(AiTrustResponseError):
+        ai_trust.validate_ai_trust_output(payload)
+
+
+@pytest.mark.asyncio
+async def test_ollama_request_bounds_generation_and_disables_thinking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, Any] = {}
+    debug_messages: list[tuple[str, str]] = []
+    raw_content = json.dumps(
+        {
+            "risk_score": 25,
+            "confidence": 0.5,
+            "would_warn": False,
+            "warning_severity": "none",
+            "reason_codes": [],
+            "operator_note": "AI observed normal entry risk.",
+        }
+    )
+
+    class _FakeResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {"message": {"content": raw_content}}
+
+    class _FakeProviderClient:
+        async def post(
+            self,
+            url: str,
+            *,
+            json: dict[str, Any],
+            timeout_seconds: float,
+        ) -> _FakeResponse:
+            captured["timeout"] = timeout_seconds
+            captured["url"] = url
+            captured["payload"] = json
+            return _FakeResponse()
+
+    monkeypatch.setattr(ai_trust, "ai_provider_client", _FakeProviderClient())
+    monkeypatch.setattr(
+        ai_trust.logging,
+        "debug",
+        lambda message, value: debug_messages.append((message, value)),
+    )
+
+    result = await ai_trust._call_ollama(
+        ai_trust.AiTrustConfig(
+            enabled=True,
+            enforce_warnings=False,
+            ollama_base_url="http://ollama.local:11434",
+            ollama_model="qwen3:8b",
+            timeout_ms=60000,
+            max_retries=0,
+        ),
+        {"schema_version": "1", "source_event": "open_deal"},
+    )
+
+    payload = captured["payload"]
+    assert captured["url"] == "http://ollama.local:11434/api/chat"
+    assert captured["timeout"] == pytest.approx(60.0)
+    assert payload["stream"] is False
+    assert payload["think"] is False
+    assert payload["options"]["temperature"] == 0
+    assert payload["options"]["num_predict"] == ai_trust.OLLAMA_RESPONSE_NUM_PREDICT
+    assert result["risk_score"] == 25
+    assert debug_messages == [
+        ("AI trust provider raw response content: %s", raw_content)
+    ]
+
+
+def test_truncate_provider_debug_text_limits_raw_response_length() -> None:
+    raw_content = "x" * (ai_trust.OLLAMA_DEBUG_RESPONSE_MAX_CHARS + 10)
+
+    result = ai_trust._truncate_provider_debug_text(raw_content)
+
+    assert result.endswith("...<truncated>")
+    assert len(result) == (
+        ai_trust.OLLAMA_DEBUG_RESPONSE_MAX_CHARS + len("...<truncated>")
+    )
+
+
+@pytest.mark.asyncio
+async def test_disabled_ai_trust_does_not_record_predictions(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        _FakeConfig.snapshot = {
+            "ai_trust_enabled": False,
+            "ai_trust_ollama_model": "qwen3:8b",
+        }
+        monkeypatch.setattr(ai_trust, "Config", _FakeConfig)
+
+        await ai_trust.observe_new_deal(
+            "BTC/USDT",
+            {"symbol": "BTC/USDT", "deal_id": "deal-1", "price": 100.0},
+        )
+
+        assert await model.AiTrustPrediction.all().count() == 0
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_enrich_entry_feature_bundle_adds_derived_market_context(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        for index in range(1, 25):
+            close = 100 + index
+            await model.Tickers.create(
+                timestamp=str(1_000_000 + index),
+                symbol="BTC/USDT",
+                open=close - 1,
+                high=close + 2,
+                low=close - 2,
+                close=close,
+                volume=1000 + index,
+            )
+
+        bundle = ai_trust.build_entry_feature_bundle(
+            "BTC/USDT",
+            {
+                "symbol": "BTC/USDT",
+                "deal_id": "deal-1",
+                "price": 124.0,
+                "amount": 0.1,
+                "ordersize": 12.4,
+                "baseorder": True,
+                "timeframe": "5m",
+                "raw_ohlcv": [[1, 2, 3, 4, 5]],
+            },
+        )
+        enriched = await ai_trust.enrich_entry_feature_bundle(bundle)
+
+        serialized = json.dumps(enriched).lower()
+        assert "raw_ohlcv" not in serialized
+        assert enriched["domain_context"] == {
+            "market": "crypto",
+            "instrument_type": "spot_pair",
+            "base_asset": "BTC",
+            "quote_asset": "USDT",
+            "strategy_family": "dca_entry_observation",
+        }
+        assert enriched["market_context"]["has_market_context"] is True
+        assert enriched["market_context"]["candle_count"] == 24
+        assert enriched["market_context"]["timeframe_minutes"] == 5
+        assert enriched["market_context"]["change_pct_3_candles"] is not None
+        assert (
+            enriched["market_context"]["realized_volatility_pct_20_candles"] is not None
+        )
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_missing_ollama_model_records_unscored_prediction(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        _FakeConfig.snapshot = {
+            "ai_trust_enabled": True,
+            "ai_trust_ollama_base_url": "http://localhost:11434",
+            "ai_trust_ollama_model": "",
+            "ai_trust_timeout_ms": 2500,
+            "ai_trust_max_retries": 0,
+        }
+        monkeypatch.setattr(ai_trust, "Config", _FakeConfig)
+
+        await ai_trust.observe_new_deal(
+            "BTC/USDT",
+            {
+                "symbol": "BTC/USDT",
+                "deal_id": "deal-1",
+                "timestamp": "2026-06-10T12:00:00Z",
+                "price": 100.0,
+                "amount": 0.2,
+                "ordersize": 20.0,
+                "baseorder": True,
+            },
+        )
+
+        row = await model.AiTrustPrediction.get(deal_id="deal-1")
+        assert row.status == "unscored"
+        assert row.provider_status == ai_trust.PROVIDER_STATUS_MISSING_MODEL
+        assert row.risk_score is None
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_provider_output_records_scored_prediction(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        _FakeConfig.snapshot = {
+            "ai_trust_enabled": True,
+            "ai_trust_ollama_base_url": "http://localhost:11434",
+            "ai_trust_ollama_model": "qwen3:8b",
+            "ai_trust_timeout_ms": 2500,
+            "ai_trust_max_retries": 0,
+        }
+        monkeypatch.setattr(ai_trust, "Config", _FakeConfig)
+
+        async def fake_score(_trust_config: Any, _feature_bundle: dict[str, Any]):
+            return ai_trust.PROVIDER_STATUS_SCORED, {
+                "risk_score": 64,
+                "confidence": 0.7,
+                "would_warn": True,
+                "warning_severity": "medium",
+                "reason_codes": ["extended_entry"],
+                "operator_note": "AI observed elevated risk.",
+            }
+
+        monkeypatch.setattr(ai_trust, "_score_with_provider", fake_score)
+
+        await ai_trust.observe_new_deal(
+            "ETH/USDT",
+            {"symbol": "ETH/USDT", "deal_id": "deal-2", "price": 120.0},
+        )
+
+        row = await model.AiTrustPrediction.get(deal_id="deal-2")
+        assert row.status == "scored"
+        assert row.provider_status == ai_trust.PROVIDER_STATUS_SCORED
+        assert row.risk_score == 64
+        assert row.would_warn is True
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_entry_enforcement_blocks_scored_warning_and_records_ledger(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+
+        async def fake_score(_trust_config: Any, _feature_bundle: dict[str, Any]):
+            return ai_trust.PROVIDER_STATUS_SCORED, {
+                "risk_score": 78,
+                "confidence": 0.82,
+                "would_warn": True,
+                "warning_severity": "high",
+                "reason_codes": ["strong_downtrend"],
+                "operator_note": "AI observed elevated entry risk.",
+            }
+
+        monkeypatch.setattr(ai_trust, "_score_with_provider", fake_score)
+
+        gate = await ai_trust.evaluate_entry_enforcement(
+            "BTC/USDT",
+            {
+                "symbol": "BTC/USDT",
+                "ordersize": 50.0,
+                "current_price": 100.0,
+                "baseorder": True,
+                "safetyorder": False,
+                "ordertype": "market",
+                "side": "buy",
+            },
+            {
+                "ai_trust_enabled": True,
+                "ai_trust_enforce_warnings": True,
+                "ai_trust_ollama_base_url": "http://localhost:11434",
+                "ai_trust_ollama_model": "qwen3:8b",
+                "ai_trust_timeout_ms": 2500,
+                "ai_trust_max_retries": 0,
+            },
+        )
+
+        assert gate.allowed is False
+        assert gate.reason_code == "ai_trust_warning"
+        assert gate.risk_score == 78
+
+        row = await model.AiTrustPrediction.get(symbol="BTC/USDT")
+        assert row.source_event == "entry_blocked"
+        assert row.outcome_status == "blocked"
+        assert row.status == "scored"
+        assert row.risk_score == 78
+        assert row.would_warn is True
+        assert json.loads(row.reason_codes_json) == ["strong_downtrend"]
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_entry_enforcement_fail_blocks_unscored_provider_status(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+
+        async def fake_score(_trust_config: Any, _feature_bundle: dict[str, Any]):
+            return ai_trust.PROVIDER_STATUS_TIMEOUT, None
+
+        monkeypatch.setattr(ai_trust, "_score_with_provider", fake_score)
+
+        gate = await ai_trust.evaluate_entry_enforcement(
+            "ETH/USDT",
+            {
+                "symbol": "ETH/USDT",
+                "ordersize": 50.0,
+                "current_price": 100.0,
+                "baseorder": True,
+                "safetyorder": False,
+            },
+            {
+                "ai_trust_enabled": True,
+                "ai_trust_enforce_warnings": True,
+                "ai_trust_ollama_model": "qwen3:8b",
+            },
+        )
+
+        assert gate.allowed is False
+        assert gate.reason_code == "ai_trust_unavailable"
+        assert gate.provider_status == ai_trust.PROVIDER_STATUS_TIMEOUT
+
+        row = await model.AiTrustPrediction.get(symbol="ETH/USDT")
+        assert row.source_event == "entry_blocked"
+        assert row.outcome_status == "blocked"
+        assert row.status == "unscored"
+        assert row.provider_status == ai_trust.PROVIDER_STATUS_TIMEOUT
+
+        runtime_status = await model.AppConfig.get(
+            key=ai_trust.AI_TRUST_RUNTIME_STATUS_KEY
+        )
+        runtime_provider_status = await model.AppConfig.get(
+            key=ai_trust.AI_TRUST_RUNTIME_PROVIDER_STATUS_KEY
+        )
+        assert (
+            runtime_status.value
+            == ai_trust.AI_TRUST_RUNTIME_STATUS_PROVIDER_UNAVAILABLE
+        )
+        assert runtime_provider_status.value == ai_trust.PROVIDER_STATUS_TIMEOUT
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_allowed_enforcement_evaluation_persists_once_after_fill(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Successful fills should reuse the preflight result without rescoring."""
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        provider_calls = 0
+
+        async def fake_score(_trust_config: Any, _feature_bundle: dict[str, Any]):
+            nonlocal provider_calls
+            provider_calls += 1
+            return ai_trust.PROVIDER_STATUS_SCORED, {
+                "risk_score": 22,
+                "confidence": 0.75,
+                "would_warn": False,
+                "warning_severity": "low",
+                "reason_codes": ["normal_entry"],
+                "operator_note": "Entry risk remained below the warning policy.",
+            }
+
+        monkeypatch.setattr(ai_trust, "_score_with_provider", fake_score)
+        gate = await ai_trust.evaluate_entry_enforcement(
+            "BTC/USDT",
+            {
+                "symbol": "BTC/USDT",
+                "baseorder": True,
+                "safetyorder": False,
+                "ordersize": 50.0,
+            },
+            {
+                "ai_trust_enabled": True,
+                "ai_trust_enforce_warnings": True,
+                "ai_trust_ollama_model": "qwen3:8b",
+            },
+        )
+        filled_payload = {
+            "symbol": "BTC/USDT",
+            "deal_id": "deal-filled",
+            "timestamp": "123",
+        }
+
+        assert gate.allowed is True
+        assert await ai_trust.persist_entry_evaluation(gate, filled_payload) is True
+        assert await ai_trust.persist_entry_evaluation(gate, filled_payload) is True
+
+        assert provider_calls == 1
+        assert (
+            await model.AiTrustPrediction.filter(
+                evaluation_id=gate.evaluation_id
+            ).count()
+            == 1
+        )
+        row = await model.AiTrustPrediction.get(evaluation_id=gate.evaluation_id)
+        assert row.deal_id == "deal-filled"
+        assert row.source_event == "entry_preflight"
+        assert row.risk_score == 22
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_outcome_attribution_labels_bad_entries(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        now = datetime.now(UTC)
+        await model.AiTrustPrediction.create(
+            symbol="SOL/USDT",
+            deal_id="deal-3",
+            source_event="open_deal",
+            status="scored",
+            provider_status="scored",
+            risk_score=80,
+            confidence=0.8,
+            would_warn=True,
+            warning_severity="high",
+            reason_codes_json='["slow_setup"]',
+        )
+        await model.ClosedTrades.create(
+            symbol="SOL/USDT",
+            deal_id="deal-3",
+            profit=0.0,
+            profit_percent=0.0,
+            so_count=3,
+            open_date=(now - timedelta(hours=96)).isoformat(),
+            close_date=now.isoformat(),
+            duration="4 days, 0:00:00",
+        )
+
+        await ai_trust.attribute_closed_outcome("deal-3")
+
+        row = await model.AiTrustPrediction.get(deal_id="deal-3")
+        reasons = json.loads(row.bad_entry_reasons_json)
+        assert row.outcome_status == "closed"
+        assert row.bad_entry is True
+        assert "non_positive_profit" in reasons
+        assert "slow_close" in reasons
+        assert "safety_order_heavy" in reasons
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_calibration_payload_uses_bounded_closed_scored_rows(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        _FakeConfig.snapshot = {
+            "ai_trust_enabled": True,
+            "ai_trust_enforce_warnings": True,
+            "ai_trust_ollama_model": "qwen3:8b",
+        }
+        monkeypatch.setattr(ai_trust, "Config", _FakeConfig)
+        monkeypatch.setattr(ai_trust, "AI_TRUST_CALIBRATION_MAX_ROWS", 2)
+
+        for index in range(4):
+            await model.AiTrustPrediction.create(
+                symbol=f"T{index}/USDT",
+                deal_id=f"cal-{index}",
+                source_event="open_deal",
+                status="scored",
+                provider_status="scored",
+                risk_score=70,
+                confidence=0.8,
+                would_warn=True,
+                warning_severity="high",
+                reason_codes_json='["strong_downtrend"]',
+                outcome_status="closed",
+                bad_entry=index % 2 == 0,
+            )
+
+        payload = await ai_trust.build_analytics_payload()
+
+        assert payload["coverage"]["closed"] == 4
+        assert payload["calibration"]["closed_samples"] == 2
+        assert payload["calibration"]["sample_cap"] == 2
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_analytics_cache_is_keyed_by_persisted_revision(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        _FakeConfig.snapshot = {
+            "ai_trust_enabled": True,
+            "ai_trust_ollama_model": "qwen3:8b",
+        }
+        monkeypatch.setattr(ai_trust, "Config", _FakeConfig)
+        await model.AiTrustPrediction.create(
+            symbol="BTC/USDT",
+            deal_id="cache-1",
+            source_event="open_deal",
+            provider_status="scored",
+            status="scored",
+        )
+        await ai_trust_analytics.bump_analytics_revision()
+
+        first = await ai_trust.build_analytics_payload()
+        aggregate_counts = ai_trust_analytics._aggregate_counts
+
+        async def fail_if_recomputed() -> dict[str, int]:
+            raise AssertionError("unchanged revision must reuse the read model")
+
+        monkeypatch.setattr(
+            ai_trust_analytics,
+            "_aggregate_counts",
+            fail_if_recomputed,
+        )
+        second = await ai_trust.build_analytics_payload()
+
+        assert second["coverage"] == first["coverage"]
+        assert second["provider_status_counts"] == {"scored": 1}
+
+        await model.AiTrustPrediction.create(
+            symbol="ETH/USDT",
+            deal_id="cache-2",
+            source_event="open_deal",
+            provider_status="timeout",
+            status="unscored",
+        )
+        await ai_trust_analytics.bump_analytics_revision()
+        monkeypatch.setattr(
+            ai_trust_analytics,
+            "_aggregate_counts",
+            aggregate_counts,
+        )
+
+        refreshed = await ai_trust.build_analytics_payload()
+
+        assert refreshed["coverage"]["total"] == 2
+        assert refreshed["provider_status_counts"] == {
+            "scored": 1,
+            "timeout": 1,
+        }
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_pending_closed_outcomes_are_recovered_from_durable_rows(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        await model.AiTrustPrediction.create(
+            symbol="BTC/USDT",
+            deal_id="recover-me",
+            source_event="open_deal",
+            outcome_status="open",
+        )
+        await model.AiTrustPrediction.create(
+            symbol="ETH/USDT",
+            deal_id="still-open",
+            source_event="open_deal",
+            outcome_status="open",
+        )
+        await model.AiTrustPrediction.create(
+            symbol="SOL/USDT",
+            deal_id="already-blocked",
+            source_event="entry_blocked",
+            outcome_status="blocked",
+        )
+        await model.ClosedTrades.create(symbol="BTC/USDT", deal_id="recover-me")
+        await model.ClosedTrades.create(
+            symbol="SOL/USDT",
+            deal_id="already-blocked",
+        )
+        scheduled: list[str] = []
+
+        async def fake_schedule(deal_id: str | None) -> bool:
+            scheduled.append(str(deal_id))
+            return True
+
+        monkeypatch.setattr(ai_trust, "schedule_outcome_attribution", fake_schedule)
+
+        recovered = await ai_trust.recover_pending_outcome_attributions()
+
+        assert recovered == 1
+        assert scheduled == ["recover-me"]
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_pending_outcome_recovery_cap_ignores_still_open_deals(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        monkeypatch.setattr(ai_trust, "MAX_RECOVERED_OUTCOME_ATTRIBUTIONS", 2)
+        for deal_id in ("open-a", "open-b"):
+            await model.AiTrustPrediction.create(
+                symbol="ETH/USDT",
+                deal_id=deal_id,
+                source_event="open_deal",
+                outcome_status="open",
+            )
+        await model.AiTrustPrediction.create(
+            symbol="BTC/USDT",
+            deal_id="closed-after-cap",
+            source_event="open_deal",
+            outcome_status="open",
+        )
+        await model.ClosedTrades.create(
+            symbol="BTC/USDT",
+            deal_id="closed-after-cap",
+        )
+        scheduled: list[str] = []
+
+        async def fake_schedule(deal_id: str | None) -> bool:
+            scheduled.append(str(deal_id))
+            return True
+
+        monkeypatch.setattr(ai_trust, "schedule_outcome_attribution", fake_schedule)
+
+        recovered = await ai_trust.recover_pending_outcome_attributions()
+
+        assert recovered == 1
+        assert scheduled == ["closed-after-cap"]
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_provider_retries_only_transient_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trust_config = ai_trust.AiTrustConfig(
+        enabled=True,
+        enforce_warnings=False,
+        ollama_base_url="http://localhost:11434",
+        ollama_model="qwen3:8b",
+        timeout_ms=1000,
+        max_retries=2,
+    )
+    attempts = 0
+    sleeps: list[float] = []
+
+    async def fake_call(*_args: Any) -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            raise httpx.ConnectError("offline")
+        return {"risk_score": 10}
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+
+    monkeypatch.setattr(ai_trust, "_call_ollama", fake_call)
+    monkeypatch.setattr(ai_trust.asyncio, "sleep", fake_sleep)
+
+    status, scored = await ai_trust._score_with_provider(trust_config, {})
+
+    assert status == ai_trust.PROVIDER_STATUS_SCORED
+    assert scored == {"risk_score": 10}
+    assert attempts == 3
+    assert sleeps == [0.25, 0.5]
+
+
+@pytest.mark.asyncio
+async def test_provider_does_not_retry_schema_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trust_config = ai_trust.AiTrustConfig(
+        enabled=True,
+        enforce_warnings=False,
+        ollama_base_url="http://localhost:11434",
+        ollama_model="qwen3:8b",
+        timeout_ms=1000,
+        max_retries=2,
+    )
+    attempts = 0
+
+    async def fake_call(*_args: Any) -> dict[str, Any]:
+        nonlocal attempts
+        attempts += 1
+        raise ai_trust.AiTrustResponseError(ai_trust.PROVIDER_STATUS_SCHEMA_INVALID)
+
+    monkeypatch.setattr(ai_trust, "_call_ollama", fake_call)
+
+    status, scored = await ai_trust._score_with_provider(trust_config, {})
+
+    assert status == ai_trust.PROVIDER_STATUS_SCHEMA_INVALID
+    assert scored is None
+    assert attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_calibration_confidence_thresholds_and_blocked_rows_are_excluded(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        _FakeConfig.snapshot = {
+            "ai_trust_enabled": True,
+            "ai_trust_enforce_warnings": True,
+            "ai_trust_ollama_model": "qwen3:8b",
+        }
+        monkeypatch.setattr(ai_trust, "Config", _FakeConfig)
+
+        for index in range(30):
+            await model.AiTrustPrediction.create(
+                symbol="SOL/USDT",
+                deal_id=f"usable-{index}",
+                source_event="open_deal",
+                status="scored",
+                provider_status="scored",
+                risk_score=52,
+                confidence=0.7,
+                would_warn=index < 15,
+                warning_severity="medium",
+                reason_codes_json='["late_entry"]',
+                outcome_status="closed",
+                bad_entry=index < 12,
+            )
+        await model.AiTrustPrediction.create(
+            symbol="SOL/USDT",
+            deal_id="blocked-1",
+            source_event="entry_blocked",
+            status="scored",
+            provider_status="scored",
+            risk_score=80,
+            confidence=0.8,
+            would_warn=True,
+            warning_severity="high",
+            reason_codes_json='["late_entry"]',
+            outcome_status="blocked",
+            bad_entry=None,
+        )
+
+        payload = await ai_trust.build_analytics_payload()
+        reason_bucket = next(
+            bucket
+            for bucket in payload["calibration"]["buckets"]
+            if bucket["bucket_type"] == "reason_code"
+            and bucket["bucket_key"] == "late_entry"
+        )
+
+        assert payload["calibration"]["closed_samples"] == 30
+        assert reason_bucket["closed_count"] == 30
+        assert reason_bucket["bad_entry_rate"] == pytest.approx(40.0)
+        assert reason_bucket["confidence"] == "usable"
+        assert reason_bucket["usable"] is True
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_shadow_calibration_can_raise_risk_without_changing_entry_gate(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        _FakeConfig.snapshot = {
+            "ai_trust_enabled": True,
+            "ai_trust_enforce_warnings": True,
+            "ai_trust_ollama_model": "qwen3:8b",
+        }
+        monkeypatch.setattr(ai_trust, "Config", _FakeConfig)
+
+        for index in range(30):
+            await model.AiTrustPrediction.create(
+                symbol="ADA/USDT",
+                deal_id=f"history-{index}",
+                source_event="open_deal",
+                status="scored",
+                provider_status="scored",
+                risk_score=32,
+                confidence=0.6,
+                would_warn=False,
+                warning_severity="low",
+                reason_codes_json='["weak_bounce"]',
+                outcome_status="closed",
+                bad_entry=index < 15,
+            )
+        recent = await model.AiTrustPrediction.create(
+            symbol="ADA/USDT",
+            deal_id="open-1",
+            source_event="open_deal",
+            status="scored",
+            provider_status="scored",
+            risk_score=32,
+            confidence=0.6,
+            would_warn=False,
+            warning_severity="low",
+            reason_codes_json='["weak_bounce"]',
+            outcome_status="open",
+            bad_entry=None,
+        )
+
+        async def fake_score(_trust_config: Any, _feature_bundle: dict[str, Any]):
+            return ai_trust.PROVIDER_STATUS_SCORED, {
+                "risk_score": 32,
+                "confidence": 0.6,
+                "would_warn": False,
+                "warning_severity": "low",
+                "reason_codes": ["weak_bounce"],
+                "operator_note": "AI observed mild risk.",
+            }
+
+        monkeypatch.setattr(ai_trust, "_score_with_provider", fake_score)
+        gate = await ai_trust.evaluate_entry_enforcement(
+            "ADA/USDT",
+            {
+                "symbol": "ADA/USDT",
+                "ordersize": 50.0,
+                "current_price": 100.0,
+                "baseorder": True,
+                "safetyorder": False,
+            },
+            {
+                "ai_trust_enabled": True,
+                "ai_trust_enforce_warnings": True,
+                "ai_trust_ollama_model": "qwen3:8b",
+            },
+        )
+        payload = await ai_trust.build_analytics_payload()
+        recent_payload = next(
+            row for row in payload["recent_predictions"] if row["id"] == recent.id
+        )
+
+        assert gate.allowed is True
+        assert gate.provider_status == ai_trust.PROVIDER_STATUS_SCORED
+        assert recent_payload["risk_score"] == 32
+        assert recent_payload["shadow_effective_risk_score"] == 75
+        assert recent_payload["calibration_reason"] == "local_bad_entry_rate"
+        assert recent_payload["calibration_buckets"]
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_calibration_skips_malformed_reason_json(
+    tmp_path: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        _FakeConfig.snapshot = {
+            "ai_trust_enabled": True,
+            "ai_trust_ollama_model": "qwen3:8b",
+        }
+        monkeypatch.setattr(ai_trust, "Config", _FakeConfig)
+        await model.AiTrustPrediction.create(
+            symbol="JUP/USDT",
+            deal_id="bad-json",
+            source_event="open_deal",
+            status="scored",
+            provider_status="scored",
+            risk_score=44,
+            confidence=0.6,
+            would_warn=False,
+            warning_severity="low",
+            reason_codes_json="[not-json",
+            outcome_status="closed",
+            bad_entry=True,
+            bad_entry_reasons_json='["slow_close"]',
+        )
+
+        payload = await ai_trust.build_analytics_payload()
+
+        assert payload["calibration"]["closed_samples"] == 1
+        assert any(
+            bucket["bucket_type"] == "reason_code"
+            and bucket["bucket_key"] == "no_reason"
+            for bucket in payload["calibration"]["buckets"]
+        )
+    finally:
+        await Tortoise.close_connections()

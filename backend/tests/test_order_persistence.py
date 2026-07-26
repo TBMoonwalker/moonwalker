@@ -1,3 +1,4 @@
+import json
 from typing import Any
 
 import pytest
@@ -126,6 +127,11 @@ async def test_persist_buy_trade_creates_open_trade_when_requested(
         "TradeExecutions",
         _DummyTradeExecutionsModel,
     )
+    monkeypatch.setattr(
+        persistence_module,
+        "is_entry_observation_enabled",
+        lambda: _async_value(False),
+    )
 
     await persistence_module.persist_buy_trade(
         "BTC/USDC",
@@ -141,11 +147,154 @@ async def test_persist_buy_trade_creates_open_trade_when_requested(
     assert _DummyOpenTradesCreateModel.created_payload is not None
     assert _DummyOpenTradesCreateModel.created_payload["deal_id"]
     assert (
+        _DummyOpenTradesCreateModel.created_payload["dca_sizing_mode"]
+        == "legacy_factors"
+    )
+    assert _DummyOpenTradesCreateModel.created_payload["dca_reference_price"] == 100.0
+    assert (
         _DummyOpenTradesCreateModel.created_payload["execution_history_complete"]
         is True
     )
     assert _DummyTradeExecutionsModel.created_payload is not None
     assert _DummyTradeExecutionsModel.created_payload["role"] == "buy"
+
+
+def test_open_trade_dca_defaults_preserve_recovery_policy_snapshot() -> None:
+    policy = {
+        "mode": "recovery_target",
+        "atr_timeframe": "4h",
+        "atr_length": 14,
+        "maximum_deal_quote": 250.0,
+    }
+
+    defaults = persistence_module._build_open_trade_dca_defaults(
+        {
+            "price": 0.568,
+            "metadata_json": json.dumps({"dca_policy": policy}),
+        }
+    )
+
+    assert defaults["dca_sizing_mode"] == "recovery_target"
+    assert defaults["dca_reference_price"] == 0.568
+    assert json.loads(defaults["dca_policy_json"])["maximum_deal_quote"] == 250.0
+
+
+async def _async_value(value: Any) -> Any:
+    return value
+
+
+@pytest.mark.asyncio
+async def test_persist_buy_trade_schedules_ai_trust_after_open_trade_persistence(
+    monkeypatch,
+) -> None:
+    _DummyTradesModel.created_payload = None
+    _DummyOpenTradesCreateModel.created_symbol = None
+    _DummyOpenTradesCreateModel.created_payload = None
+    scheduled: list[dict[str, Any]] = []
+
+    async def fake_run_sqlite(operation, _name) -> None:
+        await operation()
+
+    async def fake_schedule(symbol: str, payload: dict[str, Any]) -> None:
+        scheduled.append(
+            {
+                "symbol": symbol,
+                "deal_id": payload.get("deal_id"),
+                "open_trade_created": _DummyOpenTradesCreateModel.created_payload
+                is not None,
+            }
+        )
+
+    monkeypatch.setattr(
+        persistence_module, "run_sqlite_write_with_retry", fake_run_sqlite
+    )
+    monkeypatch.setattr(persistence_module, "in_transaction", lambda: _DummyTx())
+    monkeypatch.setattr(persistence_module.model, "Trades", _DummyTradesModel)
+    monkeypatch.setattr(
+        persistence_module.model,
+        "OpenTrades",
+        _DummyOpenTradesCreateModel,
+    )
+    monkeypatch.setattr(
+        persistence_module.model,
+        "TradeExecutions",
+        _DummyTradeExecutionsModel,
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "is_entry_observation_enabled",
+        lambda: _async_value(True),
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "schedule_entry_observation",
+        fake_schedule,
+    )
+
+    await persistence_module.persist_buy_trade(
+        "BTC/USDC",
+        {"symbol": "BTC/USDC", "price": 100.0},
+        create_open_trade=True,
+    )
+
+    assert _DummyOpenTradesCreateModel.created_payload is not None
+    assert scheduled == [
+        {
+            "symbol": "BTC/USDC",
+            "deal_id": _DummyOpenTradesCreateModel.created_payload["deal_id"],
+            "open_trade_created": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_persisted_buy_survives_optional_ai_follow_up_failure(
+    monkeypatch,
+) -> None:
+    _DummyTradesModel.created_payload = None
+    _DummyOpenTradesCreateModel.created_payload = None
+
+    async def fake_run_sqlite(operation, _name) -> None:
+        await operation()
+
+    async def fail_ai_persistence(*_args: Any) -> None:
+        raise RuntimeError("AI ledger unavailable")
+
+    monkeypatch.setattr(
+        persistence_module, "run_sqlite_write_with_retry", fake_run_sqlite
+    )
+    monkeypatch.setattr(persistence_module, "in_transaction", lambda: _DummyTx())
+    monkeypatch.setattr(persistence_module.model, "Trades", _DummyTradesModel)
+    monkeypatch.setattr(
+        persistence_module.model,
+        "OpenTrades",
+        _DummyOpenTradesCreateModel,
+    )
+    monkeypatch.setattr(
+        persistence_module.model,
+        "TradeExecutions",
+        _DummyTradeExecutionsModel,
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "persist_entry_evaluation",
+        fail_ai_persistence,
+    )
+    gate = persistence_module.AiTrustEntryGate(
+        allowed=True,
+        evaluated=True,
+        provider_status="scored",
+    )
+
+    await persistence_module.persist_buy_trade(
+        "BTC/USDC",
+        {"symbol": "BTC/USDC", "price": 100.0},
+        create_open_trade=True,
+        entry_evaluation=gate,
+    )
+
+    assert _DummyTradesModel.created_payload is not None
+    assert _DummyOpenTradesCreateModel.created_payload is not None
 
 
 @pytest.mark.asyncio
@@ -208,6 +357,11 @@ async def test_persist_buy_trade_preserves_original_open_date_on_sidestep_reentr
         persistence_module.model,
         "TradeExecutions",
         _DummyTradeExecutionsModel,
+    )
+    monkeypatch.setattr(
+        persistence_module,
+        "is_entry_observation_enabled",
+        lambda: _async_value(False),
     )
 
     await persistence_module.persist_buy_trade(

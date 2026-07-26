@@ -318,6 +318,16 @@ class Statistic:
         )
         return profit_data
 
+    async def invalidate_profit_caches(self) -> None:
+        """Invalidate DB-backed profit aggregates after bulk ledger replacement."""
+        for cached_reader in (
+            self._get_profit_base_cached,
+            self._get_profit_cached,
+        ):
+            cache_clear = getattr(cached_reader, "cache_clear", None)
+            if cache_clear is not None:
+                await cache_clear()
+
     @helper.async_ttl_cache(maxsize=1, ttl=PROFIT_CACHE_TTL_SECONDS)
     async def _get_profit_base_cached(self) -> dict[str, Any]:
         """Compute and cache DB-backed profit aggregates."""

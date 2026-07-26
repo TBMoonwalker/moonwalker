@@ -8,11 +8,13 @@ import socketio
 from service.autopilot import Autopilot
 from service.config import resolve_history_lookback_days
 from service.data import Data
+from service.external_volume import parse_external_volume
 from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
     build_common_runtime_settings,
+    build_signal_buy_intent,
     get_active_open_symbols,
     is_max_bots_reached,
     log_signal_admission_decisions,
@@ -200,15 +202,18 @@ class SignalPlugin:
             for exchange in volume_24h:
                 if exchange == self._exchange_name:
                     if volume_24h[exchange].get(self._currency) is not None:
-                        # DirtyFix: Some volume data misses "k", "M" or "B"
-                        if isinstance(volume_24h[exchange].get(self._currency), float):
-                            volume_range = "k"
-                            volume_size = volume_24h[exchange][self._currency]
-                        else:
-                            volume_range = volume_24h[exchange][self._currency][-1]
-                            volume_size = float(
-                                volume_24h[exchange][self._currency][:-1]
+                        parsed_volume = parse_external_volume(
+                            volume_24h[exchange][self._currency]
+                        )
+                        if parsed_volume.volume is None:
+                            logging.warning(
+                                "Ignoring SymSignals entry for %s: %s",
+                                symbol,
+                                parsed_volume.reason_code,
                             )
+                            return False
+                        volume_range = parsed_volume.volume.unit
+                        volume_size = parsed_volume.volume.size
                     break
             if (
                 signal_id in self._signal_settings["allowed_signals"]
@@ -467,27 +472,10 @@ class SignalPlugin:
             log_signal_entry_order_decisions(entry_orders.values())
             entry_order = entry_orders[symbol_full]
             await self.watcher_queue.put([symbol_full])
-            order = {
-                "ordersize": entry_order.order_size,
-                "symbol": symbol_full,
-                "direction": "long",
-                "botname": f"symsignal_{symbol}",
-                "baseorder": True,
-                "safetyorder": False,
-                "order_count": 0,
-                "ordertype": "market",
-                "so_percentage": None,
-                "side": "buy",
-                "signal_name": entry_order.signal_name,
-                "strategy_name": entry_order.strategy_name,
-                "timeframe": entry_order.timeframe,
-                "metadata_json": entry_order.metadata_json,
-                "baseline_order_size": entry_order.baseline_order_size,
-                "entry_size_applied": entry_order.entry_size_applied,
-                "entry_size_reason_code": entry_order.reason_code,
-                "entry_size_fallback_applied": False,
-                "entry_size_fallback_reason": None,
-            }
+            order = build_signal_buy_intent(
+                entry_order,
+                botname=f"symsignal_{symbol}",
+            )
             await self.orders.receive_buy_order(order, self.config)
         finally:
             await admission_batch.release_symbol(symbol_full)

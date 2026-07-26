@@ -15,6 +15,10 @@ from service.config import (
     is_removed_config_key,
     resolve_history_lookback_days,
 )
+from service.config_migrations import (
+    LEGACY_TRADE_MODE_KEYS,
+    canonicalize_trade_mode_rows,
+)
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
 from service.trade_lifecycle_config import (
@@ -76,7 +80,11 @@ class BackupService:
         restore_trade_data: bool,
     ) -> dict[str, Any]:
         """Restore config-only or full backup payloads."""
-        config_rows = self._validate_config_rows(backup_payload.get("config"))
+        config_rows = self._force_safe_restore_config(
+            canonicalize_trade_mode_rows(
+                self._validate_config_rows(backup_payload.get("config"))
+            )
+        )
         candidate_config = self._build_config_snapshot(config_rows)
         resolve_trade_mode_config(
             candidate_config,
@@ -143,6 +151,28 @@ class BackupService:
 
         return restore_summary
 
+    @staticmethod
+    def _force_safe_restore_config(
+        config_rows: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Return restore rows forced into paused dry-run operation."""
+        safe_rows = [dict(row) for row in config_rows]
+        rows_by_key = {str(row["key"]): row for row in safe_rows}
+        for key in ("dry_run", "trading_paused"):
+            row = rows_by_key.get(key)
+            if row is None:
+                safe_rows.append(
+                    {
+                        "key": key,
+                        "value": "True",
+                        "value_type": "bool",
+                    }
+                )
+                continue
+            row["value"] = "True"
+            row["value_type"] = "bool"
+        return safe_rows
+
     async def _export_trade_data(self) -> dict[str, list[dict[str, Any]]]:
         """Export trade-related tables, excluding ticker OHLCV data."""
         payload: dict[str, list[dict[str, Any]]] = {}
@@ -184,7 +214,7 @@ class BackupService:
                     message="Backup config rows must include key and value_type.",
                     safe_fields={"key": key or None, "value_type": value_type or None},
                 )
-            if is_removed_config_key(key):
+            if is_removed_config_key(key) and key not in LEGACY_TRADE_MODE_KEYS:
                 raise ValueError(build_removed_config_key_message(key))
             normalized_rows.append(
                 {

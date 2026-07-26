@@ -136,9 +136,9 @@ const alertTitle = computed(() => {
                 {{ configTrustState.summary }}
             </n-alert>
 
-            <div class="hero-insight">
-                <p class="hero-insight-copy">{{ featuredInsight }}</p>
-                <p class="hero-insight-meta">
+            <div class="operator-insight">
+                <p class="operator-insight-copy">{{ featuredInsight }}</p>
+                <p class="operator-insight-meta">
                     Latest saved {{ latestSavedLabel }}
                 </p>
             </div>
@@ -176,8 +176,8 @@ const alertTitle = computed(() => {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.12rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .preview-copy {
@@ -208,21 +208,21 @@ const alertTitle = computed(() => {
     text-wrap: pretty;
 }
 
-.hero-insight {
-    padding-left: 14px;
-    border-left: 3px solid rgba(29, 92, 73, 0.24);
+.operator-insight {
+    padding-top: 10px;
+    border-top: 1px solid var(--mw-color-border);
 }
 
-.hero-insight-copy {
+.operator-insight-copy {
     margin: 0 0 6px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1rem;
-    font-weight: 600;
-    letter-spacing: -0.015em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
-.hero-insight-meta {
+.operator-insight-meta {
     margin: 0;
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-body);
@@ -258,6 +258,10 @@ const alertTitle = computed(() => {
     line-height: 1.5;
 }
 
+.preview-actions :deep(.n-button) {
+    min-width: max-content;
+}
+
 @media (max-width: 768px) {
     .preview-header {
         flex-wrap: wrap;
@@ -270,6 +274,7 @@ const alertTitle = computed(() => {
 
     .preview-actions :deep(.n-button) {
         flex: 1 1 auto;
+        min-width: max-content;
     }
 
     .preview-metrics {

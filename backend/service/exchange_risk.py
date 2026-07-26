@@ -105,6 +105,8 @@ def build_buy_precheck_result(
     required_quote: float | None = None,
     available_quote: float | None = None,
     buffer_pct: float | None = None,
+    executable_price: float | None = None,
+    maximum_buy_price: float | None = None,
 ) -> dict[str, Any]:
     """Build a normalized buy precheck result payload."""
     result: dict[str, Any] = {
@@ -120,4 +122,8 @@ def build_buy_precheck_result(
         result["available_quote"] = None
     if buffer_pct is not None:
         result["buffer_pct"] = round(float(buffer_pct), 6)
+    if executable_price is not None:
+        result["executable_price"] = round(float(executable_price), 12)
+    if maximum_buy_price is not None:
+        result["maximum_buy_price"] = round(float(maximum_buy_price), 12)
     return result

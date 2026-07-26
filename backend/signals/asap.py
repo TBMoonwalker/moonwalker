@@ -13,7 +13,10 @@ from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
+    SignalAdmissionBatch,
+    SignalEntryOrderDecision,
     build_common_runtime_settings,
+    build_signal_buy_intent,
     get_active_open_symbols,
     is_max_bots_reached,
     log_signal_admission_decisions,
@@ -517,45 +520,18 @@ class SignalPlugin:
                         continue
 
                     if admission_batch.admitted_symbols:
-                        await self.watcher_queue.put(admission_batch.admitted_symbols)
-                        entry_orders = await resolve_signal_entry_orders(
-                            self.config,
-                            self.statistic,
-                            self.autopilot,
-                            admission_batch.admitted_symbols,
-                            signal_name="asap",
-                            strategy_name=(
-                                str(self.config.get("signal_strategy") or "") or None
-                            ),
-                            timeframe=self._strategy_timeframe,
+                        entry_orders = await self._prepare_signal_entry_orders(
+                            admission_batch
                         )
-                        log_signal_entry_order_decisions(entry_orders.values())
 
                     try:
                         for symbol in admission_batch.admitted_symbols:
                             entry_order = entry_orders[symbol]
                             logging.info("Triggering new trade for %s", symbol)
-                            order = {
-                                "ordersize": entry_order.order_size,
-                                "symbol": symbol,
-                                "direction": "long",
-                                "botname": f"asap_{symbol}",
-                                "baseorder": True,
-                                "safetyorder": False,
-                                "order_count": 0,
-                                "ordertype": "market",
-                                "so_percentage": None,
-                                "side": "buy",
-                                "signal_name": entry_order.signal_name,
-                                "strategy_name": entry_order.strategy_name,
-                                "timeframe": entry_order.timeframe,
-                                "metadata_json": entry_order.metadata_json,
-                                "baseline_order_size": entry_order.baseline_order_size,
-                                "entry_size_applied": entry_order.entry_size_applied,
-                                "entry_size_reason_code": entry_order.reason_code,
-                                "entry_size_fallback_applied": False,
-                                "entry_size_fallback_reason": None,
-                            }
+                            order = build_signal_buy_intent(
+                                entry_order,
+                                botname=f"asap_{symbol}",
+                            )
                             try:
                                 await self.orders.receive_buy_order(order, self.config)
                             finally:
@@ -566,6 +542,31 @@ class SignalPlugin:
             else:
                 self.__log_max_bots_waiting()
             await asyncio.sleep(5)
+
+    async def _prepare_signal_entry_orders(
+        self,
+        admission_batch: SignalAdmissionBatch,
+    ) -> dict[str, SignalEntryOrderDecision]:
+        """Prepare watcher history and entry sizing without leaking reservations."""
+        try:
+            await self.watcher_queue.put(admission_batch.admitted_symbols)
+            entry_orders = await resolve_signal_entry_orders(
+                self.config,
+                self.statistic,
+                self.autopilot,
+                admission_batch.admitted_symbols,
+                signal_name="asap",
+                strategy_name=(str(self.config.get("signal_strategy") or "") or None),
+                timeframe=self._strategy_timeframe,
+            )
+            log_signal_entry_order_decisions(entry_orders.values())
+            return entry_orders
+        except asyncio.CancelledError:
+            await admission_batch.release()
+            raise
+        except Exception:
+            await admission_batch.release()
+            raise
 
     async def shutdown(self) -> None:
         """Shutdown the signal plugin.

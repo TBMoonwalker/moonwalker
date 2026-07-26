@@ -1,10 +1,11 @@
 """Configuration API endpoints."""
 
-import json
+import asyncio
 import math
 from typing import Any
 
 import helper
+import msgspec
 from controller.responses import json_response
 from litestar.connection import Request
 from litestar.exceptions import SerializationException
@@ -17,8 +18,16 @@ from service.config import (
     build_removed_config_key_message,
     is_removed_config_key,
 )
+from service.config_contract import public_config_contract
 from service.config_persistence import should_persist_config_value
+from service.config_redaction import (
+    REDACTED_SECRET_VALUE,
+    SENSITIVE_CONFIG_KEYS,
+    redact_config_value,
+    restore_redacted_config_value,
+)
 from service.config_views import TradeLifecycleConfigView
+from service.signal_settings import SignalSettingsError, canonicalize_signal_settings
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.strategy_builder import list_strategy_options, list_strategy_summaries
 from service.trade_lifecycle_config import (
@@ -28,6 +37,7 @@ from service.trade_lifecycle_config import (
     resolve_trade_mode_config,
 )
 from service.trading_controls import GLOBAL_TRADING_PAUSED_KEY
+from service.trading_maintenance import trading_maintenance_barrier
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config_data")
 
@@ -38,7 +48,30 @@ LIVE_ACTIVATION_DENIED_MESSAGE = (
     "Generic config saves cannot switch dry run off."
 )
 backup_service = BackupService()
+_RESTORE_LOCK = asyncio.Lock()
 ConfigUpdateMap = dict[str, dict[str, Any]]
+
+
+class ConfirmMutationRequest(msgspec.Struct, forbid_unknown_fields=True):
+    """Strict body shared by operational confirmation endpoints."""
+
+    confirm: object
+
+
+class RestoreBackupRequest(msgspec.Struct, forbid_unknown_fields=True):
+    """Strict body for configuration and trade-data restore requests."""
+
+    backup: dict[str, Any]
+    restore_trade_data: object = False
+    confirm: object = False
+
+
+def _require_json_boolean(value: object, field: str) -> tuple[bool | None, Any]:
+    """Return an exact JSON boolean or an operator-readable error response."""
+    if type(value) is not bool:
+        message = f"Field '{field}' must be a JSON boolean."
+        return None, json_response({"error": message, "message": message}, 400)
+    return value, None
 
 
 def _extract_config_update_value(raw_value: Any) -> Any:
@@ -82,14 +115,7 @@ def _has_positive_number(value: Any) -> bool:
 
 def _parse_signal_settings(raw_value: Any) -> dict[str, Any]:
     """Return normalized signal settings payload from string or object input."""
-    if isinstance(raw_value, dict):
-        return raw_value
-    if isinstance(raw_value, str):
-        try:
-            return json.loads(raw_value.replace("'", '"'))
-        except Exception:  # noqa: BLE001 - defensive parsing for config rows.
-            return {}
-    return {}
+    return canonicalize_signal_settings(raw_value)
 
 
 def _get_config_snapshot(config: Config) -> dict[str, Any]:
@@ -98,6 +124,14 @@ def _get_config_snapshot(config: Config) -> dict[str, Any]:
     if callable(snapshot):
         return snapshot()
     return {}
+
+
+def _get_public_config_snapshot(config: Config) -> dict[str, Any]:
+    """Return a public-safe snapshot while supporting legacy test doubles."""
+    public_snapshot = getattr(config, "public_snapshot", None)
+    if callable(public_snapshot):
+        return public_snapshot()
+    return _get_config_snapshot(config)
 
 
 def _get_raw_config_snapshot(config: Config) -> dict[str, Any]:
@@ -269,6 +303,11 @@ def _find_live_activation_blockers(
                 )
         else:
             dynamic_dca_enabled = lifecycle.trade_mode == "dynamic_dca"
+            recovery_mode = (
+                str(config_snapshot.get("dynamic_so_sizing_mode") or "legacy_factors")
+                .strip()
+                .lower()
+            )
             dca_required_keys = (
                 [
                     ("mstc", "Set max safety order count."),
@@ -286,9 +325,23 @@ def _find_live_activation_blockers(
             for key, message in dca_required_keys:
                 if not _has_required_value(config_snapshot.get(key)):
                     blockers.append({"key": key, "message": message})
+            if dynamic_dca_enabled and recovery_mode == "recovery_target":
+                for key, message in [
+                    ("ss", "Set a positive recovery SO spacing scale."),
+                    (
+                        "dynamic_so_max_deal_quote",
+                        "Set a positive recovery-mode max deal quote.",
+                    ),
+                ]:
+                    if not _has_positive_number(config_snapshot.get(key)):
+                        blockers.append({"key": key, "message": message})
 
     signal_name = str(config_snapshot.get("signal", "") or "").strip().lower()
-    signal_settings = _parse_signal_settings(config_snapshot.get("signal_settings"))
+    try:
+        signal_settings = _parse_signal_settings(config_snapshot.get("signal_settings"))
+    except SignalSettingsError as exc:
+        blockers.append({"key": "signal_settings", "message": str(exc)})
+        signal_settings = {}
     if signal_name == "asap" and not _has_required_value(
         config_snapshot.get("symbol_list")
     ):
@@ -312,6 +365,17 @@ def _find_live_activation_blockers(
                 {
                     "key": "signal_settings.csv_source",
                     "message": "Add a CSV source or inline CSV payload.",
+                }
+            )
+    elif signal_name == "websocket_signal":
+        websocket_url = signal_settings.get("websocket_url") or signal_settings.get(
+            "api_url"
+        )
+        if not _has_required_value(websocket_url):
+            blockers.append(
+                {
+                    "key": "signal_settings.websocket_url",
+                    "message": "Add the WebSocket stream URL.",
                 }
             )
 
@@ -346,6 +410,56 @@ def _validate_removed_config_keys(updates: ConfigUpdateMap) -> str | None:
     for key in updates:
         if is_removed_config_key(key):
             return build_removed_config_key_message(key)
+    return None
+
+
+def _validate_recovery_target_policy_updates(
+    config_snapshot: dict[str, Any],
+    updates: ConfigUpdateMap,
+) -> str | None:
+    """Reject a recovery-target policy that cannot ever place an order."""
+    recovery_keys = {
+        "dynamic_so_sizing_mode",
+        "dynamic_so_max_deal_quote",
+        "dynamic_so_execution_guard_enabled",
+        "dynamic_so_execution_drift_atr_fraction",
+        "dynamic_so_execution_drift_min_pct",
+        "dynamic_so_execution_drift_max_pct",
+        "ss",
+    }
+    if recovery_keys.isdisjoint(updates):
+        return None
+
+    candidate = _merge_config_snapshot_with_updates(config_snapshot, updates)
+    recovery_mode = (
+        str(candidate.get("dynamic_so_sizing_mode") or "legacy_factors").strip().lower()
+    )
+    if recovery_mode != "recovery_target":
+        return None
+    if not _has_positive_number(candidate.get("ss")):
+        return "Recovery-target DCA requires a positive safety-order step scale."
+    if not _has_positive_number(candidate.get("dynamic_so_max_deal_quote")):
+        return "Recovery-target DCA requires a positive max deal quote."
+    if bool(candidate.get("dynamic_so_execution_guard_enabled", True)):
+        try:
+            drift_fraction = float(
+                candidate.get("dynamic_so_execution_drift_atr_fraction", 0.25)
+            )
+            minimum_drift = float(
+                candidate.get("dynamic_so_execution_drift_min_pct", 0.15)
+            )
+            maximum_drift = float(
+                candidate.get("dynamic_so_execution_drift_max_pct", 0.5)
+            )
+        except (TypeError, ValueError):
+            return "Recovery execution-drift settings must be numeric."
+        if drift_fraction < 0 or minimum_drift < 0:
+            return "Recovery execution-drift settings cannot be negative."
+        if maximum_drift < minimum_drift:
+            return (
+                "Recovery maximum execution drift must be greater than or equal "
+                "to the minimum drift."
+            )
     return None
 
 
@@ -461,14 +575,35 @@ async def _validate_config_updates(
     updates: ConfigUpdateMap,
 ) -> tuple[ConfigUpdateMap | None, Any | None]:
     """Validate shared config update invariants before persistence."""
-    error_message = _validate_removed_config_keys(updates)
+    raw_snapshot = _get_raw_config_snapshot(config)
+    prepared_sensitive_updates: ConfigUpdateMap = {}
+    for key, raw_value in updates.items():
+        value = _extract_config_update_value(raw_value)
+        current_value = raw_snapshot.get(key)
+        restored_value = restore_redacted_config_value(key, value, current_value)
+        if (
+            key in SENSITIVE_CONFIG_KEYS
+            and restored_value == current_value
+            and (
+                value == REDACTED_SECRET_VALUE
+                or value is None
+                or (isinstance(value, str) and not value.strip())
+            )
+        ):
+            continue
+        prepared_sensitive_updates[key] = {
+            **raw_value,
+            "value": restored_value,
+        }
+
+    error_message = _validate_removed_config_keys(prepared_sensitive_updates)
     if error_message:
         return None, _config_update_conflict(error_message)
 
     try:
         prepared_updates = await _prepare_trade_mode_updates(
-            _get_raw_config_snapshot(config),
-            updates,
+            raw_snapshot,
+            prepared_sensitive_updates,
         )
     except TradeModeConfigError as exc:
         return None, _config_update_conflict(exc)
@@ -485,6 +620,13 @@ async def _validate_config_updates(
     if error_message:
         return None, _config_update_conflict(error_message)
 
+    error_message = _validate_recovery_target_policy_updates(
+        raw_snapshot,
+        prepared_updates,
+    )
+    if error_message:
+        return None, _config_update_conflict(error_message)
+
     return prepared_updates, None
 
 
@@ -496,7 +638,7 @@ async def get_config() -> Any:
         JSON response containing the full configuration cache.
     """
     config = await Config.instance()
-    snapshot = config.snapshot()
+    snapshot = _get_public_config_snapshot(config)
     snapshot["trade_mode_switch_guard"] = (
         await _get_trade_mode_switch_guard(snapshot, strict=False)
     ).to_dict()
@@ -508,7 +650,14 @@ async def get_config() -> Any:
             "Strategy metadata unavailable for config snapshot.", exc_info=True
         )
     snapshot["config_updated_at"] = await _get_latest_config_updated_at()
+    snapshot["config_contract"] = public_config_contract()
     return snapshot
+
+
+@get(path="/config/schema")
+async def get_config_schema() -> Any:
+    """Return the versioned frontend-safe configuration contract."""
+    return public_config_contract()
 
 
 async def _get_latest_config_updated_at() -> str | None:
@@ -545,7 +694,7 @@ async def get_config_key(key: FromPath[str]) -> Any:
     value = config.get(key)
     if value is None:
         return json_response({"error": "Key not found"}, 404)
-    return {key: value}
+    return {key: redact_config_value(key, value)}
 
 
 @put(path="/config/single/{key:str}")
@@ -622,19 +771,11 @@ async def update_multiple_config_keys(request: Request[Any, Any, Any]) -> Any:
 
 
 @post(path="/config/live/activate")
-async def activate_live_trading(request: Request[Any, Any, Any]) -> Any:
+async def activate_live_trading(data: ConfirmMutationRequest) -> Any:
     """Switch the instance from dry run to live mode after server-side checks."""
-    try:
-        data = await request.json()
-    except SerializationException:
-        data = {}
-
-    if data is None:
-        data = {}
-    if not isinstance(data, dict):
-        return json_response({"error": "Payload must be a JSON object"}, 400)
-
-    confirm = bool(data.get("confirm", False))
+    confirm, error_response = _require_json_boolean(data.confirm, "confirm")
+    if error_response is not None:
+        return error_response
     if not confirm:
         return json_response(
             {
@@ -688,21 +829,11 @@ async def activate_live_trading(request: Request[Any, Any, Any]) -> Any:
     }
 
 
-async def _read_confirm_flag(
-    request: Request[Any, Any, Any],
-) -> tuple[bool | None, Any]:
+def _read_confirm_flag(data: ConfirmMutationRequest) -> tuple[bool | None, Any]:
     """Return the explicit confirm flag or a shaped error response."""
-    try:
-        data = await request.json()
-    except SerializationException:
-        data = {}
-
-    if data is None:
-        data = {}
-    if not isinstance(data, dict):
-        return None, json_response({"error": "Payload must be a JSON object"}, 400)
-
-    confirm = bool(data.get("confirm", False))
+    confirm, error_response = _require_json_boolean(data.confirm, "confirm")
+    if error_response is not None:
+        return None, error_response
     if not confirm:
         return None, json_response(
             {
@@ -715,9 +846,9 @@ async def _read_confirm_flag(
 
 
 @post(path="/config/trading/pause")
-async def pause_trading(request: Request[Any, Any, Any]) -> Any:
+async def pause_trading(data: ConfirmMutationRequest) -> Any:
     """Pause Moonwalker for new exposure while existing exits continue."""
-    _, error_response = await _read_confirm_flag(request)
+    _, error_response = _read_confirm_flag(data)
     if error_response is not None:
         return error_response
 
@@ -749,9 +880,9 @@ async def pause_trading(request: Request[Any, Any, Any]) -> Any:
 
 
 @post(path="/config/trading/resume")
-async def resume_trading(request: Request[Any, Any, Any]) -> Any:
+async def resume_trading(data: ConfirmMutationRequest) -> Any:
     """Resume Moonwalker so new exposure is allowed again."""
-    _, error_response = await _read_confirm_flag(request)
+    _, error_response = _read_confirm_flag(data)
     if error_response is not None:
         return error_response
 
@@ -783,43 +914,72 @@ async def resume_trading(request: Request[Any, Any, Any]) -> Any:
 
 
 @post(path="/config/backup/restore")
-async def restore_backup(request: Request[Any, Any, Any]) -> Any:
+async def restore_backup(data: RestoreBackupRequest) -> Any:
     """Restore config-only or full backup payloads."""
-    try:
-        data = await request.json()
-    except SerializationException:
-        return json_response({"error": "Payload must be a JSON object"}, 400)
+    backup_payload = data.backup
+    _, error_response = _read_confirm_flag(ConfirmMutationRequest(confirm=data.confirm))
+    if error_response is not None:
+        return error_response
+    restore_trade_data, error_response = _require_json_boolean(
+        data.restore_trade_data,
+        "restore_trade_data",
+    )
+    if error_response is not None:
+        return error_response
 
-    if not isinstance(data, dict):
-        return json_response({"error": "Payload must be a JSON object"}, 400)
-
-    backup_payload = data.get("backup")
-    restore_trade_data = bool(data.get("restore_trade_data", False))
-    if not isinstance(backup_payload, dict):
-        return json_response({"error": "Missing backup payload."}, 400)
-
-    try:
-        summary = await backup_service.restore_backup(
-            backup_payload,
-            restore_trade_data=restore_trade_data,
+    if _RESTORE_LOCK.locked():
+        return json_response(
+            {
+                "error": "A backup restore is already in progress.",
+                "message": "A backup restore is already in progress.",
+            },
+            409,
         )
-    except TradeModeConfigError as exc:
-        return json_response(exc.to_response_body(), exc.status_code)
-    except ValueError as exc:
-        return json_response({"error": str(exc)}, 400)
-    except Exception as exc:  # noqa: BLE001 - surface restore failures to UI.
-        logging.error("Backup restore failed: %s", exc, exc_info=True)
-        return json_response({"error": "Backup restore failed."}, 500)
+
+    async with _RESTORE_LOCK:
+        async with trading_maintenance_barrier.maintenance():
+            config = await Config.instance()
+            if not bool(config.get(GLOBAL_TRADING_PAUSED_KEY, False)):
+                paused = await config.set(
+                    GLOBAL_TRADING_PAUSED_KEY,
+                    {"value": True, "type": "bool"},
+                )
+                if not paused:
+                    return json_response(
+                        {"error": "Could not pause trading before backup restore."},
+                        500,
+                    )
+            try:
+                summary = await backup_service.restore_backup(
+                    backup_payload,
+                    restore_trade_data=restore_trade_data,
+                )
+                from controller import statistics as statistics_controller
+                from controller import trades as trades_controller
+
+                await trades_controller.invalidate_trade_read_caches()
+                await statistics_controller.invalidate_statistics_read_cache()
+            except TradeModeConfigError as exc:
+                return json_response(exc.to_response_body(), exc.status_code)
+            except ValueError as exc:
+                return json_response({"error": str(exc)}, 400)
+            except Exception as exc:  # noqa: BLE001 - surface restore failures to UI.
+                logging.error("Backup restore failed: %s", exc, exc_info=True)
+                return json_response({"error": "Backup restore failed."}, 500)
 
     restored_scope = "full backup" if restore_trade_data else "configuration"
     return {
-        "message": f"Restored {restored_scope} successfully.",
+        "message": (
+            f"Restored {restored_scope} successfully in paused dry-run mode. "
+            "Review the restored state before activating and resuming trading."
+        ),
         "result": summary,
     }
 
 
 route_handlers = [
     get_config,
+    get_config_schema,
     get_config_freshness,
     export_backup,
     get_config_key,

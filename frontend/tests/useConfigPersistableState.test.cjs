@@ -18,11 +18,21 @@ function createPersistableStateOptions() {
             ws_healthcheck_interval_ms: 30000,
             ws_stale_timeout_ms: 45000,
             ws_reconnect_debounce_ms: 5000,
+            ai_trust_enabled: false,
+            ai_trust_enforce_warnings: false,
+            ai_trust_ollama_base_url: 'http://localhost:11434',
+            ai_trust_ollama_model: null,
+            ai_trust_timeout_ms: 10000,
+            ai_trust_max_retries: 0,
         }),
         signal: ref({
             symbol_list: 'BTC/USDT',
             asap_use_url: false,
             asap_symbol_select: ['BTC/USDT'],
+            delisting_protection_enabled: false,
+            delisting_schedule_use_trading_credentials: false,
+            delisting_schedule_api_key: null,
+            delisting_schedule_api_secret: null,
             asap_symbol_fetch_error: null,
             asap_symbol_options: [
                 { label: 'BTC/USDT', value: 'BTC/USDT' },
@@ -170,6 +180,24 @@ test('useConfigPersistableState tracks persistable section changes by label', ()
     assert.equal(tracking.isDirty.value, true)
     assert.deepEqual(tracking.changedSections.value, ['signal'])
     assert.deepEqual(tracking.changedSectionLabels.value, ['Signal'])
+
+    tracking.syncBaselineState()
+    options.signal.value.delisting_protection_enabled = true
+
+    assert.equal(tracking.isDirty.value, true)
+    assert.deepEqual(tracking.changedSections.value, ['signal'])
+
+    tracking.syncBaselineState()
+    options.signal.value.delisting_schedule_use_trading_credentials = true
+
+    assert.equal(tracking.isDirty.value, true)
+    assert.deepEqual(tracking.changedSections.value, ['signal'])
+
+    tracking.syncBaselineState()
+    options.signal.value.delisting_schedule_api_key = 'read-only-key'
+
+    assert.equal(tracking.isDirty.value, true)
+    assert.deepEqual(tracking.changedSections.value, ['signal'])
 
     tracking.syncBaselineState()
     options.signal.value.csvsignal_file_name = 'signals.csv'

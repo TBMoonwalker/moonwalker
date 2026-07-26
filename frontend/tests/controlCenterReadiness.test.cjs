@@ -103,6 +103,27 @@ test('deriveControlCenterReadiness uses canonical dynamic_dca blockers when trad
     )
 })
 
+test('deriveControlCenterReadiness blocks an unfunded recovery-target policy', () => {
+    const readiness = deriveControlCenterReadiness({
+        ...createReadyConfig(),
+        dca: true,
+        trade_mode: 'dynamic_dca',
+        mstc: 5,
+        sos: 5,
+        ss: 1.6,
+        dynamic_so_sizing_mode: 'recovery_target',
+        dynamic_so_max_deal_quote: 0,
+    })
+
+    assert.equal(readiness.complete, false)
+    assert.deepEqual(
+        readiness.blockers.map((blocker) => blocker.key),
+        ['dynamic_so_max_deal_quote'],
+    )
+    assert.equal(readiness.nextMode, 'advanced')
+    assert.equal(readiness.nextTarget, 'dca')
+})
+
 test('deriveControlCenterViewState adapts to rescue and post-action success states', () => {
     const readiness = deriveControlCenterReadiness(createReadyConfig())
 

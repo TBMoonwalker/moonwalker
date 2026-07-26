@@ -75,3 +75,34 @@ test('router guard preserves setup targets while readiness is incomplete', () =>
         replace: true,
     })
 })
+
+test('router guard opens the advanced editor for an advanced-only blocker', () => {
+    const result = resolveControlCenterNavigation(
+        {
+            name: 'controlCenter',
+            query: {
+                mode: 'setup',
+                target: 'dca',
+            },
+        },
+        {
+            loadError: null,
+            readiness: createReadiness({
+                firstRun: false,
+                attentionNeeded: true,
+                nextMode: 'advanced',
+                nextTarget: 'dca',
+                configuredEssentials: 7,
+            }),
+        },
+    )
+
+    assert.deepEqual(result, {
+        name: 'controlCenter',
+        query: {
+            mode: 'advanced',
+            target: 'dca',
+        },
+        replace: true,
+    })
+})

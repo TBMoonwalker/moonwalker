@@ -58,6 +58,20 @@ class ExchangeSellManager:
                     default_symbol=str(order.get("symbol")),
                 )
 
+            fallback_min_price = safe_float(order.get("fallback_min_price"))
+            if fallback_min_price and fallback_min_price > 0:
+                self._logger.info(
+                    "Keeping the remaining %s position open after the limit sell "
+                    "fallback because a market order cannot guarantee the minimum "
+                    "price %.10f.",
+                    order.get("symbol"),
+                    fallback_min_price,
+                )
+                return build_partial_status_from_fallback(
+                    order_status,
+                    default_symbol=str(order.get("symbol")),
+                )
+
             if not await context.can_fallback_to_market_sell(order, config):
                 return build_partial_status_from_fallback(
                     order_status,

@@ -19,12 +19,22 @@ export interface GeneralConfigSection {
     ws_healthcheck_interval_ms: number | null
     ws_stale_timeout_ms: number | null
     ws_reconnect_debounce_ms: number | null
+    ai_trust_enabled: boolean
+    ai_trust_enforce_warnings: boolean
+    ai_trust_ollama_base_url: string | null
+    ai_trust_ollama_model: string | null
+    ai_trust_timeout_ms: number | null
+    ai_trust_max_retries: number | null
 }
 
 export interface SignalConfigSection {
     symbol_list: string | null
     asap_use_url: boolean
     asap_symbol_select: string[]
+    delisting_protection_enabled: boolean
+    delisting_schedule_use_trading_credentials?: boolean
+    delisting_schedule_api_key?: string | null
+    delisting_schedule_api_secret?: string | null
     signal: string | null
     strategy: string | null
     strategy_enabled: boolean
@@ -35,6 +45,13 @@ export interface SignalConfigSection {
     csvsignal_mode: string | null
     csvsignal_source: string | null
     csvsignal_inline: string | null
+    websocket_url?: string | null
+    websocket_headers?: string | null
+    websocket_subscribe_message?: string | null
+    websocket_required_decision?: string | null
+    websocket_min_confidence?: number | null
+    websocket_accepted_exchanges?: string | null
+    websocket_accepted_market_states?: string | null
 }
 
 export interface FilterConfigSection {
@@ -80,6 +97,19 @@ export interface DcaConfigSection {
     ss: number | null
     os: number | null
     trade_safety_order_budget_ratio: number | null
+    dynamic_so_sizing_mode: string | null
+    dynamic_so_atr_timeframe: string | null
+    dynamic_so_atr_length: number | null
+    dynamic_so_spacing_atr_multiplier: number | null
+    dynamic_so_recovery_atr_multiplier: number | null
+    dynamic_so_recovery_min_pct: number | null
+    dynamic_so_recovery_max_pct: number | null
+    dynamic_so_max_deal_quote: number | null
+    dynamic_so_min_tp_improvement_pct: number | null
+    dynamic_so_execution_guard_enabled: boolean
+    dynamic_so_execution_drift_atr_fraction: number | null
+    dynamic_so_execution_drift_min_pct: number | null
+    dynamic_so_execution_drift_max_pct: number | null
     sidestep_bearish_strategy: string | null
     sidestep_reentry_strategy: string | null
     sidestep_reentry_cooldown_candles: number | null
@@ -143,6 +173,9 @@ export interface ConfigSubmitPayloadDefaults {
     advancedWsHealthcheckIntervalMs: number
     advancedWsStaleTimeoutMs: number
     advancedWsReconnectDebounceMs: number
+    defaultAiTrustOllamaBaseUrl: string
+    defaultAiTrustTimeoutMs: number
+    defaultAiTrustMaxRetries: number
     defaultTpSpikeConfirmSeconds: number
     defaultTpSpikeConfirmTicks: number
     defaultGreenPhaseRampDays: number
@@ -233,7 +266,48 @@ export function buildConfigSubmitPayload(
                 defaults.advancedWsReconnectDebounceMs,
             'int',
         ),
+        ai_trust_enabled: serializeConfigValue(
+            general.ai_trust_enabled ?? false,
+            'bool',
+        ),
+        ai_trust_enforce_warnings: serializeConfigValue(
+            general.ai_trust_enforce_warnings ?? false,
+            'bool',
+        ),
+        ai_trust_ollama_base_url: serializeConfigValue(
+            toNullableConfigString(general.ai_trust_ollama_base_url) ||
+                defaults.defaultAiTrustOllamaBaseUrl,
+            'str',
+        ),
+        ai_trust_ollama_model: serializeConfigValue(
+            toNullableConfigString(general.ai_trust_ollama_model),
+            'str',
+        ),
+        ai_trust_timeout_ms: serializeConfigValue(
+            general.ai_trust_timeout_ms ?? defaults.defaultAiTrustTimeoutMs,
+            'int',
+        ),
+        ai_trust_max_retries: serializeConfigValue(
+            general.ai_trust_max_retries ?? defaults.defaultAiTrustMaxRetries,
+            'int',
+        ),
         signal: serializeConfigValue(toNullableConfigString(signal.signal), 'str'),
+        delisting_protection_enabled: serializeConfigValue(
+            signal.delisting_protection_enabled ?? false,
+            'bool',
+        ),
+        delisting_schedule_use_trading_credentials: serializeConfigValue(
+            signal.delisting_schedule_use_trading_credentials ?? false,
+            'bool',
+        ),
+        delisting_schedule_api_key: serializeConfigValue(
+            toNullableConfigString(signal.delisting_schedule_api_key),
+            'str',
+        ),
+        delisting_schedule_api_secret: serializeConfigValue(
+            toNullableConfigString(signal.delisting_schedule_api_secret),
+            'str',
+        ),
         signal_strategy: serializeConfigValue(
             signal.signal === 'csv_signal'
                 ? null
@@ -252,6 +326,14 @@ export function buildConfigSubmitPayload(
                 csvsignal_mode: signal.csvsignal_mode,
                 csvsignal_source: signal.csvsignal_source,
                 csvsignal_inline: signal.csvsignal_inline,
+                websocket_url: signal.websocket_url,
+                websocket_headers: signal.websocket_headers,
+                websocket_subscribe_message: signal.websocket_subscribe_message,
+                websocket_required_decision: signal.websocket_required_decision,
+                websocket_min_confidence: signal.websocket_min_confidence,
+                websocket_accepted_exchanges: signal.websocket_accepted_exchanges,
+                websocket_accepted_market_states:
+                    signal.websocket_accepted_market_states,
             }),
             'str',
         ),
@@ -325,10 +407,62 @@ export function buildConfigSubmitPayload(
         so: serializeConfigValue(dca.so || false, 'int'),
         mstc: serializeConfigValue(dca.mstc || false, 'int'),
         sos: serializeConfigValue(dca.sos || false, 'float'),
-        ss: serializeConfigValue(dca.ss || false, 'float'),
+        ss: serializeConfigValue(dca.ss ?? 1.6, 'float'),
         os: serializeConfigValue(dca.os || false, 'float'),
         trade_safety_order_budget_ratio: serializeConfigValue(
             dca.trade_safety_order_budget_ratio ?? 0.95,
+            'float',
+        ),
+        dynamic_so_sizing_mode: serializeConfigValue(
+            dca.dynamic_so_sizing_mode || 'legacy_factors',
+            'str',
+        ),
+        dynamic_so_atr_timeframe: serializeConfigValue(
+            dca.dynamic_so_atr_timeframe || 'trading',
+            'str',
+        ),
+        dynamic_so_atr_length: serializeConfigValue(
+            dca.dynamic_so_atr_length ?? 14,
+            'int',
+        ),
+        dynamic_so_spacing_atr_multiplier: serializeConfigValue(
+            dca.dynamic_so_spacing_atr_multiplier ?? 3,
+            'float',
+        ),
+        dynamic_so_recovery_atr_multiplier: serializeConfigValue(
+            dca.dynamic_so_recovery_atr_multiplier ?? 5.5,
+            'float',
+        ),
+        dynamic_so_recovery_min_pct: serializeConfigValue(
+            dca.dynamic_so_recovery_min_pct ?? 12,
+            'float',
+        ),
+        dynamic_so_recovery_max_pct: serializeConfigValue(
+            dca.dynamic_so_recovery_max_pct ?? 30,
+            'float',
+        ),
+        dynamic_so_max_deal_quote: serializeConfigValue(
+            dca.dynamic_so_max_deal_quote ?? 250,
+            'float',
+        ),
+        dynamic_so_min_tp_improvement_pct: serializeConfigValue(
+            dca.dynamic_so_min_tp_improvement_pct ?? 5,
+            'float',
+        ),
+        dynamic_so_execution_guard_enabled: serializeConfigValue(
+            dca.dynamic_so_execution_guard_enabled ?? true,
+            'bool',
+        ),
+        dynamic_so_execution_drift_atr_fraction: serializeConfigValue(
+            dca.dynamic_so_execution_drift_atr_fraction ?? 0.25,
+            'float',
+        ),
+        dynamic_so_execution_drift_min_pct: serializeConfigValue(
+            dca.dynamic_so_execution_drift_min_pct ?? 0.15,
+            'float',
+        ),
+        dynamic_so_execution_drift_max_pct: serializeConfigValue(
+            dca.dynamic_so_execution_drift_max_pct ?? 0.5,
             'float',
         ),
         sidestep_bearish_strategy: serializeConfigValue(

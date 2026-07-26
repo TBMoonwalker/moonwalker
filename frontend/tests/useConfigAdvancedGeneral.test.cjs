@@ -14,6 +14,9 @@ function createPayloadDefaults(overrides = {}) {
         advancedWsHealthcheckIntervalMs: 30000,
         advancedWsStaleTimeoutMs: 45000,
         advancedWsReconnectDebounceMs: 5000,
+        defaultAiTrustOllamaBaseUrl: 'http://ollama.test:11434',
+        defaultAiTrustTimeoutMs: 10000,
+        defaultAiTrustMaxRetries: 0,
         defaultTpSpikeConfirmSeconds: 20,
         defaultTpSpikeConfirmTicks: 5,
         defaultGreenPhaseRampDays: 7,
@@ -88,6 +91,12 @@ function createComposableOptions() {
             ws_healthcheck_interval_ms: 12000,
             ws_stale_timeout_ms: 18000,
             ws_reconnect_debounce_ms: 24000,
+            ai_trust_enabled: false,
+            ai_trust_enforce_warnings: false,
+            ai_trust_ollama_base_url: 'http://ollama.test:11434',
+            ai_trust_ollama_model: null,
+            ai_trust_timeout_ms: 10000,
+            ai_trust_max_retries: 0,
         }),
         getClientTimezone: () => 'Europe/Vienna',
         isLoading: ref(false),
@@ -112,6 +121,10 @@ test('useConfigAdvancedGeneral builds load defaults from local storage', () => {
         assert.equal(
             defaults.advancedWsHealthcheckIntervalMs,
             options.defaults.advancedWsHealthcheckIntervalMs,
+        )
+        assert.equal(
+            defaults.defaultAiTrustOllamaBaseUrl,
+            'http://ollama.test:11434',
         )
     } finally {
         localStorageMock.restore()

@@ -43,7 +43,7 @@ const emit = defineEmits<{
             <h2>{{ backupRestoreTitle }}</h2>
             <n-text depth="3">{{ backupRestoreSummary }}</n-text>
         </div>
-        <n-card title="Backup & Restore" size="small" class="mw-shell-card">
+        <n-card title="Backup & Restore" size="small" class="dashboard-panel">
             <n-flex vertical :size="12">
                 <ConfigBackupDownloadControls
                     action-button-class="utility-action-button"
@@ -84,7 +84,7 @@ const emit = defineEmits<{
                 Run operational utility checks without mixing them into the config draft.
             </n-text>
         </div>
-        <n-card size="small" class="mw-shell-card">
+        <n-card size="small" class="dashboard-panel">
             <n-flex vertical :size="12">
                 <n-text depth="3">
                     Send a Telegram test using the currently saved monitoring configuration.
@@ -137,8 +137,8 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 </style>

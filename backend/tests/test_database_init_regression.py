@@ -27,9 +27,10 @@ class _FakeConnection:
     ) -> None:
         self._rows = rows or []
         self._error = error
+        self.queries: list[str] = []
 
     async def execute_query(self, query: str) -> tuple[int, list[tuple[str]]]:
-        assert query == "PRAGMA integrity_check"
+        self.queries.append(query)
         if self._error is not None:
             raise self._error
         return len(self._rows), self._rows
@@ -169,21 +170,46 @@ async def test_run_sqlite_integrity_check_returns_trimmed_messages(
 ) -> None:
     database = Database()
     database.db_url = "sqlite:///tmp/broken.sqlite"
+    connection = _FakeConnection(
+        rows=[
+            (" row 1 missing from index idx_trades_deal_id_88bd51 ",),
+            ("",),
+            ("row 2 missing from index idx_trades_deal_id_88bd51",),
+        ]
+    )
 
     monkeypatch.setattr(
         "service.database.Tortoise.get_connection",
-        lambda *_args, **_kwargs: _FakeConnection(
-            rows=[
-                (" row 1 missing from index idx_trades_deal_id_88bd51 ",),
-                ("",),
-                ("row 2 missing from index idx_trades_deal_id_88bd51",),
-            ]
-        ),
+        lambda *_args, **_kwargs: connection,
     )
 
     assert await database._run_sqlite_integrity_check() == [
         "row 1 missing from index idx_trades_deal_id_88bd51",
         "row 2 missing from index idx_trades_deal_id_88bd51",
+    ]
+    assert connection.queries == ["PRAGMA integrity_check"]
+
+
+@pytest.mark.asyncio
+async def test_run_sqlite_integrity_check_accepts_startup_table_scope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    database = Database()
+    database.db_url = "sqlite:///tmp/healthy.sqlite"
+    connection = _FakeConnection(rows=[("ok",)])
+
+    monkeypatch.setattr(
+        "service.database.Tortoise.get_connection",
+        lambda *_args, **_kwargs: connection,
+    )
+
+    assert await database._run_sqlite_integrity_check(["trades", "opentrades"]) == [
+        "ok",
+        "ok",
+    ]
+    assert connection.queries == [
+        "PRAGMA integrity_check('trades')",
+        "PRAGMA integrity_check('opentrades')",
     ]
 
 
@@ -239,6 +265,7 @@ async def test_database_init_surfaces_actionable_sqlite_corruption(
     monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
+    monkeypatch.setattr(Database, "_ensure_ai_trust_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
     monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_malformed)
@@ -271,6 +298,7 @@ async def test_database_init_reraises_non_corruption_failures(
     monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
+    monkeypatch.setattr(Database, "_ensure_ai_trust_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
     monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_generic)
@@ -306,6 +334,7 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
     monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_trade_ledger_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
+    monkeypatch.setattr(Database, "_ensure_ai_trust_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
     monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_malformed)
@@ -366,6 +395,9 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
     monkeypatch.setattr(
         Database, "_ensure_upnl_history_columns", _record("ensure_upnl_history_columns")
     )
+    monkeypatch.setattr(
+        Database, "_ensure_ai_trust_columns", _record("ensure_ai_trust_columns")
+    )
     monkeypatch.setattr(Database, "_ensure_indexes", _record("ensure_indexes"))
     monkeypatch.setattr(
         Database,
@@ -385,6 +417,7 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "ensure_spot_campaign_columns",
         "ensure_trade_ledger_columns",
         "ensure_upnl_history_columns",
+        "ensure_ai_trust_columns",
         "ensure_indexes",
         "repair_index_only_corruption_if_needed",
         "backfill_trade_ledger_rows",
@@ -397,6 +430,7 @@ async def test_repair_index_only_corruption_reindexes_until_integrity_is_clean(
 ) -> None:
     database = Database()
     database.db_url = "sqlite:///tmp/broken.sqlite"
+    quick_runs = iter([["ok"], ["ok"]])
     integrity_runs = iter(
         [
             [
@@ -408,19 +442,33 @@ async def test_repair_index_only_corruption_reindexes_until_integrity_is_clean(
     )
     calls: list[str] = []
 
-    async def fake_integrity_check(*_args, **_kwargs) -> list[str]:
+    async def fake_quick_check(*_args, **_kwargs) -> list[str]:
+        calls.append("quick_check")
+        return next(quick_runs)
+
+    async def fake_integrity_check(
+        _self, table_names=None, *_args, **_kwargs
+    ) -> list[str]:
         calls.append("integrity_check")
+        assert table_names is None
         return next(integrity_runs)
 
     async def fake_reindex(*_args, **_kwargs) -> None:
         calls.append("reindex")
 
+    monkeypatch.setattr(Database, "_run_sqlite_quick_check", fake_quick_check)
     monkeypatch.setattr(Database, "_run_sqlite_integrity_check", fake_integrity_check)
     monkeypatch.setattr(Database, "_reindex_sqlite_database", fake_reindex)
 
     await database._repair_index_only_corruption_if_needed()
 
-    assert calls == ["integrity_check", "reindex", "integrity_check"]
+    assert calls == [
+        "quick_check",
+        "integrity_check",
+        "reindex",
+        "quick_check",
+        "integrity_check",
+    ]
 
 
 @pytest.mark.asyncio
@@ -430,10 +478,10 @@ async def test_repair_index_only_corruption_raises_for_generic_damage(
     database = Database()
     database.db_url = "sqlite:///tmp/broken.sqlite"
 
-    async def fake_integrity_check(*_args, **_kwargs) -> list[str]:
+    async def fake_quick_check(*_args, **_kwargs) -> list[str]:
         return ["*** in database main ***\nPage 5 is never used"]
 
-    monkeypatch.setattr(Database, "_run_sqlite_integrity_check", fake_integrity_check)
+    monkeypatch.setattr(Database, "_run_sqlite_quick_check", fake_quick_check)
 
     with pytest.raises(
         RuntimeError, match="SQLite corruption detected in /tmp/broken.sqlite"

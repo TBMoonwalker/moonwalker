@@ -29,6 +29,18 @@ export type OpenTradeRow = {
     automation_paused?: boolean
     automation_paused_at?: string | null
     automation_pause_source?: string | null
+    delisting_warning?: boolean
+    delisting_at?: string | null
+    delisting_reason?: string | null
+    delisting_source?: string | null
+    delisting_check_unavailable?: boolean
+    delisting_check_message?: string | null
+    delisting_check_source?: string | null
+    dca_sizing_mode?: string | null
+    dca_reference_price?: number
+    dca_reference_atr_percent?: number
+    dca_next_trigger_price?: number
+    dca_last_decision_json?: string | null
     amount: number
     cost: number
     profit: number
@@ -176,7 +188,7 @@ export function getUnsellableMessage(rowData: OpenTradeRow): string {
             `Minimum notional required: ${Number(minNotional).toFixed(8)}.`,
         )
     }
-    parts.push('Use Stop and close the remainder manually on the exchange.')
+    parts.push('Use Stop and handle the remainder manually on the exchange.')
     return parts.join(' ')
 }
 

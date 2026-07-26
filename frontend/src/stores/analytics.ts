@@ -55,6 +55,105 @@ export interface AnalyticsOverview {
      best: number
      worst: number
   }
+  ai_trust: {
+     enabled: boolean
+     enforce_warnings: boolean
+     configured: boolean
+     provider: string
+     model_name: string | null
+     status: 'disabled' | 'missing_model' | 'ready' | string
+     coverage: {
+        total: number
+        scored: number
+        unscored: number
+        closed: number
+        coverage_rate: number
+     }
+     quality: {
+        warning_hit_rate: number
+        false_warning_rate: number
+        bad_entry_capture_rate: number
+        bad_entries: number
+        warnings: number
+     }
+     provider_status_counts: Record<string, number>
+     calibration: AiTrustCalibration
+     recent_predictions: AiTrustPrediction[]
+     bad_entry_review: AiTrustPrediction[]
+  }
+}
+
+export interface AiTrustCalibrationBucket {
+   bucket_type: string
+   bucket_key: string
+   sample_count: number
+   closed_count: number
+   bad_entry_count: number
+   warned_count: number
+   warning_hit_count: number
+   false_warning_count: number
+   bad_entry_capture_count: number
+   bad_entry_rate: number
+   warning_hit_rate: number
+   false_warning_rate: number
+   bad_entry_capture_rate: number
+   confidence: 'cold' | 'warming' | 'usable' | 'confident' | string
+   usable: boolean
+}
+
+export interface AiTrustMissedBadEntryCluster {
+   symbol: string
+   reason_code: string
+   missed_bad_entries: number
+}
+
+export interface AiTrustCalibration {
+   enabled: boolean
+   confidence: 'cold' | 'warming' | 'usable' | 'confident' | string
+   confidence_thresholds: {
+      warming: number
+      usable: number
+      confident: number
+      symbol_usable: number
+   }
+   lookback_days: number
+   sample_cap: number
+   closed_samples: number
+   shadow_effective_warning_threshold: number
+   buckets: AiTrustCalibrationBucket[]
+   missed_bad_entry_clusters: AiTrustMissedBadEntryCluster[]
+}
+
+export interface AiTrustPrediction {
+   id: number
+   symbol: string
+   deal_id: string | null
+   created_at: string | null
+   source_event: string
+   status: string
+   provider_status: string
+   risk_score: number | null
+   confidence: number | null
+   would_warn: boolean | null
+   warning_severity: string
+   reason_codes: string[]
+   operator_note: string | null
+   outcome_status: string
+   bad_entry: boolean | null
+   bad_entry_reasons: string[]
+   outcome_profit: number | null
+   outcome_profit_percent: number | null
+   outcome_duration_hours: number | null
+   outcome_so_count: number | null
+   shadow_effective_risk_score?: number | null
+   calibration_reason?: string | null
+   calibration_buckets?: Array<{
+      bucket_type: string
+      bucket_key: string
+      bad_entry_rate: number
+      closed_count: number
+      confidence: string
+   }>
 }
 
 export const useAnalyticsStore = defineStore('analytics', () => {

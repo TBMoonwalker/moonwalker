@@ -38,6 +38,59 @@ build_frontend_with_fallback() {
     return ${status}
 }
 
+print_node_runtime_help() {
+    echo "Moonwalker uses the Node.js version pinned in .nvmrc."
+    echo
+    echo "macOS or Linux with nvm (recommended):"
+    echo "  Install nvm: https://github.com/nvm-sh/nvm#installing-and-updating"
+    echo "  nvm install"
+    echo "  nvm use"
+    echo "  ./run.sh start"
+    echo
+    echo "macOS with Homebrew:"
+    echo "  brew install node@24"
+    echo '  export PATH="$(brew --prefix node@24)/bin:$PATH"'
+    echo "  ./run.sh start"
+}
+
+check_frontend_runtime() {
+    local node_major
+    local node_minor
+    local node_version
+    local npm_major
+    local npm_version
+
+    if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+        echo "❌ Node.js 24 and npm 11 are required but were not both found."
+        print_node_runtime_help
+        return 1
+    fi
+
+    node_version="$(node -p 'process.versions.node')"
+    npm_version="$(npm --version)"
+    IFS=. read -r node_major node_minor _ <<< "$node_version"
+    IFS=. read -r npm_major _ <<< "$npm_version"
+
+    if [ "$node_major" -ne 24 ] || [ "$node_minor" -lt 11 ] || [ "$npm_major" -ne 11 ]; then
+        echo "❌ Unsupported frontend runtime: Node.js v${node_version}, npm ${npm_version}."
+        echo "   Required: Node.js >=24.11.0 <25 and npm >=11 <12."
+        print_node_runtime_help
+        return 1
+    fi
+}
+
+service_process_is_running() {
+    local pid
+
+    [ -f "$PID_FILE" ] || return 1
+    while read -r pid; do
+        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+            return 0
+        fi
+    done < "$PID_FILE"
+    return 1
+}
+
 # Function to stop all services
 stop_services() {
 
@@ -67,28 +120,25 @@ start_services() {
     local debug="${1:-false}"
     local trace="${2:-false}"
     local port="${3:-8130}"
+    local active_target=""
     local app_pid
+    local release_venv
     # Check if services are already running
     if [ -f "$LOCK_FILE" ]; then
-        echo "❌ Services are already running"
-        exit 1
+        if service_process_is_running; then
+            echo "❌ Services are already running"
+            exit 1
+        fi
+
+        echo "⚠️  Removing stale service lock from an incomplete startup."
+        rm -f "$LOCK_FILE" "$PID_FILE"
     fi
 
-    # Create lock file to indicate services are running
-    touch "$LOCK_FILE"
-    trap 'rm -f "$LOCK_FILE"' ERR
-
-    echo "📦 Checking npm-run-all..."
-    if ! npx --no-install run-p --version >/dev/null 2>&1; then
-      echo "⬇️  Installing npm-run-all..."
-      cd frontend
-      npm install --save-dev npm-run-all
-      cd ..
-    fi
+    check_frontend_runtime
 
     echo "📦 Installing frontend deps & building Vue..."
     cd frontend
-    npm ci
+    npm ci --ignore-scripts
     # Startup path should prioritize successful asset build over type-checking.
     # Type checks are still available via `npm run build`/CI.
     build_frontend_with_fallback
@@ -105,14 +155,47 @@ start_services() {
     cp -r frontend/dist/assets backend/static/
     cp frontend/dist/index.html backend/templates/
 
-    echo "🐍 Installing Python venv and backend dependencies..."
-    python3 -m venv .venv
-    ./.venv/bin/python -m pip install -r backend/requirements.txt
-    ./.venv/bin/python -m pip check
+    echo "🐍 Building a verified Python environment..."
+    if [ "$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.14" ]; then
+        echo "❌ Python 3.14 is required. See .python-version."
+        exit 1
+    fi
+    if [ -L .venv ]; then
+        active_target="$(readlink .venv)"
+    fi
+    if [ "$(basename "$active_target")" = "slot-a" ]; then
+        release_venv=".venvs/slot-b"
+    else
+        release_venv=".venvs/slot-a"
+    fi
+    mkdir -p .venvs
+    rm -rf "$release_venv" .venv.next
+    python3 -m venv "$release_venv"
+    ./scripts/install_python_dependencies.sh \
+        "$release_venv/bin/python" \
+        backend/requirements.txt
+    "$release_venv/bin/python" -m pip check
+    PYTHONPATH=backend "$release_venv/bin/python" -c "from controller import route_handlers"
 
-    echo "🚀 Validating backend imports & starting Litestar..."
+    rm -rf .venv.previous
+    if [ -e .venv ] || [ -L .venv ]; then
+        mv .venv .venv.previous
+    fi
+    ln -s "$release_venv" .venv.next
+    if ! mv .venv.next .venv; then
+        if [ -e .venv.previous ] || [ -L .venv.previous ]; then
+            mv .venv.previous .venv
+        fi
+        exit 1
+    fi
+
+    # Do not mark the service as running until all build and validation work
+    # has succeeded. EXIT/interrupt cleanup protects the short launch window.
+    touch "$LOCK_FILE"
+    trap 'rm -f "$LOCK_FILE" "$PID_FILE"' EXIT INT TERM
+
+    echo "🚀 Starting Litestar..."
     cd backend
-    ../.venv/bin/python -c "from controller import route_handlers"
     if [ "$trace" = "true" ]; then
         MOONWALKER_LOG_LEVEL=TRACE MOONWALKER_PORT="$port" ../.venv/bin/python app.py > ../run.log 2>&1 &
     elif [ "$debug" = "true" ]; then
@@ -131,7 +214,7 @@ start_services() {
         exit 1
     fi
 
-    trap - ERR
+    trap - EXIT INT TERM
     echo "✅ Services started in background. Use './run.sh stop' to stop them."
 }
 

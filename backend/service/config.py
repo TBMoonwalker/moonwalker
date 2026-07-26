@@ -10,13 +10,17 @@ from typing import Any, Callable
 
 import helper
 from model import AppConfig
+from service.config_contract import config_contract_defaults
+from service.config_migrations import run_config_migrations
 from service.config_persistence import should_persist_config_value
+from service.config_redaction import redact_config_snapshot
 from service.config_runtime_store import (
     ConfigEntry,
     ConfigRuntimeStore,
     ConfigUpdateAction,
 )
 from service.redis import CONFIG_CHANNEL, redis_client
+from service.signal_settings import serialize_signal_settings
 from service.strategy_builder import PUBLIC_BUILTIN_SLUGS
 from service.strategy_capability import filter_supported_strategies
 from service.trade_lifecycle_config import resolve_trade_mode_config
@@ -88,6 +92,7 @@ DEFAULT_CONFIG_VALUES = {
     "autopilot_green_phase_confirm_cycles": 2,
     "autopilot_green_phase_release_cycles": 4,
     "autopilot_green_phase_max_locked_fund_percent": 85.0,
+    **config_contract_defaults(),
 }
 
 
@@ -108,56 +113,6 @@ def build_removed_config_key_message(key: str) -> str:
             f"Use '{replacement}' instead."
         )
     return f"Config key '{normalized_key}' was removed in {version}."
-
-
-def _optional_config_string(value: Any) -> str | None:
-    """Return a stripped config string when the value is meaningful."""
-    normalized = str(value or "").strip()
-    return normalized or None
-
-
-def _bool_config_value(value: Any) -> bool:
-    """Normalize mixed bool-like config values safely."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "off", ""}:
-            return False
-    return bool(value)
-
-
-def _resolve_legacy_trade_mode(legacy_snapshot: dict[str, Any]) -> str | None:
-    """Return a runtime-only canonical trade mode from legacy upgrade rows."""
-    lifecycle_mode = _optional_config_string(
-        legacy_snapshot.get("trade_lifecycle_mode")
-    )
-    sidestep_enabled = _bool_config_value(
-        legacy_snapshot.get("sidestep_campaign_enabled", False)
-    )
-
-    if lifecycle_mode == "sidestep_reentry" or sidestep_enabled:
-        return "sidestep"
-    if _bool_config_value(legacy_snapshot.get("dynamic_dca", False)):
-        return "dynamic_dca"
-    return None
-
-
-def _apply_legacy_trade_mode_entry(
-    entries: list[ConfigEntry],
-    legacy_snapshot: dict[str, Any],
-) -> None:
-    """Add a runtime-only trade_mode entry for pre-4.0 upgrade configs."""
-    if any(entry.key == "trade_mode" for entry in entries):
-        return
-
-    trade_mode = _resolve_legacy_trade_mode(legacy_snapshot)
-    if trade_mode is None:
-        return
-
-    entries.append(ConfigEntry(key="trade_mode", value_type="str", value=trade_mode))
 
 
 def resolve_timeframe(config: dict[str, Any], default: str = "1m") -> str:
@@ -295,20 +250,15 @@ class Config:
         Retrieves all AppConfig entries and converts their values to the appropriate types
         based on the value_type field. Also loads strategies and signal plugins.
         """
+        await run_config_migrations()
         entries: list[ConfigEntry] = []
-        legacy_snapshot: dict[str, Any] = {}
         rows = await AppConfig.all()
         for row in rows:
             if row.key in LEGACY_TRADE_MODE_KEYS:
-                legacy_snapshot[row.key] = deserialize_config_value(
-                    row.value,
-                    row.value_type,
-                )
                 continue
             if is_removed_config_key(row.key):
                 continue
             entries.append(self.__build_entry(row.key, row.value, row.value_type))
-        _apply_legacy_trade_mode_entry(entries, legacy_snapshot)
         self.__validate_trade_mode_snapshot(
             self.__build_snapshot_from_entries(entries),
             source="startup",
@@ -372,6 +322,10 @@ class Config:
         snapshot = dict(raw_snapshot)
         snapshot["trade_mode"] = trade_mode_state.trade_mode
         return snapshot
+
+    def public_snapshot(self) -> dict[str, Any]:
+        """Return a client-safe config snapshot with credentials redacted."""
+        return redact_config_snapshot(self.snapshot())
 
     def raw_snapshot(self) -> dict[str, Any]:
         """Return the config state before derived trade-mode compatibility fields."""
@@ -492,7 +446,15 @@ class Config:
                 runtime_value=None,
             )
 
-        serialized_value = self.__serialize_value_for_storage(value_data, value_type)
+        if key == "signal_settings":
+            if value_type != "str":
+                raise ValueError("signal_settings must use config type 'str'.")
+            serialized_value = serialize_signal_settings(value_data)
+        else:
+            serialized_value = self.__serialize_value_for_storage(
+                value_data,
+                value_type,
+            )
         return ConfigUpdateAction(
             key=key,
             value_type=value_type,
@@ -578,11 +540,19 @@ class Config:
 
         return True
 
-    async def batch_set(self, updates: dict[str, Any]) -> bool:
+    async def batch_set(
+        self,
+        updates: dict[str, Any],
+        *,
+        notify_subscribers: bool = True,
+    ) -> bool:
         """Update multiple configuration keys in the database at once.
 
         Args:
             updates: Dictionary of key-value pairs with typed update payloads.
+            notify_subscribers: Whether to notify local and Redis subscribers.
+                Runtime status writes can skip notifications to avoid restarting
+                trading services.
 
         Returns:
             True if the operation succeeded
@@ -620,7 +590,7 @@ class Config:
             else:
                 self._store.remove_entry(action.key)
 
-        if changed_keys:
+        if changed_keys and notify_subscribers:
             self.__notify_subscribers()
             await self.__publish_change(changed_keys)
 

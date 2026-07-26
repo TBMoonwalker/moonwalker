@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref } from 'vue'
+import { computed, h, onMounted, reactive, ref, type Directive } from 'vue'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
     CalendarOutline,
@@ -55,6 +55,24 @@ const configuredCurrency = ref('')
 const strategyOptions = ref<SelectOption[]>([])
 const symbolOptions = ref<SelectOption[]>([])
 const lastRunAt = ref<number | null>(null)
+
+function labelStepperButtons(element: HTMLElement, fieldLabel: string): void {
+    const [decreaseButton, increaseButton] = Array.from(
+        element.querySelectorAll<HTMLButtonElement>('button'),
+    )
+    const normalizedLabel = fieldLabel.toLowerCase()
+    decreaseButton?.setAttribute('aria-label', `Decrease ${normalizedLabel}`)
+    increaseButton?.setAttribute('aria-label', `Increase ${normalizedLabel}`)
+}
+
+const vAccessibleStepper: Directive<HTMLElement, string> = {
+    mounted(element, binding) {
+        labelStepperButtons(element, binding.value)
+    },
+    updated(element, binding) {
+        labelStepperButtons(element, binding.value)
+    },
+}
 
 const timeframeOptions = BACKTEST_TIMEFRAME_OPTIONS.map((option) => ({ ...option }))
 const tradeModeOptions = BACKTEST_TRADE_MODE_OPTIONS.map((option) => ({ ...option }))
@@ -221,6 +239,18 @@ const statusText = computed(() => {
     }
     return 'Ready'
 })
+const statusTagType = computed(() => {
+    if (errorMessage.value) {
+        return 'error'
+    }
+    if (isRunning.value || result.value?.stats?.still_open_at_end) {
+        return 'warning'
+    }
+    if (result.value) {
+        return 'success'
+    }
+    return 'default'
+})
 
 const lastRunLabel = computed(() =>
     lastRunAt.value ? new Date(lastRunAt.value).toLocaleString() : 'No run yet',
@@ -343,21 +373,22 @@ onMounted(() => {
 </script>
 
 <template>
-    <div class="page-shell backtest-page">
-        <section class="backtest-hero mw-shell-card" aria-labelledby="backtest-title">
-            <div class="backtest-hero-copy">
-                <n-text depth="3" class="backtest-kicker">Backtest</n-text>
-                <h1 id="backtest-title">Strategy replay</h1>
-            </div>
-            <div class="backtest-status" aria-live="polite">
-                <span class="status-dot" :class="{ 'status-dot-running': isRunning }" />
-                <span>{{ statusText }}</span>
-                <span class="status-muted">{{ lastRunLabel }}</span>
-            </div>
+    <div class="page-shell backtest-page operator-console-page">
+        <section class="admission-strip backtest-status-strip" aria-live="polite">
+            <n-tag
+                class="admission-pill"
+                :type="statusTagType"
+                :bordered="false"
+            >
+                {{ statusText }}
+            </n-tag>
+            <span class="admission-copy">
+                Strategy replay workspace. Last run: {{ lastRunLabel }}.
+            </span>
         </section>
 
         <section class="backtest-workspace">
-            <form class="backtest-controls mw-shell-card" @submit.prevent="runBacktest">
+            <form class="backtest-controls dashboard-panel" @submit.prevent="runBacktest">
                 <div class="panel-title-row">
                     <n-icon size="18"><FlaskOutline /></n-icon>
                     <h2>Run setup</h2>
@@ -388,6 +419,7 @@ onMounted(() => {
                                 />
                                 <n-button
                                     secondary
+                                    aria-label="Refresh symbols"
                                     :loading="isLoadingSymbols"
                                     @click="loadExchangeSymbols"
                                 >
@@ -493,6 +525,7 @@ onMounted(() => {
                     <div class="control-grid two">
                         <n-form-item label="Base order">
                             <n-input-number
+                                v-accessible-stepper="'Base order'"
                                 v-model:value="form.baseOrderSize"
                                 :min="1"
                                 :precision="2"
@@ -500,6 +533,7 @@ onMounted(() => {
                         </n-form-item>
                         <n-form-item label="Take profit %">
                             <n-input-number
+                                v-accessible-stepper="'Take profit'"
                                 v-model:value="form.takeProfitPct"
                                 :min="0"
                                 :precision="2"
@@ -507,6 +541,7 @@ onMounted(() => {
                         </n-form-item>
                         <n-form-item label="Stop loss %">
                             <n-input-number
+                                v-accessible-stepper="'Stop loss'"
                                 v-model:value="form.stopLossPct"
                                 :min="0"
                                 :precision="2"
@@ -519,6 +554,7 @@ onMounted(() => {
                     <div v-if="!isSidestepMode" class="control-grid two">
                         <n-form-item label="Max safety orders">
                             <n-input-number
+                                v-accessible-stepper="'Max safety orders'"
                                 v-model:value="form.maxSafetyOrders"
                                 :min="0"
                                 :precision="0"
@@ -526,6 +562,7 @@ onMounted(() => {
                         </n-form-item>
                         <n-form-item label="Safety step %">
                             <n-input-number
+                                v-accessible-stepper="'Safety step'"
                                 v-model:value="form.safetyOrderStepPct"
                                 :min="0.1"
                                 :precision="2"
@@ -535,6 +572,7 @@ onMounted(() => {
 
                     <n-form-item label="Fee">
                         <n-input-number
+                            v-accessible-stepper="'Fee'"
                             v-model:value="form.fee"
                             :min="0"
                             :step="0.0001"
@@ -564,7 +602,7 @@ onMounted(() => {
                 </div>
             </form>
 
-            <div class="backtest-results mw-shell-card">
+            <div class="backtest-results dashboard-panel ledger-panel chart-panel">
                 <n-alert
                     v-if="errorMessage"
                     type="error"
@@ -609,13 +647,17 @@ onMounted(() => {
                         :indicators="result.chart.indicators ?? []"
                     />
 
-                    <n-tabs type="line" animated>
+                    <n-tabs
+                        class="calm-tabs backtest-result-tabs"
+                        type="line"
+                        animated
+                        :tabs-padding="20"
+                    >
                         <n-tab-pane name="trades" tab="Trades">
                             <n-data-table
                                 :columns="tradeColumns"
                                 :data="result.trades"
                                 :bordered="false"
-                                :single-line="false"
                                 size="small"
                             />
                         </n-tab-pane>
@@ -670,69 +712,13 @@ onMounted(() => {
 
 <style scoped>
 .backtest-page {
-    gap: 16px;
-}
-
-.backtest-hero {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    padding: 18px 20px;
-    border: 1px solid rgba(29, 92, 73, 0.14);
-    border-radius: var(--mw-radius-md);
-}
-
-.backtest-hero-copy {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 2px;
-}
-
-.backtest-kicker {
-    font-size: 0.85rem;
-    font-weight: 700;
-    text-transform: uppercase;
-}
-
-.backtest-hero h1 {
-    margin: 0;
-    font-size: 2rem;
-    line-height: 1.1;
-}
-
-.backtest-status {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 36px;
-    color: var(--mw-color-text-secondary);
-    font-weight: 700;
-}
-
-.status-dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--mw-color-success);
-}
-
-.status-dot-running {
-    background: var(--mw-color-warning);
-}
-
-.status-muted {
-    color: var(--mw-color-text-muted);
-    font-family: var(--mw-font-mono);
-    font-size: 0.78rem;
-    font-weight: 500;
+    gap: 12px;
 }
 
 .backtest-workspace {
     display: grid;
-    grid-template-columns: minmax(320px, 400px) minmax(0, 1fr);
-    gap: 16px;
+    grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+    gap: 12px;
     align-items: start;
 }
 
@@ -740,8 +726,6 @@ onMounted(() => {
 .backtest-results {
     min-width: 0;
     padding: 16px;
-    border: 1px solid rgba(29, 92, 73, 0.14);
-    border-radius: var(--mw-radius-md);
 }
 
 .backtest-controls {
@@ -760,6 +744,7 @@ onMounted(() => {
 .panel-title-row h2 {
     margin: 0;
     font-size: 1.25rem;
+    font-weight: 450;
 }
 
 .backtest-form {
@@ -826,12 +811,12 @@ onMounted(() => {
 
 .empty-result {
     display: grid;
-    min-height: 520px;
+    min-height: 320px;
     place-items: center;
     align-content: center;
     gap: 10px;
     color: var(--mw-color-text-muted);
-    font-weight: 700;
+    font-weight: 450;
 }
 
 .stats-grid {
@@ -853,7 +838,7 @@ onMounted(() => {
     display: block;
     color: var(--mw-color-text-muted);
     font-size: 0.78rem;
-    font-weight: 700;
+    font-weight: 450;
 }
 
 .stat-tile strong {
@@ -862,7 +847,7 @@ onMounted(() => {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-mono);
     font-size: 1rem;
-    font-weight: 700;
+    font-weight: 500;
 }
 
 .stat-positive strong {
@@ -892,7 +877,7 @@ onMounted(() => {
 
 .comparison-strip strong {
     font-family: var(--mw-font-mono);
-    font-weight: 700;
+    font-weight: 500;
 }
 
 .comparison-positive strong {
@@ -917,7 +902,7 @@ onMounted(() => {
 .metadata-grid dt {
     color: var(--mw-color-text-muted);
     font-size: 0.78rem;
-    font-weight: 700;
+    font-weight: 450;
 }
 
 .metadata-grid dd {
@@ -943,15 +928,6 @@ onMounted(() => {
 }
 
 @media (max-width: 640px) {
-    .backtest-hero {
-        align-items: flex-start;
-        flex-direction: column;
-    }
-
-    .backtest-hero h1 {
-        font-size: 1.55rem;
-    }
-
     .control-grid.two,
     .stats-grid,
     .metadata-grid {

@@ -1,6 +1,47 @@
 <template>
-    <n-flex justify="space-around">
-        <n-card>
+    <n-flex class="expanded-trade-layout">
+        <n-card class="expanded-order-card">
+            <section
+                v-if="showRecoveryDiagnostics"
+                class="recovery-dca-status"
+                aria-label="Recovery DCA status"
+            >
+                <div class="recovery-dca-heading">
+                    <span>Recovery DCA</span>
+                    <n-tag size="small" :type="recoveryModeTagType">
+                        {{ recoveryModeLabel }}
+                    </n-tag>
+                </div>
+                <div class="recovery-dca-grid">
+                    <div>
+                        <span class="recovery-dca-label">Next trigger</span>
+                        <span class="recovery-dca-value">
+                            {{ formatDiagnosticPrice(rowData.dca_next_trigger_price) }}
+                        </span>
+                    </div>
+                    <div>
+                        <span class="recovery-dca-label">Reference ATR</span>
+                        <span class="recovery-dca-value">
+                            {{ formatOptionalPercent(rowData.dca_reference_atr_percent) }}
+                        </span>
+                    </div>
+                    <div>
+                        <span class="recovery-dca-label">Projected TP</span>
+                        <span class="recovery-dca-value">
+                            {{ formatDiagnosticPrice(recoveryDecision.projected_tp_price) }}
+                        </span>
+                    </div>
+                    <div>
+                        <span class="recovery-dca-label">Last sized SO</span>
+                        <span class="recovery-dca-value">
+                            {{ formatOptionalQuote(recoveryDecision.final_quote) }}
+                        </span>
+                    </div>
+                </div>
+                <p v-if="recoveryDecision.reason" class="recovery-dca-reason">
+                    {{ formatDecisionReason(recoveryDecision.reason) }}
+                </p>
+            </section>
             <n-timeline :horizontal="false">
                 <n-timeline-item
                     v-for="item in timelineItems"
@@ -13,7 +54,8 @@
             </n-timeline>
             <div class="manual-order-actions">
                 <n-button
-                    tertiary
+                    class="manual-order-button"
+                    secondary
                     size="small"
                     type="primary"
                     @click="emitAddOrderManually"
@@ -24,6 +66,7 @@
         </n-card>
         <TradeReplayChart
             v-if="chartReady"
+            class="expanded-replay-chart"
             :symbol="props.rowData.symbol"
             :precision="Number(props.rowData.precision ?? 0)"
             :start-timestamp="replayStartTimestamp"
@@ -64,6 +107,11 @@ type RowData = {
     tp_price: number
     precision: number
     current_price?: number
+    dca_sizing_mode?: string | null
+    dca_reference_price?: number
+    dca_reference_atr_percent?: number
+    dca_next_trigger_price?: number
+    dca_last_decision_json?: string | null
     baseorder: OrderData
     safetyorder?: OrderData[]
 }
@@ -88,6 +136,40 @@ type TimelineItem = {
 }
 
 const executions = ref<TradeExecutionRow[]>([])
+
+type RecoveryDecision = {
+    final_quote?: number
+    projected_tp_price?: number
+    reason?: string
+}
+
+const recoveryDecision = computed<RecoveryDecision>(() => {
+    const raw = props.rowData.dca_last_decision_json
+    if (!raw) {
+        return {}
+    }
+    try {
+        const parsed = JSON.parse(raw)
+        return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch {
+        return {}
+    }
+})
+const showRecoveryDiagnostics = computed(() =>
+    ['recovery_shadow', 'recovery_target'].includes(
+        String(props.rowData.dca_sizing_mode ?? ''),
+    ),
+)
+const recoveryModeLabel = computed(() =>
+    props.rowData.dca_sizing_mode === 'recovery_target'
+        ? 'Live'
+        : 'Shadow',
+)
+const recoveryModeTagType = computed(() =>
+    props.rowData.dca_sizing_mode === 'recovery_target'
+        ? ('warning' as const)
+        : ('info' as const),
+)
 
 const safetyOrders = computed(() =>
     Array.isArray(props.rowData.safetyorder) ? props.rowData.safetyorder : [],
@@ -160,6 +242,7 @@ const timelineItems = computed<TimelineItem[]>(() => {
             index,
             (candidate) => candidate.side === 'sell',
         )
+        const recoveryFill = getRecoveryFillDiagnostics(execution)
         return {
             key: `${execution.id ?? index}-${execution.role}-${execution.timestamp}`,
             title: isBuy
@@ -172,7 +255,15 @@ const timelineItems = computed<TimelineItem[]>(() => {
                 ...(isBuy &&
                 execution.so_percentage !== null &&
                 execution.so_percentage !== undefined
-                    ? [`Percentage: ${formatPercent(execution.so_percentage)}`]
+                    ? [
+                          `${recoveryFill ? 'Trigger P&L' : 'Percentage'}: ${formatPercent(execution.so_percentage)}`,
+                      ]
+                    : []),
+                ...(recoveryFill?.fillDeviationPercent !== null &&
+                recoveryFill?.fillDeviationPercent !== undefined
+                    ? [
+                          `Fill deviation: ${formatPercent(recoveryFill.fillDeviationPercent)}`,
+                      ]
                     : []),
             ].join(' | '),
             type: isBuy
@@ -385,6 +476,29 @@ function getSafetyOrderContent(order: OrderData): string {
     return `Order size: ${formatQuoteAmount(order.ordersize)} | Amount: ${formatAssetAmount(order.amount)} | Price: ${formatPrice(order.price)} | Percentage: ${formatPercent(order.so_percentage)}`
 }
 
+function getRecoveryFillDiagnostics(execution: TradeExecutionRow): {
+    fillDeviationPercent: number | null
+} | null {
+    if (!execution.metadata_json) {
+        return null
+    }
+    try {
+        const metadata = JSON.parse(execution.metadata_json)
+        const recoverySo = metadata?.recovery_so
+        if (!recoverySo || typeof recoverySo !== 'object') {
+            return null
+        }
+        const fillDeviation = Number(recoverySo.fill_deviation_percent)
+        return {
+            fillDeviationPercent: Number.isFinite(fillDeviation)
+                ? fillDeviation
+                : null,
+        }
+    } catch {
+        return null
+    }
+}
+
 function toNumberOrZero(value: unknown): number {
     const parsed = Number(value)
     return Number.isFinite(parsed) ? parsed : 0
@@ -405,6 +519,30 @@ function formatPrice(value: unknown): string {
 
 function formatPercent(value: unknown): string {
     return `${toNumberOrZero(value).toFixed(2)} %`
+}
+
+function formatDiagnosticPrice(value: unknown): string {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0 ? formatPrice(parsed) : '—'
+}
+
+function formatOptionalPercent(value: unknown): string {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0
+        ? `${parsed.toFixed(2)} %`
+        : '—'
+}
+
+function formatOptionalQuote(value: unknown): string {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed.toFixed(2) : '—'
+}
+
+function formatDecisionReason(value: unknown): string {
+    const normalized = String(value ?? '').trim().replaceAll('_', ' ')
+    return normalized
+        ? normalized.charAt(0).toUpperCase() + normalized.slice(1)
+        : ''
 }
 
 function emitAddOrderManually(): void {
@@ -437,9 +575,108 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.expanded-trade-layout {
+    align-items: stretch;
+    flex-wrap: nowrap;
+    gap: 16px;
+    min-width: 0;
+    width: 100%;
+}
+
+.expanded-order-card {
+    flex: 0 0 340px;
+    max-width: 360px;
+    min-width: 280px;
+}
+
+.recovery-dca-status {
+    border-bottom: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    margin-bottom: 18px;
+    padding-bottom: 16px;
+}
+
+.recovery-dca-heading {
+    align-items: center;
+    display: flex;
+    font-weight: 600;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.recovery-dca-grid {
+    display: grid;
+    gap: 10px 16px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.recovery-dca-grid > div {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+}
+
+.recovery-dca-label {
+    color: var(--mw-color-text-muted);
+    font-size: 12px;
+}
+
+.recovery-dca-value {
+    font-family: var(--mw-font-mono);
+    font-size: 13px;
+    overflow-wrap: anywhere;
+}
+
+.recovery-dca-reason {
+    color: var(--mw-color-text-secondary);
+    font-size: 12px;
+    margin: 10px 0 0;
+}
+
+.expanded-replay-chart {
+    align-self: stretch;
+    display: flex;
+    flex: 1 1 0;
+    flex-direction: column;
+    min-width: 0;
+}
+
 .manual-order-actions {
     display: flex;
     justify-content: flex-end;
     margin-top: 10px;
+}
+
+.manual-order-actions :deep(.manual-order-button) {
+    --n-color: var(--mw-color-primary-soft) !important;
+    --n-color-hover: color-mix(
+        in srgb,
+        var(--mw-color-primary-soft) 84%,
+        var(--mw-color-text-primary)
+    ) !important;
+    --n-color-pressed: color-mix(
+        in srgb,
+        var(--mw-color-primary-soft) 74%,
+        var(--mw-color-text-primary)
+    ) !important;
+    --n-border: 1px solid var(--mw-color-border-strong) !important;
+    --n-border-hover: 1px solid var(--mw-color-primary) !important;
+    --n-border-pressed: 1px solid var(--mw-color-primary-strong) !important;
+    --n-text-color: var(--mw-color-text-primary) !important;
+    --n-text-color-hover: var(--mw-color-text-primary) !important;
+    --n-text-color-pressed: var(--mw-color-text-primary) !important;
+    font-weight: 450;
+}
+
+@media (max-width: 900px) {
+    .expanded-trade-layout {
+        flex-direction: column;
+    }
+
+    .expanded-order-card,
+    .expanded-replay-chart {
+        flex-basis: auto;
+        max-width: none;
+        width: 100%;
+    }
 }
 </style>

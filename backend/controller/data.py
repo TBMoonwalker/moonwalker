@@ -8,6 +8,7 @@ from litestar.exceptions import SerializationException
 from litestar.handlers import get, post
 from litestar.params import FromPath
 from service.config import Config
+from service.config_redaction import merge_redacted_config_overrides
 from service.data import Data
 
 data = Data()
@@ -123,7 +124,10 @@ async def get_exchange_symbols_from_draft(request: Request[Any, Any, Any]) -> An
 
     draft_exchange_config = payload.get("exchange_config")
     if isinstance(draft_exchange_config, dict):
-        exchange_config.update(draft_exchange_config)
+        exchange_config = merge_redacted_config_overrides(
+            exchange_config,
+            draft_exchange_config,
+        )
 
     currency = payload.get("currency") or exchange_config.get("currency")
     if not currency:

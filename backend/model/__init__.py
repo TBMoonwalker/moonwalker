@@ -1,5 +1,9 @@
 """Tortoise ORM model exports."""
 
+from .aitrustanalyticsrevision import (
+    AiTrustAnalyticsRevision as AiTrustAnalyticsRevision,
+)
+from .aitrustprediction import AiTrustPrediction as AiTrustPrediction
 from .appconfig import AppConfig as AppConfig
 from .athcache import AthCache as AthCache
 from .autopilot import Autopilot as Autopilot
@@ -7,6 +11,7 @@ from .autopilotmemoryevent import AutopilotMemoryEvent as AutopilotMemoryEvent
 from .autopilotmemorystate import AutopilotMemoryState as AutopilotMemoryState
 from .autopilotsymbolmemory import AutopilotSymbolMemory as AutopilotSymbolMemory
 from .closedtrades import ClosedTrades as ClosedTrades
+from .configmigration import ConfigMigration as ConfigMigration
 from .listings import Listings as Listings
 from .opentrades import OpenTrades as OpenTrades
 from .spotcampaigns import SpotCampaigns as SpotCampaigns
@@ -23,11 +28,14 @@ from .upnlhistory import UpnlHistory as UpnlHistory
 __all__ = [
     "AppConfig",
     "AthCache",
+    "AiTrustAnalyticsRevision",
+    "AiTrustPrediction",
     "Autopilot",
     "AutopilotMemoryEvent",
     "AutopilotMemoryState",
     "AutopilotSymbolMemory",
     "ClosedTrades",
+    "ConfigMigration",
     "Listings",
     "OpenTrades",
     "SpotCampaigns",
@@ -45,10 +53,13 @@ __all__ = [
 if __name__ == "__main__":
     __models__ = [
         "Autopilot",
+        "AiTrustAnalyticsRevision",
+        "AiTrustPrediction",
         "AutopilotMemoryEvent",
         "AutopilotMemoryState",
         "AutopilotSymbolMemory",
         "AppConfig",
+        "ConfigMigration",
         "AthCache",
         "Trades",
         "OpenTrades",

@@ -1,0 +1,66 @@
+const assert = require('node:assert/strict')
+const fs = require('node:fs')
+const path = require('node:path')
+const test = require('node:test')
+
+const tradesViewSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'views', 'TradesView.vue'),
+    'utf8',
+)
+
+test('trades page status strip surfaces AI provider unavailable state', () => {
+    assert.match(tradesViewSource, /aiTrustEnforcementActive/)
+    assert.match(tradesViewSource, /aiTrustRuntimeStatus/)
+    assert.match(tradesViewSource, /provider_unavailable/)
+    assert.match(tradesViewSource, /AI unavailable/)
+    assert.match(tradesViewSource, /New entries are blocked until AI answers successfully/)
+})
+
+test('trades page ignores stale AI runtime status when enforcement is disabled', () => {
+    assert.match(
+        tradesViewSource,
+        /configFlagEnabled\(configSnapshotStore\.snapshot\.value\?\.ai_trust_enabled\) &&\s+configFlagEnabled\(configSnapshotStore\.snapshot\.value\?\.ai_trust_enforce_warnings\)/,
+    )
+    assert.match(
+        tradesViewSource,
+        /aiTrustEnforcementActive\.value &&\s+aiTrustRuntimeStatus\.value === 'provider_unavailable'/,
+    )
+    assert.match(
+        tradesViewSource,
+        /aiTrustEnforcementActive\.value &&\s+aiTrustRuntimeStatus\.value === 'warning_blocked'/,
+    )
+})
+
+test('trades page status strip keeps global pause as highest priority', () => {
+    assert.match(
+        tradesViewSource,
+        /if \(tradingPaused\.value\) return 'Moonwalker paused'/,
+    )
+    assert.match(
+        tradesViewSource,
+        /tradingPaused\.value \|\| tradeAdmissionWarning\.value/,
+    )
+})
+
+test('trades page prominently warns when an open trade is being delisted', () => {
+    assert.match(tradesViewSource, /delistingWarnings/)
+    assert.match(tradesViewSource, /Open trade affected by delisting/)
+    assert.match(
+        tradesViewSource,
+        /New buys are blocked\. Existing sell and take-profit orders remain active\./,
+    )
+    assert.match(tradesViewSource, /aria-live="assertive"/)
+})
+
+test('trades page fails closed when the delisting provider is unavailable', () => {
+    assert.match(tradesViewSource, /delistingCheckUnavailable/)
+    assert.match(tradesViewSource, /Delisting protection cannot verify Binance/)
+    assert.match(
+        tradesViewSource,
+        /All new buys are blocked until verification succeeds/,
+    )
+    assert.match(
+        tradesViewSource,
+        /production read-only schedule credentials or enable trading/,
+    )
+})

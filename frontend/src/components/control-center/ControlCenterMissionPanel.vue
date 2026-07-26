@@ -31,8 +31,8 @@ defineEmits<{
 </script>
 
 <template>
-    <n-card class="mission-panel" content-style="padding: 22px 24px;">
-        <n-flex vertical :size="18">
+    <n-card class="mission-panel dashboard-panel" content-style="padding: 14px 16px;">
+        <n-flex vertical :size="10">
             <n-flex
                 justify="space-between"
                 align="center"
@@ -148,23 +148,21 @@ defineEmits<{
 }
 
 .mission-panel {
-    border: 1px solid rgba(29, 92, 73, 0.26);
-    background: var(--mw-surface-mission);
-    box-shadow: var(--mw-shadow-card);
-    color: var(--mw-color-text-primary);
+    border-color: rgba(29, 92, 73, 0.14);
+    background: rgba(29, 92, 73, 0.05);
 }
 
 .mission-heading-group {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     min-width: 0;
 }
 
 .mission-heading-group :deep(.mission-status-tag) {
     border-radius: 999px;
-    padding: 6px 12px;
+    padding: 4px 10px;
 }
 
 .mission-heading-group :deep(.mission-status-tag.n-tag--success-type) {
@@ -179,8 +177,8 @@ defineEmits<{
 }
 
 .mission-heading-group :deep(.mission-status-tag .n-tag__content) {
-    font-size: 0.95rem;
-    font-weight: 600;
+    font-size: 0.86rem;
+    font-weight: 500;
     line-height: 1;
 }
 
@@ -201,21 +199,43 @@ defineEmits<{
 .mission-title {
     margin: 0;
     font-family: var(--mw-font-display);
-    font-size: clamp(1.5rem, 3vw, 2.25rem);
-    line-height: 1.1;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-size: 1.35rem;
+    line-height: 1.2;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .mission-summary {
     display: block;
     min-width: 0;
     max-width: 72ch;
+    font-size: 0.95rem;
+    line-height: 1.45;
+}
+
+.mission-panel :deep(.n-card__content) {
+    padding: 14px 16px !important;
+}
+
+.mission-panel :deep(.n-alert) {
+    padding: 10px 12px;
+    border-radius: var(--mw-radius-sm);
+}
+
+.mission-panel :deep(.n-alert-body__title) {
+    margin-bottom: 2px;
+    font-size: 0.95rem;
+    font-weight: 550;
+}
+
+.mission-panel :deep(.n-alert-body__content) {
+    font-size: 0.9rem;
+    line-height: 1.35;
 }
 
 .mission-panel :deep(.n-button--primary-type .n-button__content) {
     color: #f7f8f6;
-    font-weight: 700;
+    font-weight: 500;
     letter-spacing: 0.01em;
 }
 

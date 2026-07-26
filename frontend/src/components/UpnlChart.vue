@@ -178,6 +178,9 @@ onMounted(async () => {
   try {
     await upnlStore.load_upnl_history_data()
     showEmptyState.value = data.value.length === 0
+  } catch {
+    showEmptyState.value = true
+    emptyStateText.value = 'No profit history yet'
   } finally {
     isLoading.value = false
   }
@@ -236,6 +239,6 @@ watch(
   display: flex;
   align-items: center;
   justify-content: center;
-  color: rgba(255, 255, 255, 0.7);
+  color: var(--mw-color-text-muted);
 }
 </style>

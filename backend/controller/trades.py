@@ -11,6 +11,7 @@ from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
 from litestar.params import FromPath, FromQuery
 from service.config import Config
+from service.delisting_protection import DelistingProtectionService
 from service.order_requests import normalize_order_symbol
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trade_replay_indicators import TradeReplayIndicatorService
@@ -20,6 +21,7 @@ from service.websocket_fanout import WebSocketFanout
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_trades")
 trades = Trades()
+delisting_protection = DelistingProtectionService.shared()
 trading_controls = TradingControlsService()
 trade_replay_indicators = TradeReplayIndicatorService(trades)
 
@@ -48,10 +50,24 @@ async def _get_waiting_campaigns_cached() -> list[dict[str, Any]]:
     return await trades.get_waiting_trades()
 
 
+async def invalidate_trade_read_caches() -> None:
+    """Invalidate service and controller trade caches after bulk replacement."""
+    await trades.invalidate_trade_caches()
+    for cached_reader in (
+        _get_open_trades_cached,
+        _get_closed_trades_cached,
+        _get_unsellable_trades_cached,
+        _get_waiting_campaigns_cached,
+    ):
+        cache_clear = getattr(cached_reader, "cache_clear", None)
+        if cache_clear is not None:
+            await cache_clear()
+
+
 async def _build_open_trades_payload() -> str:
     """Build serialized payload for open-trades stream."""
     output = await _get_open_trades_cached()
-    return _json_dumps(output)
+    return _json_dumps(delisting_protection.enrich_open_trades(output))
 
 
 async def _build_closed_trades_payload() -> str:

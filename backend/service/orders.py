@@ -7,7 +7,10 @@ from datetime import datetime, timezone
 from typing import Any, TypeGuard
 
 import helper
+from service.ai_trust import evaluate_entry_enforcement
 from service.capital_budget import CapitalBudgetService
+from service.dca_recovery_sizing import build_recovery_sizing_policy
+from service.delisting_protection import DelistingProtectionService
 from service.exchange import Exchange
 from service.exchange_types import (
     ExchangeOrderPayload,
@@ -47,7 +50,9 @@ from service.spot_campaign_types import TradeCloseReason
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades
+from service.trading_contracts import BuyIntent, SellIntent
 from service.trading_controls import evaluate_buy_like_gate
+from service.trading_maintenance import trading_maintenance_barrier
 from tortoise.exceptions import ConfigurationError
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
@@ -67,6 +72,7 @@ class Orders:
     def __init__(self):
         self.utils = helper.Utils()
         self.capital_budget = CapitalBudgetService()
+        self.delisting_protection = DelistingProtectionService.shared()
         self.exchange = Exchange()
         self.monitoring = MonitoringService()
         self.trades = Trades()
@@ -161,6 +167,31 @@ class Orders:
         ):
             if order_status.get(key) is None and original_order.get(key) is not None:
                 order_status[key] = original_order[key]
+        if bool(order_status.get("safetyorder")):
+            metadata = self._parse_metadata_json(order_status.get("metadata_json"))
+            recovery_so = metadata.get("recovery_so")
+            if isinstance(recovery_so, dict):
+                fill_price = float(order_status.get("price") or 0.0)
+                reference_price = float(recovery_so.get("reference_price") or 0.0)
+                trigger_market_price = float(recovery_so.get("current_price") or 0.0)
+                recovery_so["fill_price"] = fill_price
+                if reference_price > 0 and fill_price > 0:
+                    recovery_so["fill_deviation_percent"] = round(
+                        ((fill_price - reference_price) / reference_price) * 100,
+                        8,
+                    )
+                if trigger_market_price > 0 and fill_price > 0:
+                    recovery_so["fill_vs_trigger_percent"] = round(
+                        ((fill_price - trigger_market_price) / trigger_market_price)
+                        * 100,
+                        8,
+                    )
+                metadata["recovery_so"] = recovery_so
+                order_status["metadata_json"] = json.dumps(metadata, sort_keys=True)
+        if bool(order_status.get("baseorder")):
+            metadata = self._parse_metadata_json(order_status.get("metadata_json"))
+            metadata["dca_policy"] = build_recovery_sizing_policy(config).to_dict()
+            order_status["metadata_json"] = json.dumps(metadata, sort_keys=True)
         payload = build_buy_trade_payload(order_status)
         sidestep_campaigns = await self._get_sidestep_campaigns()
         campaign_context = await sidestep_campaigns.resolve_buy_context(
@@ -181,6 +212,7 @@ class Orders:
             payload,
             create_open_trade=not bool(order_status["safetyorder"]),
             campaign_context=campaign_context,
+            entry_evaluation=original_order.get("_ai_entry_evaluation"),
         )
         await self._reset_unsellable_state(order_status["symbol"])
         await self.monitoring.notify_trade(
@@ -446,6 +478,18 @@ class Orders:
         config: dict[str, Any],
     ) -> bool:
         """Close the trade if its proactive TP limit order filled."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info("Skipping proactive TP reconciliation during maintenance.")
+                return False
+            return await self._reconcile_tp_limit_order(trades, config)
+
+    async def _reconcile_tp_limit_order(
+        self,
+        trades: dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Reconcile one proactive TP limit order inside the maintenance barrier."""
         symbol = str(trades.get("symbol") or "")
         if not trades.get("tp_limit_order_id") or not symbol:
             return False
@@ -534,6 +578,21 @@ class Orders:
         config: dict[str, Any],
     ) -> bool:
         """Cancel a persisted proactive TP limit order if one exists."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping proactive TP cancellation for %s during maintenance.",
+                    symbol,
+                )
+                return False
+            return await self._cancel_tp_limit_order(symbol, config)
+
+    async def _cancel_tp_limit_order(
+        self,
+        symbol: str,
+        config: dict[str, Any],
+    ) -> bool:
+        """Cancel one proactive TP order inside the maintenance barrier."""
         sell_lock = self._get_sell_lock(symbol)
         async with sell_lock:
             return await self._cancel_tp_limit_order_locked(symbol, config)
@@ -544,6 +603,21 @@ class Orders:
         config: dict[str, Any],
     ) -> bool:
         """Place and persist a proactive TP limit sell order."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping proactive TP limit order for %s during maintenance.",
+                    order["symbol"],
+                )
+                return False
+            return await self._arm_tp_limit_order(order, config)
+
+    async def _arm_tp_limit_order(
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Arm one proactive TP order inside the maintenance barrier."""
         symbol = str(order["symbol"])
         sell_lock = self._get_sell_lock(symbol)
         async with sell_lock:
@@ -599,9 +673,22 @@ class Orders:
                 await self.exchange.close()
 
     async def receive_sell_order(
-        self, order: dict[str, Any], config: dict[str, Any]
+        self, order: SellIntent | dict[str, Any], config: dict[str, Any]
     ) -> None:
         """Create a sell order and persist closed trades."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping sell order for %s during maintenance.",
+                    order["symbol"],
+                )
+                return
+            await self._receive_sell_order(order, config)
+
+    async def _receive_sell_order(
+        self, order: SellIntent | dict[str, Any], config: dict[str, Any]
+    ) -> None:
+        """Execute one sell order inside the maintenance barrier."""
         logging.info("Incoming sell order for %s", order["symbol"])
         if order.get("sell_reason") == TradeCloseReason.SIDESTEP_EXIT.value:
             logging.info(
@@ -920,10 +1007,22 @@ class Orders:
             pass
 
     async def receive_buy_order(
-        self, order: dict[str, Any], config: dict[str, Any]
+        self, order: BuyIntent | dict[str, Any], config: dict[str, Any]
     ) -> bool:
         """Create a buy order and persist open trades."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping buy order for %s during maintenance.",
+                    order["symbol"],
+                )
+                return False
+            return await self._receive_buy_order(order, config)
 
+    async def _receive_buy_order(
+        self, order: BuyIntent | dict[str, Any], config: dict[str, Any]
+    ) -> bool:
+        """Execute one buy order inside the maintenance barrier."""
         logging.info("Incoming buy order for %s", order["symbol"])
         if str(order.get("campaign_id") or "").strip():
             logging.info(
@@ -953,6 +1052,52 @@ class Orders:
                 gate.message,
             )
             return False
+
+        delisting_decision = await self.delisting_protection.evaluate_buy(
+            str(order.get("symbol") or ""),
+            config,
+        )
+        if not delisting_decision.allowed:
+            order_role = (
+                "safety_order"
+                if bool(order.get("safetyorder")) and not bool(order.get("baseorder"))
+                else "base_or_reentry"
+            )
+            logging.warning(
+                "Skipping %s buy for %s: %s (%s). source=%s delist_at=%s",
+                order_role,
+                order["symbol"],
+                delisting_decision.reason_code,
+                delisting_decision.message,
+                delisting_decision.source,
+                delisting_decision.delist_at,
+            )
+            return False
+
+        ai_gate = await evaluate_entry_enforcement(
+            str(order.get("symbol") or ""),
+            order,
+            config,
+        )
+        if not ai_gate.allowed:
+            if ai_gate.reason_code == "ai_trust_unavailable":
+                logging.warning(
+                    "Skipping entry order for %s: AI trust enforcement requires "
+                    "a scored response but provider_status=%s.",
+                    order["symbol"],
+                    ai_gate.provider_status,
+                )
+            else:
+                logging.warning(
+                    "Skipping entry order for %s: AI trust warning enforcement "
+                    "blocked the entry (risk=%s severity=%s note=%s).",
+                    order["symbol"],
+                    ai_gate.risk_score,
+                    ai_gate.warning_severity,
+                    ai_gate.operator_note,
+                )
+            return False
+        order["_ai_entry_evaluation"] = ai_gate
 
         try:
             if bool(order.get("safetyorder")) and not bool(order.get("baseorder")):
@@ -1036,6 +1181,26 @@ class Orders:
         config: dict[str, Any],
     ) -> dict[str, Any]:
         """Append a manual buy as a safety-order row without exchange execution."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                raise ValueError("Cannot add a manual buy during backup restore.")
+            return await self._receive_manual_buy_add(
+                symbol,
+                date_input,
+                price_raw,
+                amount_raw,
+                config,
+            )
+
+    async def _receive_manual_buy_add(
+        self,
+        symbol: str,
+        date_input: Any,
+        price_raw: Any,
+        amount_raw: Any,
+        config: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Persist one manual buy inside the maintenance barrier."""
         request = parse_manual_buy_add_request(
             symbol=symbol,
             date_input=date_input,
@@ -1168,6 +1333,21 @@ class Orders:
         config: dict[str, Any] | None = None,
     ) -> bool:
         """Stop trading for a symbol."""
+        async with trading_maintenance_barrier.operation() as admitted:
+            if not admitted:
+                logging.info(
+                    "Skipping stop order for %s during maintenance.",
+                    symbol,
+                )
+                return False
+            return await self._receive_stop_signal(symbol, config)
+
+    async def _receive_stop_signal(
+        self,
+        symbol: str,
+        config: dict[str, Any] | None = None,
+    ) -> bool:
+        """Stop one symbol inside the maintenance barrier."""
         logging.info("Incoming stop order")
         symbol = normalize_order_symbol(symbol)
         try:

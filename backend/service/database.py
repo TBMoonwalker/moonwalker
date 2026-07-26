@@ -6,7 +6,7 @@ import random
 import re
 import sqlite3
 from asyncio import sleep
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Iterable
 from typing import Any
 from uuid import uuid4
 
@@ -86,6 +86,11 @@ def _integrity_check_is_clean(messages: list[str]) -> bool:
     if not messages:
         return False
     return all(str(message).strip().lower() == "ok" for message in messages)
+
+
+def _quote_sqlite_pragma_string(value: str) -> str:
+    """Return a SQL string literal for SQLite PRAGMA arguments."""
+    return "'" + value.replace("'", "''") + "'"
 
 
 def _plan_additive_column_statements(
@@ -256,6 +261,31 @@ class Database:
                 "autopilot_symbol_memory",
                 "idx_autopilot_symbol_memory_updated_at",
                 ("updated_at",),
+            ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_created_at",
+                ("created_at",),
+            ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_deal_id",
+                ("deal_id",),
+            ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_symbol_created_at",
+                ("symbol", "created_at"),
+            ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_status_provider",
+                ("status", "provider_status"),
+            ),
+            (
+                "ai_trust_predictions",
+                "idx_ai_trust_predictions_outcome_bad",
+                ("outcome_status", "bad_entry"),
             ),
             ("tickers", "idx_tickers_symbol_timestamp", ("symbol", "timestamp")),
             ("tickers", "idx_tickers_timestamp", ("timestamp",)),
@@ -622,6 +652,18 @@ class Database:
                 ("tp_limit_order_price", "REAL NULL"),
                 ("tp_limit_order_amount", "REAL NULL"),
                 ("tp_limit_order_armed_at", "TEXT NULL"),
+                (
+                    "dca_sizing_mode",
+                    "TEXT NOT NULL DEFAULT 'legacy_factors'",
+                ),
+                ("dca_policy_json", "TEXT NULL"),
+                ("dca_reference_price", "REAL NOT NULL DEFAULT 0.0"),
+                (
+                    "dca_reference_atr_percent",
+                    "REAL NOT NULL DEFAULT 0.0",
+                ),
+                ("dca_next_trigger_price", "REAL NOT NULL DEFAULT 0.0"),
+                ("dca_last_decision_json", "TEXT NULL"),
                 ("automation_paused", "INTEGER NOT NULL DEFAULT 0"),
                 ("automation_paused_at", "TEXT NULL"),
             ),
@@ -678,18 +720,74 @@ class Database:
                 ", ".join(_extract_added_column_names(alter_statements)),
             )
 
+    async def _ensure_ai_trust_columns(self) -> None:
+        """Ensure additive AI evaluation identity exists on legacy databases."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query(
+            "PRAGMA table_info('ai_trust_predictions')"
+        )
+        existing = {row["name"] for row in columns}
+        alter_statements = _plan_additive_column_statements(
+            "ai_trust_predictions",
+            existing,
+            (("evaluation_id", "TEXT NULL"),),
+        )
+        if alter_statements:
+            await connection.execute_script("\n".join(alter_statements))
+        await connection.execute_script(
+            "CREATE UNIQUE INDEX IF NOT EXISTS "
+            "uid_ai_trust_evaluation_id "
+            "ON ai_trust_predictions (evaluation_id);"
+        )
+
     async def optimize_sqlite(self) -> None:
         """Run SQLite planner/index maintenance."""
         await optimize_sqlite_connection(self.db_url)
 
-    async def _run_sqlite_integrity_check(self) -> list[str]:
+    async def _run_sqlite_quick_check(self) -> list[str]:
+        """Return SQLite quick_check messages for the active database."""
+        if not self.db_url.startswith("sqlite://"):
+            return []
+
+        try:
+            connection = Tortoise.get_connection("default")
+            _, rows = await connection.execute_query("PRAGMA quick_check")
+        except Exception as exc:  # noqa: BLE001 - diagnostic only
+            logging.warning(
+                "Failed to run SQLite quick_check during corruption diagnosis: %s",
+                exc,
+                exc_info=True,
+            )
+            return []
+
+        return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+
+    async def _run_sqlite_integrity_check(
+        self,
+        table_names: Iterable[str] | None = None,
+    ) -> list[str]:
         """Return SQLite integrity_check messages for the active database."""
         if not self.db_url.startswith("sqlite://"):
             return []
 
         try:
             connection = Tortoise.get_connection("default")
-            _, rows = await connection.execute_query("PRAGMA integrity_check")
+            if table_names is None:
+                _, rows = await connection.execute_query("PRAGMA integrity_check")
+                return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+
+            messages: list[str] = []
+            for table_name in table_names:
+                quoted_table = _quote_sqlite_pragma_string(table_name)
+                _, rows = await connection.execute_query(
+                    f"PRAGMA integrity_check({quoted_table})"
+                )
+                messages.extend(
+                    str(row[0]).strip() for row in rows if str(row[0]).strip()
+                )
         except Exception as exc:  # noqa: BLE001 - diagnostic only
             logging.warning(
                 "Failed to run SQLite integrity_check during corruption diagnosis: %s",
@@ -698,7 +796,7 @@ class Database:
             )
             return []
 
-        return [str(row[0]).strip() for row in rows if str(row[0]).strip()]
+        return messages
 
     async def _reindex_sqlite_database(self) -> None:
         """Rebuild all indexes for the active SQLite database."""
@@ -710,7 +808,13 @@ class Database:
 
     async def _repair_index_only_corruption_if_needed(self) -> None:
         """Repair index-only SQLite corruption before runtime services start."""
-        integrity_messages = await self._run_sqlite_integrity_check()
+        quick_messages = await self._run_sqlite_quick_check()
+        if not quick_messages:
+            return
+
+        integrity_messages = quick_messages
+        if _integrity_check_is_clean(quick_messages):
+            integrity_messages = await self._run_sqlite_integrity_check()
         if not integrity_messages:
             return
         if _integrity_check_is_clean(integrity_messages):
@@ -730,7 +834,9 @@ class Database:
             ", ".join(corrupted_index_names),
         )
         await self._reindex_sqlite_database()
-        repaired_messages = await self._run_sqlite_integrity_check()
+        repaired_messages = await self._run_sqlite_quick_check()
+        if _integrity_check_is_clean(repaired_messages):
+            repaired_messages = await self._run_sqlite_integrity_check()
         if _integrity_check_is_clean(repaired_messages):
             logging.warning(
                 "SQLite index corruption repaired successfully via REINDEX."
@@ -748,6 +854,7 @@ class Database:
         await self._ensure_spot_campaign_columns()
         await self._ensure_trade_ledger_columns()
         await self._ensure_upnl_history_columns()
+        await self._ensure_ai_trust_columns()
         await self._ensure_indexes()
 
     async def _run_backfill_init_steps(self) -> None:

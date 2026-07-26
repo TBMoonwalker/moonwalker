@@ -138,7 +138,7 @@ function getStateLabel(rowData: UnsellableTradeRow): string {
 }
 
 function getStateDetail(rowData: UnsellableTradeRow): string {
-    const details: string[] = [getStateLabel(rowData)]
+    const details: string[] = []
     if (rowData.unsellable_estimated_notional !== null && rowData.unsellable_estimated_notional !== undefined) {
         details.push(`est. ${formatFixed(rowData.unsellable_estimated_notional)}`)
     }
@@ -146,6 +146,30 @@ function getStateDetail(rowData: UnsellableTradeRow): string {
         details.push(`min ${formatFixed(rowData.unsellable_min_notional)}`)
     }
     return details.join(' | ')
+}
+
+function renderCellStack(
+    main: string,
+    secondary?: string,
+    mainClass = 'trade-cell-main',
+) {
+    return h('div', { class: 'trade-cell-stack' }, [
+        h('span', { class: mainClass }, main),
+        secondary
+            ? h('span', { class: 'trade-cell-sub' }, secondary)
+            : null,
+    ])
+}
+
+function renderSymbolCell(rowData: UnsellableTradeRow, index: number) {
+    const [symbol, currency] = String(rowData.symbol ?? '').split('/')
+    return h('div', { class: 'trade-symbol-cell' }, [
+        h('span', { class: 'trade-symbol-main' }, `${symbol}/${currency ?? ''}`),
+        h('div', { class: 'trade-symbol-meta' }, [
+            h('span', { class: 'trade-cell-sub' }, `#${index + 1}`),
+            h('span', { class: 'trade-cell-sub' }, 'Manual cleanup'),
+        ]),
+    ])
 }
 
 function handleSorterChange(sorter: unknown): void {
@@ -221,35 +245,40 @@ async function handleResolveUnsellableTrade(
 const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
     const columns: DataTableColumns<UnsellableTradeRow> = [
         {
-            title: '#',
-            key: 'id',
-            sorter: true,
-            sortOrder: resolveTradeTableColumnOrder(sortState.value, 'id'),
-        },
-        {
-            title: 'Pair',
+            title: 'Symbol',
             key: 'symbol',
+            render: (rowData, index) => renderSymbolCell(rowData, index),
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(sortState.value, 'symbol'),
         },
         {
             title: 'Amount',
             key: 'amount',
-            render: (rowData) => formatAssetAmount(rowData.amount),
+            render: (rowData) => {
+                const [symbol] = String(rowData.symbol ?? '').split('/')
+                return renderCellStack(
+                    `${formatAssetAmount(rowData.amount)} ${symbol}`,
+                )
+            },
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(sortState.value, 'amount'),
         },
         {
             title: 'Cost',
             key: 'cost',
-            render: (rowData) => formatFixed(rowData.cost),
+            render: (rowData) => renderCellStack(formatFixed(rowData.cost)),
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(sortState.value, 'cost'),
         },
         {
             title: 'PNL %',
             key: 'profit_percent',
-            render: (rowData) => `${formatFixed(rowData.profit_percent)} %`,
+            render: (rowData) =>
+                renderCellStack(
+                    `${formatFixed(rowData.profit_percent)}%`,
+                    undefined,
+                    'trade-cell-main profit',
+                ),
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(
                 sortState.value,
@@ -259,7 +288,11 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
         {
             title: 'State',
             key: 'unsellable_reason',
-            render: (rowData) => getStateDetail(rowData),
+            render: (rowData) =>
+                renderCellStack(
+                    getStateLabel(rowData),
+                    getStateDetail(rowData) || undefined,
+                ),
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(
                 sortState.value,
@@ -271,10 +304,7 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
             key: 'open_date',
             render: (rowData) => {
                 const { date, time } = resolveTradeDateTime(rowData.open_date)
-                return [
-                    h('div', date),
-                    h('div', time),
-                ]
+                return renderCellStack(date, time)
             },
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(
@@ -287,10 +317,7 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
             key: 'unsellable_since',
             render: (rowData) => {
                 const { date, time } = resolveTradeDateTime(String(rowData.unsellable_since ?? ''))
-                return [
-                    h('div', date),
-                    h('div', time),
-                ]
+                return renderCellStack(date, time)
             },
             sorter: true,
             sortOrder: resolveTradeTableColumnOrder(
@@ -303,16 +330,18 @@ const columns_trades = (): DataTableColumns<UnsellableTradeRow> => {
             key: 'action',
             align: 'center',
             render: (rowData) => {
-                return h(
-                    NButton,
-                    {
-                        size: 'small',
-                        type: 'warning',
-                        ghost: true,
-                        onClick: () => handleResolveUnsellableTrade(rowData),
-                    },
-                    { default: () => 'Resolve' }
-                )
+                return h('div', { class: 'trade-row-actions' }, [
+                    h(
+                        NButton,
+                        {
+                            size: 'medium',
+                            type: 'warning',
+                            ghost: true,
+                            onClick: () => handleResolveUnsellableTrade(rowData),
+                        },
+                        { default: () => 'Resolve' }
+                    ),
+                ])
             },
         },
     ]

@@ -2,40 +2,14 @@
 
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from typing import Any
 
-
-class ManualSellOrderIntent(TypedDict):
-    """Payload for a manual sell order request."""
-
-    symbol: str
-    direction: str
-    side: str
-    type_sell: str
-    actual_pnl: float
-    total_cost: float
-    current_price: float
-    sell_reason: str
-
-
-class ManualBuyOrderIntent(TypedDict):
-    """Payload for a manual buy order request."""
-
-    ordersize: float
-    symbol: str
-    direction: str
-    botname: str
-    baseorder: bool
-    safetyorder: bool
-    order_count: int
-    ordertype: str
-    so_percentage: float
-    side: str
+from service.trading_contracts import BuyIntent, SellIntent
 
 
 def build_manual_sell_order_intent(
     trades: dict[str, Any], actual_pnl: float
-) -> ManualSellOrderIntent:
+) -> SellIntent:
     """Build the sell order payload from aggregated trade data."""
     return {
         "symbol": str(trades["symbol"]),
@@ -54,7 +28,7 @@ def build_manual_buy_order_intent(
     ordersize: float,
     trades: dict[str, Any],
     actual_pnl: float,
-) -> ManualBuyOrderIntent:
+) -> BuyIntent:
     """Build the buy order payload from aggregated trade data."""
     safety_order_count = len(trades.get("safetyorders") or [])
     return {

@@ -5,6 +5,7 @@ import {
     parseVolumeLimitToNumber,
     toTokenOnlyEntries,
 } from './configForm'
+import { getConfigContractDefault } from './configContract'
 import {
     isDynamicTradeMode,
     normalizeTradeMode,
@@ -35,6 +36,9 @@ export interface ConfigLoadDefaults {
     advancedWsHealthcheckIntervalMs: number
     advancedWsStaleTimeoutMs: number
     advancedWsReconnectDebounceMs: number
+    defaultAiTrustOllamaBaseUrl: string
+    defaultAiTrustTimeoutMs: number
+    defaultAiTrustMaxRetries: number
     defaultSymSignalUrl: string
     defaultSymSignalVersion: string
     defaultTpSpikeConfirmSeconds: number
@@ -112,6 +116,26 @@ function toConfigOptions(values: unknown): ConfigOption[] {
             label: value,
             value,
         }))
+}
+
+function stringifyOptionalStructuredValue(value: unknown): string | null {
+    if (value === null || value === undefined || value === false) {
+        return null
+    }
+    if (typeof value === 'string') {
+        return value.length > 0 ? value : null
+    }
+    return JSON.stringify(value, null, 2)
+}
+
+function stringifyOptionalList(value: unknown): string | null {
+    if (value === null || value === undefined || value === false) {
+        return null
+    }
+    if (Array.isArray(value)) {
+        return value.map((entry) => String(entry).trim()).filter(Boolean).join(',')
+    }
+    return toNullableString(value)
 }
 
 function toStrategyConfigOptions(
@@ -224,6 +248,35 @@ export function buildLoadedConfigState(
         ws_reconnect_debounce_ms:
             toNumberOrNull(response.ws_reconnect_debounce_ms) ??
             defaults.advancedWsReconnectDebounceMs,
+        ai_trust_enabled:
+            parseBooleanString(response.ai_trust_enabled) ??
+            getConfigContractDefault(response, 'ai_trust_enabled', false),
+        ai_trust_enforce_warnings:
+            parseBooleanString(response.ai_trust_enforce_warnings) ??
+            getConfigContractDefault(response, 'ai_trust_enforce_warnings', false),
+        ai_trust_ollama_base_url:
+            toNullableString(response.ai_trust_ollama_base_url) ||
+            getConfigContractDefault(
+                response,
+                'ai_trust_ollama_base_url',
+                defaults.defaultAiTrustOllamaBaseUrl,
+            ),
+        ai_trust_ollama_model:
+            toNullableString(response.ai_trust_ollama_model) || null,
+        ai_trust_timeout_ms:
+            toNumberOrNull(response.ai_trust_timeout_ms) ??
+            getConfigContractDefault(
+                response,
+                'ai_trust_timeout_ms',
+                defaults.defaultAiTrustTimeoutMs,
+            ),
+        ai_trust_max_retries:
+            toNumberOrNull(response.ai_trust_max_retries) ??
+            getConfigContractDefault(
+                response,
+                'ai_trust_max_retries',
+                defaults.defaultAiTrustMaxRetries,
+            ),
     }
 
     const exchange: ExchangeConfigSection = {
@@ -248,6 +301,26 @@ export function buildLoadedConfigState(
             symbol_list: symbolList,
             asap_use_url: asapUseUrl,
             asap_symbol_select: configuredSymbols,
+            delisting_protection_enabled:
+                parseBooleanString(response.delisting_protection_enabled) ??
+                getConfigContractDefault(
+                    response,
+                    'delisting_protection_enabled',
+                    false,
+                ),
+            delisting_schedule_use_trading_credentials:
+                parseBooleanString(
+                    response.delisting_schedule_use_trading_credentials,
+                ) ??
+                getConfigContractDefault(
+                    response,
+                    'delisting_schedule_use_trading_credentials',
+                    false,
+                ),
+            delisting_schedule_api_key:
+                toNullableString(response.delisting_schedule_api_key),
+            delisting_schedule_api_secret:
+                toNullableString(response.delisting_schedule_api_secret),
             asap_symbol_fetch_error: null,
             asap_symbol_options: configuredSymbols.map((symbol) => ({
                 label: symbol,
@@ -280,6 +353,26 @@ export function buildLoadedConfigState(
             csvsignal_source: csvsignalSource,
             csvsignal_inline: csvsignalInline,
             csvsignal_file_name: null,
+            websocket_url:
+                toNullableString(signalSettings?.websocket_url) ??
+                toNullableString(signalSettings?.api_url),
+            websocket_headers: stringifyOptionalStructuredValue(
+                signalSettings?.headers,
+            ),
+            websocket_subscribe_message: stringifyOptionalStructuredValue(
+                signalSettings?.subscribe_message,
+            ),
+            websocket_required_decision:
+                toNullableString(signalSettings?.required_decision) ||
+                'take_trade',
+            websocket_min_confidence:
+                toNumberOrNull(signalSettings?.min_confidence) ?? 0,
+            websocket_accepted_exchanges: stringifyOptionalList(
+                signalSettings?.accepted_exchanges,
+            ),
+            websocket_accepted_market_states: stringifyOptionalList(
+                signalSettings?.accepted_market_states,
+            ),
         },
         filter: {
             rsi: toNumberOrNull(response.rsi_max),
@@ -320,10 +413,103 @@ export function buildLoadedConfigState(
             so: toNumberOrNull(response.so),
             mstc: toNumberOrNull(response.mstc),
             sos: toNumberOrNull(response.sos),
-            ss: toNumberOrNull(response.ss),
+            ss:
+                toNumberOrNull(response.ss) ??
+                getConfigContractDefault(response, 'ss', 1.6),
             os: toNumberOrNull(response.os),
             trade_safety_order_budget_ratio:
                 toNumberOrNull(response.trade_safety_order_budget_ratio) ?? 0.95,
+            dynamic_so_sizing_mode:
+                toNullableString(response.dynamic_so_sizing_mode) ||
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_sizing_mode',
+                    'legacy_factors',
+                ),
+            dynamic_so_atr_timeframe:
+                toNullableString(response.dynamic_so_atr_timeframe) ||
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_atr_timeframe',
+                    'trading',
+                ),
+            dynamic_so_atr_length:
+                toNumberOrNull(response.dynamic_so_atr_length) ??
+                getConfigContractDefault(response, 'dynamic_so_atr_length', 14),
+            dynamic_so_spacing_atr_multiplier:
+                toNumberOrNull(response.dynamic_so_spacing_atr_multiplier) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_spacing_atr_multiplier',
+                    3,
+                ),
+            dynamic_so_recovery_atr_multiplier:
+                toNumberOrNull(response.dynamic_so_recovery_atr_multiplier) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_recovery_atr_multiplier',
+                    5.5,
+                ),
+            dynamic_so_recovery_min_pct:
+                toNumberOrNull(response.dynamic_so_recovery_min_pct) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_recovery_min_pct',
+                    12,
+                ),
+            dynamic_so_recovery_max_pct:
+                toNumberOrNull(response.dynamic_so_recovery_max_pct) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_recovery_max_pct',
+                    30,
+                ),
+            dynamic_so_max_deal_quote:
+                toNumberOrNull(response.dynamic_so_max_deal_quote) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_max_deal_quote',
+                    250,
+                ),
+            dynamic_so_min_tp_improvement_pct:
+                toNumberOrNull(response.dynamic_so_min_tp_improvement_pct) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_min_tp_improvement_pct',
+                    5,
+                ),
+            dynamic_so_execution_guard_enabled:
+                parseBooleanString(
+                    response.dynamic_so_execution_guard_enabled,
+                ) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_execution_guard_enabled',
+                    true,
+                ),
+            dynamic_so_execution_drift_atr_fraction:
+                toNumberOrNull(
+                    response.dynamic_so_execution_drift_atr_fraction,
+                ) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_execution_drift_atr_fraction',
+                    0.25,
+                ),
+            dynamic_so_execution_drift_min_pct:
+                toNumberOrNull(response.dynamic_so_execution_drift_min_pct) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_execution_drift_min_pct',
+                    0.15,
+                ),
+            dynamic_so_execution_drift_max_pct:
+                toNumberOrNull(response.dynamic_so_execution_drift_max_pct) ??
+                getConfigContractDefault(
+                    response,
+                    'dynamic_so_execution_drift_max_pct',
+                    0.5,
+                ),
             sidestep_bearish_strategy: toNullableString(
                 response.sidestep_bearish_strategy,
             ),

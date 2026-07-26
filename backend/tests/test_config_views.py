@@ -173,7 +173,7 @@ def test_dca_runtime_config_view_applies_tp_confirmation_defaults() -> None:
     assert config.max_safety_orders == 0
     assert config.dynamic_dca is True
     assert config.safety_order_volume_scale == 1.0
-    assert config.step_scale == 0.0
+    assert config.step_scale == 1.6
     assert config.safety_order_step_percentage == 0.0
     assert config.safety_order_size == 0.0
     assert config.base_order_amount == 0.0
@@ -184,6 +184,13 @@ def test_dca_runtime_config_view_applies_tp_confirmation_defaults() -> None:
     assert config.atr_regime_mid_k == 1.8
     assert config.atr_regime_high_k == 1.4
     assert config.trade_safety_order_budget_ratio == 0.95
+    assert config.recovery_sizing_mode == "legacy_factors"
+    assert config.recovery_spacing_atr_multiplier == 3.0
+    assert config.recovery_atr_multiplier == 5.5
+    assert config.recovery_min_percent == 12.0
+    assert config.recovery_max_percent == 30.0
+    assert config.recovery_max_deal_quote == 0.0
+    assert config.recovery_min_tp_improvement_percent == 5.0
 
 
 def test_trade_mode_config_requires_explicit_sidestep_reentry_on_save() -> None:
@@ -234,12 +241,19 @@ def test_dca_runtime_config_view_normalizes_dynamic_dca_fields() -> None:
             "so": "150",
             "bo": "100",
             "dynamic_dca_ath_cache_ttl": "120",
-            "dynamic_dca_ath_timeframe": "4h",
+            "dynamic_so_atr_timeframe": "4h",
             "dynamic_so_atr_length": "21",
             "dynamic_so_atr_regime_low_k": "2.8",
             "dynamic_so_atr_regime_mid_k": "2.0",
             "dynamic_so_atr_regime_high_k": "1.6",
             "trade_safety_order_budget_ratio": "0.6",
+            "dynamic_so_sizing_mode": " recovery_target ",
+            "dynamic_so_spacing_atr_multiplier": "2.5",
+            "dynamic_so_recovery_atr_multiplier": "6",
+            "dynamic_so_recovery_min_pct": "10",
+            "dynamic_so_recovery_max_pct": "25",
+            "dynamic_so_max_deal_quote": "500",
+            "dynamic_so_min_tp_improvement_pct": "4",
         }
     )
 
@@ -268,6 +282,13 @@ def test_dca_runtime_config_view_normalizes_dynamic_dca_fields() -> None:
     assert config.atr_regime_mid_k == 2.0
     assert config.atr_regime_high_k == 1.6
     assert config.trade_safety_order_budget_ratio == 0.6
+    assert config.recovery_sizing_mode == "recovery_target"
+    assert config.recovery_spacing_atr_multiplier == 2.5
+    assert config.recovery_atr_multiplier == 6.0
+    assert config.recovery_min_percent == 10.0
+    assert config.recovery_max_percent == 25.0
+    assert config.recovery_max_deal_quote == 500.0
+    assert config.recovery_min_tp_improvement_percent == 4.0
 
 
 def test_dca_runtime_config_view_preserves_explicit_zero_values() -> None:

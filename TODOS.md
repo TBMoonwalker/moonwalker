@@ -88,7 +88,7 @@ comparison math.
 
 ### Centralize lifecycle normalization across backend and frontend config seams
 
-**Completed:** Unreleased (2026-05-12)
+**Completed:** v4.2.0.0 (2026-07-26)
 
 **What shipped:** Added one canonical lifecycle normalization seam on each
 side, made `trade_mode` the operator-facing source of truth, routed backend
@@ -98,7 +98,7 @@ round trips.
 
 ### Confirm waiting sidestep campaigns keep owning capacity while flat
 
-**Completed:** Unreleased (2026-05-12)
+**Completed:** v4.2.0.0 (2026-07-26)
 
 **What shipped:** Kept the chosen campaign-ownership policy instead of adding a
 second scheduler, verified that flat waiting campaigns continue to preserve
@@ -109,7 +109,7 @@ audit-and-validation item rather than new ranking behavior.
 
 ### Polish waiting-campaign status and grouped sidestep mission history
 
-**Completed:** Unreleased (2026-05-12)
+**Completed:** v4.2.0.0 (2026-07-26)
 
 **What shipped:** Added explicit waiting-campaign cooldown, last-exit, and
 re-entry status fields to the existing payloads and UI, kept the main closed
@@ -119,7 +119,7 @@ analytics service or DB table.
 
 ### Untangle order-persistence ownership between Orders, Trades, and order_persistence
 
-**Completed:** Unreleased (2026-05-12)
+**Completed:** v4.2.0.0 (2026-07-26)
 
 **What shipped:** Moved sell-side lifecycle writes behind
 `order_persistence`, replaced external calls to private trade-cache
@@ -129,7 +129,7 @@ adds, stop handling, and related execution flows.
 
 ### Deduplicate the EMA20 swing and reverse strategy pair
 
-**Completed:** Unreleased (2026-05-12)
+**Completed:** v4.2.0.0 (2026-07-26)
 
 **What shipped:** Extracted the shared EMA20 swing runtime and persistence
 skeleton into one shared core, kept the public bullish and reverse strategy

@@ -63,8 +63,8 @@ const emit = defineEmits<{
 }
 
 .task-section-shell {
-    border: 1px solid rgba(29, 92, 73, 0.12);
-    border-radius: var(--mw-radius-lg);
+    border: 1px solid var(--mw-color-border);
+    border-radius: var(--mw-radius-md);
     padding: 16px 18px;
     background: var(--mw-surface-card);
 }
@@ -97,8 +97,8 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .task-section-body {

@@ -23,6 +23,10 @@ class _DummyExchange:
     def __init__(self) -> None:
         self.create_order_calls = 0
         self.fetch_trading_fee_calls = 0
+        self.cancel_order_calls = 0
+        self.last_create_order: dict[str, object] | None = None
+        self.next_filled: float | None = None
+        self.next_status = "closed"
 
     async def create_order(
         self,
@@ -34,6 +38,14 @@ class _DummyExchange:
         _params: dict[str, object],
     ) -> dict[str, object]:
         self.create_order_calls += 1
+        self.last_create_order = {
+            "symbol": symbol,
+            "ordertype": ordertype,
+            "side": side,
+            "amount": amount,
+            "price": price,
+            "params": _params,
+        }
         return {
             "id": "buy-1",
             "symbol": symbol,
@@ -41,7 +53,15 @@ class _DummyExchange:
             "side": side,
             "amount": amount,
             "price": price,
+            "filled": (float(amount) if self.next_filled is None else self.next_filled),
+            "status": self.next_status,
         }
+
+    def price_to_precision(self, _symbol: str, price: float) -> str:
+        return f"{price:.5f}"
+
+    async def cancel_order(self, _order_id: str, _symbol: str) -> None:
+        self.cancel_order_calls += 1
 
     async def fetch_trading_fee(self, symbol: str) -> dict[str, object]:
         self.fetch_trading_fee_calls += 1
@@ -66,6 +86,52 @@ async def test_execute_market_buy_places_order() -> None:
     assert order is not None
     assert order["id"] == "buy-1"
     assert exchange.create_order_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_capped_recovery_buy_uses_ioc_limit_order() -> None:
+    exchange = _DummyExchange()
+    manager = ExchangeBuyManager(_DummyLogger(), get_exchange=lambda: exchange)
+
+    order = await manager.execute_market_buy(
+        {
+            "symbol": "CVC/USDC",
+            "ordertype": "market",
+            "side": "buy",
+            "amount": "286",
+            "price": "0.01955",
+            "maximum_buy_price": 0.019598,
+        }
+    )
+
+    assert order is not None
+    assert order["ordertype"] == "limit"
+    assert exchange.last_create_order is not None
+    assert exchange.last_create_order["ordertype"] == "limit"
+    assert exchange.last_create_order["price"] == "0.01960"
+    assert exchange.last_create_order["params"] == {"timeInForce": "IOC"}
+
+
+@pytest.mark.asyncio
+async def test_unfilled_capped_recovery_buy_is_not_finalized() -> None:
+    exchange = _DummyExchange()
+    exchange.next_filled = 0.0
+    exchange.next_status = "open"
+    manager = ExchangeBuyManager(_DummyLogger(), get_exchange=lambda: exchange)
+
+    order = await manager.execute_market_buy(
+        {
+            "symbol": "CVC/USDC",
+            "ordertype": "market",
+            "side": "buy",
+            "amount": "286",
+            "price": "0.01955",
+            "maximum_buy_price": 0.019598,
+        }
+    )
+
+    assert order is None
+    assert exchange.cancel_order_calls == 1
 
 
 @pytest.mark.asyncio

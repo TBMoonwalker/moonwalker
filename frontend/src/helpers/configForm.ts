@@ -1,4 +1,5 @@
 const URL_PATTERN = /^https?:\/\//i
+const WEBSOCKET_URL_PATTERN = /^wss?:\/\//i
 
 const VOLUME_MULTIPLIERS: Record<string, number> = {
     K: 1_000,
@@ -24,6 +25,13 @@ export interface SignalSettingsInput {
     csvsignal_mode: string | null
     csvsignal_source: string | null
     csvsignal_inline: string | null
+    websocket_url?: string | null
+    websocket_headers?: string | null
+    websocket_subscribe_message?: string | null
+    websocket_required_decision?: string | null
+    websocket_min_confidence?: number | null
+    websocket_accepted_exchanges?: string | null
+    websocket_accepted_market_states?: string | null
 }
 
 export function serializeConfigValue(
@@ -40,7 +48,34 @@ export function toNullableConfigString(
         return null
     }
 
-    return value.trim().length > 0 ? value : null
+    const normalized = value.trim()
+    return normalized.length > 0 ? normalized : null
+}
+
+function parseOptionalJsonConfigValue(value: string | null): unknown {
+    const normalized = toNullableConfigString(value)
+    if (normalized === null) {
+        return null
+    }
+
+    const parsed = JSON.parse(normalized)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        throw new TypeError('Expected JSON object')
+    }
+    return parsed
+}
+
+function parseOptionalJsonOrStringConfigValue(value: string | null): unknown {
+    const normalized = toNullableConfigString(value)
+    if (normalized === null) {
+        return null
+    }
+
+    try {
+        return JSON.parse(normalized)
+    } catch {
+        return normalized
+    }
 }
 
 export function getDefaultHistoryLookbackByTimeframe(
@@ -230,5 +265,49 @@ export function buildSignalSettingsValue(
             csv_source: toNullableConfigString(csvSourceValue),
         }
     }
+    if (input.signal === 'websocket_signal') {
+        const settings: StructuredConfigValue = {
+            websocket_url: toNullableConfigString(input.websocket_url),
+        }
+        const headers = parseOptionalJsonConfigValue(input.websocket_headers)
+        if (headers !== null) {
+            settings.headers = headers
+        }
+        const subscribeMessage = parseOptionalJsonOrStringConfigValue(
+            input.websocket_subscribe_message,
+        )
+        if (subscribeMessage !== null) {
+            settings.subscribe_message = subscribeMessage
+        }
+        const requiredDecision = toNullableConfigString(
+            input.websocket_required_decision,
+        )
+        if (requiredDecision !== null && requiredDecision !== 'take_trade') {
+            settings.required_decision = requiredDecision
+        }
+        if (
+            input.websocket_min_confidence !== null &&
+            input.websocket_min_confidence !== undefined
+        ) {
+            settings.min_confidence = input.websocket_min_confidence
+        }
+        const acceptedExchanges = toNullableConfigString(
+            input.websocket_accepted_exchanges,
+        )
+        if (acceptedExchanges !== null) {
+            settings.accepted_exchanges = acceptedExchanges
+        }
+        const acceptedMarketStates = toNullableConfigString(
+            input.websocket_accepted_market_states,
+        )
+        if (acceptedMarketStates !== null) {
+            settings.accepted_market_states = acceptedMarketStates
+        }
+        return settings
+    }
     return null
+}
+
+export function isWebsocketUrl(value: string | null): boolean {
+    return value !== null && WEBSOCKET_URL_PATTERN.test(value.trim())
 }

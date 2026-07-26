@@ -1,9 +1,13 @@
 import { MOONWALKER_API_ORIGIN } from '../config'
 
 const baseUrl = MOONWALKER_API_ORIGIN
+export const MOONWALKER_CLIENT_HEADER = 'X-Moonwalker-Client'
+export const MOONWALKER_CLIENT_HEADER_VALUE = 'dashboard'
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${baseUrl}${path}`, init)
+  const headers = new Headers(init?.headers)
+  headers.set(MOONWALKER_CLIENT_HEADER, MOONWALKER_CLIENT_HEADER_VALUE)
+  const response = await fetch(`${baseUrl}${path}`, { ...init, headers })
   if (!response.ok) {
     let detail = ''
     try {

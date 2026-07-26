@@ -1,26 +1,73 @@
 <script setup lang="ts">
-import { computed, h, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import {
+   computed,
+   h,
+   onActivated,
+   onMounted,
+   onUnmounted,
+   reactive,
+   ref,
+   watch,
+} from 'vue'
 import type { DataTableColumns, PaginationProps, SorterResult } from 'naive-ui'
 import Heatmap from '../components/Heatmap.vue'
 import { useAnalyticsStore } from '../stores/analytics'
-import type { AnalyticsOverview } from '../stores/analytics'
+import type { AiTrustPrediction, AnalyticsOverview } from '../stores/analytics'
 
 const analytics = useAnalyticsStore()
 const activeTab = ref('symbols')
 const isMobile = ref(false)
+const SYMBOL_PAGE_SIZE = 10
+const SYMBOL_MOBILE_COLUMN_KEYS = new Set([
+   'symbol',
+   'trades',
+   'win_rate',
+   'total_profit',
+])
+const DURATION_MOBILE_COLUMN_KEYS = new Set([
+   'symbol',
+   'duration_formatted',
+   'profit',
+])
+const AI_TRUST_MOBILE_COLUMN_KEYS = new Set([
+   'symbol',
+   'created_at',
+   'risk_score',
+   'outcome_status',
+])
 const symbolSortState = ref<{ columnKey: string; order: 'ascend' | 'descend' } | null>({
    columnKey: 'trades',
    order: 'descend',
 })
 const symbolPagination = reactive<PaginationProps>({
    page: 1,
-   pageSize: 10,
+   pageSize: SYMBOL_PAGE_SIZE,
    pageSlot: 5,
    prefix: ({ itemCount }) => `Total ${itemCount} symbols`,
+})
+const recentPredictionsPagination = reactive<PaginationProps>({
+   page: 1,
+   pageSize: SYMBOL_PAGE_SIZE,
+   pageSlot: 5,
+   prefix: ({ itemCount }) => `Total ${itemCount} predictions`,
+})
+const badEntryReviewPagination = reactive<PaginationProps>({
+   page: 1,
+   pageSize: SYMBOL_PAGE_SIZE,
+   pageSlot: 5,
+   prefix: ({ itemCount }) => `Total ${itemCount} reviews`,
 })
 
 function handleSymbolPageChange(page: number) {
    symbolPagination.page = page
+}
+
+function handleRecentPredictionsPageChange(page: number) {
+   recentPredictionsPagination.page = page
+}
+
+function handleBadEntryReviewPageChange(page: number) {
+   badEntryReviewPagination.page = page
 }
 
 function handleSymbolSorterChange(sorter: SorterResult | null) {
@@ -43,19 +90,24 @@ function columnSortOrder(key: string): string | null {
 
 function handleResize() {
    isMobile.value = window.innerWidth < 768
+   const pageSlot = isMobile.value ? 3 : 5
+   symbolPagination.pageSlot = pageSlot
+   recentPredictionsPagination.pageSlot = pageSlot
+   badEntryReviewPagination.pageSlot = pageSlot
 }
 
 onMounted(() => {
    handleResize()
    window.addEventListener('resize', handleResize)
-   void analytics.load()
  })
+
+onActivated(() => {
+   void analytics.load()
+})
 
 onUnmounted(() => {
    window.removeEventListener('resize', handleResize)
  })
-
-const SYMBOL_PAGE_SIZE = 10
 
 const d = computed(() => analytics.data)
 const summary = computed(
@@ -73,6 +125,18 @@ const drawdown = computed(
 const distribution = computed(
         () => (d.value as AnalyticsOverview | null)?.distribution ?? null,
  )
+const aiTrust = computed(
+      () => (d.value as AnalyticsOverview | null)?.ai_trust ?? null,
+ )
+const aiTrustCalibration = computed(() => aiTrust.value?.calibration ?? null)
+const recentPredictions = computed(() => aiTrust.value?.recent_predictions ?? [])
+const badEntryReview = computed(() => aiTrust.value?.bad_entry_review ?? [])
+const topCalibrationBuckets = computed(() => (
+   aiTrustCalibration.value?.buckets ?? []
+).slice(0, 4))
+const missedBadEntryClusters = computed(() => (
+   aiTrustCalibration.value?.missed_bad_entry_clusters ?? []
+).slice(0, 4))
 
 const sortedAndPaginatedSymbols = computed(() => {
    let rows = [...perSymbol.value]
@@ -128,6 +192,15 @@ const heatmapMetrics = computed(() => {
    }
 })
 
+function syncPaginationBounds(pagination: PaginationProps, itemCount: number) {
+   const pageSize = pagination.pageSize ?? SYMBOL_PAGE_SIZE
+   pagination.itemCount = itemCount
+   const maxPage = Math.max(1, Math.ceil(itemCount / pageSize))
+   if ((pagination.page ?? 1) > maxPage) {
+     pagination.page = maxPage
+   }
+}
+
 watch(perSymbol, (rows) => {
    const pageSize = symbolPagination.pageSize ?? SYMBOL_PAGE_SIZE
    symbolPagination.itemCount = rows.length
@@ -136,6 +209,18 @@ watch(perSymbol, (rows) => {
      symbolPagination.page = maxPage
    }
 })
+
+watch(
+   recentPredictions,
+   (rows) => syncPaginationBounds(recentPredictionsPagination, rows.length),
+   { immediate: true },
+)
+
+watch(
+   badEntryReview,
+   (rows) => syncPaginationBounds(badEntryReviewPagination, rows.length),
+   { immediate: true },
+)
 
 function fmt2(val: number) {
    return val.toFixed(2)
@@ -157,6 +242,46 @@ function fmtProfitRange(row: { min: number; max: number }) {
    return `${fmtRangePct(row.min)} to ${fmtRangePct(row.max)}`
 }
 
+function fmtTrustRate(value: number | null | undefined) {
+   return `${Number(value ?? 0).toFixed(1)}%`
+}
+
+function fmtConfidence(value: number | null) {
+   if (value === null) {
+     return '-'
+   }
+   return `${Math.round(value * 100)}%`
+}
+
+function fmtTrustDate(value: string | null) {
+   return value ? new Date(value).toLocaleString() : '-'
+}
+
+function fmtTrustLabel(value: string | null | undefined) {
+   return String(value || 'cold').replace(/_/g, ' ')
+}
+
+const aiTrustStatusText = computed(() => {
+   const trust = aiTrust.value
+   if (!trust || trust.status === 'disabled') {
+     return 'AI observed is disabled'
+   }
+   if (trust.status === 'missing_model') {
+     return 'AI observed is waiting for an Ollama model'
+   }
+   if (!trust.coverage.total) {
+     return 'AI observed is waiting for entry observations'
+   }
+   const suffix = trust.enforce_warnings
+     ? ' · warning entries are blocked'
+     : ''
+   return `${trust.coverage.scored} scored of ${trust.coverage.total} observations${suffix}`
+})
+
+const aiTrustUnscoredCount = computed(() => (
+   aiTrust.value?.coverage.unscored ?? 0
+))
+
 const tabNames = [
       { name: 'symbols', label: 'Symbols' },
       { name: 'duration', label: 'Duration' },
@@ -165,24 +290,24 @@ const tabNames = [
  ]
 
 function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][number]> {
-   return [
+   const columns: DataTableColumns<AnalyticsOverview['per_symbol'][number]> = [
       {
        title: 'Symbol',
        key: 'symbol',
-       width: 120,
-       fixed: 'left',
+       width: isMobile.value ? 112 : 120,
+       fixed: isMobile.value ? undefined : 'left',
       },
       {
        title: 'Trades',
        key: 'trades',
-       width: 80,
+       width: isMobile.value ? 64 : 80,
        sorter: 'default',
        sortOrder: columnSortOrder('trades'),
       },
       {
        title: 'Win Rate',
        key: 'win_rate',
-       width: 100,
+       width: isMobile.value ? 78 : 100,
        sorter: 'default',
        sortOrder: columnSortOrder('win_rate'),
        render(row: any) {
@@ -192,7 +317,7 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
       {
        title: 'Total Profit',
        key: 'total_profit',
-       width: 120,
+       width: isMobile.value ? 92 : 120,
        sorter: 'default',
        sortOrder: columnSortOrder('total_profit'),
        render(row: any) {
@@ -221,14 +346,23 @@ function getSymbolColumns(): DataTableColumns<AnalyticsOverview['per_symbol'][nu
        width: 100,
       },
     ]
+   if (isMobile.value) {
+      return columns.filter((column) => {
+         if (!('key' in column)) {
+            return true
+         }
+         return SYMBOL_MOBILE_COLUMN_KEYS.has(String(column.key))
+      })
+   }
+   return columns
 }
 
 function getDurationColumns(): DataTableColumns<AnalyticsOverview['duration_extremes']['longest'][number]> {
-   return [
+   const columns: DataTableColumns<AnalyticsOverview['duration_extremes']['longest'][number]> = [
       {
        title: 'Symbol',
        key: 'symbol',
-       width: 120,
+       width: isMobile.value ? 112 : 120,
       },
       {
        title: 'Duration',
@@ -268,6 +402,15 @@ function getDurationColumns(): DataTableColumns<AnalyticsOverview['duration_extr
         },
       },
     ]
+   if (isMobile.value) {
+      return columns.filter((column) => {
+         if (!('key' in column)) {
+            return true
+         }
+         return DURATION_MOBILE_COLUMN_KEYS.has(String(column.key))
+      })
+   }
+   return columns
 }
 
 function getDistributionColumns(): DataTableColumns<{ label: string; min: number; max: number; count: number }> {
@@ -291,18 +434,106 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
       },
     ]
 }
+
+function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
+   const columns: DataTableColumns<AiTrustPrediction> = [
+      {
+       title: 'Symbol',
+       key: 'symbol',
+       width: isMobile.value ? 112 : 130,
+       fixed: isMobile.value ? undefined : 'left',
+        render(row) {
+         return h('span', { class: 'ai-trust-symbol' }, row.symbol)
+        },
+      },
+      {
+       title: 'Observed',
+       key: 'created_at',
+       width: 160,
+        render(row) {
+         return fmtTrustDate(row.created_at)
+        },
+      },
+      {
+       title: 'Risk',
+       key: 'risk_score',
+       width: 86,
+        render(row) {
+         if (row.risk_score === null) {
+           return '-'
+         }
+         const effective = row.shadow_effective_risk_score
+         return effective && effective > row.risk_score
+           ? `${row.risk_score} -> ${effective}`
+           : `${row.risk_score}`
+        },
+      },
+      {
+       title: 'Confidence',
+       key: 'confidence',
+       width: 110,
+        render(row) {
+         return fmtConfidence(row.confidence)
+        },
+      },
+      {
+       title: 'AI would have warned',
+       key: 'would_warn',
+       width: 150,
+        render(row) {
+         if (row.would_warn === null) {
+           return 'Unscored'
+         }
+         return row.would_warn ? row.warning_severity : 'No'
+        },
+      },
+      {
+       title: 'Reasons',
+       key: 'reason_codes',
+       width: 220,
+        render(row) {
+         return row.reason_codes.length ? row.reason_codes.join(', ') : row.provider_status
+        },
+      },
+      {
+       title: 'Outcome',
+       key: 'outcome_status',
+       width: 150,
+        render(row) {
+         if (row.outcome_status === 'blocked') {
+           return 'Blocked'
+         }
+         if (row.outcome_status === 'preflight') {
+           return 'Preflight'
+         }
+         if (row.outcome_status !== 'closed') {
+           return 'Open'
+         }
+         return row.bad_entry ? 'Bad entry' : 'Closed ok'
+        },
+      },
+   ]
+   if (isMobile.value) {
+      return columns.filter((column) => {
+         if (!('key' in column)) {
+            return true
+         }
+         return AI_TRUST_MOBILE_COLUMN_KEYS.has(String(column.key))
+      })
+   }
+   return columns
+}
 </script>
 
 <template>
-   <div class="page-shell stats-page">
+   <div class="page-shell stats-page operator-console-page">
       <!-- Empty / error state -->
       <template v-if="!summary">
         <n-flex class="page-section" vertical>
-          <n-card class="stats-intro-card mw-shell-card" content-style="padding: 18px 20px;">
+          <n-card class="dashboard-panel ledger-panel" content-style="padding: 18px 20px;">
             <n-flex vertical :size="6">
-              <n-text depth="3" class="stats-kicker">Statistics</n-text>
               <n-text>
-                <template v-if="analytics.loading">Loading analytics...</template>
+                <template v-if="analytics.loading">Loading analytics…</template>
                 <template v-else-if="analytics.error">
                    <n-alert type="error" :show-icon="false">
                      {{ analytics.error }}
@@ -320,41 +551,36 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
       <template v-else>
         <!-- KPI Cards -->
         <n-flex class="page-section" vertical>
-          <n-card
-              class="statistics-overview-card mw-shell-card"
-              content-style="padding: 14px 16px;"
-          >
-            <div class="statistics-grid" aria-label="Statistics overview">
-              <div class="stat-cell">
-                <n-statistic label="Total Trades" :value="summary.total_trades" />
-              </div>
-              <div class="stat-cell">
-                <n-statistic label="Win Rate" :value="fmtPct(summary.win_rate)" />
-              </div>
-              <div class="stat-cell">
-                <n-statistic
-                    :class="summary.total_profit >= 0 ? 'green' : 'red'"
-                  label="Total Profit"
-                    :value="fmt2(summary.total_profit)"
-                />
-              </div>
-              <div class="stat-cell">
-                <n-statistic
-                    :class="summary.avg_profit >= 0 ? 'green' : 'red'"
-                  label="Avg Profit"
-                    :value="fmt2(summary.avg_profit)"
-                />
-              </div>
-              <div class="stat-cell">
-                <n-statistic label="Avg Duration" :value="summary.avg_duration_formatted" />
-              </div>
+          <div class="statistics-grid" aria-label="Statistics overview">
+            <div class="stat-cell dashboard-panel">
+              <n-statistic label="Total Trades" :value="summary.total_trades" />
             </div>
-          </n-card>
+            <div class="stat-cell dashboard-panel">
+              <n-statistic label="Win Rate" :value="fmtPct(summary.win_rate)" />
+            </div>
+            <div class="stat-cell dashboard-panel">
+              <n-statistic
+                  :class="summary.total_profit >= 0 ? 'green' : 'red'"
+                label="Total Profit"
+                  :value="fmt2(summary.total_profit)"
+              />
+            </div>
+            <div class="stat-cell dashboard-panel">
+              <n-statistic
+                  :class="summary.avg_profit >= 0 ? 'green' : 'red'"
+                label="Avg Profit"
+                  :value="fmt2(summary.avg_profit)"
+              />
+            </div>
+            <div class="stat-cell dashboard-panel">
+              <n-statistic label="Avg Duration" :value="summary.avg_duration_formatted" />
+            </div>
+          </div>
         </n-flex>
 
         <!-- Heatmap -->
         <n-flex class="page-section" vertical>
-          <n-card class="heatmap-card mw-shell-card" content-style="padding: 12px 16px;">
+          <n-card class="heatmap-card dashboard-panel" content-style="padding: 12px 16px;">
             <n-flex vertical :size="6">
               <div class="heatmap-header">
                 <n-text depth="3" class="stats-kicker">Trade Activity</n-text>
@@ -381,10 +607,193 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
           </n-card>
         </n-flex>
 
+        <!-- AI Trust Cockpit -->
+        <n-flex class="page-section" vertical>
+          <n-card class="ai-trust-card dashboard-panel ledger-panel" content-style="padding: 14px 16px;">
+            <n-flex vertical :size="12">
+              <div class="ai-trust-header">
+                <div>
+                  <n-text depth="3" class="stats-kicker">AI Trust Cockpit</n-text>
+                  <div class="ai-trust-status">{{ aiTrustStatusText }}</div>
+                </div>
+                <n-tag
+                    size="small"
+                    :type="aiTrust?.status === 'ready' ? 'success' : aiTrust?.status === 'missing_model' ? 'warning' : 'default'"
+                >
+                  {{ aiTrust?.provider ?? 'ollama' }}
+                </n-tag>
+              </div>
+
+              <div class="ai-trust-grid" aria-label="AI trust calibration">
+                <div class="stat-cell ai-trust-stat">
+                  <n-statistic
+                      label="Coverage"
+                      :value="fmtTrustRate(aiTrust?.coverage.coverage_rate)"
+                  />
+                  <span class="stat-detail">{{ aiTrust?.coverage.scored ?? 0 }} scored</span>
+                </div>
+                <div class="stat-cell ai-trust-stat">
+                  <n-statistic
+                      label="Bad-entry capture"
+                      :value="fmtTrustRate(aiTrust?.quality.bad_entry_capture_rate)"
+                  />
+                  <span class="stat-detail">{{ aiTrust?.quality.bad_entries ?? 0 }} bad entries</span>
+                </div>
+                <div class="stat-cell ai-trust-stat">
+                  <n-statistic
+                      label="False warnings"
+                      :value="fmtTrustRate(aiTrust?.quality.false_warning_rate)"
+                  />
+                  <span class="stat-detail">{{ aiTrust?.quality.warnings ?? 0 }} warnings</span>
+                </div>
+                <div class="stat-cell ai-trust-stat">
+                  <n-statistic label="Unscored" :value="aiTrustUnscoredCount" />
+                  <span class="stat-detail">{{ aiTrust?.status ?? 'disabled' }}</span>
+                </div>
+              </div>
+
+              <div class="ai-calibration-panel" aria-label="AI trust local calibration">
+                <div class="ai-calibration-summary">
+                  <div>
+                    <n-text depth="3" class="stats-kicker">Local Calibration</n-text>
+                    <div class="ai-calibration-status">
+                      Moonwalker learned this pattern locally:
+                      {{ fmtTrustLabel(aiTrustCalibration?.confidence) }}
+                    </div>
+                  </div>
+                  <n-tag size="small" type="info">
+                    {{ aiTrustCalibration?.closed_samples ?? 0 }} closed samples
+                  </n-tag>
+                </div>
+                <div class="ai-calibration-grid">
+                  <div class="stat-cell ai-trust-stat">
+                    <n-statistic
+                        label="Confidence"
+                        :value="fmtTrustLabel(aiTrustCalibration?.confidence)"
+                    />
+                    <span class="stat-detail">
+                      usable at {{ aiTrustCalibration?.confidence_thresholds.usable ?? 30 }}
+                    </span>
+                  </div>
+                  <div class="stat-cell ai-trust-stat">
+                    <n-statistic
+                        label="Shadow threshold"
+                        :value="aiTrustCalibration?.shadow_effective_warning_threshold ?? 75"
+                    />
+                    <span class="stat-detail">Calibrated warning would have applied</span>
+                  </div>
+                  <div class="stat-cell ai-trust-stat">
+                    <n-statistic
+                        label="Top reasons"
+                        :value="topCalibrationBuckets.length"
+                    />
+                    <span class="stat-detail">bounded local review</span>
+                  </div>
+                  <div class="stat-cell ai-trust-stat">
+                    <n-statistic
+                        label="Missed clusters"
+                        :value="missedBadEntryClusters.length"
+                    />
+                    <span class="stat-detail">AI observed after outcome</span>
+                  </div>
+                </div>
+                <div class="ai-calibration-lists">
+                  <div class="ai-calibration-list">
+                    <n-text strong>Top Risk Reasons</n-text>
+                    <div v-if="topCalibrationBuckets.length" class="ai-calibration-items">
+                      <div
+                          v-for="bucket in topCalibrationBuckets"
+                          :key="`${bucket.bucket_type}:${bucket.bucket_key}`"
+                          class="ai-calibration-item"
+                      >
+                        <span>{{ bucket.bucket_key }}</span>
+                        <span>{{ fmtTrustRate(bucket.bad_entry_rate) }} bad-entry</span>
+                        <span>{{ fmtTrustLabel(bucket.confidence) }}</span>
+                      </div>
+                    </div>
+                    <n-empty v-else description="No local calibration buckets yet" />
+                  </div>
+                  <div class="ai-calibration-list">
+                    <n-text strong>Missed Bad-entry Clusters</n-text>
+                    <div v-if="missedBadEntryClusters.length" class="ai-calibration-items">
+                      <div
+                          v-for="cluster in missedBadEntryClusters"
+                          :key="`${cluster.symbol}:${cluster.reason_code}`"
+                          class="ai-calibration-item"
+                      >
+                        <span>{{ cluster.symbol }}</span>
+                        <span>{{ cluster.reason_code }}</span>
+                        <span>{{ cluster.missed_bad_entries }} missed</span>
+                      </div>
+                    </div>
+                    <n-empty v-else description="No missed bad-entry clusters yet" />
+                  </div>
+                </div>
+              </div>
+
+              <n-alert
+                  v-if="aiTrust?.status === 'disabled'"
+                  type="default"
+                  :show-icon="false"
+              >
+                AI observed is off. No entry observations are being recorded.
+              </n-alert>
+              <n-alert
+                  v-else-if="aiTrust?.status === 'missing_model'"
+                  type="warning"
+                  :show-icon="false"
+              >
+                AI observed is enabled, but no Ollama model is configured.
+              </n-alert>
+
+              <n-flex :size="12" class="ai-trust-tables" vertical>
+                <n-flex vertical :size="6">
+                  <n-text strong>Recent Predictions</n-text>
+                  <n-data-table
+                      v-if="recentPredictions.length"
+                      :columns="getAiTrustColumns()"
+                      :data="recentPredictions"
+                      :pagination="recentPredictionsPagination"
+                      :scroll-x="isMobile ? 382 : 1000"
+                      size="small"
+                      @update:page="handleRecentPredictionsPageChange"
+                  />
+                  <n-empty
+                      v-else
+                      description="No AI observed entries yet"
+                  />
+                </n-flex>
+                <n-flex vertical :size="6">
+                  <n-text strong>Bad-entry Review</n-text>
+                  <n-data-table
+                      v-if="badEntryReview.length"
+                      :columns="getAiTrustColumns()"
+                      :data="badEntryReview"
+                      :pagination="badEntryReviewPagination"
+                      :scroll-x="isMobile ? 382 : 1000"
+                      size="small"
+                      @update:page="handleBadEntryReviewPageChange"
+                  />
+                  <n-empty
+                      v-else
+                      description="No calibrated bad-entry review yet"
+                  />
+                </n-flex>
+              </n-flex>
+            </n-flex>
+          </n-card>
+        </n-flex>
+
         <!-- Analytics Tabs -->
         <n-flex class="page-section" vertical>
-          <n-card content-style="padding: 0;">
-            <n-tabs v-model:value="activeTab" type="line" :tabs-padding="isMobile ? 12 : 20">
+          <n-card class="dashboard-panel ledger-panel" content-style="padding: 0;">
+            <n-tabs
+                v-model:value="activeTab"
+                class="calm-tabs statistics-tabs"
+                type="line"
+                size="large"
+                :tabs-padding="isMobile ? 12 : 20"
+            >
               <n-tab-pane v-for="tab in tabNames" :key="tab.name" :name="tab.name" :tab="tab.label">
                 <div v-show="activeTab === tab.name" class="tab-content">
                   <!-- Symbols Tab -->
@@ -394,7 +803,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                          :columns="getSymbolColumns()"
                          :data="sortedAndPaginatedSymbols"
                          :pagination="symbolPagination"
-                         :scroll-x="500"
+                         :scroll-x="isMobile ? 346 : 500"
                          size="small"
                          @update:page="handleSymbolPageChange"
                          @update:sorter="handleSymbolSorterChange"
@@ -411,7 +820,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                             :columns="getDurationColumns()"
                             :data="durationExtremes.longest"
                             :pagination="false"
-                            :scroll-x="500"
+                            :scroll-x="isMobile ? 312 : 500"
                            size="small"
                         />
                       </n-flex>
@@ -421,7 +830,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                             :columns="getDurationColumns()"
                             :data="durationExtremes.shortest"
                             :pagination="false"
-                            :scroll-x="500"
+                            :scroll-x="isMobile ? 312 : 500"
                            size="small"
                         />
                       </n-flex>
@@ -440,7 +849,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                         />
                         <span class="stat-detail">{{ fmtPct(drawdown.max_drawdown_percent) }}</span>
                       </div>
-                      <n-card content-style="padding: 12px;">
+                      <div class="risk-note operator-subpanel">
                         <n-flex vertical :size="4">
                           <n-text depth="3" style="font-size: 12px;">How to read this</n-text>
                           <n-text depth="3" style="font-size: 12px;">
@@ -449,7 +858,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                            profit fell by 10 USDT from its highest point.
                           </n-text>
                         </n-flex>
-                      </n-card>
+                      </div>
                     </n-flex>
                   </template>
 
@@ -462,7 +871,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
                             :columns="getDistributionColumns()"
                             :data="distribution.bins"
                             :pagination="false"
-                            :scroll-x="400"
+                            :scroll-x="isMobile ? 320 : 400"
                            size="small"
                         />
                         <n-flex :size="12" class="distribution-stats">
@@ -493,12 +902,11 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 
 <style scoped>
 .stats-page {
-  gap: 0;
+  gap: 12px;
 }
 
 .page-section {
-  margin-inline: 10px;
-  margin-bottom: 10px;
+  min-width: 0;
 }
 
 .page-section:last-child {
@@ -512,7 +920,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 }
 
 .tab-content {
-  padding: 12px;
+  padding: 0;
 }
 
 /* KPI grid */
@@ -524,14 +932,12 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 }
 
 .stat-cell {
+  min-height: 112px;
   min-width: 0;
-  padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: var(--mw-radius-sm, 6px);
-  background: rgba(255, 255, 255, 0.02);
+  padding: 14px 16px;
   display: flex;
-  align-items: center;
-  justify-content: center;
+  align-items: flex-start;
+  justify-content: flex-start;
 }
 
 .stat-detail {
@@ -544,7 +950,7 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 
 :deep(.n-statistic) {
   width: 100%;
-  text-align: center;
+  text-align: left;
 }
 
 :deep(.n-statistic-value) {
@@ -562,6 +968,10 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 .risk-stat {
   flex-direction: column;
   gap: 4px;
+}
+
+.risk-note {
+  padding: 12px;
 }
 
 .heatmap-card {
@@ -616,8 +1026,123 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
   color: var(--mw-color-text-primary);
   font-size: 0.95rem;
   font-variant-numeric: tabular-nums;
-  font-weight: 700;
+  font-weight: 500;
   line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ai-trust-card {
+  width: 100%;
+}
+
+.ai-trust-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-trust-status {
+  color: var(--mw-color-text-primary);
+  font-size: 1rem;
+  font-weight: 500;
+  line-height: 1.25;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.ai-trust-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-trust-stat {
+  flex-direction: column;
+  gap: 4px;
+  min-height: 82px;
+}
+
+.ai-calibration-panel {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--mw-color-border);
+  border-radius: var(--mw-radius-sm, 6px);
+  background: rgba(53, 109, 134, 0.05);
+}
+
+.ai-calibration-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ai-calibration-status {
+  color: var(--mw-color-text-primary);
+  font-size: 0.95rem;
+  font-weight: 500;
+  line-height: 1.25;
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+.ai-calibration-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-calibration-lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ai-calibration-list {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.ai-calibration-items {
+  display: grid;
+  gap: 6px;
+}
+
+.ai-calibration-item {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(53, 109, 134, 0.2);
+  border-radius: var(--mw-radius-sm, 6px);
+  color: var(--mw-color-text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.25;
+}
+
+.ai-calibration-item span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.ai-calibration-item span:first-child {
+  color: var(--mw-color-text-primary);
+  font-weight: 600;
+}
+
+.ai-trust-symbol {
+  display: inline-block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+:deep(.ai-trust-card .n-data-table-td) {
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
@@ -627,24 +1152,63 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 
 @media (max-width: 768px) {
    .tab-content {
-    padding: 8px;
+    padding: 0;
    }
 
    .page-section {
-    margin-inline: 6px;
+    min-width: 0;
    }
 
-   :deep(.n-tabs-tab-bar) {
-    flex-direction: row;
-    overflow-x: auto;
+   .statistics-tabs :deep(.n-tabs-wrapper) {
+    display: flex;
+    width: 100%;
    }
 
-   :deep(.n-tabs-tab) {
+   .statistics-tabs :deep(.n-tabs-nav-scroll-content) {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+   }
+
+   .statistics-tabs :deep(.n-tabs-tab-wrapper),
+   .statistics-tabs :deep(.n-tabs-tab) {
+    min-width: 0;
+    width: 100%;
+   }
+
+   .statistics-tabs :deep(.n-tabs-tab) {
+    justify-content: center;
     white-space: nowrap;
    }
 
-   .stats-intro-card {
-    margin-inline: 6px;
+   .ledger-panel :deep(.n-data-table-th),
+   .ledger-panel :deep(.n-data-table-td),
+   .ai-trust-card :deep(.n-data-table-th),
+   .ai-trust-card :deep(.n-data-table-td) {
+    padding-left: 8px !important;
+    padding-right: 8px !important;
+   }
+
+   .ledger-panel :deep(.n-data-table-wrapper),
+   .ai-trust-card :deep(.n-data-table-wrapper) {
+    max-width: 100%;
+   }
+
+   .ledger-panel :deep(.n-pagination),
+   .ai-trust-card :deep(.n-pagination) {
+    justify-content: flex-end;
+    gap: 4px;
+   }
+
+   .ledger-panel :deep(.n-pagination-prefix),
+   .ai-trust-card :deep(.n-pagination-prefix) {
+    display: none;
+   }
+
+   .ledger-panel :deep(.n-pagination-item),
+   .ai-trust-card :deep(.n-pagination-item) {
+    min-width: 34px;
+    height: 34px;
    }
 
    .distribution-stats {
@@ -657,6 +1221,28 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 
    .heatmap-metrics {
     grid-template-columns: repeat(3, minmax(0, 1fr));
+   }
+
+   .ai-trust-header {
+    align-items: stretch;
+    flex-direction: column;
+   }
+
+   .ai-trust-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+   }
+
+   .ai-calibration-grid,
+   .ai-calibration-lists {
+    grid-template-columns: 1fr;
+   }
+
+   .ai-calibration-summary {
+    flex-direction: column;
+   }
+
+   .ai-calibration-item {
+    grid-template-columns: minmax(0, 1fr);
    }
 
    .dist-stat {
@@ -690,6 +1276,14 @@ function getDistributionColumns(): DataTableColumns<{ label: string; min: number
 
 @media (min-width: 769px) and (max-width: 1200px) {
     .statistics-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ai-trust-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .ai-calibration-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 }

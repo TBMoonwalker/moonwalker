@@ -165,11 +165,40 @@ function collectDcaBlockers(config: SharedConfigPayload): ControlCenterBlocker[]
               ],
           ]
 
-    return requiredKeys.flatMap(([key, title, description]) =>
+    const blockers = requiredKeys.flatMap(([key, title, description]) =>
         hasRequiredValue(config[key])
             ? []
             : [resolveControlCenterBlocker(key, description, title)],
     )
+
+    const recoveryTargetEnabled =
+        isDynamicTradeMode(getTradeMode(config)) &&
+        String(config.dynamic_so_sizing_mode ?? '')
+            .trim()
+            .toLowerCase() === 'recovery_target'
+    if (recoveryTargetEnabled && !hasPositiveNumber(config.ss)) {
+        blockers.push(
+            resolveControlCenterBlocker(
+                'ss',
+                'Set a positive step scale so recovery safety-order spacing can advance.',
+                'Recovery spacing scale missing',
+            ),
+        )
+    }
+    if (
+        recoveryTargetEnabled &&
+        !hasPositiveNumber(config.dynamic_so_max_deal_quote)
+    ) {
+        blockers.push(
+            resolveControlCenterBlocker(
+                'dynamic_so_max_deal_quote',
+                'Set a positive quote-currency cap before recovery-target DCA can place safety orders.',
+                'Recovery deal cap missing',
+            ),
+        )
+    }
+
+    return blockers
 }
 
 function countConfiguredEssentials(config: SharedConfigPayload): number {

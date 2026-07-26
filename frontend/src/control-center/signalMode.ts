@@ -102,5 +102,20 @@ export function deriveSignalModeBlockers(
         ]
     }
 
+    if (
+        signalName === 'websocket_signal' &&
+        !hasRequiredValue(
+            signalSettings.websocket_url ?? signalSettings.api_url,
+        )
+    ) {
+        return [
+            buildSignalBlocker(
+                'signal_settings.websocket_url',
+                'WebSocket URL missing',
+                'Add the WebSocket stream URL before activating the signal source.',
+            ),
+        ]
+    }
+
     return []
 }

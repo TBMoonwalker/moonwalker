@@ -353,10 +353,18 @@ class Watcher:
             return
         if not self._btc_warmup_task:
             return
+        warmup_task = self._btc_warmup_task
         try:
-            await asyncio.wait_for(self._btc_warmup_task, timeout=25)
+            await asyncio.wait_for(warmup_task, timeout=25)
         except asyncio.TimeoutError:
             logging.warning("BTC pulse warmup timed out; continuing startup.")
+        except asyncio.CancelledError:
+            if asyncio.current_task() and asyncio.current_task().cancelling():
+                raise
+            logging.warning(
+                "BTC pulse warmup was replaced during watcher startup; "
+                "continuing startup."
+            )
         except (RuntimeError, TypeError, ValueError) as exc:
             logging.warning("BTC pulse warmup completed with warning: %s", exc)
 
@@ -364,15 +372,23 @@ class Watcher:
         """Await active-trade history warmup briefly before watcher startup."""
         if not self._strategy_history_warmup_task:
             return
+        warmup_task = self._strategy_history_warmup_task
         try:
             await asyncio.wait_for(
-                asyncio.shield(self._strategy_history_warmup_task),
+                asyncio.shield(warmup_task),
                 timeout=25,
             )
         except asyncio.TimeoutError:
             logging.warning(
                 "Strategy history warmup timed out after 25s; continuing "
                 "startup while warmup runs in the background."
+            )
+        except asyncio.CancelledError:
+            if asyncio.current_task() and asyncio.current_task().cancelling():
+                raise
+            logging.warning(
+                "Strategy history warmup was replaced during watcher startup; "
+                "continuing startup."
             )
         except (RuntimeError, TypeError, ValueError) as exc:
             logging.warning(

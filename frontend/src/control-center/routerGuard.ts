@@ -30,6 +30,7 @@ export function resolveControlCenterNavigation(
     },
 ): Record<string, unknown> | true {
     if (!options.loadError && !options.readiness.complete) {
+        const nextMode = options.readiness.nextMode
         const rawTarget = Array.isArray(to.query.target)
             ? to.query.target[0]
             : to.query.target
@@ -38,11 +39,11 @@ export function resolveControlCenterNavigation(
             : null
         const nextTarget =
             requestedTarget &&
-            getTaskPresentation(requestedTarget).modes.includes('setup')
+            getTaskPresentation(requestedTarget).modes.includes(nextMode)
                 ? requestedTarget
                 : options.readiness.nextTarget
         const normalizedQuery = buildControlCenterQuery({
-            mode: 'setup',
+            mode: nextMode,
             target: nextTarget,
         })
 

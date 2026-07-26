@@ -5,8 +5,12 @@
 3. Save your settings (they are persisted in the DB).
 
 Runtime configuration is stored in the `AppConfig` table and served to the UI
-through `/config/all`. Dashboard clients can also poll `/config/freshness` to
-detect whether another browser or tab has changed the saved configuration.
+through `/config/all`, with persisted credential values replaced by redaction
+markers. Dashboard clients can also poll `/config/freshness` to detect whether
+another browser or tab has changed the saved configuration.
+`/config/schema` exposes the versioned frontend-safe contract for high-risk
+settings, including defaults, bounds, enums, sensitivity, and readiness
+metadata.
 `/config/all` now includes a snapshot-native `config_updated_at` field so the
 Control Center can tell whether the snapshot it just loaded is older than the
 latest persisted config timestamp.
@@ -50,10 +54,15 @@ are not exposed in the UI and must be set via the API.
 | --- | --- | --- | --- |
 | `timezone` | `string` | Timezone used for logging. | `Europe/London` |
 | `debug` | `bool` | Enable debug logging. | `true` |
-| `signal` | `string` | Signal plugin to use (e.g. `sym_signals`, `asap`, `csv_signal`). | `sym_signals` |
+| `trading_paused` | `bool` | Persisted runtime pause state. When true, Moonwalker blocks new exposure while continuing to manage exits for existing positions. Prefer the pause/resume API actions instead of editing this key directly. | `false` |
+| `signal` | `string` | Signal plugin to use (e.g. `sym_signals`, `asap`, `csv_signal`, `websocket_signal`). | `sym_signals` |
 | `signal_settings` | `string (json)` | Plugin settings per selected signal plugin. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |
 | `symbol_list` | `string` | CSV list or URL for ASAP symbol list. | `BTC/USDT,ETH/USDT` |
 | `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema20_swing` |
+| `delisting_protection_enabled` | `bool` | Use exchange delisting schedules when available and otherwise CCXT market status to block new exposure. Existing exits remain enabled. | `false` |
+| `delisting_schedule_use_trading_credentials` | `bool` | Reuse the configured exchange trading key and secret for the isolated production Binance delisting schedule request. Dedicated read-only credentials remain the safer default. | `false` |
+| `delisting_schedule_api_key` | `str` | Dedicated production read-only Binance API key used only for delisting schedule checks when trading credential reuse is disabled. | empty |
+| `delisting_schedule_api_secret` | `str` | Secret for the production read-only Binance schedule key. Stored and returned through the same redaction boundary as exchange credentials. | empty |
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
 | `pair_denylist` | `string` | Comma-separated denied symbols. | `SCAM,XYZ` |
 | `volume` | `string (json)` | Minimum 24h volume filter. | `{"size":5,"range":"M"}` |
@@ -94,10 +103,23 @@ are not exposed in the UI and must be set via the API.
 | `tp_spike_confirm_ticks` | `int` | Minimum number of qualifying ticker updates above TP required before the sell is confirmed. `0` disables the tick requirement. | `0` |
 | `so` | `float` | Safety order size. | `20` |
 | `sos` | `float` | Price deviation for first safety order (percent). | `1.5` |
-| `ss` | `float` | Safety order step scale. | `1.05` |
+| `ss` | `float` | Safety order step scale. Recovery DCA defaults to a materially expanding ladder instead of leaving the value unset. | `1.6` |
 | `os` | `float` | Safety order volume scale. | `1.2` |
 | `mstc` | `int` | Max safety order count. | `5` |
 | `trade_safety_order_budget_ratio` | `float` | Dynamic-DCA budget cap for a single safety order as a fraction of currently free quote balance. | `0.95` |
+| `dynamic_so_sizing_mode` | `string` | Dynamic-DCA SO policy: `legacy_factors`, diagnostic-only `recovery_shadow`, or live `recovery_target`. The policy is snapshotted when a new deal opens; existing deals are not migrated. | `legacy_factors` |
+| `dynamic_so_atr_timeframe` | `string` | Candle timeframe used to measure ATR for recovery spacing and rebound targets. `trading` inherits the deal/backtest trading candle timeframe; an explicit higher timeframe remains available for deliberate smoothing. | `trading` |
+| `dynamic_so_atr_length` | `int` | Wilder ATR lookback used by recovery sizing. | `14` |
+| `dynamic_so_spacing_atr_multiplier` | `float` | Multiplies ATR% to determine the minimum gap below the preceding filled buy. The actual gap is the larger of this result and `sos`, then grows by `ss` for later SOs. | `3.0` |
+| `dynamic_so_recovery_atr_multiplier` | `float` | Multiplies current ATR% to set the desired distance from the candidate fill to projected TP. | `5.5` |
+| `dynamic_so_recovery_min_pct` | `float` | Lower clamp for the desired post-SO recovery move to TP. | `12.0` |
+| `dynamic_so_recovery_max_pct` | `float` | Upper clamp for the desired post-SO recovery move to TP. | `30.0` |
+| `dynamic_so_max_deal_quote` | `float` | Hard quote-currency cap for total cost of a recovery-target deal. Recovery-target saves and live activation require a positive value. Existing deal snapshots are not changed when this setting changes. | `250.0` |
+| `dynamic_so_min_tp_improvement_pct` | `float` | Minimum percentage-point improvement to the projected TP distance when balance or deal caps prevent reaching the full target. | `5.0` |
+| `dynamic_so_execution_guard_enabled` | `bool` | Protect recovery-target SOs from transient wicks. The exchange ask is checked immediately before execution and the buy uses an immediate-or-cancel limit capped at the calculated ceiling. Missing fields in older recovery policy snapshots inherit the enabled default. | `true` |
+| `dynamic_so_execution_drift_atr_fraction` | `float` | Fraction of ATR% allowed between the recovery trigger and the executable buy price before the SO is rejected. | `0.25` |
+| `dynamic_so_execution_drift_min_pct` | `float` | Minimum execution-price allowance used when the ATR-derived allowance is very small. | `0.15` |
+| `dynamic_so_execution_drift_max_pct` | `float` | Hard maximum execution-price allowance. The effective allowance is clamped between the configured minimum and maximum. | `0.5` |
 | `dynamic_so_volume_enabled` | `bool` | Enable dynamic scaling for safety order amount. Trigger logic stays unchanged; only SO size is scaled. | `false` |
 | `dynamic_so_ath_lookback_value` | `int` | ATH lookback amount used by dynamic SO scaling. | `1` |
 | `dynamic_so_ath_lookback_unit` | `string` | Lookback unit for ATH: `day`, `week`, `month`, or `year`. | `month` |
@@ -146,6 +168,13 @@ are not exposed in the UI and must be set via the API.
 | `autopilot_green_phase_confirm_cycles` | `int` | Number of consecutive evaluation runs that must satisfy the enter condition before Green Phase activates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `2` |
 | `autopilot_green_phase_release_cycles` | `int` | Number of consecutive evaluation runs below the exit condition before Green Phase deactivates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `4` |
 | `autopilot_green_phase_max_locked_fund_percent` | `float` | Hard ceiling for locked funds, in percent of `capital_max_fund`, above which Green Phase may not add extra deals. | `85` |
+| `ai_trust_enabled` | `bool` | Enable local AI Trust entry observations and the Statistics cockpit. | `false` |
+| `ai_trust_enforce_warnings` | `bool` | Block new entries when AI Trust returns a warning or its configured provider is unavailable. Requires AI Trust to be enabled. | `false` |
+| `ai_trust_ollama_base_url` | `string` | Base URL for the local Ollama provider used by AI Trust. | `http://localhost:11434` |
+| `ai_trust_ollama_model` | `string` | Ollama model name used for AI Trust entry evaluation. Live warning enforcement requires a configured model. | empty |
+| `ai_trust_timeout_ms` | `int` | Provider timeout in milliseconds, from `250` through `120000`. | `10000` |
+| `ai_trust_max_retries` | `int` | Retry budget for safe transient provider failures, from `0` through `2`. | `0` |
+| `ai_trust_runtime_status` | `string` | Read-only provider state: `ok`, `provider_unavailable`, or `warning_blocked`. | `ok` |
 | `monitoring_enabled` | `bool` | Enable outbound monitoring notifications for executed buys/sells. | `false` |
 | `monitoring_telegram_api_id` | `int` | Telegram API ID used by Telethon client. | `1234567` |
 | `monitoring_telegram_api_hash` | `string` | Telegram API hash used by Telethon client. | `0123456789abcdef...` |
@@ -154,7 +183,7 @@ are not exposed in the UI and must be set via the API.
 | `monitoring_timeout_sec` | `int` | Telegram send timeout in seconds. | `5` |
 | `monitoring_retry_count` | `int` | Number of retries after a failed Telegram send. | `1` |
 | `strategies` | `array[string]` | Available strategies (read-only). | `["ema_down","ema20_swing","ema20_swing_reverse","ema_low","ema_swing"]` |
-| `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals"]` |
+| `signal_plugins` | `array[string]` | Available signal plugins (read-only). | `["asap","csv_signal","sym_signals","websocket_signal"]` |
 
 Read-only metadata keys such as `strategies` and `signal_plugins` are returned
 in config snapshots for the dashboard and should not be treated as persisted

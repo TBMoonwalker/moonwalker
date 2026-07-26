@@ -76,18 +76,18 @@ function formatTrustBoardSymbol(symbol: string): string {
 </script>
 
 <template>
-    <div class="page-shell autopilot-memory-page">
-        <n-card class="autopilot-shell mw-shell-card" content-style="padding: 18px 20px;">
+    <div class="page-shell autopilot-memory-page operator-console-page">
+        <n-card class="autopilot-shell dashboard-panel" content-style="padding: 18px 20px;">
             <n-flex vertical :size="16">
-                <n-flex class="page-header" justify="space-between" align="start" :wrap="true" :size="[12, 12]">
-                    <div class="page-copy">
+                <n-flex class="autopilot-status-row" justify="space-between" align="start" :wrap="true" :size="[12, 12]">
+                    <div class="autopilot-status-copy">
                         <n-text depth="3">Control Center / Autopilot</n-text>
-                        <h1 class="page-title">{{ formatAutopilotStatusTitle(data) }}</h1>
-                        <p class="page-summary">
+                        <h1 class="autopilot-status-title">{{ formatAutopilotStatusTitle(data) }}</h1>
+                        <p class="autopilot-status-summary">
                             {{ formatAutopilotStatusBody(data) }}
                         </p>
                     </div>
-                    <div class="page-actions">
+                    <div class="autopilot-status-actions">
                         <n-button secondary @click="openControlCenterOverview">
                             Back to Control Center
                         </n-button>
@@ -110,7 +110,7 @@ function formatTrustBoardSymbol(symbol: string): string {
                 </n-alert>
 
                 <template v-else-if="loading && !data">
-                    <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                    <n-card class="autopilot-section-card operator-subpanel" content-style="padding: 18px 20px;">
                         <n-skeleton text :repeat="6" />
                     </n-card>
                 </template>
@@ -139,7 +139,7 @@ function formatTrustBoardSymbol(symbol: string): string {
 
                     <n-card
                         v-if="data.status === 'warming_up'"
-                        class="page-section-card mw-muted-card"
+                        class="autopilot-section-card operator-subpanel"
                         content-style="padding: 18px 20px;"
                     >
                         <n-flex vertical :size="10">
@@ -160,7 +160,7 @@ function formatTrustBoardSymbol(symbol: string): string {
                     </n-card>
 
                     <div class="grid-shell">
-                        <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                        <n-card class="autopilot-section-card operator-subpanel" content-style="padding: 18px 20px;">
                             <n-flex vertical :size="14">
                                 <div>
                                     <h2 class="section-title">Trust board</h2>
@@ -230,7 +230,7 @@ function formatTrustBoardSymbol(symbol: string): string {
                             </n-flex>
                         </n-card>
 
-                        <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                        <n-card class="autopilot-section-card operator-subpanel" content-style="padding: 18px 20px;">
                             <n-flex vertical :size="14">
                                 <div>
                                     <h2 class="section-title">Selected symbol</h2>
@@ -290,7 +290,7 @@ function formatTrustBoardSymbol(symbol: string): string {
                         </n-card>
                     </div>
 
-                    <n-card class="page-section-card mw-muted-card" content-style="padding: 18px 20px;">
+                    <n-card class="autopilot-section-card operator-subpanel" content-style="padding: 18px 20px;">
                         <n-flex vertical :size="14">
                             <div>
                                 <h2 class="section-title">Latest Autopilot moves</h2>
@@ -325,44 +325,55 @@ function formatTrustBoardSymbol(symbol: string): string {
 
 <style scoped>
 .autopilot-memory-page {
-    display: flex;
-    flex-direction: column;
-    gap: 0;
+    gap: 12px;
 }
 
-.page-header {
-    margin-bottom: 4px;
+.autopilot-status-row {
+    margin-bottom: 0;
+    padding: 14px 16px;
+    border: 1px solid rgba(29, 92, 73, 0.14);
+    border-radius: var(--mw-radius-md);
+    background: rgba(29, 92, 73, 0.05);
+    box-shadow: var(--mw-shadow-card);
 }
 
 .autopilot-shell {
     width: 100%;
+    overflow: visible;
+    border: 0;
+    background: transparent;
+    box-shadow: none;
 }
 
-.page-copy {
+.autopilot-shell :deep(.n-card__content) {
+    padding: 0 !important;
+}
+
+.autopilot-status-copy {
     flex: 1 1 min(40rem, 100%);
     min-width: min(40rem, 100%);
     max-width: none;
 }
 
-.page-title {
-    margin: 6px 0 8px;
+.autopilot-status-title {
+    margin: 4px 0 4px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
-    font-size: 2rem;
-    font-weight: 700;
-    letter-spacing: -0.03em;
-    white-space: nowrap;
+    font-size: 1.12rem;
+    font-weight: 450;
+    letter-spacing: 0;
+    line-height: 1.2;
 }
 
-.page-summary {
+.autopilot-status-summary {
     margin: 0;
     color: var(--mw-color-text-secondary);
     font-family: var(--mw-font-body);
-    font-size: 1rem;
-    line-height: 1.6;
+    font-size: 0.92rem;
+    line-height: 1.45;
 }
 
-.page-actions {
+.autopilot-status-actions {
     display: flex;
     gap: 8px;
     flex-wrap: wrap;
@@ -376,14 +387,17 @@ function formatTrustBoardSymbol(symbol: string): string {
     letter-spacing: -0.02em;
 }
 
-.page-section-card {
+.autopilot-section-card {
     height: auto;
     align-self: start;
+    border-radius: var(--mw-radius-md);
+    background: var(--mw-color-surface-panel);
+    box-shadow: var(--mw-shadow-card);
 }
 
 .grid-shell {
     display: grid;
-    gap: 16px;
+    gap: 12px;
     align-items: start;
     grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr);
 }
@@ -398,16 +412,16 @@ function formatTrustBoardSymbol(symbol: string): string {
     display: grid;
     gap: 10px;
     align-content: start;
-    padding: 14px;
-    border-radius: var(--mw-radius-lg, 12px);
+    padding: 12px;
+    border-radius: var(--mw-radius-sm);
     background: var(--mw-surface-card-subtle);
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
 }
 
 .trust-row {
     width: 100%;
-    padding: 11px 12px;
-    border-radius: 10px;
+    padding: 10px 12px;
+    border-radius: var(--mw-radius-sm);
     border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
     background: var(--mw-surface-card-muted);
     color: var(--mw-color-text-primary);
@@ -420,13 +434,11 @@ function formatTrustBoardSymbol(symbol: string): string {
     transition:
         border-color 140ms ease,
         background-color 140ms ease,
-    box-shadow 140ms ease,
-    transform 140ms ease;
+        box-shadow 140ms ease;
 }
 
 .trust-row:hover {
-    box-shadow: 0 10px 20px rgba(24, 46, 38, 0.08);
-    transform: translateY(-1px);
+    box-shadow: inset 0 0 0 1px rgba(29, 92, 73, 0.08);
 }
 
 .trust-row:focus-visible {
@@ -454,7 +466,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-mono);
     font-size: 0.98rem;
-    font-weight: 700;
+    font-weight: 600;
     letter-spacing: 0.01em;
     line-height: 1.25;
 }
@@ -558,18 +570,31 @@ function formatTrustBoardSymbol(symbol: string): string {
 
 .event-list {
     display: grid;
-    gap: 10px;
+    gap: 0;
+    overflow: hidden;
+    border: 1px solid var(--mw-color-border);
+    border-radius: 9px;
 }
 
 .event-row {
+    min-height: 48px;
     padding: 10px 12px;
-    border-radius: 10px;
-    background: var(--mw-surface-card-muted);
-    border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    border: 0;
+    border-bottom: 1px solid rgba(213, 219, 213, 0.7);
+    border-radius: 0;
+    background: var(--mw-color-surface-panel);
     display: flex;
     align-items: baseline;
     justify-content: space-between;
     gap: 16px;
+}
+
+.event-row:last-child {
+    border-bottom: 0;
+}
+
+.event-row:hover {
+    background: var(--mw-surface-card-muted);
 }
 
 .event-copy {
@@ -592,19 +617,15 @@ function formatTrustBoardSymbol(symbol: string): string {
         grid-template-columns: 1fr;
     }
 
-    .page-copy {
+    .autopilot-status-copy {
         min-width: 0;
     }
 
-    .page-title {
-        white-space: normal;
-    }
-
-    .page-actions {
+    .autopilot-status-actions {
         width: 100%;
     }
 
-    .page-actions :deep(.n-button) {
+    .autopilot-status-actions :deep(.n-button) {
         flex: 1 1 auto;
     }
 

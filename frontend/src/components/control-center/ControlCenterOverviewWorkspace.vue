@@ -42,7 +42,7 @@ const emit = defineEmits<{
 <template>
     <n-card
         :ref="visibleBlockers.length === 0 ? liveActivationRef : undefined"
-        class="workspace-card mw-shell-card"
+        class="workspace-card dashboard-panel"
         content-style="padding: 18px 20px;"
         id="control-center-live-activation"
     >
@@ -60,7 +60,7 @@ const emit = defineEmits<{
                     v-for="blocker in visibleBlockers"
                     :key="blocker.key"
                     size="small"
-                    class="status-card mw-muted-card"
+                    class="status-card operator-subpanel"
                 >
                     <n-flex vertical :size="10">
                         <div>
@@ -181,13 +181,13 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.12rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .systems-workspace {
     border: 1px solid var(--mw-color-border-strong);
-    border-radius: 14px;
+    border-radius: 9px;
     background: var(--mw-surface-card-muted);
     overflow: hidden;
 }
@@ -196,7 +196,7 @@ const emit = defineEmits<{
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 16px 18px 14px;
+    padding: 12px 16px;
     border-bottom: 1px solid var(--color-border);
 }
 
@@ -214,8 +214,8 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: -0.015em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .systems-workspace-summary {
@@ -225,17 +225,17 @@ const emit = defineEmits<{
 
 .systems-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: 1fr;
     align-items: stretch;
 }
 
 .system-cell {
     min-width: 0;
-    padding: 18px 18px 20px;
+    padding: 14px 16px;
 }
 
 .system-cell + .system-cell {
-    border-left: 1px solid var(--color-border);
+    border-top: 1px solid var(--color-border);
 }
 
 .status-card {
@@ -247,23 +247,18 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .status-card :deep(.n-button--primary-type .n-button__content) {
     color: #f7f8f6;
-    font-weight: 700;
+    font-weight: 500;
     letter-spacing: 0.01em;
 }
 
 @media (max-width: 768px) {
-    .systems-grid {
-        grid-template-columns: 1fr;
-    }
-
     .system-cell + .system-cell {
-        border-left: 0;
         border-top: 1px solid var(--color-border);
     }
 }

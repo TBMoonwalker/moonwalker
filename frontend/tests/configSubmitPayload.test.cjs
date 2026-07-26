@@ -12,6 +12,9 @@ function createPayloadDefaults(overrides = {}) {
         advancedWsHealthcheckIntervalMs: 30000,
         advancedWsStaleTimeoutMs: 45000,
         advancedWsReconnectDebounceMs: 5000,
+        defaultAiTrustOllamaBaseUrl: 'http://ollama.test:11434',
+        defaultAiTrustTimeoutMs: 10000,
+        defaultAiTrustMaxRetries: 0,
         defaultTpSpikeConfirmSeconds: 20,
         defaultTpSpikeConfirmTicks: 5,
         defaultGreenPhaseRampDays: 7,
@@ -44,11 +47,18 @@ function createBaseOptions(overrides = {}) {
             ws_healthcheck_interval_ms: null,
             ws_stale_timeout_ms: null,
             ws_reconnect_debounce_ms: null,
+            ai_trust_enabled: false,
+            ai_trust_enforce_warnings: false,
+            ai_trust_ollama_base_url: null,
+            ai_trust_ollama_model: null,
+            ai_trust_timeout_ms: null,
+            ai_trust_max_retries: null,
         },
         signal: {
             symbol_list: null,
             asap_use_url: false,
             asap_symbol_select: [],
+            delisting_protection_enabled: false,
             signal: 'asap',
             strategy: null,
             strategy_enabled: false,
@@ -101,6 +111,19 @@ function createBaseOptions(overrides = {}) {
             ss: 1.2,
             os: 1.4,
             trade_safety_order_budget_ratio: 0.95,
+            dynamic_so_sizing_mode: 'recovery_target',
+            dynamic_so_atr_timeframe: '4h',
+            dynamic_so_atr_length: 14,
+            dynamic_so_spacing_atr_multiplier: 3,
+            dynamic_so_recovery_atr_multiplier: 5.5,
+            dynamic_so_recovery_min_pct: 12,
+            dynamic_so_recovery_max_pct: 30,
+            dynamic_so_max_deal_quote: 250,
+            dynamic_so_min_tp_improvement_pct: 5,
+            dynamic_so_execution_guard_enabled: true,
+            dynamic_so_execution_drift_atr_fraction: 0.25,
+            dynamic_so_execution_drift_min_pct: 0.15,
+            dynamic_so_execution_drift_max_pct: 0.5,
             sidestep_bearish_strategy: null,
             sidestep_reentry_strategy: null,
             sidestep_reentry_cooldown_candles: 0,
@@ -174,6 +197,11 @@ test(
                     symbol_list: null,
                     asap_use_url: false,
                     asap_symbol_select: [],
+                    delisting_protection_enabled: true,
+                    delisting_schedule_use_trading_credentials: true,
+                    delisting_schedule_api_key: 'production-read-only-key',
+                    delisting_schedule_api_secret:
+                        'production-read-only-secret',
                     signal: 'csv_signal',
                     strategy: 'ema20_swing',
                     strategy_enabled: true,
@@ -226,6 +254,38 @@ test(
             value: null,
             type: 'str',
         })
+        assert.deepEqual(parseField(payload, 'delisting_protection_enabled'), {
+            value: true,
+            type: 'bool',
+        })
+        assert.deepEqual(
+            parseField(
+                payload,
+                'delisting_schedule_use_trading_credentials',
+            ),
+            {
+                value: true,
+                type: 'bool',
+            },
+        )
+        assert.deepEqual(parseField(payload, 'delisting_schedule_api_key'), {
+            value: 'production-read-only-key',
+            type: 'str',
+        })
+        assert.deepEqual(parseField(payload, 'delisting_schedule_api_secret'), {
+            value: 'production-read-only-secret',
+            type: 'str',
+        })
+        assert.deepEqual(parseField(payload, 'dynamic_so_sizing_mode'), {
+            value: 'legacy_factors',
+            type: 'str',
+        })
+        assert.equal(
+            parseField(payload, 'dynamic_so_atr_timeframe').value,
+            'trading',
+        )
+        assert.equal(parseField(payload, 'ss').value, 1.2)
+        assert.equal(parseField(payload, 'dynamic_so_max_deal_quote').value, 250)
         assert.deepEqual(parseField(payload, 'exchange_hostname'), {
             value: 'api.exchange.test',
             type: 'str',
@@ -238,6 +298,30 @@ test(
         assert.equal(parseField(payload, 'history_lookback_time').value, '180d')
         assert.equal(parseField(payload, 'pair_denylist').value, 'BTC/USDT,ETH/USDT')
         assert.equal(parseField(payload, 'trade_mode').value, 'dynamic_dca')
+        assert.deepEqual(parseField(payload, 'ai_trust_enabled'), {
+            value: false,
+            type: 'bool',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_enforce_warnings'), {
+            value: false,
+            type: 'bool',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_ollama_base_url'), {
+            value: 'http://ollama.test:11434',
+            type: 'str',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_ollama_model'), {
+            value: null,
+            type: 'str',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_timeout_ms'), {
+            value: 10000,
+            type: 'int',
+        })
+        assert.deepEqual(parseField(payload, 'ai_trust_max_retries'), {
+            value: 0,
+            type: 'int',
+        })
         assert.equal('dynamic_dca' in payload, false)
         assert.equal('trade_lifecycle_mode' in payload, false)
         assert.equal('sidestep_campaign_enabled' in payload, false)
@@ -258,6 +342,80 @@ test(
         )
     },
 )
+
+test('buildConfigSubmitPayload persists bounded recovery DCA settings', () => {
+    const payload = buildConfigSubmitPayload(createBaseOptions())
+
+    assert.deepEqual(parseField(payload, 'dynamic_so_sizing_mode'), {
+        value: 'recovery_target',
+        type: 'str',
+    })
+    assert.equal(parseField(payload, 'dynamic_so_atr_timeframe').value, '4h')
+    assert.equal(parseField(payload, 'dynamic_so_atr_length').value, 14)
+    assert.equal(parseField(payload, 'dynamic_so_max_deal_quote').value, 250)
+    assert.equal(
+        parseField(payload, 'dynamic_so_execution_guard_enabled').value,
+        true,
+    )
+    assert.equal(
+        parseField(payload, 'dynamic_so_execution_drift_atr_fraction').value,
+        0.25,
+    )
+    assert.equal(
+        parseField(payload, 'dynamic_so_execution_drift_min_pct').value,
+        0.15,
+    )
+    assert.equal(
+        parseField(payload, 'dynamic_so_execution_drift_max_pct').value,
+        0.5,
+    )
+})
+
+test('buildConfigSubmitPayload persists AI Trust Ollama settings', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            general: {
+                timezone: 'Europe/Vienna',
+                debug: false,
+                ws_watchdog_enabled: true,
+                ws_healthcheck_interval_ms: 9000,
+                ws_stale_timeout_ms: 18000,
+                ws_reconnect_debounce_ms: 3000,
+                ai_trust_enabled: true,
+                ai_trust_enforce_warnings: true,
+                ai_trust_ollama_base_url: 'http://ollama.local:11434',
+                ai_trust_ollama_model: 'qwen3:8b',
+                ai_trust_timeout_ms: 3500,
+                ai_trust_max_retries: 1,
+            },
+        }),
+    )
+
+    assert.deepEqual(parseField(payload, 'ai_trust_enabled'), {
+        value: true,
+        type: 'bool',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_enforce_warnings'), {
+        value: true,
+        type: 'bool',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_ollama_base_url'), {
+        value: 'http://ollama.local:11434',
+        type: 'str',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_ollama_model'), {
+        value: 'qwen3:8b',
+        type: 'str',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_timeout_ms'), {
+        value: 3500,
+        type: 'int',
+    })
+    assert.deepEqual(parseField(payload, 'ai_trust_max_retries'), {
+        value: 1,
+        type: 'int',
+    })
+})
 
 test('buildConfigSubmitPayload normalizes ASAP symbol selections', () => {
     const payload = buildConfigSubmitPayload(
@@ -285,6 +443,53 @@ test('buildConfigSubmitPayload normalizes ASAP symbol selections', () => {
         'BTC/USDT,ETH/BUSD',
     )
     assert.equal(parseField(payload, 'signal_strategy').value, 'ema20_swing')
+})
+
+test('buildConfigSubmitPayload persists websocket signal settings without headers', () => {
+    const payload = buildConfigSubmitPayload(
+        createBaseOptions({
+            signal: {
+                symbol_list: null,
+                asap_use_url: false,
+                asap_symbol_select: [],
+                signal: 'websocket_signal',
+                strategy: null,
+                strategy_enabled: false,
+                symsignal_url: null,
+                symsignal_key: null,
+                symsignal_version: null,
+                symsignal_allowedsignals: [],
+                csvsignal_mode: 'source',
+                csvsignal_source: null,
+                csvsignal_inline: null,
+                websocket_url:
+                    'ws://localhost:8000/v1/signals/stream?token=dev-token',
+                websocket_headers: '',
+                websocket_subscribe_message:
+                    '{"type":"subscribe","symbols":["DYMUSDC"]}',
+                websocket_required_decision: 'take_trade',
+                websocket_min_confidence: 78,
+                websocket_accepted_exchanges: 'binance',
+                websocket_accepted_market_states: 'healthy',
+            },
+        }),
+    )
+
+    assert.deepEqual(parseField(payload, 'signal_settings'), {
+        value: {
+            websocket_url:
+                'ws://localhost:8000/v1/signals/stream?token=dev-token',
+            subscribe_message: {
+                type: 'subscribe',
+                symbols: ['DYMUSDC'],
+            },
+            min_confidence: 78,
+            accepted_exchanges: 'binance',
+            accepted_market_states: 'healthy',
+        },
+        type: 'str',
+    })
+    assert.equal('headers' in parseField(payload, 'signal_settings').value, false)
 })
 
 test('buildConfigSubmitPayload persists configured capital budget and stretch settings', () => {

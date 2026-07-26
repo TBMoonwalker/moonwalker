@@ -419,8 +419,8 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: clamp(1.2rem, 2.5vw, 1.55rem);
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-weight: 450;
+    letter-spacing: 0;
     line-height: 1.15;
 }
 
@@ -458,8 +458,8 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .evidence-detail {

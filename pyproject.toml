@@ -4,3 +4,12 @@ line-length = 88
 [tool.isort]
 profile = "black"
 line_length = 88
+
+[tool.coverage.run]
+branch = true
+source = ["backend"]
+omit = ["backend/tests/*"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

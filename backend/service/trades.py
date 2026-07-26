@@ -1164,6 +1164,32 @@ class Trades:
                 "tp_limit_order_armed_at": (
                     open_trade.get("tp_limit_order_armed_at") if open_trade else None
                 ),
+                "dca_sizing_mode": (
+                    str(open_trade.get("dca_sizing_mode") or "legacy_factors")
+                    if open_trade
+                    else "legacy_factors"
+                ),
+                "dca_policy_json": (
+                    open_trade.get("dca_policy_json") if open_trade else None
+                ),
+                "dca_reference_price": (
+                    float(open_trade.get("dca_reference_price") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "dca_reference_atr_percent": (
+                    float(open_trade.get("dca_reference_atr_percent") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "dca_next_trigger_price": (
+                    float(open_trade.get("dca_next_trigger_price") or 0.0)
+                    if open_trade
+                    else 0.0
+                ),
+                "dca_last_decision_json": (
+                    open_trade.get("dca_last_decision_json") if open_trade else None
+                ),
                 "last_transition_at": (
                     open_trade.get("last_transition_at") if open_trade else None
                 ),

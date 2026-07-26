@@ -11,6 +11,7 @@ from litestar.handlers import get, post
 from litestar.params import FromPath, FromQuery
 from litestar.response import File
 from service.config import Config
+from service.config_redaction import merge_redacted_config_overrides
 from service.log_viewer import LogViewerService
 from service.monitoring import MonitoringService
 
@@ -83,8 +84,7 @@ async def test_monitoring_telegram(request: Request[Any, Any, Any]) -> Any:
         return json_response({"error": "Payload must be a JSON object."}, 400)
 
     config = await Config.instance()
-    effective_config = config.snapshot()
-    effective_config.update(payload)
+    effective_config = merge_redacted_config_overrides(config.snapshot(), payload)
 
     monitoring_service = MonitoringService()
     success, message = await monitoring_service.send_test_notification(effective_config)

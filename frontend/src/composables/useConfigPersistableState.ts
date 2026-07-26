@@ -49,6 +49,14 @@ function buildPersistableState(
             symbol_list: options.signal.value.symbol_list,
             asap_use_url: options.signal.value.asap_use_url,
             asap_symbol_select: options.signal.value.asap_symbol_select,
+            delisting_protection_enabled:
+                options.signal.value.delisting_protection_enabled,
+            delisting_schedule_use_trading_credentials:
+                options.signal.value.delisting_schedule_use_trading_credentials,
+            delisting_schedule_api_key:
+                options.signal.value.delisting_schedule_api_key,
+            delisting_schedule_api_secret:
+                options.signal.value.delisting_schedule_api_secret,
             signal: options.signal.value.signal,
             strategy: options.signal.value.strategy,
             strategy_enabled: options.signal.value.strategy_enabled,
@@ -59,6 +67,18 @@ function buildPersistableState(
             csvsignal_mode: options.signal.value.csvsignal_mode,
             csvsignal_source: options.signal.value.csvsignal_source,
             csvsignal_inline: options.signal.value.csvsignal_inline,
+            websocket_url: options.signal.value.websocket_url,
+            websocket_headers: options.signal.value.websocket_headers,
+            websocket_subscribe_message:
+                options.signal.value.websocket_subscribe_message,
+            websocket_required_decision:
+                options.signal.value.websocket_required_decision,
+            websocket_min_confidence:
+                options.signal.value.websocket_min_confidence,
+            websocket_accepted_exchanges:
+                options.signal.value.websocket_accepted_exchanges,
+            websocket_accepted_market_states:
+                options.signal.value.websocket_accepted_market_states,
         },
         filter: { ...options.filter.value },
         exchange: { ...options.exchange.value },

@@ -4,6 +4,11 @@ import {
 } from './taskRegistry'
 import type { ControlCenterBlocker } from './types'
 
+const ADVANCED_MODE_BLOCKER_KEYS = new Set([
+    'ss',
+    'dynamic_so_max_deal_quote',
+])
+
 export function resolveControlCenterBlocker(
     key: string,
     description: string,
@@ -15,7 +20,9 @@ export function resolveControlCenterBlocker(
         key,
         title: title?.trim() || task.title,
         description,
-        mode: task.defaultMode,
+        mode: ADVANCED_MODE_BLOCKER_KEYS.has(key)
+            ? 'advanced'
+            : task.defaultMode,
         target: task.target,
     }
 }

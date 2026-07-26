@@ -14,6 +14,9 @@ function createLoadDefaults(overrides = {}) {
         advancedWsHealthcheckIntervalMs: 30000,
         advancedWsStaleTimeoutMs: 45000,
         advancedWsReconnectDebounceMs: 5000,
+        defaultAiTrustOllamaBaseUrl: 'http://ollama.test:11434',
+        defaultAiTrustTimeoutMs: 10000,
+        defaultAiTrustMaxRetries: 0,
         defaultSymSignalUrl: 'https://signals.example/api',
         defaultSymSignalVersion: 'v2',
         defaultTpSpikeConfirmSeconds: 20,
@@ -48,6 +51,12 @@ test(
                 ws_healthcheck_interval_ms: '9000',
                 ws_stale_timeout_ms: '8000',
                 ws_reconnect_debounce_ms: '7000',
+                ai_trust_enabled: 'true',
+                ai_trust_enforce_warnings: 'true',
+                ai_trust_ollama_base_url: 'http://ollama.local:11434',
+                ai_trust_ollama_model: 'qwen3:8b',
+                ai_trust_timeout_ms: '3000',
+                ai_trust_max_retries: '1',
                 exchange_hostname: 'api.exchange.test',
                 dca: 'true',
                 trade_mode: 'dynamic_dca',
@@ -59,6 +68,11 @@ test(
                 autopilot_profit_stretch_max: '75',
                 autopilot_base_order_stretch_max_multiplier: '2',
                 signal: 'csv_signal',
+                delisting_protection_enabled: 'true',
+                delisting_schedule_use_trading_credentials: 'true',
+                delisting_schedule_api_key: '__MOONWALKER_SECRET_REDACTED__',
+                delisting_schedule_api_secret:
+                    '__MOONWALKER_SECRET_REDACTED__',
                 signal_settings: {
                     csv_source: 'pair;side\nBTC/USDT;buy',
                 },
@@ -74,6 +88,15 @@ test(
         assert.equal(state.general.ws_healthcheck_interval_ms, 9000)
         assert.equal(state.general.ws_stale_timeout_ms, 8000)
         assert.equal(state.general.ws_reconnect_debounce_ms, 7000)
+        assert.equal(state.general.ai_trust_enabled, true)
+        assert.equal(state.general.ai_trust_enforce_warnings, true)
+        assert.equal(
+            state.general.ai_trust_ollama_base_url,
+            'http://ollama.local:11434',
+        )
+        assert.equal(state.general.ai_trust_ollama_model, 'qwen3:8b')
+        assert.equal(state.general.ai_trust_timeout_ms, 3000)
+        assert.equal(state.general.ai_trust_max_retries, 1)
         assert.equal(state.exchange.exchange_hostname, 'api.exchange.test')
         assert.equal(state.signal.csvsignal_mode, 'inline')
         assert.equal(
@@ -81,6 +104,19 @@ test(
             'pair;side\nBTC/USDT;buy',
         )
         assert.equal(state.signal.csvsignal_source, null)
+        assert.equal(state.signal.delisting_protection_enabled, true)
+        assert.equal(
+            state.signal.delisting_schedule_use_trading_credentials,
+            true,
+        )
+        assert.equal(
+            state.signal.delisting_schedule_api_key,
+            '__MOONWALKER_SECRET_REDACTED__',
+        )
+        assert.equal(
+            state.signal.delisting_schedule_api_secret,
+            '__MOONWALKER_SECRET_REDACTED__',
+        )
         assert.equal(state.indicator.history_lookback_time, '180d')
         assert.equal(
             state.autopilot.green_phase_ramp_days,
@@ -109,7 +145,44 @@ test('buildLoadedConfigState keeps dynamic mode canonical and preserves the dyna
     )
 
     assert.equal(state.dca.trade_mode, 'dynamic_dca')
+    assert.equal(state.dca.ss, 1.6)
+    assert.equal(state.dca.dynamic_so_atr_timeframe, 'trading')
     assert.equal(state.capital.budget_buffer_pct, 50)
+})
+
+test('buildLoadedConfigState hydrates recovery DCA policy settings', () => {
+    const state = buildLoadedConfigState(
+        {
+            dynamic_so_sizing_mode: 'recovery_target',
+            dynamic_so_atr_timeframe: '4h',
+            dynamic_so_atr_length: '21',
+            dynamic_so_spacing_atr_multiplier: '3.5',
+            dynamic_so_recovery_atr_multiplier: '6',
+            dynamic_so_recovery_min_pct: '10',
+            dynamic_so_recovery_max_pct: '28',
+            dynamic_so_max_deal_quote: '250',
+            dynamic_so_min_tp_improvement_pct: '4',
+            dynamic_so_execution_guard_enabled: 'true',
+            dynamic_so_execution_drift_atr_fraction: '0.3',
+            dynamic_so_execution_drift_min_pct: '0.2',
+            dynamic_so_execution_drift_max_pct: '0.6',
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(state.dca.dynamic_so_sizing_mode, 'recovery_target')
+    assert.equal(state.dca.dynamic_so_atr_timeframe, '4h')
+    assert.equal(state.dca.dynamic_so_atr_length, 21)
+    assert.equal(state.dca.dynamic_so_spacing_atr_multiplier, 3.5)
+    assert.equal(state.dca.dynamic_so_recovery_atr_multiplier, 6)
+    assert.equal(state.dca.dynamic_so_recovery_min_pct, 10)
+    assert.equal(state.dca.dynamic_so_recovery_max_pct, 28)
+    assert.equal(state.dca.dynamic_so_max_deal_quote, 250)
+    assert.equal(state.dca.dynamic_so_min_tp_improvement_pct, 4)
+    assert.equal(state.dca.dynamic_so_execution_guard_enabled, true)
+    assert.equal(state.dca.dynamic_so_execution_drift_atr_fraction, 0.3)
+    assert.equal(state.dca.dynamic_so_execution_drift_min_pct, 0.2)
+    assert.equal(state.dca.dynamic_so_execution_drift_max_pct, 0.6)
 })
 
 test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () => {
@@ -155,6 +228,48 @@ test('buildLoadedConfigState distinguishes ASAP URLs from manual symbols', () =>
         { label: 'btc', value: 'btc' },
         { label: 'eth/usdt', value: 'eth/usdt' },
     ])
+})
+
+test('buildLoadedConfigState hydrates websocket signal settings for the GUI', () => {
+    const state = buildLoadedConfigState(
+        {
+            signal: 'websocket_signal',
+            signal_settings: {
+                websocket_url:
+                    'ws://localhost:8000/v1/signals/stream?token=dev-token',
+                headers: { Authorization: 'Bearer token' },
+                subscribe_message: {
+                    type: 'subscribe',
+                    symbols: ['DYMUSDC'],
+                },
+                required_decision: 'take_trade',
+                min_confidence: 78,
+                accepted_exchanges: ['binance'],
+                accepted_market_states: ['healthy', 'recovering'],
+            },
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(
+        state.signal.websocket_url,
+        'ws://localhost:8000/v1/signals/stream?token=dev-token',
+    )
+    assert.equal(
+        state.signal.websocket_headers,
+        '{\n  "Authorization": "Bearer token"\n}',
+    )
+    assert.equal(
+        state.signal.websocket_subscribe_message,
+        '{\n  "type": "subscribe",\n  "symbols": [\n    "DYMUSDC"\n  ]\n}',
+    )
+    assert.equal(state.signal.websocket_required_decision, 'take_trade')
+    assert.equal(state.signal.websocket_min_confidence, 78)
+    assert.equal(state.signal.websocket_accepted_exchanges, 'binance')
+    assert.equal(
+        state.signal.websocket_accepted_market_states,
+        'healthy,recovering',
+    )
 })
 
 test('buildLoadedConfigState defaults safety-order reserve to disabled', () => {

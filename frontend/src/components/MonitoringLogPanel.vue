@@ -274,7 +274,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <n-card class="monitoring-log-card mw-shell-card" content-style="padding: 18px 20px;">
+  <n-card class="monitoring-log-card dashboard-panel ledger-panel" content-style="padding: 18px 20px;">
     <n-flex vertical :size="16">
       <n-flex justify="space-between" align="start" :wrap="true" :size="[12, 12]">
         <n-flex vertical :size="4">
@@ -303,11 +303,11 @@ onUnmounted(() => {
         />
         <n-flex align="center" :size="8">
           <n-text depth="3">Pause</n-text>
-          <n-switch v-model:value="paused" />
+          <n-switch v-model:value="paused" aria-label="Pause log polling" />
         </n-flex>
         <n-flex align="center" :size="8">
           <n-text depth="3">Follow tail</n-text>
-          <n-switch v-model:value="followTail" />
+          <n-switch v-model:value="followTail" aria-label="Follow log tail" />
         </n-flex>
         <n-button
           secondary

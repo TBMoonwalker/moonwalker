@@ -74,8 +74,8 @@ const emit = defineEmits<{
     font-family: var(--mw-font-display);
     font-size: clamp(1.35rem, 2.4vw, 1.8rem);
     line-height: 1.2;
-    font-weight: 700;
-    letter-spacing: -0.02em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .workspace-summary {
@@ -116,8 +116,8 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.12rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
+    font-weight: 450;
+    letter-spacing: 0;
 }
 
 .setup-entry-card {

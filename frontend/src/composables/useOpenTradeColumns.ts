@@ -1,18 +1,14 @@
 import { computed, h, type Ref } from 'vue'
 import { NButton } from 'naive-ui/es/button'
-import { NDivider } from 'naive-ui/es/divider'
 import { NDropdown } from 'naive-ui/es/dropdown'
 import { NIcon } from 'naive-ui/es/icon'
-import { NSlider } from 'naive-ui/es/slider'
 import { NTag } from 'naive-ui/es/tag'
 import { NTooltip } from 'naive-ui/es/tooltip'
+import { type DataTableColumns } from 'naive-ui/es/data-table'
 import {
-    type DataTableColumns,
-    type RenderExpandIcon,
-} from 'naive-ui/es/data-table'
-import {
-    ArrowForwardCircleOutline,
+    CashOutline,
     EllipsisHorizontal,
+    StopCircleOutline,
 } from '@vicons/ionicons5'
 
 import OpenTradeExpandedRow from '../components/OpenTradeExpandedRow.vue'
@@ -47,18 +43,41 @@ interface UseOpenTradeColumnsOptions {
     isTablet: Ref<boolean>
     missionActionErrors: Record<string, string | null>
     onAddManualBuy: (rowData: OpenTradeRow) => void
-    onDealBuy: (rowData: OpenTradeRow) => void
     onDealSell: (rowData: OpenTradeRow) => void
     onDealStop: (rowData: OpenTradeRow) => void
     onPauseMission: (rowData: OpenTradeRow) => void | Promise<void>
     onResumeMission: (rowData: OpenTradeRow) => void | Promise<void>
     sortState: Ref<TradeTableSortState | null>
+    maxSafetyOrders: Ref<number>
 }
 
 const tradeActionButtonStyle = {
-    minHeight: '44px',
-    minWidth: '56px',
-    padding: '0 12px',
+    minHeight: '36px',
+    minWidth: '48px',
+    padding: '0 11px',
+}
+const OPEN_TRADES_MOBILE_COLUMN_WIDTHS: Record<string, number> = {
+    symbol: 104,
+    display_profit_percent: 72,
+    open_date: 85,
+    action: 64,
+}
+const TPSO_PRICE_PADDING_PERCENT = 0.7
+const MIN_TPSO_STATUS_FILL_PERCENT = 3
+
+function clampPercent(value: number): number {
+    if (!Number.isFinite(value)) {
+        return 0
+    }
+    return Math.max(0, Math.min(100, value))
+}
+
+function resolveRangePercent(value: number, min: number, max: number): number {
+    const range = max - min
+    if (!Number.isFinite(range) || range <= 0) {
+        return 0
+    }
+    return clampPercent(((value - min) / range) * 100)
 }
 
 export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
@@ -69,49 +88,59 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
     function isBuyBlocked(rowData: OpenTradeRow): boolean {
         return (
             Boolean(rowData.automation_paused) ||
+            Boolean(rowData.delisting_warning) ||
+            Boolean(rowData.delisting_check_unavailable) ||
             Boolean(options.globalTradingPaused.value)
         )
     }
 
     function renderOverflowActions(rowData: OpenTradeRow) {
+        const automationAction = rowData.automation_paused ? 'resume' : 'pause'
+        const overflowOptions = [
+            {
+                key: automationAction,
+                label: rowData.automation_paused
+                    ? 'Resume automation'
+                    : 'Pause automation',
+                disabled: options.isMissionActionLoading(
+                    rowData.symbol,
+                    automationAction,
+                ),
+            },
+            {
+                key: 'manual-buy',
+                label: 'Add manual buy',
+                disabled: isBuyBlocked(rowData),
+            },
+        ]
+        if (options.isMobile.value) {
+            overflowOptions.unshift({
+                key: 'stop',
+                label: 'Stop trade',
+                disabled: false,
+            })
+        }
         return h(
             NDropdown,
             {
                 trigger: 'click',
-                options: [
-                    {
-                        key: 'buy',
-                        label: 'Buy',
-                        disabled: isBuyBlocked(rowData),
-                    },
-                    {
-                        key: 'stop',
-                        label: 'Stop',
-                    },
-                    {
-                        key: rowData.automation_paused
-                            ? 'resume'
-                            : 'pause',
-                        label: rowData.automation_paused
-                            ? 'Resume automation'
-                            : 'Pause automation',
-                    },
-                ],
+                options: overflowOptions,
                 onSelect: (key: string | number) => {
-                    if (key === 'buy') {
-                        options.onDealBuy(rowData)
-                        return
-                    }
                     if (key === 'stop') {
                         options.onDealStop(rowData)
                         return
                     }
                     if (key === 'resume') {
-                        options.onResumeMission(rowData)
+                        void options.onResumeMission(rowData)
                         return
                     }
                     if (key === 'pause') {
-                        options.onPauseMission(rowData)
+                        void options.onPauseMission(rowData)
+                        return
+                    }
+                    if (key === 'manual-buy') {
+                        options.onAddManualBuy(rowData)
+                        return
                     }
                 },
             },
@@ -120,6 +149,8 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     h(
                         NButton,
                         {
+                            class: 'trade-action-button trade-action-more',
+                            'aria-label': 'More trade actions',
                             size: 'medium',
                             ghost: true,
                             style: tradeActionButtonStyle,
@@ -133,7 +164,12 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                         default: () => h(EllipsisHorizontal),
                                     },
                                 ),
-                            default: () => 'More',
+                            default: () =>
+                                h(
+                                    'span',
+                                    { class: 'trade-action-label' },
+                                    'More',
+                                ),
                         },
                     ),
             },
@@ -157,30 +193,6 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         return 'red'
     }
 
-    const renderExpandIcon: RenderExpandIcon = ({ expanded, rowData }) => {
-        const symbol = String(rowData.symbol ?? 'trade')
-        return h(
-            NButton,
-            {
-                circle: true,
-                quaternary: true,
-                size: 'small',
-                class: 'trade-expand-button',
-                'aria-label': `${
-                    expanded ? 'Collapse' : 'Expand'
-                } trade details for ${symbol}`,
-            },
-            {
-                icon: () =>
-                    h(
-                        NIcon,
-                        { size: 24, color: '#63e2b7' },
-                        { default: () => h(ArrowForwardCircleOutline) },
-                    ),
-            },
-        )
-    }
-
     function getReentryLabel(rowData: OpenTradeRow): string | null {
         const sidestepCount = Number(rowData.sidestep_count ?? 0)
         if (
@@ -192,10 +204,145 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         return `Re-entered x${sidestepCount}`
     }
 
+    function renderCellStack(
+        main: string,
+        secondary?: string,
+        mainClass = 'trade-cell-main',
+    ) {
+        return h('div', { class: 'trade-cell-stack' }, [
+            h('span', { class: mainClass }, main),
+            secondary
+                ? h('span', { class: 'trade-cell-sub' }, secondary)
+                : null,
+        ])
+    }
+
+    function renderSymbolCell(rowData: OpenTradeRow, index: number) {
+        const [symbol, currency] = splitTradeSymbol(rowData.symbol)
+        const reentryLabel = getReentryLabel(rowData)
+        const tags = []
+        if (reentryLabel) {
+            tags.push(
+                h(
+                    NTag,
+                    {
+                        size: 'small',
+                        bordered: false,
+                        type: 'warning',
+                    },
+                    { default: () => reentryLabel },
+                ),
+            )
+        }
+        if (rowData.automation_paused) {
+            tags.push(
+                h(
+                    NTag,
+                    {
+                        size: 'small',
+                        bordered: false,
+                        type: 'warning',
+                    },
+                    { default: () => 'Automation paused' },
+                ),
+            )
+        }
+        if (rowData.delisting_warning) {
+            tags.push(
+                h(
+                    NTooltip,
+                    {},
+                    {
+                        trigger: () =>
+                            h(
+                                NTag,
+                                {
+                                    size: 'small',
+                                    bordered: false,
+                                    type: 'error',
+                                },
+                                { default: () => 'Delisting risk' },
+                            ),
+                        default: () =>
+                            rowData.delisting_at
+                                ? `Scheduled for delisting at ${rowData.delisting_at}`
+                                : 'The exchange marks this market inactive',
+                    },
+                ),
+            )
+        }
+        return h('div', { class: 'trade-symbol-cell' }, [
+            h('span', { class: 'trade-symbol-main' }, `${symbol}/${currency}`),
+            h('div', { class: 'trade-symbol-meta' }, [
+                h('span', { class: 'trade-cell-sub' }, `#${index + 1}`),
+                tags.length
+                    ? h('div', { class: 'trade-cell-tags' }, tags)
+                    : null,
+            ]),
+        ])
+    }
+
+    function renderTpSoCell(rowData: OpenTradeRow) {
+        const safetyOrderCount = getSafetyOrderCount(rowData)
+        const maxSafetyOrders = Math.max(
+            safetyOrderCount,
+            Math.trunc(Number(options.maxSafetyOrders.value) || 0),
+        )
+        const avgPrice = Number(rowData.avg_price)
+        const tpPrice = Number(rowData.tp_price)
+        const currentPrice = Number(rowData.current_price)
+        const hasPriceStatus =
+            avgPrice > 0 && tpPrice > 0 && currentPrice > 0
+        const minPrice =
+            avgPrice - (avgPrice / 100) * TPSO_PRICE_PADDING_PERCENT
+        const maxPrice =
+            tpPrice + (tpPrice / 100) * TPSO_PRICE_PADDING_PERCENT
+        const avgPercent = resolveRangePercent(avgPrice, minPrice, maxPrice)
+        const currentPercent = resolveRangePercent(
+            currentPrice,
+            minPrice,
+            maxPrice,
+        )
+        const fillStart = hasPriceStatus
+            ? Math.min(avgPercent, currentPercent)
+            : 0
+        const fillWidth = hasPriceStatus
+            ? Math.max(
+                  Math.abs(currentPercent - avgPercent),
+                  MIN_TPSO_STATUS_FILL_PERCENT,
+              )
+            : 0
+        const toneClass = !hasPriceStatus
+            ? 'is-idle'
+            : currentPrice < avgPrice
+              ? 'is-warning'
+              : 'is-active'
+        const label = maxSafetyOrders
+            ? `SO ${safetyOrderCount} / ${maxSafetyOrders}`
+            : `SO ${safetyOrderCount}`
+
+        return h('div', { class: ['trade-tpso-cell', toneClass] }, [
+            h('div', { class: 'trade-tpso-track' }, [
+                h('span', {
+                    class: 'trade-tpso-fill',
+                    style: {
+                        left: `${fillStart}%`,
+                        width: `${fillWidth}%`,
+                    },
+                }),
+            ]),
+            h('span', { class: 'trade-progress-label' }, label),
+        ])
+    }
+
     function columnsTrades(): DataTableColumns<OpenTradeRow> {
         const columns: DataTableColumns<OpenTradeRow> = [
             {
                 type: 'expand',
+                width: 0,
+                minWidth: 0,
+                maxWidth: 0,
+                className: 'trade-hidden-expand-cell',
                 expandable: (rowData) => rowData.symbol != '',
                 renderExpand: (rowData) =>
                     h(OpenTradeExpandedRow, {
@@ -207,44 +354,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
             {
                 title: 'Symbol',
                 key: 'symbol',
-                render: (rowData, index) => {
-                    const [symbol] = splitTradeSymbol(rowData.symbol)
-                    const reentryLabel = getReentryLabel(rowData)
-                    const rows = [
-                        h('div', `#${index + 1}`),
-                        h(NDivider, { dashed: true }),
-                        h('div', symbol),
-                    ]
-                    if (reentryLabel) {
-                        rows.push(h(NDivider, { dashed: true }))
-                        rows.push(
-                            h(
-                                NTag,
-                                {
-                                    size: 'small',
-                                    bordered: false,
-                                    type: 'warning',
-                                },
-                                { default: () => reentryLabel },
-                            ),
-                        )
-                    }
-                    if (rowData.automation_paused) {
-                        rows.push(h(NDivider, { dashed: true }))
-                        rows.push(
-                            h(
-                                NTag,
-                                {
-                                    size: 'small',
-                                    bordered: false,
-                                    type: 'warning',
-                                },
-                                { default: () => 'Automation paused' },
-                            ),
-                        )
-                    }
-                    return rows
-                },
+                render: (rowData, index) => renderSymbolCell(rowData, index),
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
                     options.sortState.value,
@@ -258,11 +368,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     const [symbol, currency] = splitTradeSymbol(rowData.symbol)
                     const amount = `${formatAssetAmount(rowData.amount)} ${symbol}`
                     const cost = `${formatFixed(rowData.cost)} ${currency}`
-                    return [
-                        h('div', amount),
-                        h(NDivider, { dashed: true }),
-                        h('div', cost),
-                    ]
+                    return renderCellStack(amount, cost)
                 },
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
@@ -276,13 +382,13 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 render: (rowData) => {
                     const [, currency] = splitTradeSymbol(rowData.symbol)
                     const profitPercent =
-                        `${formatFixed(getDisplayedProfitPercent(rowData))} %`
+                        `${formatFixed(getDisplayedProfitPercent(rowData))}%`
                     const pnl = `${formatFixed(getDisplayedProfit(rowData))} ${currency}`
-                    return [
-                        h('div', { class: 'profit' }, profitPercent),
-                        h(NDivider, { dashed: true }),
-                        h('div', pnl),
-                    ]
+                    return renderCellStack(
+                        profitPercent,
+                        pnl,
+                        'trade-cell-main profit',
+                    )
                 },
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
@@ -293,33 +399,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
             {
                 title: 'TP/SO',
                 key: 'so_count',
-                render: (rowData) => {
-                    const avgPrice = rowData.avg_price
-                    const tpPrice = rowData.tp_price
-                    const currentPrice = rowData.current_price
-                    const minPrice = avgPrice - (avgPrice / 100) * 0.7
-                    const maxPrice = (tpPrice / 100) * 0.7 + Number(tpPrice)
-                    const fillColor =
-                        currentPrice < avgPrice
-                              ? '#B4443F'
-                              : '#2E7D5B'
-                    return [
-                        h(NSlider, {
-                            value: [currentPrice, avgPrice],
-                            range: true,
-                            min: minPrice,
-                            max: maxPrice,
-                            disabled: true,
-                            themeOverrides: {
-                                fillColor,
-                                handleSize: '8px',
-                                opacityDisabled: '1',
-                            },
-                        }),
-                        h(NDivider, { dashed: true }),
-                        h('div', String(getSafetyOrderCount(rowData))),
-                    ]
-                },
+                render: (rowData) => renderTpSoCell(rowData),
                 align: 'center',
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
@@ -338,6 +418,9 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                     h(
                                         NButton,
                                         {
+                                            class: 'trade-action-button trade-action-stop',
+                                            'aria-label':
+                                                'Stop unsellable trade',
                                             type: 'error',
                                             size: 'medium',
                                             ghost: true,
@@ -345,33 +428,96 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                             onClick: () =>
                                                 options.onDealStop(rowData),
                                         },
-                                        { default: () => 'Stop (Unsellable)' },
+                                        {
+                                            icon: () =>
+                                                h(
+                                                    NIcon,
+                                                    { size: 18 },
+                                                    {
+                                                        default: () =>
+                                                            h(StopCircleOutline),
+                                                    },
+                                                ),
+                                            default: () =>
+                                                h(
+                                                    'span',
+                                                    {
+                                                        class: 'trade-action-label',
+                                                    },
+                                                    'Stop',
+                                                ),
+                                        },
                                     ),
                                 default: () => getUnsellableMessage(rowData),
                             }),
                         ]
                     }
                     const actionError = resolveActionError(rowData)
+                    const sellAction = h(
+                        NButton,
+                        {
+                            class: 'trade-action-button trade-action-sell',
+                            'aria-label': `Sell ${rowData.symbol}`,
+                            primary: true,
+                            size: 'medium',
+                            ghost: true,
+                            color: '#2E7D5B',
+                            style: tradeActionButtonStyle,
+                            onClick: () => options.onDealSell(rowData),
+                        },
+                        {
+                            icon: () =>
+                                h(
+                                    NIcon,
+                                    { size: 18 },
+                                    { default: () => h(CashOutline) },
+                                ),
+                            default: () =>
+                                h(
+                                    'span',
+                                    { class: 'trade-action-label' },
+                                    'Sell',
+                                ),
+                        },
+                    )
+                    const stopAction = h(
+                        NButton,
+                        {
+                            class: 'trade-action-button trade-action-stop',
+                            'aria-label': `Stop ${rowData.symbol}`,
+                            type: 'error',
+                            size: 'medium',
+                            ghost: true,
+                            style: tradeActionButtonStyle,
+                            onClick: () => options.onDealStop(rowData),
+                        },
+                        {
+                            icon: () =>
+                                h(
+                                    NIcon,
+                                    { size: 18 },
+                                    {
+                                        default: () => h(StopCircleOutline),
+                                    },
+                                ),
+                            default: () =>
+                                h(
+                                    'span',
+                                    { class: 'trade-action-label' },
+                                    'Stop',
+                                ),
+                        },
+                    )
                     const compactActions = h(
                         'div',
-                        {
-                            style: 'display:flex; justify-content:center; gap:8px;',
-                        },
-                        [
-                            h(
-                                NButton,
-                                {
-                                    primary: true,
-                                    size: 'medium',
-                                    ghost: true,
-                                    color: '#63e2b7',
-                                    style: tradeActionButtonStyle,
-                                    onClick: () => options.onDealSell(rowData),
-                                },
-                                { default: () => 'Sell' },
-                            ),
-                            renderOverflowActions(rowData),
-                        ],
+                        { class: 'trade-row-actions' },
+                        options.isMobile.value
+                            ? [sellAction, renderOverflowActions(rowData)]
+                            : [
+                                  sellAction,
+                                  stopAction,
+                                  renderOverflowActions(rowData),
+                              ],
                     )
                     return [
                         compactActions,
@@ -389,18 +535,14 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 align: 'center',
             },
             {
-                title: 'Opened',
+                title: options.isMobile.value ? 'Open' : 'Opened',
                 key: 'open_date',
                 align: 'center',
                 render: (rowData) => {
                     const { date, time } = resolveTradeDateTime(
                         getOpenTradeOpenedAt(rowData),
                     )
-                    return [
-                        h('div', date),
-                        h(NDivider, { dashed: true }),
-                        h('div', time),
-                    ]
+                    return renderCellStack(date, time)
                 },
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
@@ -411,15 +553,37 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         ]
 
         if (options.isMobile.value) {
-            return columns.filter((column) => {
-                if (!('key' in column)) {
-                    return true
-                }
-                return shouldShowTradeTableColumn(
-                    column.key,
-                    OPEN_TRADES_MOBILE_COLUMN_KEYS,
-                )
-            })
+            const mobileColumns = OPEN_TRADES_MOBILE_COLUMN_KEYS.flatMap(
+                (columnKey) => {
+                    const column = columns.find(
+                        (candidate) =>
+                            'key' in candidate &&
+                            String(candidate.key) === columnKey,
+                    )
+                    if (
+                        !column ||
+                        !shouldShowTradeTableColumn(
+                            columnKey,
+                            OPEN_TRADES_MOBILE_COLUMN_KEYS,
+                        )
+                    ) {
+                        return []
+                    }
+                const mobileWidth =
+                        OPEN_TRADES_MOBILE_COLUMN_WIDTHS[String(column.key)]
+                    return [
+                        mobileWidth
+                            ? {
+                                  ...column,
+                                  width: mobileWidth,
+                                  minWidth: mobileWidth,
+                                  maxWidth: mobileWidth,
+                              }
+                        : column,
+                    ]
+                },
+            )
+            return mobileColumns
         }
 
         if (options.isTablet.value) {
@@ -441,7 +605,6 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
 
     return {
         columnsOpenTrades,
-        renderExpandIcon,
         rowClasses,
     }
 }

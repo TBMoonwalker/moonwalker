@@ -1,6 +1,6 @@
 """Typed payload contracts for exchange order flows."""
 
-from typing import Any, TypedDict
+from typing import Any, NotRequired, TypedDict
 
 
 class ExchangeOrderPayload(TypedDict, total=False):
@@ -18,6 +18,7 @@ class ExchangeOrderPayload(TypedDict, total=False):
     actual_pnl: float
     ordersize: float
     price: float | str
+    maximum_buy_price: float | str | None
     limit_price: float | str
     current_price: float | str
     cost: float
@@ -55,8 +56,8 @@ class ExchangeOrderPayload(TypedDict, total=False):
     _sell_retry_count: int
 
 
-class ParsedOrderStatus(TypedDict, total=False):
-    """Normalized order status used after exchange trade reconciliation."""
+class ExecutionFill(TypedDict):
+    """Required normalized fill that leaves the exchange adapter."""
 
     timestamp: int
     amount: float
@@ -65,9 +66,12 @@ class ParsedOrderStatus(TypedDict, total=False):
     orderid: str
     symbol: str
     side: str
-    amount_fee: Any
-    base_fee: float
-    ordersize: float
+    amount_fee: NotRequired[Any]
+    base_fee: NotRequired[float]
+    ordersize: NotRequired[float]
+
+
+ParsedOrderStatus = ExecutionFill
 
 
 class TradeExecutionPayload(TypedDict, total=False):
@@ -146,3 +150,8 @@ class SoldCheckStatus(TypedDict, total=False):
     base_fee: float
     ordersize: float
     executions: list[TradeExecutionPayload]
+
+
+ExecutionResult = (
+    ExecutionFill | PartialSellStatus | MarketFallbackStatus | SoldCheckStatus
+)

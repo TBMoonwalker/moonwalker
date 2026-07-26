@@ -54,6 +54,43 @@ async def test_config_batch_set_persists_false_bool(tmp_path, monkeypatch) -> No
 
 
 @pytest.mark.asyncio
+async def test_config_set_persists_canonical_signal_settings(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Signal settings should have deterministic versioned JSON storage."""
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+
+    config = Config()
+    await config.load_all()
+    await config.set(
+        "signal_settings",
+        {
+            "value": {
+                "allowed_signals": ["LONG", "STRONG_LONG"],
+                "api_key": "secret",
+                "api_url": "https://signals.example",
+            },
+            "type": "str",
+        },
+    )
+
+    import model
+
+    row = await model.AppConfig.get(key="signal_settings")
+    assert row.value == (
+        '{"allowed_signals":["LONG","STRONG_LONG"],"api_key":"secret",'
+        '"api_url":"https://signals.example","schema_version":1}'
+    )
+    assert config.get("signal_settings") == row.value
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_config_batch_set_clears_false_string_value(
     tmp_path, monkeypatch
 ) -> None:
@@ -139,6 +176,39 @@ async def test_config_batch_set_updates_cache_without_reload(
 
     assert config.get("exchange") == "binance"
     assert config.get("dry_run") is False
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_config_batch_set_can_skip_subscriber_notifications(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    redis = DummyRedis()
+    monkeypatch.setattr(config_module, "redis_client", redis)
+
+    notified_snapshots: list[dict[str, object]] = []
+    config = Config()
+    config.subscribe(lambda snapshot: notified_snapshots.append(snapshot))
+
+    await config.batch_set(
+        {"ai_trust_runtime_status": {"value": "provider_unavailable", "type": "str"}},
+        notify_subscribers=False,
+    )
+
+    assert config.get("ai_trust_runtime_status") == "provider_unavailable"
+    assert notified_snapshots == []
+    assert redis.messages == []
+
+    import model
+
+    row = await model.AppConfig.get(key="ai_trust_runtime_status")
+    assert row.value == "provider_unavailable"
 
     await Tortoise.close_connections()
 
@@ -385,6 +455,10 @@ async def test_config_load_all_ignores_removed_trade_mode_rows(
 
     assert config.get("trade_mode") == "dynamic_dca"
     assert config.snapshot()["trade_mode"] == "dynamic_dca"
+    assert config.get("delisting_protection_enabled") is False
+    assert config.get("delisting_schedule_use_trading_credentials") is False
+    assert config.get("delisting_schedule_api_key") == ""
+    assert config.get("delisting_schedule_api_secret") == ""
     assert "dynamic_dca" not in config.snapshot()
     assert "trade_lifecycle_mode" not in config.snapshot()
     assert "dynamic_dca" not in config.raw_snapshot()
@@ -436,7 +510,7 @@ async def test_config_load_all_derives_sidestep_from_legacy_upgrade_rows(
     assert "sidestep_campaign_enabled" not in config.snapshot()
     assert "trade_lifecycle_mode" not in config.raw_snapshot()
     assert "sidestep_campaign_enabled" not in config.raw_snapshot()
-    assert await model.AppConfig.filter(key="trade_mode").exists() is False
+    assert (await model.AppConfig.get(key="trade_mode")).value == "sidestep"
 
     await Tortoise.close_connections()
 
