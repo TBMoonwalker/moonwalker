@@ -34,6 +34,14 @@ const menuOptions: MenuOption[] = [
     },
  ]
 
+function getMenuNodeProps(option: MenuOption) {
+  if (typeof option.label !== 'string') {
+    return {}
+  }
+
+  return { 'aria-label': option.label }
+}
+
 const activeMenuKey = computed<string | null>(() => {
   if (route.name === 'stats') {
      return 'stats'
@@ -79,6 +87,7 @@ function handleMenuSelect(key: string | number): void {
             responsive
             :value="activeMenuKey"
             :options="menuOptions"
+            :node-props="getMenuNodeProps"
             @update:value="handleMenuSelect"
           />
         </div>
