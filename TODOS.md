@@ -1,6 +1,6 @@
 # TODOS
 
-## Deferred
+## Backtest
 
 ### Fix mobile Backtest chart marker label clipping (ISSUE-002)
 
@@ -9,18 +9,38 @@
 **Category:** Visual
 **What:** On a 375px mobile viewport, the Backtest chart can clip the left edge
 of the `take_profit` marker label after a run, showing `ke_profit`.
+**Why:** The clipped label hides useful exit context on small screens.
+**Context:** This is a mobile-only visual regression found during the main
+branch QA pass.
+**Effort:** S
+**Priority:** P3
+**Depends on:** None
 **Repro:** Set viewport to 375x812 -> visit `/backtest` -> run the default
 replay -> observe the take-profit marker at the left chart edge.
 **Report:** .gstack/qa-reports/qa-report-localhost-8130-2026-06-08.md
+
+## Frontend
 
 ### Fix mobile text truncation (ISSUE-003, ISSUE-004)
 
 **Found by:** /qa on main, 2026-06-05
 **Severity:** Low (ISSUE-003), Medium (ISSUE-004)
 **Category:** Visual
-**What:** On 375px mobile viewport: (a) "less/more" below stats heatmap truncates to "les mo"; (b) Control Center heading "Safe dry-run setup is ready" truncates to "Safe dry-run set".
-**Repro:** Set viewport to 375x812 → visit /stats and /control-center → observe truncated text.
+**What:** On a 375px mobile viewport, the "less/more" labels below the stats
+heatmap truncate to "les mo", and the Control Center heading "Safe dry-run
+setup is ready" truncates to "Safe dry-run set".
+**Why:** Truncated labels reduce readability and can make operator guidance
+ambiguous on small screens.
+**Context:** These are independent mobile-only visual regressions grouped from
+the same main branch QA pass.
+**Effort:** S
+**Priority:** P2
+**Depends on:** None
+**Repro:** Set viewport to 375x812 → visit `/stats` and `/control-center` →
+observe truncated text.
 **Report:** .gstack/qa-reports/qa-report-192-168-6-5-8160-2026-06-05.md
+
+## Analytics
 
 ### Extend sidestep campaign analytics beyond grouped replay polish
 
@@ -44,7 +64,11 @@ current operator workflow.
 and waiting-campaign status surfaces before deciding whether a new read model is
 actually warranted.
 
-**Depends on / blocked by:** Only worth doing if operator feedback shows the
+**Effort:** L
+
+**Priority:** P4
+
+**Depends on:** Only worth doing if operator feedback shows the
 current grouped replay and waiting-campaign context are still insufficient.
 
 ## Completed

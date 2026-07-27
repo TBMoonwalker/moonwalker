@@ -4,6 +4,25 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.3.0.0] - 2026-07-27
+
+### Added
+
+- Waiting sidestep trades now open the same TradingView replay chart used by
+  open and closed trades, including buy, re-entry, safety-order, and exit
+  markers.
+- Waiting replay rows can be expanded by pointer or keyboard and remain useful
+  for legacy campaigns with sparse execution history by falling back to
+  campaign timestamps and the recorded waiting exit price.
+
+### Fixed
+
+- Mobile Waiting and Unresolved actions now keep readable, aligned controls
+  instead of clipping their Activate, Stop, More, or Resolve labels.
+- Waiting replay execution markers now stay chronological for both ISO and
+  legacy numeric timestamps, and malformed or unavailable execution history
+  falls back safely without hiding the chart.
+
 ## [4.2.0.0] - 2026-07-26
 
 ### Added
