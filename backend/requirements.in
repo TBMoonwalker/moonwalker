@@ -1,8 +1,8 @@
 # Direct production dependencies. Regenerate requirements.txt with
 # ../scripts/compile_requirements.sh after changing this file.
-cachetools==7.1.4
-ccxt==4.5.67
-pandas==3.0.3
+cachetools==7.1.6
+ccxt==4.5.68
+pandas==3.0.5
 litestar==2.24.0
 msgspec==0.21.1
 python-socketio==5.16.3
@@ -20,12 +20,11 @@ uvicorn==0.51.0
 
 # Security floors for transitives in the HTTP/exchange stack. Keeping them as
 # direct inputs prevents a future resolver run from reintroducing known CVEs.
+# CCXT 4.5.68 hard-pins this version.
 aiohttp==3.14.1
 click==8.4.2
 cryptography==49.0.0
 idna==3.18
-# CCXT 4.5.67 hard-pins this release. PYSEC-2026-3447 affects creating source
-# distributions on Unicode-normalizing macOS filesystems, not runtime use.
-# Moonwalker installs wheels only, so the vulnerable sdist code is unreachable.
-setuptools==82.0.1
+# Keep CCXT's exact build-tool dependency visible in the direct lock inputs.
+setuptools==83.0.0
 urllib3==2.7.0

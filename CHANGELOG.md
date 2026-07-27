@@ -4,6 +4,23 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.3.0.1] - 2026-07-27
+
+### Changed
+
+- Documented Waiting campaign replay behavior, keyboard expansion, legacy
+  history fallbacks, live stream, and action endpoints across the README,
+  configuration, API, and operations guides.
+- Updated compatible Python and frontend packages after vulnerability,
+  provenance, and compatibility review, and regenerated the integrity-pinned
+  dependency locks.
+
+### Security
+
+- Removed the temporary `PYSEC-2026-3447` audit exception after CCXT 4.5.68
+  adopted setuptools 83.0.0; Python and npm audits now pass without ignored
+  vulnerabilities.
+
 ## [4.3.0.0] - 2026-07-27
 
 ### Added

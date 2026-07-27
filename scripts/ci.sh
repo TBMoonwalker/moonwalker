@@ -82,12 +82,9 @@ if [ "${MOONWALKER_RUN_E2E:-0}" = "1" ]; then
 else
     RESULTS+=("SKIP: Frontend dry-run E2E (set MOONWALKER_RUN_E2E=1)")
 fi
-# CCXT 4.5.67 hard-pins setuptools 82.0.1. PYSEC-2026-3447 only affects
-# building source distributions; CI installs wheels exclusively.
 run_step "Python dependency audit" \
     "$PYTHON_BIN" -m pip_audit \
     --disable-pip \
-    --ignore-vuln PYSEC-2026-3447 \
     --progress-spinner off \
     --strict \
     --requirement "$ROOT_DIR/backend/requirements-dev.txt"

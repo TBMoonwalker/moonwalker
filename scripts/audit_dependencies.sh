@@ -8,7 +8,6 @@ PYTHON_BIN="${PYTHON_BIN:-$ROOT_DIR/.venv/bin/python}"
 "$PYTHON_BIN" -m pip check
 "$PYTHON_BIN" -m pip_audit \
     --disable-pip \
-    --ignore-vuln PYSEC-2026-3447 \
     --progress-spinner off \
     --strict \
     --requirement "$ROOT_DIR/backend/requirements-dev.txt"
