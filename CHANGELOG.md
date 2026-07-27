@@ -4,6 +4,12 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- Waiting campaign TradingView replays now resolve the persisted sidestep
+  campaign execution timeline so the strategy indicators used by prior legs
+  render even when the current flat Waiting deal has no executions.
+
 ## [4.3.0.1] - 2026-07-27
 
 ### Changed

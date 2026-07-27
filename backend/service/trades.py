@@ -692,20 +692,38 @@ class Trades:
             logging.error("Error getting closed orders. Cause: %s", e)
             return []
 
-    async def get_trade_executions(self, deal_id: str) -> list[dict[str, Any]]:
+    async def get_trade_executions(
+        self,
+        deal_id: str,
+        *,
+        campaign_id: str | None = None,
+    ) -> list[dict[str, Any]]:
         """Return execution rows for one deal or one sidestep campaign."""
         try:
             normalized_deal_id = str(UUID(str(deal_id)))
         except (TypeError, ValueError):
             return []
 
-        campaign_id = await self._resolve_execution_campaign_id(normalized_deal_id)
         if campaign_id:
+            try:
+                normalized_campaign_id = str(UUID(str(campaign_id)))
+            except (TypeError, ValueError):
+                return []
+            replay_campaign_id = await self._resolve_requested_execution_campaign_id(
+                normalized_campaign_id
+            )
+        else:
+            replay_campaign_id = await self._resolve_execution_campaign_id(
+                normalized_deal_id
+            )
+
+        if replay_campaign_id:
             return await self._execute_db(
-                model.TradeExecutions.filter(campaign_id=campaign_id)
+                model.TradeExecutions.filter(campaign_id=replay_campaign_id)
                 .order_by("timestamp", "id")
                 .values(),
-                f"Error getting trade executions for sidestep campaign {campaign_id}.",
+                "Error getting trade executions for sidestep campaign "
+                f"{replay_campaign_id}.",
                 [],
             )
 
@@ -734,6 +752,13 @@ class Trades:
         if not campaign_id:
             return None
 
+        return await self._resolve_requested_execution_campaign_id(campaign_id)
+
+    async def _resolve_requested_execution_campaign_id(
+        self,
+        campaign_id: str,
+    ) -> str | None:
+        """Return a campaign id when its executions form one replay timeline."""
         campaign_rows = await self._execute_db(
             model.SpotCampaigns.filter(campaign_id=campaign_id)
             .limit(1)
