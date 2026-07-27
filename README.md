@@ -18,8 +18,9 @@ base orders, and plain-language trust signals in the Control Center.
   waiting state, and later re-enter that same campaign instead of treating it
   as a brand-new trade.
 - Waiting campaign rows expand into the same TradingView replay used by open
-  and closed trades, with buy, re-entry, safety-order, and exit markers. Sparse
-  legacy campaigns fall back to their campaign and last-exit context.
+  and closed trades, with strategy indicators plus buy, re-entry, safety-order,
+  and exit markers. Sparse legacy campaigns fall back to their campaign and
+  last-exit context.
 - Supported config writes and dashboard snapshots now use `trade_mode` only.
   Older stored rows and backup payloads can still be canonicalized during load
   and restore, but operator workflows should not use the removed bridge keys.

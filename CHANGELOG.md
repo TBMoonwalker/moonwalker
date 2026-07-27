@@ -15,6 +15,12 @@ All notable changes to Moonwalker are documented in this file.
   provenance, and compatibility review, and regenerated the integrity-pinned
   dependency locks.
 
+### Fixed
+
+- Waiting campaign TradingView replays now resolve the persisted sidestep
+  campaign execution timeline so the strategy indicators used by prior legs
+  render even when the current flat Waiting deal has no executions.
+
 ### Security
 
 - Removed the temporary `PYSEC-2026-3447` audit exception after CCXT 4.5.68
