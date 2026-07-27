@@ -1,4 +1,4 @@
-"""Strategy indicator overlays for open and closed trade replay charts."""
+"""Strategy indicator overlays for open, waiting, and closed trade replay charts."""
 
 from __future__ import annotations
 
@@ -88,10 +88,15 @@ class TradeReplayIndicatorService:
         timerange: str,
         timestamp_start: str | int | float,
         timestamp_end: str | int | float,
+        *,
+        campaign_id: str | None = None,
     ) -> dict[str, Any]:
         """Return strategy indicator overlays for a replay deal."""
         try:
             normalized_deal_id = str(UUID(str(deal_id)))
+            normalized_campaign_id = (
+                str(UUID(str(campaign_id))) if campaign_id else None
+            )
             start_ms = int(float(timestamp_start))
             end_ms = int(float(timestamp_end))
         except (TypeError, ValueError):
@@ -100,7 +105,13 @@ class TradeReplayIndicatorService:
         if end_ms <= start_ms:
             return self._empty(timerange)
 
-        executions = await self.trades.get_trade_executions(normalized_deal_id)
+        if normalized_campaign_id:
+            executions = await self.trades.get_trade_executions(
+                normalized_deal_id,
+                campaign_id=normalized_campaign_id,
+            )
+        else:
+            executions = await self.trades.get_trade_executions(normalized_deal_id)
         strategies = self._execution_strategies(executions)
         source = "execution_ledger"
         if not strategies:

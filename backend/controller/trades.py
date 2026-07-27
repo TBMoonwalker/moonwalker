@@ -197,9 +197,15 @@ async def closed_trades_pagination(
 
 
 @get(path="/trades/executions/{deal_id:str}")
-async def trade_executions(deal_id: FromPath[str]) -> dict[str, Any]:
-    """Get execution rows for one trade deal."""
-    response = await trades.get_trade_executions(deal_id)
+async def trade_executions(
+    deal_id: FromPath[str],
+    campaign_id: FromQuery[str | None] = None,
+) -> dict[str, Any]:
+    """Get execution rows for one trade deal or its sidestep campaign."""
+    response = await trades.get_trade_executions(
+        deal_id,
+        campaign_id=campaign_id,
+    )
     return {"result": response}
 
 
@@ -211,6 +217,7 @@ async def trade_replay_indicator_series(
     timerange: FromPath[str],
     start: FromPath[str],
     end: FromPath[str],
+    campaign_id: FromQuery[str | None] = None,
 ) -> dict[str, Any]:
     """Get strategy indicator overlays for one trade replay chart."""
     response = await trade_replay_indicators.get_indicators(
@@ -218,6 +225,7 @@ async def trade_replay_indicator_series(
         timerange,
         start,
         end,
+        campaign_id=campaign_id,
     )
     return {"result": response}
 

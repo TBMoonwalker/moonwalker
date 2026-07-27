@@ -286,11 +286,13 @@ When `trade_mode = sidestep` on spot markets:
 
 In the Trades page, open the **Waiting** tab and expand a campaign row with a
 pointer, Enter, or Space to inspect its TradingView replay. The chart shows the
-same buy, re-entry, safety-order, and exit markers used by open and closed
-trades. Older campaigns without complete execution rows fall back to the
-campaign timestamps and recorded waiting exit price instead of hiding the
-chart. Expanding a row is read-only; Stop, Activate, Pause, and Resume remain
-separate confirmed actions.
+same strategy indicators plus buy, re-entry, safety-order, and exit markers
+used by open and closed trades. The Waiting replay resolves indicators from the
+persisted campaign execution timeline even while the current flat deal has no
+executions. Older campaigns without complete execution rows fall back to the
+campaign timestamps and recorded waiting exit price instead of hiding the chart.
+Expanding a row is read-only; Stop, Activate, Pause, and Resume remain separate
+confirmed actions.
 
 ## Autopilot Green Phase
 
