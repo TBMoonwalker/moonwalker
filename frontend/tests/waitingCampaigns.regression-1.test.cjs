@@ -11,6 +11,16 @@ const waitingCampaignsSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'WaitingCampaigns.vue'),
     'utf8',
 )
+const waitingCampaignExpandedRowSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'components',
+        'WaitingCampaignExpandedRow.vue',
+    ),
+    'utf8',
+)
 const openTradeColumnsSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'composables', 'useOpenTradeColumns.ts'),
     'utf8',
@@ -173,5 +183,51 @@ test('waiting sidestep campaigns use a dedicated mobile card layout', () => {
     assert.ok(
         waitingCampaignsSource.includes('grid-template-columns: minmax(0, 1fr) minmax(0, 1fr)'),
         'expected mobile PNL and cost values to keep stable two-column spacing',
+    )
+})
+
+test('waiting sidestep campaigns expose the shared replay chart from the whole row', () => {
+    assert.ok(
+        waitingCampaignsSource.includes('WaitingCampaignExpandedRow') &&
+            waitingCampaignsSource.includes("type: 'expand'") &&
+            waitingCampaignsSource.includes('trade-hidden-expand-cell'),
+        'expected waiting campaigns to mount a hidden replay-chart expansion column',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes(
+            'v-model:expanded-row-keys="expandedWaitingRowKeys"',
+        ) &&
+            waitingCampaignsSource.includes(
+                ':row-props="getWaitingCampaignRowProps"',
+            ) &&
+            waitingCampaignsSource.includes(
+                "'aria-expanded': expandedWaitingRowKeys.value.includes(rowKey)",
+            ),
+        'expected the whole waiting row to toggle replay details accessibly',
+    )
+    assert.ok(
+        waitingCampaignsSource.includes('configuredMinTimeframe') &&
+            waitingCampaignsSource.includes('loadConfiguredMinTimeframe'),
+        'expected waiting replay charts to use the configured minimum timeframe',
+    )
+    assert.ok(
+        waitingCampaignExpandedRowSource.includes('<TradeReplayChart') &&
+            waitingCampaignExpandedRowSource.includes(
+                ':deal-id="props.rowData.deal_id"',
+            ) &&
+            waitingCampaignExpandedRowSource.includes(
+                'props.rowData.campaign_started_at',
+            ),
+        'expected waiting details to reuse the TradingView replay chart with campaign history',
+    )
+    assert.ok(
+        waitingCampaignExpandedRowSource.includes(
+            '/trades/executions/${props.rowData.deal_id}',
+        ) &&
+            waitingCampaignExpandedRowSource.includes(
+                'props.rowData.waiting_reference_price',
+            ) &&
+            !waitingCampaignExpandedRowSource.includes('<n-button'),
+        'expected waiting replay to tolerate sparse history without adding trade actions',
     )
 })

@@ -111,6 +111,25 @@ test('mobile trade ledger keeps action controls in a compact touch grid', () => 
     assert.match(tradesViewSource, /clip: rect\(0 0 0 0\);/)
 })
 
+test('mobile text actions keep readable labels outside the icon grid', () => {
+    assert.match(
+        tradesViewSource,
+        /waiting-campaign-mobile-actions \.trade-row-actions\) \{[\s\S]*?display: flex;[\s\S]*?width: 100%;/,
+    )
+    assert.match(
+        tradesViewSource,
+        /waiting-campaign-mobile-actions \.trade-row-actions \.n-button\) \{[\s\S]*?min-width: max-content !important;[\s\S]*?width: auto !important;[\s\S]*?padding: 0 14px !important;/,
+    )
+    assert.match(
+        tradesViewSource,
+        /unsellable-trades \.trade-row-actions\) \{[\s\S]*?display: flex;[\s\S]*?width: 100%;/,
+    )
+    assert.match(
+        tradesViewSource,
+        /unsellable-trades \.trade-row-actions \.n-button\) \{[\s\S]*?min-width: 72px !important;[\s\S]*?width: auto !important;[\s\S]*?padding: 0 10px !important;/,
+    )
+})
+
 test('mobile trade ledger reduces first column indentation', () => {
     assert.match(tradesViewSource, /data-col-key="__n_expand__"/)
     assert.match(tradesViewSource, /n-data-table-table colgroup col:first-child/)
