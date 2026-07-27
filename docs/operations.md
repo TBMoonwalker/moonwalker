@@ -114,6 +114,7 @@ Main live dashboard endpoints:
 - `WS /trades/open`
 - `WS /trades/closed`
 - `WS /trades/unsellable`
+- `WS /trades/waiting`
 - `WS /statistic/profit`
 
 Main REST statistics endpoint:
@@ -121,6 +122,19 @@ Main REST statistics endpoint:
 
 These websocket streams refresh every 5 seconds and broadcast shared payloads
 to all connected dashboard clients.
+
+## Waiting Campaign Replay
+
+Waiting sidestep campaigns use the same TradingView replay language as open and
+closed trades. In the Trades page, select **Waiting** and expand a campaign row
+with a pointer, Enter, or Space. Nested action controls do not toggle the row.
+
+Moonwalker loads the deal's chronological execution history before mounting the
+chart and marks buys, re-entries, safety orders, and exits. If a legacy campaign
+has sparse, malformed, or temporarily unavailable execution history, the chart
+still opens using the campaign timestamps and recorded waiting exit price.
+Replay expansion is read-only and does not activate, stop, pause, or resume a
+campaign.
 
 ## Backup And Restore
 

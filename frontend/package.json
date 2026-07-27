@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "@vicons/ionicons5": "0.13.0",
-    "@vue/devtools-api": "8.1.5",
+    "@vue/devtools-api": "8.2.1",
     "@vueuse/core": "14.3.0",
     "axios": "1.18.1",
     "echarts": "6.1.0",
@@ -50,7 +50,7 @@
     "unplugin-vue-components": "32.1.0",
     "vite": "8.1.5",
     "vitest": "4.1.10",
-    "vue-tsc": "3.3.7"
+    "vue-tsc": "3.3.8"
   },
   "overrides": {
     "fsevents": "2.3.3",

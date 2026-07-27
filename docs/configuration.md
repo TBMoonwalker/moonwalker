@@ -284,6 +284,14 @@ When `trade_mode = sidestep` on spot markets:
   `/trades/waiting`, while `SpotSidestepCampaignService` owns the campaign
   mutations behind manual stop and activate actions.
 
+In the Trades page, open the **Waiting** tab and expand a campaign row with a
+pointer, Enter, or Space to inspect its TradingView replay. The chart shows the
+same buy, re-entry, safety-order, and exit markers used by open and closed
+trades. Older campaigns without complete execution rows fall back to the
+campaign timestamps and recorded waiting exit price instead of hiding the
+chart. Expanding a row is read-only; Stop, Activate, Pause, and Resume remain
+separate confirmed actions.
+
 ## Autopilot Green Phase
 
 Green Phase is an Autopilot extension that watches the speed of profitable closed

@@ -8,4 +8,4 @@ pip-tools==7.6.0
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0
-ruff==0.15.22
+ruff==0.15.22  # Ruff 0.16 enables new rules that require a dedicated cleanup.

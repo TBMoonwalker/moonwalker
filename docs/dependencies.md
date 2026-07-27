@@ -77,6 +77,21 @@ requires SHA-512 integrity metadata, and allows install-script metadata only
 for the reviewed `rete@2.0.6` banner and optional `fsevents@2.3.3` native hook.
 Neither hook executes in Moonwalker automation.
 
+Moonwalker intentionally remains on TypeScript 6 while Vue's embedded
+type-checking tools depend on the TypeScript programmatic API. TypeScript 7.0
+does not expose that stable API yet, and the TypeScript team recommends that
+Vue projects keep using TypeScript 6 during this transition. The Node type
+package also stays on the Node 24 line to match Moonwalker's supported runtime.
+
+Do not update `@vue/test-utils` from `2.2.7` to `2.4.11` until its dependency
+tree is clean. The npm advisory service currently reports six high-severity
+findings through its `js-beautify`, `glob`, `minimatch`, and
+`brace-expansion` chain.
+
+Ruff remains on `0.15.22`. Ruff `0.16.0` enables additional rules that surface
+287 findings in the current backend and test suite; adopting that version
+requires a dedicated lint-cleanup change instead of a dependency-only rewrite.
+
 ## Security verification
 
 Run the focused audit or the full CI suite:
@@ -91,17 +106,15 @@ signatures, exact root pins, registry origin, artifact integrity, the lifecycle
 hook allowlist, tests, type checks, linting, and production builds. Review all
 major updates and newly introduced packages before changing a lock file.
 
-### Temporary CCXT/setuptools exception
+### CCXT/setuptools advisory resolution
 
-CCXT `4.5.67` hard-pins `setuptools 82.0.1`. That setuptools release is listed
-under `PYSEC-2026-3447` because a Unicode-normalization edge case can cause an
-excluded file to enter a source distribution built on macOS. Moonwalker does
-not build or publish source distributions, and both runtime and CI installs
-enforce wheel-only artifacts, so the affected code path is unreachable.
+CCXT `4.5.68` pins `setuptools 83.0.0`, which resolves the previously
+allowlisted `PYSEC-2026-3447` finding in setuptools 82.0.1. Moonwalker's Python
+audit no longer ignores that advisory or any other vulnerability.
 
-The audit ignores only `PYSEC-2026-3447`. Remove the exception and upgrade to
-`setuptools >=83.0.0` as soon as CCXT relaxes its exact pin. No other audit
-finding is allowlisted.
+The same CCXT release still pins aiohttp `3.14.1`, certifi `2026.6.17`, cffi
+`2.0.0`, charset-normalizer `3.4.7`, and yarl `1.24.2`. Moonwalker keeps those
+audit-clean versions until CCXT relaxes its exact transitive constraints.
 
 ## Rollback
 
