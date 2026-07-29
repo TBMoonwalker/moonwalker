@@ -1,9 +1,7 @@
 import asyncio
-import hmac
 
 import httpx
 import pytest
-import service.coin_market_cap as coin_market_cap_module
 from service.coin_market_cap import (
     SNAPSHOT_MAX_STALE_SECONDS,
     SNAPSHOT_REFRESH_SECONDS,
@@ -12,28 +10,49 @@ from service.coin_market_cap import (
 from service.filter import Filter
 
 
-def test_cmc_api_key_fingerprint_uses_a_process_local_key(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fingerprint_key = b"k" * 32
-    api_key = "sensitive-api-key"
-    monkeypatch.setattr(
-        coin_market_cap_module,
-        "_FINGERPRINT_KEY",
-        fingerprint_key,
-    )
+@pytest.mark.asyncio
+async def test_cmc_snapshot_owner_stays_private_and_is_cleared() -> None:
+    requested_keys: list[str] = []
 
-    fingerprint = CoinMarketCapRankService._fingerprint(api_key)
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requested_key = request.headers["X-CMC_PRO_API_KEY"]
+        requested_keys.append(requested_key)
+        rank = 1 if requested_key == "api-key-one" else 2
+        return httpx.Response(
+            200,
+            json={
+                "status": {"error_code": 0},
+                "data": [{"symbol": "BTC", "rank": rank}],
+            },
+        )
 
-    assert (
-        fingerprint
-        == hmac.digest(
-            fingerprint_key,
-            api_key.encode("utf-8"),
-            "sha256",
-        ).hex()
-    )
-    assert api_key not in fingerprint
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    service = CoinMarketCapRankService(client_factory=lambda **_kwargs: client)
+    await service.start()
+    second_owner: bytearray | None = None
+    try:
+        first = await service.lookup("api-key-one", "BTC")
+        first_owner = service._snapshot_owner
+        assert first.rank == 1
+        assert first_owner is not None
+        assert first_owner == bytearray(b"api-key-one")
+        assert "api-key-one" not in repr(service._snapshot)
+
+        cached = await service.lookup("api-key-one", "BTC")
+        assert cached.rank == 1
+
+        second = await service.lookup("api-key-two", "BTC")
+        second_owner = service._snapshot_owner
+        assert second.rank == 2
+        assert first_owner == bytearray(len(first_owner))
+        assert "api-key-two" not in repr(service._snapshot)
+        assert requested_keys == ["api-key-one", "api-key-two"]
+    finally:
+        await service.shutdown()
+
+    assert second_owner is not None
+    assert second_owner == bytearray(len(second_owner))
+    assert service._snapshot_owner is None
 
 
 def test_has_enough_volume_accepts_higher_range() -> None:

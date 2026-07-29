@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hmac
 import secrets
 import time
 from collections.abc import Callable, Mapping
@@ -25,14 +24,12 @@ SNAPSHOT_MAX_STALE_SECONDS = 7 * 24 * 60 * 60
 REQUEST_TIMEOUT_SECONDS = 10.0
 REQUEST_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 0.25
-_FINGERPRINT_KEY = secrets.token_bytes(32)
 
 
 @dataclass(frozen=True)
 class MarketCapRankSnapshot:
     """One immutable symbol-to-rank provider snapshot."""
 
-    api_key_fingerprint: str
     ranks: Mapping[str, int]
     fetched_at: float
 
@@ -67,6 +64,7 @@ class CoinMarketCapRankService:
         self._clock = clock
         self._client: httpx.AsyncClient | None = None
         self._snapshot: MarketCapRankSnapshot | None = None
+        self._snapshot_owner: bytearray | None = None
         self._refresh_lock = asyncio.Lock()
         self._refresh_task: asyncio.Task[MarketCapRankSnapshot | None] | None = None
 
@@ -85,6 +83,8 @@ class CoinMarketCapRankService:
         if self._client is not None:
             await self._client.aclose()
             self._client = None
+        self._clear_snapshot_owner()
+        self._snapshot = None
 
     async def lookup(self, api_key: str, symbol: str) -> MarketCapRankLookup:
         """Return a rank using fresh data or a bounded-stale snapshot."""
@@ -109,8 +109,7 @@ class CoinMarketCapRankService:
                 reason_code="cmc_service_not_started",
             )
 
-        fingerprint = self._fingerprint(normalized_key)
-        snapshot = self._matching_snapshot(fingerprint)
+        snapshot = self._matching_snapshot(normalized_key)
         if snapshot is not None:
             age = max(0.0, self._clock() - snapshot.fetched_at)
             if age <= SNAPSHOT_REFRESH_SECONDS:
@@ -121,7 +120,7 @@ class CoinMarketCapRankService:
                     stale=False,
                 )
             if age <= SNAPSHOT_MAX_STALE_SECONDS:
-                self._schedule_refresh(normalized_key, fingerprint)
+                self._schedule_refresh(normalized_key)
                 return self._lookup_snapshot(
                     snapshot,
                     normalized_symbol,
@@ -129,7 +128,7 @@ class CoinMarketCapRankService:
                     stale=True,
                 )
 
-        snapshot = await self._refresh(normalized_key, fingerprint)
+        snapshot = await self._refresh(normalized_key)
         if snapshot is None:
             return MarketCapRankLookup(
                 rank=None,
@@ -143,23 +142,35 @@ class CoinMarketCapRankService:
             stale=False,
         )
 
-    def _matching_snapshot(self, fingerprint: str) -> MarketCapRankSnapshot | None:
+    def _matching_snapshot(self, api_key: str) -> MarketCapRankSnapshot | None:
         """Return the snapshot only when it belongs to the current credential."""
         if (
             self._snapshot is not None
-            and self._snapshot.api_key_fingerprint == fingerprint
+            and self._snapshot_owner is not None
+            and secrets.compare_digest(
+                self._snapshot_owner,
+                api_key.encode("utf-8"),
+            )
         ):
             return self._snapshot
         return None
 
-    @staticmethod
-    def _fingerprint(api_key: str) -> str:
-        """Return a process-local identity for snapshot ownership checks."""
-        return hmac.digest(
-            _FINGERPRINT_KEY,
-            api_key.encode("utf-8"),
-            "sha256",
-        ).hex()
+    def _replace_snapshot(
+        self,
+        snapshot: MarketCapRankSnapshot,
+        api_key: str,
+    ) -> None:
+        """Install a snapshot while keeping its credential outside its repr."""
+        self._clear_snapshot_owner()
+        self._snapshot_owner = bytearray(api_key.encode("utf-8"))
+        self._snapshot = snapshot
+
+    def _clear_snapshot_owner(self) -> None:
+        """Best-effort clear the private in-memory snapshot credential."""
+        if self._snapshot_owner is None:
+            return
+        self._snapshot_owner[:] = bytes(len(self._snapshot_owner))
+        self._snapshot_owner = None
 
     @staticmethod
     def _lookup_snapshot(
@@ -187,25 +198,24 @@ class CoinMarketCapRankService:
             stale=stale,
         )
 
-    def _schedule_refresh(self, api_key: str, fingerprint: str) -> None:
+    def _schedule_refresh(self, api_key: str) -> None:
         """Start at most one stale-while-revalidate refresh."""
         if self._refresh_task is not None and not self._refresh_task.done():
             return
         self._refresh_task = asyncio.create_task(
-            self._refresh(api_key, fingerprint, force=True),
+            self._refresh(api_key, force=True),
             name="moonwalker:cmc-rank-refresh",
         )
 
     async def _refresh(
         self,
         api_key: str,
-        fingerprint: str,
         *,
         force: bool = False,
     ) -> MarketCapRankSnapshot | None:
         """Refresh once under a single-flight lock."""
         async with self._refresh_lock:
-            existing = self._matching_snapshot(fingerprint)
+            existing = self._matching_snapshot(api_key)
             if existing is not None and not force:
                 age = max(0.0, self._clock() - existing.fetched_at)
                 if age <= SNAPSHOT_REFRESH_SECONDS:
@@ -224,11 +234,10 @@ class CoinMarketCapRankService:
                     response.raise_for_status()
                     ranks = self._parse_ranks(response.json())
                     snapshot = MarketCapRankSnapshot(
-                        api_key_fingerprint=fingerprint,
                         ranks=MappingProxyType(ranks),
                         fetched_at=self._clock(),
                     )
-                    self._snapshot = snapshot
+                    self._replace_snapshot(snapshot, api_key)
                     return snapshot
                 except (httpx.HTTPError, TypeError, ValueError, KeyError) as exc:
                     logging.warning(
