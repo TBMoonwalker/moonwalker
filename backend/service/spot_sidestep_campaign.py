@@ -15,6 +15,7 @@ from service.config import Config, resolve_timeframe
 from service.config_views import SidestepCampaignConfigView, TradeLifecycleConfigView
 from service.data_timeframes import timeframe_to_seconds
 from service.database import run_sqlite_write_with_retry
+from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.spot_campaign_types import (
     SpotCampaignState,
     TradeCloseReason,
@@ -692,11 +693,33 @@ class SpotSidestepCampaignService:
         if not normalized_campaign_id:
             return False
 
+        campaign = await self._find_campaign_by_id(normalized_campaign_id)
+        symbol = _normalize_symbol((campaign or {}).get("symbol"))
+        if not symbol:
+            return False
+
+        async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
+            if not admitted:
+                return False
+            return await self._stop_campaign_prelocked(
+                normalized_campaign_id,
+                symbol,
+            )
+
+    async def _stop_campaign_prelocked(
+        self,
+        campaign_id: str,
+        symbol: str,
+    ) -> bool:
+        """Stop a campaign while the symbol lifecycle lock is held."""
+        lifecycle_mutation_coordinator.assert_prelocked(symbol)
+
         async def _stop_campaign() -> bool:
             async with in_transaction() as conn:
                 campaign = (
                     await model.SpotCampaigns.filter(
-                        campaign_id=normalized_campaign_id,
+                        campaign_id=campaign_id,
+                        symbol=symbol,
                         state__in=[
                             SpotCampaignState.ACTIVE_LONG.value,
                             SpotCampaignState.FLAT_WAITING_REENTRY.value,
@@ -722,9 +745,9 @@ class SpotSidestepCampaignService:
                     if principal_quote > 0
                     else float(campaign.cumulative_realized_percent or 0.0)
                 )
-                await model.SpotCampaigns.filter(
-                    campaign_id=normalized_campaign_id
-                ).using_db(conn).update(
+                await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(
+                    conn
+                ).update(
                     state=SpotCampaignState.STOPPED.value,
                     last_transition_at=now_iso,
                     last_exit_reason=TradeCloseReason.MANUAL_STOP.value,
@@ -737,7 +760,7 @@ class SpotSidestepCampaignService:
                 await model.ClosedTrades.create(
                     symbol=campaign.symbol,
                     deal_id=None,
-                    campaign_id=normalized_campaign_id,
+                    campaign_id=campaign_id,
                     execution_history_complete=False,
                     so_count=0,
                     profit=cumulative_realized_quote,
@@ -762,7 +785,7 @@ class SpotSidestepCampaignService:
 
         return await run_sqlite_write_with_retry(
             _stop_campaign,
-            f"stopping sidestep campaign {normalized_campaign_id}",
+            f"stopping sidestep campaign {campaign_id}",
         )
 
     async def activate_campaign(self, campaign_id: str) -> bool:
@@ -784,6 +807,30 @@ class SpotSidestepCampaignService:
         if not symbol:
             return False
 
+        async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
+            if not admitted:
+                return False
+            return await self._activate_campaign_prelocked(
+                normalized_campaign_id,
+                symbol,
+            )
+
+    async def _activate_campaign_prelocked(
+        self,
+        campaign_id: str,
+        symbol: str,
+    ) -> bool:
+        """Activate a campaign while the symbol lifecycle lock is held."""
+        lifecycle_mutation_coordinator.assert_prelocked(symbol)
+        campaign = await self._find_campaign_by_id(campaign_id)
+        if (
+            campaign is None
+            or _normalize_symbol(campaign.get("symbol")) != symbol
+            or str(campaign.get("state") or "")
+            != SpotCampaignState.FLAT_WAITING_REENTRY.value
+        ):
+            return False
+
         open_trade_rows = (
             await model.OpenTrades.filter(symbol=symbol)
             .limit(1)
@@ -799,14 +846,14 @@ class SpotSidestepCampaignService:
             logging.warning(
                 "Manual sidestep re-entry skipped for %s: campaign=%s has no reserved quote.",
                 symbol,
-                normalized_campaign_id,
+                campaign_id,
             )
             return False
 
         logging.info(
             "Manual sidestep re-entry requested for %s: campaign=%s reserved_quote=%s.",
             symbol,
-            normalized_campaign_id,
+            campaign_id,
             order_size,
         )
         orders = await self._get_orders()
@@ -821,23 +868,23 @@ class SpotSidestepCampaignService:
             "ordertype": "market",
             "so_percentage": None,
             "side": "buy",
-            "campaign_id": normalized_campaign_id,
+            "campaign_id": campaign_id,
             "signal_name": None,
             "strategy_name": "manual_reentry",
             "timeframe": resolve_timeframe(self.config or {}),
             "metadata_json": None,
         }
-        success = await orders.receive_buy_order(order, self.config)
+        success = await orders.receive_buy_order_prelocked(order, self.config)
         if success:
             logging.info(
                 "Manual sidestep re-entry buy submitted for %s: campaign=%s.",
                 symbol,
-                normalized_campaign_id,
+                campaign_id,
             )
         else:
             logging.warning(
                 "Manual sidestep re-entry buy rejected for %s: campaign=%s.",
                 symbol,
-                normalized_campaign_id,
+                campaign_id,
             )
         return success

@@ -1,0 +1,316 @@
+{
+  "schema_version": 1,
+  "captured_from": {
+    "kind": "sanitized_live_audit_and_regression_cases",
+    "audited_at": "2026-07-28",
+    "source_commit": "9a56ed911cb3cd3a3e4a471fbbd7bbfd731c1ff3",
+    "notes": "The live symbol, deal identifier, and exchange order identifiers were removed."
+  },
+  "static_cases": [
+    {
+      "name": "first_order_not_reached",
+      "input": {
+        "step_scale": 1.5,
+        "price_deviation": 2.0,
+        "safety_orders_count": 0,
+        "total_pnl": -1.99
+      },
+      "expected": {
+        "max_deviation": 2.0,
+        "actual_deviation": 0.0,
+        "should_place": false,
+        "trigger_threshold": -2.0,
+        "next_so_percentage": 0.0
+      }
+    },
+    {
+      "name": "first_order_boundary_is_inclusive",
+      "input": {
+        "step_scale": 1.5,
+        "price_deviation": 2.0,
+        "safety_orders_count": 0,
+        "total_pnl": -2.0
+      },
+      "expected": {
+        "max_deviation": 2.0,
+        "actual_deviation": 0.0,
+        "should_place": true,
+        "trigger_threshold": -2.0,
+        "next_so_percentage": 2.0
+      }
+    },
+    {
+      "name": "second_order_progression",
+      "input": {
+        "step_scale": 1.5,
+        "price_deviation": 2.0,
+        "safety_orders_count": 1,
+        "total_pnl": -5.0
+      },
+      "expected": {
+        "max_deviation": 5.0,
+        "actual_deviation": 2.0,
+        "should_place": true,
+        "trigger_threshold": -3.0,
+        "next_so_percentage": 3.0
+      }
+    }
+  ],
+  "recovery_policy": {
+    "mode": "recovery_target",
+    "atr_timeframe": "15m",
+    "atr_length": 14,
+    "spacing_atr_multiplier": 3.0,
+    "minimum_spacing_percent": 3.0,
+    "spacing_step_scale": 1.6,
+    "recovery_atr_multiplier": 5.5,
+    "minimum_recovery_percent": 12.0,
+    "maximum_recovery_percent": 30.0,
+    "maximum_deal_quote": 250.0,
+    "minimum_tp_improvement_percent": 5.0,
+    "execution_guard_enabled": true,
+    "execution_drift_atr_fraction": 0.25,
+    "execution_drift_min_percent": 0.15,
+    "execution_drift_max_percent": 0.5
+  },
+  "live_recovery_cases": [
+    {
+      "name": "sanitized_live_so_1",
+      "input": {
+        "reference_price": 0.6703,
+        "reference_atr_percent": 2.118043,
+        "filled_safety_orders": 0,
+        "execution_atr_percent": 1.5369,
+        "actual_fill_price": 0.5815
+      },
+      "expected": {
+        "spacing_percent": 6.354129,
+        "trigger_price": 0.62770827,
+        "target_recovery_percent": 12.0,
+        "execution_drift_percent": 0.384225,
+        "execution_ceiling": 0.6301200854261368,
+        "execution_guard_passed": true
+      }
+    },
+    {
+      "name": "sanitized_live_so_2",
+      "input": {
+        "reference_price": 0.5815,
+        "reference_atr_percent": 1.5369,
+        "filled_safety_orders": 1,
+        "execution_atr_percent": 1.16082,
+        "actual_fill_price": 0.51560468
+      },
+      "expected": {
+        "spacing_percent": 7.37712,
+        "trigger_price": 0.53860205,
+        "target_recovery_percent": 12.0,
+        "execution_drift_percent": 0.290205,
+        "execution_ceiling": 0.5401650972710769,
+        "execution_guard_passed": true
+      }
+    },
+    {
+      "name": "sanitized_live_so_3",
+      "input": {
+        "reference_price": 0.51560468,
+        "reference_atr_percent": 1.1608190104166667,
+        "filled_safety_orders": 2,
+        "execution_atr_percent": 1.399844,
+        "actual_fill_price": 0.4626
+      },
+      "expected": {
+        "spacing_percent": 8.91509,
+        "trigger_price": 0.46963806,
+        "target_recovery_percent": 12.0,
+        "execution_drift_percent": 0.349961,
+        "execution_ceiling": 0.47128160878051334,
+        "execution_guard_passed": true
+      }
+    },
+    {
+      "name": "sanitized_live_next_order_waits_for_spacing",
+      "input": {
+        "reference_price": 0.4626,
+        "reference_atr_percent": 1.399844,
+        "filled_safety_orders": 3,
+        "execution_atr_percent": 1.399844,
+        "current_price": 0.4386
+      },
+      "expected": {
+        "spacing_percent": 17.201283072000006,
+        "trigger_price": 0.3830268645089279,
+        "target_recovery_percent": 12.0,
+        "execution_drift_percent": 0.349961,
+        "execution_ceiling": 0.38436730915423206,
+        "decision_reason": "waiting_for_atr_spacing"
+      }
+    }
+  ],
+  "recovery_sizing_cases": [
+    {
+      "name": "target_recovery_order",
+      "policy_overrides": {
+        "minimum_spacing_percent": 5.0,
+        "atr_timeframe": "4h"
+      },
+      "input": {
+        "total_cost": 11.99048,
+        "total_amount": 21.0899455,
+        "fill_price": 0.495,
+        "take_profit_percent": 1.0,
+        "fee_ratio": 0.0,
+        "atr_percent": 1.5880084343
+      },
+      "expected": {
+        "requested_quote": 3.8010819527272663,
+        "final_quote": 3.8010819527272663,
+        "current_tp_price": 0.5742255142385266,
+        "current_recovery_percent": 16.005154391621534,
+        "target_recovery_percent": 12.0,
+        "projected_average_price": 0.548910891089109,
+        "projected_tp_price": 0.5544,
+        "projected_recovery_percent": 12.00000000000001,
+        "tp_improvement_percent": 4.005154391621524,
+        "remaining_deal_quote": 238.00952,
+        "capped": false,
+        "should_place": true,
+        "reason": "target_recovery"
+      }
+    },
+    {
+      "name": "tp_already_reachable",
+      "policy_overrides": {
+        "minimum_spacing_percent": 5.0,
+        "atr_timeframe": "4h"
+      },
+      "input": {
+        "total_cost": 11.99048,
+        "total_amount": 21.0899455,
+        "fill_price": 0.556,
+        "take_profit_percent": 1.0,
+        "fee_ratio": 0.0,
+        "atr_percent": 1.8022608275
+      },
+      "expected": {
+        "requested_quote": 0.0,
+        "final_quote": 0.0,
+        "current_tp_price": 0.5742255142385266,
+        "current_recovery_percent": 3.2779701867853506,
+        "target_recovery_percent": 12.0,
+        "projected_average_price": 0.5685401131074521,
+        "projected_tp_price": 0.5742255142385266,
+        "projected_recovery_percent": 3.2779701867853506,
+        "tp_improvement_percent": 0.0,
+        "remaining_deal_quote": 238.00952,
+        "capped": false,
+        "should_place": false,
+        "reason": "tp_already_reachable"
+      }
+    },
+    {
+      "name": "budget_cap_rejected",
+      "policy_overrides": {
+        "minimum_spacing_percent": 5.0,
+        "atr_timeframe": "4h",
+        "minimum_tp_improvement_percent": 10.0
+      },
+      "input": {
+        "total_cost": 249.0,
+        "total_amount": 500.0,
+        "fill_price": 0.2,
+        "take_profit_percent": 1.0,
+        "fee_ratio": 0.0,
+        "atr_percent": 3.0
+      },
+      "expected": {
+        "requested_quote": 870.9032258064519,
+        "final_quote": 1.0,
+        "current_tp_price": 0.50298,
+        "current_recovery_percent": 151.48999999999998,
+        "target_recovery_percent": 16.5,
+        "projected_average_price": 0.49504950495049505,
+        "projected_tp_price": 0.5,
+        "projected_recovery_percent": 150.0,
+        "tp_improvement_percent": 1.4899999999999807,
+        "remaining_deal_quote": 1.0,
+        "capped": true,
+        "should_place": false,
+        "reason": "insufficient_tp_improvement"
+      }
+    },
+    {
+      "name": "missing_live_budget_fails_closed",
+      "policy_overrides": {
+        "maximum_deal_quote": 0.0
+      },
+      "input": {
+        "total_cost": 12.0,
+        "total_amount": 24.0,
+        "fill_price": 0.3,
+        "take_profit_percent": 1.0,
+        "fee_ratio": 0.0,
+        "atr_percent": 3.0
+      },
+      "expected": {
+        "requested_quote": 0.0,
+        "final_quote": 0.0,
+        "current_tp_price": 0.0,
+        "current_recovery_percent": 0.0,
+        "target_recovery_percent": 0.0,
+        "projected_average_price": 0.0,
+        "projected_tp_price": 0.0,
+        "projected_recovery_percent": 0.0,
+        "tp_improvement_percent": 0.0,
+        "remaining_deal_quote": 0.0,
+        "capped": false,
+        "should_place": false,
+        "reason": "missing_deal_budget"
+      }
+    }
+  ],
+  "live_execution_history": {
+    "fee_ratio": 0.001,
+    "take_profit_percent": 1.15,
+    "orders": [
+      {
+        "role": "base_order",
+        "price": 0.6703,
+        "amount": 25.2,
+        "quote": 16.89156
+      },
+      {
+        "role": "safety_order_1",
+        "price": 0.5815,
+        "amount": 8.6,
+        "quote": 5.0009
+      },
+      {
+        "role": "safety_order_2",
+        "price": 0.51560468,
+        "amount": 44.9,
+        "quote": 23.15065
+      },
+      {
+        "role": "safety_order_3",
+        "price": 0.4626,
+        "amount": 93.4,
+        "quote": 43.20684
+      }
+    ],
+    "expected": {
+      "total_quote": 88.24995,
+      "total_amount": 172.1,
+      "fee_adjusted_average": 0.513295757989541,
+      "take_profit_price": 0.5191986592064207
+    },
+    "candles": {
+      "count": 374,
+      "gap_count": 0,
+      "duplicate_time_count": 0,
+      "invalid_ohlc_count": 0,
+      "indicator_source": "execution_ledger",
+      "indicator_points": 374
+    }
+  }
+}

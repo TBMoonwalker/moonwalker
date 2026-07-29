@@ -66,8 +66,8 @@ are not exposed in the UI and must be set via the API.
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
 | `pair_denylist` | `string` | Comma-separated denied symbols. | `SCAM,XYZ` |
 | `volume` | `string (json)` | Minimum 24h volume filter. | `{"size":5,"range":"M"}` |
-| `topcoin_limit` | `int` | Max CoinMarketCap rank allowed. | `200` |
-| `marketcap_cmc_api_key` | `string` | CoinMarketCap API key for market cap filtering. | `cmc_...` |
+| `topcoin_limit` | `int` | Max CoinMarketCap rank allowed. Rank-dependent admission fails closed when no usable provider snapshot exists. | `200` |
+| `marketcap_cmc_api_key` | `string` | CoinMarketCap API key for market cap filtering. Moonwalker shares one daily rank snapshot, serves it stale for at most seven days during provider failure, and never logs the key. | `cmc_...` |
 | `rsi_max` | `float` | Max RSI allowed for entry. | `70` |
 | `btc_pulse` | `bool` | Enable BTC pulse filter. | `true` |
 | `exchange` | `string` | Exchange name (ccxt id). | `binance` |

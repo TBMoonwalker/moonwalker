@@ -9,9 +9,9 @@ from litestar.handlers import get, post
 from litestar.params import FromPath
 from service.config import Config
 from service.config_redaction import merge_redacted_config_overrides
-from service.data import Data
+from service.runtime_services import runtime_service_proxy
 
-data = Data()
+data = runtime_service_proxy("data")
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_data")
 

@@ -9,6 +9,7 @@ from typing import Any
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
+from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.order_requests import normalize_order_symbol
 from service.spot_campaign_types import TradeLifecycleMode
 from tortoise.transactions import in_transaction
@@ -110,9 +111,15 @@ class MissionPauseResult:
 class TradingControlsService:
     """Persist and enforce mission-level pause controls."""
 
-    def __init__(self) -> None:
-        self._orders: Any | None = None
-        self._trades: Any | None = None
+    def __init__(
+        self,
+        *,
+        orders: Any | None = None,
+        trades: Any | None = None,
+    ) -> None:
+        """Initialize optionally shared lifecycle collaborators."""
+        self._orders = orders
+        self._trades = trades
 
     async def _get_orders(self) -> Any:
         """Return the lazily constructed Orders service."""
@@ -240,6 +247,39 @@ class TradingControlsService:
         config: dict[str, Any] | None,
     ) -> MissionPauseResult:
         """Pause one symbol mission and cancel any armed proactive TP order."""
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            return MissionPauseResult(
+                status="not_found",
+                message="Mission not found.",
+                symbol="",
+                campaign_id=None,
+                automation_paused=False,
+            )
+
+        async with lifecycle_mutation_coordinator.mutation(
+            normalized_symbol
+        ) as admitted:
+            if not admitted:
+                return MissionPauseResult(
+                    status="maintenance",
+                    message="Mission changes are paused during maintenance.",
+                    symbol=normalized_symbol,
+                    campaign_id=None,
+                    automation_paused=False,
+                )
+            return await self._pause_mission_prelocked(
+                normalized_symbol,
+                config,
+            )
+
+    async def _pause_mission_prelocked(
+        self,
+        symbol: str,
+        config: dict[str, Any] | None,
+    ) -> MissionPauseResult:
+        """Pause one mission while the symbol lifecycle lock is held."""
+        lifecycle_mutation_coordinator.assert_prelocked(symbol)
         mission = await self._resolve_symbol_mission(symbol)
         if mission is None:
             return MissionPauseResult(
@@ -261,7 +301,7 @@ class TradingControlsService:
 
         if mission.get("tp_limit_order_id"):
             orders = await self._get_orders()
-            canceled = await orders.cancel_tp_limit_order(
+            canceled = await orders.cancel_tp_limit_order_prelocked(
                 mission["symbol"], config or {}
             )
             if not canceled:
@@ -308,6 +348,32 @@ class TradingControlsService:
 
     async def resume_mission(self, symbol: str) -> MissionPauseResult:
         """Resume one symbol mission without placing any immediate orders."""
+        normalized_symbol = self._normalize_symbol(symbol)
+        if not normalized_symbol:
+            return MissionPauseResult(
+                status="not_found",
+                message="Mission not found.",
+                symbol="",
+                campaign_id=None,
+                automation_paused=False,
+            )
+
+        async with lifecycle_mutation_coordinator.mutation(
+            normalized_symbol
+        ) as admitted:
+            if not admitted:
+                return MissionPauseResult(
+                    status="maintenance",
+                    message="Mission changes are paused during maintenance.",
+                    symbol=normalized_symbol,
+                    campaign_id=None,
+                    automation_paused=False,
+                )
+            return await self._resume_mission_prelocked(normalized_symbol)
+
+    async def _resume_mission_prelocked(self, symbol: str) -> MissionPauseResult:
+        """Resume one mission while the symbol lifecycle lock is held."""
+        lifecycle_mutation_coordinator.assert_prelocked(symbol)
         mission = await self._resolve_symbol_mission(symbol)
         if mission is None:
             return MissionPauseResult(

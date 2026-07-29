@@ -257,7 +257,7 @@ const emit = defineEmits<{
     letter-spacing: 0.01em;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .system-cell + .system-cell {
         border-top: 1px solid var(--color-border);
     }

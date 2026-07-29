@@ -5,6 +5,7 @@ import json
 import pytest
 from service.dca import Dca
 from service.dca_recovery_sizing import RecoverySizingPolicy
+from service.lifecycle_snapshot import LifecycleSnapshotIdentity
 
 
 def _policy_json() -> str:
@@ -167,6 +168,7 @@ async def test_recovery_mode_places_target_sized_0g_order(monkeypatch) -> None:
     dca = Dca()
     dca.config = _config()
     buys: list[dict] = []
+    minimum_calls: list[dict] = []
 
     async def fake_atr(*_args, **_kwargs):
         return 1.5, {"regime": "high", "atr_percent": 3.1376532711}
@@ -180,7 +182,8 @@ async def test_recovery_mode_places_target_sized_0g_order(monkeypatch) -> None:
     async def fake_balance(*_args, **_kwargs):
         return 1000.0
 
-    async def fake_minimum(*_args, **_kwargs):
+    async def fake_minimum(*_args, **kwargs):
+        minimum_calls.append(kwargs)
         return 5.0
 
     async def fake_buy(order, _config_snapshot):
@@ -203,37 +206,53 @@ async def test_recovery_mode_places_target_sized_0g_order(monkeypatch) -> None:
     monkeypatch.setattr(dca.statistic, "update_statistic_data", fake_stat)
 
     first_cost = 3.8010819527
+    trade = {
+        "symbol": "0G/USDC",
+        "direction": "long",
+        "bot": "symsignal_0GUSDC",
+        "ordertype": "market",
+        "bo_price": 0.568,
+        "fee": 0.0,
+        "total_cost": 11.99048 + first_cost,
+        "total_amount": 21.0899455 + (first_cost / 0.495),
+        "safetyorders_count": 1,
+        "safetyorders": [
+            {
+                "price": 0.495,
+                "so_percentage": -12.9,
+                "ordersize": first_cost,
+            }
+        ],
+        "dca_sizing_mode": "recovery_target",
+        "dca_policy_json": _policy_json(),
+        "dca_reference_price": 0.495,
+        "dca_reference_atr_percent": 1.5880084343,
+        "dca_next_trigger_price": 0.0,
+    }
+    trade["_lifecycle_snapshot"] = LifecycleSnapshotIdentity.from_trade(
+        trade,
+        dca.config,
+    )
     await dca._Dca__calculate_dca(
         0.306,
-        {
-            "symbol": "0G/USDC",
-            "direction": "long",
-            "bot": "symsignal_0GUSDC",
-            "ordertype": "market",
-            "bo_price": 0.568,
-            "fee": 0.0,
-            "total_cost": 11.99048 + first_cost,
-            "total_amount": 21.0899455 + (first_cost / 0.495),
-            "safetyorders_count": 1,
-            "safetyorders": [
-                {
-                    "price": 0.495,
-                    "so_percentage": -12.9,
-                    "ordersize": first_cost,
-                }
-            ],
-            "dca_sizing_mode": "recovery_target",
-            "dca_policy_json": _policy_json(),
-            "dca_reference_price": 0.495,
-            "dca_reference_atr_percent": 1.5880084343,
-            "dca_next_trigger_price": 0.0,
-        },
+        trade,
     )
 
     assert len(buys) == 1
+    assert len(minimum_calls) == 1
+    assert minimum_calls[0]["is_market_order"] is False
+    assert minimum_calls[0]["amount_sizing_price"] == pytest.approx(0.457677)
     assert buys[0]["ordersize"] == pytest.approx(34.61260727)
     assert buys[0]["strategy_name"] == "ema_swing"
     assert buys[0]["maximum_buy_price"] == pytest.approx(0.457677)
+    assert trade["dca_next_trigger_price"] > 0
+    assert (
+        buys[0]["lifecycle_snapshot"]
+        == LifecycleSnapshotIdentity.from_trade(
+            trade,
+            dca.config,
+        ).to_dict()
+    )
     metadata = json.loads(buys[0]["metadata_json"])
     assert metadata["recovery_so"]["target_recovery_percent"] == pytest.approx(
         17.25709299

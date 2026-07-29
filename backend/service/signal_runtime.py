@@ -4,7 +4,7 @@ import asyncio
 import json
 import time
 from dataclasses import dataclass
-from typing import Any, Sequence
+from typing import Any, Awaitable, Callable, Protocol, Sequence
 
 import helper
 import model
@@ -152,6 +152,51 @@ class SignalEntryOrderDecision:
         )
 
 
+@dataclass(frozen=True)
+class SignalEntryBatchResult:
+    """Outcome of one shared signal entry execution batch."""
+
+    decisions: tuple[SignalAdmissionDecision, ...]
+    prepared_symbols: tuple[str, ...]
+    submitted_symbols: tuple[str, ...]
+
+    @property
+    def admitted_symbols(self) -> tuple[str, ...]:
+        """Return all symbols admitted before optional preparation."""
+        return tuple(
+            decision.symbol for decision in self.decisions if decision.admitted
+        )
+
+    @property
+    def has_capacity_block(self) -> bool:
+        """Return whether capacity prevented at least one admission."""
+        return any(
+            decision.reason_code in {"skipped_capacity_full", "skipped_slot_reserved"}
+            for decision in self.decisions
+        )
+
+
+class SignalOrderReceiver(Protocol):
+    """Order receiver required by the shared signal entry coordinator."""
+
+    async def receive_buy_order(
+        self,
+        order: BuyIntent,
+        config: dict[str, Any],
+    ) -> Any:
+        """Submit one canonical signal buy intent."""
+
+
+SignalAdmissionResolver = Callable[
+    [dict[str, Any], Statistic, Autopilot, Sequence[str]],
+    Awaitable[SignalAdmissionBatch],
+]
+SignalEntryOrderResolver = Callable[..., Awaitable[dict[str, SignalEntryOrderDecision]]]
+SignalSymbolPreparer = Callable[[str], Awaitable[bool]]
+SignalBotnameFactory = Callable[[str], str]
+SignalMetadataFactory = Callable[[SignalEntryOrderDecision], str | None]
+
+
 def build_signal_buy_intent(
     decision: SignalEntryOrderDecision,
     *,
@@ -182,6 +227,85 @@ def build_signal_buy_intent(
         "entry_size_fallback_applied": False,
         "entry_size_fallback_reason": None,
     }
+
+
+async def execute_signal_entry_batch(
+    config: dict[str, Any],
+    statistic: Statistic,
+    autopilot: Autopilot,
+    watcher_queue: asyncio.Queue[Any],
+    orders: SignalOrderReceiver,
+    candidate_symbols: Sequence[str],
+    *,
+    signal_name: str | None,
+    strategy_name: str | None,
+    timeframe: str | None,
+    botname_factory: SignalBotnameFactory,
+    prepare_symbol: SignalSymbolPreparer | None = None,
+    metadata_factory: SignalMetadataFactory | None = None,
+    inter_order_delay_seconds: float = 0.0,
+    admission_resolver: SignalAdmissionResolver,
+    entry_order_resolver: SignalEntryOrderResolver,
+) -> SignalEntryBatchResult:
+    """Admit, prepare, size, and submit signal entries without leaking slots."""
+    admission_batch = await admission_resolver(
+        config,
+        statistic,
+        autopilot,
+        candidate_symbols,
+    )
+    log_signal_admission_decisions(admission_batch.decisions)
+    prepared_symbols: list[str] = []
+    submitted_symbols: list[str] = []
+
+    try:
+        for symbol in admission_batch.admitted_symbols:
+            prepared = prepare_symbol is None or await prepare_symbol(symbol)
+            if not prepared:
+                await admission_batch.release_symbol(symbol)
+                continue
+            prepared_symbols.append(symbol)
+
+        if prepared_symbols:
+            await watcher_queue.put(prepared_symbols)
+            entry_orders = await entry_order_resolver(
+                config,
+                statistic,
+                autopilot,
+                prepared_symbols,
+                signal_name=signal_name,
+                strategy_name=strategy_name,
+                timeframe=timeframe,
+            )
+            log_signal_entry_order_decisions(entry_orders.values())
+
+            for index, symbol in enumerate(prepared_symbols):
+                entry_order = entry_orders[symbol]
+                metadata_json = (
+                    metadata_factory(entry_order) if metadata_factory else None
+                )
+                order = build_signal_buy_intent(
+                    entry_order,
+                    botname=botname_factory(symbol),
+                    metadata_json=metadata_json,
+                )
+                logging.info("Triggering new trade for %s", symbol)
+                try:
+                    await orders.receive_buy_order(order, config)
+                    submitted_symbols.append(symbol)
+                finally:
+                    await admission_batch.release_symbol(symbol)
+
+                if inter_order_delay_seconds > 0 and index < len(prepared_symbols) - 1:
+                    await asyncio.sleep(inter_order_delay_seconds)
+    finally:
+        await admission_batch.release()
+
+    return SignalEntryBatchResult(
+        decisions=tuple(admission_batch.decisions),
+        prepared_symbols=tuple(prepared_symbols),
+        submitted_symbols=tuple(submitted_symbols),
+    )
 
 
 def _normalize_symbol(value: Any) -> str:

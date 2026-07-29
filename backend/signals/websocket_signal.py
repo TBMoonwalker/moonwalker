@@ -16,11 +16,8 @@ from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
     build_common_runtime_settings,
-    build_signal_buy_intent,
-    get_active_open_symbols,
+    execute_signal_entry_batch,
     is_max_bots_reached,
-    log_signal_admission_decisions,
-    log_signal_entry_order_decisions,
     parse_signal_settings,
     resolve_max_bots_log_interval,
     resolve_signal_admission_batch,
@@ -650,23 +647,7 @@ class SignalPlugin:
             source="websocket_signal",
         )
 
-        running_symbols = await get_active_open_symbols()
-        if candidate.symbol.upper() in running_symbols:
-            return
-
-        admission_batch = await resolve_signal_admission_batch(
-            self.config,
-            self.statistic,
-            self.autopilot,
-            [candidate.symbol],
-        )
-        log_signal_admission_decisions(admission_batch.decisions)
-        if not admission_batch.admitted_symbols:
-            if admission_batch.has_capacity_block:
-                self.__log_max_bots_waiting()
-            return
-
-        try:
+        async def prepare_symbol(_symbol: str) -> bool:
             if (
                 self.config.get("trade_mode") == "dynamic_dca"
                 or self._required_history_candles > 0
@@ -684,37 +665,37 @@ class SignalPlugin:
                         "data.log.",
                         candidate.symbol,
                     )
-                    return
+                    return False
                 if not await self.__has_sufficient_strategy_history(candidate.symbol):
-                    return
+                    return False
+            return True
 
-            entry_orders = await resolve_signal_entry_orders(
-                self.config,
-                self.statistic,
-                self.autopilot,
-                [candidate.symbol],
-                signal_name=candidate.signal_name,
-                strategy_name=candidate.strategy_name,
-                timeframe=candidate.timeframe,
-            )
-            log_signal_entry_order_decisions(entry_orders.values())
-            entry_order = entry_orders[candidate.symbol]
-            await self.watcher_queue.put([candidate.symbol])
-            order = build_signal_buy_intent(
-                entry_order,
-                botname=f"websocket_signal_{candidate.source_symbol}",
-                metadata_json=self.__merge_metadata(
-                    entry_order.metadata_json,
-                    candidate.metadata_json,
-                ),
-            )
-            logging.info("Triggering new trade for %s", candidate.symbol)
-            await self.orders.receive_buy_order(order, self.config)
-        finally:
-            await admission_batch.release_symbol(candidate.symbol)
-            await admission_batch.release()
+        entry_result = await execute_signal_entry_batch(
+            self.config,
+            self.statistic,
+            self.autopilot,
+            self.watcher_queue,
+            self.orders,
+            [candidate.symbol],
+            signal_name=candidate.signal_name,
+            strategy_name=candidate.strategy_name,
+            timeframe=candidate.timeframe,
+            botname_factory=lambda _symbol: (
+                f"websocket_signal_{candidate.source_symbol}"
+            ),
+            prepare_symbol=prepare_symbol,
+            metadata_factory=lambda entry_order: self.__merge_metadata(
+                entry_order.metadata_json,
+                candidate.metadata_json,
+            ),
+            admission_resolver=resolve_signal_admission_batch,
+            entry_order_resolver=resolve_signal_entry_orders,
+        )
+        if entry_result.has_capacity_block and not entry_result.admitted_symbols:
+            self.__log_max_bots_waiting()
 
     async def shutdown(self) -> None:
         """Stop the websocket signal loop and release data resources."""
         self.status = False
         await self.data.close()
+        await self.orders.close()

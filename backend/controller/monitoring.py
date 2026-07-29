@@ -12,13 +12,13 @@ from litestar.params import FromPath, FromQuery
 from litestar.response import File
 from service.config import Config
 from service.config_redaction import merge_redacted_config_overrides
-from service.log_viewer import LogViewerService
 from service.monitoring import MonitoringService
+from service.runtime_services import runtime_service_proxy
 
 logging = helper.LoggerFactory.get_logger(
     "logs/controller.log", "controller_monitoring"
 )
-log_viewer_service = LogViewerService()
+log_viewer_service = runtime_service_proxy("log_viewer")
 
 
 @get(path="/monitoring/logs")

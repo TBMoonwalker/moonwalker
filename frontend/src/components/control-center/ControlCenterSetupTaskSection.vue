@@ -105,7 +105,7 @@ const emit = defineEmits<{
     margin-top: 6px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .task-section-heading-row {
         flex-direction: column;
     }

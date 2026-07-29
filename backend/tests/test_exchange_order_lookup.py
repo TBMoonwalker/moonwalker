@@ -1,102 +1,118 @@
-"""Regression coverage for extracted exchange order lookup helpers."""
+"""Tests for typed exchange-order reconciliation lookups."""
 
+from __future__ import annotations
+
+from typing import Any
+
+import ccxt.async_support as ccxt
 import pytest
-from service.exchange_order_lookup import (
-    build_parsed_order_status,
-    lookup_aggregated_trade,
-)
+from service.exchange import Exchange
+from service.exchange_capabilities import ExchangeOrderLookupStatus
 
 
-class _DummyLogger:
-    def debug(self, *_args, **_kwargs) -> None:
-        pass
+class _LookupExchange:
+    def __init__(self, result: dict[str, Any] | Exception) -> None:
+        self.result = result
+        self.calls: list[tuple[str, str, dict[str, str]]] = []
+
+    async def fetch_order(
+        self,
+        order_id: str,
+        symbol: str,
+        params: dict[str, str],
+    ) -> dict[str, Any]:
+        self.calls.append((order_id, symbol, params))
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
 
 
-class _TradeLookupExchange:
-    def milliseconds(self) -> int:
-        return 2_000_000
+async def _noop_async(*_args: Any, **_kwargs: Any) -> None:
+    return None
 
-    async def fetch_order_trades(
-        self, _orderid: str, _symbol: str
-    ) -> list[dict[str, object]]:
-        return [
-            {
-                "order": "abc123",
-                "amount": 1.2,
-                "cost": 120.0,
-                "fee": {"cost": 0.2, "currency": "USDT"},
-                "timestamp": 1_999_000,
-                "price": 100.0,
-                "symbol": "BTC/USDT",
-                "side": "buy",
-            }
-        ]
+
+async def _resolved_symbol(_symbol: str) -> str:
+    return "BTC/USDC"
+
+
+def _exchange_with_lookup(
+    monkeypatch: pytest.MonkeyPatch,
+    result: dict[str, Any] | Exception,
+) -> tuple[Exchange, _LookupExchange]:
+    service = Exchange()
+    client = _LookupExchange(result)
+    service.exchange = client
+    monkeypatch.setattr(service, "_Exchange__ensure_exchange", _noop_async)
+    monkeypatch.setattr(service, "_Exchange__ensure_markets_loaded", _noop_async)
+    monkeypatch.setattr(
+        service,
+        "_Exchange__resolve_symbol_with_refresh",
+        _resolved_symbol,
+    )
+    return service, client
 
 
 @pytest.mark.asyncio
-async def test_lookup_aggregated_trade_returns_trade_payload() -> None:
-    trade = await lookup_aggregated_trade(
-        _TradeLookupExchange(),
-        logger=_DummyLogger(),
-        symbol="BTC/USDT",
-        orderid="abc123",
-        order_check_range_seconds=300,
-        order_timestamp=1_998_000,
+async def test_lookup_by_client_identity_returns_found(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, client = _exchange_with_lookup(
+        monkeypatch,
+        {"id": "exchange-order-1", "status": "closed"},
     )
 
-    assert trade is not None
-    assert trade["order"] == "abc123"
-    assert trade["amount"] == pytest.approx(1.2)
-    assert trade["fee_cost"] == pytest.approx(0.2)
-
-
-def test_build_parsed_order_status_prefers_trade_payload() -> None:
-    order = {
-        "id": "abc123",
-        "timestamp": 1_998_000,
-        "amount": 1.0,
-        "price": 95.0,
-        "symbol": "BTC/USDT",
-        "side": "buy",
-        "fee": {"cost": 0.1, "currency": "USDT"},
-        "cost": 95.0,
-    }
-
-    parsed = build_parsed_order_status(
-        order,
-        {
-            "timestamp": 1_999_000,
-            "amount": 1.2,
-            "price": 100.0,
-            "order": "abc123",
-            "symbol": "BTC/USDT",
-            "side": "buy",
-            "fee_cost": 0.2,
-            "base_fee": 0.0,
-        },
+    result = await service.lookup_spot_order(
+        "BTCUSDC",
+        {},
+        client_order_id="mw-client-1",
     )
 
-    assert parsed["timestamp"] == 1_999_000
-    assert parsed["amount"] == pytest.approx(1.2)
-    assert parsed["price"] == pytest.approx(100.0)
-    assert parsed["ordersize"] == pytest.approx(95.0)
+    assert result.status == ExchangeOrderLookupStatus.FOUND
+    assert result.order == {"id": "exchange-order-1", "status": "closed"}
+    assert client.calls == [
+        (
+            "mw-client-1",
+            "BTC/USDC",
+            {"clientOrderId": "mw-client-1"},
+        )
+    ]
 
 
-def test_build_parsed_order_status_falls_back_to_order_payload() -> None:
-    order = {
-        "id": "abc123",
-        "timestamp": 1_998_000,
-        "amount": 1.0,
-        "price": 95.0,
-        "symbol": "BTC/USDT",
-        "side": "buy",
-        "fee": {"cost": 0.1, "currency": "USDT"},
-        "cost": 95.0,
-    }
+@pytest.mark.asyncio
+async def test_lookup_distinguishes_confirmed_absence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _client = _exchange_with_lookup(
+        monkeypatch,
+        ccxt.OrderNotFound("missing"),
+    )
 
-    parsed = build_parsed_order_status(order, None)
+    result = await service.lookup_spot_order(
+        "BTC/USDC",
+        {},
+        exchange_order_id="exchange-order-2",
+    )
 
-    assert parsed["timestamp"] == 1_998_000
-    assert parsed["amount"] == pytest.approx(1.0)
-    assert parsed["price"] == pytest.approx(95.0)
-    assert parsed["amount_fee"] == {"cost": 0.1, "currency": "USDT"}
+    assert result.status == ExchangeOrderLookupStatus.NOT_FOUND
+    assert result.order is None
+    assert result.error_message == "missing"
+
+
+@pytest.mark.asyncio
+async def test_lookup_distinguishes_exchange_unavailability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service, _client = _exchange_with_lookup(
+        monkeypatch,
+        ccxt.NetworkError("network down"),
+    )
+
+    result = await service.lookup_spot_order(
+        "BTC/USDC",
+        {},
+        client_order_id="mw-client-3",
+    )
+
+    assert result.status == ExchangeOrderLookupStatus.UNAVAILABLE
+    assert result.order is None
+    assert result.error_message == "network down"

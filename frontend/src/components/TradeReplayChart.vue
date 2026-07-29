@@ -723,7 +723,7 @@ onUnmounted(() => {
     width: 100%;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .expand-chart,
     .expand-chart-empty {
         flex-basis: 300px;

@@ -27,8 +27,9 @@ class Statistic:
 
     PROFIT_CACHE_TTL_SECONDS = 2
 
-    def __init__(self) -> None:
-        self.trades = Trades()
+    def __init__(self, trades: Trades | None = None) -> None:
+        """Initialize statistics with an injectable trade reader."""
+        self.trades = trades or Trades()
         self.autopilot = Autopilot()
         self.capital_budget = CapitalBudgetService()
         self.snapshot_interval_seconds = 60

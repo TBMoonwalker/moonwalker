@@ -8,6 +8,7 @@ from service.signal_runtime import (
     SignalAdmissionBatch,
     SignalAdmissionDecision,
     SignalAdmissionLease,
+    execute_signal_entry_batch,
 )
 from signals.asap import SignalPlugin, SymbolSelectionResult
 
@@ -186,8 +187,27 @@ async def test_asap_releases_admission_when_watcher_queue_fails() -> None:
     )
     plugin = SignalPlugin(FailingQueue())
 
+    async def resolve_admission(*_args, **_kwargs) -> SignalAdmissionBatch:
+        return batch
+
+    async def resolve_entry_orders(*_args, **_kwargs) -> dict[str, Any]:
+        raise AssertionError("Sizing must not run after watcher queue failure")
+
     with pytest.raises(RuntimeError, match="queue unavailable"):
-        await plugin._prepare_signal_entry_orders(batch)
+        await execute_signal_entry_batch(
+            {},
+            plugin.statistic,
+            plugin.autopilot,
+            plugin.watcher_queue,
+            plugin.orders,
+            ["BTC/USDT"],
+            signal_name="asap",
+            strategy_name=None,
+            timeframe="1m",
+            botname_factory=lambda symbol: f"asap_{symbol}",
+            admission_resolver=resolve_admission,
+            entry_order_resolver=resolve_entry_orders,
+        )
 
     assert lease.released is True
 

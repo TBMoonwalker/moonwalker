@@ -3,20 +3,19 @@ import {
    computed,
    h,
    onActivated,
-   onMounted,
-   onUnmounted,
    reactive,
    ref,
    watch,
 } from 'vue'
 import type { DataTableColumns, PaginationProps, SorterResult } from 'naive-ui'
 import Heatmap from '../components/Heatmap.vue'
+import { useViewport } from '../composables/useViewport'
 import { useAnalyticsStore } from '../stores/analytics'
 import type { AiTrustPrediction, AnalyticsOverview } from '../stores/analytics'
 
 const analytics = useAnalyticsStore()
 const activeTab = ref('symbols')
-const isMobile = ref(false)
+const { isMobile } = useViewport()
 const SYMBOL_PAGE_SIZE = 10
 const SYMBOL_MOBILE_COLUMN_KEYS = new Set([
    'symbol',
@@ -88,26 +87,18 @@ function columnSortOrder(key: string): string | null {
      : null
 }
 
-function handleResize() {
-   isMobile.value = window.innerWidth < 768
+function syncPaginationSlots() {
    const pageSlot = isMobile.value ? 3 : 5
    symbolPagination.pageSlot = pageSlot
    recentPredictionsPagination.pageSlot = pageSlot
    badEntryReviewPagination.pageSlot = pageSlot
 }
 
-onMounted(() => {
-   handleResize()
-   window.addEventListener('resize', handleResize)
- })
+watch(isMobile, syncPaginationSlots, { immediate: true })
 
 onActivated(() => {
    void analytics.load()
 })
-
-onUnmounted(() => {
-   window.removeEventListener('resize', handleResize)
- })
 
 const d = computed(() => analytics.data)
 const summary = computed(
@@ -1150,7 +1141,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
   padding: 12px;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
    .tab-content {
     padding: 0;
    }
@@ -1207,8 +1198,8 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
    .ledger-panel :deep(.n-pagination-item),
    .ai-trust-card :deep(.n-pagination-item) {
-    min-width: 34px;
-    height: 34px;
+    min-width: 44px;
+    height: 44px;
    }
 
    .distribution-stats {

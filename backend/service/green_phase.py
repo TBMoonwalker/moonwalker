@@ -96,13 +96,13 @@ class GreenPhaseService:
         self._task = asyncio.create_task(self._run_loop())
 
     async def shutdown(self) -> None:
-        """Stop the monitoring loop."""
+        """Stop the monitoring loop and close its exchange client."""
         self._running = False
-        if self._task is None:
-            return
-        self._task.cancel()
-        await asyncio.gather(self._task, return_exceptions=True)
-        self._task = None
+        if self._task is not None:
+            self._task.cancel()
+            await asyncio.gather(self._task, return_exceptions=True)
+            self._task = None
+        await self.exchange.close()
 
     def on_config_change(self, config: dict[str, Any]) -> None:
         """Refresh the cached config snapshot."""

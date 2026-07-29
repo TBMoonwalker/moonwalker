@@ -60,6 +60,7 @@ class _FakeTrades:
     def __init__(self) -> None:
         self.persisted_order: dict[str, Any] | None = None
         self.cleared_symbols: list[str] = []
+        self.clear_calls: list[dict[str, Any]] = []
         self.partial_fills: list[dict[str, Any]] = []
         self.invalidated = 0
 
@@ -93,8 +94,9 @@ class _FakeTrades:
             "current_price": 109.0,
         }
 
-    async def clear_tp_limit_order(self, symbol: str) -> bool:
+    async def clear_tp_limit_order(self, symbol: str, **kwargs: Any) -> bool:
         self.cleared_symbols.append(symbol)
+        self.clear_calls.append({"symbol": symbol, **kwargs})
         return True
 
     async def add_partial_sell_execution(
@@ -161,9 +163,7 @@ async def test_cancel_tp_limit_order_clears_persisted_metadata() -> None:
 
 
 @pytest.mark.asyncio
-async def test_cancel_tp_limit_order_persists_partial_fill(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+async def test_cancel_tp_limit_order_persists_partial_fill() -> None:
     orders = Orders()
     fake_exchange = _FakeExchange()
     fake_exchange.cancel_status = {
@@ -179,50 +179,15 @@ async def test_cancel_tp_limit_order_persists_partial_fill(
     fake_trades = _FakeTrades()
     orders.exchange = fake_exchange  # type: ignore[assignment]
     orders.trades = fake_trades  # type: ignore[assignment]
-    persisted_partials: list[dict[str, Any]] = []
-
-    async def fake_persist_partial_sell_execution(
-        symbol: str,
-        sold_amount: float,
-        sold_proceeds: float,
-        sell_executions: list[dict[str, Any]],
-    ) -> None:
-        persisted_partials.append(
-            {
-                "symbol": symbol,
-                "sold_amount": sold_amount,
-                "sold_proceeds": sold_proceeds,
-                "sell_executions": sell_executions,
-            }
-        )
-
-    monkeypatch.setattr(
-        "service.orders.persist_partial_sell_execution",
-        fake_persist_partial_sell_execution,
-    )
 
     canceled = await orders.cancel_tp_limit_order("XPL/USDC", {})
 
     assert canceled is True
-    assert persisted_partials == [
+    assert fake_trades.clear_calls == [
         {
             "symbol": "XPL/USDC",
-            "sold_amount": 0.4,
-            "sold_proceeds": 44.4,
-            "sell_executions": [
-                {
-                    "symbol": "XPL/USDC",
-                    "side": "sell",
-                    "role": "partial_sell",
-                    "timestamp": "1742000000123",
-                    "price": 111.0,
-                    "amount": 0.4,
-                    "ordersize": 44.4,
-                    "fee": 0.0,
-                    "order_id": "tp-limit-1",
-                    "order_type": "limit",
-                }
-            ],
+            "placement_operation_id": None,
+            "exchange_status": fake_exchange.cancel_status,
         }
     ]
     assert fake_trades.cleared_symbols == ["XPL/USDC"]

@@ -363,7 +363,11 @@ async def test_archive_replay_candles_repairs_sparse_archive_from_exchange_histo
 
     monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_PRE_ROLL_MS", 0)
     monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_POST_ROLL_MS", 0)
-    monkeypatch.setattr(replay_module, "get_live_candle_snapshot", lambda _symbol: None)
+    monkeypatch.setattr(
+        replay_module,
+        "get_live_candle_snapshot",
+        lambda _symbol: [43_200_000, 12.8, 13.2, 12.6, 13.0, 10.0],
+    )
     monkeypatch.setattr(replay_module.Config, "instance", _fake_config_instance)
     monkeypatch.setattr(replay_module, "Exchange", _FakeExchange)
 
@@ -422,6 +426,7 @@ async def test_archive_replay_candles_repairs_sparse_archive_from_exchange_histo
         symbol,
         open_date="0",
         close_date="43200000",
+        allow_live_snapshot_exchange_repair=True,
     )
 
     archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).values(
@@ -865,6 +870,7 @@ async def test_delete_all_unsellable_trades_cascades_only_detached_history(
 
     detached_deal_id = "44444444-4444-4444-4444-444444444444"
     linked_deal_id = "55555555-5555-5555-5555-555555555555"
+    live_deal_id = "66666666-6666-6666-6666-666666666666"
 
     await model.UnsellableTrades.create(
         symbol="DETACHED/USDT",
@@ -947,14 +953,72 @@ async def test_delete_all_unsellable_trades_cascades_only_detached_history(
         volume=10.0,
     )
 
+    await model.UnsellableTrades.create(
+        symbol="LIVE/USDT",
+        deal_id=live_deal_id,
+        execution_history_complete=True,
+        amount=0.02,
+        cost=0.04,
+        current_price=2.0,
+        avg_price=2.0,
+        open_date="240000",
+        unsellable_reason="minimum_notional",
+    )
+    await model.OpenTrades.create(
+        symbol="LIVE/USDT",
+        deal_id=live_deal_id,
+    )
+    await model.Trades.create(
+        timestamp="240000",
+        ordersize=10.0,
+        fee=0.0,
+        amount=1.0,
+        amount_fee=0.0,
+        price=10.0,
+        symbol="LIVE/USDT",
+        deal_id=live_deal_id,
+        orderid="live-order",
+        bot="asap_LIVE/USDT",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        direction="long",
+        side="buy",
+    )
+    await model.TradeExecutions.create(
+        deal_id=live_deal_id,
+        symbol="LIVE/USDT",
+        side="buy",
+        role="base_order",
+        timestamp="240000",
+        price=10.0,
+        amount=1.0,
+        ordersize=10.0,
+        fee=0.0,
+    )
+    await model.TradeReplayCandles.create(
+        deal_id=live_deal_id,
+        symbol="LIVE/USDT",
+        timestamp="240000",
+        open=10.0,
+        high=11.0,
+        low=9.5,
+        close=10.5,
+        volume=10.0,
+    )
+
     deleted = await Trades().delete_all_unsellable_trades()
 
-    assert deleted == 2
+    assert deleted == 3
     assert await model.UnsellableTrades.all().count() == 0
     assert await model.TradeExecutions.filter(deal_id=detached_deal_id).count() == 0
     assert await model.TradeReplayCandles.filter(deal_id=detached_deal_id).count() == 0
     assert await model.TradeExecutions.filter(deal_id=linked_deal_id).count() == 1
     assert await model.TradeReplayCandles.filter(deal_id=linked_deal_id).count() == 1
     assert await model.ClosedTrades.filter(deal_id=linked_deal_id).count() == 1
+    assert await model.TradeExecutions.filter(deal_id=live_deal_id).count() == 1
+    assert await model.TradeReplayCandles.filter(deal_id=live_deal_id).count() == 1
+    assert await model.OpenTrades.filter(deal_id=live_deal_id).count() == 1
+    assert await model.Trades.filter(deal_id=live_deal_id).count() == 1
 
     await Tortoise.close_connections()

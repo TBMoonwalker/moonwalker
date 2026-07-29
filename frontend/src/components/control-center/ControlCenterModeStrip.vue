@@ -144,7 +144,7 @@ const emit = defineEmits<{
     letter-spacing: 0;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .mode-strip-shell {
         gap: 12px;
     }

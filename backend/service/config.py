@@ -21,8 +21,8 @@ from service.config_runtime_store import (
 )
 from service.redis import CONFIG_CHANNEL, redis_client
 from service.signal_settings import serialize_signal_settings
-from service.strategy_builder import PUBLIC_BUILTIN_SLUGS
 from service.strategy_capability import filter_supported_strategies
+from service.strategy_catalog import PUBLIC_BUILTIN_SLUGS
 from service.trade_lifecycle_config import resolve_trade_mode_config
 from tortoise.transactions import in_transaction
 

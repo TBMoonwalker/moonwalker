@@ -1008,4 +1008,5 @@ class Watcher:
         self._pending_reload_config = None
         self.runtime_state.notify_symbol_update()
         await self._shutdown_runtime_tasks()
+        await self.dca.shutdown()
         logging.info("Watcher shutdown complete.")

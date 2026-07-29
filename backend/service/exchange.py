@@ -1,13 +1,20 @@
 """Exchange service for CCXT async operations."""
 
 import asyncio
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Awaitable, Callable
+from typing import Any, cast
 
 import ccxt.async_support as ccxt
 import helper
 from service.exchange_balance_manager import ExchangeBalanceManager
 from service.exchange_buy_manager import ExchangeBuyManager
+from service.exchange_capabilities import (
+    ExchangeOrderLookupResult,
+    ExchangeOrderLookupStatus,
+    ExchangePostSubmissionFailure,
+    UnsupportedExchangeCapability,
+    require_exchange_placement_capabilities,
+)
 from service.exchange_client_manager import ExchangeClientManager
 from service.exchange_contexts import (
     BuyFinalizationContext,
@@ -36,7 +43,13 @@ from service.exchange_sell_status import (
     finalize_sell_order_status,
 )
 from service.exchange_types import ExchangeOrderPayload, ParsedOrderStatus
-from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
+from tenacity import (
+    TryAgain,
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_fixed,
+)
 
 logging = helper.LoggerFactory.get_logger("logs/exchange.log", "exchange")
 
@@ -762,17 +775,54 @@ class Exchange:
         symbol: str,
         *,
         is_market_order: bool = True,
+        amount_sizing_price: float | None = None,
     ) -> float | None:
-        """Return the exchange minimum quote notional for a buy order."""
+        """Return the precision-safe minimum quote notional for a buy order."""
         await self.__ensure_exchange(config)
         await self.__ensure_markets_loaded()
         resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
         if resolved_symbol is None:
             return None
-        return self.__get_min_notional_for_symbol(
+        minimum_notional = self.__get_min_notional_for_symbol(
             resolved_symbol,
             is_market_order=is_market_order,
         )
+        if (
+            minimum_notional is None
+            or amount_sizing_price is None
+            or amount_sizing_price <= 0
+        ):
+            return minimum_notional
+
+        try:
+            precise_price = float(
+                self.exchange.price_to_precision(
+                    resolved_symbol,
+                    amount_sizing_price,
+                )
+            )
+            raw_amount = minimum_notional / precise_price
+            formatted_amount = self.exchange.amount_to_precision(
+                resolved_symbol,
+                raw_amount,
+            )
+            precise_amount = float(formatted_amount)
+            estimated_notional = precise_amount * precise_price
+            if estimated_notional + 1e-12 < minimum_notional:
+                amount_step = precision_step_for_amount(formatted_amount)
+                precise_amount = float(
+                    self.exchange.amount_to_precision(
+                        resolved_symbol,
+                        precise_amount + amount_step,
+                    )
+                )
+                estimated_notional = precise_amount * precise_price
+                if estimated_notional + 1e-12 < minimum_notional:
+                    return None
+                estimated_notional += amount_step * precise_price * 0.001
+            return max(minimum_notional, estimated_notional)
+        except (ccxt.BaseError, TypeError, ValueError, ZeroDivisionError):
+            return None
 
     async def __preflight_buy_funds(
         self, order: dict[str, Any], config: dict[str, Any]
@@ -881,6 +931,24 @@ class Exchange:
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any] | None:
         """Create a spot market buy order."""
+        try:
+            require_exchange_placement_capabilities(
+                config,
+                order_type=(
+                    "limit"
+                    if float(order.get("maximum_buy_price") or 0.0) > 0
+                    else str(order.get("ordertype") or "market")
+                ),
+            )
+        except UnsupportedExchangeCapability as exc:
+            self._last_buy_precheck_result = build_buy_precheck_result(
+                ok=False,
+                reason="unsupported_exchange_reconciliation",
+                symbol=str(order.get("symbol") or ""),
+                required_quote=self.__resolve_required_buy_quote(order),
+            )
+            logging.error("%s", exc)
+            return None
         await self.__ensure_exchange(config)
         await self.__ensure_markets_loaded()
         self._last_buy_precheck_result = None
@@ -930,6 +998,34 @@ class Exchange:
                 order.get("amount"),
             )
             return None
+        below_minimum, minimum_notional, estimated_notional = (
+            self.__is_notional_below_minimum(
+                order["symbol"],
+                float(order["amount"]),
+                float(amount_sizing_price),
+                is_market_order=maximum_buy_price <= 0,
+            )
+        )
+        if below_minimum:
+            self._last_buy_precheck_result = build_buy_precheck_result(
+                ok=False,
+                reason="amount_below_minimum_notional",
+                symbol=str(order.get("symbol") or ""),
+                required_quote=minimum_notional,
+                available_quote=None,
+                executable_price=float(amount_sizing_price),
+                maximum_buy_price=(
+                    maximum_buy_price if maximum_buy_price > 0 else None
+                ),
+            )
+            logging.warning(
+                "Skipping buy for %s: precision-adjusted notional %.12f is "
+                "below minimum %.12f.",
+                order.get("symbol"),
+                estimated_notional,
+                minimum_notional,
+            )
+            return None
         if not await self.__preflight_buy_funds(order, config):
             precheck = self._last_buy_precheck_result or {}
             logging.warning(
@@ -953,8 +1049,53 @@ class Exchange:
                     maximum_buy_price=maximum_buy_price,
                 )
             return None
+        try:
+            finalized = await self._buy_manager.finalize_market_buy(
+                order=order,
+                config=config,
+                context=BuyFinalizationContext(
+                    parse_order_status=lambda buy_order: self.__parse_order_status(
+                        buy_order,
+                        order_check_range_seconds=order_check_range_seconds,
+                    ),
+                    get_precision_for_symbol=self.__get_precision_for_symbol,
+                    resolve_symbol=self.__resolve_symbol_with_refresh,
+                    get_demo_taker_fee_for_symbol=self.__get_demo_taker_fee_for_symbol,
+                ),
+            )
+        except Exception as exc:
+            raise ExchangePostSubmissionFailure(
+                action="buy",
+                symbol=str(order.get("symbol") or submitted_order.get("symbol") or ""),
+                order=dict(order),
+                cause=exc,
+                operation_id=str(order.get("operation_id") or "") or None,
+            ) from exc
+        if finalized is None:
+            raise ExchangePostSubmissionFailure(
+                action="buy",
+                symbol=str(order.get("symbol") or submitted_order.get("symbol") or ""),
+                order=dict(order),
+                operation_id=str(order.get("operation_id") or "") or None,
+            )
+        return finalized
+
+    async def build_spot_buy_order_status(
+        self,
+        exchange_order: dict[str, Any],
+        original_order: dict[str, Any],
+        config: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Normalize a reconciled exchange buy without placing another order."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        combined_order = cast(
+            ExchangeOrderPayload,
+            {**original_order, **exchange_order},
+        )
+        order_check_range_seconds = self.__get_order_check_range_seconds(config)
         return await self._buy_manager.finalize_market_buy(
-            order=order,
+            order=combined_order,
             config=config,
             context=BuyFinalizationContext(
                 parse_order_status=lambda buy_order: self.__parse_order_status(
@@ -978,22 +1119,61 @@ class Exchange:
         return await self._buy_manager.execute_market_buy(order)
 
     async def create_spot_sell(
-        self, order: dict[str, Any], config: dict[str, Any]
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+        *,
+        create_market_fallback: (
+            Callable[
+                [dict[str, Any], dict[str, Any], dict[str, Any]],
+                Awaitable[dict[str, Any] | None],
+            ]
+            | None
+        ) = None,
     ) -> dict[str, Any] | None:
+        order_type = str(config.get("sell_order_type", "market")).lower()
+        try:
+            require_exchange_placement_capabilities(
+                config,
+                order_type=order_type,
+            )
+        except UnsupportedExchangeCapability as exc:
+            logging.error("%s", exc)
+            return None
         return await self._sell_manager.create_spot_sell(
             order=order,
             config=config,
             context=SellRoutingContext(
                 create_spot_limit_sell=self.create_spot_limit_sell,
                 create_spot_market_sell=self.create_spot_market_sell,
+                create_spot_market_fallback=(
+                    create_market_fallback or self.__create_spot_market_fallback
+                ),
                 can_fallback_to_market_sell=self.__can_fallback_to_market_sell,
             ),
         )
+
+    async def __create_spot_market_fallback(
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+        _limit_status: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Execute the legacy non-durable fallback for direct adapter callers."""
+        return await self.create_spot_market_sell(order, config)
 
     async def place_spot_limit_sell(
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any] | None:
         """Place a limit sell without waiting for fill reconciliation."""
+        try:
+            require_exchange_placement_capabilities(
+                config,
+                order_type="limit",
+            )
+        except UnsupportedExchangeCapability as exc:
+            logging.error("%s", exc)
+            return None
         return await self._limit_order_manager.create_spot_limit_sell(
             order=order,
             config=config,
@@ -1044,6 +1224,83 @@ class Exchange:
             )
             return None
 
+    async def lookup_spot_order(
+        self,
+        symbol: str,
+        config: dict[str, Any],
+        *,
+        exchange_order_id: str | None = None,
+        client_order_id: str | None = None,
+    ) -> ExchangeOrderLookupResult:
+        """Look up a durable placement without conflating absence and I/O failure."""
+        await self.__ensure_exchange(config)
+        await self.__ensure_markets_loaded()
+        exchange = self.exchange
+        if exchange is None:
+            return ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.UNAVAILABLE,
+                error_message="Exchange client is unavailable.",
+            )
+        resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
+        if resolved_symbol is None:
+            return ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.UNAVAILABLE,
+                error_message=f"Symbol {symbol} is unavailable.",
+            )
+        normalized_exchange_id = str(exchange_order_id or "").strip()
+        normalized_client_id = str(client_order_id or "").strip()
+        if not normalized_exchange_id and not normalized_client_id:
+            return ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.UNAVAILABLE,
+                error_message="Placement has no exchange or client order identity.",
+            )
+
+        lookup_id = normalized_exchange_id or normalized_client_id
+        params = (
+            {"clientOrderId": normalized_client_id}
+            if not normalized_exchange_id and normalized_client_id
+            else {}
+        )
+        try:
+            order = await exchange.fetch_order(
+                lookup_id,
+                resolved_symbol,
+                params,
+            )
+        except ccxt.OrderNotFound as exc:
+            return ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.NOT_FOUND,
+                error_message=str(exc),
+            )
+        except (
+            ccxt.NetworkError,
+            ccxt.ExchangeError,
+            ccxt.BaseError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            logging.warning(
+                "Durable order lookup failed for %s (exchange_id=%s client_id=%s): %s",
+                symbol,
+                normalized_exchange_id or None,
+                normalized_client_id or None,
+                exc,
+            )
+            return ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.UNAVAILABLE,
+                error_message=str(exc),
+            )
+        if not isinstance(order, dict) or not order:
+            return ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.UNAVAILABLE,
+                error_message="Exchange returned an empty order lookup result.",
+            )
+        return ExchangeOrderLookupResult(
+            status=ExchangeOrderLookupStatus.FOUND,
+            order=dict(order),
+        )
+
     async def cancel_spot_order(
         self,
         symbol: str,
@@ -1051,6 +1308,14 @@ class Exchange:
         config: dict[str, Any],
     ) -> dict[str, Any] | None:
         """Cancel one exchange order and return its latest status if available."""
+        try:
+            require_exchange_placement_capabilities(
+                config,
+                order_type="limit",
+            )
+        except UnsupportedExchangeCapability as exc:
+            logging.error("%s", exc)
+            return None
         await self.__ensure_exchange(config)
         await self.__ensure_markets_loaded()
         resolved_symbol = await self.__resolve_symbol_with_refresh(symbol)
@@ -1212,6 +1477,14 @@ class Exchange:
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any] | None:
         """Create a spot limit sell order and delegate fill handling."""
+        try:
+            require_exchange_placement_capabilities(
+                config,
+                order_type="limit",
+            )
+        except UnsupportedExchangeCapability as exc:
+            logging.error("%s", exc)
+            return None
         order_check_range_seconds = self.__get_order_check_range_seconds(config)
         return await self._limit_order_manager.create_spot_limit_sell(
             order=order,
@@ -1264,11 +1537,24 @@ class Exchange:
             ),
         )
 
-    @retry(wait=wait_fixed(1), stop=stop_after_attempt(200))
+    @retry(
+        wait=wait_fixed(1),
+        stop=stop_after_attempt(200),
+        retry=retry_if_exception_type(TryAgain),
+        reraise=True,
+    )
     async def create_spot_market_sell(
         self, order: dict[str, Any], config: dict[str, Any]
     ) -> dict[str, Any] | None:
         """Create a spot market sell order via the sell manager."""
+        try:
+            require_exchange_placement_capabilities(
+                config,
+                order_type="market",
+            )
+        except UnsupportedExchangeCapability as exc:
+            logging.error("%s", exc)
+            return None
         order_check_range_seconds = self.__get_order_check_range_seconds(config)
         return await self._sell_manager.create_spot_market_sell(
             order=order,

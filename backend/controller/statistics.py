@@ -10,8 +10,7 @@ from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, websocket_stream
 from litestar.params import FromPath
 from service.config import Config
-from service.exchange import Exchange
-from service.statistic import Statistic
+from service.runtime_services import runtime_service_proxy
 from service.websocket_fanout import WebSocketFanout
 
 logging = helper.LoggerFactory.get_logger(
@@ -20,8 +19,8 @@ logging = helper.LoggerFactory.get_logger(
 PROFIT_STREAM_INTERVAL_SECONDS = 5
 STATISTICS_BALANCE_CACHE_TTL_SECONDS = float(PROFIT_STREAM_INTERVAL_SECONDS)
 
-statistic = Statistic()
-exchange = Exchange(balance_cache_ttl_seconds=STATISTICS_BALANCE_CACHE_TTL_SECONDS)
+statistic = runtime_service_proxy("statistic")
+exchange = runtime_service_proxy("statistics_exchange")
 _config_service: Config | None = None
 
 

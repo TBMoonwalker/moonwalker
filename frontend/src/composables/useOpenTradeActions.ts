@@ -5,7 +5,7 @@ import { NSlider } from 'naive-ui/es/slider'
 import { useDialog } from 'naive-ui/es/dialog'
 import { useMessage } from 'naive-ui/es/message'
 
-import { fetchJson } from '../api/client'
+import { fetchJson, MOONWALKER_OPERATION_HEADER } from '../api/client'
 import {
     calculateSoPercentage,
     clampToRange,
@@ -19,6 +19,12 @@ import {
     toFiniteNonNegative,
     type OpenTradeRow,
 } from '../helpers/openTrades'
+import {
+    createOrderOperationId,
+    orderMutationApplied,
+    orderMutationFailureMessage,
+    type OrderMutationResponse,
+} from '../helpers/orderMutations'
 
 interface UseOpenTradeActionsOptions {
     availableFunds: Ref<number>
@@ -38,15 +44,24 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
                 const [symbol, currency] = splitTradeSymbol(
                     data.symbol.toLowerCase(),
                 )
-                const result = await fetchJson<{ result: string }>(
+                const result = await fetchJson<OrderMutationResponse>(
                     `/orders/sell/${symbol}-${currency}`,
-                    { method: 'POST' },
+                    {
+                        method: 'POST',
+                        headers: {
+                            [MOONWALKER_OPERATION_HEADER]:
+                                createOrderOperationId('manual_sell'),
+                        },
+                    },
                 )
-                if (result.result == 'sell') {
+                if (orderMutationApplied(result, 'sell')) {
                     options.message.success(`Sold ${data.amount} ${data.symbol}`)
                 } else {
                     options.message.error(
-                        `Failed to sell${data.amount} ${data.symbol} - please check your logs`,
+                        orderMutationFailureMessage(
+                            result,
+                            `Failed to sell ${data.amount} ${data.symbol}`,
+                        ),
                     )
                 }
             },
@@ -154,17 +169,26 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
                     return false
                 }
                 const orderAmount = formatOrderAmount(finalAmount)
-                const result = await fetchJson<{ result: string }>(
+                const result = await fetchJson<OrderMutationResponse>(
                     `/orders/buy/${symbol}-${currency}/${orderAmount}`,
-                    { method: 'POST' },
+                    {
+                        method: 'POST',
+                        headers: {
+                            [MOONWALKER_OPERATION_HEADER]:
+                                createOrderOperationId('manual_buy'),
+                        },
+                    },
                 )
-                if (result.result == 'new_so') {
+                if (orderMutationApplied(result, 'new_so')) {
                     options.message.success(
                         `Added ${orderAmount} ${currency.toUpperCase()} for ${symbol.toUpperCase()}`,
                     )
                 } else {
                     options.message.error(
-                        `Failed to add ${orderAmount} ${currency.toUpperCase()} for ${symbol.toUpperCase()}`,
+                        orderMutationFailureMessage(
+                            result,
+                            `Failed to add ${orderAmount} ${currency.toUpperCase()} for ${symbol.toUpperCase()}`,
+                        ),
                     )
                 }
             },
@@ -319,17 +343,20 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
                 const [symbol, currency] = splitTradeSymbol(
                     data.symbol.toLowerCase(),
                 )
-                const result = await fetchJson<{ result: string }>(
+                const result = await fetchJson<OrderMutationResponse>(
                     `/orders/stop/${symbol}-${currency}`,
                     { method: 'POST' },
                 )
-                if (result.result == 'stop') {
+                if (orderMutationApplied(result, 'stop')) {
                     options.message.success(
                         `Stopped ${data.symbol} Please trade it manually on your exchange`,
                     )
                 } else {
                     options.message.error(
-                        `Failed to stop${data.symbol} - please check your logs`,
+                        orderMutationFailureMessage(
+                            result,
+                            `Failed to stop ${data.symbol}`,
+                        ),
                     )
                 }
             },

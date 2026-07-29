@@ -4,11 +4,52 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.5.0.0] - 2026-07-28
+
+### Added
+
+- Added durable placement intents, client operation IDs, startup reconciliation,
+  and crash-recovery workflows so accepted exchange orders cannot be blindly
+  retried after a local failure.
+- Added schema-migration records, verified backup/restore handling, canonical
+  execution ledgers, and archived replay candles for reliable trade-history
+  reconstruction.
+- Added versioned Strategy Builder graphs with validation, conflict detection,
+  reusable catalog/IR seams, and desktop editing plus mobile review workflows.
+- Added AI trust calibration, persisted analytics, work-queue coordination, and
+  CoinMarketCap-backed ranking support behind explicit runtime controls.
+
+### Changed
+
+- Split DCA decisions, lifecycle snapshots/mutations, persistence records,
+  runtime services, and sell fallback orchestration into focused typed modules.
+- Supervised application services through the Litestar lifespan and made
+  startup/shutdown cleanup best-effort across all owned resources.
+- Refined the Control Center, statistics, monitoring, replay, and trade-ledger
+  surfaces for clearer responsive behavior and multi-client-safe mutations.
+- Expanded regression coverage and coverage ratchets across DCA decisions,
+  durable placement, crash recovery, migrations, Strategy Builder, responsive
+  interactions, and typed order results.
+
 ### Fixed
 
 - Waiting campaign TradingView replays now resolve the persisted sidestep
   campaign execution timeline so the strategy indicators used by prior legs
   render even when the current flat Waiting deal has no executions.
+- Prevented limit-sell cancel/fill races from submitting a duplicate market
+  fallback; fallback now requires explicit canceled state and finite,
+  non-negative quantities that reconcile with the submitted amount.
+- Kept capped IOC buys pending when exchange fill evidence is missing,
+  non-numeric, non-finite, negative, or contradictory instead of treating
+  ambiguous responses as definitive zero fills.
+- Prevented same-symbol buy/sell action conflicts, repeated manual operation
+  IDs, malformed accepted-order responses, and post-submission enrichment
+  failures from causing unsafe retries.
+- Serialized Strategy Builder rendering and debounced, canceled, and
+  generation-guarded validation so stale async results cannot overwrite the
+  current graph.
+- Corrected mobile trade expansion columns and stale table widths so DCA
+  execution details and statistics remain readable without horizontal overflow.
 
 ## [4.3.0.1] - 2026-07-27
 

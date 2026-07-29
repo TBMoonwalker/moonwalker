@@ -1,7 +1,9 @@
 """Tests for exchange buy manager."""
 
+import ccxt.async_support as ccxt
 import pytest
 from service.exchange_buy_manager import ExchangeBuyManager
+from service.exchange_capabilities import ExchangePostSubmissionFailure
 from service.exchange_contexts import BuyFinalizationContext
 
 
@@ -25,8 +27,9 @@ class _DummyExchange:
         self.fetch_trading_fee_calls = 0
         self.cancel_order_calls = 0
         self.last_create_order: dict[str, object] | None = None
-        self.next_filled: float | None = None
+        self.next_filled: float | str | None = None
         self.next_status = "closed"
+        self.omit_filled = False
 
     async def create_order(
         self,
@@ -46,16 +49,20 @@ class _DummyExchange:
             "price": price,
             "params": _params,
         }
-        return {
+        result: dict[str, object] = {
             "id": "buy-1",
             "symbol": symbol,
             "type": ordertype,
             "side": side,
             "amount": amount,
             "price": price,
-            "filled": (float(amount) if self.next_filled is None else self.next_filled),
             "status": self.next_status,
         }
+        if not self.omit_filled:
+            result["filled"] = (
+                float(amount) if self.next_filled is None else self.next_filled
+            )
+        return result
 
     def price_to_precision(self, _symbol: str, price: float) -> str:
         return f"{price:.5f}"
@@ -132,6 +139,101 @@ async def test_unfilled_capped_recovery_buy_is_not_finalized() -> None:
 
     assert order is None
     assert exchange.cancel_order_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_unfilled_capped_buy_cancel_failure_stays_pending() -> None:
+    exchange = _DummyExchange()
+    exchange.next_filled = 0.0
+    exchange.next_status = "open"
+
+    async def fail_cancel(_order_id: str, _symbol: str) -> None:
+        exchange.cancel_order_calls += 1
+        raise ccxt.InvalidOrder("cancel outcome unresolved")
+
+    exchange.cancel_order = fail_cancel  # type: ignore[method-assign]
+    manager = ExchangeBuyManager(_DummyLogger(), get_exchange=lambda: exchange)
+
+    with pytest.raises(ExchangePostSubmissionFailure) as raised:
+        await manager.execute_market_buy(
+            {
+                "operation_id": "buy-capped-pending",
+                "client_order_id": "mw-buy-capped-pending",
+                "symbol": "CVC/USDC",
+                "ordertype": "market",
+                "side": "buy",
+                "amount": "286",
+                "price": "0.01955",
+                "maximum_buy_price": 0.019598,
+            }
+        )
+
+    assert raised.value.order["id"] == "buy-1"
+    assert raised.value.operation_id == "buy-capped-pending"
+    assert exchange.cancel_order_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_malformed_capped_buy_fill_stays_pending() -> None:
+    exchange = _DummyExchange()
+    exchange.next_filled = "not-a-number"
+    manager = ExchangeBuyManager(_DummyLogger(), get_exchange=lambda: exchange)
+
+    with pytest.raises(ExchangePostSubmissionFailure) as raised:
+        await manager.execute_market_buy(
+            {
+                "operation_id": "buy-malformed-fill",
+                "client_order_id": "mw-buy-malformed-fill",
+                "symbol": "CVC/USDC",
+                "ordertype": "market",
+                "side": "buy",
+                "amount": "286",
+                "price": "0.01955",
+                "maximum_buy_price": 0.019598,
+            }
+        )
+
+    assert raised.value.order["id"] == "buy-1"
+    assert raised.value.operation_id == "buy-malformed-fill"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("omit_filled", "filled", "status"),
+    [
+        (True, None, "canceled"),
+        (False, 0.0, "closed"),
+        (False, -1.0, "canceled"),
+        (False, float("nan"), "canceled"),
+    ],
+)
+async def test_invalid_fill_capped_buy_stays_pending(
+    omit_filled: bool,
+    filled: float | None,
+    status: str,
+) -> None:
+    exchange = _DummyExchange()
+    exchange.omit_filled = omit_filled
+    exchange.next_filled = filled
+    exchange.next_status = status
+    manager = ExchangeBuyManager(_DummyLogger(), get_exchange=lambda: exchange)
+
+    with pytest.raises(ExchangePostSubmissionFailure) as raised:
+        await manager.execute_market_buy(
+            {
+                "operation_id": "buy-ambiguous-fill",
+                "client_order_id": "mw-buy-ambiguous-fill",
+                "symbol": "CVC/USDC",
+                "ordertype": "market",
+                "side": "buy",
+                "amount": "286",
+                "price": "0.01955",
+                "maximum_buy_price": 0.019598,
+            }
+        )
+
+    assert raised.value.order["id"] == "buy-1"
+    assert raised.value.operation_id == "buy-ambiguous-fill"
 
 
 @pytest.mark.asyncio

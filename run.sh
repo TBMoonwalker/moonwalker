@@ -3,6 +3,7 @@ set -e
 
 PID_FILE="moonwalker.pid"
 LOCK_FILE="moonwalker.lock"
+STOP_TIMEOUT_SECONDS=30
 
 usage() {
     echo "Usage: $0 {start|stop} [-d|--debug] [-t|--trace] [-p|--port PORT]"
@@ -93,6 +94,8 @@ service_process_is_running() {
 
 # Function to stop all services
 stop_services() {
+    local elapsed
+    local pid
 
     if [ -z "${MOONWALKER_DEBUG}" ]; then
         unset MOONWALKER_DEBUG
@@ -101,8 +104,27 @@ stop_services() {
         echo "🛑 Stopping services..."
         if [ -f "$PID_FILE" ]; then
             while read -r pid; do
-                if kill -9 "$pid" 2>/dev/null; then
-                    kill "$pid"
+                if ! [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+                    echo "⚠️  Ignoring invalid PID entry: $pid"
+                    continue
+                fi
+                if ! kill -0 "$pid" 2>/dev/null; then
+                    continue
+                fi
+
+                kill -TERM "$pid"
+                elapsed=0
+                while kill -0 "$pid" 2>/dev/null; do
+                    if [ "$elapsed" -ge "$STOP_TIMEOUT_SECONDS" ]; then
+                        echo "⚠️  Process $pid did not stop gracefully; forcing shutdown."
+                        kill -KILL "$pid" 2>/dev/null || true
+                        break
+                    fi
+                    sleep 1
+                    elapsed=$((elapsed + 1))
+                done
+
+                if ! kill -0 "$pid" 2>/dev/null; then
                     echo "Stopped process with PID: $pid"
                 fi
             done < "$PID_FILE"

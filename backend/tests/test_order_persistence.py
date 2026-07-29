@@ -1,8 +1,36 @@
 import json
-from typing import Any
+from typing import Any, cast
 
 import pytest
 import service.order_persistence as persistence_module
+from service.persistence_records import TradePersistenceRecord
+from service.placement_intents import PlacementIntentState
+from tortoise import Tortoise
+from tortoise.exceptions import IntegrityError
+
+
+def _trade_record(**overrides: Any) -> TradePersistenceRecord:
+    payload: dict[str, Any] = {
+        "timestamp": "1714726800000",
+        "ordersize": 100.0,
+        "fee": 0.0,
+        "precision": 8,
+        "amount": 1.0,
+        "amount_fee": 0.0,
+        "price": 100.0,
+        "symbol": "BTC/USDC",
+        "orderid": "test-order",
+        "bot": "test",
+        "ordertype": "market",
+        "baseorder": True,
+        "safetyorder": False,
+        "order_count": 0,
+        "so_percentage": None,
+        "direction": "long",
+        "side": "buy",
+    }
+    payload.update(overrides)
+    return cast(TradePersistenceRecord, payload)
 
 
 class _DummyTradesModel:
@@ -135,7 +163,10 @@ async def test_persist_buy_trade_creates_open_trade_when_requested(
 
     await persistence_module.persist_buy_trade(
         "BTC/USDC",
-        {"symbol": "BTC/USDC", "price": 100.0},
+        _trade_record(
+            signal_name="asap",
+            metadata_json='{"entry_sizing":{"applied":true}}',
+        ),
         create_open_trade=True,
     )
 
@@ -143,6 +174,8 @@ async def test_persist_buy_trade_creates_open_trade_when_requested(
     assert _DummyTradesModel.created_payload["symbol"] == "BTC/USDC"
     assert _DummyTradesModel.created_payload["price"] == 100.0
     assert _DummyTradesModel.created_payload["deal_id"]
+    assert "signal_name" not in _DummyTradesModel.created_payload
+    assert "metadata_json" not in _DummyTradesModel.created_payload
     assert _DummyOpenTradesCreateModel.created_symbol == "BTC/USDC"
     assert _DummyOpenTradesCreateModel.created_payload is not None
     assert _DummyOpenTradesCreateModel.created_payload["deal_id"]
@@ -156,7 +189,12 @@ async def test_persist_buy_trade_creates_open_trade_when_requested(
         is True
     )
     assert _DummyTradeExecutionsModel.created_payload is not None
-    assert _DummyTradeExecutionsModel.created_payload["role"] == "buy"
+    assert _DummyTradeExecutionsModel.created_payload["role"] == "base_order"
+    assert _DummyTradeExecutionsModel.created_payload["signal_name"] == "asap"
+    assert (
+        _DummyTradeExecutionsModel.created_payload["metadata_json"]
+        == '{"entry_sizing":{"applied":true}}'
+    )
 
 
 def test_open_trade_dca_defaults_preserve_recovery_policy_snapshot() -> None:
@@ -181,6 +219,185 @@ def test_open_trade_dca_defaults_preserve_recovery_policy_snapshot() -> None:
 
 async def _async_value(value: Any) -> Any:
     return value
+
+
+@pytest.mark.asyncio
+async def test_unsellable_outcome_and_placement_persist_atomically(tmp_path) -> None:
+    """A failed remainder archive must roll back every sell-side mutation."""
+    import model
+
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'unsellable-atomic.sqlite'}",
+        modules={"models": ["model"]},
+    )
+    await Tortoise.generate_schemas()
+    try:
+        await model.Trades.create(
+            timestamp="1778000000000",
+            ordersize=10.0,
+            fee=0.0,
+            precision=8,
+            amount=1.0,
+            amount_fee=0.0,
+            price=10.0,
+            symbol="LINK/USDC",
+            orderid="buy-before-unsellable",
+            bot="atomic_test",
+            ordertype="market",
+            baseorder=True,
+            safetyorder=False,
+            order_count=0,
+            so_percentage=None,
+            direction="long",
+            side="buy",
+            deal_id="deal-unsellable",
+        )
+        await model.OpenTrades.create(
+            symbol="LINK/USDC",
+            deal_id="deal-unsellable",
+            amount=1.0,
+            cost=10.0,
+            execution_history_complete=True,
+        )
+        await model.PlacementIntent.create(
+            operation_id="unsellable-sell",
+            client_order_id="mw-unsellable-sell",
+            exchange_name="binance",
+            symbol="LINK/USDC",
+            action="sell",
+            side="sell",
+            order_type="market",
+            state=PlacementIntentState.FILLED.value,
+        )
+        existing_archive = await model.UnsellableTrades.create(
+            symbol="STALE/USDC",
+            deal_id="deal-unsellable",
+        )
+        closed_payload = {
+            "symbol": "LINK/USDC",
+            "amount": 0.9,
+            "cost": 9.0,
+            "profit": 0.9,
+        }
+        unsellable_payload = {
+            "symbol": "LINK/USDC",
+            "amount": 0.1,
+            "cost": 1.0,
+        }
+
+        with pytest.raises(IntegrityError):
+            await persistence_module.persist_unsellable_remainder(
+                "LINK/USDC",
+                unsellable_payload,
+                partial_amount=0.9,
+                partial_proceeds=9.9,
+                closed_trade_payload=closed_payload,
+                placement_operation_id="unsellable-sell",
+            )
+
+        assert await model.Trades.filter(symbol="LINK/USDC").count() == 1
+        assert await model.OpenTrades.filter(symbol="LINK/USDC").count() == 1
+        assert await model.TradeExecutions.all().count() == 0
+        assert await model.ClosedTrades.all().count() == 0
+        assert await model.UnsellableTrades.all().count() == 1
+        placement = await model.PlacementIntent.get(operation_id="unsellable-sell")
+        assert placement.state == PlacementIntentState.FILLED.value
+
+        await existing_archive.delete()
+        await persistence_module.persist_unsellable_remainder(
+            "LINK/USDC",
+            unsellable_payload,
+            partial_amount=0.9,
+            partial_proceeds=9.9,
+            closed_trade_payload=closed_payload,
+            placement_operation_id="unsellable-sell",
+        )
+
+        assert await model.Trades.filter(symbol="LINK/USDC").count() == 0
+        assert await model.OpenTrades.filter(symbol="LINK/USDC").count() == 0
+        assert await model.TradeExecutions.all().count() == 1
+        assert await model.ClosedTrades.all().count() == 1
+        assert await model.UnsellableTrades.all().count() == 1
+        await placement.refresh_from_db()
+        assert placement.state == PlacementIntentState.PERSISTED.value
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_tp_cancel_partial_fill_and_intent_persist_atomically(tmp_path) -> None:
+    """Cancel fill bookkeeping and metadata clearing share one transaction."""
+    import model
+
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'tp-cancel-atomic.sqlite'}",
+        modules={"models": ["model"]},
+    )
+    await Tortoise.generate_schemas()
+    try:
+        await model.OpenTrades.create(
+            symbol="XPL/USDC",
+            deal_id="deal-tp-cancel",
+            amount=2.0,
+            cost=20.0,
+            execution_history_complete=True,
+            tp_limit_order_id="tp-limit-1",
+            tp_limit_order_price=11.0,
+            tp_limit_order_amount=2.0,
+        )
+        intent = await model.PlacementIntent.create(
+            operation_id="cancel-tp-limit",
+            client_order_id="mw-cancel-tp-limit",
+            exchange_order_id="tp-limit-1",
+            exchange_name="binance",
+            symbol="XPL/USDC",
+            action="cancel",
+            side="sell",
+            order_type="limit",
+            state=PlacementIntentState.REJECTED.value,
+        )
+        exchange_status = {
+            "id": "tp-limit-1",
+            "symbol": "XPL/USDC",
+            "status": "canceled",
+            "filled": 0.4,
+            "amount": 2.0,
+            "average": 11.0,
+            "cost": 4.4,
+            "timestamp": 1_742_000_000_123,
+        }
+
+        with pytest.raises(ValueError, match="Cannot mark placement"):
+            await persistence_module.persist_tp_limit_cancellation(
+                "XPL/USDC",
+                exchange_status,
+                placement_operation_id="cancel-tp-limit",
+            )
+
+        open_trade = await model.OpenTrades.get(symbol="XPL/USDC")
+        assert open_trade.sold_amount == pytest.approx(0.0)
+        assert open_trade.tp_limit_order_id == "tp-limit-1"
+        assert await model.TradeExecutions.all().count() == 0
+
+        intent.state = PlacementIntentState.ACCEPTED.value
+        await intent.save(update_fields=["state"])
+        persisted = await persistence_module.persist_tp_limit_cancellation(
+            "XPL/USDC",
+            exchange_status,
+            placement_operation_id="cancel-tp-limit",
+        )
+
+        assert persisted is True
+        await open_trade.refresh_from_db()
+        assert open_trade.sold_amount == pytest.approx(0.4)
+        assert open_trade.sold_proceeds == pytest.approx(4.4)
+        assert open_trade.tp_limit_order_id is None
+        execution = await model.TradeExecutions.get(deal_id="deal-tp-cancel")
+        assert execution.order_id == "tp-limit-1"
+        await intent.refresh_from_db()
+        assert intent.state == PlacementIntentState.PERSISTED.value
+    finally:
+        await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio
@@ -233,7 +450,7 @@ async def test_persist_buy_trade_schedules_ai_trust_after_open_trade_persistence
 
     await persistence_module.persist_buy_trade(
         "BTC/USDC",
-        {"symbol": "BTC/USDC", "price": 100.0},
+        _trade_record(),
         create_open_trade=True,
     )
 
@@ -288,7 +505,7 @@ async def test_persisted_buy_survives_optional_ai_follow_up_failure(
 
     await persistence_module.persist_buy_trade(
         "BTC/USDC",
-        {"symbol": "BTC/USDC", "price": 100.0},
+        _trade_record(),
         create_open_trade=True,
         entry_evaluation=gate,
     )
@@ -326,7 +543,7 @@ async def test_persist_manual_buy_add_requires_matching_open_trade(
     with pytest.raises(ValueError, match="No open trade found for BTC/USDC."):
         await persistence_module.persist_manual_buy_add(
             "BTC/USDC",
-            {"symbol": "BTC/USDC"},
+            _trade_record(),
             {"amount": 1.5},
         )
 
@@ -366,15 +583,14 @@ async def test_persist_buy_trade_preserves_original_open_date_on_sidestep_reentr
 
     await persistence_module.persist_buy_trade(
         "BTC/USDC",
-        {
-            "symbol": "BTC/USDC",
-            "timestamp": "1714726800000",
-            "ordersize": 100.0,
-            "amount": 1.0,
-            "price": 100.0,
-            "baseorder": True,
-            "safetyorder": False,
-        },
+        _trade_record(
+            timestamp="1714726800000",
+            ordersize=100.0,
+            amount=1.0,
+            price=100.0,
+            baseorder=True,
+            safetyorder=False,
+        ),
         create_open_trade=True,
         campaign_context={
             "campaign_id": "campaign-1",

@@ -13,6 +13,10 @@ from service.order_payloads import (
     normalize_trade_datetime,
     trade_datetime_from_ms,
 )
+from service.persistence_records import (
+    ClosedTradeSummaryRecord,
+    UnsellableTradePersistenceRecord,
+)
 
 
 @dataclass(frozen=True)
@@ -41,8 +45,8 @@ class UnsellableRemainderContext:
     min_notional: float | None
     estimated_notional: float | None
     already_notified: bool
-    closed_trade_payload: dict[str, Any] | None
-    unsellable_payload: dict[str, Any]
+    closed_trade_payload: ClosedTradeSummaryRecord | None
+    unsellable_payload: UnsellableTradePersistenceRecord
     monitor_payload: dict[str, Any]
 
 
@@ -112,7 +116,7 @@ def build_unsellable_remainder_context(
     )
     open_date_value = open_trade.get("open_date") if open_trade else None
 
-    closed_trade_payload: dict[str, Any] | None = None
+    closed_trade_payload: ClosedTradeSummaryRecord | None = None
     if snapshot.partial_amount > 0 and open_timestamp_ms is not None:
         close_date = (
             normalize_trade_datetime(closed_at)
@@ -145,7 +149,7 @@ def build_unsellable_remainder_context(
             "duration": duration_data,
         }
 
-    unsellable_payload = {
+    unsellable_payload: UnsellableTradePersistenceRecord = {
         "symbol": snapshot.symbol,
         "deal_id": deal_id or None,
         "execution_history_complete": execution_history_complete,

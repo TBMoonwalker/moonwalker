@@ -170,19 +170,20 @@ test('heatmapSummary uses singular "active day" when count is 1', () => {
 // 12. Resize handler and lifecycle
 // ---------------------------------------------------------------------------
 
-test('handleResize sets isMobile based on window width', () => {
-    assert.match(source, /isMobile\.value = window\.innerWidth < 768/)
+test('statistics uses the shared viewport source', () => {
+    assert.match(source, /import \{ useViewport \} from '\.\.\/composables\/useViewport'/)
+    assert.match(source, /const \{ isMobile \} = useViewport\(\)/)
 })
 
-test('handleResize reduces pagination slots on mobile', () => {
+test('shared viewport changes reduce pagination slots on mobile', () => {
     assert.match(source, /const pageSlot = isMobile\.value \? 3 : 5/)
     assert.match(source, /symbolPagination\.pageSlot = pageSlot/)
     assert.match(source, /recentPredictionsPagination\.pageSlot = pageSlot/)
     assert.match(source, /badEntryReviewPagination\.pageSlot = pageSlot/)
-})
-
-test('onMounted adds resize listener', () => {
-    assert.match(source, /addEventListener\('resize', handleResize\)/)
+    assert.match(
+        source,
+        /watch\(isMobile, syncPaginationSlots, \{ immediate: true \}\)/,
+    )
 })
 
 test('onActivated refreshes analytics for kept-alive route visits', () => {
@@ -190,8 +191,9 @@ test('onActivated refreshes analytics for kept-alive route visits', () => {
     assert.match(source, /void analytics\.load\(\)/)
 })
 
-test('onUnmounted removes resize listener', () => {
-    assert.match(source, /removeEventListener\('resize', handleResize\)/)
+test('statistics does not own a window resize listener', () => {
+    assert.doesNotMatch(source, /addEventListener\('resize'/)
+    assert.doesNotMatch(source, /removeEventListener\('resize'/)
 })
 
 // ---------------------------------------------------------------------------

@@ -93,6 +93,14 @@ All mutating order endpoints use `POST`.
 | `POST` | `/orders/stop/{symbol}` | Stop an active trade. |
 | `POST` | `/orders/buy/manual` | Append a manual buy row without placing an exchange order. |
 
+The sell, buy, and stop endpoints retain their legacy `result` field and also
+return a typed `mutation` object. Its `status` is one of `applied`,
+`deduplicated`, `rejected`, `stale`, `indeterminate`, or `quarantined`.
+`operation_id` is the server-assigned durable identity used to deduplicate and
+reconcile the exchange effect. An `indeterminate` or `quarantined` response is
+not success and must not trigger a second placement; surface the operation ID
+for manual reconciliation.
+
 Manual buy payload:
 
 ```json

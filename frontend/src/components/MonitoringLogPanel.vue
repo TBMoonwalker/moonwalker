@@ -388,7 +388,7 @@ onUnmounted(() => {
   width: 100%;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .log-control-source,
   .log-control-level {
     min-width: 0;

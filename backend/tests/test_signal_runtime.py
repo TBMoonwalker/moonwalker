@@ -1,3 +1,4 @@
+import asyncio
 import types
 
 import model
@@ -5,7 +6,12 @@ import pytest
 import service.signal_runtime as signal_runtime_module
 from service.autopilot_memory import SymbolAdmissionProfile
 from service.signal_runtime import (
+    SignalAdmissionBatch,
+    SignalAdmissionDecision,
+    SignalAdmissionLease,
+    SignalEntryOrderDecision,
     build_common_runtime_settings,
+    execute_signal_entry_batch,
     is_max_bots_reached,
     parse_signal_settings,
     resolve_max_bots_log_interval,
@@ -473,6 +479,134 @@ async def test_resolve_signal_entry_orders_reuses_shared_autopilot_policy() -> N
     assert decision.entry_size_applied is True
     assert decision.reason_code == "quick_profitable_closes"
     assert '"resolved_order_size": 115.0' in decision.metadata_json
+
+
+def _entry_decision(symbol: str) -> SignalEntryOrderDecision:
+    return SignalEntryOrderDecision(
+        symbol=symbol,
+        entry_sizing_configured=False,
+        order_size=10.0,
+        baseline_order_size=10.0,
+        suggested_order_size=10.0,
+        entry_size_applied=False,
+        reason_code=None,
+        memory_status="fresh",
+        trust_direction="neutral",
+        trust_score=50.0,
+        signal_name="shared-signal",
+        strategy_name="ema",
+        timeframe="1m",
+    )
+
+
+def _admitted_batch(*symbols: str) -> SignalAdmissionBatch:
+    signal_runtime_module._PENDING_ADMISSION_SYMBOLS.update(symbols)
+    return SignalAdmissionBatch(
+        decisions=[
+            SignalAdmissionDecision(
+                symbol=symbol,
+                admitted=True,
+                reason_code="admitted_capacity_available",
+                memory_status="fresh",
+                trust_direction="neutral",
+                trust_score=50.0,
+                available_slots=len(symbols),
+                competing_candidates=len(symbols),
+            )
+            for symbol in symbols
+        ],
+        lease=SignalAdmissionLease(symbols),
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_signal_entry_batch_owns_prepare_size_submit_and_release() -> (
+    None
+):
+    batch = _admitted_batch("BTC/USDT", "ETH/USDT")
+    watcher_queue: asyncio.Queue[list[str]] = asyncio.Queue()
+    submitted_orders = []
+
+    async def resolve_admission(*_args, **_kwargs) -> SignalAdmissionBatch:
+        return batch
+
+    async def resolve_entry_orders(
+        _config,
+        _statistic,
+        _autopilot,
+        symbols,
+        **_kwargs,
+    ) -> dict[str, SignalEntryOrderDecision]:
+        assert symbols == ["BTC/USDT"]
+        return {symbol: _entry_decision(symbol) for symbol in symbols}
+
+    async def prepare_symbol(symbol: str) -> bool:
+        return symbol == "BTC/USDT"
+
+    async def receive_buy_order(order, _config) -> None:
+        submitted_orders.append(order)
+
+    result = await execute_signal_entry_batch(
+        {},
+        types.SimpleNamespace(),
+        types.SimpleNamespace(),
+        watcher_queue,
+        types.SimpleNamespace(receive_buy_order=receive_buy_order),
+        ["btc/usdt", "eth/usdt"],
+        signal_name="shared-signal",
+        strategy_name="ema",
+        timeframe="1m",
+        botname_factory=lambda symbol: f"signal_{symbol}",
+        prepare_symbol=prepare_symbol,
+        admission_resolver=resolve_admission,
+        entry_order_resolver=resolve_entry_orders,
+    )
+
+    assert result.admitted_symbols == ("BTC/USDT", "ETH/USDT")
+    assert result.prepared_symbols == ("BTC/USDT",)
+    assert result.submitted_symbols == ("BTC/USDT",)
+    assert await watcher_queue.get() == ["BTC/USDT"]
+    assert submitted_orders[0]["botname"] == "signal_BTC/USDT"
+    assert signal_runtime_module._PENDING_ADMISSION_SYMBOLS == set()
+
+
+@pytest.mark.asyncio
+async def test_execute_signal_entry_batch_releases_all_slots_on_order_failure() -> None:
+    batch = _admitted_batch("BTC/USDT")
+    watcher_queue: asyncio.Queue[list[str]] = asyncio.Queue()
+
+    async def resolve_admission(*_args, **_kwargs) -> SignalAdmissionBatch:
+        return batch
+
+    async def resolve_entry_orders(
+        _config,
+        _statistic,
+        _autopilot,
+        symbols,
+        **_kwargs,
+    ) -> dict[str, SignalEntryOrderDecision]:
+        return {symbol: _entry_decision(symbol) for symbol in symbols}
+
+    async def receive_buy_order(_order, _config) -> None:
+        raise RuntimeError("exchange unavailable")
+
+    with pytest.raises(RuntimeError, match="exchange unavailable"):
+        await execute_signal_entry_batch(
+            {},
+            types.SimpleNamespace(),
+            types.SimpleNamespace(),
+            watcher_queue,
+            types.SimpleNamespace(receive_buy_order=receive_buy_order),
+            ["BTC/USDT"],
+            signal_name="shared-signal",
+            strategy_name="ema",
+            timeframe="1m",
+            botname_factory=lambda symbol: f"signal_{symbol}",
+            admission_resolver=resolve_admission,
+            entry_order_resolver=resolve_entry_orders,
+        )
+
+    assert signal_runtime_module._PENDING_ADMISSION_SYMBOLS == set()
 
 
 def _async_result(value):

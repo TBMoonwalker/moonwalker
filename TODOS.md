@@ -19,27 +19,6 @@ branch QA pass.
 replay -> observe the take-profit marker at the left chart edge.
 **Report:** .gstack/qa-reports/qa-report-localhost-8130-2026-06-08.md
 
-## Frontend
-
-### Fix mobile text truncation (ISSUE-003, ISSUE-004)
-
-**Found by:** /qa on main, 2026-06-05
-**Severity:** Low (ISSUE-003), Medium (ISSUE-004)
-**Category:** Visual
-**What:** On a 375px mobile viewport, the "less/more" labels below the stats
-heatmap truncate to "les mo", and the Control Center heading "Safe dry-run
-setup is ready" truncates to "Safe dry-run set".
-**Why:** Truncated labels reduce readability and can make operator guidance
-ambiguous on small screens.
-**Context:** These are independent mobile-only visual regressions grouped from
-the same main branch QA pass.
-**Effort:** S
-**Priority:** P2
-**Depends on:** None
-**Repro:** Set viewport to 375x812 → visit `/stats` and `/control-center` →
-observe truncated text.
-**Report:** .gstack/qa-reports/qa-report-192-168-6-5-8160-2026-06-05.md
-
 ## Analytics
 
 ### Extend sidestep campaign analytics beyond grouped replay polish
@@ -72,6 +51,15 @@ actually warranted.
 current grouped replay and waiting-campaign context are still insufficient.
 
 ## Completed
+
+### Fix mobile text truncation (ISSUE-003, ISSUE-004)
+
+**Completed:** v4.5.0.0 (2026-07-28)
+
+**What shipped:** Reworked the Control Center mission header and Statistics
+mobile layout so guidance, tabs, and activity labels remain readable at 375
+pixels, aligned responsive breakpoints at 767 pixels, and added desktop,
+tablet, and mobile Playwright coverage.
 
 ### Fix Statistics pagination (ISSUE-001)
 

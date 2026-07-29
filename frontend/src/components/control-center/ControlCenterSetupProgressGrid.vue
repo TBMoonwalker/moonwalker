@@ -110,7 +110,7 @@ const emit = defineEmits<{
     border-color: rgba(46, 125, 91, 0.2);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .setup-progress-grid {
         grid-template-columns: 1fr;
     }

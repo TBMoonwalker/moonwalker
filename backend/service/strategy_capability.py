@@ -7,7 +7,7 @@ import re
 from typing import Any, Iterable
 
 import helper
-from service.strategy_builder import BUILTIN_STRATEGY_BY_SLUG
+from service.strategy_catalog import BUILTIN_STRATEGY_BY_SLUG
 from service.trade_lifecycle_config import TradeLifecycleConfigView
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_capability")

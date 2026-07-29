@@ -1,8 +1,13 @@
 """Sell execution orchestration helpers."""
 
-from typing import Any
+from typing import Any, cast
 
 import ccxt.async_support as ccxt
+from service.exchange_capabilities import (
+    ExchangePostSubmissionFailure,
+    ExchangeSubmissionIndeterminate,
+    build_client_order_params,
+)
 from service.exchange_contexts import MarketSellExecutionContext, SellRoutingContext
 from service.exchange_helpers import safe_float
 from service.exchange_limit_sell import build_partial_status_from_fallback
@@ -83,8 +88,10 @@ class ExchangeSellManager:
             remaining_order["total_amount"] = float(
                 order_status.get("remaining_amount") or 0.0
             )
-            market_status = await context.create_spot_market_sell(
-                remaining_order, config
+            market_status = await context.create_spot_market_fallback(
+                remaining_order,
+                config,
+                order_status,
             )
             if not market_status:
                 self._logger.warning(
@@ -185,6 +192,8 @@ class ExchangeSellManager:
             )
             return None
 
+        submission_accepted = False
+        accepted_order: dict[str, Any] = {}
         try:
             requested_amount = float(order["total_amount"])
             sell_amount = await context.resolve_sell_amount(
@@ -298,10 +307,26 @@ class ExchangeSellManager:
             trade = await exchange.create_market_sell_order(
                 resolved_symbol,
                 order["total_amount"],
+                build_client_order_params(order.get("client_order_id")),
             )
-            order.update(trade)
+            submission_accepted = True
+            accepted_order = {
+                **order,
+                **(trade if isinstance(trade, dict) else {}),
+            }
+            if not isinstance(trade, dict):
+                raise TypeError("Exchange returned a non-object order result")
+            order.update(cast(ExchangeOrderPayload, trade))
             await context.log_remaining_sell_dust(resolved_symbol)
         except ccxt.ExchangeError as exc:
+            if submission_accepted:
+                raise ExchangePostSubmissionFailure(
+                    action="market_sell",
+                    symbol=str(resolved_symbol),
+                    order=accepted_order,
+                    cause=exc,
+                    operation_id=str(order.get("operation_id") or "") or None,
+                ) from exc
             if "insufficient balance" in str(exc):
                 self._logger.error(
                     "Trying to sell %s of pair %s failed due insufficient balance.",
@@ -332,13 +357,28 @@ class ExchangeSellManager:
             )
             order = None
         except ccxt.NetworkError as exc:
-            self._logger.error(
-                "Selling pair %s failed due to an network error: %s",
-                order["symbol"],
-                exc,
-            )
-            order = None
+            if submission_accepted:
+                raise ExchangePostSubmissionFailure(
+                    action="market_sell",
+                    symbol=str(resolved_symbol),
+                    order=accepted_order,
+                    cause=exc,
+                    operation_id=str(order.get("operation_id") or "") or None,
+                ) from exc
+            raise ExchangeSubmissionIndeterminate(
+                action="market_sell",
+                symbol=str(order["symbol"]),
+                client_order_id=str(order.get("client_order_id") or "") or None,
+            ) from exc
         except ccxt.BaseError as exc:
+            if submission_accepted:
+                raise ExchangePostSubmissionFailure(
+                    action="market_sell",
+                    symbol=str(resolved_symbol),
+                    order=accepted_order,
+                    cause=exc,
+                    operation_id=str(order.get("operation_id") or "") or None,
+                ) from exc
             self._logger.error(
                 "Selling pair %s failed due to an error: %s",
                 order["symbol"],
@@ -346,6 +386,14 @@ class ExchangeSellManager:
             )
             order = None
         except (TypeError, ValueError, RuntimeError, KeyError) as exc:
+            if submission_accepted:
+                raise ExchangePostSubmissionFailure(
+                    action="market_sell",
+                    symbol=str(resolved_symbol),
+                    order=accepted_order,
+                    cause=exc,
+                    operation_id=str(order.get("operation_id") or "") or None,
+                ) from exc
             self._logger.error("Selling pair %s failed with: %s", order["symbol"], exc)
             order = None
 
@@ -358,6 +406,23 @@ class ExchangeSellManager:
                 "Sold %s %s on Exchange.", order["total_amount"], order["symbol"]
             )
             order.pop("_sell_retry_count", None)
-            return await context.build_sell_order_status(order)
+            try:
+                status = await context.build_sell_order_status(order)
+            except Exception as exc:
+                raise ExchangePostSubmissionFailure(
+                    action="market_sell",
+                    symbol=str(resolved_symbol),
+                    order=accepted_order or dict(order),
+                    cause=exc,
+                    operation_id=str(order.get("operation_id") or "") or None,
+                ) from exc
+            if status is None:
+                raise ExchangePostSubmissionFailure(
+                    action="market_sell",
+                    symbol=str(resolved_symbol),
+                    order=accepted_order or dict(order),
+                    operation_id=str(order.get("operation_id") or "") or None,
+                )
+            return status
 
         return None

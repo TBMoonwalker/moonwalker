@@ -4,7 +4,6 @@ import {
   defineAsyncComponent,
   nextTick,
   onMounted,
-  onUnmounted,
   ref,
   type HTMLAttributes,
 } from 'vue'
@@ -13,6 +12,7 @@ import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
 import { useSharedConfigSnapshot } from '@/control-center/configSnapshotStore'
 import { useTradingPauseStatus } from '@/composables/useTradingPauseStatus'
+import { useViewport } from '@/composables/useViewport'
 
 const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
 const WaitingCampaigns = defineAsyncComponent(() => import('../components/WaitingCampaigns.vue'))
@@ -28,9 +28,8 @@ const waitingCampaignsState = storeToRefs(waitingCampaignsStore)
 const openTradesStore = useWebSocketDataStore('openTrades')
 const openTradesState = storeToRefs(openTradesStore)
 const configSnapshotStore = useSharedConfigSnapshot()
-const viewportWidth = ref(window.innerWidth)
+const { isMobile } = useViewport()
 const { tradingPaused } = useTradingPauseStatus()
-const isMobile = computed(() => viewportWidth.value < 768)
 const tabPadding = computed(() => (isMobile.value ? 12 : 20))
 const activeProfitTab = ref('profit-overall')
 const activeTradesTab = ref('open-trades')
@@ -145,10 +144,6 @@ const admissionToneClass = computed(() =>
   tradingPaused.value || tradeAdmissionWarning.value ? 'is-warning' : 'is-open'
 )
 
-function handleResize() {
-  viewportWidth.value = window.innerWidth
-}
-
 function buildTabProps(
   group: 'profit' | 'trade',
   name: string,
@@ -216,12 +211,7 @@ function syncTablistRoles(): void {
 }
 
 onMounted(() => {
-  window.addEventListener('resize', handleResize)
   void nextTick(syncTablistRoles)
-})
-
-onUnmounted(() => {
-  window.removeEventListener('resize', handleResize)
 })
 </script>
 
@@ -572,7 +562,7 @@ onUnmounted(() => {
   color: var(--mw-color-primary);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .chart-panel :deep(.chart-wrap),
   .chart-panel :deep(.chart),
   .chart-panel :deep(.chart-placeholder) {
@@ -602,18 +592,6 @@ onUnmounted(() => {
     width: 0 !important;
     min-width: 0 !important;
     max-width: 0 !important;
-  }
-
-  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(1)) {
-    width: 104px !important;
-    min-width: 104px !important;
-    max-width: 104px !important;
-  }
-
-  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(2)) {
-    width: 72px !important;
-    min-width: 72px !important;
-    max-width: 72px !important;
   }
 
   .profit-tabs :deep(.n-tabs-wrapper) {
@@ -693,18 +671,6 @@ onUnmounted(() => {
     min-width: 85px;
     width: 85px;
     max-width: 85px;
-  }
-
-  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(3)) {
-    width: 85px !important;
-    min-width: 85px !important;
-    max-width: 85px !important;
-  }
-
-  .ledger-panel :deep(.open-trades-table .n-data-table-table colgroup col:nth-child(4)) {
-    width: 64px !important;
-    min-width: 64px !important;
-    max-width: 64px !important;
   }
 
   .ledger-panel :deep(.closed-trades-table .n-data-table-th[data-col-key="action"]),
