@@ -1,13 +1,40 @@
 import asyncio
+import hashlib
+import hmac
 
 import httpx
 import pytest
+import service.coin_market_cap as coin_market_cap_module
 from service.coin_market_cap import (
     SNAPSHOT_MAX_STALE_SECONDS,
     SNAPSHOT_REFRESH_SECONDS,
     CoinMarketCapRankService,
 )
 from service.filter import Filter
+
+
+def test_cmc_api_key_fingerprint_uses_a_process_local_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fingerprint_key = b"k" * 32
+    api_key = "sensitive-api-key"
+    monkeypatch.setattr(
+        coin_market_cap_module,
+        "_FINGERPRINT_KEY",
+        fingerprint_key,
+    )
+
+    fingerprint = CoinMarketCapRankService._fingerprint(api_key)
+
+    assert (
+        fingerprint
+        == hmac.new(
+            fingerprint_key,
+            api_key.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+    )
+    assert api_key not in fingerprint
 
 
 def test_has_enough_volume_accepts_higher_range() -> None:

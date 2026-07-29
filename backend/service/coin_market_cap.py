@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
+import secrets
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
@@ -24,6 +26,7 @@ SNAPSHOT_MAX_STALE_SECONDS = 7 * 24 * 60 * 60
 REQUEST_TIMEOUT_SECONDS = 10.0
 REQUEST_ATTEMPTS = 3
 RETRY_DELAY_SECONDS = 0.25
+_FINGERPRINT_KEY = secrets.token_bytes(32)
 
 
 @dataclass(frozen=True)
@@ -152,8 +155,12 @@ class CoinMarketCapRankService:
 
     @staticmethod
     def _fingerprint(api_key: str) -> str:
-        """Return a non-secret identity for snapshot ownership checks."""
-        return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+        """Return a process-local identity for snapshot ownership checks."""
+        return hmac.new(
+            _FINGERPRINT_KEY,
+            api_key.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
     @staticmethod
     def _lookup_snapshot(
