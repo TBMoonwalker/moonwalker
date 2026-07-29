@@ -1,5 +1,4 @@
 import asyncio
-import hashlib
 import hmac
 
 import httpx
@@ -28,11 +27,11 @@ def test_cmc_api_key_fingerprint_uses_a_process_local_key(
 
     assert (
         fingerprint
-        == hmac.new(
+        == hmac.digest(
             fingerprint_key,
             api_key.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
+            "sha256",
+        ).hex()
     )
     assert api_key not in fingerprint
 

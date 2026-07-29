@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import hmac
 import secrets
 import time
@@ -156,11 +155,11 @@ class CoinMarketCapRankService:
     @staticmethod
     def _fingerprint(api_key: str) -> str:
         """Return a process-local identity for snapshot ownership checks."""
-        return hmac.new(
+        return hmac.digest(
             _FINGERPRINT_KEY,
             api_key.encode("utf-8"),
-            hashlib.sha256,
-        ).hexdigest()
+            "sha256",
+        ).hex()
 
     @staticmethod
     def _lookup_snapshot(
