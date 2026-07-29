@@ -12,10 +12,15 @@ Current CI checks include:
 - backend import ordering (`isort --check-only`)
 - backend type checking (`mypy`)
 - backend guardrail checks
-- backend pytest suite
+- backend pytest suite with line and branch coverage
+- global and critical-module backend coverage ratchets
 - frontend type-check (`vue-tsc`)
-- frontend tests (`node --test`)
+- frontend legacy/rendered checks (`node --test`)
+- frontend unit and component tests (`Vitest`)
+- frontend coverage ratchets
 - frontend production build (`vite build`)
+- dry-run Playwright journeys on desktop, mobile, and tablet in GitHub CI
+- Python and npm vulnerability audits plus npm registry signature checks
 
 ## Runtime Model
 

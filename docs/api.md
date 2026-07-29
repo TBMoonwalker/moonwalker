@@ -82,6 +82,23 @@ The Autopilot Memory payload is read-only. It includes:
 - portfolio-effect ranges for adaptive TP and suggested base order
 - entry-sizing status, warmup progress, and stale markers
 
+## Strategy Builder
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| `GET` | `/strategies` | Return strategy summaries and the available node palette. |
+| `GET` | `/strategies/{slug}` | Return one strategy, its active graph IR, validation result, explanation, and palette. |
+| `POST` | `/strategies` | Create a blank custom strategy with `{"name":"My strategy"}`. |
+| `POST` | `/strategies/duplicate` | Duplicate a built-in or custom strategy with `{"source_slug":"ema20_swing","name":"My copy"}`. |
+| `POST` | `/strategies/validate` | Validate a draft graph with `{"ir":{...}}` without saving it. |
+| `PUT` | `/strategies/{slug}` | Validate and promote a custom graph as a new active version with `ir` and `base_lock_version`. |
+| `DELETE` | `/strategies/{slug}` | Delete a custom strategy. Built-in strategies cannot be deleted. |
+
+Active graph versions are immutable. A save uses `base_lock_version` for
+optimistic concurrency and returns `409` when another dashboard client saved a
+newer version first. Built-in strategies are read-only templates; duplicate one
+before editing it.
+
 ## Orders
 
 All mutating order endpoints use `POST`.
