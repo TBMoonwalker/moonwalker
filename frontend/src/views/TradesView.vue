@@ -594,6 +594,11 @@ onMounted(() => {
     max-width: 0 !important;
   }
 
+  .ledger-panel :deep(.open-trades-table .n-data-table-th[data-col-key="__n_expand__"]),
+  .ledger-panel :deep(.open-trades-table .n-data-table-td[data-col-key="__n_expand__"]) {
+    display: none !important;
+  }
+
   .profit-tabs :deep(.n-tabs-wrapper) {
     display: flex;
     width: 100%;

@@ -154,6 +154,10 @@ test('mobile trade ledger reduces first column indentation', () => {
     assert.match(tradesViewSource, /max-width: 104px;/)
     assert.match(tradesViewSource, /min-width: 64px;/)
     assert.match(tradesViewSource, /max-width: 64px;/)
+    assert.match(
+        tradesViewSource,
+        /open-trades-table \.n-data-table-td\[data-col-key="__n_expand__"\]\) \{[\s\S]*?display: none !important;/,
+    )
 })
 
 test('mobile trade ledger tabs avoid clipped horizontal scroll labels', () => {
