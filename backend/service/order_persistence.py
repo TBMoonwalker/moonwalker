@@ -583,9 +583,11 @@ async def persist_closed_trade(
     """Persist a closed trade and remove its open-trade rows."""
 
     closed_deal_id: str | None = None
+    closed_open_date: Any = payload.get("open_date")
+    closed_close_date: Any = payload.get("close_date")
 
     async def _persist_sell() -> None:
-        nonlocal closed_deal_id
+        nonlocal closed_close_date, closed_deal_id, closed_open_date
         async with in_transaction() as conn:
             deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
             closed_deal_id = deal_id
@@ -613,6 +615,8 @@ async def persist_closed_trade(
                 for key, value in summary_overrides.items():
                     if key in SUMMARY_TRADE_KEYS:
                         summary_payload[key] = value
+            closed_open_date = summary_payload.get("open_date")
+            closed_close_date = summary_payload.get("close_date")
             await model.ClosedTrades.create(**summary_payload, using_db=conn)
 
             for sell_execution in payload.get("sell_executions") or []:
@@ -657,8 +661,43 @@ async def persist_closed_trade(
     await run_sqlite_write_with_retry(
         _persist_sell, f"persisting sell order for {symbol}"
     )
+    await _repair_replay_archive_after_commit(
+        closed_deal_id,
+        symbol,
+        open_date=closed_open_date,
+        close_date=closed_close_date,
+    )
     if await has_prediction_for_deal(closed_deal_id):
         await schedule_outcome_attribution(closed_deal_id)
+
+
+async def _repair_replay_archive_after_commit(
+    deal_id: str | None,
+    symbol: str,
+    *,
+    open_date: Any,
+    close_date: Any,
+) -> None:
+    """Complete a terminal deal's replay archive without holding a DB transaction."""
+    if deal_id is None:
+        return
+
+    try:
+        await archive_replay_candles_for_deal(
+            deal_id,
+            symbol,
+            open_date=open_date,
+            close_date=close_date,
+            allow_missing_archive_exchange_repair=True,
+            allow_live_snapshot_exchange_repair=True,
+        )
+    except Exception:
+        logging.error(
+            "Trade %s (%s) was persisted, but replay archive repair failed.",
+            symbol,
+            deal_id,
+            exc_info=True,
+        )
 
 
 async def persist_sidestep_transition(
@@ -672,9 +711,13 @@ async def persist_sidestep_transition(
 ) -> None:
     """Persist a sidestep sell while keeping the active open-trade mission alive."""
 
+    closed_deal_id: str | None = None
+
     async def _persist_sidestep() -> None:
+        nonlocal closed_deal_id
         async with in_transaction() as conn:
             deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
+            closed_deal_id = deal_id
             campaign_id = (
                 campaign_context.get("campaign_id")
                 if campaign_context
@@ -760,6 +803,12 @@ async def persist_sidestep_transition(
 
     await run_sqlite_write_with_retry(
         _persist_sidestep, f"persisting sidestep transition for {symbol}"
+    )
+    await _repair_replay_archive_after_commit(
+        closed_deal_id,
+        symbol,
+        open_date=payload.get("open_date"),
+        close_date=payload.get("close_date"),
     )
 
 
