@@ -165,6 +165,27 @@ const ExpandedRowStub = defineComponent({
     setup: () => () => h('div', { 'data-test': 'expanded-replay' }),
 })
 
+const ModalStub = defineComponent({
+    name: 'NModal',
+    props: {
+        show: Boolean,
+    },
+    emits: ['update:show'],
+    setup(props, { slots }) {
+        return () =>
+            props.show
+                ? h(
+                      'div',
+                      {
+                          'data-test': 'mobile-trade-details',
+                          role: 'dialog',
+                      },
+                      slots.default?.(),
+                  )
+                : null
+    },
+})
+
 function openTrade(): OpenTradeRow {
     return {
         id: 2,
@@ -207,6 +228,8 @@ function mountOpenTrades() {
             stubs: {
                 NDataTable: DataTableStub,
                 DataTable: DataTableStub,
+                NModal: ModalStub,
+                Modal: ModalStub,
                 OpenTradeExpandedRow: ExpandedRowStub,
             },
         },
@@ -221,7 +244,29 @@ describe('OpenTrades mobile replay interaction', () => {
         loadConfiguredMinTimeframeMock.mockResolvedValue(undefined)
     })
 
-    it('retains the expand column and mounts replay details after a row click', async () => {
+    it('omits the expand column and opens replay details in a modal', async () => {
+        const wrapper = mountOpenTrades()
+        const row = wrapper.get('[data-test="trade-row"]')
+        const columns = wrapper
+            .getComponent(DataTableStub)
+            .props('columns') as Array<Record<string, unknown>>
+
+        expect(columns.some((column) => column.type === 'expand')).toBe(false)
+        expect(row.attributes('aria-expanded')).toBe('false')
+        expect(row.attributes('aria-haspopup')).toBe('dialog')
+        expect(wrapper.find('[data-test="expanded-replay"]').exists()).toBe(false)
+
+        await row.get('[data-test="row-content"]').trigger('click')
+
+        expect(row.attributes('aria-expanded')).toBe('true')
+        expect(wrapper.get('[data-test="mobile-trade-details"]').attributes('role')).toBe(
+            'dialog',
+        )
+        expect(wrapper.get('[data-test="expanded-replay"]').exists()).toBe(true)
+    })
+
+    it('keeps the expand column and inline replay on larger viewports', async () => {
+        testState.isMobile = false
         const wrapper = mountOpenTrades()
         const row = wrapper.get('[data-test="trade-row"]')
         const columns = wrapper
@@ -229,12 +274,14 @@ describe('OpenTrades mobile replay interaction', () => {
             .props('columns') as Array<Record<string, unknown>>
 
         expect(columns[0].type).toBe('expand')
-        expect(row.attributes('aria-expanded')).toBe('false')
-        expect(wrapper.find('[data-test="expanded-replay"]').exists()).toBe(false)
+        expect(row.attributes('aria-haspopup')).toBeUndefined()
 
         await row.get('[data-test="row-content"]').trigger('click')
 
         expect(row.attributes('aria-expanded')).toBe('true')
+        expect(wrapper.find('[data-test="mobile-trade-details"]').exists()).toBe(
+            false,
+        )
         expect(wrapper.get('[data-test="expanded-replay"]').exists()).toBe(true)
     })
 })

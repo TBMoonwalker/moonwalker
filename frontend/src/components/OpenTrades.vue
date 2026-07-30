@@ -15,16 +15,35 @@
         aria-label="Open trades table"
         @update:sorter="handleSorterChange"
     />
+    <n-modal
+        v-if="isMobile"
+        v-model:show="mobileTradeDetailsOpen"
+        class="open-trade-mobile-details"
+        preset="card"
+        :title="mobileTradeDetailsTitle"
+        :bordered="false"
+        content-scrollable
+        :style="mobileTradeDetailsStyle"
+        @after-leave="clearMobileTradeDetails"
+    >
+        <OpenTradeExpandedRow
+            v-if="mobileTradeDetailsRow"
+            :row-data="mobileTradeDetailsRow"
+            :min-timeframe="configuredMinTimeframe"
+            :on-add-order-manually="handleMobileAddOrderManually"
+        />
+    </n-modal>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, type CSSProperties } from 'vue'
 import {
     NDataTable,
     type DataTableRowKey,
 } from 'naive-ui/es/data-table'
 import { useDialog } from 'naive-ui/es/dialog'
 import { useMessage } from 'naive-ui/es/message'
+import { NModal } from 'naive-ui/es/modal'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { useTradesStore } from '../stores/trades'
 import { storeToRefs } from 'pinia'
@@ -45,6 +64,7 @@ import {
     sortTradeRows,
     type TradeTableSortState,
 } from '../helpers/tradeTable'
+import OpenTradeExpandedRow from './OpenTradeExpandedRow.vue'
 
 const props = withDefaults(
     defineProps<{
@@ -68,6 +88,18 @@ const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
     useConfiguredMinTimeframe()
 const sortState = ref<TradeTableSortState | null>(null)
 const expandedTradeRowKeys = ref<DataTableRowKey[]>([])
+const mobileTradeDetailsOpen = ref(false)
+const mobileTradeDetailsRow = ref<OpenTradeRow | null>(null)
+const mobileTradeDetailsTitle = computed(() =>
+    mobileTradeDetailsRow.value
+        ? `Trade details · ${mobileTradeDetailsRow.value.symbol}`
+        : 'Trade details',
+)
+const mobileTradeDetailsStyle: CSSProperties = {
+    width: 'calc(100vw - 24px)',
+    maxWidth: '560px',
+    maxHeight: 'calc(100dvh - 24px)',
+}
 
 const {
     rows: open_trades,
@@ -189,18 +221,45 @@ function toggleOpenTradeRow(rowData: OpenTradeRow): void {
     if (!rowData.symbol) {
         return
     }
+    if (isMobile.value) {
+        mobileTradeDetailsRow.value = rowData
+        mobileTradeDetailsOpen.value = true
+        return
+    }
     const rowKey = getOpenTradeRowKey(rowData)
     expandedTradeRowKeys.value = expandedTradeRowKeys.value.includes(rowKey)
         ? expandedTradeRowKeys.value.filter((key) => key !== rowKey)
         : [...expandedTradeRowKeys.value, rowKey]
 }
 
-function getOpenTradeRowProps(rowData: OpenTradeRow) {
+function isOpenTradeRowExpanded(rowData: OpenTradeRow): boolean {
     const rowKey = getOpenTradeRowKey(rowData)
+    if (isMobile.value) {
+        return (
+            mobileTradeDetailsOpen.value &&
+            mobileTradeDetailsRow.value !== null &&
+            getOpenTradeRowKey(mobileTradeDetailsRow.value) === rowKey
+        )
+    }
+    return expandedTradeRowKeys.value.includes(rowKey)
+}
+
+function clearMobileTradeDetails(): void {
+    mobileTradeDetailsRow.value = null
+}
+
+function handleMobileAddOrderManually(): void {
+    if (mobileTradeDetailsRow.value) {
+        handleAddManualBuy(mobileTradeDetailsRow.value)
+    }
+}
+
+function getOpenTradeRowProps(rowData: OpenTradeRow) {
     return {
         class: 'trade-row-clickable',
         tabindex: 0,
-        'aria-expanded': expandedTradeRowKeys.value.includes(rowKey),
+        'aria-expanded': isOpenTradeRowExpanded(rowData),
+        'aria-haspopup': isMobile.value ? 'dialog' : undefined,
         'aria-label': `Toggle trade details for ${rowData.symbol}`,
         onClick: (event: MouseEvent) => {
             if (!isInteractiveRowTarget(event.target)) {
@@ -267,5 +326,10 @@ onMounted(async () => {
 :deep(.trade-hidden-expand-cell .n-data-table-expand-trigger),
 :deep(.n-data-table-td--expand .n-data-table-expand-trigger) {
     display: none;
+}
+
+:deep(.open-trade-mobile-details .n-card-header__close) {
+    min-height: 44px;
+    min-width: 44px;
 }
 </style>

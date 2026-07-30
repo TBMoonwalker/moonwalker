@@ -555,7 +555,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         if (options.isMobile.value) {
             return columns.flatMap((column) => {
                 if (!('key' in column)) {
-                    return [column]
+                    return []
                 }
                 if (
                     !shouldShowTradeTableColumn(
