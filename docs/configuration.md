@@ -70,7 +70,7 @@ are not exposed in the UI and must be set via the API.
 | `marketcap_cmc_api_key` | `string` | CoinMarketCap API key for market cap filtering. Moonwalker shares one daily rank snapshot, serves it stale for at most seven days during provider failure, and never logs the key. | `cmc_...` |
 | `rsi_max` | `float` | Max RSI allowed for entry. | `70` |
 | `btc_pulse` | `bool` | Enable BTC pulse filter. | `true` |
-| `exchange` | `string` | Exchange name (ccxt id). | `binance` |
+| `exchange` | `string` | Exchange name (CCXT id). The Control Center supports `binance`, `bybit`, and `bybiteu` (Bybit EU). | `binance` |
 | `key` | `string` | Exchange API key. | `your-key` |
 | `secret` | `string` | Exchange API secret. | `your-secret` |
 | `exchange_hostname` | `string` | Optional ccxt hostname override for exchange domains (advanced). | `bybit.eu` |

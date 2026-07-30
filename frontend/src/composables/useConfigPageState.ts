@@ -47,6 +47,7 @@ const HISTORY_LOOKBACK_OPTIONS: StringSelectOption[] = [
 const EXCHANGE_OPTIONS: StringSelectOption[] = [
     { label: 'Binance', value: 'binance' },
     { label: 'Bybit', value: 'bybit' },
+    { label: 'Bybit EU', value: 'bybiteu' },
 ]
 
 const CURRENCY_OPTIONS: StringSelectOption[] = [
