@@ -7,6 +7,9 @@ class ExchangeOrderPayload(TypedDict, total=False):
     """Mutable order payload shared across exchange execution paths."""
 
     id: str
+    operation_id: str
+    source_operation_id: str
+    client_order_id: str
     symbol: str
     ordertype: str
     side: str
@@ -22,6 +25,10 @@ class ExchangeOrderPayload(TypedDict, total=False):
     limit_price: float | str
     current_price: float | str
     cost: float
+    filled: float
+    remaining: float
+    average: float
+    status: str
     timestamp: int
     fee: Any
     orderid: str
@@ -54,6 +61,9 @@ class ExchangeOrderPayload(TypedDict, total=False):
     partial_avg_price: float
     _limit_cancel_confirmed: bool
     _sell_retry_count: int
+    _placement_operation_id: str
+    _placement_source_operation_id: str
+    _placement_operation_ids: list[str]
 
 
 class ExecutionFill(TypedDict):
@@ -121,6 +131,7 @@ class MarketFallbackStatus(TypedDict, total=False):
     limit_cancel_confirmed: bool
     fallback_reason: str
     symbol: str
+    exchange_order_id: str
     remaining_amount: float
     partial_filled_amount: float
     partial_avg_price: float

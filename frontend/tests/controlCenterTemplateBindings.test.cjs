@@ -186,6 +186,20 @@ const strategyBuilderWorkspaceSource = fs.readFileSync(
     ),
     'utf8',
 )
+const strategyReteSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'composables', 'useStrategyRete.ts'),
+    'utf8',
+)
+const strategyWorkspaceSource = fs.readFileSync(
+    path.join(
+        __dirname,
+        '..',
+        'src',
+        'composables',
+        'useStrategyBuilderWorkspace.ts',
+    ),
+    'utf8',
+)
 const feedbackSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -1107,18 +1121,29 @@ test('control center delegates advanced and utilities presentation to dedicated 
         'expected dedicated strategy builder workspace to remain available',
     )
     assert.ok(
-        strategyBuilderWorkspaceSource.indexOf('await nextTick()') <
-            strategyBuilderWorkspaceSource.indexOf('const host = reteHost.value'),
+        strategyBuilderWorkspaceSource.includes(
+            "import { useStrategyBuilderWorkspace } from '../../composables/useStrategyBuilderWorkspace'",
+        ),
+        'expected strategy builder to delegate workspace state ownership',
+    )
+    assert.ok(
+        strategyWorkspaceSource.includes(
+            "import { useStrategyRete } from './useStrategyRete'",
+        ),
+        'expected strategy workspace state to delegate Rete lifecycle ownership',
+    )
+    assert.ok(
+        strategyReteSource.indexOf('await nextTick()') <
+            strategyReteSource.indexOf('const host = options.host.value'),
         'expected strategy builder to wait for the canvas host before rendering Rete',
     )
     assert.ok(
-        strategyBuilderWorkspaceSource.includes('const RETE_FIT_SCALE = 0.98'),
+        strategyReteSource.includes('const RETE_FIT_SCALE = 0.98'),
         'expected strategy builder to keep graph fit scale readable',
     )
     assert.ok(
-        strategyBuilderWorkspaceSource.includes(
-            'AreaExtensions.zoomAt(area, reteNodes, { scale: RETE_FIT_SCALE })',
-        ),
+        strategyReteSource.includes('AreaExtensions.zoomAt(area, reteNodes, {') &&
+            strategyReteSource.includes('scale: RETE_FIT_SCALE,'),
         'expected strategy builder to apply the readable graph fit scale',
     )
     assert.equal(

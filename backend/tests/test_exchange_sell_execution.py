@@ -1,5 +1,6 @@
 import pytest
 from service.exchange import Exchange
+from service.exchange_capabilities import ExchangePostSubmissionFailure
 
 
 class _FakeMarketExchange:
@@ -23,7 +24,12 @@ class _FakeMarketExchange:
             },
         }
 
-    async def create_market_sell_order(self, _symbol: str, _amount: float) -> dict:
+    async def create_market_sell_order(
+        self,
+        _symbol: str,
+        _amount: float,
+        _params: dict[str, object],
+    ) -> dict:
         self.market_sell_calls += 1
         return {}
 
@@ -45,6 +51,37 @@ class _FakeDustExchange:
                 ]
             },
         }
+
+
+@pytest.mark.asyncio
+async def test_post_submission_failure_is_not_retried(monkeypatch) -> None:
+    exchange = Exchange()
+    submissions = 0
+
+    async def accepted_then_failed(*_args, **_kwargs) -> None:
+        nonlocal submissions
+        submissions += 1
+        raise ExchangePostSubmissionFailure(
+            action="market_sell",
+            symbol="BTC/USDC",
+            operation_id="sell-accepted",
+            order={"id": "exchange-sell-1", "symbol": "BTC/USDC"},
+            cause=RuntimeError("status normalization failed"),
+        )
+
+    monkeypatch.setattr(
+        exchange._sell_manager,
+        "create_spot_market_sell",
+        accepted_then_failed,
+    )
+
+    with pytest.raises(ExchangePostSubmissionFailure):
+        await exchange.create_spot_market_sell(
+            {"symbol": "BTC/USDC"},
+            {},
+        )
+
+    assert submissions == 1
 
 
 @pytest.mark.asyncio

@@ -1,3 +1,4 @@
+import json
 import os
 from datetime import datetime, timezone
 
@@ -265,6 +266,128 @@ async def test_restore_backup_config_only_keeps_existing_trade_rows(
 
     await Tortoise.close_connections()
     Config._instance = None
+
+
+@pytest.mark.asyncio
+async def test_full_backup_restores_terminal_intents_and_quarantines_pending(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    """Portable restore must never replay unresolved exchange side effects."""
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
+    monkeypatch.setattr(Config, "instance", classmethod(_fake_config_instance))
+    Config._instance = None
+
+    import model
+
+    await model.AppConfig.create(key="timezone", value="UTC", value_type="str")
+    common = {
+        "exchange_name": "binance",
+        "symbol": "ASSET/USDC",
+        "action": "place",
+        "side": "buy",
+        "order_type": "market",
+        "request_json": json.dumps({"ordersize": 10.0}),
+    }
+    await model.PlacementIntent.create(
+        operation_id="terminal-operation",
+        client_order_id="terminal-client-order",
+        exchange_order_id="exchange-order-1",
+        state="completed",
+        result_json=json.dumps({"filled": True}),
+        **common,
+    )
+    await model.PlacementIntent.create(
+        operation_id="pending-operation",
+        client_order_id="pending-client-order",
+        exchange_order_id="exchange-order-2",
+        state="indeterminate",
+        reserved_quote=25.0,
+        result_json=json.dumps({"uncertain": True}),
+        **common,
+    )
+
+    backup_service = BackupService()
+    backup_payload = await backup_service.export_backup(include_trade_data=True)
+
+    portable_rows = backup_payload["trade_data"]["placement_intents"]
+    manifest = backup_payload["sealed_recovery_manifest"]
+    assert [row["operation_id"] for row in portable_rows] == ["terminal-operation"]
+    assert [row["operation_id"] for row in manifest["intents"]] == ["pending-operation"]
+
+    await model.PlacementIntent.all().delete()
+
+    async def fake_close(self) -> None:
+        return None
+
+    monkeypatch.setattr(backup_module.Data, "close", fake_close)
+    summary = await backup_service.restore_backup(
+        backup_payload,
+        restore_trade_data=True,
+    )
+
+    terminal = await model.PlacementIntent.get(operation_id="terminal-operation")
+    restored = await model.PlacementIntent.get(source_operation_id="pending-operation")
+    assert terminal.state == "completed"
+    assert terminal.exchange_order_id == "exchange-order-1"
+    assert restored.operation_id.startswith("restored-")
+    assert restored.state == "restored_quarantined"
+    assert restored.client_order_id is None
+    assert restored.exchange_order_id is None
+    assert restored.result_json is None
+    assert restored.reserved_quote == 25.0
+    assert restored.reason_code == "portable_restore_quarantine"
+    assert summary["quarantined_placement_intents"] == 1
+
+    restored_config = {row.key: row.value for row in await model.AppConfig.all()}
+    assert restored_config["dry_run"] == "True"
+    assert restored_config["trading_paused"] == "True"
+
+    await Tortoise.close_connections()
+    Config._instance = None
+
+
+@pytest.mark.asyncio
+async def test_restore_rejects_tampered_recovery_manifest_before_writes(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
+    db_path = tmp_path / "test.sqlite"
+    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
+    await Tortoise.generate_schemas()
+
+    import model
+
+    await model.AppConfig.create(
+        key="timezone",
+        value="Europe/Vienna",
+        value_type="str",
+    )
+    backup_service = BackupService()
+    backup_payload = await backup_service.export_backup(include_trade_data=True)
+    backup_payload["sealed_recovery_manifest"]["intents"].append(
+        {
+            "operation_id": "injected",
+            "state": "submitting",
+        }
+    )
+
+    with pytest.raises(ValueError, match="integrity check failed"):
+        await backup_service.restore_backup(
+            backup_payload,
+            restore_trade_data=True,
+        )
+
+    timezone_row = await model.AppConfig.get(key="timezone")
+    assert timezone_row.value == "Europe/Vienna"
+
+    await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio

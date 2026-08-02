@@ -17,6 +17,7 @@ from service.capital_budget_logic import (
     has_capital_budget_config,
     resolve_capital_max_fund,
 )
+from service.placement_intents import PlacementIntentState
 from service.spot_campaign_types import TradeExposureState
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
@@ -32,6 +33,7 @@ class CapitalBudgetUsage:
     open_trade_reserve: float
     closed_profit: float
     reserved_reentry_by_symbol: dict[str, float]
+    durable_pending_quote: float
     unavailable_reason: str | None = None
 
 
@@ -54,6 +56,12 @@ class CapitalBudgetLease:
         self._released = True
         await self._service.release_lease(self._lease_id)
 
+    async def bind_operation(self, operation_id: str | None) -> None:
+        """Associate the process lease with its durable reservation."""
+        if self._released or self._lease_id is None or not operation_id:
+            return
+        await self._service.bind_lease_operation(self._lease_id, operation_id)
+
     async def __aenter__(self) -> "CapitalBudgetLease":
         """Return the lease for async-context use."""
         return self
@@ -67,7 +75,7 @@ class CapitalBudgetService:
     """Enforce the single-node hard capital budget for buy paths."""
 
     _lock = asyncio.Lock()
-    _leases: dict[str, float] = {}
+    _leases: dict[str, tuple[float, str | None]] = {}
 
     async def get_runtime_state(self, config: dict) -> dict[str, float | bool | str]:
         """Return capital-budget telemetry for dashboard/statistics payloads."""
@@ -84,7 +92,7 @@ class CapitalBudgetService:
                 "capital_available_quote": 0.0,
             }
         usage = await self._load_usage(config)
-        pending_quote = self._pending_reserved_quote()
+        pending_quote = self._pending_reserved_quote() + usage.durable_pending_quote
         if usage.unavailable_reason is not None:
             return {
                 "capital_budget_available": False,
@@ -150,7 +158,11 @@ class CapitalBudgetService:
             )
         usage = await self._load_usage(config)
         order = self._apply_reserved_reentry_credit(order, usage)
-        pending_quote = self._pending_reserved_quote() if include_pending else 0.0
+        pending_quote = (
+            self._pending_reserved_quote() + usage.durable_pending_quote
+            if include_pending
+            else 0.0
+        )
         if usage.unavailable_reason is not None:
             return self._unavailable_check(
                 order,
@@ -186,7 +198,7 @@ class CapitalBudgetService:
         async with self._lock:
             usage = await self._load_usage(config)
             order = self._apply_reserved_reentry_credit(order, usage)
-            pending_quote = self._pending_reserved_quote()
+            pending_quote = self._pending_reserved_quote() + usage.durable_pending_quote
             if usage.unavailable_reason is not None:
                 check = self._unavailable_check(
                     order,
@@ -212,8 +224,20 @@ class CapitalBudgetService:
                 return CapitalBudgetLease(self, None), check
 
             lease_id = uuid4().hex
-            self._leases[lease_id] = lease_amount
+            self._leases[lease_id] = (lease_amount, None)
             return CapitalBudgetLease(self, lease_id), check
+
+    async def bind_lease_operation(
+        self,
+        lease_id: str,
+        operation_id: str,
+    ) -> None:
+        """Prevent double-counting one reservation in memory and SQLite."""
+        async with self._lock:
+            current = self._leases.get(lease_id)
+            if current is None:
+                return
+            self._leases[lease_id] = (current[0], operation_id)
 
     async def release_lease(self, lease_id: str) -> None:
         """Release a pending capital reservation."""
@@ -223,7 +247,19 @@ class CapitalBudgetService:
     @classmethod
     def _pending_reserved_quote(cls) -> float:
         """Return total process-local pending buy reservations."""
-        return round(sum(float(value or 0.0) for value in cls._leases.values()), 8)
+        return round(
+            sum(float(value[0] or 0.0) for value in cls._leases.values()),
+            8,
+        )
+
+    @classmethod
+    def _active_operation_ids(cls) -> set[str]:
+        """Return durable operations already represented by process leases."""
+        return {
+            operation_id
+            for _, operation_id in cls._leases.values()
+            if operation_id is not None
+        }
 
     @staticmethod
     def _apply_reserved_reentry_credit(
@@ -299,11 +335,37 @@ class CapitalBudgetService:
             closed_profit = float(
                 (closed_profit_rows[0] if closed_profit_rows else 0.0) or 0.0
             )
+            durable_query = model.PlacementIntent.filter(
+                state__in=[
+                    PlacementIntentState.PREPARED.value,
+                    PlacementIntentState.SUBMITTING.value,
+                    PlacementIntentState.INDETERMINATE.value,
+                    PlacementIntentState.RECONCILING.value,
+                    PlacementIntentState.ACCEPTED.value,
+                    PlacementIntentState.FILLED.value,
+                    PlacementIntentState.QUARANTINED.value,
+                    PlacementIntentState.RESTORED_QUARANTINED.value,
+                ],
+                reserved_quote__gt=0,
+            )
+            active_operation_ids = self._active_operation_ids()
+            if active_operation_ids:
+                durable_query = durable_query.exclude(
+                    operation_id__in=active_operation_ids
+                )
+            durable_rows = await durable_query.values_list(
+                "reserved_quote",
+                flat=True,
+            )
+            durable_pending_quote = 0.0
+            for value in durable_rows:
+                durable_pending_quote += max(0.0, float(value or 0.0))
             return CapitalBudgetUsage(
                 funds_locked=round(funds_locked, 8),
                 open_trade_reserve=estimate_open_trade_reserve(config, open_trades),
                 closed_profit=round(closed_profit, 8),
                 reserved_reentry_by_symbol=reserved_reentry_by_symbol,
+                durable_pending_quote=round(durable_pending_quote, 8),
             )
         except BaseORMException as exc:
             logging.error(
@@ -316,6 +378,7 @@ class CapitalBudgetService:
                 open_trade_reserve=0.0,
                 closed_profit=0.0,
                 reserved_reentry_by_symbol={},
+                durable_pending_quote=0.0,
                 unavailable_reason="capital_budget_unavailable",
             )
 

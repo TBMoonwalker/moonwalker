@@ -1,5 +1,6 @@
 """Order API endpoints."""
 
+import re
 from typing import Any
 
 import helper
@@ -9,14 +10,31 @@ from litestar.exceptions import SerializationException
 from litestar.handlers import post
 from litestar.params import FromPath
 from service.config import Config
-from service.orders import Orders
+from service.runtime_services import runtime_service_proxy
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_orders")
-orders = Orders()
+orders = runtime_service_proxy("orders")
+OPERATION_ID_HEADER = "x-moonwalker-operation-id"
+OPERATION_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
+
+
+def _operation_id_from_request(request: Request[Any, Any, Any]) -> str | None:
+    """Validate an optional client identity for one confirmed operator action."""
+    operation_id = str(request.headers.get(OPERATION_ID_HEADER) or "").strip()
+    if not operation_id:
+        return None
+    if not OPERATION_ID_PATTERN.fullmatch(operation_id):
+        raise ValueError(
+            "X-Moonwalker-Operation-Id must be 1-64 letters, numbers, or ._:-"
+        )
+    return operation_id
 
 
 @post(path="/orders/sell/{symbol:str}", status_code=200)
-async def sell_order(symbol: FromPath[str]) -> dict[str, Any]:
+async def sell_order(
+    symbol: FromPath[str],
+    request: Request[Any, Any, Any],
+) -> Any:
     """Create a sell order for the specified symbol.
 
     Args:
@@ -29,14 +47,27 @@ async def sell_order(symbol: FromPath[str]) -> dict[str, Any]:
         {"result": "sell"} or {"result": ""}
     """
     config = await Config.instance()
-    if await orders.receive_sell_signal(symbol, config):
-        return {"result": "sell"}
-    else:
-        return {"result": ""}
+    try:
+        operation_id = _operation_id_from_request(request)
+    except ValueError as exc:
+        return json_response({"result": "", "error": str(exc)}, 400)
+    mutation = await orders.receive_sell_signal_result(
+        symbol,
+        config,
+        operation_id=operation_id,
+    )
+    return {
+        "result": "sell" if mutation.applied else "",
+        "mutation": mutation.to_dict(),
+    }
 
 
 @post(path="/orders/buy/{symbol:str}/{ordersize:str}", status_code=200)
-async def buy_order(symbol: FromPath[str], ordersize: FromPath[str]) -> dict[str, Any]:
+async def buy_order(
+    symbol: FromPath[str],
+    ordersize: FromPath[str],
+    request: Request[Any, Any, Any],
+) -> Any:
     """Create a buy order for the specified symbol and size.
 
     Args:
@@ -50,10 +81,20 @@ async def buy_order(symbol: FromPath[str], ordersize: FromPath[str]) -> dict[str
         {"result": "new_so"} or {"result": ""}
     """
     config = await Config.instance()
-    if await orders.receive_buy_signal(symbol, ordersize, config):
-        return {"result": "new_so"}
-    else:
-        return {"result": ""}
+    try:
+        operation_id = _operation_id_from_request(request)
+    except ValueError as exc:
+        return json_response({"result": "", "error": str(exc)}, 400)
+    mutation = await orders.receive_buy_signal_result(
+        symbol,
+        ordersize,
+        config,
+        operation_id=operation_id,
+    )
+    return {
+        "result": "new_so" if mutation.applied else "",
+        "mutation": mutation.to_dict(),
+    }
 
 
 @post(path="/orders/stop/{symbol:str}", status_code=200)
@@ -70,10 +111,11 @@ async def stop_order(symbol: FromPath[str]) -> dict[str, Any]:
         {"result": "stop"} or {"result": ""}
     """
     config = await Config.instance()
-    if await orders.receive_stop_signal(symbol, config):
-        return {"result": "stop"}
-    else:
-        return {"result": ""}
+    mutation = await orders.receive_stop_signal_result(symbol, config)
+    return {
+        "result": "stop" if mutation.applied else "",
+        "mutation": mutation.to_dict(),
+    }
 
 
 @post(path="/orders/buy/manual")

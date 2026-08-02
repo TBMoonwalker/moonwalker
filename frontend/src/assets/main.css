@@ -275,7 +275,7 @@ body {
   border-radius: var(--mw-radius-sm);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   #app {
     padding: 12px;
   }

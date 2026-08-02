@@ -9,6 +9,12 @@ from service.exchange_types import (
     SoldCheckStatus,
     TradeExecutionPayload,
 )
+from service.persistence_records import (
+    ClosedTradePayloadBundle,
+    ClosedTradePersistenceRecord,
+    OpenTradeUpdateRecord,
+    TradePersistenceRecord,
+)
 
 
 def normalize_trade_datetime(value: datetime) -> datetime:
@@ -57,7 +63,7 @@ def build_closed_trade_payloads(
     partial_amount: float = 0.0,
     partial_proceeds: float = 0.0,
     closed_at: datetime | None = None,
-) -> dict[str, dict[str, Any]]:
+) -> ClosedTradePayloadBundle:
     """Build persistence and monitoring payloads for a completed sell."""
     symbol = str(order_status["symbol"])
     total_cost = float(order_status.get("total_cost") or 0.0)
@@ -93,7 +99,7 @@ def build_closed_trade_payloads(
     open_date = trade_datetime_from_ms(open_timestamp_ms)
     duration_data = calculate_trade_duration(open_timestamp_ms, sell_timestamp_ms)
 
-    payload = {
+    payload: ClosedTradePersistenceRecord = {
         "symbol": symbol,
         "campaign_id": order_status.get("campaign_id"),
         "so_count": so_count,
@@ -177,7 +183,9 @@ def build_final_sell_executions(
     ]
 
 
-def build_buy_trade_payload(order_status: ExchangeOrderPayload) -> dict[str, Any]:
+def build_buy_trade_payload(
+    order_status: ExchangeOrderPayload,
+) -> TradePersistenceRecord:
     """Build the trade-row payload for a filled exchange buy."""
     return {
         "timestamp": order_status["timestamp"],
@@ -185,8 +193,8 @@ def build_buy_trade_payload(order_status: ExchangeOrderPayload) -> dict[str, Any
         "fee": order_status["fees"],
         "precision": order_status["precision"],
         "amount_fee": order_status["amount_fee"],
-        "amount": order_status["amount"],
-        "price": order_status["price"],
+        "amount": float(order_status["amount"]),
+        "price": float(order_status["price"]),
         "symbol": order_status["symbol"],
         "orderid": order_status["orderid"],
         "campaign_id": order_status.get("campaign_id"),
@@ -239,7 +247,7 @@ def build_manual_buy_trade_payload(
     order_count: int,
     so_percentage: float,
     trade_data: dict[str, Any],
-) -> dict[str, Any]:
+) -> TradePersistenceRecord:
     """Build the trade-row payload for a manual safety-order add."""
     return {
         "timestamp": str(int(timestamp_ms)),
@@ -273,7 +281,7 @@ def build_manual_buy_open_trade_payload(
     ordersize: float,
     order_count: int,
     tp_percent: float,
-) -> dict[str, Any]:
+) -> OpenTradeUpdateRecord:
     """Build the open-trade update payload for a manual safety-order add."""
     total_amount = float(open_trade.get("amount") or 0.0) + amount
     total_cost = float(open_trade.get("cost") or 0.0) + ordersize

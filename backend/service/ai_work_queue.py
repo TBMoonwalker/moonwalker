@@ -114,7 +114,7 @@ class AiWorkQueue:
         except TimeoutError:
             logging.warning(
                 "AI work queue drain timed out with %s item(s) pending.",
-                self._queue.qsize(),
+                len(self._pending_keys),
             )
         finally:
             for worker in self._workers:
@@ -134,6 +134,7 @@ class AiWorkQueue:
             )
         return {
             "depth": self._queue.qsize(),
+            "pending_count": len(self._pending_keys),
             "oldest_age_seconds": round(oldest_age_seconds, 3),
             "rejected_count": self._rejected_count,
             "coalesced_count": self._coalesced_count,

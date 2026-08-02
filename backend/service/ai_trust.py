@@ -19,6 +19,12 @@ from service.ai_trust_analytics import (
     bump_analytics_revision,
     load_analytics_rows,
 )
+from service.ai_trust_calibration import (
+    AiTrustCalibrationPolicy,
+    build_calibration_payload,
+    prediction_to_api,
+    rate,
+)
 from service.ai_work_queue import ai_work_queue
 from service.config import Config
 from tortoise.expressions import Subquery
@@ -1206,302 +1212,28 @@ async def has_prediction_for_deal(deal_id: str | None) -> bool:
         return False
 
 
-def _parse_json_list(value: str | None) -> list[str]:
-    """Parse a JSON list of strings from the ledger."""
-    try:
-        parsed = json.loads(value or "[]")
-    except json.JSONDecodeError:
-        return []
-    if not isinstance(parsed, list):
-        return []
-    return [str(item) for item in parsed if isinstance(item, str)]
-
-
-def _score_band(value: int | None) -> str:
-    """Return a stable score-band bucket for calibration."""
-    if value is None:
-        return "unscored"
-    lower = max(0, min(100, (value // 20) * 20))
-    upper = 100 if lower >= 100 else min(100, lower + 19)
-    return f"{lower}-{upper}"
-
-
-def _calibration_confidence(sample_count: int, *, symbol_specific: bool = False) -> str:
-    """Return the confidence label for a calibration sample count."""
-    if symbol_specific and sample_count < AI_TRUST_CALIBRATION_SYMBOL_USABLE_SAMPLES:
-        if sample_count < AI_TRUST_CALIBRATION_WARMING_SAMPLES:
-            return "cold"
-        return "warming"
-    if sample_count >= AI_TRUST_CALIBRATION_CONFIDENT_SAMPLES:
-        return "confident"
-    if sample_count >= AI_TRUST_CALIBRATION_USABLE_SAMPLES:
-        return "usable"
-    if sample_count >= AI_TRUST_CALIBRATION_WARMING_SAMPLES:
-        return "warming"
-    return "cold"
-
-
-def _confidence_rank(value: str) -> int:
-    """Return ordering rank for calibration confidence labels."""
-    return {"cold": 0, "warming": 1, "usable": 2, "confident": 3}.get(value, 0)
-
-
-def _rate(numerator: int, denominator: int) -> float:
-    """Return a rounded percentage rate."""
-    return round((numerator / denominator) * 100, 2) if denominator else 0.0
-
-
-def _empty_bucket(bucket_type: str, bucket_key: str) -> dict[str, Any]:
-    """Create a mutable calibration bucket accumulator."""
-    return {
-        "bucket_type": bucket_type,
-        "bucket_key": bucket_key,
-        "sample_count": 0,
-        "closed_count": 0,
-        "bad_entry_count": 0,
-        "warned_count": 0,
-        "warning_hit_count": 0,
-        "false_warning_count": 0,
-        "bad_entry_capture_count": 0,
-    }
-
-
-def _add_row_to_bucket(bucket: dict[str, Any], row: model.AiTrustPrediction) -> None:
-    """Accumulate closed prediction outcome metrics into one bucket."""
-    would_warn = bool(row.would_warn)
-    bad_entry = bool(row.bad_entry)
-    bucket["sample_count"] += 1
-    bucket["closed_count"] += 1
-    if bad_entry:
-        bucket["bad_entry_count"] += 1
-    if would_warn:
-        bucket["warned_count"] += 1
-    if would_warn and bad_entry:
-        bucket["warning_hit_count"] += 1
-        bucket["bad_entry_capture_count"] += 1
-    if would_warn and not bad_entry:
-        bucket["false_warning_count"] += 1
-
-
-def _finalize_bucket(bucket: dict[str, Any]) -> dict[str, Any]:
-    """Return the API-safe immutable form of a calibration bucket."""
-    closed_count = _safe_int(bucket.get("closed_count"))
-    warned_count = _safe_int(bucket.get("warned_count"))
-    bad_entry_count = _safe_int(bucket.get("bad_entry_count"))
-    symbol_specific = bucket.get("bucket_type") == "symbol_reason"
-    confidence = _calibration_confidence(
-        closed_count,
-        symbol_specific=symbol_specific,
+def _calibration_policy() -> AiTrustCalibrationPolicy:
+    """Build calibration policy from the stable facade constants."""
+    return AiTrustCalibrationPolicy(
+        lookback_days=AI_TRUST_CALIBRATION_LOOKBACK_DAYS,
+        max_rows=AI_TRUST_CALIBRATION_MAX_ROWS,
+        warming_samples=AI_TRUST_CALIBRATION_WARMING_SAMPLES,
+        usable_samples=AI_TRUST_CALIBRATION_USABLE_SAMPLES,
+        confident_samples=AI_TRUST_CALIBRATION_CONFIDENT_SAMPLES,
+        symbol_usable_samples=AI_TRUST_CALIBRATION_SYMBOL_USABLE_SAMPLES,
+        bad_entry_rate_floor=AI_TRUST_CALIBRATION_BAD_ENTRY_RATE_FLOOR,
+        warning_threshold=AI_TRUST_CALIBRATION_WARNING_THRESHOLD,
     )
-    return {
-        **bucket,
-        "bad_entry_rate": _rate(bad_entry_count, closed_count),
-        "warning_hit_rate": _rate(
-            _safe_int(bucket.get("warning_hit_count")),
-            warned_count,
-        ),
-        "false_warning_rate": _rate(
-            _safe_int(bucket.get("false_warning_count")),
-            warned_count,
-        ),
-        "bad_entry_capture_rate": _rate(
-            _safe_int(bucket.get("bad_entry_capture_count")),
-            bad_entry_count,
-        ),
-        "confidence": confidence,
-        "usable": _confidence_rank(confidence) >= _confidence_rank("usable"),
-    }
-
-
-def _prediction_bucket_keys(row: model.AiTrustPrediction) -> list[tuple[str, str]]:
-    """Return calibration bucket keys for one scored prediction row."""
-    reason_codes = _parse_json_list(row.reason_codes_json)
-    keys = [
-        ("score_band", _score_band(row.risk_score)),
-        ("severity", row.warning_severity or "none"),
-        ("source_event", row.source_event or "unknown"),
-    ]
-    for reason_code in reason_codes:
-        keys.append(("reason_code", reason_code))
-        keys.append(("symbol_reason", f"{row.symbol}:{reason_code}"))
-    if not reason_codes:
-        keys.append(("reason_code", "no_reason"))
-    for reason in _parse_json_list(row.bad_entry_reasons_json):
-        keys.append(("bad_entry_reason", reason))
-    return keys
-
-
-def _calibrated_floor_from_bucket(bucket: dict[str, Any]) -> int | None:
-    """Return a conservative floor for buckets with enough bad-entry signal."""
-    if not bucket.get("usable"):
-        return None
-    if (
-        _safe_float(bucket.get("bad_entry_rate"))
-        < AI_TRUST_CALIBRATION_BAD_ENTRY_RATE_FLOOR
-    ):
-        return None
-    return AI_TRUST_CALIBRATION_WARNING_THRESHOLD
-
-
-def _build_calibration_payload(
-    rows: list[model.AiTrustPrediction],
-) -> tuple[dict[str, Any], dict[tuple[str, str], dict[str, Any]]]:
-    """Build read-only calibration diagnostics from bounded closed rows."""
-    buckets: dict[tuple[str, str], dict[str, Any]] = {}
-    missed_clusters: dict[tuple[str, str], dict[str, Any]] = {}
-    for row in rows:
-        for bucket_type, bucket_key in _prediction_bucket_keys(row):
-            bucket_id = (bucket_type, bucket_key)
-            bucket = buckets.setdefault(
-                bucket_id,
-                _empty_bucket(bucket_type, bucket_key),
-            )
-            _add_row_to_bucket(bucket, row)
-
-        if bool(row.bad_entry) and not bool(row.would_warn):
-            reason_codes = _parse_json_list(row.reason_codes_json) or [
-                "unexplained_ai_miss"
-            ]
-            for reason_code in reason_codes:
-                cluster_id = (row.symbol, reason_code)
-                cluster = missed_clusters.setdefault(
-                    cluster_id,
-                    {
-                        "symbol": row.symbol,
-                        "reason_code": reason_code,
-                        "missed_bad_entries": 0,
-                    },
-                )
-                cluster["missed_bad_entries"] += 1
-
-    finalized = [_finalize_bucket(bucket) for bucket in buckets.values()]
-    finalized.sort(
-        key=lambda item: (
-            _confidence_rank(str(item.get("confidence"))),
-            _safe_float(item.get("bad_entry_rate")),
-            _safe_int(item.get("closed_count")),
-        ),
-        reverse=True,
-    )
-    best_confidence = "cold"
-    for bucket in finalized:
-        confidence = str(bucket.get("confidence") or "cold")
-        if _confidence_rank(confidence) > _confidence_rank(best_confidence):
-            best_confidence = confidence
-
-    clusters = list(missed_clusters.values())
-    clusters.sort(
-        key=lambda item: _safe_int(item.get("missed_bad_entries")), reverse=True
-    )
-    bucket_index = {
-        (str(bucket["bucket_type"]), str(bucket["bucket_key"])): bucket
-        for bucket in finalized
-    }
-    return (
-        {
-            "enabled": True,
-            "confidence": best_confidence,
-            "confidence_thresholds": {
-                "warming": AI_TRUST_CALIBRATION_WARMING_SAMPLES,
-                "usable": AI_TRUST_CALIBRATION_USABLE_SAMPLES,
-                "confident": AI_TRUST_CALIBRATION_CONFIDENT_SAMPLES,
-                "symbol_usable": AI_TRUST_CALIBRATION_SYMBOL_USABLE_SAMPLES,
-            },
-            "lookback_days": AI_TRUST_CALIBRATION_LOOKBACK_DAYS,
-            "sample_cap": AI_TRUST_CALIBRATION_MAX_ROWS,
-            "closed_samples": len(rows),
-            "shadow_effective_warning_threshold": (
-                AI_TRUST_CALIBRATION_WARNING_THRESHOLD
-            ),
-            "buckets": finalized[:12],
-            "missed_bad_entry_clusters": clusters[:8],
-        },
-        bucket_index,
-    )
-
-
-def _shadow_effective_risk_for_prediction(
-    row: model.AiTrustPrediction,
-    bucket_index: dict[tuple[str, str], dict[str, Any]],
-) -> dict[str, Any]:
-    """Return derived calibration diagnostics for one prediction row."""
-    raw_score = row.risk_score
-    if raw_score is None:
-        return {
-            "shadow_effective_risk_score": None,
-            "calibration_reason": None,
-            "calibration_buckets": [],
-        }
-    matched_buckets: list[dict[str, Any]] = []
-    calibrated_floor: int | None = None
-    for bucket_type, bucket_key in _prediction_bucket_keys(row):
-        bucket = bucket_index.get((bucket_type, bucket_key))
-        if bucket is None:
-            continue
-        floor = _calibrated_floor_from_bucket(bucket)
-        if floor is None:
-            continue
-        matched_buckets.append(
-            {
-                "bucket_type": bucket_type,
-                "bucket_key": bucket_key,
-                "bad_entry_rate": bucket["bad_entry_rate"],
-                "closed_count": bucket["closed_count"],
-                "confidence": bucket["confidence"],
-            }
-        )
-        calibrated_floor = max(calibrated_floor or raw_score, floor)
-    effective_score = max(raw_score, calibrated_floor or raw_score)
-    return {
-        "shadow_effective_risk_score": effective_score,
-        "calibration_reason": (
-            "local_bad_entry_rate"
-            if effective_score > raw_score and matched_buckets
-            else None
-        ),
-        "calibration_buckets": matched_buckets[:4],
-    }
-
-
-def _prediction_to_api(
-    row: model.AiTrustPrediction,
-    bucket_index: dict[tuple[str, str], dict[str, Any]] | None = None,
-) -> dict[str, Any]:
-    """Return a compact API representation of a prediction row."""
-    payload = {
-        "id": row.id,
-        "symbol": row.symbol,
-        "deal_id": row.deal_id,
-        "created_at": row.created_at.isoformat() if row.created_at else None,
-        "source_event": row.source_event,
-        "status": row.status,
-        "provider_status": row.provider_status,
-        "risk_score": row.risk_score,
-        "confidence": row.confidence,
-        "would_warn": row.would_warn,
-        "warning_severity": row.warning_severity,
-        "reason_codes": _parse_json_list(row.reason_codes_json),
-        "operator_note": row.operator_note,
-        "outcome_status": row.outcome_status,
-        "bad_entry": row.bad_entry,
-        "bad_entry_reasons": _parse_json_list(row.bad_entry_reasons_json),
-        "outcome_profit": row.outcome_profit,
-        "outcome_profit_percent": row.outcome_profit_percent,
-        "outcome_duration_hours": row.outcome_duration_hours,
-        "outcome_so_count": row.outcome_so_count,
-    }
-    if bucket_index is not None:
-        payload.update(_shadow_effective_risk_for_prediction(row, bucket_index))
-    return payload
 
 
 async def build_analytics_payload() -> dict[str, Any]:
     """Return the reduced Statistics payload for AI trust calibration."""
     trust_config = await get_ai_trust_config()
-    cutoff = datetime.now(UTC) - timedelta(days=AI_TRUST_CALIBRATION_LOOKBACK_DAYS)
+    policy = _calibration_policy()
+    cutoff = datetime.now(UTC) - timedelta(days=policy.lookback_days)
     rows = await load_analytics_rows(
         calibration_cutoff=cutoff,
-        calibration_limit=AI_TRUST_CALIBRATION_MAX_ROWS,
+        calibration_limit=policy.max_rows,
         recent_limit=MAX_RECENT_PREDICTIONS,
         review_limit=MAX_BAD_ENTRY_REVIEW,
     )
@@ -1510,7 +1242,7 @@ async def build_analytics_payload() -> dict[str, Any]:
     scored_count = counts["scored"]
     warning_count = counts["warnings"]
     bad_entry_count = counts["bad_entries"]
-    calibration, bucket_index = _build_calibration_payload(list(rows.calibration))
+    calibration, bucket_index = build_calibration_payload(rows.calibration, policy)
     return {
         "enabled": trust_config.enabled,
         "enforce_warnings": trust_config.enforce_warnings,
@@ -1527,15 +1259,15 @@ async def build_analytics_payload() -> dict[str, Any]:
             "scored": scored_count,
             "unscored": total - scored_count,
             "closed": counts["closed"],
-            "coverage_rate": _rate(scored_count, total),
+            "coverage_rate": rate(scored_count, total),
         },
         "quality": {
-            "warning_hit_rate": _rate(
+            "warning_hit_rate": rate(
                 counts["captured_bad_entries"],
                 warning_count,
             ),
-            "false_warning_rate": _rate(counts["false_warnings"], warning_count),
-            "bad_entry_capture_rate": _rate(
+            "false_warning_rate": rate(counts["false_warnings"], warning_count),
+            "bad_entry_capture_rate": rate(
                 counts["captured_bad_entries"],
                 bad_entry_count,
             ),
@@ -1546,10 +1278,10 @@ async def build_analytics_payload() -> dict[str, Any]:
         "queue": ai_work_queue.status(),
         "calibration": calibration,
         "recent_predictions": [
-            _prediction_to_api(row, bucket_index) for row in rows.recent
+            prediction_to_api(row, policy, bucket_index) for row in rows.recent
         ],
         "bad_entry_review": [
-            _prediction_to_api(row, bucket_index) for row in rows.review
+            prediction_to_api(row, policy, bucket_index) for row in rows.review
         ],
     }
 

@@ -17,6 +17,10 @@ from litestar import Litestar
 from litestar.testing import TestClient
 from service.config_contract import public_config_contract
 from service.log_viewer import LogReadResult
+from service.order_mutation_result import (
+    OrderMutationResult,
+    OrderMutationStatus,
+)
 
 
 class _DummyConfigService:
@@ -1417,28 +1421,64 @@ def test_order_mutations_require_post(monkeypatch) -> None:
     """Sell, buy, and stop endpoints must reject GET and accept POST."""
     service = _DummyConfigService()
     captured_calls: list[tuple[str, tuple[Any, ...]]] = []
+    captured_operation_ids: list[str | None] = []
 
     async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
         return service
 
-    async def _fake_sell(symbol: str, _config: Any) -> bool:
+    def _result(symbol: str, action: str) -> OrderMutationResult:
+        return OrderMutationResult(
+            operation_id=f"{action}-1",
+            symbol=symbol,
+            action=action,
+            status=OrderMutationStatus.APPLIED,
+            reason_code="mutation_applied",
+            user_message="Applied.",
+        )
+
+    async def _fake_sell(
+        symbol: str,
+        _config: Any,
+        *,
+        operation_id: str | None = None,
+    ) -> OrderMutationResult:
         captured_calls.append(("sell", (symbol,)))
-        return True
+        captured_operation_ids.append(operation_id)
+        return _result(symbol, "manual_sell")
 
-    async def _fake_buy(symbol: str, ordersize: str, _config: Any) -> bool:
+    async def _fake_buy(
+        symbol: str,
+        ordersize: str,
+        _config: Any,
+        *,
+        operation_id: str | None = None,
+    ) -> OrderMutationResult:
         captured_calls.append(("buy", (symbol, ordersize)))
-        return True
+        captured_operation_ids.append(operation_id)
+        return _result(symbol, "manual_buy")
 
-    async def _fake_stop(symbol: str, _config: Any) -> bool:
+    async def _fake_stop(symbol: str, _config: Any) -> OrderMutationResult:
         captured_calls.append(("stop", (symbol,)))
-        return True
+        return _result(symbol, "manual_stop")
 
     monkeypatch.setattr(
         orders_controller.Config, "instance", classmethod(_fake_instance)
     )
-    monkeypatch.setattr(orders_controller.orders, "receive_sell_signal", _fake_sell)
-    monkeypatch.setattr(orders_controller.orders, "receive_buy_signal", _fake_buy)
-    monkeypatch.setattr(orders_controller.orders, "receive_stop_signal", _fake_stop)
+    monkeypatch.setattr(
+        orders_controller.orders,
+        "receive_sell_signal_result",
+        _fake_sell,
+    )
+    monkeypatch.setattr(
+        orders_controller.orders,
+        "receive_buy_signal_result",
+        _fake_buy,
+    )
+    monkeypatch.setattr(
+        orders_controller.orders,
+        "receive_stop_signal_result",
+        _fake_stop,
+    )
 
     app = Litestar(
         route_handlers=[
@@ -1453,16 +1493,34 @@ def test_order_mutations_require_post(monkeypatch) -> None:
         assert client.get("/orders/buy/btc-usdt/10").status_code == 405
         assert client.get("/orders/stop/btc-usdt").status_code == 405
 
-        sell_response = client.post("/orders/sell/btc-usdt")
-        buy_response = client.post("/orders/buy/btc-usdt/10")
+        sell_response = client.post(
+            "/orders/sell/btc-usdt",
+            headers={"X-Moonwalker-Operation-Id": "manual_sell-client-1"},
+        )
+        buy_response = client.post(
+            "/orders/buy/btc-usdt/10",
+            headers={"X-Moonwalker-Operation-Id": "manual_buy-client-1"},
+        )
         stop_response = client.post("/orders/stop/btc-usdt")
+        invalid_response = client.post(
+            "/orders/sell/btc-usdt",
+            headers={"X-Moonwalker-Operation-Id": "invalid operation id"},
+        )
 
     assert sell_response.status_code == 200
-    assert sell_response.json() == {"result": "sell"}
+    assert sell_response.json()["result"] == "sell"
+    assert sell_response.json()["mutation"]["status"] == "applied"
     assert buy_response.status_code == 200
-    assert buy_response.json() == {"result": "new_so"}
+    assert buy_response.json()["result"] == "new_so"
+    assert buy_response.json()["mutation"]["status"] == "applied"
     assert stop_response.status_code == 200
-    assert stop_response.json() == {"result": "stop"}
+    assert stop_response.json()["result"] == "stop"
+    assert stop_response.json()["mutation"]["status"] == "applied"
+    assert invalid_response.status_code == 400
+    assert captured_operation_ids == [
+        "manual_sell-client-1",
+        "manual_buy-client-1",
+    ]
     assert captured_calls == [
         ("sell", ("btc-usdt",)),
         ("buy", ("btc-usdt", "10")),

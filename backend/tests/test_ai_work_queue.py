@@ -64,5 +64,62 @@ async def test_ai_work_queue_records_worker_failure_and_continues() -> None:
     assert queue.status()["last_error"] == "RuntimeError: provider stalled"
 
 
+@pytest.mark.asyncio
+async def test_ai_work_queue_rejects_burst_when_capacity_is_saturated() -> None:
+    """Non-blocking producers should receive an explicit bounded rejection."""
+    queue = AiWorkQueue(capacity=1, worker_count=1)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def active_work() -> None:
+        started.set()
+        await release.wait()
+
+    async with asyncio.TaskGroup() as task_group:
+        await queue.start(task_group)
+        assert await queue.submit("active", active_work, backpressure=False) is True
+        await started.wait()
+        assert await queue.submit("queued", _noop_work, backpressure=False) is True
+        assert await queue.submit("rejected", _noop_work, backpressure=False) is False
+
+        status = queue.status()
+        assert status["depth"] == 1
+        assert status["pending_count"] == 2
+        assert status["rejected_count"] == 1
+
+        release.set()
+        await queue.stop()
+
+
+@pytest.mark.asyncio
+async def test_ai_work_queue_cancels_stalled_work_at_drain_deadline() -> None:
+    """Shutdown should remain bounded even when a provider call never returns."""
+    queue = AiWorkQueue(capacity=1, worker_count=1)
+    started = asyncio.Event()
+    canceled = asyncio.Event()
+
+    async def stalled_work() -> None:
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            canceled.set()
+
+    async with asyncio.TaskGroup() as task_group:
+        await queue.start(task_group)
+        assert await queue.submit("stalled", stalled_work, backpressure=False) is True
+        await started.wait()
+
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        await queue.stop(drain_timeout=0.01)
+        elapsed = loop.time() - started_at
+
+    assert elapsed < 0.5
+    assert canceled.is_set()
+    assert queue.status()["pending_count"] == 0
+    assert queue.status()["accepting"] is False
+
+
 async def _noop_work() -> None:
     return None

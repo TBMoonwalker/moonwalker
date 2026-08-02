@@ -399,7 +399,7 @@ const columns_unsellable_trades = computed(() => columns_trades())
     opacity: 0.82;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .unsellable-trades-toolbar {
         flex-direction: column;
         align-items: stretch;

@@ -2,6 +2,7 @@
 
 import ccxt.async_support as ccxt
 import pytest
+from service.exchange_capabilities import ExchangePostSubmissionFailure
 from service.exchange_contexts import LimitSellPlacementContext
 from service.exchange_limit_order_manager import ExchangeLimitOrderManager
 
@@ -48,6 +49,24 @@ class _WholeUnitExchange(_DummyExchange):
         raise ccxt.InvalidOrder(
             f"binance amount of {symbol} must be greater than minimum amount precision of 1"
         )
+
+
+class _MissingIdExchange(_DummyExchange):
+    def __init__(self, result: dict[str, object]) -> None:
+        super().__init__()
+        self.result = result
+
+    async def create_order(
+        self,
+        _symbol: str,
+        _ordertype: str,
+        _side: str,
+        _amount: str,
+        _price: str,
+        _params: dict[str, object],
+    ) -> dict[str, object]:
+        self.create_order_calls += 1
+        return dict(self.result)
 
 
 @pytest.mark.asyncio
@@ -107,6 +126,77 @@ async def test_create_spot_limit_sell_initializes_exchange_before_lookup() -> No
     )
 
     assert status == {"type": "sold_check", "symbol": "ETH/USDT", "id": "limit-1"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exchange_result",
+    [
+        {},
+        {"status": "open", "clientOrderId": "mw-limit-pending"},
+    ],
+)
+async def test_accepted_limit_sell_without_id_stays_pending(
+    exchange_result: dict[str, object],
+) -> None:
+    exchange = _MissingIdExchange(exchange_result)
+    manager = ExchangeLimitOrderManager(
+        _DummyLogger(),
+        get_exchange=lambda: exchange,
+    )
+
+    async def fake_ensure_exchange(_config: dict[str, object]) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_resolve_symbol(symbol: str) -> str:
+        return symbol
+
+    async def fake_resolve_sell_amount(
+        symbol: str,
+        requested_amount: float,
+    ) -> tuple[str, float]:
+        return symbol, requested_amount
+
+    async def fake_get_price_for_symbol(_symbol: str) -> str:
+        return "2500.0"
+
+    async def unexpected_fill(
+        _sell_order: dict[str, object],
+        _resolved_symbol: str,
+        _config: dict[str, object],
+        _original_order: dict[str, object],
+    ) -> None:
+        raise AssertionError("missing-id placement must not enter fill handling")
+
+    context = LimitSellPlacementContext(
+        ensure_exchange=fake_ensure_exchange,
+        ensure_markets_loaded=fake_ensure_markets_loaded,
+        resolve_symbol=fake_resolve_symbol,
+        resolve_sell_amount=fake_resolve_sell_amount,
+        get_price_for_symbol=fake_get_price_for_symbol,
+        is_notional_below_minimum=lambda *_args: (False, None, 2500.0),
+        handle_limit_sell_fill=unexpected_fill,
+    )
+
+    with pytest.raises(ExchangePostSubmissionFailure) as raised:
+        await manager.create_spot_limit_sell(
+            order={
+                "operation_id": "limit-sell-pending",
+                "client_order_id": "mw-limit-pending",
+                "symbol": "ETH/USDT",
+                "total_amount": 1.0,
+                "limit_price": 2500.0,
+            },
+            config={},
+            context=context,
+        )
+
+    assert raised.value.operation_id == "limit-sell-pending"
+    assert raised.value.order["client_order_id"] == "mw-limit-pending"
+    assert exchange.create_order_calls == 1
 
 
 @pytest.mark.asyncio

@@ -553,37 +553,31 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         ]
 
         if (options.isMobile.value) {
-            const mobileColumns = OPEN_TRADES_MOBILE_COLUMN_KEYS.flatMap(
-                (columnKey) => {
-                    const column = columns.find(
-                        (candidate) =>
-                            'key' in candidate &&
-                            String(candidate.key) === columnKey,
+            return columns.flatMap((column) => {
+                if (!('key' in column)) {
+                    return []
+                }
+                if (
+                    !shouldShowTradeTableColumn(
+                        column.key,
+                        OPEN_TRADES_MOBILE_COLUMN_KEYS,
                     )
-                    if (
-                        !column ||
-                        !shouldShowTradeTableColumn(
-                            columnKey,
-                            OPEN_TRADES_MOBILE_COLUMN_KEYS,
-                        )
-                    ) {
-                        return []
-                    }
+                ) {
+                    return []
+                }
                 const mobileWidth =
-                        OPEN_TRADES_MOBILE_COLUMN_WIDTHS[String(column.key)]
-                    return [
-                        mobileWidth
-                            ? {
-                                  ...column,
-                                  width: mobileWidth,
-                                  minWidth: mobileWidth,
-                                  maxWidth: mobileWidth,
-                              }
+                    OPEN_TRADES_MOBILE_COLUMN_WIDTHS[String(column.key)]
+                return [
+                    mobileWidth
+                        ? {
+                              ...column,
+                              width: mobileWidth,
+                              minWidth: mobileWidth,
+                              maxWidth: mobileWidth,
+                          }
                         : column,
-                    ]
-                },
-            )
-            return mobileColumns
+                ]
+            })
         }
 
         if (options.isTablet.value) {

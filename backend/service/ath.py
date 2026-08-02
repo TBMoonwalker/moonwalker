@@ -23,6 +23,10 @@ class AthService:
         self.exchange = Exchange()
         self._cache: dict[tuple[str, str], tuple[float, float]] = {}
 
+    async def close(self) -> None:
+        """Close exchange resources owned by this ATH service."""
+        await self.exchange.close()
+
     def _to_utc_aware(self, value: datetime) -> datetime:
         """Normalize datetime values to UTC-aware for safe comparisons."""
         if value.tzinfo is None:

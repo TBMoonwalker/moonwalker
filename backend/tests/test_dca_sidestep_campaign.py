@@ -698,7 +698,10 @@ async def test_activate_campaign_submits_manual_reentry_buy(
     submitted_orders: list[dict[str, object]] = []
 
     class _FakeOrders:
-        async def receive_buy_order(self, order, config):
+        async def receive_buy_order_prelocked(self, order, config):
+            from service.lifecycle_mutation import lifecycle_mutation_coordinator
+
+            lifecycle_mutation_coordinator.assert_prelocked(order["symbol"])
             submitted_orders.append({"order": dict(order), "config": dict(config)})
             return True
 

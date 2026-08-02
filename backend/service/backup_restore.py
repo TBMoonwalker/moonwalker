@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
@@ -21,6 +23,12 @@ from service.config_migrations import (
 )
 from service.data import Data
 from service.database import run_sqlite_write_with_retry
+from service.placement_intents import (
+    NONTERMINAL_PLACEMENT_STATES,
+    TERMINAL_PLACEMENT_STATES,
+    is_terminal_placement_state,
+    quarantine_restored_intent,
+)
 from service.trade_lifecycle_config import (
     build_invalid_backup_shape_error,
     resolve_trade_mode_config,
@@ -30,7 +38,9 @@ from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "backup_restore")
 
-BACKUP_SCHEMA_VERSION = 1
+BACKUP_SCHEMA_VERSION = 2
+RECOVERY_MANIFEST_SCHEMA_VERSION = 1
+RECOVERY_MANIFEST_DISPOSITION = "quarantine_only"
 
 TRADE_TABLE_MODELS: dict[str, type] = {
     "trades": model.Trades,
@@ -41,6 +51,7 @@ TRADE_TABLE_MODELS: dict[str, type] = {
     "unsellable_trades": model.UnsellableTrades,
     "autopilot_history": model.Autopilot,
     "upnl_history": model.UpnlHistory,
+    "placement_intents": model.PlacementIntent,
 }
 
 
@@ -71,6 +82,7 @@ class BackupService:
         }
         if include_trade_data:
             payload["trade_data"] = await self._export_trade_data()
+            payload["sealed_recovery_manifest"] = await self._export_recovery_manifest()
         return payload
 
     async def restore_backup(
@@ -99,8 +111,12 @@ class BackupService:
                     safe_fields={"restore_trade_data": restore_trade_data},
                 )
             validated_trade_data = self._validate_trade_data(trade_data)
+            quarantined_intents = self._validate_recovery_manifest(
+                backup_payload.get("sealed_recovery_manifest")
+            )
         else:
             validated_trade_data = None
+            quarantined_intents = []
 
         restore_summary = {
             "config_keys": len(config_rows),
@@ -110,6 +126,7 @@ class BackupService:
             },
             "history_refreshed_symbols": [],
             "history_failed_symbols": [],
+            "quarantined_placement_intents": len(quarantined_intents),
         }
 
         async def _restore() -> None:
@@ -130,6 +147,7 @@ class BackupService:
                 await model.TradeReplayCandles.all().using_db(conn).delete()
                 await model.TradeExecutions.all().using_db(conn).delete()
                 await model.Trades.all().using_db(conn).delete()
+                await model.PlacementIntent.all().using_db(conn).delete()
 
                 for table_name, rows in validated_trade_data.items():
                     model_class = TRADE_TABLE_MODELS[table_name]
@@ -138,6 +156,14 @@ class BackupService:
                             using_db=conn,
                             **self._deserialize_row(model_class, row),
                         )
+                for row in quarantined_intents:
+                    await model.PlacementIntent.create(
+                        using_db=conn,
+                        **self._deserialize_row(
+                            model.PlacementIntent,
+                            quarantine_restored_intent(row),
+                        ),
+                    )
 
         await run_sqlite_write_with_retry(_restore, "restoring backup")
 
@@ -177,9 +203,39 @@ class BackupService:
         """Export trade-related tables, excluding ticker OHLCV data."""
         payload: dict[str, list[dict[str, Any]]] = {}
         for table_name, model_class in TRADE_TABLE_MODELS.items():
-            rows = await model_class.all().order_by("id").values()
+            query = model_class.all()
+            if model_class is model.PlacementIntent:
+                query = query.filter(state__in=TERMINAL_PLACEMENT_STATES)
+            rows = await query.order_by("id").values()
             payload[table_name] = self._serialize_rows(rows)
         return payload
+
+    async def _export_recovery_manifest(self) -> dict[str, Any]:
+        """Seal nonterminal intents for audit-only quarantine on restore."""
+        rows = (
+            await model.PlacementIntent.filter(state__in=NONTERMINAL_PLACEMENT_STATES)
+            .order_by("id")
+            .values()
+        )
+        body = {
+            "schema_version": RECOVERY_MANIFEST_SCHEMA_VERSION,
+            "disposition": RECOVERY_MANIFEST_DISPOSITION,
+            "intents": self._serialize_rows(rows),
+        }
+        return {
+            **body,
+            "sha256": self._recovery_manifest_digest(body),
+        }
+
+    @staticmethod
+    def _recovery_manifest_digest(body: dict[str, Any]) -> str:
+        """Return the deterministic integrity seal for a recovery manifest."""
+        canonical = json.dumps(
+            body,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
     @staticmethod
     def _serialize_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -254,8 +310,81 @@ class BackupService:
                             "row_type": type(raw_row).__name__,
                         },
                     )
-                normalized_rows.append(dict(raw_row))
+                normalized_row = dict(raw_row)
+                if table_name == "placement_intents" and not (
+                    is_terminal_placement_state(normalized_row.get("state"))
+                ):
+                    raise build_invalid_backup_shape_error(
+                        message=(
+                            "Portable placement audit rows must be terminal; "
+                            "nonterminal rows belong in the sealed recovery manifest."
+                        ),
+                        safe_fields={
+                            "table_name": table_name,
+                            "state": normalized_row.get("state"),
+                        },
+                    )
+                normalized_rows.append(normalized_row)
             validated[table_name] = normalized_rows
+        return validated
+
+    @classmethod
+    def _validate_recovery_manifest(
+        cls,
+        raw_manifest: Any,
+    ) -> list[dict[str, Any]]:
+        """Validate a sealed manifest and return nonterminal source intents."""
+        if raw_manifest is None:
+            return []
+        if not isinstance(raw_manifest, dict):
+            raise build_invalid_backup_shape_error(
+                message="The sealed recovery manifest must be an object.",
+                safe_fields={"manifest_type": type(raw_manifest).__name__},
+            )
+
+        raw_intents = raw_manifest.get("intents")
+        if not isinstance(raw_intents, list):
+            raise build_invalid_backup_shape_error(
+                message="The sealed recovery manifest intents must be a list.",
+                safe_fields={"intents_type": type(raw_intents).__name__},
+            )
+        body = {
+            "schema_version": raw_manifest.get("schema_version"),
+            "disposition": raw_manifest.get("disposition"),
+            "intents": raw_intents,
+        }
+        if body["schema_version"] != RECOVERY_MANIFEST_SCHEMA_VERSION:
+            raise build_invalid_backup_shape_error(
+                message="Unsupported sealed recovery manifest schema version.",
+                safe_fields={"schema_version": body["schema_version"]},
+            )
+        if body["disposition"] != RECOVERY_MANIFEST_DISPOSITION:
+            raise build_invalid_backup_shape_error(
+                message="Recovery manifests may only restore into quarantine.",
+                safe_fields={"disposition": body["disposition"]},
+            )
+        if raw_manifest.get("sha256") != cls._recovery_manifest_digest(body):
+            raise build_invalid_backup_shape_error(
+                message="The sealed recovery manifest integrity check failed.",
+                safe_fields={"manifest_intents": len(raw_intents)},
+            )
+
+        validated: list[dict[str, Any]] = []
+        for raw_intent in raw_intents:
+            if not isinstance(raw_intent, dict):
+                raise build_invalid_backup_shape_error(
+                    message="Recovery manifest intents must be objects.",
+                    safe_fields={
+                        "intent_type": type(raw_intent).__name__,
+                    },
+                )
+            state = str(raw_intent.get("state") or "")
+            if state not in NONTERMINAL_PLACEMENT_STATES:
+                raise build_invalid_backup_shape_error(
+                    message="Recovery manifest intents must be nonterminal.",
+                    safe_fields={"state": state},
+                )
+            validated.append(dict(raw_intent))
         return validated
 
     @staticmethod

@@ -2,33 +2,22 @@
 
 from typing import Any
 
-import helper
-import httpx
-from tenacity import TryAgain, retry, stop_after_attempt, wait_fixed
-
-logging = helper.LoggerFactory.get_logger("logs/filter.log", "filter")
+from service.coin_market_cap import (
+    CoinMarketCapRankService,
+    MarketCapRankLookup,
+    coin_market_cap_rank_service,
+)
 
 
 class Filter:
     """Filter helpers for allow/deny lists and volume checks."""
 
-    @retry(wait=wait_fixed(10), stop=stop_after_attempt(10))
-    async def __request_api_endpoint(
-        self, request: str, headers: dict | None = None
-    ) -> Any:
-        response = None
-        try:
-            async with httpx.AsyncClient() as client:
-                if headers:
-                    response = await client.get(url=request, headers=headers)
-                else:
-                    response = await client.get(url=request)
-                response.raise_for_status()
-        except httpx.HTTPError as e:
-            logging.error("Error getting response for %s. Cause: %s", request, e)
-            raise TryAgain
-
-        return response
+    def __init__(
+        self,
+        market_cap_service: CoinMarketCapRankService | None = None,
+    ) -> None:
+        """Use the shared lifespan-owned rank service by default."""
+        self._market_cap_service = market_cap_service or coin_market_cap_rank_service
 
     def is_on_allowed_list(self, symbol: str, allow_list: list[str] | None) -> bool:
         """Return True if symbol is in allow list or allow list is empty."""
@@ -85,30 +74,15 @@ class Filter:
 
         return result
 
-    @helper.async_ttl_cache(maxsize=1024, ttl=86400)
-    async def get_cmc_marketcap_rank(self, api_key: str, symbol: str) -> Any:
-        """Fetch CoinMarketCap market cap rank for the symbol."""
-        marketcap = None
-        headers = {"X-CMC_PRO_API_KEY": api_key}
-        ws_endpoint = "pro-api.coinmarketcap.com"
-        ws_context = "v1/cryptocurrency/map"
-        start = 1
-        limit = 5000
-        sort = "cmc_rank"
-        url = f"https://{ws_endpoint}/{ws_context}?start={start}&limit={limit}&sort={sort}"
-        response = await self.__request_api_endpoint(
-            url,
-            headers,
-        )
+    async def lookup_cmc_marketcap_rank(
+        self,
+        api_key: str,
+        symbol: str,
+    ) -> MarketCapRankLookup:
+        """Return rank data with availability and snapshot diagnostics."""
+        return await self._market_cap_service.lookup(api_key, symbol)
 
-        try:
-            json_data = response.json()
-            if json_data["status"]["error_code"] == 0:
-                for entry in json_data["data"]:
-                    if entry["symbol"] == symbol:
-                        marketcap = entry["rank"]
-                        break
-        except (KeyError, TypeError, ValueError) as e:
-            logging.error("Error getting CMC data. Cause: %s", e)
-
-        return marketcap
+    async def get_cmc_marketcap_rank(self, api_key: str, symbol: str) -> int | None:
+        """Return the rank while retaining compatibility with legacy callers."""
+        lookup = await self.lookup_cmc_marketcap_rank(api_key, symbol)
+        return lookup.rank if lookup.available else None

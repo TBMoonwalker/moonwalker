@@ -70,7 +70,7 @@ test('trade replay expansion is available from the whole row', () => {
         'expected open and closed trade expansion to be controlled by row props',
     )
     assert.ok(
-        openTradesSource.includes("'aria-expanded': expandedTradeRowKeys.value.includes(rowKey)") &&
+        openTradesSource.includes("'aria-expanded': isOpenTradeRowExpanded(rowData)") &&
             closedTradesSource.includes("'aria-expanded': expandedClosedTradeRowKeys.value.includes(rowKey)") &&
             openTradesSource.includes("'aria-label': `Toggle trade details for ${rowData.symbol}`") &&
             closedTradesSource.includes("'aria-label': `Toggle trade details for ${rowData.symbol}`"),

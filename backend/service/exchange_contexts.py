@@ -29,6 +29,10 @@ class SellRoutingContext:
         [ExchangeOrderPayload, dict[str, Any]],
         Awaitable[dict[str, Any] | None],
     ]
+    create_spot_market_fallback: Callable[
+        [ExchangeOrderPayload, dict[str, Any], dict[str, Any]],
+        Awaitable[dict[str, Any] | None],
+    ]
     can_fallback_to_market_sell: Callable[
         [ExchangeOrderPayload, dict[str, Any]],
         Awaitable[bool],

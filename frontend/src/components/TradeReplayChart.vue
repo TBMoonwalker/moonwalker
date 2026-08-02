@@ -66,6 +66,11 @@ import {
     type TimeframeChoice,
 } from '../helpers/openTrades'
 import {
+    mergeReplayCandleRows,
+    replayNeedsHistoryFallback,
+    type ReplayCandleRow,
+} from '../helpers/tradeReplayCandles'
+import {
     getIndicatorPanes,
     getPriceIndicatorSeries,
     renderIndicatorSeries,
@@ -183,7 +188,7 @@ function normalizeUuid(value: string | null | undefined): string | null {
         : null
 }
 
-function normalizeCandleRows(payload: unknown): Array<Record<string, number>> {
+function normalizeCandleRows(payload: unknown): ReplayCandleRow[] {
     return Array.isArray(payload) ? payload : []
 }
 
@@ -398,7 +403,7 @@ async function initChart(): Promise<void> {
             : `/data/ohlcv/replay/${props.archiveDealId}/${timeframe.timerange}/${historyStart}/${historyEnd}/0`
         : null
 
-    let tickerData: Array<Record<string, number>> = []
+    let tickerData: ReplayCandleRow[] = []
     try {
         if (archiveUrl && archiveCacheKey) {
             try {
@@ -411,14 +416,32 @@ async function initChart(): Promise<void> {
             }
         }
 
-        if (tickerData.length === 0) {
+        const needsHistoryFallback =
+            tickerData.length === 0 ||
+            (archiveUrl !== null &&
+                replayNeedsHistoryFallback(
+                    tickerData,
+                    historyStart,
+                    historyEnd,
+                    timeframe.seconds,
+                ))
+        if (needsHistoryFallback) {
+            let historyData: ReplayCandleRow[] = []
             try {
-                tickerData = normalizeCandleRows(await fetchJson<unknown>(historyUrl))
-                if (tickerData.length > 0) {
-                    ohlcvStore.set(fallbackCacheKey, tickerData)
+                historyData = normalizeCandleRows(
+                    await fetchJson<unknown>(historyUrl),
+                )
+                if (historyData.length > 0) {
+                    ohlcvStore.set(fallbackCacheKey, historyData)
                 }
             } catch (_error) {
-                tickerData = normalizeCandleRows(ohlcvStore.get(fallbackCacheKey) ?? [])
+                historyData = normalizeCandleRows(
+                    ohlcvStore.get(fallbackCacheKey) ?? [],
+                )
+            }
+            tickerData = mergeReplayCandleRows(tickerData, historyData)
+            if (archiveCacheKey && tickerData.length > 0) {
+                ohlcvStore.set(archiveCacheKey, tickerData)
             }
         }
 
@@ -723,7 +746,7 @@ onUnmounted(() => {
     width: 100%;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .expand-chart,
     .expand-chart-empty {
         flex-basis: 300px;

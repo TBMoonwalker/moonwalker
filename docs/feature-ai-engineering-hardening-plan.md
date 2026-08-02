@@ -417,72 +417,90 @@ passes at desktop and mobile viewports, and `scripts/ci.sh` is green.
 
 ## Implementation Tasks
 
-Synthesized from this review's findings. Checkbox each task as it ships.
+Synthesized from this review's findings. Status was re-audited against the
+repository on 2026-07-28; checked items link to their implementation evidence.
+Partially shipped tasks remain unchecked and name the exact work still open.
 
-- [ ] **T1 (P1, human: ~1d / CC: ~2h)** — CI — Establish rendered-test, E2E, coverage, and hardened workflow gates.
+- [x] **T1 (P1, human: ~1d / CC: ~2h)** — CI — Establish rendered-test, E2E, coverage, and hardened workflow gates.
   - Surfaced by: Test review — current checks are source-heavy, have no coverage ratchet, and are not enforced by repository CI.
   - Files: `frontend/package.json`, `frontend/package-lock.json`, `scripts/ci.sh`, `pyproject.toml`, `.github/workflows/`
   - Verify: `cd scripts && ./ci.sh`
-- [ ] **T2 (P1, human: ~4h / CC: ~45m)** — Admin API — Replace truthy mutation flags with strict DTOs.
+  - Evidence: [`scripts/ci.sh`](../scripts/ci.sh), [CI workflow](../.github/workflows/ci.yml), and [`frontend/tests-vitest`](../frontend/tests-vitest/).
+- [x] **T2 (P1, human: ~4h / CC: ~45m)** — Admin API — Replace truthy mutation flags with strict DTOs.
   - Surfaced by: Code quality — `backend/controller/config.py:744,812,904`.
   - Files: `backend/controller/config.py`, `backend/tests/`
   - Verify: wrong-type/unknown-field API tests plus `cd scripts && ./ci.sh`
-- [ ] **T3 (P1, human: ~4h / CC: ~45m)** — Transport — Enforce same-origin defaults and a validated explicit allowlist.
+  - Evidence: [`controller/config.py`](../backend/controller/config.py) and strict request coverage in [`test_litestar_migration_regressions.py`](../backend/tests/test_litestar_migration_regressions.py).
+- [x] **T3 (P1, human: ~4h / CC: ~45m)** — Transport — Enforce same-origin defaults and a validated explicit allowlist.
   - Surfaced by: Architecture — wildcard CORS at `backend/app.py:214-220`.
   - Files: `backend/app.py`, config schema/docs, `backend/tests/`
   - Verify: origin matrix tests and WebSocket connection tests
-- [ ] **T4 (P1, human: ~1d / CC: ~2h)** — Runtime — Supervise critical tasks through the application lifespan.
+  - Evidence: [`origin_policy.py`](../backend/service/origin_policy.py) and [`test_origin_policy.py`](../backend/tests/test_origin_policy.py).
+- [x] **T4 (P1, human: ~1d / CC: ~2h)** — Runtime — Supervise critical tasks through the application lifespan.
   - Surfaced by: Architecture — detached startup tasks at `backend/app.py:145-167`.
   - Files: `backend/app.py`, runtime service shutdown seams, `backend/tests/`
   - Verify: unexpected-exit, optional-failure, and shutdown-order integration tests
-- [ ] **T5 (P1, human: ~1d / CC: ~2h)** — Config — Add versioned idempotent trade-mode migration.
+  - Evidence: [`app.py`](../backend/app.py), [`runtime_services.py`](../backend/service/runtime_services.py), and [`test_app_startup.py`](../backend/tests/test_app_startup.py).
+- [x] **T5 (P1, human: ~1d / CC: ~2h)** — Config — Add versioned idempotent trade-mode migration.
   - Surfaced by: Code quality — runtime fallback at `backend/service/config.py:164-192`.
   - Files: `backend/service/config.py`, database migration helpers, backup/restore, `backend/tests/`
   - Verify: legacy DB, legacy backup, interruption, and retry fixtures
-- [ ] **T6 (P1, human: ~1d / CC: ~2h)** — Config — Persist canonical typed signal settings.
+  - Evidence: [`config_migrations.py`](../backend/service/config_migrations.py) and [`test_config_migrations.py`](../backend/tests/test_config_migrations.py).
+- [x] **T6 (P1, human: ~1d / CC: ~2h)** — Config — Persist canonical typed signal settings.
   - Surfaced by: Code quality — strict runtime parser conflicts with permissive controller fallback.
   - Files: `backend/service/signal_runtime.py`, `backend/controller/config.py`, signal plugins, frontend config editor
   - Verify: legacy conversion, malformed blocker, redaction, and round-trip tests
-- [ ] **T7 (P2, human: ~3d / CC: ~5h)** — Config — Publish a canonical backend config contract and migrate recovery, delisting, and AI slices.
+  - Evidence: [`signal_settings.py`](../backend/service/signal_settings.py), its migration in [`config_migrations.py`](../backend/service/config_migrations.py), and config tests.
+- [x] **T7 (P2, human: ~3d / CC: ~5h)** — Config — Publish a canonical backend config contract and migrate recovery, delisting, and AI slices.
   - Surfaced by: Code quality — defaults/validation/readiness duplicated across backend and frontend.
   - Files: backend config/controller/schema, `frontend/src/helpers/config*`, `frontend/src/control-center/readiness.ts`
   - Verify: schema snapshot, frontend round trip, secret omission, readiness parity
-- [ ] **T8 (P1, human: ~2d / CC: ~4h)** — AI Runtime — Add a bounded lifecycle-owned worker queue.
+  - Evidence: [`config_contract.py`](../backend/service/config_contract.py), [`test_config_contract.py`](../backend/tests/test_config_contract.py), and the frontend contract tests.
+- [x] **T8 (P1, human: ~2d / CC: ~4h)** — AI Runtime — Add a bounded lifecycle-owned worker queue.
   - Surfaced by: Performance/async — detached AI tasks at `backend/service/ai_trust.py:1539-1570`.
   - Files: AI services, `backend/app.py`, monitoring/status controller, `backend/tests/`
   - Verify: burst, dedupe, backpressure, restart, and shutdown-drain tests
-- [ ] **T9 (P2, human: ~2d / CC: ~4h)** — AI Design — Extract provider, calibration, and analytics modules behind the stable facade.
+  - Evidence: [`ai_work_queue.py`](../backend/service/ai_work_queue.py), lifespan ownership in [`app.py`](../backend/app.py), and [`test_ai_work_queue.py`](../backend/tests/test_ai_work_queue.py).
+- [x] **T9 (P2, human: ~2d / CC: ~4h)** — AI Design — Extract provider, calibration, and analytics modules behind the stable facade.
   - Surfaced by: Architecture — `backend/service/ai_trust.py` combines transport, policy, persistence, calibration, and analytics.
   - Files: `backend/service/ai_trust.py`, new focused AI service modules, `backend/tests/test_ai_trust.py`
   - Verify: public-import compatibility and focused module tests
-- [ ] **T10 (P1, human: ~1d / CC: ~2h)** — AI Orders — Carry and persist the exact enforcement evaluation once.
+  - Evidence: provider transport, calibration policy, and analytics reads are isolated in [`ai_provider.py`](../backend/service/ai_provider.py), [`ai_trust_calibration.py`](../backend/service/ai_trust_calibration.py), and [`ai_trust_analytics.py`](../backend/service/ai_trust_analytics.py), with facade compatibility plus focused coverage in [`test_ai_trust.py`](../backend/tests/test_ai_trust.py) and [`test_ai_trust_calibration.py`](../backend/tests/test_ai_trust_calibration.py).
+- [x] **T10 (P1, human: ~1d / CC: ~2h)** — AI Orders — Carry and persist the exact enforcement evaluation once.
   - Surfaced by: Performance — enforcement and post-fill observation can score the same entry twice.
   - Files: `backend/service/ai_trust.py`, `backend/service/orders.py`, `backend/service/order_persistence.py`, AI model
   - Verify: provider call-count, fill failure, retry-idempotency, blocked, and shadow-mode tests
-- [ ] **T11 (P2, human: ~4h / CC: ~45m)** — AI Transport — Reuse one bounded `httpx.AsyncClient`.
+  - Evidence: evaluation identity in [`ai_trust.py`](../backend/service/ai_trust.py), unique persistence in [`aitrustprediction.py`](../backend/model/aitrustprediction.py), and [`test_ai_trust.py`](../backend/tests/test_ai_trust.py).
+- [x] **T11 (P2, human: ~4h / CC: ~45m)** — AI Transport — Reuse one bounded `httpx.AsyncClient`.
   - Surfaced by: Performance/async — provider transport lacks application-owned pooling lifecycle.
   - Files: AI provider module, `backend/app.py`, `backend/tests/`
   - Verify: timeout categories, pool reuse, bounded retry, and close tests
-- [ ] **T12 (P2, human: ~1d / CC: ~2h)** — AI Analytics — Use indexed DB aggregates and revision caching.
+  - Evidence: [`ai_provider.py`](../backend/service/ai_provider.py) and its start/close ownership in [`app.py`](../backend/app.py).
+- [x] **T12 (P2, human: ~1d / CC: ~2h)** — AI Analytics — Use indexed DB aggregates and revision caching.
   - Surfaced by: Performance — sequential counts and unbounded provider-row load at `backend/service/ai_trust.py:1441-1469`.
   - Files: AI model/migrations, analytics module/controller, `backend/tests/`
   - Verify: result parity, query-count, invalidation, and p95 fixture budget
-- [ ] **T13 (P2, human: ~3d / CC: ~5h)** — Trading Domain — Introduce typed intent, execution, and persistence contracts.
+  - Evidence: grouped SQL, bounded detail reads, indexes, and revision caching are implemented in [`ai_trust_analytics.py`](../backend/service/ai_trust_analytics.py); [`test_ai_trust_analytics.py`](../backend/tests/test_ai_trust_analytics.py) locks the six-query cold read, one-query cache hit, invalidation behavior, 5,000-row fixture, and 500 ms p95 budget.
+- [x] **T13 (P2, human: ~3d / CC: ~5h)** — Trading Domain — Introduce typed intent, execution, and persistence contracts.
   - Surfaced by: Code quality — loose optional exchange payloads have 100+ assumed direct field accesses.
   - Files: `backend/service/exchange_types.py`, exchange/orders/persistence services, controllers, tests
   - Verify: adapter contract tests and buy/sell/partial-fill regression suite
-- [ ] **T14 (P2, human: ~2d / CC: ~4h)** — Signals — Add the shared entry coordinator and typed volume normalization.
+  - Evidence: [`trading_contracts.py`](../backend/service/trading_contracts.py), [`exchange_types.py`](../backend/service/exchange_types.py), and [`persistence_records.py`](../backend/service/persistence_records.py) define required create-time contracts separately from intentionally partial update records. [`test_persistence_records.py`](../backend/tests/test_persistence_records.py) and the exchange/order regression suites enforce those boundaries.
+- [x] **T14 (P2, human: ~2d / CC: ~4h)** — Signals — Add the shared entry coordinator and typed volume normalization.
   - Surfaced by: Architecture/code quality — repeated plugin orchestration and SymSignals `DirtyFix`.
   - Files: `backend/service/signal_runtime.py`, `backend/signals/`, filter/order services, tests
   - Verify: parity tests per plugin, concurrency/reservation release, volume table tests
-- [ ] **T15 (P2, human: ~4h / CC: ~45m)** — Mobile UI — Remove statistics and Control Center text clipping.
+  - Evidence: [`signal_runtime.py`](../backend/service/signal_runtime.py), [`external_volume.py`](../backend/service/external_volume.py), and signal/volume tests.
+- [x] **T15 (P2, human: ~4h / CC: ~45m)** — Mobile UI — Remove statistics and Control Center text clipping.
   - Surfaced by: accepted TODO ISSUE-003/004; implementation waits for Playwright baseline.
   - Files: `frontend/src/components/Heatmap.vue`, `frontend/src/views/StatisticsView.vue`, Control Center mission components, Playwright tests
   - Verify: 375x812 plus tablet/desktop visual and accessibility assertions
-- [ ] **T16 (P3, human: ~1h / CC: ~15m)** — Cleanup — Remove verified-obsolete compatibility exports and replaced source tests.
+  - Evidence: [`control-center.spec.ts`](../frontend/tests-e2e/control-center.spec.ts) and responsive rendered/source regression tests.
+- [x] **T16 (P3, human: ~1h / CC: ~15m)** — Cleanup — Remove verified-obsolete compatibility exports and replaced source tests.
   - Surfaced by: obsolete-code review — datetime helper re-exports and superseded compatibility assertions.
   - Files: `backend/service/autopilot_memory.py`, affected tests, migrated frontend tests
   - Verify: repository search is clean and `cd scripts && ./ci.sh`
+  - Evidence: canonical datetime use in [`autopilot_memory.py`](../backend/service/autopilot_memory.py) and the current rendered/legacy test split in [`scripts/ci.sh`](../scripts/ci.sh).
 
 ## Worktree Parallelization
 

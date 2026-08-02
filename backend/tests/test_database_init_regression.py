@@ -11,12 +11,20 @@ from service.database import (
     _integrity_check_is_clean,
     _plan_additive_column_statements,
 )
+from service.schema_migrations import MigrationDefinition
 from service.sqlite_timestamps import coerce_timestamp_like_to_ms
 from tortoise import Tortoise
 
 
 async def _noop(*_args, **_kwargs) -> None:
     return None
+
+
+async def _run_migration_callbacks(
+    migrations: tuple[MigrationDefinition, ...],
+) -> None:
+    for migration in migrations:
+        await migration.apply()
 
 
 class _FakeConnection:
@@ -260,6 +268,14 @@ async def test_database_init_surfaces_actionable_sqlite_corruption(
 
     monkeypatch.setattr("service.database.Tortoise.init", fake_tortoise_init)
     monkeypatch.setattr("service.database.Tortoise.generate_schemas", _noop)
+    monkeypatch.setattr(
+        "service.database.bootstrap_sqlite_migration_ledger",
+        _noop,
+    )
+    monkeypatch.setattr(
+        "service.database.run_schema_migrations",
+        _run_migration_callbacks,
+    )
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
@@ -293,6 +309,14 @@ async def test_database_init_reraises_non_corruption_failures(
 
     monkeypatch.setattr("service.database.Tortoise.init", fake_tortoise_init)
     monkeypatch.setattr("service.database.Tortoise.generate_schemas", _noop)
+    monkeypatch.setattr(
+        "service.database.bootstrap_sqlite_migration_ledger",
+        _noop,
+    )
+    monkeypatch.setattr(
+        "service.database.run_schema_migrations",
+        _run_migration_callbacks,
+    )
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
@@ -329,6 +353,14 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
 
     monkeypatch.setattr("service.database.Tortoise.init", fake_tortoise_init)
     monkeypatch.setattr("service.database.Tortoise.generate_schemas", _noop)
+    monkeypatch.setattr(
+        "service.database.bootstrap_sqlite_migration_ledger",
+        _noop,
+    )
+    monkeypatch.setattr(
+        "service.database.run_schema_migrations",
+        _run_migration_callbacks,
+    )
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _noop)
     monkeypatch.setattr(Database, "_ensure_open_trades_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_spot_campaign_columns", _noop)
@@ -380,6 +412,14 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
     monkeypatch.setattr(
         "service.database.Tortoise.generate_schemas", fake_generate_schemas
     )
+    monkeypatch.setattr(
+        "service.database.bootstrap_sqlite_migration_ledger",
+        _record("bootstrap_migration_ledger"),
+    )
+    monkeypatch.setattr(
+        "service.database.run_schema_migrations",
+        _run_migration_callbacks,
+    )
     monkeypatch.setattr(Database, "_apply_sqlite_pragmas", _record("apply_pragmas"))
     monkeypatch.setattr(
         Database, "_ensure_open_trades_columns", _record("ensure_open_trades_columns")
@@ -412,6 +452,7 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
     assert calls == [
         "tortoise_init",
         "apply_pragmas",
+        "bootstrap_migration_ledger",
         "generate_schemas",
         "ensure_open_trades_columns",
         "ensure_spot_campaign_columns",
@@ -529,6 +570,7 @@ async def test_background_replay_backfill_allows_missing_archive_exchange_repair
         open_date,
         close_date,
         allow_missing_archive_exchange_repair: bool = False,
+        allow_live_snapshot_exchange_repair: bool = False,
         conn=None,
     ) -> int:
         captured_kwargs.append(
@@ -539,6 +581,9 @@ async def test_background_replay_backfill_allows_missing_archive_exchange_repair
                 "close_date": close_date,
                 "allow_missing_archive_exchange_repair": (
                     allow_missing_archive_exchange_repair
+                ),
+                "allow_live_snapshot_exchange_repair": (
+                    allow_live_snapshot_exchange_repair
                 ),
                 "conn": conn,
             }
@@ -570,6 +615,7 @@ async def test_background_replay_backfill_allows_missing_archive_exchange_repair
             "open_date": "0",
             "close_date": "43200000",
             "allow_missing_archive_exchange_repair": True,
+            "allow_live_snapshot_exchange_repair": True,
             "conn": None,
         }
     ]

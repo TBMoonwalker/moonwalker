@@ -1,4 +1,9 @@
-from service.config import parse_history_lookback_to_days, resolve_history_lookback_days
+import pytest
+from service.config import (
+    deserialize_config_value,
+    parse_history_lookback_to_days,
+    resolve_history_lookback_days,
+)
 
 
 def test_parse_history_lookback_to_days_supports_units() -> None:
@@ -6,6 +11,45 @@ def test_parse_history_lookback_to_days_supports_units() -> None:
     assert parse_history_lookback_to_days("2w") == 14
     assert parse_history_lookback_to_days("6m") == 180
     assert parse_history_lookback_to_days("1y") == 365
+
+
+@pytest.mark.parametrize(
+    ("value", "expected"),
+    [
+        ("", None),
+        ("false", None),
+        ("30", 30),
+        ("0", None),
+        ("invalid", None),
+        ("0d", None),
+    ],
+)
+def test_parse_history_lookback_to_days_rejects_invalid_windows(
+    value: str,
+    expected: int | None,
+) -> None:
+    assert parse_history_lookback_to_days(value) == expected
+
+
+@pytest.mark.parametrize(
+    ("value", "value_type", "expected"),
+    [
+        (True, "int", 1),
+        ("false", "int", 0),
+        ("12", "int", 12),
+        ("invalid", "int", 0),
+        (False, "float", 0.0),
+        ("null", "float", 0.0),
+        ("12.5", "float", 12.5),
+        ("invalid", "float", 0.0),
+    ],
+)
+def test_deserialize_config_value_handles_legacy_numeric_forms(
+    value: object,
+    value_type: str,
+    expected: int | float,
+) -> None:
+    assert deserialize_config_value(value, value_type) == expected
 
 
 def test_resolve_history_lookback_days_prefers_new_key() -> None:

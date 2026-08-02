@@ -276,6 +276,7 @@ async def archive_replay_candles_for_deal(
     close_date: Any,
     conn: Any | None = None,
     allow_missing_archive_exchange_repair: bool = False,
+    allow_live_snapshot_exchange_repair: bool = False,
 ) -> int:
     """Copy the bounded replay candle window into the per-deal archive table."""
     normalized_deal_id = str(deal_id or "").strip()
@@ -337,7 +338,9 @@ async def archive_replay_candles_for_deal(
         timeframe_ms=timeframe_ms,
     )
 
-    should_try_exchange_repair = live_row is None and (
+    should_try_exchange_repair = (
+        live_row is None or allow_live_snapshot_exchange_repair
+    ) and (
         (bool(archived_timestamps) and archived_score[0] == 0)
         or (
             allow_missing_archive_exchange_repair

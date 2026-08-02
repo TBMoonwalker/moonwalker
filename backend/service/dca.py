@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from contextvars import ContextVar
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -13,6 +14,19 @@ from service.config_views import (
     DcaRuntimeConfigView,
     SidestepCampaignConfigView,
     TradeLifecycleConfigView,
+)
+from service.dca_decision import (
+    DcaAction,
+    DcaEvaluationContext,
+    ExitActionContext,
+    SidestepExitContext,
+    WaitingReentryContext,
+    build_dca_evaluation_context,
+    evaluate_exit_action_decision,
+    evaluate_recovery_trigger_decision,
+    evaluate_sidestep_exit_decision,
+    evaluate_static_dca_decision,
+    evaluate_waiting_reentry_decision,
 )
 from service.dca_math import (
     calculate_average_entry_price,
@@ -27,15 +41,12 @@ from service.dca_recovery_sizing import (
     calculate_recovery_execution_ceiling,
     calculate_recovery_execution_drift_percent,
     calculate_recovery_sizing,
-    calculate_recovery_spacing_percent,
-    calculate_recovery_trigger_price,
     normalize_recovery_sizing_mode,
 )
 from service.dca_safety_orders import (
     SafetyOrderContext,
     calculate_static_deviations,
     derive_safety_order_context,
-    evaluate_static_dca_trigger,
 )
 from service.dca_tp_state import (
     TpConfirmationState,
@@ -46,6 +57,7 @@ from service.dca_tp_state import (
 )
 from service.exchange import Exchange
 from service.indicators import Indicators
+from service.lifecycle_snapshot import LifecycleSnapshotIdentity
 from service.orders import Orders
 from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
@@ -73,11 +85,32 @@ class Dca:
         self.trades = Trades()
         self.utils = helper.Utils()
         self.sidestep_campaigns: SpotSidestepCampaignService | None = None
-        self.config: dict[str, Any] | None = None
+        self._config_snapshot: ContextVar[dict[str, Any] | None] = ContextVar(
+            "moonwalker_dca_config_snapshot",
+            default=None,
+        )
+        self._compat_config: dict[str, Any] | None = None
         self._strategy_cache: dict[tuple[str, str, str], object] = {}
         self._pending_tp_confirmations: dict[str, TpConfirmationState] = {}
         self._trailing_tp_peaks: dict[str, float] = {}
         self._last_sidestep_gate_by_symbol: dict[str, tuple[Any, ...]] = {}
+
+    async def shutdown(self) -> None:
+        """Close exchange resources owned by the DCA runtime."""
+        await self.exchange.close()
+        await self.ath_service.close()
+        await self.orders.close()
+
+    @property
+    def config(self) -> dict[str, Any] | None:
+        """Return the task-local config or a direct-test compatibility value."""
+        active = self._config_snapshot.get()
+        return active if active is not None else self._compat_config
+
+    @config.setter
+    def config(self, value: dict[str, Any] | None) -> None:
+        """Keep direct helper tests compatible without sharing runtime requests."""
+        self._compat_config = value
 
     def __log_sidestep_gate(
         self,
@@ -104,6 +137,14 @@ class Dca:
         """Forget the last sidestep gate state once evaluation can proceed."""
         normalized_symbol = str(symbol or "").strip()
         self._last_sidestep_gate_by_symbol.pop(normalized_symbol, None)
+
+    @staticmethod
+    def __order_snapshot_payload(trades: dict[str, Any]) -> dict[str, Any]:
+        """Return the evaluated identity for execution-bound order requests."""
+        snapshot = trades.get("_lifecycle_snapshot")
+        if not isinstance(snapshot, LifecycleSnapshotIdentity):
+            return {}
+        return {"lifecycle_snapshot": snapshot.to_dict()}
 
     def __get_monotonic_time(self) -> float:
         """Return a monotonic timestamp for TP confirmation timing."""
@@ -247,6 +288,7 @@ class Dca:
             "limit_price": take_profit_price,
             "tp_price": take_profit_price,
             "fallback_min_price": take_profit_price,
+            **self.__order_snapshot_payload(trades),
         }
         return await self.orders.arm_tp_limit_order(order, self.config or {})
 
@@ -394,14 +436,25 @@ class Dca:
         current_price: float,
     ) -> bool:
         """Place a sidestep re-entry buy from the watcher-owned lifecycle loop."""
-        if not self.__is_sidestep_mode(trades) or not self.__is_flat_waiting(trades):
-            return False
-        if not trades.get("campaign_id"):
-            self.__log_sidestep_gate(
-                trades["symbol"],
-                "waiting_missing_campaign",
+        preflight_action, preflight_reason = evaluate_waiting_reentry_decision(
+            WaitingReentryContext(
+                is_sidestep_mode=self.__is_sidestep_mode(trades),
+                is_flat_waiting=self.__is_flat_waiting(trades),
+                has_campaign_id=bool(trades.get("campaign_id")),
+                campaign_found=None,
+                cooldown_active=False,
+                strategy_signal=None,
+                order_size=0.0,
             )
+        )
+        if preflight_reason != "waiting_campaign_lookup_required":
+            if preflight_reason == "waiting_missing_campaign":
+                self.__log_sidestep_gate(
+                    trades["symbol"],
+                    preflight_reason,
+                )
             return False
+        assert preflight_action is DcaAction.WAIT
 
         sidestep_campaigns = await self._get_sidestep_campaigns()
         campaign = await sidestep_campaigns.get_campaign_snapshot(
@@ -415,37 +468,64 @@ class Dca:
             )
             return False
 
+        cooldown_active = False
         cooldown_until = campaign.get("cooldown_until")
         if cooldown_until:
             try:
-                if (
+                cooldown_active = (
                     datetime.fromisoformat(str(cooldown_until).replace("Z", "+00:00"))
                     > datetime.now().astimezone()
-                ):
-                    self.__log_sidestep_gate(
-                        trades["symbol"],
-                        "waiting_cooldown_active",
-                        cooldown_until=str(cooldown_until),
-                    )
-                    return False
+                )
             except ValueError:
                 pass
 
-        self.__clear_sidestep_gate(trades["symbol"])
-        if not await self.__sidestep_reentry_strategy(trades["symbol"]):
+        strategy_gate_action, strategy_gate_reason = evaluate_waiting_reentry_decision(
+            WaitingReentryContext(
+                is_sidestep_mode=True,
+                is_flat_waiting=True,
+                has_campaign_id=True,
+                campaign_found=True,
+                cooldown_active=cooldown_active,
+                strategy_signal=None,
+                order_size=0.0,
+            )
+        )
+        if strategy_gate_reason != "sidestep_reentry_strategy_required":
+            if strategy_gate_reason == "waiting_cooldown_active":
+                self.__log_sidestep_gate(
+                    trades["symbol"],
+                    strategy_gate_reason,
+                    cooldown_until=str(cooldown_until),
+                )
             return False
+        assert strategy_gate_action is DcaAction.WAIT
+
+        self.__clear_sidestep_gate(trades["symbol"])
+        strategy_signal = await self.__sidestep_reentry_strategy(trades["symbol"])
 
         order_size = float(
             trades.get("reserved_reentry_quote")
             or campaign.get("reserved_quote")
             or float((self.config or {}).get("bo") or 0.0)
         )
-        if order_size <= 0:
-            self.__log_sidestep_gate(
-                trades["symbol"],
-                "waiting_missing_reserved_quote",
-                campaign_id=str(trades.get("campaign_id") or ""),
+        reentry_action, reentry_reason = evaluate_waiting_reentry_decision(
+            WaitingReentryContext(
+                is_sidestep_mode=True,
+                is_flat_waiting=True,
+                has_campaign_id=True,
+                campaign_found=True,
+                cooldown_active=False,
+                strategy_signal=strategy_signal,
+                order_size=order_size,
             )
+        )
+        if reentry_action is not DcaAction.PLACE_REENTRY_BUY:
+            if reentry_reason == "waiting_missing_reserved_quote":
+                self.__log_sidestep_gate(
+                    trades["symbol"],
+                    reentry_reason,
+                    campaign_id=str(trades.get("campaign_id") or ""),
+                )
             return False
 
         logging.info(
@@ -476,6 +556,7 @@ class Dca:
             ).reentry_strategy,
             "timeframe": resolve_timeframe(self.config or {}),
             "metadata_json": None,
+            **self.__order_snapshot_payload(trades),
         }
         success = await self.orders.receive_buy_order(order, self.config or {})
         if success:
@@ -737,8 +818,20 @@ class Dca:
         current_price: float,
         actual_pnl: float,
         policy: RecoverySizingPolicy,
+        context: DcaEvaluationContext | None = None,
     ) -> tuple[bool, float, dict[str, Any]]:
         """Evaluate ATR spacing and the configured fresh recovery signal."""
+        if context is None:
+            context = build_dca_evaluation_context(
+                trade=trades,
+                config=self.config or {},
+                current_price=current_price,
+                decision_timestamp_ms=int(datetime.now().timestamp() * 1000),
+                persisted_policy=policy,
+                strategy_name=self.__runtime_config().dca_strategy or None,
+                strategy_timeframe=resolve_timeframe(self.config or {}),
+                replay_identity=str(trades.get("deal_id") or "") or None,
+            )
         atr_percent, atr_details = await self.__get_recovery_atr_percent(
             trades["symbol"],
             policy,
@@ -753,15 +846,16 @@ class Dca:
         if reference_atr_percent <= 0:
             reference_atr_percent = atr_percent
 
-        spacing_percent = calculate_recovery_spacing_percent(
-            reference_atr_percent,
-            int(trades.get("safetyorders_count") or 0),
-            policy,
+        preliminary_decision = evaluate_recovery_trigger_decision(
+            context,
+            reference_price=reference_price,
+            reference_atr_percent=reference_atr_percent,
+            execution_atr_percent=atr_percent,
+            strategy_signal=True,
+            strategy_payload_changed=True,
         )
-        trigger_price = calculate_recovery_trigger_price(
-            reference_price,
-            spacing_percent,
-        )
+        spacing_percent = float(preliminary_decision.spacing_percent or 0.0)
+        trigger_price = float(preliminary_decision.trigger_price or 0.0)
         details: dict[str, Any] = {
             "enabled": "true",
             "mode": policy.mode,
@@ -781,22 +875,30 @@ class Dca:
             abs(persisted_trigger - trigger_price) > 1e-12
             or persisted_reference_atr <= 0
         ):
+            updated_policy_state = {
+                "dca_reference_price": reference_price,
+                "dca_reference_atr_percent": reference_atr_percent,
+                "dca_next_trigger_price": trigger_price,
+            }
             await self.trades.update_open_trades(
-                {
-                    "dca_reference_price": reference_price,
-                    "dca_reference_atr_percent": reference_atr_percent,
-                    "dca_next_trigger_price": trigger_price,
-                },
+                updated_policy_state,
                 trades["symbol"],
             )
+            trades.update(updated_policy_state)
+            if isinstance(
+                trades.get("_lifecycle_snapshot"),
+                LifecycleSnapshotIdentity,
+            ):
+                trades["_lifecycle_snapshot"] = LifecycleSnapshotIdentity.from_trade(
+                    trades,
+                    self.config or {},
+                )
 
-        if policy.mode == RECOVERY_TARGET_MODE and policy.maximum_deal_quote <= 0:
-            details["reason"] = "missing_deal_budget"
-            await self.__persist_recovery_dca_diagnostics(trades, details)
-            return False, round(actual_pnl, 1), details
-
-        if trigger_price <= 0 or current_price > trigger_price:
-            details["reason"] = "waiting_for_atr_spacing"
+        if preliminary_decision.reason_code in {
+            "missing_deal_budget",
+            "waiting_for_atr_spacing",
+        }:
+            details["reason"] = preliminary_decision.reason_code
             await self.__persist_recovery_dca_diagnostics(trades, details)
             return False, round(actual_pnl, 1), details
 
@@ -806,16 +908,19 @@ class Dca:
             strategy_buy_signal, payload_changed = strategy_result
         else:
             strategy_buy_signal = bool(strategy_result)
-        if not strategy_buy_signal:
-            details["reason"] = "recovery_signal_not_matched"
-            await self.__persist_recovery_dca_diagnostics(trades, details)
-            return False, round(actual_pnl, 1), details
-        if not payload_changed:
-            details["reason"] = "recovery_signal_unchanged"
+        decision = evaluate_recovery_trigger_decision(
+            context,
+            reference_price=reference_price,
+            reference_atr_percent=reference_atr_percent,
+            execution_atr_percent=atr_percent,
+            strategy_signal=strategy_buy_signal,
+            strategy_payload_changed=payload_changed,
+        )
+        details["reason"] = decision.reason_code
+        if not decision.should_place:
             await self.__persist_recovery_dca_diagnostics(trades, details)
             return False, round(actual_pnl, 1), details
 
-        details["reason"] = "recovery_trigger_matched"
         return True, round(actual_pnl, 1), details
 
     async def __resolve_recovery_safety_order_size(
@@ -840,10 +945,20 @@ class Dca:
             if free_quote_balance is not None
             else None
         )
+        maximum_buy_price = 0.0
+        if policy.execution_guard_enabled:
+            execution_atr_percent = float(trigger_details.get("atr_percent") or 0.0)
+            execution_trigger_price = float(trigger_details.get("trigger_price") or 0.0)
+            maximum_buy_price = calculate_recovery_execution_ceiling(
+                execution_trigger_price,
+                execution_atr_percent,
+                policy,
+            )
         minimum_order_quote = await self.exchange.get_minimum_buy_notional(
             self.config or {},
             trades["symbol"],
-            is_market_order=True,
+            is_market_order=maximum_buy_price <= 0,
+            amount_sizing_price=maximum_buy_price or current_price,
         )
         sizing = calculate_recovery_sizing(
             total_cost=float(trades.get("total_cost") or 0.0),
@@ -980,7 +1095,21 @@ class Dca:
         # Actual PNL in percent (value for profit calculation)
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
 
-        if await self.orders.reconcile_tp_limit_order(trades, self.config or {}):
+        expected_snapshot = trades.get("_lifecycle_snapshot")
+        if not isinstance(expected_snapshot, LifecycleSnapshotIdentity):
+            expected_snapshot = None
+        if expected_snapshot is None:
+            reconciled = await self.orders.reconcile_tp_limit_order(
+                trades,
+                self.config or {},
+            )
+        else:
+            reconciled = await self.orders.reconcile_tp_limit_order(
+                trades,
+                self.config or {},
+                expected_snapshot=expected_snapshot,
+            )
+        if reconciled:
             return
 
         sellable_amount = float(
@@ -995,10 +1124,17 @@ class Dca:
                 total_amount=sellable_amount,
             )
         ):
-            canceled = await self.orders.cancel_tp_limit_order(
-                trades["symbol"],
-                self.config or {},
-            )
+            if expected_snapshot is None:
+                canceled = await self.orders.cancel_tp_limit_order(
+                    trades["symbol"],
+                    self.config or {},
+                )
+            else:
+                canceled = await self.orders.cancel_tp_limit_order(
+                    trades["symbol"],
+                    self.config or {},
+                    expected_snapshot=expected_snapshot,
+                )
             if not canceled:
                 return
             trades = {
@@ -1058,63 +1194,80 @@ class Dca:
                 sell = True
                 sell_reason = "autopilot_timeout"
 
-        # TP reached - sell order (market)
-        if sell:
-            if has_tp_limit_order and sell_reason == "take_profit" and prearm_supported:
-                logging.debug(
-                    "TP reached for %s with proactive limit order already armed; "
-                    "waiting for exchange fill reconciliation.",
-                    trades["symbol"],
-                )
-                sell = False
-            else:
-                if has_tp_limit_order:
-                    canceled = await self.orders.cancel_tp_limit_order(
-                        trades["symbol"],
-                        self.config or {},
-                    )
-                    if not canceled:
-                        return
-                    has_tp_limit_order = False
-                self.__clear_tp_confirmation(
-                    trades["symbol"],
-                    reason="sell_submitted",
-                    current_price=current_price,
-                    tp_price=take_profit_price,
-                )
-                order = {
-                    "symbol": trades["symbol"],
-                    "direction": trades["direction"],
-                    "side": "sell",
-                    "type_sell": "order_sell",
-                    "sell_reason": sell_reason,
-                    "actual_pnl": actual_pnl,
-                    "total_cost": trades["total_cost"],
-                    "current_price": current_price,
-                    "tp_price": take_profit_price,
-                    "limit_price": (
-                        take_profit_price
-                        if sell_reason == "take_profit"
-                        and str((self.config or {}).get("sell_order_type", "")).lower()
-                        == "limit"
-                        else None
-                    ),
-                    "fallback_min_price": (
-                        take_profit_price
-                        if current_price >= take_profit_price
-                        else None
-                    ),
-                }
-                await self.orders.receive_sell_order(order, self.config or {})
-        elif (
-            prearm_supported
+        prearm_ready = (
+            not sell
+            and prearm_supported
             and not has_tp_limit_order
             and self.__tp_limit_prearm_ready(
                 current_price=current_price,
                 tp_price=take_profit_price,
                 margin_percent=runtime_config.tp_limit_prearm_margin_percent,
             )
-        ):
+        )
+        exit_action, exit_reason, resolved_sell_reason = evaluate_exit_action_decision(
+            ExitActionContext(
+                sell_signal=sell,
+                sell_reason=sell_reason,
+                is_unsellable=is_unsellable,
+                has_tp_limit_order=has_tp_limit_order,
+                tp_limit_prearm_supported=prearm_supported,
+                tp_limit_prearm_ready=prearm_ready,
+            )
+        )
+        sell = exit_action is DcaAction.SELL
+        if exit_reason == "waiting_for_tp_limit_fill":
+            logging.debug(
+                "TP reached for %s with proactive limit order already armed; "
+                "waiting for exchange fill reconciliation.",
+                trades["symbol"],
+            )
+        elif exit_action is DcaAction.SELL:
+            sell_reason = resolved_sell_reason
+            if has_tp_limit_order:
+                if expected_snapshot is None:
+                    canceled = await self.orders.cancel_tp_limit_order(
+                        trades["symbol"],
+                        self.config or {},
+                    )
+                else:
+                    canceled = await self.orders.cancel_tp_limit_order(
+                        trades["symbol"],
+                        self.config or {},
+                        expected_snapshot=expected_snapshot,
+                    )
+                if not canceled:
+                    return
+                has_tp_limit_order = False
+            self.__clear_tp_confirmation(
+                trades["symbol"],
+                reason="sell_submitted",
+                current_price=current_price,
+                tp_price=take_profit_price,
+            )
+            order = {
+                "symbol": trades["symbol"],
+                "direction": trades["direction"],
+                "side": "sell",
+                "type_sell": "order_sell",
+                "sell_reason": sell_reason,
+                "actual_pnl": actual_pnl,
+                "total_cost": trades["total_cost"],
+                "current_price": current_price,
+                "tp_price": take_profit_price,
+                "limit_price": (
+                    take_profit_price
+                    if sell_reason == "take_profit"
+                    and str((self.config or {}).get("sell_order_type", "")).lower()
+                    == "limit"
+                    else None
+                ),
+                "fallback_min_price": (
+                    take_profit_price if current_price >= take_profit_price else None
+                ),
+                **self.__order_snapshot_payload(trades),
+            }
+            await self.orders.receive_sell_order(order, self.config or {})
+        elif exit_action is DcaAction.ARM_TP_LIMIT:
             has_tp_limit_order = await self.__arm_tp_limit_order(
                 trades=trades,
                 current_price=current_price,
@@ -1185,6 +1338,16 @@ class Dca:
         dynamic_so_details: dict[str, Any] = {"enabled": "false"}
         recovery_policy = self.__get_recovery_policy(trades)
         recovery_trigger_details: dict[str, Any] = {}
+        decision_context = build_dca_evaluation_context(
+            trade=trades,
+            config=self.config or {},
+            current_price=current_price,
+            decision_timestamp_ms=int(datetime.now().timestamp() * 1000),
+            persisted_policy=recovery_policy,
+            strategy_name=runtime_config.dca_strategy or None,
+            strategy_timeframe=resolve_timeframe(self.config or {}),
+            replay_identity=str(trades.get("deal_id") or "") or None,
+        )
 
         # Actual PNL in percent
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
@@ -1229,6 +1392,7 @@ class Dca:
                         current_price,
                         actual_pnl,
                         recovery_policy,
+                        decision_context,
                     )
                 else:
                     new_so, next_so_percentage = (
@@ -1240,11 +1404,16 @@ class Dca:
                         )
                     )
             else:
-                new_so, trigger_threshold, next_so_percentage = (
-                    self.__evaluate_static_dca_trigger(
-                        total_pnl, max_deviation, actual_deviation
-                    )
+                static_decision = evaluate_static_dca_decision(
+                    decision_context,
+                    total_pnl=total_pnl,
+                    step_scale=step_scale,
+                    price_deviation=price_deviation,
+                    safety_orders_count=int(trades["safetyorders_count"]),
                 )
+                new_so = static_decision.should_place
+                trigger_threshold = float(static_decision.trigger_threshold or 0.0)
+                next_so_percentage = float(static_decision.next_so_percentage or 0.0)
 
             if new_so:
                 if recovery_policy.mode == RECOVERY_TARGET_MODE:
@@ -1362,6 +1531,7 @@ class Dca:
                             if recovery_policy.mode == RECOVERY_TARGET_MODE
                             else None
                         ),
+                        **self.__order_snapshot_payload(trades),
                     }
                     placed_new_so = await self.orders.receive_buy_order(
                         order, self.config
@@ -1423,22 +1593,21 @@ class Dca:
         self, ticker: dict[str, Any], config: dict[str, Any]
     ) -> None:
         """Process incoming ticker data and trigger DCA actions."""
-        async with trading_maintenance_barrier.operation() as admitted:
-            if not admitted:
-                logging.info(
-                    "Skipping ticker evaluation for %s during maintenance.",
-                    ticker.get("ticker", {}).get("symbol"),
-                )
-                return
-            await self._process_ticker_data(ticker, config)
+        token = self._config_snapshot.set(dict(config))
+        try:
+            async with trading_maintenance_barrier.operation() as admitted:
+                if not admitted:
+                    logging.info(
+                        "Skipping ticker evaluation for %s during maintenance.",
+                        ticker.get("ticker", {}).get("symbol"),
+                    )
+                    return
+                await self._process_ticker_data(ticker)
+        finally:
+            self._config_snapshot.reset(token)
 
-    async def _process_ticker_data(
-        self, ticker: dict[str, Any], config: dict[str, Any]
-    ) -> None:
+    async def _process_ticker_data(self, ticker: dict[str, Any]) -> None:
         """Evaluate one ticker inside the trading maintenance barrier."""
-        # Get config
-        self.config = config
-
         # New price action for DCA calculation
         if ticker["type"] == "ticker_price":
             price = ticker["ticker"]["price"]
@@ -1469,6 +1638,10 @@ class Dca:
                         "campaign_id": ensured_campaign_id,
                         "lifecycle_mode": TradeLifecycleMode.SIDESTEP_REENTRY.value,
                     }
+                trades["_lifecycle_snapshot"] = LifecycleSnapshotIdentity.from_trade(
+                    trades,
+                    self.config or {},
+                )
                 self.__clear_sidestep_gate(trades["symbol"])
 
                 if self.__is_flat_waiting(trades):
@@ -1519,40 +1692,68 @@ class Dca:
     ) -> bool:
         """Sell early into flat-waiting mode when the bearish sidestep says so."""
         sidestep_campaigns = await self._get_sidestep_campaigns()
-        if not sidestep_campaigns.is_enabled(self.config):
-            return False
-        if not self.__is_sidestep_mode(trades):
-            return False
-        if self.__is_flat_waiting(trades):
-            return False
-        if trades.get("is_unsellable", False):
-            return False
-        if not trades.get("campaign_id"):
-            self.__log_sidestep_gate(
-                trades["symbol"],
-                "active_missing_campaign",
-            )
-            return False
-
         total_amount = float(trades.get("total_amount") or 0.0)
         total_cost = float(trades.get("total_cost") or 0.0)
         total_fee = float(trades.get("fee") or 0.0)
-        if total_amount <= 0:
-            self.__log_sidestep_gate(
-                trades["symbol"],
-                "active_missing_amount",
+        take_profit_price = 0.0
+        if total_amount > 0:
+            average_buy_price = calculate_average_entry_price(
+                total_cost,
+                total_fee,
+                total_amount,
             )
+            take_profit_price = calculate_take_profit_price(
+                average_buy_price,
+                trading_policy.take_profit,
+            )
+
+        decision_context = SidestepExitContext(
+            enabled=sidestep_campaigns.is_enabled(self.config),
+            is_sidestep_mode=self.__is_sidestep_mode(trades),
+            is_flat_waiting=self.__is_flat_waiting(trades),
+            is_unsellable=bool(trades.get("is_unsellable", False)),
+            has_campaign=bool(trades.get("campaign_id")),
+            total_amount=total_amount,
+            current_price=current_price,
+            take_profit_price=take_profit_price,
+            strategy_signal=None,
+        )
+        preflight_action, preflight_reason = evaluate_sidestep_exit_decision(
+            decision_context
+        )
+        if preflight_reason != "sidestep_exit_strategy_required":
+            log_context: dict[str, Any] = {}
+            if preflight_reason == "exit_tp_gate":
+                log_context = {
+                    "current_price": round(float(current_price), 8),
+                    "tp_price": round(float(take_profit_price), 8),
+                }
+            if preflight_reason in {
+                "active_missing_campaign",
+                "active_missing_amount",
+                "exit_tp_gate",
+            }:
+                self.__log_sidestep_gate(
+                    trades["symbol"],
+                    preflight_reason,
+                    **log_context,
+                )
+            return False
+        assert preflight_action is DcaAction.WAIT
+
+        self.__clear_sidestep_gate(trades["symbol"])
+        strategy_signal = await self.__sidestep_exit_strategy(trades["symbol"])
+        exit_action, _reason = evaluate_sidestep_exit_decision(
+            SidestepExitContext(
+                **{
+                    **decision_context.__dict__,
+                    "strategy_signal": strategy_signal,
+                }
+            )
+        )
+        if exit_action is not DcaAction.SELL:
             return False
 
-        average_buy_price = calculate_average_entry_price(
-            total_cost,
-            total_fee,
-            total_amount,
-        )
-        take_profit_price = calculate_take_profit_price(
-            average_buy_price,
-            trading_policy.take_profit,
-        )
         if current_price >= take_profit_price:
             self.__log_sidestep_gate(
                 trades["symbol"],
@@ -1560,10 +1761,6 @@ class Dca:
                 current_price=round(float(current_price), 8),
                 tp_price=round(float(take_profit_price), 8),
             )
-            return False
-
-        self.__clear_sidestep_gate(trades["symbol"])
-        if not await self.__sidestep_exit_strategy(trades["symbol"]):
             return False
 
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
@@ -1587,6 +1784,7 @@ class Dca:
             "current_price": current_price,
             "tp_price": take_profit_price,
             "campaign_id": trades.get("campaign_id"),
+            **self.__order_snapshot_payload(trades),
         }
         await self.orders.receive_sell_order(order, self.config or {})
         return True
@@ -1631,15 +1829,6 @@ class Dca:
                         next_so_percentage = normalized_actual_pnl
                         new_so = True
         return new_so, next_so_percentage
-
-    def __evaluate_static_dca_trigger(
-        self, total_pnl: float, max_deviation: float, actual_deviation: float
-    ) -> tuple[bool, float, float]:
-        return evaluate_static_dca_trigger(
-            total_pnl,
-            max_deviation,
-            actual_deviation,
-        )
 
     async def __log_dca_check(
         self,

@@ -13,14 +13,10 @@ from service.filter import Filter
 from service.indicators import Indicators
 from service.orders import Orders
 from service.signal_runtime import (
-    SignalAdmissionBatch,
-    SignalEntryOrderDecision,
     build_common_runtime_settings,
-    build_signal_buy_intent,
+    execute_signal_entry_batch,
     get_active_open_symbols,
     is_max_bots_reached,
-    log_signal_admission_decisions,
-    log_signal_entry_order_decisions,
     resolve_max_bots_log_interval,
     resolve_signal_admission_batch,
     resolve_signal_entry_orders,
@@ -399,25 +395,33 @@ class SignalPlugin:
                     return False
 
             # topcoin limit check
-            if self.config.get("topcoin_limit", None) and self.config.get(
-                "marketcap_cmc_api_key", None
-            ):
-                marketcap = await self.filter.get_cmc_marketcap_rank(
-                    self.config.get("marketcap_cmc_api_key", None),
+            topcoin_limit = self.config.get("topcoin_limit", None)
+            if topcoin_limit:
+                marketcap_lookup = await self.filter.lookup_cmc_marketcap_rank(
+                    str(self.config.get("marketcap_cmc_api_key") or ""),
                     symbol_only,
                 )
-                if marketcap:
-                    if not self.filter.is_within_topcoin_limit(
-                        marketcap, self.config.get("topcoin_limit", None)
-                    ):
-                        logging.info(
-                            "Symbol %s has a marketcap of %s and is not within your "
-                            "topcoin limit of the top %s. Ignoring it.",
-                            symbol,
-                            marketcap,
-                            self.config.get("topcoin_limit", None),
-                        )
-                        return False
+                if not marketcap_lookup.available:
+                    logging.warning(
+                        "Ignoring %s because CMC rank admission is unavailable "
+                        "(reason=%s, snapshot_age_seconds=%s).",
+                        symbol,
+                        marketcap_lookup.reason_code,
+                        marketcap_lookup.snapshot_age_seconds,
+                    )
+                    return False
+                if not self.filter.is_within_topcoin_limit(
+                    marketcap_lookup.rank,
+                    topcoin_limit,
+                ):
+                    logging.info(
+                        "Symbol %s has a marketcap rank of %s and is not within "
+                        "the configured top %s. Ignoring it.",
+                        symbol,
+                        marketcap_lookup.rank,
+                        topcoin_limit,
+                    )
+                    return False
 
                 if self.config.get("rsi_max", None):
                     rsi = await self.indicators.calculate_rsi(
@@ -504,69 +508,31 @@ class SignalPlugin:
                             )
                             candidate_symbols.append(symbol)
 
-                    admission_batch = await resolve_signal_admission_batch(
+                    entry_result = await execute_signal_entry_batch(
                         self.config,
                         self.statistic,
                         self.autopilot,
+                        self.watcher_queue,
+                        self.orders,
                         candidate_symbols,
+                        signal_name="asap",
+                        strategy_name=(
+                            str(self.config.get("signal_strategy") or "") or None
+                        ),
+                        timeframe=self._strategy_timeframe,
+                        botname_factory=lambda symbol: f"asap_{symbol}",
+                        inter_order_delay_seconds=1.0,
+                        admission_resolver=resolve_signal_admission_batch,
+                        entry_order_resolver=resolve_signal_entry_orders,
                     )
-                    log_signal_admission_decisions(admission_batch.decisions)
-
                     if (
-                        admission_batch.has_capacity_block
-                        and not admission_batch.admitted_symbols
+                        entry_result.has_capacity_block
+                        and not entry_result.admitted_symbols
                     ):
                         self.__log_max_bots_waiting()
-                        continue
-
-                    if admission_batch.admitted_symbols:
-                        entry_orders = await self._prepare_signal_entry_orders(
-                            admission_batch
-                        )
-
-                    try:
-                        for symbol in admission_batch.admitted_symbols:
-                            entry_order = entry_orders[symbol]
-                            logging.info("Triggering new trade for %s", symbol)
-                            order = build_signal_buy_intent(
-                                entry_order,
-                                botname=f"asap_{symbol}",
-                            )
-                            try:
-                                await self.orders.receive_buy_order(order, self.config)
-                            finally:
-                                await admission_batch.release_symbol(symbol)
-                            await asyncio.sleep(1)
-                    finally:
-                        await admission_batch.release()
             else:
                 self.__log_max_bots_waiting()
             await asyncio.sleep(5)
-
-    async def _prepare_signal_entry_orders(
-        self,
-        admission_batch: SignalAdmissionBatch,
-    ) -> dict[str, SignalEntryOrderDecision]:
-        """Prepare watcher history and entry sizing without leaking reservations."""
-        try:
-            await self.watcher_queue.put(admission_batch.admitted_symbols)
-            entry_orders = await resolve_signal_entry_orders(
-                self.config,
-                self.statistic,
-                self.autopilot,
-                admission_batch.admitted_symbols,
-                signal_name="asap",
-                strategy_name=(str(self.config.get("signal_strategy") or "") or None),
-                timeframe=self._strategy_timeframe,
-            )
-            log_signal_entry_order_decisions(entry_orders.values())
-            return entry_orders
-        except asyncio.CancelledError:
-            await admission_batch.release()
-            raise
-        except Exception:
-            await admission_batch.release()
-            raise
 
     async def shutdown(self) -> None:
         """Shutdown the signal plugin.
@@ -578,3 +544,4 @@ class SignalPlugin:
         """
         self.status = False
         await self.data.close()
+        await self.orders.close()

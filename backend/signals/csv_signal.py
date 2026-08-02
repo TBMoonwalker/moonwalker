@@ -176,3 +176,4 @@ class SignalPlugin:
         """Signal plugin loop to stop."""
         self.status = False
         await self.data.close()
+        await self.orders.close()

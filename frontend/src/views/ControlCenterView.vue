@@ -636,7 +636,7 @@ async function handleToggleAutopilot(): Promise<void> {
     border: 0;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .page-section {
         min-width: 0;
     }

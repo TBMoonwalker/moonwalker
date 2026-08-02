@@ -239,7 +239,7 @@ defineEmits<{
     letter-spacing: 0.01em;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .mission-summary {
         white-space: normal;
     }

@@ -1,8 +1,14 @@
 """Market buy execution and finalization helpers."""
 
-from typing import Any
+import math
+from typing import Any, cast
 
 import ccxt.async_support as ccxt
+from service.exchange_capabilities import (
+    ExchangePostSubmissionFailure,
+    ExchangeSubmissionIndeterminate,
+    build_client_order_params,
+)
 from service.exchange_contexts import BuyFinalizationContext
 from service.exchange_types import ExchangeOrderPayload, ParsedOrderStatus
 
@@ -27,7 +33,9 @@ class ExchangeBuyManager:
             maximum_buy_price = float(order.get("maximum_buy_price") or 0.0)
             order_type = order["ordertype"]
             order_price = order["price"]
-            params: dict[str, Any] = {}
+            params: dict[str, Any] = build_client_order_params(
+                order.get("client_order_id")
+            )
             if maximum_buy_price > 0:
                 order_type = "limit"
                 order_price = exchange.price_to_precision(
@@ -48,22 +56,94 @@ class ExchangeBuyManager:
                 order_price,
                 params,
             )
-            order.update(trade)
+            if not isinstance(trade, dict):
+                raise ExchangePostSubmissionFailure(
+                    action="buy",
+                    symbol=str(order["symbol"]),
+                    order=order,
+                    cause=TypeError("Exchange returned a non-object order result"),
+                    operation_id=str(order.get("operation_id") or "") or None,
+                )
+            try:
+                order.update(cast(ExchangeOrderPayload, trade))
+            except (TypeError, ValueError, RuntimeError, KeyError) as exc:
+                raise ExchangePostSubmissionFailure(
+                    action="buy",
+                    symbol=str(order["symbol"]),
+                    order={**order, **trade},
+                    cause=exc,
+                    operation_id=str(order.get("operation_id") or "") or None,
+                ) from exc
             if maximum_buy_price > 0:
                 order["ordertype"] = "limit"
-                filled_amount = float(trade.get("filled") or 0.0)
+                try:
+                    raw_filled_amount = trade.get("filled")
+                    if raw_filled_amount is None or raw_filled_amount == "":
+                        raise ValueError(
+                            "Capped buy response omitted explicit fill evidence"
+                        )
+                    filled_amount = float(raw_filled_amount)
+                    if not math.isfinite(filled_amount) or filled_amount < 0:
+                        raise ValueError(
+                            "Capped buy response returned invalid fill evidence"
+                        )
+                    status = str(trade.get("status") or "").lower()
+                except (TypeError, ValueError, RuntimeError, KeyError) as exc:
+                    raise ExchangePostSubmissionFailure(
+                        action="buy",
+                        symbol=str(order["symbol"]),
+                        order=order,
+                        cause=exc,
+                        operation_id=str(order.get("operation_id") or "") or None,
+                    ) from exc
                 if filled_amount <= 0:
                     order_id = trade.get("id")
-                    if order_id and str(trade.get("status") or "").lower() == "open":
+                    if order_id and status == "open":
                         try:
                             await exchange.cancel_order(order_id, order["symbol"])
+                        except ccxt.NetworkError as exc:
+                            raise ExchangeSubmissionIndeterminate(
+                                action="cancel_unfilled_buy",
+                                symbol=str(order["symbol"]),
+                                client_order_id=str(order.get("client_order_id") or "")
+                                or None,
+                            ) from exc
                         except ccxt.BaseError as exc:
-                            self._logger.warning(
-                                "Canceling unfilled capped buy %s for %s failed: %s",
-                                order_id,
-                                order["symbol"],
-                                exc,
-                            )
+                            raise ExchangePostSubmissionFailure(
+                                action="cancel_unfilled_buy",
+                                symbol=str(order["symbol"]),
+                                order=order,
+                                cause=exc,
+                                operation_id=str(order.get("operation_id") or "")
+                                or None,
+                            ) from exc
+                    elif status in {"closed", "filled"}:
+                        raise ExchangePostSubmissionFailure(
+                            action="buy",
+                            symbol=str(order["symbol"]),
+                            order=order,
+                            cause=RuntimeError(
+                                "Capped buy returned a filled terminal status with "
+                                "an explicit zero fill"
+                            ),
+                            operation_id=str(order.get("operation_id") or "") or None,
+                        )
+                    elif status not in {
+                        "canceled",
+                        "cancelled",
+                        "rejected",
+                        "expired",
+                    }:
+                        raise ExchangePostSubmissionFailure(
+                            action="buy",
+                            symbol=str(order["symbol"]),
+                            order=order,
+                            cause=RuntimeError(
+                                "Unfilled capped buy did not return a definitive "
+                                "terminal status or cancelable exchange order id"
+                            ),
+                            operation_id=str(order.get("operation_id") or "") or None,
+                        )
                     self._logger.info(
                         "Capped recovery buy for %s did not fill at or below %s.",
                         order["symbol"],
@@ -79,12 +159,13 @@ class ExchangeBuyManager:
             )
             return None
         except ccxt.NetworkError as exc:
-            self._logger.error(
-                "Buying pair %s failed due to an network error: %s",
-                order["symbol"],
-                exc,
-            )
-            return None
+            raise ExchangeSubmissionIndeterminate(
+                action="buy",
+                symbol=str(order["symbol"]),
+                client_order_id=str(order.get("client_order_id") or "") or None,
+            ) from exc
+        except ExchangePostSubmissionFailure:
+            raise
         except ccxt.BaseError as exc:
             self._logger.error(
                 "Buying pair %s failed due to an error: %s", order["symbol"], exc

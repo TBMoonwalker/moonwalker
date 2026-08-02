@@ -12,10 +12,15 @@ Current CI checks include:
 - backend import ordering (`isort --check-only`)
 - backend type checking (`mypy`)
 - backend guardrail checks
-- backend pytest suite
+- backend pytest suite with line and branch coverage
+- global and critical-module backend coverage ratchets
 - frontend type-check (`vue-tsc`)
-- frontend tests (`node --test`)
+- frontend legacy/rendered checks (`node --test`)
+- frontend unit and component tests (`Vitest`)
+- frontend coverage ratchets
 - frontend production build (`vite build`)
+- dry-run Playwright journeys on desktop, mobile, and tablet in GitHub CI
+- Python and npm vulnerability audits plus npm registry signature checks
 
 ## Runtime Model
 
@@ -172,6 +177,15 @@ repairs sparse closed-trade replay archives from bounded exchange OHLCV when the
 exchange can supply the missing deal window, and otherwise keeps the existing
 archive without blocking startup.
 
+Completed and rejected exchange-placement records are portable audit history and
+are included in full backups. Any placement that was unresolved when the backup
+was created is kept separately in an integrity-sealed recovery manifest. On
+restore, Moonwalker clears its source exchange and client-order identities,
+invalidates any nonportable result, retains the recorded capital reservation,
+and marks the row `restored_quarantined`. Restored quarantined rows are never
+submitted automatically. Keep trading paused and reconcile them manually before
+resuming live operation.
+
 Two restore modes are available:
 
 - Restore config only: replaces configuration, leaves current trade data in
@@ -185,6 +199,12 @@ review configuration and trade state before deliberately activating and
 resuming trading.
 
 ## Startup Recovery
+
+Before any watcher or signal producer starts, Moonwalker reconciles every
+nonterminal exchange-placement intent by stable client/exchange order identity.
+If an intent cannot be resolved safely, startup fails closed and identifies the
+operation requiring manual reconciliation. Capital recorded by an unresolved
+buy remains reserved until the intent reaches a safe terminal state.
 
 If Moonwalker fails during startup with a message like `SQLite corruption
 detected in ...` or `SQLite index corruption detected in ...`, the local SQLite

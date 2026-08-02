@@ -139,14 +139,23 @@ test('mobile trade ledger reduces first column indentation', () => {
     assert.match(openTradeColumnsSource, /open_date: 85/)
     assert.match(openTradeColumnsSource, /action: 64/)
     assert.match(openTradeColumnsSource, /title: options\.isMobile\.value \? 'Open' : 'Opened'/)
-    assert.doesNotMatch(openTradeColumnsSource, /return \[\.\.\.hiddenColumns, \.\.\.mobileColumns\]/)
-    assert.match(openTradeColumnsSource, /return mobileColumns/)
+    assert.match(openTradeColumnsSource, /return columns\.flatMap\(\(column\) => \{/)
+    assert.match(
+        openTradeColumnsSource,
+        /if \(!\('key' in column\)\) \{\s*return \[\]/,
+    )
+    assert.doesNotMatch(
+        openTradeColumnsSource,
+        /if \(!\('key' in column\)\) \{\s*return \[column\]/,
+    )
     assert.match(openTradesSource, /class="open-trades-table"/)
-    assert.match(tradesViewSource, /open-trades-table \.n-data-table-table colgroup col:nth-child\(1\)/)
-    assert.match(tradesViewSource, /open-trades-table \.n-data-table-table colgroup col:nth-child\(2\)/)
-    assert.match(tradesViewSource, /open-trades-table \.n-data-table-table colgroup col:nth-child\(3\)/)
-    assert.match(tradesViewSource, /open-trades-table \.n-data-table-table colgroup col:nth-child\(4\)/)
-    assert.doesNotMatch(tradesViewSource, /open-trades-table \.n-data-table-table colgroup col:nth-child\(5\)/)
+    assert.match(openTradesSource, /<n-modal/)
+    assert.match(openTradesSource, /v-model:show="mobileTradeDetailsOpen"/)
+    assert.match(openTradesSource, /<OpenTradeExpandedRow/)
+    assert.doesNotMatch(
+        tradesViewSource,
+        /open-trades-table \.n-data-table-table colgroup col:nth-child/,
+    )
     assert.match(tradesViewSource, /padding-left: 0 !important;/)
     assert.match(tradesViewSource, /min-width: 104px;/)
     assert.match(tradesViewSource, /max-width: 104px;/)

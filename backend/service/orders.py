@@ -1,6 +1,5 @@
 """Order orchestration for exchange buy/sell actions."""
 
-import asyncio
 import json
 import sqlite3
 from datetime import datetime, timezone
@@ -12,10 +11,20 @@ from service.capital_budget import CapitalBudgetService
 from service.dca_recovery_sizing import build_recovery_sizing_policy
 from service.delisting_protection import DelistingProtectionService
 from service.exchange import Exchange
+from service.exchange_capabilities import (
+    ExchangePostSubmissionFailure,
+    ExchangeSubmissionIndeterminate,
+)
+from service.exchange_limit_sell import build_partial_status_from_fallback
 from service.exchange_types import (
     ExchangeOrderPayload,
     PartialSellStatus,
     SoldCheckStatus,
+)
+from service.lifecycle_mutation import lifecycle_mutation_coordinator
+from service.lifecycle_snapshot import (
+    LifecycleSnapshotIdentity,
+    snapshots_match,
 )
 from service.monitoring import MonitoringService
 from service.order_close_context import (
@@ -25,6 +34,10 @@ from service.order_close_context import (
 from service.order_intents import (
     build_manual_buy_order_intent,
     build_manual_sell_order_intent,
+)
+from service.order_mutation_result import (
+    OrderMutationResult,
+    OrderMutationStatus,
 )
 from service.order_payloads import (
     build_buy_monitor_payload,
@@ -37,22 +50,33 @@ from service.order_payloads import (
 from service.order_persistence import (
     persist_buy_trade,
     persist_closed_trade,
-    persist_closed_trade_summary,
     persist_manual_buy_add,
     persist_partial_sell_execution,
     persist_sidestep_transition,
     persist_stopped_trade,
     persist_unsellable_remainder,
-    persist_unsellable_remainder_archive,
 )
 from service.order_requests import normalize_order_symbol, parse_manual_buy_add_request
+from service.placement_intents import (
+    PlacementAction,
+    PlacementIntentState,
+    build_derived_operation_id,
+    ensure_operation_id,
+    is_terminal_placement_state,
+)
+from service.placement_reconciliation import (
+    PlacementReconciler,
+    PlacementReconciliationSummary,
+)
+from service.placement_recovery import PlacementRecoveryHandler
+from service.placement_workflow import PlacementWorkflow
+from service.sell_fallback_workflow import DurableSellFallback
 from service.spot_campaign_types import TradeCloseReason
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades
 from service.trading_contracts import BuyIntent, SellIntent
 from service.trading_controls import evaluate_buy_like_gate
-from service.trading_maintenance import trading_maintenance_barrier
 from tortoise.exceptions import ConfigurationError
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
@@ -61,7 +85,6 @@ logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
 class Orders:
     """Handle incoming buy/sell signals and persist trades."""
 
-    _sell_locks: dict[str, asyncio.Lock] = {}
     _ENTRY_SIZING_RETRY_REASONS = {
         "capital_budget_exceeded",
         "insufficient_quote_balance",
@@ -75,14 +98,131 @@ class Orders:
         self.delisting_protection = DelistingProtectionService.shared()
         self.exchange = Exchange()
         self.monitoring = MonitoringService()
+        self.placement_workflow = PlacementWorkflow()
+        self.placement_intents = self.placement_workflow.intents
         self.trades = Trades()
         self.sidestep_campaigns: SpotSidestepCampaignService | None = None
+
+    async def close(self) -> None:
+        """Close exchange resources owned by this order service."""
+        await self.exchange.close()
+
+    @staticmethod
+    def _expected_lifecycle_snapshot(
+        order: dict[str, Any],
+    ) -> LifecycleSnapshotIdentity | None:
+        """Parse an optional evaluated lifecycle identity from an order."""
+        raw_snapshot = order.get("lifecycle_snapshot")
+        if not isinstance(raw_snapshot, dict):
+            return None
+        try:
+            return LifecycleSnapshotIdentity.from_dict(raw_snapshot)
+        except (TypeError, ValueError):
+            logging.warning(
+                "Rejecting %s mutation with invalid lifecycle snapshot.",
+                order.get("symbol"),
+            )
+            return None
+
+    async def _load_fresh_trade(self, symbol: str) -> dict[str, Any] | None:
+        """Reload authoritative trade state without the dashboard TTL cache."""
+        fresh_loader = getattr(self.trades, "get_trades_for_orders_fresh", None)
+        if callable(fresh_loader):
+            return await fresh_loader(symbol)
+        return await self.trades.get_trades_for_orders(symbol)
+
+    async def _get_placement_intent(self, operation_id: str) -> Any | None:
+        """Read a durable intent when persistence is available."""
+        try:
+            return await self.placement_intents.get(operation_id)
+        except (RuntimeError, ConfigurationError):
+            return None
+
+    async def _snapshot_is_current(
+        self,
+        expected: LifecycleSnapshotIdentity | None,
+        symbol: str,
+        config: dict[str, Any],
+    ) -> bool:
+        """Fail closed when locked lifecycle state differs from evaluation."""
+        if expected is None:
+            return True
+        current_trade = await self._load_fresh_trade(symbol)
+        if snapshots_match(expected, current_trade, config):
+            return True
+        logging.info(
+            "Rejecting lifecycle mutation for %s: stale_snapshot.",
+            symbol,
+        )
+        return False
+
+    async def _order_snapshot_is_current(
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Validate and compare an order's optional lifecycle snapshot."""
+        if order.get("lifecycle_snapshot") is None:
+            return True
+        expected = self._expected_lifecycle_snapshot(order)
+        if expected is None:
+            return False
+        return await self._snapshot_is_current(
+            expected,
+            str(order.get("symbol") or ""),
+            config,
+        )
 
     async def _get_sidestep_campaigns(self) -> SpotSidestepCampaignService:
         """Return the shared sidestep campaign service instance."""
         if self.sidestep_campaigns is None:
             self.sidestep_campaigns = await SpotSidestepCampaignService.instance()
         return self.sidestep_campaigns
+
+    async def reconcile_placement_intents(
+        self,
+        config: dict[str, Any],
+    ) -> PlacementReconciliationSummary:
+        """Reconcile durable exchange effects before runtime producers start."""
+        recovery = PlacementRecoveryHandler(
+            exchange=self.exchange,
+            trades=self.trades,
+            validate_buy=self._has_valid_buy_fill,
+            validate_sell=self._is_sold_check_status,
+            finalize_buy=self._finalize_buy_order,
+            finalize_sell=self._finalize_completed_sell,
+            build_limit_sell_payload=self._build_tp_limit_sell_payload,
+            persist_limit_fallback=self._persist_reconciled_limit_fallback,
+        )
+        reconciler = PlacementReconciler(
+            self.exchange,
+            recovery.resume,
+            self.placement_intents,
+        )
+        try:
+            return await reconciler.reconcile(config)
+        finally:
+            await self.exchange.close()
+
+    async def _persist_reconciled_limit_fallback(
+        self,
+        limit_status: dict[str, Any],
+        config: dict[str, Any],
+        operation_id: str,
+    ) -> bool:
+        """Persist a recovered partial limit fill without replaying fallback."""
+        partial_status = build_partial_status_from_fallback(
+            limit_status,
+            default_symbol=str(limit_status.get("symbol") or ""),
+        )
+        if float(partial_status.get("partial_filled_amount") or 0.0) <= 0:
+            return False
+        await self.__handle_partial_sell_status(
+            partial_status,
+            config,
+            placement_operation_id=operation_id,
+        )
+        return True
 
     @staticmethod
     def _parse_metadata_json(raw_value: Any) -> dict[str, Any]:
@@ -144,6 +284,7 @@ class Orders:
         config: dict[str, Any],
         *,
         original_order: dict[str, Any],
+        placement_operation_id: str | None = None,
     ) -> bool:
         """Persist a filled buy order and emit monitoring."""
         logging.debug(order_status)
@@ -207,12 +348,17 @@ class Orders:
                 original_order.get("strategy_name"),
                 original_order.get("signal_name"),
             )
+        persistence_options: dict[str, Any] = {
+            "create_open_trade": not bool(order_status["safetyorder"]),
+            "campaign_context": campaign_context,
+            "entry_evaluation": original_order.get("_ai_entry_evaluation"),
+        }
+        if placement_operation_id:
+            persistence_options["placement_operation_id"] = placement_operation_id
         await persist_buy_trade(
             order_status["symbol"],
             payload,
-            create_open_trade=not bool(order_status["safetyorder"]),
-            campaign_context=campaign_context,
-            entry_evaluation=original_order.get("_ai_entry_evaluation"),
+            **persistence_options,
         )
         await self._reset_unsellable_state(order_status["symbol"])
         await self.monitoring.notify_trade(
@@ -239,15 +385,6 @@ class Orders:
             return
         logging.error("Failed creating buy order for %s", symbol)
 
-    @classmethod
-    def _get_sell_lock(cls, symbol: str) -> asyncio.Lock:
-        """Return a shared per-symbol sell lock."""
-        lock = cls._sell_locks.get(symbol)
-        if lock is None:
-            lock = asyncio.Lock()
-            cls._sell_locks[symbol] = lock
-        return lock
-
     @staticmethod
     def _is_exchange_order_filled(status: dict[str, Any]) -> bool:
         """Return whether an exchange order status represents a completed fill."""
@@ -261,54 +398,6 @@ class Orders:
         """Return whether an exchange order is safely no longer open."""
         order_status = str(status.get("status") or "").lower()
         return order_status in {"canceled", "cancelled", "rejected", "expired"}
-
-    @staticmethod
-    def _exchange_order_partial_fill(status: dict[str, Any]) -> tuple[float, float]:
-        """Return filled amount and average price for a partial exchange order."""
-        filled_amount = float(status.get("filled") or 0.0)
-        if filled_amount <= 0:
-            return 0.0, 0.0
-        average_price = float(status.get("average") or status.get("price") or 0.0)
-        if average_price <= 0 and float(status.get("cost") or 0.0) > 0:
-            average_price = float(status["cost"]) / filled_amount
-        return filled_amount, average_price
-
-    async def _persist_tp_limit_partial_fill(
-        self,
-        symbol: str,
-        exchange_status: dict[str, Any],
-    ) -> None:
-        """Persist any partial fill from a canceled proactive TP limit order."""
-        filled_amount, average_price = self._exchange_order_partial_fill(
-            exchange_status
-        )
-        if filled_amount <= 0:
-            return
-        proceeds = float(exchange_status.get("cost") or filled_amount * average_price)
-        timestamp = exchange_status.get("timestamp")
-        await persist_partial_sell_execution(
-            symbol,
-            filled_amount,
-            proceeds,
-            [
-                {
-                    "symbol": str(exchange_status.get("symbol") or symbol),
-                    "side": str(exchange_status.get("side") or "sell"),
-                    "role": "partial_sell",
-                    "timestamp": str(int(timestamp)) if timestamp is not None else "",
-                    "price": average_price,
-                    "amount": filled_amount,
-                    "ordersize": proceeds,
-                    "fee": 0.0,
-                    "order_id": (
-                        str(exchange_status.get("id"))
-                        if exchange_status.get("id") is not None
-                        else None
-                    ),
-                    "order_type": "limit",
-                }
-            ],
-        )
 
     def _build_tp_limit_sell_payload(
         self,
@@ -358,6 +447,9 @@ class Orders:
         self,
         order_status: SoldCheckStatus,
         config: dict[str, Any],
+        *,
+        placement_operation_id: str | None = None,
+        placement_operation_ids: list[str] | None = None,
     ) -> None:
         """Persist a completed sell status and emit monitoring."""
         normalized_close_reason = SpotSidestepCampaignService.normalize_close_reason(
@@ -384,16 +476,30 @@ class Orders:
                 order_status["symbol"],
                 campaign_context.get("campaign_id"),
             )
+            sidestep_options: dict[str, Any] = {
+                "campaign_context": campaign_context,
+            }
+            if placement_operation_id:
+                sidestep_options["placement_operation_id"] = placement_operation_id
+            if placement_operation_ids:
+                sidestep_options["placement_operation_ids"] = placement_operation_ids
             await persist_sidestep_transition(
                 order_status["symbol"],
                 close_context["payload"],
-                campaign_context=campaign_context,
+                **sidestep_options,
             )
         else:
+            close_options: dict[str, Any] = {
+                "campaign_context": campaign_context,
+            }
+            if placement_operation_id:
+                close_options["placement_operation_id"] = placement_operation_id
+            if placement_operation_ids:
+                close_options["placement_operation_ids"] = placement_operation_ids
             await persist_closed_trade(
                 order_status["symbol"],
                 close_context["payload"],
-                campaign_context=campaign_context,
+                **close_options,
             )
         await self.trades.invalidate_trade_caches()
         await self.monitoring.notify_trade(
@@ -461,8 +567,10 @@ class Orders:
                 )
                 return True
             if self._is_exchange_order_inactive(exchange_status):
-                await self._persist_tp_limit_partial_fill(symbol, exchange_status)
-                await self.trades.clear_tp_limit_order(symbol)
+                await self.trades.clear_tp_limit_order(
+                    symbol,
+                    exchange_status=exchange_status,
+                )
                 logging.info(
                     "Cleared inactive proactive TP limit order %s for %s.",
                     order_id,
@@ -476,11 +584,22 @@ class Orders:
         self,
         trades: dict[str, Any],
         config: dict[str, Any],
+        *,
+        expected_snapshot: LifecycleSnapshotIdentity | None = None,
     ) -> bool:
         """Close the trade if its proactive TP limit order filled."""
-        async with trading_maintenance_barrier.operation() as admitted:
+        symbol = str(trades.get("symbol") or "")
+        if not trades.get("tp_limit_order_id") or not symbol:
+            return False
+        async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
             if not admitted:
                 logging.info("Skipping proactive TP reconciliation during maintenance.")
+                return False
+            if not await self._snapshot_is_current(
+                expected_snapshot,
+                symbol,
+                config,
+            ):
                 return False
             return await self._reconcile_tp_limit_order(trades, config)
 
@@ -489,12 +608,11 @@ class Orders:
         trades: dict[str, Any],
         config: dict[str, Any],
     ) -> bool:
-        """Reconcile one proactive TP limit order inside the maintenance barrier."""
+        """Reconcile one proactive TP limit order with the symbol prelocked."""
         symbol = str(trades.get("symbol") or "")
         if not trades.get("tp_limit_order_id") or not symbol:
             return False
-        sell_lock = self._get_sell_lock(symbol)
-        async with sell_lock:
+        async with lifecycle_mutation_coordinator.prelocked(symbol):
             return await self._reconcile_tp_limit_order_locked(trades, config)
 
     async def _cancel_tp_limit_order_locked(
@@ -521,13 +639,58 @@ class Orders:
         if not order_id:
             return True
 
-        try:
-            exchange_status = await self.exchange.cancel_spot_order(
+        cancel_order = {
+            "symbol": symbol,
+            "side": "sell",
+            "ordertype": "limit",
+            "operation_id": build_derived_operation_id(
+                PlacementAction.CANCEL,
+                config.get("exchange"),
                 symbol,
                 order_id,
-                config,
+            ),
+        }
+        placement = await self.placement_workflow.begin(
+            cancel_order,
+            config,
+            action=PlacementAction.CANCEL,
+            side="sell",
+            order_type="limit",
+            exchange_order_id=order_id,
+        )
+        if placement.completed:
+            return True
+        if not placement.claimed:
+            logging.warning(
+                "Skipping duplicate cancel for %s order %s: operation=%s state=%s.",
+                symbol,
+                order_id,
+                placement.operation_id,
+                placement.state,
             )
+            return False
+        try:
+            try:
+                exchange_status = await self.exchange.cancel_spot_order(
+                    symbol,
+                    order_id,
+                    config,
+                )
+            except ExchangeSubmissionIndeterminate as exc:
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.INDETERMINATE,
+                    reason_code="cancel_response_lost",
+                    error_message=str(exc),
+                )
+                return False
             if exchange_status and self._is_exchange_order_filled(exchange_status):
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.FILLED,
+                    exchange_order_id=order_id,
+                    result=dict(exchange_status),
+                )
                 if trade_data:
                     payload = self._build_tp_limit_sell_payload(
                         trade_data,
@@ -538,12 +701,41 @@ class Orders:
                         config,
                     )
                     if order_status and self._is_sold_check_status(order_status):
-                        await self._finalize_completed_sell(order_status, config)
+                        await self._finalize_completed_sell(
+                            order_status,
+                            config,
+                            placement_operation_id=placement.operation_id,
+                        )
                     elif order_status and self._is_partial_sell_status(order_status):
-                        await self.__handle_partial_sell_status(order_status, config)
-                        await self.trades.clear_tp_limit_order(symbol)
+                        await self.__handle_partial_sell_status(
+                            order_status,
+                            config,
+                            placement_operation_id=placement.operation_id,
+                        )
+                recovered = await self.placement_intents.get(
+                    str(placement.operation_id or "")
+                )
+                if (
+                    recovered is None
+                    or str(recovered.state) != PlacementIntentState.PERSISTED.value
+                ):
+                    await self.placement_intents.transition(
+                        placement.operation_id,
+                        PlacementIntentState.QUARANTINED,
+                        reason_code="order_filled_before_cancel_recovery_failed",
+                    )
+                    return False
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.COMPLETED,
+                )
                 return False
             if exchange_status is None:
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.INDETERMINATE,
+                    reason_code="cancel_not_confirmed",
+                )
                 logging.warning(
                     "Could not confirm proactive TP limit order %s for %s after "
                     "cancel request. Keeping metadata for retry.",
@@ -553,8 +745,21 @@ class Orders:
                 return False
 
             if self._is_exchange_order_inactive(exchange_status):
-                await self._persist_tp_limit_partial_fill(symbol, exchange_status)
-                await self.trades.clear_tp_limit_order(symbol)
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.ACCEPTED,
+                    exchange_order_id=order_id,
+                    result=dict(exchange_status),
+                )
+                await self.trades.clear_tp_limit_order(
+                    symbol,
+                    placement_operation_id=placement.operation_id,
+                    exchange_status=exchange_status,
+                )
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.COMPLETED,
+                )
                 logging.info(
                     "Canceled proactive TP limit order %s for %s.",
                     order_id,
@@ -568,6 +773,12 @@ class Orders:
                 order_id,
                 symbol,
             )
+            await self.placement_intents.transition(
+                placement.operation_id,
+                PlacementIntentState.INDETERMINATE,
+                reason_code="cancel_status_still_open",
+                result=dict(exchange_status),
+            )
             return False
         finally:
             await self.exchange.close()
@@ -576,25 +787,47 @@ class Orders:
         self,
         symbol: str,
         config: dict[str, Any],
+        *,
+        expected_snapshot: LifecycleSnapshotIdentity | None = None,
     ) -> bool:
         """Cancel a persisted proactive TP limit order if one exists."""
-        async with trading_maintenance_barrier.operation() as admitted:
+        async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
             if not admitted:
                 logging.info(
                     "Skipping proactive TP cancellation for %s during maintenance.",
                     symbol,
                 )
                 return False
-            return await self._cancel_tp_limit_order(symbol, config)
+            return await self.cancel_tp_limit_order_prelocked(
+                symbol,
+                config,
+                expected_snapshot=expected_snapshot,
+            )
+
+    async def cancel_tp_limit_order_prelocked(
+        self,
+        symbol: str,
+        config: dict[str, Any],
+        *,
+        expected_snapshot: LifecycleSnapshotIdentity | None = None,
+    ) -> bool:
+        """Cancel a proactive TP order while the caller owns the symbol lock."""
+        lifecycle_mutation_coordinator.assert_prelocked(symbol)
+        if not await self._snapshot_is_current(
+            expected_snapshot,
+            symbol,
+            config,
+        ):
+            return False
+        return await self._cancel_tp_limit_order(symbol, config)
 
     async def _cancel_tp_limit_order(
         self,
         symbol: str,
         config: dict[str, Any],
     ) -> bool:
-        """Cancel one proactive TP order inside the maintenance barrier."""
-        sell_lock = self._get_sell_lock(symbol)
-        async with sell_lock:
+        """Cancel one proactive TP order with the symbol prelocked."""
+        async with lifecycle_mutation_coordinator.prelocked(symbol):
             return await self._cancel_tp_limit_order_locked(symbol, config)
 
     async def arm_tp_limit_order(
@@ -603,7 +836,9 @@ class Orders:
         config: dict[str, Any],
     ) -> bool:
         """Place and persist a proactive TP limit sell order."""
-        async with trading_maintenance_barrier.operation() as admitted:
+        async with lifecycle_mutation_coordinator.mutation(
+            str(order["symbol"])
+        ) as admitted:
             if not admitted:
                 logging.info(
                     "Skipping proactive TP limit order for %s during maintenance.",
@@ -617,13 +852,74 @@ class Orders:
         order: dict[str, Any],
         config: dict[str, Any],
     ) -> bool:
-        """Arm one proactive TP order inside the maintenance barrier."""
+        """Arm one proactive TP order with the symbol prelocked."""
         symbol = str(order["symbol"])
-        sell_lock = self._get_sell_lock(symbol)
-        async with sell_lock:
+        async with lifecycle_mutation_coordinator.prelocked(symbol):
+            if not await self._order_snapshot_is_current(order, config):
+                return False
+            placement = await self.placement_workflow.begin(
+                order,
+                config,
+                action=PlacementAction.LIMIT_SELL,
+                side="sell",
+                order_type="limit",
+                requested_amount=float(order.get("total_amount") or 0.0),
+            )
+            if placement.completed:
+                return True
+            if not placement.claimed:
+                logging.warning(
+                    "Skipping duplicate proactive TP placement for %s: "
+                    "operation=%s state=%s.",
+                    symbol,
+                    placement.operation_id,
+                    placement.state,
+                )
+                return False
             try:
-                order_status = await self.exchange.place_spot_limit_sell(order, config)
+                try:
+                    order_status = await self.exchange.place_spot_limit_sell(
+                        order,
+                        config,
+                    )
+                except ExchangePostSubmissionFailure as exc:
+                    active_operation_id = str(
+                        exc.operation_id or placement.operation_id or ""
+                    )
+                    await self.placement_intents.transition(
+                        active_operation_id,
+                        PlacementIntentState.ACCEPTED,
+                        exchange_order_id=str(exc.order.get("id") or "") or None,
+                        result=exc.order,
+                        reason_code="local_finalization_pending",
+                        error_message=str(exc.cause or exc),
+                    )
+                    logging.error(
+                        "Sell submission for %s was accepted but could not be "
+                        "finalized locally; operation=%s requires reconciliation.",
+                        order.get("symbol"),
+                        active_operation_id,
+                        exc_info=True,
+                    )
+                    return False
+                except ExchangeSubmissionIndeterminate as exc:
+                    await self.placement_intents.transition(
+                        placement.operation_id,
+                        PlacementIntentState.INDETERMINATE,
+                        reason_code="exchange_response_lost",
+                        error_message=str(exc),
+                    )
+                    return False
                 if not order_status or order_status.get("requires_market_fallback"):
+                    await self.placement_intents.transition(
+                        placement.operation_id,
+                        PlacementIntentState.REJECTED,
+                        reason_code=str(
+                            (order_status or {}).get("fallback_reason")
+                            or "limit_order_not_placed"
+                        ),
+                        result=dict(order_status) if order_status else None,
+                    )
                     logging.info(
                         "Proactive TP limit order for %s was not armed: %s",
                         symbol,
@@ -633,6 +929,16 @@ class Orders:
 
                 order_id = str(order_status.get("id") or "").strip()
                 if not order_id:
+                    await self.placement_intents.transition(
+                        placement.operation_id,
+                        PlacementIntentState.ACCEPTED,
+                        result=dict(order_status),
+                    )
+                    await self.placement_intents.transition(
+                        placement.operation_id,
+                        PlacementIntentState.QUARANTINED,
+                        reason_code="limit_order_missing_id",
+                    )
                     logging.error(
                         "Proactive TP limit order for %s returned no order id.",
                         symbol,
@@ -651,16 +957,45 @@ class Orders:
                     or order.get("total_amount")
                     or 0.0
                 )
-                persisted = await self.trades.set_tp_limit_order(
-                    symbol,
-                    order_id=order_id,
-                    price=price,
-                    amount=amount,
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.ACCEPTED,
+                    exchange_order_id=order_id,
+                    result=dict(order_status),
                 )
+                if placement.operation_id:
+                    persisted = await self.trades.set_tp_limit_order(
+                        symbol,
+                        order_id=order_id,
+                        price=price,
+                        amount=amount,
+                        placement_operation_id=placement.operation_id,
+                    )
+                else:
+                    persisted = await self.trades.set_tp_limit_order(
+                        symbol,
+                        order_id=order_id,
+                        price=price,
+                        amount=amount,
+                    )
                 if not persisted:
-                    await self.exchange.cancel_spot_order(symbol, order_id, config)
+                    compensation_reason = await self._cancel_unpersisted_tp_limit_order(
+                        symbol,
+                        order_id,
+                        config,
+                        source_operation_id=placement.operation_id,
+                    )
+                    await self.placement_intents.transition(
+                        placement.operation_id,
+                        PlacementIntentState.QUARANTINED,
+                        reason_code=compensation_reason,
+                    )
                     return False
 
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.COMPLETED,
+                )
                 logging.info(
                     "Armed proactive TP limit order for %s: id=%s amount=%s price=%s.",
                     symbol,
@@ -672,23 +1007,135 @@ class Orders:
             finally:
                 await self.exchange.close()
 
+    async def _cancel_unpersisted_tp_limit_order(
+        self,
+        symbol: str,
+        order_id: str,
+        config: dict[str, Any],
+        *,
+        source_operation_id: str | None,
+    ) -> str:
+        """Durably compensate a limit order whose local metadata was not saved."""
+        cancel_order = {
+            "symbol": symbol,
+            "side": "sell",
+            "ordertype": "limit",
+            "operation_id": build_derived_operation_id(
+                PlacementAction.CANCEL,
+                config.get("exchange"),
+                symbol,
+                order_id,
+            ),
+            "source_operation_id": source_operation_id,
+        }
+        cancellation = await self.placement_workflow.begin(
+            cancel_order,
+            config,
+            action=PlacementAction.CANCEL,
+            side="sell",
+            order_type="limit",
+            exchange_order_id=order_id,
+        )
+        if cancellation.completed:
+            return "limit_metadata_persistence_failed_compensated"
+        if not cancellation.claimed:
+            return "limit_persistence_and_cancel_pending"
+
+        try:
+            exchange_status = await self.exchange.cancel_spot_order(
+                symbol,
+                order_id,
+                config,
+            )
+        except ExchangeSubmissionIndeterminate as exc:
+            await self.placement_intents.transition(
+                cancellation.operation_id,
+                PlacementIntentState.INDETERMINATE,
+                reason_code="cancel_response_lost",
+                error_message=str(exc),
+            )
+            return "limit_persistence_and_cancel_uncertain"
+
+        if exchange_status is None:
+            await self.placement_intents.transition(
+                cancellation.operation_id,
+                PlacementIntentState.INDETERMINATE,
+                reason_code="cancel_not_confirmed",
+            )
+            return "limit_persistence_and_cancel_uncertain"
+
+        if not self._is_exchange_order_inactive(exchange_status):
+            target_state = (
+                PlacementIntentState.REJECTED
+                if self._is_exchange_order_filled(exchange_status)
+                else PlacementIntentState.INDETERMINATE
+            )
+            await self.placement_intents.transition(
+                cancellation.operation_id,
+                target_state,
+                exchange_order_id=order_id,
+                result=dict(exchange_status),
+                reason_code=(
+                    "order_filled_before_cancel"
+                    if target_state == PlacementIntentState.REJECTED
+                    else "cancel_status_still_open"
+                ),
+            )
+            return (
+                "limit_persistence_failed_order_filled"
+                if target_state == PlacementIntentState.REJECTED
+                else "limit_persistence_and_cancel_uncertain"
+            )
+
+        await self.placement_intents.transition(
+            cancellation.operation_id,
+            PlacementIntentState.ACCEPTED,
+            exchange_order_id=order_id,
+            result=dict(exchange_status),
+        )
+        await self.placement_intents.transition(
+            cancellation.operation_id,
+            PlacementIntentState.PERSISTED,
+        )
+        await self.placement_intents.transition(
+            cancellation.operation_id,
+            PlacementIntentState.COMPLETED,
+        )
+        return "limit_metadata_persistence_failed_compensated"
+
     async def receive_sell_order(
         self, order: SellIntent | dict[str, Any], config: dict[str, Any]
-    ) -> None:
+    ) -> bool:
         """Create a sell order and persist closed trades."""
-        async with trading_maintenance_barrier.operation() as admitted:
+        async with lifecycle_mutation_coordinator.mutation(
+            str(order["symbol"])
+        ) as admitted:
             if not admitted:
                 logging.info(
                     "Skipping sell order for %s during maintenance.",
                     order["symbol"],
                 )
-                return
-            await self._receive_sell_order(order, config)
+                return False
+            return await self._receive_sell_order(order, config)
+
+    async def _create_durable_market_fallback(
+        self,
+        remaining_order: dict[str, Any],
+        config: dict[str, Any],
+        limit_status: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Delegate fallback to the durable parent/child state machine."""
+        return await DurableSellFallback(
+            exchange=self.exchange,
+            workflow=self.placement_workflow,
+            persist_limit_fallback=self._persist_reconciled_limit_fallback,
+            logger=logging,
+        ).execute(remaining_order, config, limit_status)
 
     async def _receive_sell_order(
         self, order: SellIntent | dict[str, Any], config: dict[str, Any]
-    ) -> None:
-        """Execute one sell order inside the maintenance barrier."""
+    ) -> bool:
+        """Execute one sell order with the symbol prelocked."""
         logging.info("Incoming sell order for %s", order["symbol"])
         if order.get("sell_reason") == TradeCloseReason.SIDESTEP_EXIT.value:
             logging.info(
@@ -696,16 +1143,10 @@ class Orders:
                 order["symbol"],
                 order.get("campaign_id"),
             )
-        sell_lock = self._get_sell_lock(order["symbol"])
-        if sell_lock.locked():
-            logging.debug(
-                "Skipping sell for %s because another sell is in progress.",
-                order["symbol"],
-            )
-            return
-
-        async with sell_lock:
+        async with lifecycle_mutation_coordinator.prelocked(order["symbol"]):
             try:
+                if not await self._order_snapshot_is_current(order, config):
+                    return False
                 if not bool(order.get("skip_tp_limit_cancel", False)):
                     canceled = await self._cancel_tp_limit_order_locked(
                         order["symbol"],
@@ -717,23 +1158,133 @@ class Orders:
                             "limit order could not be canceled first.",
                             order["symbol"],
                         )
-                        return
+                        return False
 
                 order["total_amount"] = await self.trades.get_token_amount_from_trades(
                     order["symbol"]
                 )
                 order["requested_total_amount"] = float(order["total_amount"] or 0.0)
+                sell_order_type = str(config.get("sell_order_type") or "market").lower()
 
-                # 1. Create exchange order
-                order_status = await self.exchange.create_spot_sell(order, config)
+                placement = await self.placement_workflow.begin(
+                    order,
+                    config,
+                    action=(
+                        PlacementAction.LIMIT_SELL
+                        if sell_order_type == "limit"
+                        else PlacementAction.SELL
+                    ),
+                    side="sell",
+                    order_type=sell_order_type,
+                    requested_amount=float(order["requested_total_amount"]),
+                )
+                if placement.completed:
+                    return True
+                if not placement.claimed:
+                    logging.warning(
+                        "Skipping duplicate sell submission for %s: operation=%s "
+                        "state=%s.",
+                        order.get("symbol"),
+                        placement.operation_id,
+                        placement.state,
+                    )
+                    return False
+                try:
+                    if sell_order_type == "limit":
+                        order_status = await self.exchange.create_spot_sell(
+                            order,
+                            config,
+                            create_market_fallback=(
+                                self._create_durable_market_fallback
+                            ),
+                        )
+                    else:
+                        order_status = await self.exchange.create_spot_sell(
+                            order,
+                            config,
+                        )
+                except ExchangePostSubmissionFailure as exc:
+                    active_operation_id = str(
+                        exc.operation_id or placement.operation_id or ""
+                    )
+                    await self.placement_intents.transition(
+                        active_operation_id,
+                        PlacementIntentState.ACCEPTED,
+                        exchange_order_id=str(exc.order.get("id") or "") or None,
+                        result=exc.order,
+                        reason_code="local_finalization_pending",
+                        error_message=str(exc.cause or exc),
+                    )
+                    logging.error(
+                        "Sell submission for %s was accepted but could not be "
+                        "finalized locally; operation=%s requires reconciliation.",
+                        order.get("symbol"),
+                        active_operation_id,
+                        exc_info=True,
+                    )
+                    return False
+                except ExchangeSubmissionIndeterminate as exc:
+                    if exc.operation_id and exc.operation_id != placement.operation_id:
+                        logging.error(
+                            "Market fallback for %s is indeterminate; "
+                            "child operation=%s will be reconciled before retry.",
+                            order.get("symbol"),
+                            exc.operation_id,
+                        )
+                        return False
+                    await self.placement_intents.transition(
+                        placement.operation_id,
+                        PlacementIntentState.INDETERMINATE,
+                        reason_code="exchange_response_lost",
+                        error_message=str(exc),
+                    )
+                    logging.error(
+                        "Sell submission for %s is indeterminate; operation=%s "
+                        "will be reconciled before any retry.",
+                        order.get("symbol"),
+                        placement.operation_id,
+                    )
+                    return False
 
                 if not order_status:
+                    latest_placement = await self.placement_intents.get(
+                        str(placement.operation_id or "")
+                    )
+                    if latest_placement is not None and is_terminal_placement_state(
+                        latest_placement.state
+                    ):
+                        return (
+                            latest_placement.state
+                            == PlacementIntentState.COMPLETED.value
+                        )
+                    await self.placement_intents.transition(
+                        placement.operation_id,
+                        PlacementIntentState.REJECTED,
+                        reason_code="exchange_rejected_or_unfilled",
+                    )
                     logging.error(
                         "Failed creating sell order for %s. "
                         "No exchange sell result was returned.",
                         order["symbol"],
                     )
-                    return
+                    return False
+
+                active_operation_id = str(
+                    order_status.get("_placement_operation_id")
+                    or placement.operation_id
+                    or ""
+                )
+                source_operation_id = str(
+                    order_status.get("_placement_source_operation_id") or ""
+                )
+                persistence_operation_ids = [
+                    operation_id
+                    for operation_id in (
+                        active_operation_id,
+                        source_operation_id,
+                    )
+                    if operation_id
+                ]
 
                 if self._is_partial_sell_status(order_status):
                     if (
@@ -746,16 +1297,65 @@ class Orders:
                         and order.get("campaign_id") is not None
                     ):
                         order_status["campaign_id"] = str(order["campaign_id"])
-                    await self.__handle_partial_sell_status(order_status, config)
-                    return
+                    partial_amount = float(
+                        order_status.get("partial_filled_amount") or 0.0
+                    )
+                    if partial_amount <= 0:
+                        await self.placement_intents.transition(
+                            active_operation_id,
+                            PlacementIntentState.REJECTED,
+                            result=dict(order_status),
+                            reason_code=str(
+                                order_status.get("unsellable_reason")
+                                or order_status.get("fallback_reason")
+                                or "no_sell_fill"
+                            ),
+                        )
+                        await self.__handle_partial_sell_status(order_status, config)
+                        return False
+                    await self.placement_intents.transition(
+                        active_operation_id,
+                        PlacementIntentState.FILLED,
+                        exchange_order_id=str(order_status.get("id") or "") or None,
+                        result=dict(order_status),
+                    )
+                    if source_operation_id:
+                        await self.__handle_partial_sell_status(
+                            order_status,
+                            config,
+                            placement_operation_ids=persistence_operation_ids,
+                        )
+                    else:
+                        await self.__handle_partial_sell_status(
+                            order_status,
+                            config,
+                            placement_operation_id=active_operation_id,
+                        )
+                    for operation_id in persistence_operation_ids:
+                        await self.placement_intents.transition(
+                            operation_id,
+                            PlacementIntentState.COMPLETED,
+                        )
+                    return True
 
                 if not self._is_sold_check_status(order_status):
+                    await self.placement_intents.transition(
+                        active_operation_id,
+                        PlacementIntentState.ACCEPTED,
+                        exchange_order_id=str(order_status.get("id") or "") or None,
+                        result=dict(order_status),
+                    )
+                    await self.placement_intents.transition(
+                        active_operation_id,
+                        PlacementIntentState.QUARANTINED,
+                        reason_code="unsupported_sell_result",
+                    )
                     logging.error(
                         "Unsupported sell order status for %s: %s",
                         order["symbol"],
                         order_status,
                     )
-                    return
+                    return False
 
                 if (
                     order_status.get("close_reason") is None
@@ -768,26 +1368,68 @@ class Orders:
                 ):
                     order_status["campaign_id"] = order["campaign_id"]
 
-                await self._finalize_completed_sell(order_status, config)
+                await self.placement_intents.transition(
+                    active_operation_id,
+                    PlacementIntentState.FILLED,
+                    exchange_order_id=str(
+                        order_status.get("id") or order_status.get("orderid") or ""
+                    )
+                    or None,
+                    result=dict(order_status),
+                )
+                if source_operation_id:
+                    await self._finalize_completed_sell(
+                        order_status,
+                        config,
+                        placement_operation_ids=persistence_operation_ids,
+                    )
+                else:
+                    await self._finalize_completed_sell(
+                        order_status,
+                        config,
+                        placement_operation_id=active_operation_id,
+                    )
+                for operation_id in persistence_operation_ids:
+                    await self.placement_intents.transition(
+                        operation_id,
+                        PlacementIntentState.COMPLETED,
+                    )
+                return True
             finally:
                 await self.exchange.close()
 
     async def __handle_partial_sell_status(
-        self, order_status: PartialSellStatus, config: dict[str, Any]
+        self,
+        order_status: PartialSellStatus,
+        config: dict[str, Any],
+        *,
+        placement_operation_id: str | None = None,
+        placement_operation_ids: list[str] | None = None,
     ) -> None:
         """Persist partial sell execution while keeping the trade open."""
         if bool(order_status.get("unsellable", False)):
-            await self.__handle_unsellable_remainder(order_status, config)
+            await self.__handle_unsellable_remainder(
+                order_status,
+                config,
+                placement_operation_id=placement_operation_id,
+                placement_operation_ids=placement_operation_ids,
+            )
             return
 
         partial_amount = float(order_status.get("partial_filled_amount") or 0.0)
         partial_proceeds = float(order_status.get("partial_proceeds") or 0.0)
         if partial_amount > 0:
+            partial_options: dict[str, Any] = {}
+            if placement_operation_id:
+                partial_options["placement_operation_id"] = placement_operation_id
+            if placement_operation_ids:
+                partial_options["placement_operation_ids"] = placement_operation_ids
             await persist_partial_sell_execution(
                 order_status["symbol"],
                 partial_amount,
                 partial_proceeds,
                 order_status.get("executions"),
+                **partial_options,
             )
             await self.trades.invalidate_trade_caches()
             logging.info(
@@ -799,7 +1441,12 @@ class Orders:
             )
 
     async def __handle_unsellable_remainder(
-        self, order_status: PartialSellStatus, config: dict[str, Any]
+        self,
+        order_status: PartialSellStatus,
+        config: dict[str, Any],
+        *,
+        placement_operation_id: str | None = None,
+        placement_operation_ids: list[str] | None = None,
     ) -> None:
         """Persist partial close and mark remaining amount as unsellable."""
         snapshot = build_unsellable_status_snapshot(order_status)
@@ -855,8 +1502,10 @@ class Orders:
                 snapshot.symbol,
                 sidestep_payload,
                 campaign_context=campaign_context,
+                unsellable_payload=context.unsellable_payload,
+                placement_operation_id=placement_operation_id,
+                placement_operation_ids=placement_operation_ids,
             )
-            await persist_unsellable_remainder_archive(context.unsellable_payload)
             await self.trades.invalidate_trade_caches()
             if not context.already_notified:
                 await self.monitoring.notify_trade(
@@ -874,20 +1523,15 @@ class Orders:
             )
             return
 
-        if context.partial_amount > 0:
-            await persist_partial_sell_execution(
-                snapshot.symbol,
-                context.partial_amount,
-                context.partial_proceeds,
-                snapshot.partial_executions,
-            )
-
-        if context.closed_trade_payload is not None:
-            await persist_closed_trade_summary(context.closed_trade_payload)
-
         await persist_unsellable_remainder(
             snapshot.symbol,
             context.unsellable_payload,
+            partial_amount=context.partial_amount,
+            partial_proceeds=context.partial_proceeds,
+            sell_executions=snapshot.partial_executions,
+            closed_trade_payload=context.closed_trade_payload,
+            placement_operation_id=placement_operation_id,
+            placement_operation_ids=placement_operation_ids,
         )
         await self.trades.invalidate_trade_caches()
 
@@ -1010,20 +1654,34 @@ class Orders:
         self, order: BuyIntent | dict[str, Any], config: dict[str, Any]
     ) -> bool:
         """Create a buy order and persist open trades."""
-        async with trading_maintenance_barrier.operation() as admitted:
+        async with lifecycle_mutation_coordinator.mutation(
+            str(order["symbol"])
+        ) as admitted:
             if not admitted:
                 logging.info(
                     "Skipping buy order for %s during maintenance.",
                     order["symbol"],
                 )
                 return False
-            return await self._receive_buy_order(order, config)
+            return await self.receive_buy_order_prelocked(order, config)
+
+    async def receive_buy_order_prelocked(
+        self,
+        order: BuyIntent | dict[str, Any],
+        config: dict[str, Any],
+    ) -> bool:
+        """Execute a buy while the caller owns the symbol lifecycle lock."""
+        lifecycle_mutation_coordinator.assert_prelocked(str(order["symbol"]))
+        return await self._receive_buy_order(order, config)
 
     async def _receive_buy_order(
         self, order: BuyIntent | dict[str, Any], config: dict[str, Any]
     ) -> bool:
-        """Execute one buy order inside the maintenance barrier."""
+        """Execute one buy order with the symbol prelocked."""
+        lifecycle_mutation_coordinator.assert_prelocked(str(order["symbol"]))
         logging.info("Incoming buy order for %s", order["symbol"])
+        if not await self._order_snapshot_is_current(order, config):
+            return False
         if str(order.get("campaign_id") or "").strip():
             logging.info(
                 "Incoming campaign buy order for %s: campaign=%s strategy=%s signal=%s.",
@@ -1101,7 +1759,10 @@ class Orders:
 
         try:
             if bool(order.get("safetyorder")) and not bool(order.get("baseorder")):
-                canceled = await self.cancel_tp_limit_order(order["symbol"], config)
+                canceled = await self._cancel_tp_limit_order_locked(
+                    order["symbol"],
+                    config,
+                )
                 if not canceled:
                     logging.warning(
                         "Skipping safety order for %s because an armed proactive "
@@ -1157,18 +1818,141 @@ class Orders:
             )
             return False, precheck
 
+        order_type = (
+            "limit"
+            if float(order.get("maximum_buy_price") or 0.0) > 0
+            else str(order.get("ordertype") or "market")
+        )
+        placement = await self.placement_workflow.begin(
+            order,
+            config,
+            action=PlacementAction.BUY,
+            side="buy",
+            order_type=order_type,
+            requested_quote=float(budget_check.order_quote or 0.0),
+            reserved_quote=float(budget_check.required_quote or 0.0),
+        )
+        await budget_lease.bind_operation(placement.operation_id)
         try:
-            order_status = await self.exchange.create_spot_market_buy(order, config)
-            if not order_status:
-                return False, self.exchange.get_last_buy_precheck_result()
-            return (
-                await self._finalize_buy_order(
-                    order_status,
+            if placement.completed:
+                return True, None
+            if not placement.claimed:
+                logging.warning(
+                    "Skipping duplicate buy submission for %s: operation=%s state=%s.",
+                    order.get("symbol"),
+                    placement.operation_id,
+                    placement.state,
+                )
+                return (
+                    False,
+                    {
+                        "ok": False,
+                        "reason": f"placement_{placement.state}",
+                        "symbol": str(order.get("symbol") or ""),
+                    },
+                )
+
+            try:
+                order_status = await self.exchange.create_spot_market_buy(
+                    order,
                     config,
-                    original_order=order,
-                ),
-                None,
+                )
+            except ExchangePostSubmissionFailure as exc:
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.ACCEPTED,
+                    exchange_order_id=str(exc.order.get("id") or "") or None,
+                    result=exc.order,
+                    reason_code="local_finalization_pending",
+                    error_message=str(exc.cause or exc),
+                )
+                logging.error(
+                    "Buy submission for %s was accepted but could not be "
+                    "finalized locally; operation=%s requires reconciliation.",
+                    order.get("symbol"),
+                    placement.operation_id,
+                    exc_info=True,
+                )
+                return (
+                    False,
+                    {
+                        "ok": False,
+                        "reason": "placement_reconciliation_pending",
+                        "symbol": str(order.get("symbol") or ""),
+                    },
+                )
+            except ExchangeSubmissionIndeterminate as exc:
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.INDETERMINATE,
+                    reason_code="exchange_response_lost",
+                    error_message=str(exc),
+                )
+                logging.error(
+                    "Buy submission for %s is indeterminate; operation=%s will "
+                    "be reconciled before any retry.",
+                    order.get("symbol"),
+                    placement.operation_id,
+                )
+                return (
+                    False,
+                    {
+                        "ok": False,
+                        "reason": "placement_indeterminate",
+                        "symbol": str(order.get("symbol") or ""),
+                    },
+                )
+            if not order_status:
+                precheck = self.exchange.get_last_buy_precheck_result()
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.REJECTED,
+                    reason_code=str((precheck or {}).get("reason") or "not_filled"),
+                )
+                return False, precheck
+            if not self._has_valid_buy_fill(order_status):
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.ACCEPTED,
+                    exchange_order_id=str(order_status.get("id") or "") or None,
+                    result=dict(order_status),
+                )
+                await self.placement_intents.transition(
+                    placement.operation_id,
+                    PlacementIntentState.QUARANTINED,
+                    reason_code="invalid_buy_fill",
+                    error_message="Exchange returned an accepted buy without a valid fill.",
+                )
+                return (
+                    False,
+                    {
+                        "ok": False,
+                        "reason": "placement_quarantined",
+                        "symbol": str(order.get("symbol") or ""),
+                    },
+                )
+            await self.placement_intents.transition(
+                placement.operation_id,
+                PlacementIntentState.FILLED,
+                exchange_order_id=str(
+                    order_status.get("id") or order_status.get("orderid") or ""
+                )
+                or None,
+                result=dict(order_status),
             )
+            finalized = await self._finalize_buy_order(
+                order_status,
+                config,
+                original_order=order,
+                placement_operation_id=placement.operation_id,
+            )
+            if not finalized:
+                return False, None
+            await self.placement_intents.transition(
+                placement.operation_id,
+                PlacementIntentState.COMPLETED,
+            )
+            return True, None
         finally:
             await budget_lease.release()
 
@@ -1181,11 +1965,14 @@ class Orders:
         config: dict[str, Any],
     ) -> dict[str, Any]:
         """Append a manual buy as a safety-order row without exchange execution."""
-        async with trading_maintenance_barrier.operation() as admitted:
+        normalized_symbol = normalize_order_symbol(symbol)
+        async with lifecycle_mutation_coordinator.mutation(
+            normalized_symbol
+        ) as admitted:
             if not admitted:
                 raise ValueError("Cannot add a manual buy during backup restore.")
             return await self._receive_manual_buy_add(
-                symbol,
+                normalized_symbol,
                 date_input,
                 price_raw,
                 amount_raw,
@@ -1200,7 +1987,7 @@ class Orders:
         amount_raw: Any,
         config: dict[str, Any],
     ) -> dict[str, Any]:
-        """Persist one manual buy inside the maintenance barrier."""
+        """Persist one manual buy with the symbol prelocked."""
         request = parse_manual_buy_add_request(
             symbol=symbol,
             date_input=date_input,
@@ -1208,6 +1995,7 @@ class Orders:
             amount_raw=amount_raw,
         )
         normalized_symbol = request.symbol
+        lifecycle_mutation_coordinator.assert_prelocked(normalized_symbol)
 
         open_trade_rows = await self.trades.get_open_trades_by_symbol(normalized_symbol)
         if not open_trade_rows:
@@ -1274,7 +2062,10 @@ class Orders:
             config,
         )
 
-        canceled = await self.cancel_tp_limit_order(normalized_symbol, config)
+        canceled = await self._cancel_tp_limit_order_locked(
+            normalized_symbol,
+            config,
+        )
         if not canceled:
             raise ValueError(
                 "Cannot add manual buy while the proactive TP limit order is filled "
@@ -1331,27 +2122,118 @@ class Orders:
         self,
         symbol: str,
         config: dict[str, Any] | None = None,
+        *,
+        expected_snapshot: LifecycleSnapshotIdentity | None = None,
     ) -> bool:
         """Stop trading for a symbol."""
-        async with trading_maintenance_barrier.operation() as admitted:
-            if not admitted:
-                logging.info(
-                    "Skipping stop order for %s during maintenance.",
-                    symbol,
-                )
-                return False
-            return await self._receive_stop_signal(symbol, config)
+        try:
+            normalized_symbol = normalize_order_symbol(symbol)
+            async with lifecycle_mutation_coordinator.mutation(
+                normalized_symbol
+            ) as admitted:
+                if not admitted:
+                    logging.info(
+                        "Skipping stop order for %s during maintenance.",
+                        normalized_symbol,
+                    )
+                    return False
+                if not await self._snapshot_is_current(
+                    expected_snapshot,
+                    normalized_symbol,
+                    config or {},
+                ):
+                    return False
+                return await self._receive_stop_signal(normalized_symbol, config)
+        except ValueError:
+            logging.warning("Skipping stop order with invalid symbol: %s", symbol)
+            return False
+
+    async def receive_stop_signal_result(
+        self,
+        symbol: str,
+        config: dict[str, Any],
+        *,
+        operation_id: str | None = None,
+    ) -> OrderMutationResult:
+        """Stop a trade and return an explicit operator-visible outcome."""
+        try:
+            normalized_symbol = normalize_order_symbol(symbol)
+        except ValueError:
+            return OrderMutationResult(
+                operation_id=str(operation_id or ""),
+                symbol=str(symbol or ""),
+                action="manual_stop",
+                status=OrderMutationStatus.REJECTED,
+                reason_code="invalid_symbol",
+                user_message="The symbol is invalid.",
+            )
+        trade = await self._load_fresh_trade(normalized_symbol)
+        if trade is None:
+            return OrderMutationResult(
+                operation_id=str(operation_id or ""),
+                symbol=normalized_symbol,
+                action="manual_stop",
+                status=OrderMutationStatus.REJECTED,
+                reason_code="trade_not_found",
+                user_message="No active trade was found.",
+            )
+        snapshot = LifecycleSnapshotIdentity.from_trade(trade, config)
+        resolved_operation_id = str(
+            operation_id
+            or build_derived_operation_id(
+                "manual_stop",
+                snapshot.deal_id,
+                snapshot.execution_count,
+            )
+        )
+        applied = await self.receive_stop_signal(
+            normalized_symbol,
+            config,
+            expected_snapshot=snapshot,
+        )
+        if applied:
+            status = OrderMutationStatus.APPLIED
+            reason_code = "mutation_applied"
+            message = "The trade was stopped."
+        else:
+            current_trade = await self._load_fresh_trade(normalized_symbol)
+            is_stale = current_trade is not None and not snapshots_match(
+                snapshot,
+                current_trade,
+                config,
+            )
+            status = (
+                OrderMutationStatus.STALE if is_stale else OrderMutationStatus.REJECTED
+            )
+            reason_code = "stale_snapshot" if is_stale else "mutation_rejected"
+            message = (
+                "Trade state changed before execution. Refresh and try again."
+                if is_stale
+                else "The trade could not be stopped."
+            )
+        return OrderMutationResult(
+            operation_id=resolved_operation_id,
+            symbol=normalized_symbol,
+            action="manual_stop",
+            status=status,
+            reason_code=reason_code,
+            user_message=message,
+        )
 
     async def _receive_stop_signal(
         self,
         symbol: str,
         config: dict[str, Any] | None = None,
     ) -> bool:
-        """Stop one symbol inside the maintenance barrier."""
+        """Stop one symbol with the symbol prelocked."""
         logging.info("Incoming stop order")
         symbol = normalize_order_symbol(symbol)
+        lifecycle_mutation_coordinator.assert_prelocked(symbol)
         try:
-            canceled = await self.cancel_tp_limit_order(symbol, config or {})
+            canceled = await self._cancel_tp_limit_order_locked(
+                symbol,
+                config or {},
+            )
             if not canceled:
                 return False
             sidestep_campaigns = await self._get_sidestep_campaigns()
@@ -1393,8 +2275,136 @@ class Orders:
 
         actual_pnl = self.utils.calculate_actual_pnl(trades)
         order = build_manual_sell_order_intent(trades, actual_pnl)
-        await self.receive_sell_order(order, config)
-        return True
+        return await self.receive_sell_order(order, config)
+
+    async def _operator_mutation_result(
+        self,
+        *,
+        order: dict[str, Any],
+        action: str,
+        applied: bool,
+        preexisting_operation: bool,
+        expected_snapshot: LifecycleSnapshotIdentity,
+        config: dict[str, Any],
+    ) -> OrderMutationResult:
+        """Resolve a stable API outcome from lifecycle and placement state."""
+        operation_id = str(order.get("operation_id") or "")
+        intent = (
+            await self._get_placement_intent(operation_id) if operation_id else None
+        )
+
+        status = (
+            OrderMutationStatus.APPLIED if applied else OrderMutationStatus.REJECTED
+        )
+        reason_code = "mutation_applied" if applied else "mutation_rejected"
+        if intent is not None:
+            intent_state = str(intent.state)
+            reason_code = str(intent.reason_code or intent_state)
+            if (
+                intent_state == PlacementIntentState.COMPLETED.value
+                and preexisting_operation
+            ):
+                status = OrderMutationStatus.DEDUPLICATED
+                reason_code = "duplicate_operation"
+            elif intent_state in {
+                PlacementIntentState.INDETERMINATE.value,
+                PlacementIntentState.RECONCILING.value,
+                PlacementIntentState.ACCEPTED.value,
+                PlacementIntentState.FILLED.value,
+                PlacementIntentState.PERSISTED.value,
+            }:
+                status = OrderMutationStatus.INDETERMINATE
+            elif intent_state in {
+                PlacementIntentState.QUARANTINED.value,
+                PlacementIntentState.RESTORED_QUARANTINED.value,
+            }:
+                status = OrderMutationStatus.QUARANTINED
+            elif intent_state == PlacementIntentState.REJECTED.value:
+                status = OrderMutationStatus.REJECTED
+        elif not applied:
+            current_trade = await self._load_fresh_trade(expected_snapshot.symbol)
+            if not snapshots_match(expected_snapshot, current_trade, config):
+                status = OrderMutationStatus.STALE
+                reason_code = "stale_snapshot"
+
+        messages = {
+            OrderMutationStatus.APPLIED: "The order was applied.",
+            OrderMutationStatus.DEDUPLICATED: (
+                "This operation was already completed; no duplicate order was sent."
+            ),
+            OrderMutationStatus.REJECTED: "The order was rejected before completion.",
+            OrderMutationStatus.STALE: (
+                "Trade state changed before execution. Refresh and try again."
+            ),
+            OrderMutationStatus.INDETERMINATE: (
+                "The exchange outcome is not yet known. Reconciliation is required."
+            ),
+            OrderMutationStatus.QUARANTINED: (
+                "The operation is quarantined and requires operator review."
+            ),
+        }
+        return OrderMutationResult(
+            operation_id=operation_id,
+            symbol=expected_snapshot.symbol,
+            action=action,
+            status=status,
+            reason_code=reason_code,
+            exchange_order_id=(
+                str(intent.exchange_order_id or "") or None
+                if intent is not None
+                else None
+            ),
+            client_order_id=(
+                str(intent.client_order_id or "") or None
+                if intent is not None
+                else None
+            ),
+            user_message=messages[status],
+        )
+
+    async def receive_sell_signal_result(
+        self,
+        symbol: str,
+        config: dict[str, Any],
+        *,
+        operation_id: str | None = None,
+    ) -> OrderMutationResult:
+        """Handle a manual sell and report its durable execution outcome."""
+        symbol = normalize_order_symbol(symbol)
+        trades = await self._load_fresh_trade(symbol)
+        if not trades:
+            logging.error(
+                "Force remove trade from OpenTrades table for %s - No running trade found.",
+                symbol,
+            )
+            await self.trades.delete_open_trades(symbol)
+            return OrderMutationResult(
+                operation_id=str(operation_id or ""),
+                symbol=symbol,
+                action="manual_sell",
+                status=OrderMutationStatus.REJECTED,
+                reason_code="trade_not_found",
+                user_message="No active trade was found.",
+            )
+
+        snapshot = LifecycleSnapshotIdentity.from_trade(trades, config)
+        actual_pnl = self.utils.calculate_actual_pnl(trades)
+        order = build_manual_sell_order_intent(trades, actual_pnl)
+        order["lifecycle_snapshot"] = snapshot.to_dict()
+        if operation_id:
+            order["operation_id"] = str(operation_id)
+        else:
+            ensure_operation_id(order, "manual_sell")
+        preexisting = await self._get_placement_intent(order["operation_id"])
+        applied = await self.receive_sell_order(order, config)
+        return await self._operator_mutation_result(
+            order=order,
+            action="manual_sell",
+            applied=applied,
+            preexisting_operation=preexisting is not None,
+            expected_snapshot=snapshot,
+            config=config,
+        )
 
     async def receive_buy_signal(
         self, symbol: str, ordersize: float, config: dict[str, Any]
@@ -1409,3 +2419,44 @@ class Orders:
         actual_pnl = self.utils.calculate_actual_pnl(trades)
         order = build_manual_buy_order_intent(symbol, ordersize, trades, actual_pnl)
         return await self.receive_buy_order(order, config)
+
+    async def receive_buy_signal_result(
+        self,
+        symbol: str,
+        ordersize: float,
+        config: dict[str, Any],
+        *,
+        operation_id: str | None = None,
+    ) -> OrderMutationResult:
+        """Handle a manual safety buy and report its durable outcome."""
+        symbol = normalize_order_symbol(symbol)
+        trades = await self._load_fresh_trade(symbol)
+
+        if not trades:
+            return OrderMutationResult(
+                operation_id=str(operation_id or ""),
+                symbol=symbol,
+                action="manual_buy",
+                status=OrderMutationStatus.REJECTED,
+                reason_code="trade_not_found",
+                user_message="No active trade was found.",
+            )
+
+        snapshot = LifecycleSnapshotIdentity.from_trade(trades, config)
+        actual_pnl = self.utils.calculate_actual_pnl(trades)
+        order = build_manual_buy_order_intent(symbol, ordersize, trades, actual_pnl)
+        order["lifecycle_snapshot"] = snapshot.to_dict()
+        if operation_id:
+            order["operation_id"] = str(operation_id)
+        else:
+            ensure_operation_id(order, "manual_buy")
+        preexisting = await self._get_placement_intent(order["operation_id"])
+        applied = await self.receive_buy_order(order, config)
+        return await self._operator_mutation_result(
+            order=order,
+            action="manual_buy",
+            applied=applied,
+            preexisting_operation=preexisting is not None,
+            expected_snapshot=snapshot,
+            config=config,
+        )

@@ -4,11 +4,11 @@ from typing import Any
 
 import helper
 from litestar.handlers import get
-from service.analytics import Analytics
+from service.runtime_services import runtime_service_proxy
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_analytics")
 
-analytics = Analytics()
+analytics = runtime_service_proxy("analytics")
 
 
 @get(path="/analytics/overview")

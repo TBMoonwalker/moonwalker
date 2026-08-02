@@ -24,7 +24,10 @@ class _DummyExchange:
         return f"{amount:.3f}"
 
     async def create_market_sell_order(
-        self, _symbol: str, _amount: float
+        self,
+        _symbol: str,
+        _amount: float,
+        _params: dict[str, object],
     ) -> dict[str, object]:
         self.market_sell_calls += 1
         return {"id": "sell-1", "symbol": _symbol}
@@ -117,6 +120,13 @@ async def test_create_spot_sell_returns_partial_when_fallback_disabled() -> None
     ) -> dict[str, object] | None:
         raise AssertionError("market fallback should not run")
 
+    async def fake_market_fallback(
+        order: dict[str, object],
+        config: dict[str, object],
+        _limit_status: dict[str, object],
+    ) -> dict[str, object] | None:
+        return await fake_market_sell(order, config)
+
     async def fake_guard(_order: dict[str, object], _config: dict[str, object]) -> bool:
         return True
 
@@ -126,6 +136,7 @@ async def test_create_spot_sell_returns_partial_when_fallback_disabled() -> None
         context=SellRoutingContext(
             create_spot_limit_sell=fake_limit_sell,
             create_spot_market_sell=fake_market_sell,
+            create_spot_market_fallback=fake_market_fallback,
             can_fallback_to_market_sell=fake_guard,
         ),
     )
@@ -161,6 +172,13 @@ async def test_create_spot_sell_preserves_tp_floor_after_limit_timeout() -> None
     ) -> dict[str, object] | None:
         raise AssertionError("TP-protected fallback must not become a market sell")
 
+    async def fake_market_fallback(
+        order: dict[str, object],
+        config: dict[str, object],
+        _limit_status: dict[str, object],
+    ) -> dict[str, object] | None:
+        return await fake_market_sell(order, config)
+
     async def fake_guard(_order: dict[str, object], _config: dict[str, object]) -> bool:
         raise AssertionError("a live-price check cannot guarantee a market fill floor")
 
@@ -177,6 +195,7 @@ async def test_create_spot_sell_preserves_tp_floor_after_limit_timeout() -> None
         context=SellRoutingContext(
             create_spot_limit_sell=fake_limit_sell,
             create_spot_market_sell=fake_market_sell,
+            create_spot_market_fallback=fake_market_fallback,
             can_fallback_to_market_sell=fake_guard,
         ),
     )

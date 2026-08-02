@@ -328,7 +328,7 @@ onUnmounted(removeCharts)
     font-size: 0.95rem;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .backtest-chart {
         height: 320px;
     }

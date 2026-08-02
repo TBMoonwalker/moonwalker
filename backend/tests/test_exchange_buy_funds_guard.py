@@ -3,6 +3,63 @@ from service.exchange import Exchange
 
 
 @pytest.mark.asyncio
+async def test_minimum_buy_notional_accounts_for_amount_precision(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+
+    class _FakeClient:
+        def market(self, _symbol):
+            return {
+                "limits": {"cost": {"min": 5.0}},
+                "info": {
+                    "filters": [
+                        {
+                            "filterType": "NOTIONAL",
+                            "minNotional": "5.0",
+                            "applyMinToMarket": True,
+                        }
+                    ]
+                },
+            }
+
+        def price_to_precision(self, _symbol, _price):
+            return "0.02887"
+
+        def amount_to_precision(self, _symbol, amount):
+            return str(int(float(amount)))
+
+    async def fake_ensure_exchange(_config) -> None:
+        exchange.exchange = _FakeClient()
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_resolve(symbol):
+        return symbol
+
+    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(
+        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
+    )
+    monkeypatch.setattr(
+        exchange,
+        "_Exchange__resolve_symbol_with_refresh",
+        fake_resolve,
+    )
+
+    minimum = await exchange.get_minimum_buy_notional(
+        {},
+        "CHIP/USDC",
+        is_market_order=False,
+        amount_sizing_price=0.02887,
+    )
+
+    assert minimum == pytest.approx(5.02340887)
+    assert int(minimum / 0.02887) * 0.02887 >= 5.0
+
+
+@pytest.mark.asyncio
 async def test_create_spot_market_buy_skips_when_quote_balance_is_zero(
     monkeypatch,
 ) -> None:
@@ -108,6 +165,73 @@ async def test_create_spot_market_buy_skips_when_balance_check_unavailable(
     assert precheck is not None
     assert precheck["ok"] is False
     assert precheck["reason"] == "balance_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_create_spot_market_buy_rejects_precision_below_minimum(
+    monkeypatch,
+) -> None:
+    exchange = Exchange()
+    execute_calls = {"count": 0}
+
+    async def fake_ensure_exchange(_config) -> None:
+        return None
+
+    async def fake_ensure_markets_loaded() -> None:
+        return None
+
+    async def fake_get_amount(_ordersize, _symbol, _price=None) -> str:
+        return "173"
+
+    async def fake_get_price(_symbol, **_kwargs) -> str:
+        return "0.02596"
+
+    def fake_notional_check(
+        symbol,
+        amount,
+        price,
+        *,
+        is_market_order,
+    ):
+        assert symbol == "CHIP/USDC"
+        assert amount == 173.0
+        assert price == 0.02887
+        assert is_market_order is False
+        return True, 5.0, 4.99451
+
+    async def fake_execute(_order) -> None:
+        execute_calls["count"] += 1
+        return None
+
+    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(
+        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
+    )
+    monkeypatch.setattr(exchange, "_Exchange__get_amount_from_symbol", fake_get_amount)
+    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(
+        exchange,
+        "_Exchange__is_notional_below_minimum",
+        fake_notional_check,
+    )
+    monkeypatch.setattr(exchange, "_Exchange__execute_market_buy", fake_execute)
+
+    result = await exchange.create_spot_market_buy(
+        {
+            "ordersize": 5.0,
+            "symbol": "CHIP/USDC",
+            "maximum_buy_price": 0.02887,
+        },
+        {},
+    )
+
+    assert result is None
+    assert execute_calls["count"] == 0
+    precheck = exchange.get_last_buy_precheck_result()
+    assert precheck is not None
+    assert precheck["ok"] is False
+    assert precheck["reason"] == "amount_below_minimum_notional"
+    assert precheck["required_quote"] == 5.0
 
 
 @pytest.mark.asyncio

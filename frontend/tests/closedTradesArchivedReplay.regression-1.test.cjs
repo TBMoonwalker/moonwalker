@@ -34,3 +34,14 @@ test('closed trades prefer archived replay candles before shared ticker fallback
         'expected the chart to request archived replay candles first',
     )
 })
+
+test('closed trades supplement sparse archives with shared ticker history', () => {
+    // Regression: startup archive repair can finish after an expanded chart has
+    // accepted a nonempty but incomplete archive. Nonempty alone is not proof
+    // that a multi-day replay has adequate candle coverage.
+    assert.ok(
+        tradeReplayChartSource.includes('replayNeedsHistoryFallback') &&
+            tradeReplayChartSource.includes('mergeReplayCandleRows'),
+        'expected sparse archives to merge with the shared ticker fallback',
+    )
+})

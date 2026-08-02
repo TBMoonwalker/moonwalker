@@ -13,6 +13,11 @@ from uuid import uuid4
 import helper
 import model
 from service.replay_candles import archive_replay_candles_for_deal
+from service.schema_migrations import (
+    MigrationDefinition,
+    bootstrap_sqlite_migration_ledger,
+    run_schema_migrations,
+)
 from tortoise import Tortoise
 from tortoise.context import TortoiseContext
 
@@ -363,6 +368,21 @@ class Database:
                 ("symbol", "timestamp"),
             ),
             (
+                "placement_intents",
+                "idx_placement_intents_state_symbol",
+                ("state", "symbol"),
+            ),
+            (
+                "placement_intents",
+                "idx_placement_intents_exchange_order_id",
+                ("exchange_order_id",),
+            ),
+            (
+                "placement_intents",
+                "idx_placement_intents_deal_id",
+                ("deal_id",),
+            ),
+            (
                 "unsellabletrades",
                 "idx_unsellabletrades_symbol",
                 ("symbol",),
@@ -391,6 +411,16 @@ class Database:
             ("spotcampaigns", "uidx_spotcampaigns_campaign_id", ("campaign_id",)),
             ("unsellabletrades", "uidx_unsellabletrades_deal_id", ("deal_id",)),
             ("strategy_definitions", "uidx_strategy_definitions_slug", ("slug",)),
+            (
+                "placement_intents",
+                "uidx_placement_intents_operation_id",
+                ("operation_id",),
+            ),
+            (
+                "placement_intents",
+                "uidx_placement_intents_client_order_id",
+                ("client_order_id",),
+            ),
         )
         existing_signatures: set[tuple[str, tuple[str, ...]]] = set()
         existing_unique_signatures: set[tuple[str, tuple[str, ...]]] = set()
@@ -626,6 +656,7 @@ class Database:
                 open_date=closed_row.get("open_date"),
                 close_date=closed_row.get("close_date"),
                 allow_missing_archive_exchange_repair=True,
+                allow_live_snapshot_exchange_repair=True,
             )
 
     async def _ensure_open_trades_columns(self) -> None:
@@ -849,17 +880,60 @@ class Database:
         raise RuntimeError(message)
 
     async def _run_schema_init_steps(self) -> None:
-        """Run additive schema and index maintenance for existing databases."""
-        await self._ensure_open_trades_columns()
-        await self._ensure_spot_campaign_columns()
-        await self._ensure_trade_ledger_columns()
-        await self._ensure_upnl_history_columns()
-        await self._ensure_ai_trust_columns()
-        await self._ensure_indexes()
+        """Run ordered additive schema migrations for existing databases."""
+        await run_schema_migrations(
+            (
+                MigrationDefinition(
+                    version="2026-07-28-001-open-trades-expand",
+                    phase="schema",
+                    description="Add backward-compatible open-trade runtime columns.",
+                    apply=self._ensure_open_trades_columns,
+                ),
+                MigrationDefinition(
+                    version="2026-07-28-002-campaign-expand",
+                    phase="schema",
+                    description="Add backward-compatible campaign runtime columns.",
+                    apply=self._ensure_spot_campaign_columns,
+                ),
+                MigrationDefinition(
+                    version="2026-07-28-003-trade-ledger-expand",
+                    phase="schema",
+                    description="Add deal and campaign execution-ledger identity.",
+                    apply=self._ensure_trade_ledger_columns,
+                ),
+                MigrationDefinition(
+                    version="2026-07-28-004-upnl-expand",
+                    phase="schema",
+                    description="Add persisted locked-funds history.",
+                    apply=self._ensure_upnl_history_columns,
+                ),
+                MigrationDefinition(
+                    version="2026-07-28-005-ai-trust-expand",
+                    phase="schema",
+                    description="Add stable AI evaluation identity.",
+                    apply=self._ensure_ai_trust_columns,
+                ),
+                MigrationDefinition(
+                    version="2026-07-28-006-indexes",
+                    phase="schema",
+                    description="Create current additive and unique indexes.",
+                    apply=self._ensure_indexes,
+                ),
+            )
+        )
 
     async def _run_backfill_init_steps(self) -> None:
-        """Run init-time backfills required before the runtime starts."""
-        await self._backfill_trade_ledger_rows()
+        """Run ordered data migrations required before the runtime starts."""
+        await run_schema_migrations(
+            (
+                MigrationDefinition(
+                    version="2026-07-28-007-trade-ledger-backfill",
+                    phase="data",
+                    description="Backfill deal identity and execution-ledger rows.",
+                    apply=self._backfill_trade_ledger_rows,
+                ),
+            )
+        )
 
     async def init(self) -> None:
         """Initialize the database connection and generate schemas.
@@ -879,6 +953,7 @@ class Database:
                 _enable_global_fallback=True,
             )
             await self._apply_sqlite_pragmas()
+            await bootstrap_sqlite_migration_ledger(db_url)
             # Generate the schema
             await Tortoise.generate_schemas()
             await self._run_schema_init_steps()

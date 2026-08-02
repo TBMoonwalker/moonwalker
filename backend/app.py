@@ -23,11 +23,16 @@ from service.ai_provider import ai_provider_client
 from service.ai_trust import recover_pending_outcome_attributions
 from service.ai_work_queue import ai_work_queue
 from service.autopilot_memory import AutopilotMemoryService
+from service.coin_market_cap import (
+    CoinMarketCapRankService,
+    coin_market_cap_rank_service,
+)
 from service.config import Config
 from service.database import Database
 from service.delisting_protection import DelistingProtectionService
 from service.green_phase import GreenPhaseService
 from service.housekeeper import Housekeeper
+from service.orders import Orders
 from service.origin_policy import (
     TrustedLanHttpMiddleware,
     WebSocketOriginMiddleware,
@@ -35,6 +40,12 @@ from service.origin_policy import (
     parse_allowed_origins,
 )
 from service.redis import redis_client, start_redis, stop_redis
+from service.runtime_services import (
+    RuntimeServices,
+    activate_runtime_services,
+    build_runtime_services,
+    deactivate_runtime_services,
+)
 from service.signal import Signal
 from service.watcher import Watcher
 
@@ -50,6 +61,9 @@ class RuntimeState:
     redis_proc: subprocess.Popen[bytes] | None = None
     watcher_queue: asyncio.Queue[Any] | None = None
     database: Database | None = None
+    market_cap_rank_service: CoinMarketCapRankService | None = None
+    controller_services: RuntimeServices | None = None
+    placement_orders: Orders | None = None
     watcher: Watcher | None = None
     housekeeper: Housekeeper | None = None
     green_phase_service: GreenPhaseService | None = None
@@ -60,6 +74,14 @@ class RuntimeState:
 
 
 runtime_state = RuntimeState()
+
+
+class RuntimeShutdownError(RuntimeError):
+    """Aggregate ordinary cleanup failures after all resources were attempted."""
+
+    def __init__(self, failures: list[Exception]) -> None:
+        self.failures = tuple(failures)
+        super().__init__(f"Moonwalker shutdown failed in {len(failures)} step(s)")
 
 
 async def _run_startup_step(
@@ -101,10 +123,31 @@ async def startup() -> None:
         runtime_state.database = Database()
         await _run_startup_step("database init", runtime_state.database.init)
 
-        await _run_startup_step(
+        config_service = await _run_startup_step(
             "config load",
             lambda: runtime_state.database.run_with_context(Config.instance),
         )
+
+        runtime_state.market_cap_rank_service = coin_market_cap_rank_service
+        await _run_startup_step(
+            "CoinMarketCap rank service start",
+            runtime_state.market_cap_rank_service.start,
+        )
+
+        runtime_state.placement_orders = Orders()
+        reconciliation = await _run_startup_step(
+            "exchange placement reconciliation",
+            lambda: runtime_state.database.run_with_context(
+                runtime_state.placement_orders.reconcile_placement_intents,
+                config_service.snapshot(),
+            ),
+        )
+        if not reconciliation.ready:
+            operations = ", ".join(reconciliation.action_required)
+            raise RuntimeError(
+                "Exchange placement reconciliation requires operator action "
+                f"before trading can start: {operations}"
+            )
 
         runtime_state.watcher = Watcher()
         await _run_startup_step("watcher init", runtime_state.watcher.init)
@@ -139,6 +182,16 @@ async def startup() -> None:
             runtime_state.delisting_protection_service.start,
         )
 
+        assert runtime_state.placement_orders is not None
+        runtime_state.controller_services = build_runtime_services(
+            orders=runtime_state.placement_orders,
+            delisting_protection=runtime_state.delisting_protection_service,
+            statistics_balance_cache_ttl_seconds=(
+                statistics_controller.STATISTICS_BALANCE_CACHE_TTL_SECONDS
+            ),
+        )
+        activate_runtime_services(runtime_state.controller_services)
+
         runtime_state.signal_plugin = Signal(runtime_state.watcher_queue)
         await _run_startup_step(
             "signal plugin init",
@@ -170,11 +223,30 @@ async def startup() -> None:
 
 async def shutdown() -> None:
     """Gracefully stop background services and close external connections."""
-    await trades_controller.stop_websocket_fanout()
-    await statistics_controller.stop_websocket_fanout()
+    failures: list[Exception] = []
+
+    async def attempt(
+        name: str,
+        operation: Callable[[], Awaitable[None]],
+    ) -> None:
+        try:
+            await operation()
+        except Exception as exc:  # noqa: BLE001 - cleanup must continue.
+            logging.exception("Shutdown step failed: %s", name)
+            failures.append(exc)
+
+    await attempt(
+        "trades websocket fanout",
+        trades_controller.stop_websocket_fanout,
+    )
+    await attempt(
+        "statistics websocket fanout",
+        statistics_controller.stop_websocket_fanout,
+    )
 
     if runtime_state.signal_plugin is not None:
-        await runtime_state.signal_plugin.shutdown()
+        await attempt("signal plugin", runtime_state.signal_plugin.shutdown)
+        runtime_state.signal_plugin = None
 
     for task in runtime_state.background_tasks:
         task.cancel()
@@ -183,24 +255,59 @@ async def shutdown() -> None:
     runtime_state.background_tasks.clear()
 
     if runtime_state.watcher is not None:
-        await runtime_state.watcher.shutdown()
+        await attempt("watcher", runtime_state.watcher.shutdown)
+        runtime_state.watcher = None
     if runtime_state.housekeeper is not None:
-        await runtime_state.housekeeper.shutdown()
+        await attempt("housekeeper", runtime_state.housekeeper.shutdown)
+        runtime_state.housekeeper = None
     if runtime_state.green_phase_service is not None:
-        await runtime_state.green_phase_service.shutdown()
+        await attempt("green phase", runtime_state.green_phase_service.shutdown)
+        runtime_state.green_phase_service = None
     if runtime_state.autopilot_memory_service is not None:
-        await runtime_state.autopilot_memory_service.shutdown()
+        await attempt(
+            "autopilot memory",
+            runtime_state.autopilot_memory_service.shutdown,
+        )
+        runtime_state.autopilot_memory_service = None
     if runtime_state.delisting_protection_service is not None:
-        await runtime_state.delisting_protection_service.shutdown()
+        await attempt(
+            "delisting protection",
+            runtime_state.delisting_protection_service.shutdown,
+        )
+        runtime_state.delisting_protection_service = None
+    if runtime_state.controller_services is not None:
+        controller_services = runtime_state.controller_services
+        await attempt("controller services", controller_services.shutdown)
+        deactivate_runtime_services(controller_services)
+        runtime_state.controller_services = None
+        runtime_state.placement_orders = None
+    elif runtime_state.placement_orders is not None:
+        await attempt("placement orders", runtime_state.placement_orders.close)
+        runtime_state.placement_orders = None
+    if runtime_state.market_cap_rank_service is not None:
+        await attempt(
+            "CoinMarketCap rank service",
+            runtime_state.market_cap_rank_service.shutdown,
+        )
+        runtime_state.market_cap_rank_service = None
     if runtime_state.database is not None:
-        await runtime_state.database.shutdown()
+        await attempt("database", runtime_state.database.shutdown)
+        runtime_state.database = None
 
-    await ai_provider_client.close()
-    await redis_client.aclose()
+    await attempt("AI provider", ai_provider_client.close)
+    await attempt("Redis client", redis_client.aclose)
 
     if runtime_state.redis_proc is not None:
-        await asyncio.to_thread(stop_redis, runtime_state.redis_proc)
+        redis_proc = runtime_state.redis_proc
+        await attempt(
+            "Redis process",
+            lambda: asyncio.to_thread(stop_redis, redis_proc),
+        )
         runtime_state.redis_proc = None
+    runtime_state.watcher_queue = None
+
+    if failures:
+        raise RuntimeShutdownError(failures)
 
 
 async def _run_critical_runtime_task(
@@ -215,6 +322,9 @@ async def _run_critical_runtime_task(
     except Exception:
         logging.exception("Critical runtime task failed: %s", name)
         raise
+    current_task = asyncio.current_task()
+    if current_task is not None and current_task.cancelling():
+        raise asyncio.CancelledError
     raise RuntimeError(f"Critical runtime task exited unexpectedly: {name}")
 
 
@@ -229,6 +339,28 @@ async def _run_optional_runtime_task(
         raise
     except Exception:
         logging.exception("Optional runtime task failed: %s", name)
+
+
+async def _finish_cleanup_despite_cancellation(
+    operation: Awaitable[None],
+) -> None:
+    """Finish cleanup even when the hosting lifespan task is cancelled."""
+    cleanup_task = asyncio.create_task(
+        operation,
+        name="moonwalker:runtime-shutdown",
+    )
+    current_task = asyncio.current_task()
+
+    while not cleanup_task.done():
+        try:
+            await asyncio.shield(cleanup_task)
+        except asyncio.CancelledError:
+            if cleanup_task.done():
+                await cleanup_task
+            if current_task is not None:
+                current_task.uncancel()
+
+    await cleanup_task
 
 
 @asynccontextmanager
@@ -297,7 +429,7 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
                 for task in runtime_state.background_tasks:
                     task.cancel()
     finally:
-        await shutdown()
+        await _finish_cleanup_despite_cancellation(shutdown())
 
 
 app = Litestar(

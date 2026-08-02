@@ -28,6 +28,9 @@ class BuyIntent(TypedDict):
     entry_size_fallback_applied: NotRequired[bool]
     entry_size_fallback_reason: NotRequired[str | None]
     campaign_id: NotRequired[str | None]
+    operation_id: NotRequired[str]
+    client_order_id: NotRequired[str]
+    lifecycle_snapshot: NotRequired[dict[str, Any]]
     _ai_entry_evaluation: NotRequired[Any]
 
 
@@ -43,6 +46,9 @@ class SellIntent(TypedDict):
     current_price: float
     sell_reason: str
     campaign_id: NotRequired[str | None]
+    operation_id: NotRequired[str]
+    client_order_id: NotRequired[str]
+    lifecycle_snapshot: NotRequired[dict[str, Any]]
     skip_tp_limit_cancel: NotRequired[bool]
     total_amount: NotRequired[float]
     requested_total_amount: NotRequired[float]

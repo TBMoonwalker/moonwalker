@@ -98,3 +98,23 @@ def test_startup_script_cleans_lock_when_backend_exits_immediately() -> None:
     assert 'if ! kill -0 "$app_pid" 2>/dev/null; then' in script
     assert 'rm -f "$PID_FILE" "$LOCK_FILE"' in script
     assert 'trap \'rm -f "$LOCK_FILE" "$PID_FILE"\' EXIT INT TERM' in script
+
+
+def test_stop_script_allows_graceful_shutdown_before_forcing_exit() -> None:
+    """Normal stops must give lifespan cleanup time to release owned resources."""
+    script = RUN_SCRIPT.read_text()
+    stop_function = script.index("stop_services()")
+    start_function = script.index("start_services()")
+    stop_script = script[stop_function:start_function]
+
+    term_step = 'kill -TERM "$pid"'
+    wait_step = 'while kill -0 "$pid" 2>/dev/null; do'
+    force_step = 'kill -KILL "$pid" 2>/dev/null || true'
+
+    assert "STOP_TIMEOUT_SECONDS=30" in script
+    assert '[[ "$pid" =~ ^[1-9][0-9]*$ ]]' in stop_script
+    assert term_step in stop_script
+    assert wait_step in stop_script
+    assert force_step in stop_script
+    assert stop_script.index(term_step) < stop_script.index(wait_step)
+    assert stop_script.index(wait_step) < stop_script.index(force_step)

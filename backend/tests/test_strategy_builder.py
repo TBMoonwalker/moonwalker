@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 
@@ -338,6 +339,72 @@ async def test_duplicate_then_promote_custom_strategy_uses_optimistic_lock(
     )
     assert stale_status == 409
     assert stale_payload["active_version"] == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_strategy_promotions_commit_one_version(strategy_db) -> None:
+    """Concurrent clients with one lock version must produce one promotion."""
+    await seed_builtin_strategies()
+    duplicate = await duplicate_strategy("ema_down", "Concurrent copy")
+    draft = duplicate["ir"]
+    draft["name"] = "Concurrent copy tuned"
+
+    results = await asyncio.gather(
+        promote_strategy_version(
+            duplicate["slug"],
+            draft,
+            duplicate["lock_version"],
+        ),
+        promote_strategy_version(
+            duplicate["slug"],
+            draft,
+            duplicate["lock_version"],
+        ),
+    )
+
+    assert sorted(status for _payload, status in results) == [200, 409]
+    assert (
+        await model.StrategyVersion.filter(strategy_slug=duplicate["slug"]).count() == 2
+    )
+
+
+@pytest.mark.asyncio
+async def test_strategy_promotion_rolls_back_version_when_pointer_save_fails(
+    strategy_db,
+    monkeypatch,
+) -> None:
+    """A failed active-pointer update must not leave an orphan version."""
+    await seed_builtin_strategies()
+    duplicate = await duplicate_strategy("ema_down", "Rollback copy")
+    draft = duplicate["ir"]
+    draft["name"] = "Rollback copy tuned"
+    original_save = model.StrategyDefinition.save
+
+    async def fail_promoted_definition_save(self, *args, **kwargs):
+        if self.slug == duplicate["slug"] and self.lock_version > 1:
+            raise RuntimeError("pointer write failed")
+        return await original_save(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        model.StrategyDefinition,
+        "save",
+        fail_promoted_definition_save,
+    )
+
+    with pytest.raises(RuntimeError, match="pointer write failed"):
+        await promote_strategy_version(
+            duplicate["slug"],
+            draft,
+            duplicate["lock_version"],
+        )
+
+    persisted = await get_strategy_detail(duplicate["slug"])
+    assert persisted is not None
+    assert persisted["active_version"] == 1
+    assert persisted["lock_version"] == duplicate["lock_version"]
+    assert (
+        await model.StrategyVersion.filter(strategy_slug=duplicate["slug"]).count() == 1
+    )
 
 
 @pytest.mark.asyncio

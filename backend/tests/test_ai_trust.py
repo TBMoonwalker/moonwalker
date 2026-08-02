@@ -32,6 +32,18 @@ class _FakeConfig:
         return _FakeConfigService(cls.snapshot)
 
 
+def test_facade_scalar_normalizers_cover_supported_input_shapes() -> None:
+    """Keep facade coercion behavior explicit after module extraction."""
+    assert ai_trust._safe_bool("yes") is True
+    assert ai_trust._safe_bool(0) is False
+    assert ai_trust._safe_float(float("inf"), 7.0) == pytest.approx(7.0)
+    assert ai_trust._risk_score_severity(50) == "medium"
+    assert ai_trust._normalize_warning_consistency(30, True, "low") == (
+        True,
+        "low",
+    )
+
+
 async def _init_db(tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "test.sqlite"

@@ -3,6 +3,7 @@ import { MOONWALKER_API_ORIGIN } from '../config'
 const baseUrl = MOONWALKER_API_ORIGIN
 export const MOONWALKER_CLIENT_HEADER = 'X-Moonwalker-Client'
 export const MOONWALKER_CLIENT_HEADER_VALUE = 'dashboard'
+export const MOONWALKER_OPERATION_HEADER = 'X-Moonwalker-Operation-Id'
 
 export async function fetchJson<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)

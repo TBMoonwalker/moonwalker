@@ -3,6 +3,11 @@
 from typing import Any
 
 import ccxt.async_support as ccxt
+from service.exchange_capabilities import (
+    ExchangePostSubmissionFailure,
+    ExchangeSubmissionIndeterminate,
+    build_client_order_params,
+)
 from service.exchange_contexts import LimitSellPlacementContext
 from service.exchange_limit_sell import build_market_fallback_status
 from service.exchange_sell_status import build_partial_sell_status
@@ -120,7 +125,7 @@ class ExchangeLimitOrderManager:
             limit_price=limit_price,
             order=order,
         )
-        if not trade:
+        if trade is None:
             return build_market_fallback_status(
                 symbol=resolved_symbol,
                 remaining_amount=float(amount_value),
@@ -131,16 +136,6 @@ class ExchangeLimitOrderManager:
         sell_order.update(trade)
         sell_order["symbol"] = resolved_symbol
         sell_order["total_amount"] = float(amount_value)
-        if not sell_order.get("id"):
-            self._logger.error(
-                "Limit sell for %s returned no order id.",
-                resolved_symbol,
-            )
-            return build_market_fallback_status(
-                symbol=resolved_symbol,
-                remaining_amount=float(amount_value),
-                fallback_reason="limit_order_missing_id",
-            )
 
         return await context.handle_limit_sell_fill(
             sell_order,
@@ -192,14 +187,29 @@ class ExchangeLimitOrderManager:
             return None
 
         try:
-            return await exchange.create_order(
+            trade = await exchange.create_order(
                 resolved_symbol,
                 "limit",
                 "sell",
                 amount,
                 limit_price,
-                {},
+                build_client_order_params(order.get("client_order_id")),
             )
+            if not isinstance(trade, dict) or not trade.get("id"):
+                evidence = dict(order)
+                if isinstance(trade, dict):
+                    evidence.update(trade)
+                evidence["symbol"] = resolved_symbol
+                raise ExchangePostSubmissionFailure(
+                    action="limit_sell",
+                    symbol=resolved_symbol,
+                    order=evidence,
+                    cause=TypeError(
+                        "Exchange accepted the limit sell but returned no order id"
+                    ),
+                    operation_id=str(order.get("operation_id") or "") or None,
+                )
+            return trade
         except ccxt.ExchangeError as exc:
             self._logger.error(
                 "Limit sell for %s failed due to an exchange error: %s",
@@ -208,12 +218,11 @@ class ExchangeLimitOrderManager:
             )
             return None
         except ccxt.NetworkError as exc:
-            self._logger.error(
-                "Limit sell for %s failed due to a network error: %s",
-                order["symbol"],
-                exc,
-            )
-            return None
+            raise ExchangeSubmissionIndeterminate(
+                action="limit_sell",
+                symbol=str(order["symbol"]),
+                client_order_id=str(order.get("client_order_id") or "") or None,
+            ) from exc
         except ccxt.BaseError as exc:
             self._logger.error(
                 "Limit sell for %s failed due to an error: %s",

@@ -243,7 +243,7 @@ const trustSummary = computed(() => {
     min-width: max-content;
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
     .preview-header {
         flex-wrap: wrap;
     }

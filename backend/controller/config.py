@@ -12,7 +12,6 @@ from litestar.exceptions import SerializationException
 from litestar.handlers import get, post, put
 from litestar.params import FromPath, FromQuery
 from model import AppConfig, OpenTrades
-from service.backup_restore import BackupService
 from service.config import (
     Config,
     build_removed_config_key_message,
@@ -27,6 +26,7 @@ from service.config_redaction import (
     restore_redacted_config_value,
 )
 from service.config_views import TradeLifecycleConfigView
+from service.runtime_services import runtime_service_proxy
 from service.signal_settings import SignalSettingsError, canonicalize_signal_settings
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.strategy_builder import list_strategy_options, list_strategy_summaries
@@ -47,7 +47,7 @@ LIVE_ACTIVATION_DENIED_MESSAGE = (
     "Live activation must go through /config/live/activate. "
     "Generic config saves cannot switch dry run off."
 )
-backup_service = BackupService()
+backup_service = runtime_service_proxy("backup")
 _RESTORE_LOCK = asyncio.Lock()
 ConfigUpdateMap = dict[str, dict[str, Any]]
 

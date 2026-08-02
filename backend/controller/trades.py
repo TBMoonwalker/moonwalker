@@ -11,19 +11,16 @@ from litestar.exceptions import WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
 from litestar.params import FromPath, FromQuery
 from service.config import Config
-from service.delisting_protection import DelistingProtectionService
 from service.order_requests import normalize_order_symbol
+from service.runtime_services import runtime_service_proxy
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
-from service.trade_replay_indicators import TradeReplayIndicatorService
-from service.trades import Trades
-from service.trading_controls import TradingControlsService
 from service.websocket_fanout import WebSocketFanout
 
 logging = helper.LoggerFactory.get_logger("logs/controller.log", "controller_trades")
-trades = Trades()
-delisting_protection = DelistingProtectionService.shared()
-trading_controls = TradingControlsService()
-trade_replay_indicators = TradeReplayIndicatorService(trades)
+trades = runtime_service_proxy("trades")
+delisting_protection = runtime_service_proxy("delisting_protection")
+trading_controls = runtime_service_proxy("trading_controls")
+trade_replay_indicators = runtime_service_proxy("trade_replay_indicators")
 
 
 def _json_dumps(payload: Any) -> str:

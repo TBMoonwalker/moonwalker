@@ -10,18 +10,34 @@ from typing import Any
 
 GLOBAL_LINE_FLOOR = 71.0
 GLOBAL_BRANCH_FLOOR = 57.0
-CRITICAL_MODULE_FLOORS = {
+CRITICAL_MODULE_BRANCH_FLOORS = {
     "backend/controller/config.py": 65.0,
-    "backend/service/ai_trust.py": 78.0,
-    "backend/service/config.py": 79.0,
-    "backend/service/orders.py": 74.0,
-    "backend/service/signal_runtime.py": 82.0,
+    "backend/service/ai_trust.py": 72.0,
+    "backend/service/ai_trust_analytics.py": 95.0,
+    "backend/service/ai_trust_calibration.py": 90.0,
+    "backend/service/coin_market_cap.py": 76.0,
+    "backend/service/config.py": 72.0,
+    "backend/service/dca_decision.py": 100.0,
+    "backend/service/exchange_capabilities.py": 87.0,
+    "backend/service/lifecycle_mutation.py": 100.0,
+    "backend/service/lifecycle_snapshot.py": 100.0,
+    "backend/service/order_mutation_result.py": 100.0,
+    "backend/service/orders.py": 67.0,
+    "backend/service/placement_intents.py": 84.0,
+    "backend/service/placement_reconciliation.py": 65.0,
+    "backend/service/placement_recovery.py": 71.0,
+    "backend/service/placement_workflow.py": 87.0,
+    "backend/service/runtime_services.py": 75.0,
+    "backend/service/schema_migrations.py": 85.0,
+    "backend/service/signal_runtime.py": 77.0,
+    "backend/service/strategy_ir.py": 76.0,
+    "backend/service/strategy_persistence.py": 67.0,
 }
 
 
-def _percentage(summary: dict[str, Any]) -> float:
-    """Return the combined line/branch coverage percentage."""
-    return float(summary.get("percent_covered", 0.0))
+def _branch_percentage(summary: dict[str, Any]) -> float:
+    """Return branch coverage without conflating it with line coverage."""
+    return float(summary.get("percent_branches_covered", 0.0))
 
 
 def validate_coverage(payload: dict[str, Any]) -> list[str]:
@@ -43,7 +59,7 @@ def validate_coverage(payload: dict[str, Any]) -> list[str]:
         )
 
     files = payload.get("files", {})
-    for module, floor in CRITICAL_MODULE_FLOORS.items():
+    for module, floor in CRITICAL_MODULE_BRANCH_FLOORS.items():
         result = next(
             (
                 candidate
@@ -55,10 +71,10 @@ def validate_coverage(payload: dict[str, Any]) -> list[str]:
         if not isinstance(result, dict):
             failures.append(f"coverage output is missing critical module {module}")
             continue
-        coverage = _percentage(result.get("summary", {}))
+        coverage = _branch_percentage(result.get("summary", {}))
         if coverage < floor:
             failures.append(
-                f"{module} coverage {coverage:.2f}% is below {floor:.2f}%"
+                f"{module} branch coverage {coverage:.2f}% is below {floor:.2f}%"
             )
     return failures
 
@@ -86,7 +102,7 @@ def main() -> int:
         "Coverage floors passed "
         f"(global >= {GLOBAL_LINE_FLOOR:.0f}%, "
         f"branches >= {GLOBAL_BRANCH_FLOOR:.0f}%, "
-        f"{len(CRITICAL_MODULE_FLOORS)} critical modules ratcheted)."
+        f"{len(CRITICAL_MODULE_BRANCH_FLOORS)} critical modules ratcheted)."
     )
     return 0
 

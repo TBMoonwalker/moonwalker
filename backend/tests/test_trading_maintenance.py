@@ -10,6 +10,7 @@ import pytest
 import service.dca as dca_module
 import service.orders as orders_module
 from service.dca import Dca
+from service.lifecycle_mutation import LifecycleMutationCoordinator
 from service.orders import Orders
 from service.trading_maintenance import TradingMaintenanceBarrier
 
@@ -50,7 +51,11 @@ async def test_sell_is_rejected_while_restore_owns_maintenance_barrier(
 ) -> None:
     """A stale DCA sell snapshot must not reach the exchange during restore."""
     barrier = TradingMaintenanceBarrier()
-    monkeypatch.setattr(orders_module, "trading_maintenance_barrier", barrier)
+    monkeypatch.setattr(
+        orders_module,
+        "lifecycle_mutation_coordinator",
+        LifecycleMutationCoordinator(barrier),
+    )
     exchange_called = False
 
     async def create_spot_sell(
@@ -74,13 +79,34 @@ async def test_sell_is_rejected_while_restore_owns_maintenance_barrier(
 
 
 @pytest.mark.asyncio
+async def test_buy_is_rejected_while_restore_owns_lifecycle_coordinator(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No buy mutation may enter while destructive maintenance is active."""
+    barrier = TradingMaintenanceBarrier()
+    monkeypatch.setattr(
+        orders_module,
+        "lifecycle_mutation_coordinator",
+        LifecycleMutationCoordinator(barrier),
+    )
+    orders = Orders()
+
+    async with barrier.maintenance():
+        accepted = await orders.receive_buy_order(
+            {"symbol": "ETH/USDC"},
+            {},
+        )
+
+    assert accepted is False
+
+
+@pytest.mark.asyncio
 async def test_maintenance_drains_complete_dca_evaluation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A ticker snapshot cannot survive across restore and sell restored state."""
     barrier = TradingMaintenanceBarrier()
     monkeypatch.setattr(dca_module, "trading_maintenance_barrier", barrier)
-    monkeypatch.setattr(orders_module, "trading_maintenance_barrier", barrier)
     evaluation_started = asyncio.Event()
     release_evaluation = asyncio.Event()
     maintenance_started = asyncio.Event()

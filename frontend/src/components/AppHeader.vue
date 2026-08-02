@@ -214,7 +214,7 @@ function handleMenuSelect(key: string | number): void {
   color: var(--mw-color-text-primary);
 }
 
-@media (max-width: 768px) {
+@media (max-width: 767px) {
   .header-shell {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;

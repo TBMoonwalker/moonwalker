@@ -13,11 +13,14 @@ class _FakeOrders:
         self.cancel_result = cancel_result
         self.cancel_calls: list[tuple[str, dict[str, object]]] = []
 
-    async def cancel_tp_limit_order(
+    async def cancel_tp_limit_order_prelocked(
         self,
         symbol: str,
         config: dict[str, object],
     ) -> bool:
+        from service.lifecycle_mutation import lifecycle_mutation_coordinator
+
+        lifecycle_mutation_coordinator.assert_prelocked(symbol)
         self.cancel_calls.append((symbol, dict(config)))
         if not self.cancel_result:
             return False

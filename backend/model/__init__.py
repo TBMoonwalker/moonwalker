@@ -14,6 +14,8 @@ from .closedtrades import ClosedTrades as ClosedTrades
 from .configmigration import ConfigMigration as ConfigMigration
 from .listings import Listings as Listings
 from .opentrades import OpenTrades as OpenTrades
+from .placementintent import PlacementIntent as PlacementIntent
+from .schemamigration import SchemaMigration as SchemaMigration
 from .spotcampaigns import SpotCampaigns as SpotCampaigns
 from .strategybuilder import StrategyDefinition as StrategyDefinition
 from .strategybuilder import StrategyGraphState as StrategyGraphState
@@ -38,6 +40,8 @@ __all__ = [
     "ConfigMigration",
     "Listings",
     "OpenTrades",
+    "PlacementIntent",
+    "SchemaMigration",
     "SpotCampaigns",
     "StrategyDefinition",
     "StrategyGraphState",
@@ -63,6 +67,8 @@ if __name__ == "__main__":
         "AthCache",
         "Trades",
         "OpenTrades",
+        "PlacementIntent",
+        "SchemaMigration",
         "SpotCampaigns",
         "StrategyDefinition",
         "StrategyGraphState",

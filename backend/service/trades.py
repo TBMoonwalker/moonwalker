@@ -14,7 +14,10 @@ from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
 from service.order_persistence import (
     persist_closed_trade_summary,
     persist_partial_sell_execution,
+    persist_tp_limit_cancellation,
 )
+from service.persistence_records import ClosedTradeSummaryRecord
+from service.placement_intents import mark_placement_persisted_in_transaction
 from service.spot_campaign_types import (
     NON_TERMINAL_CLOSE_REASON_VALUES,
     SpotCampaignState,
@@ -377,7 +380,7 @@ class Trades:
 
     async def _clear_order_cache(self) -> None:
         """Clear cached trade aggregates after open-position mutations."""
-        cache_clear = getattr(self.get_trades_for_orders, "cache_clear", None)
+        cache_clear = getattr(self._get_trades_for_orders_cached, "cache_clear", None)
         if cache_clear is not None:
             await cache_clear()
 
@@ -809,39 +812,48 @@ class Trades:
 
         async def _delete_all_summaries() -> int:
             async with in_transaction() as conn:
-                summary_rows = (
-                    await model.UnsellableTrades.all().using_db(conn).values("deal_id")
+                summary_count = (
+                    await model.UnsellableTrades.all().using_db(conn).count()
                 )
-                if not summary_rows:
+                if summary_count == 0:
                     return 0
 
+                eligible_rows = await conn.execute_query_dict("""
+                    SELECT DISTINCT TRIM(unsellable.deal_id) AS deal_id
+                    FROM unsellabletrades AS unsellable
+                    WHERE unsellable.deal_id IS NOT NULL
+                      AND TRIM(unsellable.deal_id) <> ''
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM closedtrades AS closed
+                          WHERE closed.deal_id = unsellable.deal_id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM opentrades AS open_trade
+                          WHERE open_trade.deal_id = unsellable.deal_id
+                      )
+                      AND NOT EXISTS (
+                          SELECT 1
+                          FROM trades AS execution
+                          WHERE execution.deal_id = unsellable.deal_id
+                      )
+                    """)
+                deal_ids = [
+                    str(row.get("deal_id") or "").strip()
+                    for row in eligible_rows
+                    if str(row.get("deal_id") or "").strip()
+                ]
                 deleted_count = (
                     await model.UnsellableTrades.all().using_db(conn).delete()
                 )
-                deal_ids: set[str] = set()
-                for row in summary_rows:
-                    deal_id = str(row.get("deal_id") or "").strip()
-                    if deal_id:
-                        deal_ids.add(deal_id)
-
-                for deal_id in deal_ids:
-                    linked_rows = (
-                        await model.ClosedTrades.filter(deal_id=deal_id)
-                        .using_db(conn)
-                        .count()
-                    )
-                    linked_rows += (
-                        await model.UnsellableTrades.filter(deal_id=deal_id)
-                        .using_db(conn)
-                        .count()
-                    )
-                    if linked_rows == 0:
-                        await model.TradeReplayCandles.filter(
-                            deal_id=deal_id,
-                        ).using_db(conn).delete()
-                        await model.TradeExecutions.filter(
-                            deal_id=deal_id,
-                        ).using_db(conn).delete()
+                if deal_ids:
+                    await model.TradeReplayCandles.filter(
+                        deal_id__in=deal_ids,
+                    ).using_db(conn).delete()
+                    await model.TradeExecutions.filter(
+                        deal_id__in=deal_ids,
+                    ).using_db(conn).delete()
                 return deleted_count
 
         try:
@@ -872,14 +884,34 @@ class Trades:
         order_id: str,
         price: float,
         amount: float,
+        placement_operation_id: str | None = None,
     ) -> bool:
         """Persist the currently armed proactive TP limit order for a symbol."""
+
+        async def _set_tp_limit_order() -> int:
+            async with in_transaction() as conn:
+                updated_count = (
+                    await model.OpenTrades.filter(symbol=symbol)
+                    .using_db(conn)
+                    .update(
+                        tp_limit_order_id=order_id,
+                        tp_limit_order_price=float(price),
+                        tp_limit_order_amount=float(amount),
+                        tp_limit_order_armed_at=datetime.now(timezone.utc).isoformat(),
+                    )
+                )
+                if updated_count <= 0:
+                    return updated_count
+                await mark_placement_persisted_in_transaction(
+                    placement_operation_id,
+                    conn,
+                )
+                return updated_count
+
         try:
-            updated_count = await model.OpenTrades.filter(symbol=symbol).update(
-                tp_limit_order_id=order_id,
-                tp_limit_order_price=float(price),
-                tp_limit_order_amount=float(amount),
-                tp_limit_order_armed_at=datetime.now(timezone.utc).isoformat(),
+            updated_count = await run_sqlite_write_with_retry(
+                _set_tp_limit_order,
+                f"setting proactive TP limit order for {symbol}",
             )
         except BaseORMException as exc:
             self._log_db_error(
@@ -896,20 +928,30 @@ class Trades:
         await self._clear_order_cache()
         return True
 
-    async def clear_tp_limit_order(self, symbol: str) -> bool:
+    async def clear_tp_limit_order(
+        self,
+        symbol: str,
+        *,
+        placement_operation_id: str | None = None,
+        exchange_status: dict[str, Any] | None = None,
+    ) -> bool:
         """Clear persisted proactive TP limit order metadata for a symbol."""
-        updated = await self._write_db(
-            model.OpenTrades.filter(symbol=symbol).update(
-                tp_limit_order_id=None,
-                tp_limit_order_price=None,
-                tp_limit_order_amount=None,
-                tp_limit_order_armed_at=None,
-            ),
-            f"Error clearing proactive TP limit order for {symbol}.",
-        )
+
+        try:
+            updated = await persist_tp_limit_cancellation(
+                symbol,
+                exchange_status,
+                placement_operation_id=placement_operation_id,
+            )
+        except BaseORMException as exc:
+            self._log_db_error(
+                f"Error clearing proactive TP limit order for {symbol}.",
+                exc,
+            )
+            return False
         if updated:
             await self._clear_order_cache()
-        return updated
+        return bool(updated)
 
     async def add_partial_sell_execution(
         self,
@@ -962,7 +1004,10 @@ class Trades:
         except BaseORMException as exc:
             self._log_db_error(f"Error deleting open trades for {symbol}.", exc)
 
-    async def create_closed_trades(self, payload: dict[str, Any]) -> None:
+    async def create_closed_trades(
+        self,
+        payload: ClosedTradeSummaryRecord,
+    ) -> None:
         """Delegate detached closed-trade summary persistence to the write layer."""
         await persist_closed_trade_summary(payload)
 
@@ -1058,9 +1103,23 @@ class Trades:
             logging.error("Error getting total amount from %s. Cause %s", symbol, e)
             return 0.0
 
-    @helper.async_ttl_cache(maxsize=2048, ttl=2)
     async def get_trades_for_orders(self, symbol: str) -> dict[str, Any] | None:
-        """Return aggregated trade data for order processing."""
+        """Return a briefly cached trade aggregate for read-heavy callers."""
+        return await self._get_trades_for_orders_cached(symbol)
+
+    @helper.async_ttl_cache(maxsize=2048, ttl=2)
+    async def _get_trades_for_orders_cached(
+        self,
+        symbol: str,
+    ) -> dict[str, Any] | None:
+        """Cache one trade aggregate without hiding the authoritative loader."""
+        return await self.get_trades_for_orders_fresh(symbol)
+
+    async def get_trades_for_orders_fresh(
+        self,
+        symbol: str,
+    ) -> dict[str, Any] | None:
+        """Load authoritative trade data for locked mutation revalidation."""
         trade_data = []
         total_cost = 0
         total_amount = 0
@@ -1175,6 +1234,7 @@ class Trades:
                 "current_price": current_price,
                 "safetyorders": safetyorders,
                 "safetyorders_count": safetyorders_count,
+                "execution_count": len(trades),
                 "ordertype": baseorder["ordertype"],
                 "open_date": open_trade.get("open_date") if open_trade else None,
                 "tp_limit_order_id": (

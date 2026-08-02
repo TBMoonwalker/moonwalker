@@ -5,6 +5,7 @@ import ccxt.async_support as ccxt
 import pytest
 from service.data import Data
 from service.database import Database
+from service.order_persistence import persist_closed_trade
 from service.replay_candles import archive_replay_candles_for_deal
 from service.trades import Trades
 from tortoise import Tortoise
@@ -363,7 +364,11 @@ async def test_archive_replay_candles_repairs_sparse_archive_from_exchange_histo
 
     monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_PRE_ROLL_MS", 0)
     monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_POST_ROLL_MS", 0)
-    monkeypatch.setattr(replay_module, "get_live_candle_snapshot", lambda _symbol: None)
+    monkeypatch.setattr(
+        replay_module,
+        "get_live_candle_snapshot",
+        lambda _symbol: [43_200_000, 12.8, 13.2, 12.6, 13.0, 10.0],
+    )
     monkeypatch.setattr(replay_module.Config, "instance", _fake_config_instance)
     monkeypatch.setattr(replay_module, "Exchange", _FakeExchange)
 
@@ -422,6 +427,7 @@ async def test_archive_replay_candles_repairs_sparse_archive_from_exchange_histo
         symbol,
         open_date="0",
         close_date="43200000",
+        allow_live_snapshot_exchange_repair=True,
     )
 
     archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).values(
@@ -519,6 +525,137 @@ async def test_archive_replay_candles_skips_exchange_repair_for_missing_archive(
 
     assert archived == 2
     assert archived_timestamps == [0, 43_200_000]
+
+    await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_persist_closed_trade_repairs_sparse_archive_after_commit(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    await _init_test_db(tmp_path, monkeypatch)
+
+    import model
+    import service.replay_candles as replay_module
+
+    class _FakeConfig:
+        def snapshot(self) -> dict[str, str]:
+            return {"exchange": "binance", "timeframe": "4h"}
+
+    class _FakeExchange:
+        async def get_history_for_symbol(
+            self,
+            config: dict[str, str],
+            symbol: str,
+            timeframe: str,
+            limit: int = 1,
+            since: int = 0,
+            until: int | None = None,
+        ) -> list[list[float]]:
+            assert config["exchange"] == "binance"
+            assert symbol == "ABC/USDT"
+            assert timeframe == "4h"
+            assert since == 0
+            assert until == 43_200_000
+            return [
+                _make_candle(0, 10.0),
+                _make_candle(14_400_000, 11.0),
+                _make_candle(28_800_000, 12.0),
+                _make_candle(43_200_000, 13.0),
+            ]
+
+        async def close(self) -> None:
+            return None
+
+    async def _fake_config_instance() -> _FakeConfig:
+        return _FakeConfig()
+
+    async def _no_prediction(_deal_id: str | None) -> bool:
+        return False
+
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_PRE_ROLL_MS", 0)
+    monkeypatch.setattr(replay_module, "REPLAY_ARCHIVE_POST_ROLL_MS", 0)
+    monkeypatch.setattr(
+        replay_module,
+        "get_live_candle_snapshot",
+        lambda _symbol: [43_200_000, 12.8, 13.2, 12.6, 13.0, 10.0],
+    )
+    monkeypatch.setattr(replay_module.Config, "instance", _fake_config_instance)
+    monkeypatch.setattr(replay_module, "Exchange", _FakeExchange)
+    monkeypatch.setattr(
+        "service.order_persistence.has_prediction_for_deal",
+        _no_prediction,
+    )
+
+    deal_id = "5d5d5d5d-5555-4444-8888-555555555555"
+    symbol = "ABC/USDT"
+    await model.OpenTrades.create(
+        symbol=symbol,
+        deal_id=deal_id,
+        execution_history_complete=True,
+    )
+    await model.TradeExecutions.create(
+        deal_id=deal_id,
+        symbol=symbol,
+        side="buy",
+        role="base_order",
+        timestamp="0",
+        price=10.0,
+        amount=1.0,
+        ordersize=10.0,
+        fee=0.0,
+    )
+
+    for timestamp, close_price in (
+        (0, 10.0),
+        (43_200_000, 13.0),
+    ):
+        await model.Tickers.create(
+            timestamp=str(timestamp),
+            symbol=symbol,
+            open=close_price - 0.2,
+            high=close_price + 0.2,
+            low=close_price - 0.4,
+            close=close_price,
+            volume=10.0,
+        )
+
+    await persist_closed_trade(
+        symbol,
+        {
+            "symbol": symbol,
+            "so_count": 0,
+            "profit": 3.0,
+            "profit_percent": 30.0,
+            "amount": 1.0,
+            "cost": 10.0,
+            "tp_price": 13.0,
+            "avg_price": 10.0,
+            "open_date": "0",
+            "close_date": "43200000",
+            "duration": "{}",
+            "sell_executions": [
+                {
+                    "symbol": symbol,
+                    "side": "sell",
+                    "role": "final_sell",
+                    "timestamp": "43200000",
+                    "price": 13.0,
+                    "amount": 1.0,
+                    "ordersize": 13.0,
+                    "fee": 0.0,
+                }
+            ],
+        },
+    )
+
+    archived_rows = await model.TradeReplayCandles.filter(deal_id=deal_id).values(
+        "timestamp"
+    )
+    archived_timestamps = sorted(int(row["timestamp"]) for row in archived_rows)
+
+    assert archived_timestamps == [0, 14_400_000, 28_800_000, 43_200_000]
 
     await Tortoise.close_connections()
 
@@ -865,6 +1002,7 @@ async def test_delete_all_unsellable_trades_cascades_only_detached_history(
 
     detached_deal_id = "44444444-4444-4444-4444-444444444444"
     linked_deal_id = "55555555-5555-5555-5555-555555555555"
+    live_deal_id = "66666666-6666-6666-6666-666666666666"
 
     await model.UnsellableTrades.create(
         symbol="DETACHED/USDT",
@@ -947,14 +1085,72 @@ async def test_delete_all_unsellable_trades_cascades_only_detached_history(
         volume=10.0,
     )
 
+    await model.UnsellableTrades.create(
+        symbol="LIVE/USDT",
+        deal_id=live_deal_id,
+        execution_history_complete=True,
+        amount=0.02,
+        cost=0.04,
+        current_price=2.0,
+        avg_price=2.0,
+        open_date="240000",
+        unsellable_reason="minimum_notional",
+    )
+    await model.OpenTrades.create(
+        symbol="LIVE/USDT",
+        deal_id=live_deal_id,
+    )
+    await model.Trades.create(
+        timestamp="240000",
+        ordersize=10.0,
+        fee=0.0,
+        amount=1.0,
+        amount_fee=0.0,
+        price=10.0,
+        symbol="LIVE/USDT",
+        deal_id=live_deal_id,
+        orderid="live-order",
+        bot="asap_LIVE/USDT",
+        ordertype="market",
+        baseorder=True,
+        safetyorder=False,
+        direction="long",
+        side="buy",
+    )
+    await model.TradeExecutions.create(
+        deal_id=live_deal_id,
+        symbol="LIVE/USDT",
+        side="buy",
+        role="base_order",
+        timestamp="240000",
+        price=10.0,
+        amount=1.0,
+        ordersize=10.0,
+        fee=0.0,
+    )
+    await model.TradeReplayCandles.create(
+        deal_id=live_deal_id,
+        symbol="LIVE/USDT",
+        timestamp="240000",
+        open=10.0,
+        high=11.0,
+        low=9.5,
+        close=10.5,
+        volume=10.0,
+    )
+
     deleted = await Trades().delete_all_unsellable_trades()
 
-    assert deleted == 2
+    assert deleted == 3
     assert await model.UnsellableTrades.all().count() == 0
     assert await model.TradeExecutions.filter(deal_id=detached_deal_id).count() == 0
     assert await model.TradeReplayCandles.filter(deal_id=detached_deal_id).count() == 0
     assert await model.TradeExecutions.filter(deal_id=linked_deal_id).count() == 1
     assert await model.TradeReplayCandles.filter(deal_id=linked_deal_id).count() == 1
     assert await model.ClosedTrades.filter(deal_id=linked_deal_id).count() == 1
+    assert await model.TradeExecutions.filter(deal_id=live_deal_id).count() == 1
+    assert await model.TradeReplayCandles.filter(deal_id=live_deal_id).count() == 1
+    assert await model.OpenTrades.filter(deal_id=live_deal_id).count() == 1
+    assert await model.Trades.filter(deal_id=live_deal_id).count() == 1
 
     await Tortoise.close_connections()

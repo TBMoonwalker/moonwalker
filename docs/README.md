@@ -10,6 +10,7 @@
 - [Dependency management and supply-chain policy](dependencies.md)
 - [AI Trust local calibration plan](ai-trust-local-calibration-plan.md)
 - [Feature branch engineering hardening plan](feature-ai-engineering-hardening-plan.md)
+- [DCA localhost live audit](dca-localhost-live-audit.md)
 
 Moonwalker is documented as a single-node, single-instance application with one
 shared trading runtime and support for multiple concurrent dashboard clients.

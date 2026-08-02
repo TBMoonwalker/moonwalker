@@ -37,5 +37,13 @@ export default defineConfig({
         ...(browserChannel ? { channel: browserChannel } : {}),
       },
     },
+    {
+      name: 'tablet-chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        viewport: { width: 768, height: 1024 },
+        ...(browserChannel ? { channel: browserChannel } : {}),
+      },
+    },
   ],
 })
