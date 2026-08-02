@@ -400,11 +400,14 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
             events.append("signal:shutdown")
 
     class OrderedQueue:
+        def __init__(self, name: str) -> None:
+            self.name = name
+
         async def start(self, _task_group) -> None:
-            events.append("queue:start")
+            events.append(f"{self.name}:start")
 
         async def stop(self) -> None:
-            events.append("queue:stop")
+            events.append(f"{self.name}:stop")
 
     class OrderedProvider:
         async def start(self) -> None:
@@ -442,7 +445,12 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
 
     monkeypatch.setattr(app_module, "runtime_state", state)
     monkeypatch.setattr(app_module, "startup", ordered_startup)
-    monkeypatch.setattr(app_module, "ai_work_queue", OrderedQueue())
+    monkeypatch.setattr(app_module, "ai_work_queue", OrderedQueue("ai-queue"))
+    monkeypatch.setattr(
+        app_module,
+        "replay_repair_queue",
+        OrderedQueue("replay-repair-queue"),
+    )
     monkeypatch.setattr(app_module, "ai_provider_client", OrderedProvider())
     monkeypatch.setattr(app_module, "redis_client", OrderedRedis())
     monkeypatch.setattr(app_module, "stop_redis", stop_redis_process)
@@ -466,7 +474,8 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
         events.append("running")
         await asyncio.sleep(0)
 
-    assert events.index("queue:stop") < events.index("symbol-intake:done")
+    assert events.index("ai-queue:stop") < events.index("symbol-intake:done")
+    assert events.index("replay-repair-queue:stop") < events.index("symbol-intake:done")
     for task_name in ("symbol-intake", "ticker-watcher", "housekeeping", "replay"):
         assert events.index(f"{task_name}:done") < events.index("trades-fanout:stop")
     ordered_shutdown_events = [

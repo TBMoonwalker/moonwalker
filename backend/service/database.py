@@ -330,6 +330,11 @@ class Database:
                 ("symbol", "timestamp"),
             ),
             ("tradeexecutions", "idx_tradeexecutions_side_role", ("side", "role")),
+            (
+                "tradeexecutions",
+                "idx_tradeexecutions_strategy_version",
+                ("strategy_slug", "strategy_version"),
+            ),
             ("spotcampaigns", "idx_spotcampaigns_symbol", ("symbol",)),
             ("spotcampaigns", "idx_spotcampaigns_state_symbol", ("state", "symbol")),
             (
@@ -475,7 +480,11 @@ class Database:
                 ("deal_id", "TEXT NULL"),
                 ("campaign_id", "TEXT NULL"),
             ),
-            "tradeexecutions": (("campaign_id", "TEXT NULL"),),
+            "tradeexecutions": (
+                ("campaign_id", "TEXT NULL"),
+                ("strategy_slug", "TEXT NULL"),
+                ("strategy_version", "INTEGER NULL"),
+            ),
             "opentrades": (
                 ("deal_id", "TEXT NULL"),
                 ("campaign_id", "TEXT NULL"),
@@ -919,8 +928,19 @@ class Database:
                     description="Create current additive and unique indexes.",
                     apply=self._ensure_indexes,
                 ),
+                MigrationDefinition(
+                    version="2026-08-02-008-strategy-history-expand",
+                    phase="schema",
+                    description="Add immutable strategy identity to trade executions.",
+                    apply=self._ensure_strategy_history_schema,
+                ),
             )
         )
+
+    async def _ensure_strategy_history_schema(self) -> None:
+        """Add strategy identity columns and their lookup index."""
+        await self._ensure_trade_ledger_columns()
+        await self._ensure_indexes()
 
     async def _run_backfill_init_steps(self) -> None:
         """Run ordered data migrations required before the runtime starts."""

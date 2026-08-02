@@ -74,7 +74,7 @@ from service.sell_fallback_workflow import DurableSellFallback
 from service.spot_campaign_types import TradeCloseReason
 from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.trade_math import calculate_order_size, calculate_so_percentage
-from service.trades import Trades
+from service.trades import Trades, TradeStateUnavailableError
 from service.trading_contracts import BuyIntent, SellIntent
 from service.trading_controls import evaluate_buy_like_gate
 from tortoise.exceptions import ConfigurationError
@@ -130,6 +130,34 @@ class Orders:
         if callable(fresh_loader):
             return await fresh_loader(symbol)
         return await self.trades.get_trades_for_orders(symbol)
+
+    async def _load_authoritative_trade(self, symbol: str) -> dict[str, Any] | None:
+        """Load mutation state without converting database failures to absence."""
+        authoritative_loader = getattr(
+            self.trades,
+            "get_trades_for_orders_authoritative",
+            None,
+        )
+        if callable(authoritative_loader):
+            return await authoritative_loader(symbol)
+        return await self._load_fresh_trade(symbol)
+
+    @staticmethod
+    def _trade_state_unavailable_result(
+        *,
+        operation_id: str | None,
+        symbol: str,
+        action: str,
+    ) -> OrderMutationResult:
+        """Return a fail-closed operator result for an unreadable trade ledger."""
+        return OrderMutationResult(
+            operation_id=str(operation_id or ""),
+            symbol=symbol,
+            action=action,
+            status=OrderMutationStatus.REJECTED,
+            reason_code="trade_state_unavailable",
+            user_message="Trade state could not be loaded. No order was sent.",
+        )
 
     async def _get_placement_intent(self, operation_id: str) -> Any | None:
         """Read a durable intent when persistence is available."""
@@ -298,6 +326,8 @@ class Orders:
             "campaign_id",
             "signal_name",
             "strategy_name",
+            "strategy_slug",
+            "strategy_version",
             "timeframe",
             "metadata_json",
             "baseline_order_size",
@@ -1286,6 +1316,15 @@ class Orders:
                     if operation_id
                 ]
 
+                for key in (
+                    "strategy_name",
+                    "strategy_slug",
+                    "strategy_version",
+                    "timeframe",
+                ):
+                    if order_status.get(key) is None and order.get(key) is not None:
+                        order_status[key] = order[key]
+
                 if self._is_partial_sell_status(order_status):
                     if (
                         order_status.get("close_reason") is None
@@ -2167,7 +2206,14 @@ class Orders:
                 reason_code="invalid_symbol",
                 user_message="The symbol is invalid.",
             )
-        trade = await self._load_fresh_trade(normalized_symbol)
+        try:
+            trade = await self._load_authoritative_trade(normalized_symbol)
+        except TradeStateUnavailableError:
+            return self._trade_state_unavailable_result(
+                operation_id=operation_id,
+                symbol=normalized_symbol,
+                action="manual_stop",
+            )
         if trade is None:
             return OrderMutationResult(
                 operation_id=str(operation_id or ""),
@@ -2266,11 +2312,7 @@ class Orders:
         symbol = normalize_order_symbol(symbol)
         trades = await self.trades.get_trades_for_orders(symbol)
         if not trades:
-            logging.error(
-                "Force remove trade from OpenTrades table for %s - No running trade found.",
-                symbol,
-            )
-            await self.trades.delete_open_trades(symbol)
+            logging.error("No running trade found for manual sell of %s.", symbol)
             return False
 
         actual_pnl = self.utils.calculate_actual_pnl(trades)
@@ -2322,7 +2364,16 @@ class Orders:
             elif intent_state == PlacementIntentState.REJECTED.value:
                 status = OrderMutationStatus.REJECTED
         elif not applied:
-            current_trade = await self._load_fresh_trade(expected_snapshot.symbol)
+            try:
+                current_trade = await self._load_authoritative_trade(
+                    expected_snapshot.symbol
+                )
+            except TradeStateUnavailableError:
+                return self._trade_state_unavailable_result(
+                    operation_id=operation_id,
+                    symbol=expected_snapshot.symbol,
+                    action=action,
+                )
             if not snapshots_match(expected_snapshot, current_trade, config):
                 status = OrderMutationStatus.STALE
                 reason_code = "stale_snapshot"
@@ -2371,13 +2422,44 @@ class Orders:
     ) -> OrderMutationResult:
         """Handle a manual sell and report its durable execution outcome."""
         symbol = normalize_order_symbol(symbol)
-        trades = await self._load_fresh_trade(symbol)
-        if not trades:
-            logging.error(
-                "Force remove trade from OpenTrades table for %s - No running trade found.",
-                symbol,
+        try:
+            trades = await self._load_authoritative_trade(symbol)
+        except TradeStateUnavailableError:
+            return self._trade_state_unavailable_result(
+                operation_id=operation_id,
+                symbol=symbol,
+                action="manual_sell",
             )
-            await self.trades.delete_open_trades(symbol)
+        if not trades:
+            if operation_id:
+                existing = await self._get_placement_intent(str(operation_id))
+                if existing is not None:
+                    status = (
+                        OrderMutationStatus.DEDUPLICATED
+                        if str(existing.state) == PlacementIntentState.COMPLETED.value
+                        else OrderMutationStatus.INDETERMINATE
+                    )
+                    return OrderMutationResult(
+                        operation_id=str(operation_id),
+                        symbol=symbol,
+                        action="manual_sell",
+                        status=status,
+                        reason_code=(
+                            "duplicate_operation"
+                            if status is OrderMutationStatus.DEDUPLICATED
+                            else str(existing.reason_code or existing.state)
+                        ),
+                        user_message=(
+                            "This operation was already completed; no duplicate "
+                            "order was sent."
+                            if status is OrderMutationStatus.DEDUPLICATED
+                            else "The exchange outcome is not yet known. "
+                            "Reconciliation is required."
+                        ),
+                        exchange_order_id=str(existing.exchange_order_id or "") or None,
+                        client_order_id=str(existing.client_order_id or "") or None,
+                    )
+            logging.error("No running trade found for manual sell of %s.", symbol)
             return OrderMutationResult(
                 operation_id=str(operation_id or ""),
                 symbol=symbol,
@@ -2430,7 +2512,14 @@ class Orders:
     ) -> OrderMutationResult:
         """Handle a manual safety buy and report its durable outcome."""
         symbol = normalize_order_symbol(symbol)
-        trades = await self._load_fresh_trade(symbol)
+        try:
+            trades = await self._load_authoritative_trade(symbol)
+        except TradeStateUnavailableError:
+            return self._trade_state_unavailable_result(
+                operation_id=operation_id,
+                symbol=symbol,
+                action="manual_buy",
+            )
 
         if not trades:
             return OrderMutationResult(

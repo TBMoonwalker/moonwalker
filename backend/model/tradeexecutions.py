@@ -24,6 +24,8 @@ class TradeExecutions(Model):
     so_percentage = fields.FloatField(null=True)
     signal_name = fields.TextField(null=True)
     strategy_name = fields.TextField(null=True)
+    strategy_slug = fields.CharField(max_length=96, null=True)
+    strategy_version = fields.IntField(null=True)
     timeframe = fields.TextField(null=True)
     metadata_json = fields.TextField(null=True)
 
@@ -34,4 +36,5 @@ class TradeExecutions(Model):
             ("campaign_id", "timestamp"),
             ("symbol", "timestamp"),
             ("side", "role"),
+            ("strategy_slug", "strategy_version"),
         )

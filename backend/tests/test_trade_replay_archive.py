@@ -1,14 +1,64 @@
+import asyncio
 import json
 import os
 
 import ccxt.async_support as ccxt
 import pytest
+import service.order_persistence as order_persistence_module
+from service.background_work_queue import BoundedWorkQueue
 from service.data import Data
 from service.database import Database
 from service.order_persistence import persist_closed_trade
 from service.replay_candles import archive_replay_candles_for_deal
 from service.trades import Trades
 from tortoise import Tortoise
+
+
+@pytest.mark.asyncio
+async def test_post_commit_replay_repair_runs_in_supervised_queue(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Terminal persistence returns before exchange-history repair completes."""
+    queue = BoundedWorkQueue(
+        name="Replay repair test",
+        task_prefix="replay-repair-test",
+        logger=order_persistence_module.logging,
+        capacity=2,
+        worker_count=1,
+    )
+    started = asyncio.Event()
+    release = asyncio.Event()
+    completed = asyncio.Event()
+
+    async def fake_archive(*_args, **_kwargs) -> None:
+        started.set()
+        await release.wait()
+        completed.set()
+
+    monkeypatch.setattr(order_persistence_module, "replay_repair_queue", queue)
+    monkeypatch.setattr(
+        order_persistence_module,
+        "archive_replay_candles_for_deal",
+        fake_archive,
+    )
+
+    async with asyncio.TaskGroup() as task_group:
+        await queue.start(task_group)
+        await order_persistence_module._repair_replay_archive_after_commit(
+            "11111111-1111-4111-8111-111111111111",
+            "BTC/USDC",
+            open_date="0",
+            close_date="60000",
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+
+        assert completed.is_set() is False
+        assert queue.status()["pending_count"] == 1
+
+        release.set()
+        await queue.stop()
+
+    assert completed.is_set()
 
 
 async def _init_test_db(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -435,7 +485,16 @@ async def test_archive_replay_candles_repairs_sparse_archive_from_exchange_histo
     )
     archived_timestamps = sorted(int(row["timestamp"]) for row in archived_rows)
 
+    unchanged = await archive_replay_candles_for_deal(
+        deal_id,
+        symbol,
+        open_date="0",
+        close_date="43200000",
+        allow_live_snapshot_exchange_repair=True,
+    )
+
     assert archived == 4
+    assert unchanged == 0
     assert archived_timestamps == [0, 14_400_000, 28_800_000, 43_200_000]
 
     await Tortoise.close_connections()

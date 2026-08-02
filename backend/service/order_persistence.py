@@ -42,6 +42,7 @@ from service.placement_intents import (
     mark_placements_persisted_in_transaction,
 )
 from service.replay_candles import archive_replay_candles_for_deal
+from service.replay_repair_queue import replay_repair_queue
 from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from service.trade_math import parse_date_to_ms
 from tortoise.expressions import F
@@ -171,13 +172,41 @@ def _resolve_buy_execution_role(payload: Mapping[str, Any]) -> str:
     return "buy"
 
 
-def _build_trade_execution_payload(
+async def _resolve_strategy_identity(
+    payload: Mapping[str, Any],
+    conn: Any,
+) -> tuple[str | None, int | None]:
+    """Resolve the immutable Strategy Builder identity for an execution."""
+    strategy_slug = str(
+        payload.get("strategy_slug") or payload.get("strategy_name") or ""
+    ).strip()
+    if not strategy_slug:
+        return None, None
+
+    raw_version = payload.get("strategy_version")
+    if raw_version is not None:
+        try:
+            return strategy_slug, int(raw_version)
+        except (TypeError, ValueError):
+            pass
+
+    definition = (
+        await model.StrategyDefinition.filter(slug=strategy_slug).using_db(conn).first()
+    )
+    if definition is None or definition.active_version is None:
+        return strategy_slug, None
+    return strategy_slug, int(definition.active_version)
+
+
+async def _build_trade_execution_payload(
     deal_id: str,
     payload: Mapping[str, Any],
     *,
     role: str,
+    conn: Any,
 ) -> TradeExecutionRecord:
     """Normalize a trade-row payload into a TradeExecutions insert payload."""
+    strategy_slug, strategy_version = await _resolve_strategy_identity(payload, conn)
     return {
         "deal_id": deal_id,
         "campaign_id": payload.get("campaign_id"),
@@ -216,6 +245,8 @@ def _build_trade_execution_payload(
             if payload.get("strategy_name") is not None
             else None
         ),
+        "strategy_slug": strategy_slug,
+        "strategy_version": strategy_version,
         "timeframe": (
             str(payload.get("timeframe"))
             if payload.get("timeframe") is not None
@@ -487,10 +518,13 @@ async def persist_buy_trade(
                 using_db=conn,
             )
             await model.TradeExecutions.create(
-                **_build_trade_execution_payload(
-                    deal_id,
-                    payload,
-                    role=_resolve_buy_execution_role(payload),
+                **(
+                    await _build_trade_execution_payload(
+                        deal_id,
+                        payload,
+                        role=_resolve_buy_execution_role(payload),
+                        conn=conn,
+                    )
                 ),
                 using_db=conn,
             )
@@ -625,13 +659,16 @@ async def persist_closed_trade(
                 if float(sell_execution.get("amount") or 0.0) <= 0:
                     continue
                 await model.TradeExecutions.create(
-                    **_build_trade_execution_payload(
-                        deal_id,
-                        {
-                            **sell_execution,
-                            "campaign_id": summary_payload.get("campaign_id"),
-                        },
-                        role=str(sell_execution.get("role") or "final_sell"),
+                    **(
+                        await _build_trade_execution_payload(
+                            deal_id,
+                            {
+                                **sell_execution,
+                                "campaign_id": summary_payload.get("campaign_id"),
+                            },
+                            role=str(sell_execution.get("role") or "final_sell"),
+                            conn=conn,
+                        )
                     ),
                     using_db=conn,
                 )
@@ -678,11 +715,11 @@ async def _repair_replay_archive_after_commit(
     open_date: Any,
     close_date: Any,
 ) -> None:
-    """Complete a terminal deal's replay archive without holding a DB transaction."""
+    """Schedule terminal replay repair outside the persistence transaction."""
     if deal_id is None:
         return
 
-    try:
+    async def repair() -> None:
         await archive_replay_candles_for_deal(
             deal_id,
             symbol,
@@ -690,6 +727,12 @@ async def _repair_replay_archive_after_commit(
             close_date=close_date,
             allow_missing_archive_exchange_repair=True,
             allow_live_snapshot_exchange_repair=True,
+        )
+
+    try:
+        await replay_repair_queue.submit_or_run_inline(
+            f"replay-repair:{deal_id}",
+            repair,
         )
     except Exception:
         logging.error(
@@ -729,13 +772,16 @@ async def persist_sidestep_transition(
                 if float(sell_execution.get("amount") or 0.0) <= 0:
                     continue
                 await model.TradeExecutions.create(
-                    **_build_trade_execution_payload(
-                        deal_id,
-                        {
-                            **sell_execution,
-                            "campaign_id": campaign_id,
-                        },
-                        role=str(sell_execution.get("role") or "final_sell"),
+                    **(
+                        await _build_trade_execution_payload(
+                            deal_id,
+                            {
+                                **sell_execution,
+                                "campaign_id": campaign_id,
+                            },
+                            role=str(sell_execution.get("role") or "final_sell"),
+                            conn=conn,
+                        )
                     ),
                     using_db=conn,
                 )
@@ -837,10 +883,13 @@ async def persist_manual_buy_add(
                 using_db=conn,
             )
             await model.TradeExecutions.create(
-                **_build_trade_execution_payload(
-                    deal_id,
-                    trade_payload,
-                    role=_resolve_buy_execution_role(trade_payload),
+                **(
+                    await _build_trade_execution_payload(
+                        deal_id,
+                        trade_payload,
+                        role=_resolve_buy_execution_role(trade_payload),
+                        conn=conn,
+                    )
                 ),
                 using_db=conn,
             )
@@ -918,13 +967,16 @@ async def persist_partial_sell_execution(
                 if float(execution.get("amount") or 0.0) <= 0:
                     continue
                 await model.TradeExecutions.create(
-                    **_build_trade_execution_payload(
-                        deal_id,
-                        {
-                            **execution,
-                            "campaign_id": campaign_id,
-                        },
-                        role=str(execution.get("role") or "partial_sell"),
+                    **(
+                        await _build_trade_execution_payload(
+                            deal_id,
+                            {
+                                **execution,
+                                "campaign_id": campaign_id,
+                            },
+                            role=str(execution.get("role") or "partial_sell"),
+                            conn=conn,
+                        )
                     ),
                     using_db=conn,
                 )
@@ -992,28 +1044,31 @@ async def persist_tp_limit_cancellation(
                 )
                 timestamp = status.get("timestamp")
                 await model.TradeExecutions.create(
-                    **_build_trade_execution_payload(
-                        deal_id,
-                        {
-                            "symbol": str(status.get("symbol") or symbol),
-                            "campaign_id": campaign_id,
-                            "side": str(status.get("side") or "sell"),
-                            "role": "partial_sell",
-                            "timestamp": (
-                                str(int(timestamp)) if timestamp is not None else ""
-                            ),
-                            "price": average_price,
-                            "amount": filled_amount,
-                            "ordersize": proceeds,
-                            "fee": 0.0,
-                            "order_id": (
-                                str(status.get("id"))
-                                if status.get("id") is not None
-                                else None
-                            ),
-                            "order_type": "limit",
-                        },
-                        role="partial_sell",
+                    **(
+                        await _build_trade_execution_payload(
+                            deal_id,
+                            {
+                                "symbol": str(status.get("symbol") or symbol),
+                                "campaign_id": campaign_id,
+                                "side": str(status.get("side") or "sell"),
+                                "role": "partial_sell",
+                                "timestamp": (
+                                    str(int(timestamp)) if timestamp is not None else ""
+                                ),
+                                "price": average_price,
+                                "amount": filled_amount,
+                                "ordersize": proceeds,
+                                "fee": 0.0,
+                                "order_id": (
+                                    str(status.get("id"))
+                                    if status.get("id") is not None
+                                    else None
+                                ),
+                                "order_type": "limit",
+                            },
+                            role="partial_sell",
+                            conn=conn,
+                        )
                     ),
                     using_db=conn,
                 )
@@ -1101,13 +1156,16 @@ async def persist_unsellable_remainder(
                     if float(execution.get("amount") or 0.0) <= 0:
                         continue
                     await model.TradeExecutions.create(
-                        **_build_trade_execution_payload(
-                            deal_id,
-                            {
-                                **execution,
-                                "campaign_id": campaign_id,
-                            },
-                            role=str(execution.get("role") or "partial_sell"),
+                        **(
+                            await _build_trade_execution_payload(
+                                deal_id,
+                                {
+                                    **execution,
+                                    "campaign_id": campaign_id,
+                                },
+                                role=str(execution.get("role") or "partial_sell"),
+                                conn=conn,
+                            )
                         ),
                         using_db=conn,
                     )

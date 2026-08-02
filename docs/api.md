@@ -113,10 +113,38 @@ All mutating order endpoints use `POST`.
 The sell, buy, and stop endpoints retain their legacy `result` field and also
 return a typed `mutation` object. Its `status` is one of `applied`,
 `deduplicated`, `rejected`, `stale`, `indeterminate`, or `quarantined`.
-`operation_id` is the server-assigned durable identity used to deduplicate and
+For confirmed buy and sell requests, clients should send an
+`X-Moonwalker-Operation-Id` header containing 1-64 letters, numbers, or the
+characters `._:-`. Reuse the exact same value only when retrying the same
+confirmed action; using a new value creates a new exchange-placement identity.
+Moonwalker generates a fallback identity when the header is omitted.
+
+The response `operation_id` is the durable identity used to deduplicate and
 reconcile the exchange effect. An `indeterminate` or `quarantined` response is
-not success and must not trigger a second placement; surface the operation ID
+not success and must not trigger another placement. Surface the operation ID
 for manual reconciliation.
+
+```http
+POST /orders/sell/btc-usdt HTTP/1.1
+X-Moonwalker-Operation-Id: manual-sell-btc-20260802-01
+```
+
+```json
+{
+  "result": "",
+  "mutation": {
+    "operation_id": "manual-sell-btc-20260802-01",
+    "symbol": "BTC/USDT",
+    "action": "manual_sell",
+    "status": "indeterminate",
+    "reason_code": "exchange_outcome_indeterminate",
+    "user_message": "The exchange may have accepted this order.",
+    "exchange_order_id": null,
+    "client_order_id": "mw-...",
+    "persisted_execution_id": null
+  }
+}
+```
 
 Manual buy payload:
 

@@ -150,6 +150,29 @@ _SAFE_REQUEST_KEYS = frozenset(
     }
 )
 
+_PLACEMENT_IDENTITY_KEYS = frozenset(
+    {
+        "symbol",
+        "side",
+        "ordertype",
+        "ordersize",
+        "amount",
+        "total_amount",
+        "requested_total_amount",
+        "maximum_buy_price",
+        "limit_price",
+        "baseorder",
+        "safetyorder",
+        "order_count",
+        "campaign_id",
+        "deal_id",
+        "sell_reason",
+        "type_sell",
+        "direction",
+        "source_operation_id",
+    }
+)
+
 
 @dataclass(frozen=True)
 class PlacementPreparation:
@@ -219,6 +242,18 @@ def deserialize_placement_payload(raw_value: Any) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _placement_identity_payload(raw_value: Any) -> dict[str, Any]:
+    """Return the stable economic identity of one persisted request."""
+    payload = (
+        raw_value
+        if isinstance(raw_value, dict)
+        else deserialize_placement_payload(raw_value)
+    )
+    return {
+        key: payload[key] for key in sorted(_PLACEMENT_IDENTITY_KEYS) if key in payload
+    }
+
+
 class PlacementIntentService:
     """Persist exchange effects before submission and advance them monotonically."""
 
@@ -253,6 +288,20 @@ class PlacementIntentService:
         normalized_side = str(side).strip().lower()
         normalized_order_type = str(order_type).strip().lower()
         request_json = serialize_placement_payload(_safe_request_payload(order))
+        normalized_requested_quote = max(0.0, float(requested_quote or 0.0))
+        normalized_requested_amount = max(0.0, float(requested_amount or 0.0))
+        normalized_reserved_quote = max(0.0, float(reserved_quote or 0.0))
+        deal_id = str(order.get("deal_id") or "").strip() or None
+        campaign_id = str(order.get("campaign_id") or "").strip() or None
+        maximum_price = (
+            float(order["maximum_buy_price"])
+            if float(order.get("maximum_buy_price") or 0.0) > 0
+            else (
+                float(order["limit_price"])
+                if float(order.get("limit_price") or 0.0) > 0
+                else None
+            )
+        )
 
         async with self._lock:
 
@@ -271,6 +320,13 @@ class PlacementIntentService:
                         source_operation_id=(
                             str(order.get("source_operation_id") or "").strip() or None
                         ),
+                        requested_quote=normalized_requested_quote,
+                        requested_amount=normalized_requested_amount,
+                        maximum_price=maximum_price,
+                        reserved_quote=normalized_reserved_quote,
+                        deal_id=deal_id,
+                        campaign_id=campaign_id,
+                        request_json=request_json,
                     )
                     return existing
                 conflicting_actions = (
@@ -321,22 +377,12 @@ class PlacementIntentService:
                         side=normalized_side,
                         order_type=normalized_order_type,
                         state=PlacementIntentState.PREPARED.value,
-                        deal_id=str(order.get("deal_id") or "").strip() or None,
-                        campaign_id=(
-                            str(order.get("campaign_id") or "").strip() or None
-                        ),
-                        requested_quote=max(0.0, float(requested_quote or 0.0)),
-                        requested_amount=max(0.0, float(requested_amount or 0.0)),
-                        maximum_price=(
-                            float(order["maximum_buy_price"])
-                            if float(order.get("maximum_buy_price") or 0.0) > 0
-                            else (
-                                float(order["limit_price"])
-                                if float(order.get("limit_price") or 0.0) > 0
-                                else None
-                            )
-                        ),
-                        reserved_quote=max(0.0, float(reserved_quote or 0.0)),
+                        deal_id=deal_id,
+                        campaign_id=campaign_id,
+                        requested_quote=normalized_requested_quote,
+                        requested_amount=normalized_requested_amount,
+                        maximum_price=maximum_price,
+                        reserved_quote=normalized_reserved_quote,
                         request_json=request_json,
                     )
                 except IntegrityError:
@@ -353,6 +399,13 @@ class PlacementIntentService:
                         source_operation_id=(
                             str(order.get("source_operation_id") or "").strip() or None
                         ),
+                        requested_quote=normalized_requested_quote,
+                        requested_amount=normalized_requested_amount,
+                        maximum_price=maximum_price,
+                        reserved_quote=normalized_reserved_quote,
+                        deal_id=deal_id,
+                        campaign_id=campaign_id,
+                        request_json=request_json,
                     )
                     return concurrent
 
@@ -500,6 +553,13 @@ class PlacementIntentService:
         side: str,
         order_type: str,
         source_operation_id: str | None,
+        requested_quote: float,
+        requested_amount: float,
+        maximum_price: float | None,
+        reserved_quote: float,
+        deal_id: str | None,
+        campaign_id: str | None,
+        request_json: str,
     ) -> None:
         """Reject accidental reuse of an operation identity for another effect."""
         expected = (
@@ -509,6 +569,13 @@ class PlacementIntentService:
             side,
             order_type,
             source_operation_id,
+            requested_quote,
+            requested_amount,
+            maximum_price,
+            reserved_quote,
+            deal_id,
+            campaign_id,
+            _placement_identity_payload(request_json),
         )
         actual = (
             str(intent.exchange_name),
@@ -521,6 +588,13 @@ class PlacementIntentService:
                 if intent.source_operation_id is not None
                 else None
             ),
+            float(intent.requested_quote or 0.0),
+            float(intent.requested_amount or 0.0),
+            float(intent.maximum_price) if intent.maximum_price is not None else None,
+            float(intent.reserved_quote or 0.0),
+            str(intent.deal_id) if intent.deal_id is not None else None,
+            str(intent.campaign_id) if intent.campaign_id is not None else None,
+            _placement_identity_payload(intent.request_json),
         )
         if actual != expected:
             raise ValueError(

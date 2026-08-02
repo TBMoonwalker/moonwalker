@@ -142,13 +142,15 @@ class StrategyHealthCheckSummary:
     failed: int
 
 
-_SNAPSHOT_CACHE: dict[str, StrategySnapshot] = {}
+_SNAPSHOT_CACHE: dict[tuple[str, int | None], StrategySnapshot] = {}
 
 
 def invalidate_strategy_runtime_cache(slug: str | None = None) -> None:
     """Invalidate active graph snapshots after a version promotion."""
     if slug:
-        _SNAPSHOT_CACHE.pop(slug, None)
+        for cache_key in tuple(_SNAPSHOT_CACHE):
+            if cache_key[0] == slug:
+                _SNAPSHOT_CACHE.pop(cache_key, None)
         return
     _SNAPSHOT_CACHE.clear()
 
@@ -282,28 +284,66 @@ async def evaluate_strategy_graph(
     )
 
 
-async def _load_strategy_snapshot(slug: str) -> StrategySnapshot:
-    """Load and cache the active immutable version for a strategy."""
-    cached = _SNAPSHOT_CACHE.get(slug)
+async def _load_strategy_snapshot(
+    slug: str,
+    version: int | None = None,
+) -> StrategySnapshot:
+    """Load and cache an exact or active immutable strategy version."""
+    cache_key = (slug, version)
+    cached = _SNAPSHOT_CACHE.get(cache_key)
     if cached:
         return cached
 
-    detail = await strategy_builder.get_strategy_detail(slug)
-    if detail is None:
-        raise ValueError(f"Strategy '{slug}' was not found.")
-    ir = detail["ir"]
-    validation = detail.get("validation") or strategy_builder.validate_strategy_ir(ir)
-    snapshot = StrategySnapshot(
-        slug=slug,
-        version=int(detail.get("active_version") or 0),
-        ir=ir,
-        validation=validation,
-        explanation=str(
-            detail.get("explanation")
-            or strategy_builder.build_strategy_explanation(ir, validation)
-        ),
-    )
-    _SNAPSHOT_CACHE[slug] = snapshot
+    if version is None:
+        detail = await strategy_builder.get_strategy_detail(slug)
+        if detail is None:
+            raise ValueError(f"Strategy '{slug}' was not found.")
+        ir = detail["ir"]
+        validation = detail.get("validation") or strategy_builder.validate_strategy_ir(
+            ir
+        )
+        snapshot = StrategySnapshot(
+            slug=slug,
+            version=int(detail.get("active_version") or 0),
+            ir=ir,
+            validation=validation,
+            explanation=str(
+                detail.get("explanation")
+                or strategy_builder.build_strategy_explanation(ir, validation)
+            ),
+        )
+    else:
+        row = await model.StrategyVersion.get_or_none(
+            strategy_slug=slug,
+            version=version,
+        )
+        if row is None:
+            raise ValueError(f"Strategy '{slug}' version {version} was not found.")
+        try:
+            ir = json.loads(row.ir_json)
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise ValueError(
+                f"Strategy '{slug}' version {version} has invalid IR."
+            ) from exc
+        if not isinstance(ir, dict):
+            raise ValueError(f"Strategy '{slug}' version {version} has invalid IR.")
+        try:
+            validation = json.loads(row.validation_json)
+        except (json.JSONDecodeError, TypeError):
+            validation = strategy_builder.validate_strategy_ir(ir)
+        if not isinstance(validation, dict):
+            validation = strategy_builder.validate_strategy_ir(ir)
+        snapshot = StrategySnapshot(
+            slug=slug,
+            version=version,
+            ir=ir,
+            validation=validation,
+            explanation=str(
+                row.explanation
+                or strategy_builder.build_strategy_explanation(ir, validation)
+            ),
+        )
+    _SNAPSHOT_CACHE[cache_key] = snapshot
     return snapshot
 
 

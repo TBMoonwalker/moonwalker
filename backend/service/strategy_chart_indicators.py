@@ -36,20 +36,38 @@ class StrategyChartIndicatorBuilder:
 
     async def collect_strategy_requirements(self, *slugs: str) -> list[str]:
         """Load strategy graph snapshots and collect supported indicator series."""
+        return await self.collect_versioned_strategy_requirements(
+            [(slug, None) for slug in slugs]
+        )
+
+    async def collect_versioned_strategy_requirements(
+        self,
+        references: list[tuple[str, int | None]],
+    ) -> list[str]:
+        """Collect indicators from exact historical strategy versions."""
         from service.strategy_runtime import _load_strategy_snapshot as load_snapshot
 
         loaded: list[str] = []
-        for slug in dict.fromkeys(
-            str(slug).strip() for slug in slugs if str(slug).strip()
-        ):
+        seen_references: set[tuple[str, int | None]] = set()
+        for raw_slug, version in references:
+            slug = str(raw_slug).strip()
+            reference = (slug, version)
+            if not slug or reference in seen_references:
+                continue
+            seen_references.add(reference)
             try:
-                snapshot = await load_snapshot(slug)
+                snapshot = (
+                    await load_snapshot(slug)
+                    if version is None
+                    else await load_snapshot(slug, version=version)
+                )
             except Exception:  # noqa: BLE001 - one bad strategy must not break charts.
                 continue
             ir = getattr(snapshot, "ir", None)
             if isinstance(ir, dict):
                 self.collect_ir_requirements(ir)
-                loaded.append(slug)
+                if slug not in loaded:
+                    loaded.append(slug)
         return loaded
 
     def collect_ir_requirements(self, ir: dict[str, Any]) -> None:

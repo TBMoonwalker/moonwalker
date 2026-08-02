@@ -29,6 +29,13 @@ logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_builder")
 
 _SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9_]{1,94}$")
 _STRATEGY_PROMOTION_LOCK = asyncio.Lock()
+_STRATEGY_CONFIG_KEYS = (
+    "signal_strategy",
+    "dca_strategy",
+    "tp_strategy",
+    "sidestep_bearish_strategy",
+    "sidestep_reentry_strategy",
+)
 
 
 def _utc_now_iso() -> str:
@@ -704,11 +711,14 @@ def validate_strategy_ir(ir: dict[str, Any]) -> dict[str, Any]:
 
 
 async def seed_builtin_strategies() -> None:
-    """Ensure built-in Strategy Builder definitions exist."""
+    """Ensure built-ins exist without rewriting immutable version rows."""
     await _delete_retired_builtin_strategies()
     for spec in BUILTIN_STRATEGIES:
         ir = build_builtin_ir(spec)
         validation = validate_strategy_ir(ir)
+        next_ir_json = _json_dumps(ir)
+        next_validation_json = _json_dumps(validation)
+        next_explanation = build_strategy_explanation(ir, validation)
         definition = await model.StrategyDefinition.get_or_none(slug=spec.slug)
         if definition is None:
             definition = await model.StrategyDefinition.create(
@@ -720,37 +730,6 @@ async def seed_builtin_strategies() -> None:
                 draft_version=1,
                 validation_status=validation["status"],
             )
-        else:
-            changed = False
-            if not definition.is_builtin:
-                definition.is_builtin = True
-                changed = True
-            if definition.name != spec.name:
-                definition.name = spec.name
-                changed = True
-            if definition.description != spec.description:
-                definition.description = spec.description
-                changed = True
-            if definition.active_version is None:
-                definition.active_version = 1
-                changed = True
-            if definition.draft_version < 1:
-                definition.draft_version = 1
-                changed = True
-            if definition.validation_status != validation["status"]:
-                definition.validation_status = validation["status"]
-                changed = True
-            if changed:
-                await definition.save()
-
-        version = await model.StrategyVersion.get_or_none(
-            strategy_slug=spec.slug,
-            version=1,
-        )
-        next_ir_json = _json_dumps(ir)
-        next_validation_json = _json_dumps(validation)
-        next_explanation = build_strategy_explanation(ir, validation)
-        if version is None:
             await model.StrategyVersion.create(
                 strategy_slug=spec.slug,
                 version=1,
@@ -759,17 +738,69 @@ async def seed_builtin_strategies() -> None:
                 explanation=next_explanation,
                 activated_at=datetime.now(timezone.utc),
             )
-        elif (
-            version.ir_json != next_ir_json
-            or version.validation_json != next_validation_json
-            or version.explanation != next_explanation
-        ):
-            version.ir_json = next_ir_json
-            version.validation_json = next_validation_json
-            version.explanation = next_explanation
-            if version.activated_at is None:
-                version.activated_at = datetime.now(timezone.utc)
-            await version.save()
+            continue
+
+        active_version = await _get_active_version(definition)
+        content_changed = active_version is None or (
+            active_version.ir_json != next_ir_json
+            or _validation_identity(active_version.validation_json)
+            != _validation_identity(next_validation_json)
+            or active_version.explanation != next_explanation
+        )
+        if content_changed:
+            latest_version = (
+                await model.StrategyVersion.filter(strategy_slug=spec.slug)
+                .order_by("-version")
+                .first()
+            )
+            next_version = int(latest_version.version if latest_version else 0) + 1
+            async with in_transaction() as connection:
+                await model.StrategyVersion.create(
+                    strategy_slug=spec.slug,
+                    version=next_version,
+                    ir_json=next_ir_json,
+                    validation_json=next_validation_json,
+                    explanation=next_explanation,
+                    activated_at=datetime.now(timezone.utc),
+                    using_db=connection,
+                )
+                definition.active_version = next_version
+                definition.draft_version = next_version
+                definition.lock_version += 1
+                definition.is_builtin = True
+                definition.name = spec.name
+                definition.description = spec.description
+                definition.validation_status = validation["status"]
+                await definition.save(using_db=connection)
+
+            from service.strategy_runtime import invalidate_strategy_runtime_cache
+
+            invalidate_strategy_runtime_cache(spec.slug)
+            continue
+
+        changed = False
+        if not definition.is_builtin:
+            definition.is_builtin = True
+            changed = True
+        if definition.name != spec.name:
+            definition.name = spec.name
+            changed = True
+        if definition.description != spec.description:
+            definition.description = spec.description
+            changed = True
+        if definition.validation_status != validation["status"]:
+            definition.validation_status = validation["status"]
+            changed = True
+        if changed:
+            await definition.save()
+
+
+def _validation_identity(raw_validation: str | None) -> str:
+    """Return stable validation content without its observation timestamp."""
+    validation = _json_loads(raw_validation, {})
+    if isinstance(validation, dict):
+        validation.pop("checked_at", None)
+    return _json_dumps(validation)
 
 
 async def _delete_retired_builtin_strategies() -> None:
@@ -785,6 +816,14 @@ async def _delete_retired_builtin_strategies() -> None:
 
     for definition in retired_rows:
         slug = str(definition.slug)
+        usage_reasons = await _strategy_usage_reasons(slug)
+        if usage_reasons:
+            logging.warning(
+                "Preserving retired built-in strategy %s because it is %s.",
+                slug,
+                " and ".join(usage_reasons),
+            )
+            continue
         await model.StrategyVersion.filter(strategy_slug=slug).delete()
         await model.StrategyGraphState.filter(strategy_slug=slug).delete()
         await definition.delete()
@@ -932,6 +971,13 @@ async def delete_custom_strategy(slug: str) -> None:
     if definition.is_builtin:
         raise PermissionError("Built-in strategies cannot be deleted.")
 
+    usage_reasons = await _strategy_usage_reasons(slug)
+    if usage_reasons:
+        raise PermissionError(
+            f"Strategy '{slug}' cannot be deleted because it is "
+            f"{' and '.join(usage_reasons)}."
+        )
+
     await model.StrategyVersion.filter(strategy_slug=slug).delete()
     await model.StrategyGraphState.filter(strategy_slug=slug).delete()
     await definition.delete()
@@ -939,6 +985,23 @@ async def delete_custom_strategy(slug: str) -> None:
     from service.strategy_runtime import invalidate_strategy_runtime_cache
 
     invalidate_strategy_runtime_cache(slug)
+
+
+async def _strategy_usage_reasons(slug: str) -> list[str]:
+    """Return durable references that prevent strategy deletion."""
+    reasons: list[str] = []
+    configured_rows = await model.AppConfig.filter(key__in=_STRATEGY_CONFIG_KEYS)
+    configured_keys = sorted(
+        row.key for row in configured_rows if str(row.value or "").strip() == slug
+    )
+    if configured_keys:
+        reasons.append(f"configured by {', '.join(configured_keys)}")
+    if (
+        await model.TradeExecutions.filter(strategy_slug=slug).exists()
+        or await model.TradeExecutions.filter(strategy_name=slug).exists()
+    ):
+        reasons.append("referenced by trade history")
+    return reasons
 
 
 async def promote_strategy_version(

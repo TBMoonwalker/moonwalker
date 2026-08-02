@@ -1784,6 +1784,10 @@ class Dca:
             "current_price": current_price,
             "tp_price": take_profit_price,
             "campaign_id": trades.get("campaign_id"),
+            "strategy_name": SidestepCampaignConfigView.from_config(
+                self.config or {}
+            ).bearish_strategy,
+            "timeframe": resolve_timeframe(self.config or {}),
             **self.__order_snapshot_payload(trades),
         }
         await self.orders.receive_sell_order(order, self.config or {})

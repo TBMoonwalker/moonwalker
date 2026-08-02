@@ -23,6 +23,12 @@ export interface OrderMutationResponse {
     mutation?: OrderMutationResult
 }
 
+export interface OrderOperationRegistry {
+    acquire(key: string, action: string): string
+    release(key: string): void
+    get(key: string): string | null
+}
+
 let fallbackOperationSequence = 0
 
 export function createOrderOperationId(action: string): string {
@@ -31,6 +37,28 @@ export function createOrderOperationId(action: string): string {
         globalThis.crypto?.randomUUID?.().replaceAll('-', '') ??
         `${Date.now().toString(36)}-${(++fallbackOperationSequence).toString(36)}`
     return `${normalizedAction}-${randomId}`.slice(0, 64)
+}
+
+export function createOrderOperationRegistry(): OrderOperationRegistry {
+    const operations = new Map<string, string>()
+    return {
+        acquire(key: string, action: string): string {
+            const normalizedKey = key.trim().toLowerCase()
+            const existing = operations.get(normalizedKey)
+            if (existing) {
+                return existing
+            }
+            const operationId = createOrderOperationId(action)
+            operations.set(normalizedKey, operationId)
+            return operationId
+        },
+        release(key: string): void {
+            operations.delete(key.trim().toLowerCase())
+        },
+        get(key: string): string | null {
+            return operations.get(key.trim().toLowerCase()) ?? null
+        },
+    }
 }
 
 export function orderMutationApplied(
@@ -50,5 +78,22 @@ export function orderMutationFailureMessage(
     response: OrderMutationResponse,
     fallback: string,
 ): string {
-    return response.mutation?.user_message || fallback
+    const mutation = response.mutation
+    const message = mutation?.user_message || fallback
+    if (
+        mutation?.status === 'indeterminate' ||
+        mutation?.status === 'quarantined'
+    ) {
+        return `${message} Do not submit a new order. Operation ID: ${mutation.operation_id}`
+    }
+    return message
+}
+
+export function orderMutationRequiresReconciliation(
+    response: OrderMutationResponse,
+): boolean {
+    return (
+        response.mutation?.status === 'indeterminate' ||
+        response.mutation?.status === 'quarantined'
+    )
 }

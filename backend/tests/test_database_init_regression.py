@@ -460,6 +460,8 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "ensure_upnl_history_columns",
         "ensure_ai_trust_columns",
         "ensure_indexes",
+        "ensure_trade_ledger_columns",
+        "ensure_indexes",
         "repair_index_only_corruption_if_needed",
         "backfill_trade_ledger_rows",
     ]

@@ -43,6 +43,20 @@ async def test_ai_work_queue_rejects_work_outside_lifespan() -> None:
 
 
 @pytest.mark.asyncio
+async def test_ai_work_queue_can_run_compatibility_work_inline() -> None:
+    """Direct scripts may explicitly preserve synchronous compatibility."""
+    queue = AiWorkQueue(capacity=1, worker_count=1)
+    completed = False
+
+    async def work() -> None:
+        nonlocal completed
+        completed = True
+
+    assert await queue.submit_or_run_inline("entry:deal-1", work) is True
+    assert completed is True
+
+
+@pytest.mark.asyncio
 async def test_ai_work_queue_records_worker_failure_and_continues() -> None:
     """A failed optional work item should be visible and not kill its worker."""
     queue = AiWorkQueue(capacity=2, worker_count=1)

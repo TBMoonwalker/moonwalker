@@ -20,6 +20,8 @@ class BuyIntent(TypedDict):
     side: str
     signal_name: NotRequired[str | None]
     strategy_name: NotRequired[str | None]
+    strategy_slug: NotRequired[str | None]
+    strategy_version: NotRequired[int | None]
     timeframe: NotRequired[str | None]
     metadata_json: NotRequired[str | None]
     baseline_order_size: NotRequired[float]
@@ -45,6 +47,10 @@ class SellIntent(TypedDict):
     total_cost: float
     current_price: float
     sell_reason: str
+    strategy_name: NotRequired[str | None]
+    strategy_slug: NotRequired[str | None]
+    strategy_version: NotRequired[int | None]
+    timeframe: NotRequired[str | None]
     campaign_id: NotRequired[str | None]
     operation_id: NotRequired[str]
     client_order_id: NotRequired[str]

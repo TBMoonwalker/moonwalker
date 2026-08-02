@@ -45,6 +45,35 @@ async def test_builtin_strategies_seed_as_versioned_ir(strategy_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_builtin_reseed_appends_version_without_rewriting_history(
+    strategy_db,
+) -> None:
+    """Changed built-in content creates a new immutable active version."""
+    await seed_builtin_strategies()
+    original = await model.StrategyVersion.get(
+        strategy_slug="ema_down",
+        version=1,
+    )
+    original.ir_json = json.dumps({"legacy": "preserve me"})
+    await original.save()
+
+    await seed_builtin_strategies()
+
+    definition = await model.StrategyDefinition.get(slug="ema_down")
+    historical = await model.StrategyVersion.get(
+        strategy_slug="ema_down",
+        version=1,
+    )
+    active = await model.StrategyVersion.get(
+        strategy_slug="ema_down",
+        version=2,
+    )
+    assert definition.active_version == 2
+    assert json.loads(historical.ir_json) == {"legacy": "preserve me"}
+    assert json.loads(active.ir_json)["slug"] == "ema_down"
+
+
+@pytest.mark.asyncio
 async def test_ema20_swing_builtin_is_decomposed_into_executable_graph(
     strategy_db,
 ) -> None:
@@ -437,6 +466,66 @@ async def test_delete_builtin_strategy_is_rejected(strategy_db) -> None:
 
     with pytest.raises(PermissionError):
         await delete_custom_strategy("ema20_swing")
+
+
+@pytest.mark.asyncio
+async def test_delete_configured_custom_strategy_is_rejected(strategy_db) -> None:
+    detail = await create_blank_strategy("Configured strategy")
+    await model.AppConfig.create(
+        key="dca_strategy",
+        value=detail["slug"],
+        value_type="str",
+    )
+
+    with pytest.raises(PermissionError, match="configured by dca_strategy"):
+        await delete_custom_strategy(detail["slug"])
+
+
+@pytest.mark.asyncio
+async def test_delete_historically_referenced_strategy_is_rejected(
+    strategy_db,
+) -> None:
+    detail = await create_blank_strategy("Historical strategy")
+    await model.TradeExecutions.create(
+        deal_id="11111111-1111-4111-8111-111111111111",
+        symbol="BTC/USDC",
+        side="buy",
+        role="base_order",
+        timestamp="1700000000000",
+        price=100.0,
+        amount=1.0,
+        strategy_name=detail["slug"],
+        strategy_slug=detail["slug"],
+        strategy_version=1,
+    )
+
+    with pytest.raises(PermissionError, match="referenced by trade history"):
+        await delete_custom_strategy(detail["slug"])
+
+
+@pytest.mark.asyncio
+async def test_runtime_loads_exact_historical_strategy_version(strategy_db) -> None:
+    from service.strategy_runtime import (
+        _load_strategy_snapshot,
+        invalidate_strategy_runtime_cache,
+    )
+
+    await seed_builtin_strategies()
+    version_one = await model.StrategyVersion.get(
+        strategy_slug="ema_down",
+        version=1,
+    )
+    historical_ir = json.loads(version_one.ir_json)
+    historical_ir["name"] = "Historical EMA Down"
+    version_one.ir_json = json.dumps(historical_ir)
+    await version_one.save()
+    await seed_builtin_strategies()
+    invalidate_strategy_runtime_cache("ema_down")
+
+    snapshot = await _load_strategy_snapshot("ema_down", version=1)
+
+    assert snapshot.version == 1
+    assert snapshot.ir["name"] == "Historical EMA Down"
 
 
 def test_validation_groups_blocking_errors_for_invalid_graph() -> None:

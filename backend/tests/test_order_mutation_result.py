@@ -13,6 +13,7 @@ from service.order_mutation_result import (
 )
 from service.orders import Orders
 from service.placement_intents import PlacementIntentState
+from service.trades import TradeStateUnavailableError
 
 
 def _trade(**overrides: Any) -> dict[str, Any]:
@@ -48,6 +49,9 @@ class _TradeReader:
 
 
 class _MissingTradeReader:
+    def __init__(self) -> None:
+        self.delete_calls = 0
+
     async def get_trades_for_orders_fresh(
         self,
         _symbol: str,
@@ -55,7 +59,15 @@ class _MissingTradeReader:
         return None
 
     async def delete_open_trades(self, _symbol: str) -> None:
-        return None
+        self.delete_calls += 1
+
+
+class _UnavailableTradeReader:
+    async def get_trades_for_orders_authoritative(
+        self,
+        _symbol: str,
+    ) -> None:
+        raise TradeStateUnavailableError("database unavailable")
 
 
 class _SequenceTradeReader:
@@ -209,7 +221,8 @@ async def test_typed_order_result_reports_missing_trade(
     expected_action: str,
 ) -> None:
     orders = Orders()
-    orders.trades = _MissingTradeReader()  # type: ignore[assignment]
+    trade_reader = _MissingTradeReader()
+    orders.trades = trade_reader  # type: ignore[assignment]
     method = getattr(orders, method_name)
 
     result = (
@@ -221,6 +234,35 @@ async def test_typed_order_result_reports_missing_trade(
     assert result.status is OrderMutationStatus.REJECTED
     assert result.reason_code == "trade_not_found"
     assert result.action == expected_action
+    assert trade_reader.delete_calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "expected_action"),
+    [
+        ("receive_sell_signal_result", "manual_sell"),
+        ("receive_buy_signal_result", "manual_buy"),
+        ("receive_stop_signal_result", "manual_stop"),
+    ],
+)
+async def test_typed_order_result_fails_closed_when_trade_state_is_unavailable(
+    method_name: str,
+    expected_action: str,
+) -> None:
+    orders = Orders()
+    orders.trades = _UnavailableTradeReader()  # type: ignore[assignment]
+    method = getattr(orders, method_name)
+
+    result = (
+        await method("btc-usdc", 25.0, {"dry_run": True})
+        if expected_action == "manual_buy"
+        else await method("btc-usdc", {"dry_run": True})
+    )
+
+    assert result.status is OrderMutationStatus.REJECTED
+    assert result.reason_code == "trade_state_unavailable"
+    assert result.user_message == "Trade state could not be loaded. No order was sent."
 
 
 @pytest.mark.asyncio

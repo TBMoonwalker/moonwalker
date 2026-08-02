@@ -6,6 +6,7 @@ import { useDialog } from 'naive-ui/es/dialog'
 import { useMessage } from 'naive-ui/es/message'
 
 import { fetchJson, MOONWALKER_OPERATION_HEADER } from '../api/client'
+import { extractApiErrorMessage } from '../helpers/apiErrors'
 import {
     calculateSoPercentage,
     clampToRange,
@@ -20,9 +21,10 @@ import {
     type OpenTradeRow,
 } from '../helpers/openTrades'
 import {
-    createOrderOperationId,
+    createOrderOperationRegistry,
     orderMutationApplied,
     orderMutationFailureMessage,
+    orderMutationRequiresReconciliation,
     type OrderMutationResponse,
 } from '../helpers/orderMutations'
 
@@ -33,6 +35,8 @@ interface UseOpenTradeActionsOptions {
 }
 
 export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
+    const operationRegistry = createOrderOperationRegistry()
+
     function handleDealSell(data: OpenTradeRow): void {
         const d = options.dialog.warning({
             title: 'Selling deal',
@@ -44,25 +48,50 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
                 const [symbol, currency] = splitTradeSymbol(
                     data.symbol.toLowerCase(),
                 )
-                const result = await fetchJson<OrderMutationResponse>(
-                    `/orders/sell/${symbol}-${currency}`,
-                    {
-                        method: 'POST',
-                        headers: {
-                            [MOONWALKER_OPERATION_HEADER]:
-                                createOrderOperationId('manual_sell'),
-                        },
-                    },
+                const operationKey = `manual_sell:${data.deal_id || data.symbol}`
+                const operationId = operationRegistry.acquire(
+                    operationKey,
+                    'manual_sell',
                 )
-                if (orderMutationApplied(result, 'sell')) {
-                    options.message.success(`Sold ${data.amount} ${data.symbol}`)
-                } else {
-                    options.message.error(
-                        orderMutationFailureMessage(
-                            result,
-                            `Failed to sell ${data.amount} ${data.symbol}`,
-                        ),
+                try {
+                    const result = await fetchJson<OrderMutationResponse>(
+                        `/orders/sell/${symbol}-${currency}`,
+                        {
+                            method: 'POST',
+                            headers: {
+                                [MOONWALKER_OPERATION_HEADER]: operationId,
+                            },
+                        },
                     )
+                    const requiresReconciliation =
+                        orderMutationRequiresReconciliation(result)
+                    if (orderMutationApplied(result, 'sell')) {
+                        operationRegistry.release(operationKey)
+                        options.message.success(
+                            `Sold ${data.amount} ${data.symbol}`,
+                        )
+                    } else {
+                        if (!requiresReconciliation) {
+                            operationRegistry.release(operationKey)
+                        }
+                        options.message.error(
+                            orderMutationFailureMessage(
+                                result,
+                                `Failed to sell ${data.amount} ${data.symbol}`,
+                            ),
+                            requiresReconciliation
+                                ? { duration: 0, closable: true }
+                                : undefined,
+                        )
+                        return !requiresReconciliation
+                    }
+                } catch (error) {
+                    d.loading = false
+                    options.message.error(
+                        `${extractApiErrorMessage(error, 'The sell request did not return a result.')} Do not submit a new order. Retry this action to reuse operation ID: ${operationId}`,
+                        { duration: 0, closable: true },
+                    )
+                    return false
                 }
             },
             onNegativeClick: () => {
@@ -169,27 +198,50 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
                     return false
                 }
                 const orderAmount = formatOrderAmount(finalAmount)
-                const result = await fetchJson<OrderMutationResponse>(
-                    `/orders/buy/${symbol}-${currency}/${orderAmount}`,
-                    {
-                        method: 'POST',
-                        headers: {
-                            [MOONWALKER_OPERATION_HEADER]:
-                                createOrderOperationId('manual_buy'),
-                        },
-                    },
+                const operationKey = `manual_buy:${data.deal_id || data.symbol}`
+                const operationId = operationRegistry.acquire(
+                    operationKey,
+                    'manual_buy',
                 )
-                if (orderMutationApplied(result, 'new_so')) {
-                    options.message.success(
-                        `Added ${orderAmount} ${currency.toUpperCase()} for ${symbol.toUpperCase()}`,
+                try {
+                    const result = await fetchJson<OrderMutationResponse>(
+                        `/orders/buy/${symbol}-${currency}/${orderAmount}`,
+                        {
+                            method: 'POST',
+                            headers: {
+                                [MOONWALKER_OPERATION_HEADER]: operationId,
+                            },
+                        },
                     )
-                } else {
+                    const requiresReconciliation =
+                        orderMutationRequiresReconciliation(result)
+                    if (orderMutationApplied(result, 'new_so')) {
+                        operationRegistry.release(operationKey)
+                        options.message.success(
+                            `Added ${orderAmount} ${currency.toUpperCase()} for ${symbol.toUpperCase()}`,
+                        )
+                    } else {
+                        if (!requiresReconciliation) {
+                            operationRegistry.release(operationKey)
+                        }
+                        options.message.error(
+                            orderMutationFailureMessage(
+                                result,
+                                `Failed to add ${orderAmount} ${currency.toUpperCase()} for ${symbol.toUpperCase()}`,
+                            ),
+                            requiresReconciliation
+                                ? { duration: 0, closable: true }
+                                : undefined,
+                        )
+                        return !requiresReconciliation
+                    }
+                } catch (error) {
+                    d.loading = false
                     options.message.error(
-                        orderMutationFailureMessage(
-                            result,
-                            `Failed to add ${orderAmount} ${currency.toUpperCase()} for ${symbol.toUpperCase()}`,
-                        ),
+                        `${extractApiErrorMessage(error, 'The buy request did not return a result.')} Do not submit a new order. Retry this action to reuse operation ID: ${operationId}`,
+                        { duration: 0, closable: true },
                     )
+                    return false
                 }
             },
             onNegativeClick: () => {

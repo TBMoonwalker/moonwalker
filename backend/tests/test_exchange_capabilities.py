@@ -22,6 +22,22 @@ def test_binance_spot_exposes_required_reconciliation_guarantees() -> None:
     assert capabilities.supported_order_types == {"market", "limit"}
 
 
+@pytest.mark.parametrize("exchange_id", ["bybit", "bybiteu"])
+def test_bybit_spot_exposes_verified_reconciliation_guarantees(
+    exchange_id: str,
+) -> None:
+    capabilities = resolve_exchange_placement_capabilities(
+        {"exchange": exchange_id, "market": "spot"}
+    )
+
+    assert capabilities is not None
+    assert capabilities.supports_safe_placement is True
+    assert capabilities.client_order_id_parameter == "clientOrderId"
+    assert capabilities.client_order_lookup_parameter == "orderLinkId"
+    assert capabilities.client_order_lookup_via_order_lists is True
+    assert capabilities.supported_order_types == {"market", "limit"}
+
+
 def test_unsupported_configured_exchange_fails_closed() -> None:
     with pytest.raises(
         UnsupportedExchangeCapability,

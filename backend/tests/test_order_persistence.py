@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -31,6 +32,39 @@ def _trade_record(**overrides: Any) -> TradePersistenceRecord:
     }
     payload.update(overrides)
     return cast(TradePersistenceRecord, payload)
+
+
+class _StrategyDefinitionQuery:
+    def using_db(self, _conn: Any) -> "_StrategyDefinitionQuery":
+        return self
+
+    async def first(self) -> SimpleNamespace:
+        return SimpleNamespace(active_version=7)
+
+
+class _DummyStrategyDefinitionModel:
+    @classmethod
+    def filter(cls, **_kwargs: Any) -> _StrategyDefinitionQuery:
+        return _StrategyDefinitionQuery()
+
+
+@pytest.mark.asyncio
+async def test_execution_payload_captures_active_strategy_version(monkeypatch) -> None:
+    monkeypatch.setattr(
+        persistence_module.model,
+        "StrategyDefinition",
+        _DummyStrategyDefinitionModel,
+    )
+
+    payload = await persistence_module._build_trade_execution_payload(
+        "11111111-1111-4111-8111-111111111111",
+        _trade_record(strategy_name="ema_swing"),
+        role="base_order",
+        conn=object(),
+    )
+
+    assert payload["strategy_slug"] == "ema_swing"
+    assert payload["strategy_version"] == 7
 
 
 class _DummyTradesModel:

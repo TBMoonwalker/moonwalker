@@ -155,6 +155,48 @@ async def test_invalid_transition_and_operation_id_reuse_fail_closed(tmp_path) -
 
 
 @pytest.mark.asyncio
+async def test_operation_id_reuse_with_changed_economic_payload_fails_closed(
+    tmp_path,
+) -> None:
+    await _init_database(tmp_path)
+    try:
+        service = PlacementIntentService()
+        config = {"exchange": "binance", "dry_run": False}
+        await service.prepare(
+            {
+                "operation_id": "economic-operation",
+                "symbol": "BTC/USDC",
+                "ordersize": 25.0,
+                "deal_id": "deal-1",
+            },
+            config,
+            action=PlacementAction.BUY,
+            side="buy",
+            order_type="market",
+            requested_quote=25.0,
+            reserved_quote=25.0,
+        )
+
+        with pytest.raises(ValueError, match="reused with a different request"):
+            await service.prepare(
+                {
+                    "operation_id": "economic-operation",
+                    "symbol": "BTC/USDC",
+                    "ordersize": 50.0,
+                    "deal_id": "deal-1",
+                },
+                config,
+                action=PlacementAction.BUY,
+                side="buy",
+                order_type="market",
+                requested_quote=50.0,
+                reserved_quote=50.0,
+            )
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_indeterminate_buy_reservation_survives_process_lease(tmp_path) -> None:
     await _init_database(tmp_path)
     try:
