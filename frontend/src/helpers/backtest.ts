@@ -1,3 +1,5 @@
+import type { UTCTimestamp } from 'lightweight-charts'
+
 export const BACKTEST_TIMEFRAME_OPTIONS = [
     { label: '5m', value: '5m' },
     { label: '15m', value: '15m' },
@@ -264,6 +266,8 @@ export function normalizeBacktestMarkerShape(
     return 'circle'
 }
 
-export function normalizeBacktestTimestampSeconds(value: number): number {
-    return Math.trunc(value > 10_000_000_000 ? value / 1000 : value)
+export function normalizeBacktestTimestampSeconds(value: number): UTCTimestamp {
+    return Math.trunc(
+        value > 10_000_000_000 ? value / 1000 : value,
+    ) as UTCTimestamp
 }

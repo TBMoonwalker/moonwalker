@@ -1,56 +1,52 @@
 # TODOS
 
-## Backtest
-
-### Fix mobile Backtest chart marker label clipping (ISSUE-002)
-
-**Found by:** /qa on main, 2026-06-08
-**Severity:** Low
-**Category:** Visual
-**What:** On a 375px mobile viewport, the Backtest chart can clip the left edge
-of the `take_profit` marker label after a run, showing `ke_profit`.
-**Why:** The clipped label hides useful exit context on small screens.
-**Context:** This is a mobile-only visual regression found during the main
-branch QA pass.
-**Effort:** S
-**Priority:** P3
-**Depends on:** None
-**Repro:** Set viewport to 375x812 -> visit `/backtest` -> run the default
-replay -> observe the take-profit marker at the left chart edge.
-**Report:** .gstack/qa-reports/qa-report-localhost-8130-2026-06-08.md
-
 ## Analytics
 
 ### Extend sidestep campaign analytics beyond grouped replay polish
 
-**What:** If operators later need deeper reporting, add a campaign-first
-analytics surface or read model that rolls up cumulative PnL, time-in-mission,
-and leg sequencing across one sidestep campaign.
+**Status:** Discovery only — 0/3 confirmed evidence issues.
 
-**Why:** Grouped replay, waiting-campaign status, and compact campaign summary
-copy now cover the release-safe operator story, but they still stop short of a
-dedicated campaign analytics view.
+**What:** Collect concrete operator decisions or questions that the shipped
+grouped replay, waiting-campaign status, and campaign summary cannot answer.
+At three unique confirmed issues, bring the item through a fresh product and
+engineering review. Reaching the threshold does not pre-authorize a new screen,
+table, read model, projection, or event pipeline.
 
-**Pros:** Could improve campaign-level evaluation, make long multi-leg missions
-easier to compare, and create a clearer base for future reporting or
-Autopilot-facing summaries.
+**Confirmed evidence issues:** None linked.
 
-**Cons:** Adds reporting and read-model complexity on top of the already
-cross-cutting sidestep persistence model, and it is not required for the
-current operator workflow.
+**Evidence format:** Link a
+[GitHub issue](https://github.com/TBMoonwalker/moonwalker/issues/new) containing:
 
-**Context:** If this is picked up later, start from the shipped grouped replay
-and waiting-campaign status surfaces before deciding whether a new read model is
-actually warranted.
+- Operator role
+- Decision being made
+- Question the current UI cannot answer
+- Manual reconstruction required
+- Why grouped replay or the campaign summary was insufficient
+- Maintainer confirmation
+
+Duplicate questions about the same operator decision count once. An issue only
+increments the counter after a maintainer confirms the gap against the current
+UI.
 
 **Effort:** L
 
 **Priority:** P4
 
-**Depends on:** Only worth doing if operator feedback shows the
-current grouped replay and waiting-campaign context are still insufficient.
+**Depends on:** Three unique confirmed evidence issues linked above.
 
 ## Completed
+
+### Fix mobile Backtest chart marker label clipping (ISSUE-002)
+
+**Completed:** 2026-08-02
+
+**What shipped:** Added exact feature-local logical-range padding based on the
+actual first- and last-candle marker text, typed the Lightweight Charts payloads,
+and guarded pre-paint rendering with invocation ownership and fail-open padding.
+Added 100 percent viewport-helper coverage, component lifecycle regressions,
+and stable 375 x 812 left/right Playwright snapshots. The real localhost
+default Backtest now shows the complete `take_profit` label with no page overflow
+or console errors.
 
 ### Fix mobile text truncation (ISSUE-003, ISSUE-004)
 
