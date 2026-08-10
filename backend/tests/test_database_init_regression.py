@@ -444,9 +444,9 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
     monkeypatch.setattr(Database, "_ensure_indexes", _record("ensure_indexes"))
     monkeypatch.setattr(
         Database,
-           "_ensure_strategy_history_index",
-           _record("ensure_strategy_history_index"),
-        )
+        "_ensure_strategy_history_index",
+        _record("ensure_strategy_history_index"),
+    )
     monkeypatch.setattr(
         Database,
         "_repair_index_only_corruption_if_needed",

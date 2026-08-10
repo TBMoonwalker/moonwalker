@@ -279,7 +279,9 @@ async def execute_signal_entry_batch(
                 "timeframe": timeframe,
             }
             if strategy_identity_by_symbol is not None:
-                entry_kwargs["strategy_identity_by_symbol"] = strategy_identity_by_symbol
+                entry_kwargs["strategy_identity_by_symbol"] = (
+                    strategy_identity_by_symbol
+                )
             entry_orders = await entry_order_resolver(
                 config,
                 statistic,

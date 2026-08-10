@@ -175,7 +175,9 @@ class Orders:
     ) -> tuple[OrderMutationStatus, str]:
         """Map durable placement state to the public mutation result contract."""
         intent_state = str(intent.state)
-        status = OrderMutationStatus.APPLIED if applied else OrderMutationStatus.REJECTED
+        status = (
+            OrderMutationStatus.APPLIED if applied else OrderMutationStatus.REJECTED
+        )
         reason_code = str(intent.reason_code or intent_state)
         if (
             intent_state == PlacementIntentState.COMPLETED.value

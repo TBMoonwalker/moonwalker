@@ -204,8 +204,9 @@ async def test_missing_intent_distinguishes_applied_and_stale() -> None:
 
 
 @pytest.mark.asyncio
-async def test_post_dispatch_recheck_fails_closed_when_trade_state_is_unavailable(
-) -> None:
+async def test_post_dispatch_recheck_fails_closed_when_trade_state_is_unavailable() -> (
+    None
+):
     config = {"dry_run": True}
     trade = _trade()
     snapshot = LifecycleSnapshotIdentity.from_trade(trade, config)
@@ -269,8 +270,9 @@ async def test_typed_order_result_reports_missing_trade(
 
 
 @pytest.mark.asyncio
-async def test_completed_manual_buy_retry_deduplicates_before_rebuilding_order(
-) -> None:
+async def test_completed_manual_buy_retry_deduplicates_before_rebuilding_order() -> (
+    None
+):
     orders = Orders()
     orders.trades = _UnexpectedTradeReader()  # type: ignore[assignment]
     orders.placement_intents = _IntentReader(

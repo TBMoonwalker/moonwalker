@@ -3,7 +3,7 @@ import os
 import model
 import pytest
 from service.spot_campaign_types import TradeCloseReason
-from service.trades import TradeStateUnavailableError, Trades
+from service.trades import Trades, TradeStateUnavailableError
 from tortoise import Tortoise
 from tortoise.exceptions import OperationalError
 

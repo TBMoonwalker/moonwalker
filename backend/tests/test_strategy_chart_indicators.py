@@ -4,7 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 import service.strategy_runtime as runtime_module
-
 from service.strategy_chart_indicators import StrategyChartIndicatorBuilder
 
 

@@ -270,9 +270,9 @@ async def test_concurrent_prepare_accepts_only_volatile_payload_changes(
             requested_quote=25.0,
             reserved_quote=25.0,
         )
-        await model.PlacementIntent.filter(
-            operation_id=first.operation_id
-        ).update(state=PlacementIntentState.COMPLETED.value)
+        await model.PlacementIntent.filter(operation_id=first.operation_id).update(
+            state=PlacementIntentState.COMPLETED.value
+        )
 
         async def miss_concurrent_row(**_kwargs):
             return None

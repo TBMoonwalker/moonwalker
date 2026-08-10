@@ -943,12 +943,10 @@ class Database:
             return
 
         connection = Tortoise.get_connection("default")
-        await connection.execute_script(
-            """
+        await connection.execute_script("""
             CREATE INDEX IF NOT EXISTS idx_tradeexecutions_strategy_version
             ON tradeexecutions (strategy_slug, strategy_version);
-            """
-        )
+            """)
 
     async def _run_backfill_init_steps(self) -> None:
         """Run ordered data migrations required before the runtime starts."""

@@ -335,13 +335,9 @@ async def test_seed_preserves_configured_retired_builtin_strategy(strategy_db) -
 
     await seed_builtin_strategies()
 
+    assert await model.StrategyDefinition.get_or_none(slug=definition.slug) is not None
     assert (
-        await model.StrategyDefinition.get_or_none(slug=definition.slug)
-        is not None
-    )
-    assert (
-        await model.StrategyVersion.filter(strategy_slug=definition.slug).count()
-        == 1
+        await model.StrategyVersion.filter(strategy_slug=definition.slug).count() == 1
     )
 
 
