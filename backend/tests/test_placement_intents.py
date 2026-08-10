@@ -197,6 +197,113 @@ async def test_operation_id_reuse_with_changed_economic_payload_fails_closed(
 
 
 @pytest.mark.asyncio
+async def test_conflicting_pending_prepare_rewrites_order_to_resolved_operation(
+    tmp_path,
+) -> None:
+    await _init_database(tmp_path)
+    try:
+        service = PlacementIntentService()
+        config = {"exchange": "binance", "dry_run": False}
+        pending_order = {
+            "operation_id": "pending-buy",
+            "symbol": "BTC/USDC",
+            "ordersize": 25.0,
+        }
+        pending = await service.prepare(
+            pending_order,
+            config,
+            action=PlacementAction.BUY,
+            side="buy",
+            order_type="market",
+            requested_quote=25.0,
+            reserved_quote=25.0,
+        )
+        assert await service.claim_submission(pending.operation_id) is True
+
+        competing_order = {
+            "operation_id": "new-buy",
+            "symbol": "BTC/USDC",
+            "ordersize": 25.0,
+        }
+        blocked = await service.prepare(
+            competing_order,
+            config,
+            action=PlacementAction.BUY,
+            side="buy",
+            order_type="market",
+            requested_quote=25.0,
+            reserved_quote=25.0,
+        )
+
+        assert blocked.blocked_by_conflict is True
+        assert blocked.operation_id == "pending-buy"
+        assert competing_order["operation_id"] == "pending-buy"
+        assert competing_order["client_order_id"] == pending.client_order_id
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_prepare_accepts_only_volatile_payload_changes(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The unique-insert race revalidates stable economic identity."""
+    await _init_database(tmp_path)
+    try:
+        service = PlacementIntentService()
+        config = {"exchange": "binance", "dry_run": False}
+        original = {
+            "operation_id": "concurrent-operation",
+            "symbol": "BTC/USDC",
+            "ordersize": 25.0,
+            "actual_pnl": -1.0,
+            "current_price": 99.0,
+            "metadata_json": '{"attempt":1}',
+        }
+        first = await service.prepare(
+            original,
+            config,
+            action=PlacementAction.BUY,
+            side="buy",
+            order_type="market",
+            requested_quote=25.0,
+            reserved_quote=25.0,
+        )
+        await model.PlacementIntent.filter(
+            operation_id=first.operation_id
+        ).update(state=PlacementIntentState.COMPLETED.value)
+
+        async def miss_concurrent_row(**_kwargs):
+            return None
+
+        monkeypatch.setattr(
+            model.PlacementIntent,
+            "get_or_none",
+            miss_concurrent_row,
+        )
+        retry = await service.prepare(
+            {
+                **original,
+                "actual_pnl": -2.0,
+                "current_price": 98.0,
+                "metadata_json": '{"attempt":2}',
+            },
+            config,
+            action=PlacementAction.BUY,
+            side="buy",
+            order_type="market",
+            requested_quote=25.0,
+            reserved_quote=25.0,
+        )
+
+        assert retry.operation_id == first.operation_id
+        assert await model.PlacementIntent.all().count() == 1
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
 async def test_indeterminate_buy_reservation_survives_process_lease(tmp_path) -> None:
     await _init_database(tmp_path)
     try:
@@ -289,7 +396,7 @@ async def test_new_operation_reuses_pending_symbol_action(tmp_path) -> None:
         )
 
         assert reused.operation_id == "buy-pending-first"
-        assert next_order["operation_id"] == "buy-new-ticker-identity"
+        assert next_order["operation_id"] == "buy-pending-first"
         assert reused.blocked_by_conflict is True
         assert await model.PlacementIntent.all().count() == 1
     finally:
@@ -359,7 +466,7 @@ async def test_pending_exposure_blocks_other_action_types(
         )
 
         assert blocked.operation_id == first.operation_id
-        assert next_order["operation_id"] == f"{next_action}-fresh"
+        assert next_order["operation_id"] == first.operation_id
         assert blocked.blocked_by_conflict is True
         assert await model.PlacementIntent.all().count() == 1
     finally:
@@ -399,7 +506,7 @@ async def test_prepared_cross_action_conflict_cannot_be_claimed(tmp_path) -> Non
 
         assert blocked.status == PlacementStartStatus.BLOCKED
         assert blocked.operation_id == first.operation_id
-        assert next_order["operation_id"] == "fresh-sell"
+        assert next_order["operation_id"] == first.operation_id
         persisted = await model.PlacementIntent.get(operation_id="prepared-buy")
         assert persisted.state == PlacementIntentState.PREPARED.value
         assert await model.PlacementIntent.all().count() == 1

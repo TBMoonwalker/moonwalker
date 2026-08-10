@@ -239,3 +239,51 @@ async def test_bybit_lookup_reports_unavailable_when_any_history_query_fails(
     assert result.status == ExchangeOrderLookupStatus.UNAVAILABLE
     assert result.order is None
     assert result.error_message == "network down"
+
+
+@pytest.mark.asyncio
+async def test_bybit_lookup_reports_confirmed_absence_after_all_order_lists(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _BybitLookupExchange(
+        open_orders=[{"id": "other-open"}],
+        closed_orders=[{"id": "other-closed"}],
+        canceled_orders=[{"id": "other-canceled"}],
+    )
+    service = _exchange_with_client(monkeypatch, client)
+
+    result = await service.lookup_spot_order(
+        "BTCUSDC",
+        {"exchange": "bybit", "market": "spot"},
+        client_order_id="missing-client",
+    )
+
+    assert result.status == ExchangeOrderLookupStatus.NOT_FOUND
+    assert result.order is None
+    assert [call[0] for call in client.calls] == ["open", "closed", "canceled"]
+
+
+@pytest.mark.asyncio
+async def test_bybit_lookup_matches_public_client_order_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client = _BybitLookupExchange(
+        open_orders=[
+            {
+                "id": "exchange-order-public",
+                "clientOrderId": "public-client-id",
+                "info": {},
+            }
+        ]
+    )
+    service = _exchange_with_client(monkeypatch, client)
+
+    result = await service.lookup_spot_order(
+        "BTCUSDC",
+        {"exchange": "bybiteu", "market": "spot"},
+        client_order_id="public-client-id",
+    )
+
+    assert result.status == ExchangeOrderLookupStatus.FOUND
+    assert result.order is not None
+    assert result.order["id"] == "exchange-order-public"

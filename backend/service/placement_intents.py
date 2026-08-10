@@ -419,9 +419,8 @@ class PlacementIntentService:
             intent.client_order_id or build_client_order_id(resolved_operation_id)
         )
         blocked_by_conflict = resolved_operation_id != operation_id
-        if not blocked_by_conflict:
-            order["operation_id"] = resolved_operation_id
-            order["client_order_id"] = resolved_client_order_id
+        order["operation_id"] = resolved_operation_id
+        order["client_order_id"] = resolved_client_order_id
         return PlacementPreparation(
             intent=intent,
             operation_id=resolved_operation_id,

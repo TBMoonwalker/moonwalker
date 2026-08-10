@@ -166,6 +166,83 @@ class Orders:
         except (RuntimeError, ConfigurationError):
             return None
 
+    @staticmethod
+    def _operator_status_from_intent(
+        intent: Any,
+        *,
+        applied: bool,
+        preexisting_operation: bool,
+    ) -> tuple[OrderMutationStatus, str]:
+        """Map durable placement state to the public mutation result contract."""
+        intent_state = str(intent.state)
+        status = OrderMutationStatus.APPLIED if applied else OrderMutationStatus.REJECTED
+        reason_code = str(intent.reason_code or intent_state)
+        if (
+            intent_state == PlacementIntentState.COMPLETED.value
+            and preexisting_operation
+        ):
+            return OrderMutationStatus.DEDUPLICATED, "duplicate_operation"
+        if intent_state in {
+            PlacementIntentState.INDETERMINATE.value,
+            PlacementIntentState.RECONCILING.value,
+            PlacementIntentState.ACCEPTED.value,
+            PlacementIntentState.FILLED.value,
+            PlacementIntentState.PERSISTED.value,
+        }:
+            return OrderMutationStatus.INDETERMINATE, reason_code
+        if intent_state in {
+            PlacementIntentState.QUARANTINED.value,
+            PlacementIntentState.RESTORED_QUARANTINED.value,
+        }:
+            return OrderMutationStatus.QUARANTINED, reason_code
+        if intent_state == PlacementIntentState.REJECTED.value:
+            return OrderMutationStatus.REJECTED, reason_code
+        return status, reason_code
+
+    @classmethod
+    def _operator_result_from_intent(
+        cls,
+        *,
+        intent: Any,
+        operation_id: str,
+        symbol: str,
+        action: str,
+        applied: bool,
+        preexisting_operation: bool,
+    ) -> OrderMutationResult:
+        """Build an operator-visible result from the resolved durable intent."""
+        status, reason_code = cls._operator_status_from_intent(
+            intent,
+            applied=applied,
+            preexisting_operation=preexisting_operation,
+        )
+        messages = {
+            OrderMutationStatus.APPLIED: "The order was applied.",
+            OrderMutationStatus.DEDUPLICATED: (
+                "This operation was already completed; no duplicate order was sent."
+            ),
+            OrderMutationStatus.REJECTED: "The order was rejected before completion.",
+            OrderMutationStatus.STALE: (
+                "Trade state changed before execution. Refresh and try again."
+            ),
+            OrderMutationStatus.INDETERMINATE: (
+                "The exchange outcome is not yet known. Reconciliation is required."
+            ),
+            OrderMutationStatus.QUARANTINED: (
+                "The operation is quarantined and requires operator review."
+            ),
+        }
+        return OrderMutationResult(
+            operation_id=operation_id,
+            symbol=symbol,
+            action=action,
+            status=status,
+            reason_code=reason_code,
+            exchange_order_id=str(intent.exchange_order_id or "") or None,
+            client_order_id=str(intent.client_order_id or "") or None,
+            user_message=messages[status],
+        )
+
     async def _snapshot_is_current(
         self,
         expected: LifecycleSnapshotIdentity | None,
@@ -2340,29 +2417,14 @@ class Orders:
         )
         reason_code = "mutation_applied" if applied else "mutation_rejected"
         if intent is not None:
-            intent_state = str(intent.state)
-            reason_code = str(intent.reason_code or intent_state)
-            if (
-                intent_state == PlacementIntentState.COMPLETED.value
-                and preexisting_operation
-            ):
-                status = OrderMutationStatus.DEDUPLICATED
-                reason_code = "duplicate_operation"
-            elif intent_state in {
-                PlacementIntentState.INDETERMINATE.value,
-                PlacementIntentState.RECONCILING.value,
-                PlacementIntentState.ACCEPTED.value,
-                PlacementIntentState.FILLED.value,
-                PlacementIntentState.PERSISTED.value,
-            }:
-                status = OrderMutationStatus.INDETERMINATE
-            elif intent_state in {
-                PlacementIntentState.QUARANTINED.value,
-                PlacementIntentState.RESTORED_QUARANTINED.value,
-            }:
-                status = OrderMutationStatus.QUARANTINED
-            elif intent_state == PlacementIntentState.REJECTED.value:
-                status = OrderMutationStatus.REJECTED
+            return self._operator_result_from_intent(
+                intent=intent,
+                operation_id=operation_id,
+                symbol=expected_snapshot.symbol,
+                action=action,
+                applied=applied,
+                preexisting_operation=preexisting_operation,
+            )
         elif not applied:
             try:
                 current_trade = await self._load_authoritative_trade(
@@ -2512,6 +2574,17 @@ class Orders:
     ) -> OrderMutationResult:
         """Handle a manual safety buy and report its durable outcome."""
         symbol = normalize_order_symbol(symbol)
+        if operation_id:
+            existing = await self._get_placement_intent(str(operation_id))
+            if existing is not None:
+                return self._operator_result_from_intent(
+                    intent=existing,
+                    operation_id=str(operation_id),
+                    symbol=symbol,
+                    action="manual_buy",
+                    applied=False,
+                    preexisting_operation=True,
+                )
         try:
             trades = await self._load_authoritative_trade(symbol)
         except TradeStateUnavailableError:

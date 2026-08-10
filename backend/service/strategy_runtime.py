@@ -70,6 +70,7 @@ class GraphStrategyAdapter:
         self.indicators = Indicators()
         self._last_log_by_symbol: dict[str, dict[str, Any]] = {}
         self._log_state_by_key: dict[tuple[str, str], StrategyLogState] = {}
+        self._last_result_by_key: dict[tuple[str, str], StrategyEvaluationResult] = {}
 
     async def run(self, symbol: str, side: str) -> bool:
         """Evaluate the active graph for one symbol."""
@@ -88,8 +89,18 @@ class GraphStrategyAdapter:
             "creating_order": result.matched,
             "reason": result.reason,
         }
+        self._last_result_by_key[(symbol, side)] = result
         self._log_payload(symbol, side, payload)
         return result.matched
+
+    def last_evaluation_identity(
+        self,
+        symbol: str,
+        side: str,
+    ) -> tuple[str, int | None]:
+        """Return the immutable strategy identity from the latest run."""
+        result = self._last_result_by_key.get((symbol, side))
+        return self.slug, result.version if result is not None else None
 
     def _log_payload(self, symbol: str, side: str, payload: dict[str, Any]) -> None:
         """Log changed strategy results and periodic unchanged heartbeats."""

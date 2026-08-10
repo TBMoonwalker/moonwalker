@@ -48,6 +48,20 @@ class _DummyStrategyDefinitionModel:
         return _StrategyDefinitionQuery()
 
 
+class _MissingStrategyDefinitionQuery:
+    def using_db(self, _conn: Any) -> "_MissingStrategyDefinitionQuery":
+        return self
+
+    async def first(self) -> None:
+        return None
+
+
+class _MissingStrategyDefinitionModel:
+    @classmethod
+    def filter(cls, **_kwargs: Any) -> _MissingStrategyDefinitionQuery:
+        return _MissingStrategyDefinitionQuery()
+
+
 @pytest.mark.asyncio
 async def test_execution_payload_captures_active_strategy_version(monkeypatch) -> None:
     monkeypatch.setattr(
@@ -65,6 +79,48 @@ async def test_execution_payload_captures_active_strategy_version(monkeypatch) -
 
     assert payload["strategy_slug"] == "ema_swing"
     assert payload["strategy_version"] == 7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("strategy_values", "definition_model", "expected"),
+    [
+        (
+            {"strategy_slug": "ema_swing", "strategy_version": 4},
+            _MissingStrategyDefinitionModel,
+            ("ema_swing", 4),
+        ),
+        (
+            {"strategy_slug": "ema_swing", "strategy_version": "invalid"},
+            _DummyStrategyDefinitionModel,
+            ("ema_swing", 7),
+        ),
+        (
+            {"strategy_slug": "retired_strategy"},
+            _MissingStrategyDefinitionModel,
+            ("retired_strategy", None),
+        ),
+        ({}, _MissingStrategyDefinitionModel, (None, None)),
+    ],
+)
+async def test_execution_strategy_identity_resolution_branches(
+    monkeypatch: pytest.MonkeyPatch,
+    strategy_values: dict[str, Any],
+    definition_model: type[Any],
+    expected: tuple[str | None, int | None],
+) -> None:
+    monkeypatch.setattr(
+        persistence_module.model,
+        "StrategyDefinition",
+        definition_model,
+    )
+
+    resolved = await persistence_module._resolve_strategy_identity(
+        _trade_record(**strategy_values),
+        object(),
+    )
+
+    assert resolved == expected
 
 
 class _DummyTradesModel:

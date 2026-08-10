@@ -55,6 +55,8 @@ def _entry_order_decisions(
     *,
     signal_name: str = "websocket_signal:sig-1",
     strategy_name: str | None = "momentum-confirmation",
+    strategy_slug: str | None = None,
+    strategy_version: int | None = None,
     timeframe: str = "1h",
 ) -> dict[str, types.SimpleNamespace]:
     return {
@@ -70,6 +72,8 @@ def _entry_order_decisions(
             trust_score=50.0,
             signal_name=signal_name,
             strategy_name=strategy_name,
+            strategy_slug=strategy_slug or strategy_name,
+            strategy_version=strategy_version,
             timeframe=timeframe,
             metadata_json='{"entry_sizing":{"applied":false}}',
         )

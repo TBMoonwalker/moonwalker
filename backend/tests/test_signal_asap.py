@@ -114,6 +114,8 @@ async def test_asap_run_uses_shared_admission_batch(monkeypatch) -> None:
                 trust_score=75.0,
                 signal_name="asap",
                 strategy_name=None,
+                strategy_slug=None,
+                strategy_version=None,
                 timeframe="1m",
                 metadata_json='{"entry_sizing":{"applied":true}}',
             )

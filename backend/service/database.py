@@ -330,11 +330,6 @@ class Database:
                 ("symbol", "timestamp"),
             ),
             ("tradeexecutions", "idx_tradeexecutions_side_role", ("side", "role")),
-            (
-                "tradeexecutions",
-                "idx_tradeexecutions_strategy_version",
-                ("strategy_slug", "strategy_version"),
-            ),
             ("spotcampaigns", "idx_spotcampaigns_symbol", ("symbol",)),
             ("spotcampaigns", "idx_spotcampaigns_state_symbol", ("state", "symbol")),
             (
@@ -940,7 +935,20 @@ class Database:
     async def _ensure_strategy_history_schema(self) -> None:
         """Add strategy identity columns and their lookup index."""
         await self._ensure_trade_ledger_columns()
-        await self._ensure_indexes()
+        await self._ensure_strategy_history_index()
+
+    async def _ensure_strategy_history_index(self) -> None:
+        """Create the strategy lookup index after its columns exist."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        await connection.execute_script(
+            """
+            CREATE INDEX IF NOT EXISTS idx_tradeexecutions_strategy_version
+            ON tradeexecutions (strategy_slug, strategy_version);
+            """
+        )
 
     async def _run_backfill_init_steps(self) -> None:
         """Run ordered data migrations required before the runtime starts."""

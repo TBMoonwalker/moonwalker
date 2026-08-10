@@ -122,6 +122,7 @@ async def test_process_ticker_data_uses_bearish_sidestep_exit_before_dca(
             "dca": True,
             "trade_mode": "sidestep",
             "sidestep_bearish_strategy": "ema_down",
+            "timeframe": "4h",
             "tp": 10.0,
         },
     )
@@ -135,6 +136,8 @@ async def test_process_ticker_data_uses_bearish_sidestep_exit_before_dca(
     assert order["campaign_id"] == "campaign-1"
     assert order["actual_pnl"] == pytest.approx(-5.0)
     assert order["tp_price"] == pytest.approx(110.0)
+    assert order["strategy_name"] == "ema_down"
+    assert order["timeframe"] == "4h"
 
 
 @pytest.mark.asyncio

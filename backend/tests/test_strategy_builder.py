@@ -45,6 +45,28 @@ async def test_builtin_strategies_seed_as_versioned_ir(strategy_db) -> None:
 
 
 @pytest.mark.asyncio
+async def test_unchanged_builtin_reseed_does_not_append_version(strategy_db) -> None:
+    """Validation timestamps alone must not create immutable versions."""
+    await seed_builtin_strategies()
+    initial_versions = await model.StrategyVersion.filter(
+        strategy_slug="ema_down"
+    ).count()
+    initial_definition = await model.StrategyDefinition.get(slug="ema_down")
+    initial_lock_version = initial_definition.lock_version
+
+    await asyncio.sleep(0)
+    await seed_builtin_strategies()
+
+    definition = await model.StrategyDefinition.get(slug="ema_down")
+    versions = await model.StrategyVersion.filter(strategy_slug="ema_down").count()
+    assert initial_versions == 1
+    assert versions == 1
+    assert definition.active_version == 1
+    assert definition.draft_version == 1
+    assert definition.lock_version == initial_lock_version
+
+
+@pytest.mark.asyncio
 async def test_builtin_reseed_appends_version_without_rewriting_history(
     strategy_db,
 ) -> None:
@@ -285,6 +307,42 @@ async def test_seed_removes_retired_builtin_strategy_rows(strategy_db) -> None:
     assert (
         await model.StrategyVersion.filter(strategy_slug=definition.slug).count()
     ) == 0
+
+
+@pytest.mark.asyncio
+async def test_seed_preserves_configured_retired_builtin_strategy(strategy_db) -> None:
+    definition = await model.StrategyDefinition.create(
+        slug="retired_configured_builtin",
+        name="Retired configured built-in",
+        description="",
+        is_builtin=True,
+        active_version=1,
+        draft_version=1,
+        validation_status="valid",
+    )
+    await model.StrategyVersion.create(
+        strategy_slug=definition.slug,
+        version=1,
+        ir_json=json.dumps({"slug": definition.slug}),
+        validation_json=json.dumps({"status": "valid"}),
+        explanation="legacy",
+    )
+    await model.AppConfig.create(
+        key="dca_strategy",
+        value=definition.slug,
+        value_type="str",
+    )
+
+    await seed_builtin_strategies()
+
+    assert (
+        await model.StrategyDefinition.get_or_none(slug=definition.slug)
+        is not None
+    )
+    assert (
+        await model.StrategyVersion.filter(strategy_slug=definition.slug).count()
+        == 1
+    )
 
 
 @pytest.mark.asyncio

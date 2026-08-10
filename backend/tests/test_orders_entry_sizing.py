@@ -85,6 +85,8 @@ async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
             "side": "buy",
             "signal_name": "asap",
             "strategy_name": "ema20_swing",
+            "strategy_slug": "ema20_swing",
+            "strategy_version": 3,
             "timeframe": "15m",
             "metadata_json": json.dumps(
                 {
@@ -122,4 +124,6 @@ async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
     assert metadata["entry_sizing"]["fallback_reason_code"] == "invalid_price_or_amount"
     assert metadata["entry_sizing"]["resolved_order_size"] == 100.0
     assert persisted[0][1]["signal_name"] == "asap"
+    assert persisted[0][1]["strategy_slug"] == "ema20_swing"
+    assert persisted[0][1]["strategy_version"] == 3
     assert len(notifications) == 1

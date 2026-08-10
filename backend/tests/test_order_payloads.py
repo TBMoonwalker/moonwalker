@@ -4,10 +4,88 @@ from service.order_payloads import (
     build_buy_monitor_payload,
     build_buy_trade_payload,
     build_closed_trade_payloads,
+    build_final_sell_executions,
     build_manual_buy_open_trade_payload,
     build_manual_buy_trade_payload,
     calculate_trade_duration,
 )
+
+
+def test_final_sell_executions_inherit_missing_strategy_identity() -> None:
+    """Final executions retain the immutable strategy used by the deal."""
+    result = build_final_sell_executions(
+        {
+            "symbol": "BTC/USDC",
+            "strategy_name": "EMA Swing",
+            "strategy_slug": "ema_swing",
+            "strategy_version": 4,
+            "timeframe": "15m",
+            "executions": [
+                {
+                    "symbol": "BTC/USDC",
+                    "side": "sell",
+                    "role": "final_sell",
+                    "strategy_name": None,
+                    "strategy_slug": None,
+                    "strategy_version": None,
+                    "timeframe": None,
+                },
+                {
+                    "symbol": "BTC/USDC",
+                    "side": "sell",
+                    "role": "partial_sell",
+                    "strategy_name": "Historical",
+                    "strategy_slug": "historical",
+                    "strategy_version": 0,
+                    "timeframe": "4h",
+                },
+            ],
+        },
+        closed_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+
+    assert result[0]["strategy_name"] == "EMA Swing"
+    assert result[0]["strategy_slug"] == "ema_swing"
+    assert result[0]["strategy_version"] == 4
+    assert result[0]["timeframe"] == "15m"
+    assert result[1]["strategy_name"] == "Historical"
+    assert result[1]["strategy_slug"] == "historical"
+    assert result[1]["strategy_version"] == 0
+    assert result[1]["timeframe"] == "4h"
+
+
+def test_synthesized_final_sell_execution_keeps_strategy_identity() -> None:
+    result = build_final_sell_executions(
+        {
+            "symbol": "BTC/USDC",
+            "side": "sell",
+            "total_amount": 0.5,
+            "price": 110.0,
+            "strategy_name": "EMA Swing",
+            "strategy_slug": "ema_swing",
+            "strategy_version": 4,
+        },
+        closed_at=datetime(2026, 8, 2, tzinfo=timezone.utc),
+    )
+
+    assert result == [
+        {
+            "symbol": "BTC/USDC",
+            "side": "sell",
+            "role": "final_sell",
+            "campaign_id": None,
+            "timestamp": "1785628800000",
+            "price": 110.0,
+            "amount": 0.5,
+            "ordersize": 55.0,
+            "fee": 0.0,
+            "order_id": None,
+            "order_type": None,
+            "strategy_name": "EMA Swing",
+            "strategy_slug": "ema_swing",
+            "strategy_version": 4,
+        }
+    ]
 
 
 def test_calculate_trade_duration_returns_json_payload() -> None:

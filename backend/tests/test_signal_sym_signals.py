@@ -64,6 +64,8 @@ def _entry_order_decisions(
     order_size: float = 10.0,
     baseline_order_size: float = 10.0,
     strategy_name: str | None = None,
+    strategy_slug: str | None = None,
+    strategy_version: int | None = None,
 ) -> dict[str, types.SimpleNamespace]:
     entry_size_applied = order_size != baseline_order_size
     return {
@@ -79,6 +81,8 @@ def _entry_order_decisions(
             trust_score=72.0 if entry_size_applied else 50.0,
             signal_name="sym_signals:1",
             strategy_name=strategy_name,
+            strategy_slug=strategy_slug or strategy_name,
+            strategy_version=strategy_version,
             timeframe="1m",
             metadata_json=(
                 '{"entry_sizing":{"applied":true}}'

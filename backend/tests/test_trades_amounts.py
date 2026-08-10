@@ -3,8 +3,9 @@ import os
 import model
 import pytest
 from service.spot_campaign_types import TradeCloseReason
-from service.trades import Trades
+from service.trades import TradeStateUnavailableError, Trades
 from tortoise import Tortoise
+from tortoise.exceptions import OperationalError
 
 
 @pytest.mark.asyncio
@@ -77,6 +78,22 @@ async def test_get_trades_for_orders_uses_net_amount(tmp_path, monkeypatch) -> N
     assert aggregated["total_amount"] == 99.0
     assert aggregated["sellable_amount"] == 99.0
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_authoritative_trade_read_preserves_database_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trades = Trades()
+
+    async def fail_trade_read(_symbol: str):
+        raise OperationalError("database unavailable")
+
+    monkeypatch.setattr(trades, "get_trades_by_symbol", fail_trade_read)
+
+    assert await trades.get_trades_for_orders_fresh("BTC/USDC") is None
+    with pytest.raises(TradeStateUnavailableError, match="BTC/USDC"):
+        await trades.get_trades_for_orders_authoritative("BTC/USDC")
 
 
 @pytest.mark.asyncio

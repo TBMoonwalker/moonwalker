@@ -75,6 +75,9 @@ class SignalPlugin:
         self._volume: dict[str, Any] | None = None
         self._strategy_timeframe = "1m"
         self._signal_strategy_plugin: Any | None = None
+        self._signal_strategy_identity_by_symbol: dict[
+            str, tuple[str | None, int | None]
+        ] = {}
         self._required_history_days = 0
         self._required_history_candles = 0
 
@@ -86,6 +89,7 @@ class SignalPlugin:
         self._volume = runtime.volume
         self._strategy_timeframe = runtime.strategy_timeframe
         self._signal_strategy_plugin = None
+        self._signal_strategy_identity_by_symbol.clear()
         configured_history_days = resolve_history_lookback_days(
             self.config,
             timeframe=self._strategy_timeframe,
@@ -442,6 +446,15 @@ class SignalPlugin:
                 try:
                     if not await self._signal_strategy_plugin.run(symbol, "buy"):
                         return False
+                    identity_reader = getattr(
+                        self._signal_strategy_plugin,
+                        "last_evaluation_identity",
+                        None,
+                    )
+                    if callable(identity_reader):
+                        self._signal_strategy_identity_by_symbol[symbol] = (
+                            identity_reader(symbol, "buy")
+                        )
                 except (AttributeError, RuntimeError, TypeError, ValueError) as e:
                     # Broad catch to keep signal processing resilient.
                     logging.error("Error running buy strategy. Cause: %s", e)
@@ -522,6 +535,11 @@ class SignalPlugin:
                         timeframe=self._strategy_timeframe,
                         botname_factory=lambda symbol: f"asap_{symbol}",
                         inter_order_delay_seconds=1.0,
+                        strategy_identity_by_symbol=(
+                            self._signal_strategy_identity_by_symbol
+                            if self._signal_strategy_plugin
+                            else None
+                        ),
                         admission_resolver=resolve_signal_admission_batch,
                         entry_order_resolver=resolve_signal_entry_orders,
                     )
