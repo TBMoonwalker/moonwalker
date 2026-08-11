@@ -41,4 +41,4 @@ jobs:
             git config user.email "tb@moonwalker.dev"
             git add frontend/tests-e2e/backtest-mobile.spec.ts-snapshots/
             git commit -m "fix: regenerate backtest mobile snapshots for Linux" || echo "no changes to commit"
-            git push origin HEAD/codex/repository-simplification
+            git push origin HEAD:codex/repository-simplification
