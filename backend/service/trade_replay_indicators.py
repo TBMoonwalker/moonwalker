@@ -112,18 +112,28 @@ class TradeReplayIndicatorService:
             )
         else:
             executions = await self.trades.get_trade_executions(normalized_deal_id)
-        strategies = self._execution_strategies(executions)
+        strategy_references = self._execution_strategy_references(executions)
+        strategies = self._strategy_names(strategy_references)
         source = "execution_ledger"
         if not strategies:
             strategies = await self._legacy_backfill_strategies(executions)
             if strategies:
                 source = "legacy_config_backfill"
+                strategy_references = [(strategy, None) for strategy in strategies]
         symbol = self._execution_symbol(executions)
         if not symbol or not strategies:
             return self._empty(timerange)
 
         builder = StrategyChartIndicatorBuilder(symbol, str(timerange))
-        loaded_strategies = await builder.collect_strategy_requirements(*strategies)
+        versioned_collector = getattr(
+            builder,
+            "collect_versioned_strategy_requirements",
+            None,
+        )
+        if callable(versioned_collector):
+            loaded_strategies = await versioned_collector(strategy_references)
+        else:
+            loaded_strategies = await builder.collect_strategy_requirements(*strategies)
         if not loaded_strategies:
             return self._payload([], strategies, timerange, source)
 
@@ -157,17 +167,32 @@ class TradeReplayIndicatorService:
         return (await Config.instance()).snapshot()
 
     @staticmethod
-    def _execution_strategies(executions: list[dict[str, Any]]) -> list[str]:
-        """Return unique non-empty strategies in ledger order."""
-        strategies: list[str] = []
-        seen: set[str] = set()
+    def _execution_strategy_references(
+        executions: list[dict[str, Any]],
+    ) -> list[tuple[str, int | None]]:
+        """Return unique strategy-version references in ledger order."""
+        references: list[tuple[str, int | None]] = []
+        seen: set[tuple[str, int | None]] = set()
         for execution in executions:
-            strategy = str(execution.get("strategy_name") or "").strip()
-            if not strategy or strategy in seen:
+            strategy = str(
+                execution.get("strategy_slug") or execution.get("strategy_name") or ""
+            ).strip()
+            raw_version = execution.get("strategy_version")
+            try:
+                version = int(raw_version) if raw_version is not None else None
+            except (TypeError, ValueError):
+                version = None
+            reference = (strategy, version)
+            if not strategy or reference in seen:
                 continue
-            seen.add(strategy)
-            strategies.append(strategy)
-        return strategies
+            seen.add(reference)
+            references.append(reference)
+        return references
+
+    @staticmethod
+    def _strategy_names(references: list[tuple[str, int | None]]) -> list[str]:
+        """Return unique strategy slugs while preserving ledger order."""
+        return list(dict.fromkeys(slug for slug, _version in references))
 
     @staticmethod
     def _execution_symbol(executions: list[dict[str, Any]]) -> str | None:

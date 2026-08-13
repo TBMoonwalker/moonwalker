@@ -535,14 +535,18 @@ test('surfaces every typed sell failure from the mounted Open Trades UI', async 
     }),
   ).toBeVisible()
 
-  for (const [, userMessage] of failures) {
+  for (const [status, userMessage] of failures) {
     await page.getByRole('button', { name: 'Sell BTC/USDC' }).click()
     const sellDialog = page.getByRole('dialog')
     await expect(sellDialog).toContainText('Selling deal')
     await sellDialog
       .getByRole('button', { name: 'Sell', exact: true })
       .click()
-    await expect(page.getByText(userMessage, { exact: true })).toBeVisible()
+    await expect(page.getByText(userMessage, { exact: false })).toBeVisible()
+    if (status === 'indeterminate' || status === 'quarantined') {
+      await expect(sellDialog).toBeVisible()
+      await sellDialog.getByRole('button', { name: 'close' }).click()
+    }
     await expect(sellDialog).toBeHidden()
   }
   expect(failureIndex).toBe(failures.length)

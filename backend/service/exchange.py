@@ -14,6 +14,7 @@ from service.exchange_capabilities import (
     ExchangePostSubmissionFailure,
     UnsupportedExchangeCapability,
     require_exchange_placement_capabilities,
+    resolve_exchange_placement_capabilities,
 )
 from service.exchange_client_manager import ExchangeClientManager
 from service.exchange_contexts import (
@@ -1255,6 +1256,20 @@ class Exchange:
                 error_message="Placement has no exchange or client order identity.",
             )
 
+        capabilities = resolve_exchange_placement_capabilities(config)
+        if (
+            not normalized_exchange_id
+            and normalized_client_id
+            and capabilities is not None
+            and capabilities.client_order_lookup_via_order_lists
+        ):
+            return await self.__lookup_spot_order_by_client_id_in_order_lists(
+                exchange=exchange,
+                symbol=resolved_symbol,
+                client_order_id=normalized_client_id,
+                lookup_parameter=capabilities.client_order_lookup_parameter,
+            )
+
         lookup_id = normalized_exchange_id or normalized_client_id
         params = (
             {"clientOrderId": normalized_client_id}
@@ -1299,6 +1314,65 @@ class Exchange:
         return ExchangeOrderLookupResult(
             status=ExchangeOrderLookupStatus.FOUND,
             order=dict(order),
+        )
+
+    async def __lookup_spot_order_by_client_id_in_order_lists(
+        self,
+        *,
+        exchange: Any,
+        symbol: str,
+        client_order_id: str,
+        lookup_parameter: str,
+    ) -> ExchangeOrderLookupResult:
+        """Query Bybit-style order lists by their native client identifier."""
+        params = {lookup_parameter: client_order_id}
+        lookup_error: Exception | None = None
+        for fetch_orders in (
+            exchange.fetch_open_orders,
+            exchange.fetch_closed_orders,
+            exchange.fetch_canceled_orders,
+        ):
+            try:
+                orders = await fetch_orders(symbol, None, None, params)
+            except (
+                ccxt.NetworkError,
+                ccxt.ExchangeError,
+                ccxt.BaseError,
+                RuntimeError,
+                TypeError,
+                ValueError,
+            ) as exc:
+                lookup_error = exc
+                continue
+            for order in orders or []:
+                if not isinstance(order, dict):
+                    continue
+                info = order.get("info")
+                native_client_id = (
+                    info.get(lookup_parameter) if isinstance(info, dict) else None
+                )
+                if str(order.get("clientOrderId") or native_client_id or "") == (
+                    client_order_id
+                ):
+                    return ExchangeOrderLookupResult(
+                        status=ExchangeOrderLookupStatus.FOUND,
+                        order=dict(order),
+                    )
+
+        if lookup_error is not None:
+            logging.warning(
+                "Durable client-order lookup failed for %s (client_id=%s): %s",
+                symbol,
+                client_order_id,
+                lookup_error,
+            )
+            return ExchangeOrderLookupResult(
+                status=ExchangeOrderLookupStatus.UNAVAILABLE,
+                error_message=str(lookup_error),
+            )
+        return ExchangeOrderLookupResult(
+            status=ExchangeOrderLookupStatus.NOT_FOUND,
+            error_message="No order exists for the client order identity.",
         )
 
     async def cancel_spot_order(

@@ -26,8 +26,9 @@ class _DummyExchange:
 
 
 class _ConfigurableExchange(_DummyExchange):
-    def __init__(self, _params: dict[str, object]) -> None:
+    def __init__(self, params: dict[str, object]) -> None:
         super().__init__()
+        self.params = params
         self.demo_enabled = False
         self.sandbox_enabled = False
 
@@ -207,3 +208,30 @@ async def test_init_exchange_uses_sandbox_only_when_not_dry_run(
 
     assert exchange.demo_enabled is False
     assert exchange.sandbox_enabled is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("exchange_id", ["bybit", "bybiteu"])
+async def test_init_bybit_exchange_acknowledges_fetch_order_contract(
+    monkeypatch: pytest.MonkeyPatch,
+    exchange_id: str,
+) -> None:
+    manager = ExchangeClientManager(_DummyLogger())
+    monkeypatch.setattr(
+        f"service.exchange_client_manager.ccxt.{exchange_id}",
+        _ConfigurableExchange,
+    )
+
+    exchange = await manager._init_exchange(
+        {
+            "exchange": exchange_id,
+            "market": "spot",
+            "dry_run": False,
+            "sandbox": False,
+        }
+    )
+
+    assert exchange.params["options"] == {
+        "defaultType": "spot",
+        "fetchOrder": {"acknowledged": True},
+    }

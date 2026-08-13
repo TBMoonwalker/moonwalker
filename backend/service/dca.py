@@ -94,6 +94,15 @@ class Dca:
         self._pending_tp_confirmations: dict[str, TpConfirmationState] = {}
         self._trailing_tp_peaks: dict[str, float] = {}
         self._last_sidestep_gate_by_symbol: dict[str, tuple[Any, ...]] = {}
+        self._last_dynamic_strategy_identity_by_symbol: dict[
+            str, tuple[str | None, int | None]
+        ] = {}
+        self._last_sidestep_exit_identity_by_symbol: dict[
+            str, tuple[str | None, int | None]
+        ] = {}
+        self._last_sidestep_reentry_identity_by_symbol: dict[
+            str, tuple[str | None, int | None]
+        ] = {}
 
     async def shutdown(self) -> None:
         """Close exchange resources owned by the DCA runtime."""
@@ -137,6 +146,19 @@ class Dca:
         """Forget the last sidestep gate state once evaluation can proceed."""
         normalized_symbol = str(symbol or "").strip()
         self._last_sidestep_gate_by_symbol.pop(normalized_symbol, None)
+
+    @staticmethod
+    def __strategy_identity_from_plugin(
+        plugin: object,
+        symbol: str,
+        side: str,
+        fallback_slug: str | None,
+    ) -> tuple[str | None, int | None]:
+        """Return the strategy identity that produced the latest adapter result."""
+        identity_reader = getattr(plugin, "last_evaluation_identity", None)
+        if callable(identity_reader):
+            return identity_reader(symbol, side)
+        return fallback_slug, None
 
     @staticmethod
     def __order_snapshot_payload(trades: dict[str, Any]) -> dict[str, Any]:
@@ -312,6 +334,14 @@ class Dca:
                     previous_payload = state_map.get(symbol)
 
             result = await dca_strategy_plugin.run(symbol, "buy")
+            self._last_dynamic_strategy_identity_by_symbol[symbol] = (
+                self.__strategy_identity_from_plugin(
+                    dca_strategy_plugin,
+                    symbol,
+                    "buy",
+                    runtime_config.dca_strategy,
+                )
+            )
             if hasattr(dca_strategy_plugin, "_last_log_by_symbol"):
                 state_map = getattr(dca_strategy_plugin, "_last_log_by_symbol")
                 if isinstance(state_map, dict):
@@ -338,7 +368,16 @@ class Dca:
             strategy_timeframe,
             "sidestep_exit",
         )
-        return bool(await sidestep_strategy_plugin.run(symbol, "sell"))
+        result = bool(await sidestep_strategy_plugin.run(symbol, "sell"))
+        self._last_sidestep_exit_identity_by_symbol[symbol] = (
+            self.__strategy_identity_from_plugin(
+                sidestep_strategy_plugin,
+                symbol,
+                "sell",
+                bearish_strategy_name,
+            )
+        )
+        return result
 
     async def __sidestep_reentry_strategy(self, symbol: str) -> bool:
         """Return whether the configured sidestep re-entry strategy wants to rebuy."""
@@ -358,7 +397,16 @@ class Dca:
             strategy_timeframe,
             "sidestep_reentry",
         )
-        return bool(await reentry_strategy_plugin.run(symbol, "buy"))
+        result = bool(await reentry_strategy_plugin.run(symbol, "buy"))
+        self._last_sidestep_reentry_identity_by_symbol[symbol] = (
+            self.__strategy_identity_from_plugin(
+                reentry_strategy_plugin,
+                symbol,
+                "buy",
+                reentry_strategy_name,
+            )
+        )
+        return result
 
     @staticmethod
     def __is_sidestep_mode(trades: dict[str, Any]) -> bool:
@@ -528,6 +576,14 @@ class Dca:
                 )
             return False
 
+        reentry_strategy_name = SidestepCampaignConfigView.from_config(
+            self.config or {}
+        ).reentry_strategy
+        reentry_identity = self._last_sidestep_reentry_identity_by_symbol.get(
+            trades["symbol"],
+            (reentry_strategy_name, None),
+        )
+
         logging.info(
             "Sidestep re-entry triggered for %s: campaign=%s reserved_quote=%s "
             "current_price=%s strategy=%s.",
@@ -535,7 +591,7 @@ class Dca:
             trades.get("campaign_id"),
             order_size,
             current_price,
-            SidestepCampaignConfigView.from_config(self.config or {}).reentry_strategy,
+            reentry_strategy_name,
         )
         order = {
             "ordersize": order_size,
@@ -551,9 +607,9 @@ class Dca:
             "current_price": current_price,
             "campaign_id": trades.get("campaign_id"),
             "signal_name": None,
-            "strategy_name": SidestepCampaignConfigView.from_config(
-                self.config or {}
-            ).reentry_strategy,
+            "strategy_name": reentry_strategy_name,
+            "strategy_slug": reentry_identity[0] or reentry_strategy_name,
+            "strategy_version": reentry_identity[1],
             "timeframe": resolve_timeframe(self.config or {}),
             "metadata_json": None,
             **self.__order_snapshot_payload(trades),
@@ -1499,6 +1555,15 @@ class Dca:
                                 "maximum_buy_price": maximum_buy_price,
                             }
                         )
+                    dca_strategy_name = (
+                        runtime_config.dca_strategy
+                        if dynamic_dca and runtime_config.dca_strategy
+                        else None
+                    )
+                    dca_identity = self._last_dynamic_strategy_identity_by_symbol.get(
+                        trades["symbol"],
+                        (dca_strategy_name, None),
+                    )
                     order = {
                         "ordersize": safety_order_size,
                         "symbol": trades["symbol"],
@@ -1513,11 +1578,9 @@ class Dca:
                         "maximum_buy_price": (
                             maximum_buy_price if maximum_buy_price > 0 else None
                         ),
-                        "strategy_name": (
-                            runtime_config.dca_strategy
-                            if dynamic_dca and runtime_config.dca_strategy
-                            else None
-                        ),
+                        "strategy_name": dca_strategy_name,
+                        "strategy_slug": dca_identity[0] or dca_strategy_name,
+                        "strategy_version": dca_identity[1],
                         "timeframe": (
                             resolve_timeframe(self.config or {})
                             if dynamic_dca and runtime_config.dca_strategy
@@ -1764,6 +1827,14 @@ class Dca:
             return False
 
         actual_pnl = self.utils.calculate_actual_pnl(trades, current_price)
+        bearish_strategy_name = SidestepCampaignConfigView.from_config(
+            self.config or {}
+        ).bearish_strategy
+        bearish_identity = self._last_sidestep_exit_identity_by_symbol.get(
+            trades["symbol"],
+            (bearish_strategy_name, None),
+        )
+
         logging.info(
             "Sidestep exit triggered for %s: campaign=%s current_price=%s "
             "tp_price=%s actual_pnl=%s.",
@@ -1784,6 +1855,10 @@ class Dca:
             "current_price": current_price,
             "tp_price": take_profit_price,
             "campaign_id": trades.get("campaign_id"),
+            "strategy_name": bearish_strategy_name,
+            "strategy_slug": bearish_identity[0] or bearish_strategy_name,
+            "strategy_version": bearish_identity[1],
+            "timeframe": resolve_timeframe(self.config or {}),
             **self.__order_snapshot_payload(trades),
         }
         await self.orders.receive_sell_order(order, self.config or {})

@@ -475,7 +475,11 @@ class Database:
                 ("deal_id", "TEXT NULL"),
                 ("campaign_id", "TEXT NULL"),
             ),
-            "tradeexecutions": (("campaign_id", "TEXT NULL"),),
+            "tradeexecutions": (
+                ("campaign_id", "TEXT NULL"),
+                ("strategy_slug", "TEXT NULL"),
+                ("strategy_version", "INTEGER NULL"),
+            ),
             "opentrades": (
                 ("deal_id", "TEXT NULL"),
                 ("campaign_id", "TEXT NULL"),
@@ -919,8 +923,30 @@ class Database:
                     description="Create current additive and unique indexes.",
                     apply=self._ensure_indexes,
                 ),
+                MigrationDefinition(
+                    version="2026-08-02-008-strategy-history-expand",
+                    phase="schema",
+                    description="Add immutable strategy identity to trade executions.",
+                    apply=self._ensure_strategy_history_schema,
+                ),
             )
         )
+
+    async def _ensure_strategy_history_schema(self) -> None:
+        """Add strategy identity columns and their lookup index."""
+        await self._ensure_trade_ledger_columns()
+        await self._ensure_strategy_history_index()
+
+    async def _ensure_strategy_history_index(self) -> None:
+        """Create the strategy lookup index after its columns exist."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+
+        connection = Tortoise.get_connection("default")
+        await connection.execute_script("""
+            CREATE INDEX IF NOT EXISTS idx_tradeexecutions_strategy_version
+            ON tradeexecutions (strategy_slug, strategy_version);
+            """)
 
     async def _run_backfill_init_steps(self) -> None:
         """Run ordered data migrations required before the runtime starts."""

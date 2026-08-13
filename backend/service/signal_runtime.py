@@ -130,6 +130,8 @@ class SignalEntryOrderDecision:
     signal_name: str | None
     strategy_name: str | None
     timeframe: str
+    strategy_slug: str | None = None
+    strategy_version: int | None = None
 
     @property
     def metadata_json(self) -> str:
@@ -217,6 +219,8 @@ def build_signal_buy_intent(
         "side": "buy",
         "signal_name": decision.signal_name,
         "strategy_name": decision.strategy_name,
+        "strategy_slug": decision.strategy_slug,
+        "strategy_version": decision.strategy_version,
         "timeframe": decision.timeframe,
         "metadata_json": (
             decision.metadata_json if metadata_json is None else metadata_json
@@ -244,6 +248,7 @@ async def execute_signal_entry_batch(
     prepare_symbol: SignalSymbolPreparer | None = None,
     metadata_factory: SignalMetadataFactory | None = None,
     inter_order_delay_seconds: float = 0.0,
+    strategy_identity_by_symbol: dict[str, tuple[str | None, int | None]] | None = None,
     admission_resolver: SignalAdmissionResolver,
     entry_order_resolver: SignalEntryOrderResolver,
 ) -> SignalEntryBatchResult:
@@ -268,14 +273,21 @@ async def execute_signal_entry_batch(
 
         if prepared_symbols:
             await watcher_queue.put(prepared_symbols)
+            entry_kwargs: dict[str, Any] = {
+                "signal_name": signal_name,
+                "strategy_name": strategy_name,
+                "timeframe": timeframe,
+            }
+            if strategy_identity_by_symbol is not None:
+                entry_kwargs["strategy_identity_by_symbol"] = (
+                    strategy_identity_by_symbol
+                )
             entry_orders = await entry_order_resolver(
                 config,
                 statistic,
                 autopilot,
                 prepared_symbols,
-                signal_name=signal_name,
-                strategy_name=strategy_name,
-                timeframe=timeframe,
+                **entry_kwargs,
             )
             log_signal_entry_order_decisions(entry_orders.values())
 
@@ -658,6 +670,7 @@ async def resolve_signal_entry_orders(
     signal_name: str | None,
     strategy_name: str | None,
     timeframe: str | None = None,
+    strategy_identity_by_symbol: dict[str, tuple[str | None, int | None]] | None = None,
 ) -> dict[str, SignalEntryOrderDecision]:
     """Resolve shared per-symbol entry sizes for admitted signal candidates."""
     normalized_symbols = _dedupe_candidate_symbols(admitted_symbols)
@@ -700,6 +713,13 @@ async def resolve_signal_entry_orders(
             entry_size_applied = False
             reason_code = "invalid_entry_order_size"
 
+        strategy_identity = (strategy_identity_by_symbol or {}).get(symbol)
+        strategy_slug = strategy_name
+        strategy_version = None
+        if strategy_identity is not None:
+            strategy_slug = strategy_identity[0] or strategy_name
+            strategy_version = strategy_identity[1]
+
         decisions[symbol] = SignalEntryOrderDecision(
             symbol=symbol,
             entry_sizing_configured=entry_sizing_configured,
@@ -713,6 +733,8 @@ async def resolve_signal_entry_orders(
             trust_score=policy.adaptive_trust_score,
             signal_name=signal_name,
             strategy_name=strategy_name,
+            strategy_slug=strategy_slug,
+            strategy_version=strategy_version,
             timeframe=resolved_timeframe,
         )
 

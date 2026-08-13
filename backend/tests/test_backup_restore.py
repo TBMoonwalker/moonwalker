@@ -378,7 +378,7 @@ async def test_restore_rejects_tampered_recovery_manifest_before_writes(
         }
     )
 
-    with pytest.raises(ValueError, match="integrity check failed"):
+    with pytest.raises(ValueError, match="checksum validation failed"):
         await backup_service.restore_backup(
             backup_payload,
             restore_trade_data=True,

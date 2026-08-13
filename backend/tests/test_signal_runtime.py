@@ -11,6 +11,7 @@ from service.signal_runtime import (
     SignalAdmissionLease,
     SignalEntryOrderDecision,
     build_common_runtime_settings,
+    build_signal_buy_intent,
     execute_signal_entry_batch,
     is_max_bots_reached,
     parse_signal_settings,
@@ -471,6 +472,7 @@ async def test_resolve_signal_entry_orders_reuses_shared_autopilot_policy() -> N
         signal_name="asap",
         strategy_name="ema20_swing",
         timeframe="15m",
+        strategy_identity_by_symbol={"BTC/USDT": ("ema20_swing", 3)},
     )
 
     decision = decisions["BTC/USDT"]
@@ -478,6 +480,12 @@ async def test_resolve_signal_entry_orders_reuses_shared_autopilot_policy() -> N
     assert decision.baseline_order_size == 100.0
     assert decision.entry_size_applied is True
     assert decision.reason_code == "quick_profitable_closes"
+    assert decision.strategy_slug == "ema20_swing"
+    assert decision.strategy_version == 3
+    assert (
+        build_signal_buy_intent(decision, botname="asap_BTC/USDT")["strategy_version"]
+        == 3
+    )
     assert '"resolved_order_size": 115.0' in decision.metadata_json
 
 

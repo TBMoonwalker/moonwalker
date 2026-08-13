@@ -222,8 +222,25 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
                 "PRAGMA table_info('upnl_history')"
             ).fetchall()
         }
+        execution_columns = {
+            row[1]
+            for row in connection.execute(
+                "PRAGMA table_info('tradeexecutions')"
+            ).fetchall()
+        }
+        execution_index_columns = {
+            tuple(
+                column[2]
+                for column in connection.execute(
+                    f"PRAGMA index_info('{index_row[1]}')"
+                ).fetchall()
+            )
+            for index_row in connection.execute(
+                "PRAGMA index_list('tradeexecutions')"
+            ).fetchall()
+        }
 
-    assert len(ledger_rows) == 7
+    assert len(ledger_rows) == 8
     assert {status for _, status in ledger_rows} == {MIGRATION_STATUS_APPLIED}
     assert open_trade is not None
     assert open_trade[:3] == ("BTC/USDC", 1.0, 100.0)
@@ -240,3 +257,5 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
     )
     assert "evaluation_id" in ai_columns
     assert "funds_locked" in upnl_columns
+    assert {"strategy_slug", "strategy_version"} <= execution_columns
+    assert ("strategy_slug", "strategy_version") in execution_index_columns

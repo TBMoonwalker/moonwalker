@@ -2,6 +2,9 @@ import {
     HistogramSeries,
     LineSeries,
     createChart,
+    type HistogramData,
+    type LineData,
+    type UTCTimestamp,
 } from 'lightweight-charts'
 
 import {
@@ -70,9 +73,10 @@ export function getIndicatorPanes(
 export function normalizedIndicatorValues(
     series: BacktestIndicatorSeries,
     timeOffsetSeconds = 0,
-) {
+): LineData<UTCTimestamp>[] {
     return series.values.map((value) => ({
-        time: normalizeBacktestTimestampSeconds(value.time) + timeOffsetSeconds,
+        time: (normalizeBacktestTimestampSeconds(value.time) +
+            timeOffsetSeconds) as UTCTimestamp,
         value: Number(value.value),
     }))
 }
@@ -96,9 +100,11 @@ export function renderIndicatorSeries(
             priceLineVisible,
             lastValueVisible: priceMarkersVisible,
         })
-        histogram.setData(
-            normalizedIndicatorValues(series, timeOffsetSeconds) as any[],
+        const values: HistogramData<UTCTimestamp>[] = normalizedIndicatorValues(
+            series,
+            timeOffsetSeconds,
         )
+        histogram.setData(values)
         return histogram
     }
     const line = targetChart.addSeries(LineSeries, {
@@ -107,6 +113,6 @@ export function renderIndicatorSeries(
         priceLineVisible,
         lastValueVisible: priceMarkersVisible,
     })
-    line.setData(normalizedIndicatorValues(series, timeOffsetSeconds) as any[])
+    line.setData(normalizedIndicatorValues(series, timeOffsetSeconds))
     return line
 }

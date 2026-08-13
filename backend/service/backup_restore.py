@@ -211,7 +211,7 @@ class BackupService:
         return payload
 
     async def _export_recovery_manifest(self) -> dict[str, Any]:
-        """Seal nonterminal intents for audit-only quarantine on restore."""
+        """Checksum nonterminal intents for audit-only quarantine on restore."""
         rows = (
             await model.PlacementIntent.filter(state__in=NONTERMINAL_PLACEMENT_STATES)
             .order_by("id")
@@ -229,7 +229,7 @@ class BackupService:
 
     @staticmethod
     def _recovery_manifest_digest(body: dict[str, Any]) -> str:
-        """Return the deterministic integrity seal for a recovery manifest."""
+        """Return a checksum that detects accidental manifest corruption."""
         canonical = json.dumps(
             body,
             sort_keys=True,
@@ -333,19 +333,24 @@ class BackupService:
         cls,
         raw_manifest: Any,
     ) -> list[dict[str, Any]]:
-        """Validate a sealed manifest and return nonterminal source intents."""
+        """Validate a checksummed manifest and return nonterminal source intents.
+
+        The legacy ``sealed_recovery_manifest`` field name remains part of the
+        backup schema. Its plain SHA-256 digest detects corruption but does not
+        authenticate a backup supplied by an untrusted party.
+        """
         if raw_manifest is None:
             return []
         if not isinstance(raw_manifest, dict):
             raise build_invalid_backup_shape_error(
-                message="The sealed recovery manifest must be an object.",
+                message="The recovery manifest must be an object.",
                 safe_fields={"manifest_type": type(raw_manifest).__name__},
             )
 
         raw_intents = raw_manifest.get("intents")
         if not isinstance(raw_intents, list):
             raise build_invalid_backup_shape_error(
-                message="The sealed recovery manifest intents must be a list.",
+                message="The recovery manifest intents must be a list.",
                 safe_fields={"intents_type": type(raw_intents).__name__},
             )
         body = {
@@ -355,7 +360,7 @@ class BackupService:
         }
         if body["schema_version"] != RECOVERY_MANIFEST_SCHEMA_VERSION:
             raise build_invalid_backup_shape_error(
-                message="Unsupported sealed recovery manifest schema version.",
+                message="Unsupported recovery manifest schema version.",
                 safe_fields={"schema_version": body["schema_version"]},
             )
         if body["disposition"] != RECOVERY_MANIFEST_DISPOSITION:
@@ -365,7 +370,7 @@ class BackupService:
             )
         if raw_manifest.get("sha256") != cls._recovery_manifest_digest(body):
             raise build_invalid_backup_shape_error(
-                message="The sealed recovery manifest integrity check failed.",
+                message="The recovery manifest checksum validation failed.",
                 safe_fields={"manifest_intents": len(raw_intents)},
             )
 

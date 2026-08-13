@@ -81,6 +81,8 @@ class ExchangePlacementCapabilities:
     order_history: bool
     deterministic_cancellation: bool
     supported_order_types: frozenset[str]
+    client_order_lookup_parameter: str = "clientOrderId"
+    client_order_lookup_via_order_lists: bool = False
 
     @property
     def supports_safe_placement(self) -> bool:
@@ -107,8 +109,36 @@ BINANCE_SPOT_CAPABILITIES = ExchangePlacementCapabilities(
     supported_order_types=frozenset({"market", "limit"}),
 )
 
+BYBIT_SPOT_CAPABILITIES = ExchangePlacementCapabilities(
+    exchange_id="bybit",
+    client_order_id_parameter="clientOrderId",
+    stable_client_order_id=True,
+    lookup_by_client_order_id=True,
+    lookup_by_exchange_order_id=True,
+    order_history=True,
+    deterministic_cancellation=True,
+    supported_order_types=frozenset({"market", "limit"}),
+    client_order_lookup_parameter="orderLinkId",
+    client_order_lookup_via_order_lists=True,
+)
+
+BYBIT_EU_SPOT_CAPABILITIES = ExchangePlacementCapabilities(
+    exchange_id="bybiteu",
+    client_order_id_parameter="clientOrderId",
+    stable_client_order_id=True,
+    lookup_by_client_order_id=True,
+    lookup_by_exchange_order_id=True,
+    order_history=True,
+    deterministic_cancellation=True,
+    supported_order_types=frozenset({"market", "limit"}),
+    client_order_lookup_parameter="orderLinkId",
+    client_order_lookup_via_order_lists=True,
+)
+
 EXCHANGE_PLACEMENT_CAPABILITIES = {
     BINANCE_SPOT_CAPABILITIES.exchange_id: BINANCE_SPOT_CAPABILITIES,
+    BYBIT_SPOT_CAPABILITIES.exchange_id: BYBIT_SPOT_CAPABILITIES,
+    BYBIT_EU_SPOT_CAPABILITIES.exchange_id: BYBIT_EU_SPOT_CAPABILITIES,
 }
 
 
@@ -155,7 +185,7 @@ def require_exchange_placement_capabilities(
 
 
 def build_client_order_id(operation_id: str) -> str:
-    """Return a stable Binance-compatible client order identifier."""
+    """Return a stable exchange-compatible client order identifier."""
     digest = hashlib.sha256(operation_id.encode("utf-8")).hexdigest()[:28]
     return f"mw-{digest}"
 

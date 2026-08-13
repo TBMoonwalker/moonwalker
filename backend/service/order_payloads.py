@@ -144,7 +144,23 @@ def build_final_sell_executions(
     """Return execution rows for the final sell status payload."""
     executions = list(order_status.get("executions") or [])
     if executions:
-        return executions
+        return [
+            {
+                **execution,
+                "strategy_name": execution.get("strategy_name")
+                or order_status.get("strategy_name"),
+                "strategy_slug": execution.get("strategy_slug")
+                or order_status.get("strategy_slug"),
+                "strategy_version": (
+                    execution.get("strategy_version")
+                    if execution.get("strategy_version") is not None
+                    else order_status.get("strategy_version")
+                ),
+                "timeframe": execution.get("timeframe")
+                or order_status.get("timeframe"),
+            }
+            for execution in executions
+        ]
 
     amount = float(order_status.get("total_amount") or 0.0)
     if amount <= 0:
@@ -179,6 +195,9 @@ def build_final_sell_executions(
                 if order_status.get("ordertype") is not None
                 else None
             ),
+            "strategy_name": order_status.get("strategy_name"),
+            "strategy_slug": order_status.get("strategy_slug"),
+            "strategy_version": order_status.get("strategy_version"),
         }
     ]
 
@@ -208,6 +227,8 @@ def build_buy_trade_payload(
         "side": order_status["side"],
         "signal_name": order_status.get("signal_name"),
         "strategy_name": order_status.get("strategy_name"),
+        "strategy_slug": order_status.get("strategy_slug"),
+        "strategy_version": order_status.get("strategy_version"),
         "timeframe": order_status.get("timeframe"),
         "metadata_json": order_status.get("metadata_json"),
     }

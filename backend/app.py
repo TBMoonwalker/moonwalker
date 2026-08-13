@@ -40,6 +40,7 @@ from service.origin_policy import (
     parse_allowed_origins,
 )
 from service.redis import redis_client, start_redis, stop_redis
+from service.replay_repair_queue import replay_repair_queue
 from service.runtime_services import (
     RuntimeServices,
     activate_runtime_services,
@@ -380,6 +381,7 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
         # `-- optional: replay-candle backfill
         async with asyncio.TaskGroup() as task_group:
             await ai_work_queue.start(task_group)
+            await replay_repair_queue.start(task_group)
             await runtime_state.database.run_with_context(
                 recover_pending_outcome_attributions
             )
@@ -426,6 +428,7 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
                 yield
             finally:
                 await ai_work_queue.stop()
+                await replay_repair_queue.stop()
                 for task in runtime_state.background_tasks:
                     task.cancel()
     finally:

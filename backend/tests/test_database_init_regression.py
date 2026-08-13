@@ -283,6 +283,7 @@ async def test_database_init_surfaces_actionable_sqlite_corruption(
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_ai_trust_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
+    monkeypatch.setattr(Database, "_ensure_strategy_history_index", _noop)
     monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_malformed)
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", _noop)
@@ -324,6 +325,7 @@ async def test_database_init_reraises_non_corruption_failures(
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_ai_trust_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
+    monkeypatch.setattr(Database, "_ensure_strategy_history_index", _noop)
     monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_generic)
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", _noop)
@@ -368,6 +370,7 @@ async def test_database_init_surfaces_index_rebuild_guidance_for_index_only_corr
     monkeypatch.setattr(Database, "_ensure_upnl_history_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_ai_trust_columns", _noop)
     monkeypatch.setattr(Database, "_ensure_indexes", _noop)
+    monkeypatch.setattr(Database, "_ensure_strategy_history_index", _noop)
     monkeypatch.setattr(Database, "_repair_index_only_corruption_if_needed", _noop)
     monkeypatch.setattr(Database, "_backfill_trade_ledger_rows", raise_malformed)
     monkeypatch.setattr(Database, "_backfill_trade_replay_candles", _noop)
@@ -441,6 +444,11 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
     monkeypatch.setattr(Database, "_ensure_indexes", _record("ensure_indexes"))
     monkeypatch.setattr(
         Database,
+        "_ensure_strategy_history_index",
+        _record("ensure_strategy_history_index"),
+    )
+    monkeypatch.setattr(
+        Database,
         "_repair_index_only_corruption_if_needed",
         _record("repair_index_only_corruption_if_needed"),
     )
@@ -460,6 +468,8 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "ensure_upnl_history_columns",
         "ensure_ai_trust_columns",
         "ensure_indexes",
+        "ensure_trade_ledger_columns",
+        "ensure_strategy_history_index",
         "repair_index_only_corruption_if_needed",
         "backfill_trade_ledger_rows",
     ]

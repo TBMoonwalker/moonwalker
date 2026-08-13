@@ -39,12 +39,13 @@ async def sell_order(
 
     Args:
         symbol: Trading pair symbol (e.g., "BTCUSDT").
+        request: HTTP request carrying an optional durable operation ID.
 
     Returns:
-        Dictionary with result status.
+        Legacy result status plus the typed mutation result.
 
     Example:
-        {"result": "sell"} or {"result": ""}
+        {"result": "sell", "mutation": {"status": "applied", ...}}
     """
     config = await Config.instance()
     try:
@@ -73,12 +74,13 @@ async def buy_order(
     Args:
         symbol: Trading pair symbol (e.g., "BTCUSDT").
         ordersize: Order size in quote currency.
+        request: HTTP request carrying an optional durable operation ID.
 
     Returns:
-        Dictionary with result status.
+        Legacy result status plus the typed mutation result.
 
     Example:
-        {"result": "new_so"} or {"result": ""}
+        {"result": "new_so", "mutation": {"status": "applied", ...}}
     """
     config = await Config.instance()
     try:

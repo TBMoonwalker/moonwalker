@@ -29,6 +29,8 @@ class TradePersistenceRecord(TypedDict):
     campaign_id: NotRequired[str | None]
     signal_name: NotRequired[str | None]
     strategy_name: NotRequired[str | None]
+    strategy_slug: NotRequired[str | None]
+    strategy_version: NotRequired[int | None]
     timeframe: NotRequired[str | None]
     metadata_json: NotRequired[str | dict[str, Any] | None]
     total_amount: NotRequired[float]
@@ -55,6 +57,8 @@ class TradeExecutionRecord(TypedDict):
     so_percentage: float | None
     signal_name: str | None
     strategy_name: str | None
+    strategy_slug: str | None
+    strategy_version: int | None
     timeframe: str | None
     metadata_json: str | None
 

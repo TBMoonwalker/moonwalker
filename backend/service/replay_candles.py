@@ -369,7 +369,7 @@ async def archive_replay_candles_for_deal(
     if not best_source_rows:
         return 0
 
-    if live_row is None and archived_timestamps:
+    if archived_timestamps:
         if best_score <= archived_score:
             return 0
         if source_timestamps == archived_timestamps:

@@ -36,6 +36,10 @@ logging = helper.LoggerFactory.get_logger("logs/trades.log", "trades")
 T = TypeVar("T")
 
 
+class TradeStateUnavailableError(RuntimeError):
+    """Raised when authoritative trade state cannot be loaded safely."""
+
+
 class PartialSellExecution(TypedDict):
     """Accumulated partial-sell execution totals on an open trade."""
 
@@ -1118,6 +1122,8 @@ class Trades:
     async def get_trades_for_orders_fresh(
         self,
         symbol: str,
+        *,
+        fail_on_error: bool = False,
     ) -> dict[str, Any] | None:
         """Load authoritative trade data for locked mutation revalidation."""
         trade_data = []
@@ -1320,9 +1326,24 @@ class Trades:
             ):
                 self._apply_waiting_campaign_status_fields(trade_data, campaign)
             return trade_data
-        except BaseORMException:
-            # Broad catch to return None when trade aggregation fails.
+        except BaseORMException as exc:
+            logging.error(
+                "Could not load authoritative trade state for %s.",
+                symbol,
+                exc_info=True,
+            )
+            if fail_on_error:
+                raise TradeStateUnavailableError(
+                    f"Could not load authoritative trade state for {symbol}."
+                ) from exc
             return None
+
+    async def get_trades_for_orders_authoritative(
+        self,
+        symbol: str,
+    ) -> dict[str, Any] | None:
+        """Load trade state while preserving database failure information."""
+        return await self.get_trades_for_orders_fresh(symbol, fail_on_error=True)
 
     async def get_symbols(self) -> list[str]:
         """Return distinct trade symbols."""

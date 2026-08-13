@@ -89,6 +89,8 @@ class ExchangeClientManager:
 
         if config.get("exchange", None):
             options: dict[str, Any] = {"defaultType": config.get("market", "spot")}
+            if config.get("exchange") in {"bybit", "bybiteu"}:
+                options["fetchOrder"] = {"acknowledged": True}
             hostname = config.get("exchange_hostname")
             if hostname:
                 options["hostname"] = str(hostname).strip()

@@ -32,6 +32,7 @@ export default defineConfig({
         'src/control-center/readiness.ts',
         'src/control-center/routerGuard.ts',
         'src/helpers/configForm.ts',
+        'src/helpers/backtestChartViewport.ts',
         'src/helpers/heatmap.ts',
         'src/helpers/strategyBuilderGraph.ts',
         'src/helpers/tradeLifecycle.ts',
@@ -60,6 +61,12 @@ export default defineConfig({
           branches: 82,
           functions: 100,
           lines: 90,
+        },
+        'src/helpers/backtestChartViewport.ts': {
+          statements: 100,
+          branches: 100,
+          functions: 100,
+          lines: 100,
         },
         'src/helpers/strategyBuilderGraph.ts': {
           statements: 80,

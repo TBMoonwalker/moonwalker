@@ -84,7 +84,7 @@ async def test_receive_sell_signal_returns_false_when_trade_context_missing(
     result = await orders.receive_sell_signal("btc-usdt", {})
 
     assert result is False
-    assert deleted_symbols == ["BTC/USDT"]
+    assert deleted_symbols == []
 
 
 @pytest.mark.asyncio

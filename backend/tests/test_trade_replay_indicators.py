@@ -23,7 +23,7 @@ class _FakeTrades:
 
 
 class _FakeBuilder:
-    calls: list[tuple[str, ...]] = []
+    calls: list[tuple[tuple[str, int | None], ...]] = []
     build_calls: list[tuple[int, int]] = []
     warmup_candles = 0
 
@@ -31,9 +31,16 @@ class _FakeBuilder:
         self.symbol = symbol
         self.timeframe = timeframe
 
-    async def collect_strategy_requirements(self, *slugs: str) -> list[str]:
-        self.calls.append(tuple(slugs))
-        return [slug for slug in slugs if slug != "missing_strategy"]
+    async def collect_versioned_strategy_requirements(
+        self,
+        references: list[tuple[str, int | None]],
+    ) -> list[str]:
+        self.calls.append(tuple(references))
+        return list(
+            dict.fromkeys(
+                slug for slug, _version in references if slug != "missing_strategy"
+            )
+        )
 
     async def build(
         self,
@@ -62,7 +69,12 @@ class _FakeBuilder:
         return self.warmup_candles
 
 
-def _execution(strategy_name: str | None) -> dict[str, Any]:
+def _execution(
+    strategy_name: str | None,
+    *,
+    strategy_slug: str | None = None,
+    strategy_version: int | None = None,
+) -> dict[str, Any]:
     return {
         "deal_id": DEAL_ID,
         "symbol": "BTC/USDT",
@@ -70,6 +82,8 @@ def _execution(strategy_name: str | None) -> dict[str, Any]:
         "role": "base_order",
         "timestamp": "1700000000000",
         "strategy_name": strategy_name,
+        "strategy_slug": strategy_slug,
+        "strategy_version": strategy_version,
         "timeframe": "1m",
     }
 
@@ -112,7 +126,43 @@ async def test_replay_indicators_return_series_for_persisted_strategy(
     assert payload["timeframe"] == "1h"
     assert payload["strategies"] == ["ema20_swing"]
     assert payload["indicators"][0]["label"] == "EMA 20"
-    assert _FakeBuilder.calls == [("ema20_swing",)]
+    assert _FakeBuilder.calls == [(("ema20_swing", None),)]
+
+
+@pytest.mark.asyncio
+async def test_replay_indicators_request_exact_persisted_strategy_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Versioned ledger rows replay against their immutable graph snapshot."""
+    _FakeBuilder.calls = []
+    _FakeBuilder.build_calls = []
+    _FakeBuilder.warmup_candles = 0
+    service = TradeReplayIndicatorService(
+        _FakeTrades(
+            [
+                _execution(
+                    "old-display-name",
+                    strategy_slug="ema20_swing",
+                    strategy_version=3,
+                )
+            ]
+        )
+    )
+
+    async def fake_load_candles(
+        *args: Any, **kwargs: Any
+    ) -> list[ReplayIndicatorCandle]:
+        return [_candle(0), _candle(1)]
+
+    monkeypatch.setattr(service, "_load_candles", fake_load_candles)
+    monkeypatch.setattr(replay_module, "StrategyChartIndicatorBuilder", _FakeBuilder)
+
+    payload = await service.get_indicators(
+        DEAL_ID, "1h", 1_700_000_000_000, 1_700_000_060_000
+    )
+
+    assert payload["strategies"] == ["ema20_swing"]
+    assert _FakeBuilder.calls == [(("ema20_swing", 3),)]
 
 
 @pytest.mark.asyncio
@@ -146,7 +196,7 @@ async def test_replay_indicators_collect_all_unique_sidestep_strategies(
     )
 
     assert payload["strategies"] == ["sidestep_exit", "sidestep_reentry"]
-    assert _FakeBuilder.calls == [("sidestep_exit", "sidestep_reentry")]
+    assert _FakeBuilder.calls == [(("sidestep_exit", None), ("sidestep_reentry", None))]
 
 
 @pytest.mark.asyncio
@@ -181,7 +231,7 @@ async def test_replay_indicators_backfill_legacy_missing_strategy_from_config(
     assert payload["source"] == "legacy_config_backfill"
     assert payload["strategies"] == ["ema_swing"]
     assert payload["indicators"][0]["label"] == "EMA 20"
-    assert _FakeBuilder.calls == [("ema_swing",)]
+    assert _FakeBuilder.calls == [(("ema_swing", None),)]
 
 
 @pytest.mark.asyncio
@@ -241,7 +291,7 @@ async def test_replay_indicators_skip_missing_strategy_snapshots(
 
     assert payload["strategies"] == ["ema20_swing"]
     assert payload["indicators"][0]["values"][0]["value"] == 100.0
-    assert _FakeBuilder.calls == [("missing_strategy", "ema20_swing")]
+    assert _FakeBuilder.calls == [(("missing_strategy", None), ("ema20_swing", None))]
 
 
 @pytest.mark.asyncio

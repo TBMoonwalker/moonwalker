@@ -13,6 +13,7 @@ from service.order_mutation_result import (
 )
 from service.orders import Orders
 from service.placement_intents import PlacementIntentState
+from service.trades import TradeStateUnavailableError
 
 
 def _trade(**overrides: Any) -> dict[str, Any]:
@@ -48,6 +49,9 @@ class _TradeReader:
 
 
 class _MissingTradeReader:
+    def __init__(self) -> None:
+        self.delete_calls = 0
+
     async def get_trades_for_orders_fresh(
         self,
         _symbol: str,
@@ -55,7 +59,23 @@ class _MissingTradeReader:
         return None
 
     async def delete_open_trades(self, _symbol: str) -> None:
-        return None
+        self.delete_calls += 1
+
+
+class _UnavailableTradeReader:
+    async def get_trades_for_orders_authoritative(
+        self,
+        _symbol: str,
+    ) -> None:
+        raise TradeStateUnavailableError("database unavailable")
+
+
+class _UnexpectedTradeReader:
+    async def get_trades_for_orders_authoritative(
+        self,
+        _symbol: str,
+    ) -> None:
+        raise AssertionError("completed operation retries must not reload trade state")
 
 
 class _SequenceTradeReader:
@@ -183,6 +203,30 @@ async def test_missing_intent_distinguishes_applied_and_stale() -> None:
     assert stale.reason_code == "stale_snapshot"
 
 
+@pytest.mark.asyncio
+async def test_post_dispatch_recheck_fails_closed_when_trade_state_is_unavailable() -> (
+    None
+):
+    config = {"dry_run": True}
+    trade = _trade()
+    snapshot = LifecycleSnapshotIdentity.from_trade(trade, config)
+    orders = Orders()
+    orders.placement_intents = _IntentReader(None)  # type: ignore[assignment]
+    orders.trades = _UnavailableTradeReader()  # type: ignore[assignment]
+
+    result = await orders._operator_mutation_result(
+        order={"symbol": "BTC/USDC", "operation_id": "operation-1"},
+        action="manual_buy",
+        applied=False,
+        preexisting_operation=False,
+        expected_snapshot=snapshot,
+        config=config,
+    )
+
+    assert result.status is OrderMutationStatus.REJECTED
+    assert result.reason_code == "trade_state_unavailable"
+
+
 def test_mutation_result_applied_property_rejects_unresolved_states() -> None:
     result = OrderMutationResult(
         operation_id="operation-1",
@@ -209,7 +253,8 @@ async def test_typed_order_result_reports_missing_trade(
     expected_action: str,
 ) -> None:
     orders = Orders()
-    orders.trades = _MissingTradeReader()  # type: ignore[assignment]
+    trade_reader = _MissingTradeReader()
+    orders.trades = trade_reader  # type: ignore[assignment]
     method = getattr(orders, method_name)
 
     result = (
@@ -221,6 +266,98 @@ async def test_typed_order_result_reports_missing_trade(
     assert result.status is OrderMutationStatus.REJECTED
     assert result.reason_code == "trade_not_found"
     assert result.action == expected_action
+    assert trade_reader.delete_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_completed_manual_buy_retry_deduplicates_before_rebuilding_order() -> (
+    None
+):
+    orders = Orders()
+    orders.trades = _UnexpectedTradeReader()  # type: ignore[assignment]
+    orders.placement_intents = _IntentReader(
+        _intent(PlacementIntentState.COMPLETED),
+    )  # type: ignore[assignment]
+
+    result = await orders.receive_buy_signal_result(
+        "btc-usdc",
+        25.0,
+        {"dry_run": True},
+        operation_id="operation-1",
+    )
+
+    assert result.status is OrderMutationStatus.DEDUPLICATED
+    assert result.reason_code == "duplicate_operation"
+    assert result.operation_id == "operation-1"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("state", "expected_status", "expected_reason"),
+    [
+        (
+            PlacementIntentState.COMPLETED,
+            OrderMutationStatus.DEDUPLICATED,
+            "duplicate_operation",
+        ),
+        (
+            PlacementIntentState.ACCEPTED,
+            OrderMutationStatus.INDETERMINATE,
+            PlacementIntentState.ACCEPTED.value,
+        ),
+    ],
+)
+async def test_manual_sell_retry_recovers_intent_after_trade_closes(
+    state: PlacementIntentState,
+    expected_status: OrderMutationStatus,
+    expected_reason: str,
+) -> None:
+    """A retry must reconcile the durable intent after the trade row is gone."""
+    orders = Orders()
+    trade_reader = _MissingTradeReader()
+    orders.trades = trade_reader  # type: ignore[assignment]
+    orders.placement_intents = _IntentReader(_intent(state))  # type: ignore[assignment]
+
+    result = await orders.receive_sell_signal_result(
+        "btc-usdc",
+        {"dry_run": True},
+        operation_id="operator-1",
+    )
+
+    assert result.status is expected_status
+    assert result.reason_code == expected_reason
+    assert result.operation_id == "operator-1"
+    assert result.exchange_order_id == "exchange-1"
+    assert result.client_order_id == "client-1"
+    assert trade_reader.delete_calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "expected_action"),
+    [
+        ("receive_sell_signal_result", "manual_sell"),
+        ("receive_buy_signal_result", "manual_buy"),
+        ("receive_stop_signal_result", "manual_stop"),
+    ],
+)
+async def test_typed_order_result_fails_closed_when_trade_state_is_unavailable(
+    method_name: str,
+    expected_action: str,
+) -> None:
+    orders = Orders()
+    orders.trades = _UnavailableTradeReader()  # type: ignore[assignment]
+    method = getattr(orders, method_name)
+
+    result = (
+        await method("btc-usdc", 25.0, {"dry_run": True})
+        if expected_action == "manual_buy"
+        else await method("btc-usdc", {"dry_run": True})
+    )
+
+    assert result.status is OrderMutationStatus.REJECTED
+    assert result.reason_code == "trade_state_unavailable"
+    assert result.user_message == "Trade state could not be loaded. No order was sent."
 
 
 @pytest.mark.asyncio

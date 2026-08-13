@@ -38,6 +38,7 @@ async def test_strategy_adapter_logs_first_result_and_suppresses_unchanged(
             "reason": "no_match",
         }
     ]
+    assert adapter.last_evaluation_identity("UNI/USDC", "buy") == ("ema_swing", 1)
 
 
 @pytest.mark.asyncio

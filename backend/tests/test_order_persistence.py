@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -31,6 +32,95 @@ def _trade_record(**overrides: Any) -> TradePersistenceRecord:
     }
     payload.update(overrides)
     return cast(TradePersistenceRecord, payload)
+
+
+class _StrategyDefinitionQuery:
+    def using_db(self, _conn: Any) -> "_StrategyDefinitionQuery":
+        return self
+
+    async def first(self) -> SimpleNamespace:
+        return SimpleNamespace(active_version=7)
+
+
+class _DummyStrategyDefinitionModel:
+    @classmethod
+    def filter(cls, **_kwargs: Any) -> _StrategyDefinitionQuery:
+        return _StrategyDefinitionQuery()
+
+
+class _MissingStrategyDefinitionQuery:
+    def using_db(self, _conn: Any) -> "_MissingStrategyDefinitionQuery":
+        return self
+
+    async def first(self) -> None:
+        return None
+
+
+class _MissingStrategyDefinitionModel:
+    @classmethod
+    def filter(cls, **_kwargs: Any) -> _MissingStrategyDefinitionQuery:
+        return _MissingStrategyDefinitionQuery()
+
+
+@pytest.mark.asyncio
+async def test_execution_payload_captures_active_strategy_version(monkeypatch) -> None:
+    monkeypatch.setattr(
+        persistence_module.model,
+        "StrategyDefinition",
+        _DummyStrategyDefinitionModel,
+    )
+
+    payload = await persistence_module._build_trade_execution_payload(
+        "11111111-1111-4111-8111-111111111111",
+        _trade_record(strategy_name="ema_swing"),
+        role="base_order",
+        conn=object(),
+    )
+
+    assert payload["strategy_slug"] == "ema_swing"
+    assert payload["strategy_version"] == 7
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("strategy_values", "definition_model", "expected"),
+    [
+        (
+            {"strategy_slug": "ema_swing", "strategy_version": 4},
+            _MissingStrategyDefinitionModel,
+            ("ema_swing", 4),
+        ),
+        (
+            {"strategy_slug": "ema_swing", "strategy_version": "invalid"},
+            _DummyStrategyDefinitionModel,
+            ("ema_swing", 7),
+        ),
+        (
+            {"strategy_slug": "retired_strategy"},
+            _MissingStrategyDefinitionModel,
+            ("retired_strategy", None),
+        ),
+        ({}, _MissingStrategyDefinitionModel, (None, None)),
+    ],
+)
+async def test_execution_strategy_identity_resolution_branches(
+    monkeypatch: pytest.MonkeyPatch,
+    strategy_values: dict[str, Any],
+    definition_model: type[Any],
+    expected: tuple[str | None, int | None],
+) -> None:
+    monkeypatch.setattr(
+        persistence_module.model,
+        "StrategyDefinition",
+        definition_model,
+    )
+
+    resolved = await persistence_module._resolve_strategy_identity(
+        _trade_record(**strategy_values),
+        object(),
+    )
+
+    assert resolved == expected
 
 
 class _DummyTradesModel:

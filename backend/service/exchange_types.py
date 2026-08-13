@@ -44,6 +44,8 @@ class ExchangeOrderPayload(TypedDict, total=False):
     direction: str
     signal_name: str | None
     strategy_name: str | None
+    strategy_slug: str | None
+    strategy_version: int | None
     timeframe: str | None
     metadata_json: str | None
     close_reason: str | None
@@ -102,6 +104,8 @@ class TradeExecutionPayload(TypedDict, total=False):
     so_percentage: float | None
     signal_name: str | None
     strategy_name: str | None
+    strategy_slug: str | None
+    strategy_version: int | None
     timeframe: str | None
     metadata_json: str | None
 
@@ -113,6 +117,10 @@ class PartialSellStatus(TypedDict, total=False):
     symbol: str
     campaign_id: str | None
     close_reason: str | None
+    strategy_name: str | None
+    strategy_slug: str | None
+    strategy_version: int | None
+    timeframe: str | None
     partial_filled_amount: float
     partial_avg_price: float
     partial_proceeds: float
@@ -157,6 +165,10 @@ class SoldCheckStatus(TypedDict, total=False):
     orderid: str
     side: str
     close_reason: str | None
+    strategy_name: str | None
+    strategy_slug: str | None
+    strategy_version: int | None
+    timeframe: str | None
     amount_fee: Any
     base_fee: float
     ordersize: float

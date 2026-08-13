@@ -112,7 +112,7 @@ stop_services() {
                     continue
                 fi
 
-                kill -TERM "$pid"
+                kill -TERM "$pid" 2>/dev/null || true
                 elapsed=0
                 while kill -0 "$pid" 2>/dev/null; do
                     if [ "$elapsed" -ge "$STOP_TIMEOUT_SECONDS" ]; then

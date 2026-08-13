@@ -107,7 +107,7 @@ def test_stop_script_allows_graceful_shutdown_before_forcing_exit() -> None:
     start_function = script.index("start_services()")
     stop_script = script[stop_function:start_function]
 
-    term_step = 'kill -TERM "$pid"'
+    term_step = 'kill -TERM "$pid" 2>/dev/null || true'
     wait_step = 'while kill -0 "$pid" 2>/dev/null; do'
     force_step = 'kill -KILL "$pid" 2>/dev/null || true'
 

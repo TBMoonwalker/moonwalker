@@ -47,6 +47,10 @@ import {
     LineSeries,
     createChart,
     createSeriesMarkers,
+    type CandlestickData,
+    type LineData,
+    type SeriesMarker,
+    type UTCTimestamp,
 } from 'lightweight-charts'
 
 import {
@@ -56,6 +60,10 @@ import {
     type BacktestIndicatorSeries,
     type BacktestMarker,
 } from '../helpers/backtest'
+import {
+    expandBoundaryLogicalRange,
+    selectBoundaryMarkerTextWidths,
+} from '../helpers/backtestChartViewport'
 import {
     getIndicatorPanes,
     getPriceIndicatorSeries,
@@ -75,6 +83,10 @@ const indicatorChartRefs = new Map<string, HTMLElement>()
 let chart: ReturnType<typeof createChart> | null = null
 let indicatorCharts: Array<ReturnType<typeof createChart>> = []
 let isSynchronizingTimeScale = false
+let activeRenderToken: object | null = null
+
+const MARKER_EDGE_GUTTER_PX = 8
+const MARKER_SHAPE_HALF_WIDTH_PX = 8
 
 const displayIndicators = computed<BacktestIndicatorSeries[]>(() =>
     withDistinctIndicatorColors(props.indicators),
@@ -97,6 +109,8 @@ function setIndicatorChartRef(key: string, element: unknown): void {
 }
 
 function removeCharts(): void {
+    activeRenderToken = null
+    chartRef.value?.removeAttribute('data-backtest-chart-ready')
     if (chart) {
         chart.remove()
         chart = null
@@ -105,6 +119,21 @@ function removeCharts(): void {
         indicatorChart.remove()
     }
     indicatorCharts = []
+}
+
+function waitForSizingFrame(): Promise<void> {
+    return new Promise((resolve) => {
+        requestAnimationFrame(() => resolve())
+    })
+}
+
+function requiredBoundaryPaddingPx(textWidthPx: number | null): number {
+    if (textWidthPx === null) {
+        return 0
+    }
+    return Math.ceil(
+        textWidthPx / 2 + MARKER_SHAPE_HALF_WIDTH_PX + MARKER_EDGE_GUTTER_PX,
+    )
 }
 
 function chartOptions() {
@@ -151,14 +180,22 @@ function synchronizeTimeScales(charts: Array<ReturnType<typeof createChart>>): v
 
 async function renderChart(): Promise<void> {
     removeCharts()
+    const renderToken = {}
+    activeRenderToken = renderToken
     await nextTick()
-    if (!chartRef.value || props.candles.length === 0) {
+    if (
+        activeRenderToken !== renderToken ||
+        !chartRef.value ||
+        props.candles.length === 0
+    ) {
         return
     }
 
-    chart = createChart(chartRef.value, chartOptions())
+    const element = chartRef.value
+    const priceChart = createChart(element, chartOptions())
+    chart = priceChart
 
-    const candlestickSeries = chart.addSeries(CandlestickSeries, {
+    const candlestickSeries = priceChart.addSeries(CandlestickSeries, {
         upColor: '#2E7D5B',
         borderUpColor: '#2E7D5B',
         wickUpColor: '#2E7D5B',
@@ -167,21 +204,22 @@ async function renderChart(): Promise<void> {
         wickDownColor: '#B4443F',
     })
 
-    candlestickSeries.setData(
-        props.candles.map((candle) => ({
+    const candleData: CandlestickData<UTCTimestamp>[] = props.candles.map(
+        (candle) => ({
             time: normalizeBacktestTimestampSeconds(candle.time),
             open: Number(candle.open),
             high: Number(candle.high),
             low: Number(candle.low),
             close: Number(candle.close),
-        })) as any[],
+        }),
     )
+    candlestickSeries.setData(candleData)
 
     for (const series of priceIndicators.value) {
-        renderIndicatorSeries(chart, series)
+        renderIndicatorSeries(priceChart, series)
     }
 
-    const markerData = props.markers
+    const markerData: SeriesMarker<UTCTimestamp>[] = props.markers
         .map((marker) => ({
             time: normalizeBacktestTimestampSeconds(marker.time),
             position: marker.position,
@@ -213,7 +251,7 @@ async function renderChart(): Promise<void> {
                 lastValueVisible: false,
             })
             timelineAnchor.setData(
-                [
+                <LineData<UTCTimestamp>[]>[
                     {
                         time: normalizeBacktestTimestampSeconds(props.candles[0].time),
                         value: anchorValue,
@@ -224,7 +262,7 @@ async function renderChart(): Promise<void> {
                         ),
                         value: anchorValue,
                     },
-                ] as any[],
+                ],
             )
         }
         const renderedSeries = pane.series.map((series) =>
@@ -244,8 +282,51 @@ async function renderChart(): Promise<void> {
         indicatorCharts.push(indicatorChart)
     }
 
-    synchronizeTimeScales([chart, ...indicatorCharts])
-    chart.timeScale().fitContent()
+    synchronizeTimeScales([priceChart, ...indicatorCharts])
+
+    await waitForSizingFrame()
+    if (activeRenderToken !== renderToken || chart !== priceChart) {
+        return
+    }
+
+    const timeScale = priceChart.timeScale()
+    timeScale.fitContent()
+    try {
+        const canvasContext = document.createElement('canvas').getContext('2d')
+        const fittedRange = timeScale.getVisibleLogicalRange()
+        if (canvasContext && fittedRange) {
+            const { fontFamily, fontSize } = priceChart.options().layout
+            canvasContext.font = `${fontSize}px ${fontFamily}`
+            const boundaryTextWidths = selectBoundaryMarkerTextWidths({
+                firstCandleTime: Number(candleData[0].time),
+                lastCandleTime: Number(candleData[candleData.length - 1].time),
+                markers: markerData.map((marker) => ({
+                    time: Number(marker.time),
+                    textWidthPx: canvasContext.measureText(marker.text ?? '').width,
+                })),
+            })
+            if (boundaryTextWidths) {
+                const paddedRange = expandBoundaryLogicalRange({
+                    fittedRange,
+                    firstLogicalIndex: 0,
+                    lastLogicalIndex: candleData.length - 1,
+                    plotWidthPx: timeScale.width(),
+                    requiredLeftPx: requiredBoundaryPaddingPx(
+                        boundaryTextWidths.leftTextWidthPx,
+                    ),
+                    requiredRightPx: requiredBoundaryPaddingPx(
+                        boundaryTextWidths.rightTextWidthPx,
+                    ),
+                })
+                if (paddedRange) {
+                    timeScale.setVisibleLogicalRange(paddedRange)
+                }
+            }
+        }
+    } catch {
+        // Marker padding is best-effort; the fitted chart remains usable.
+    }
+    element.dataset.backtestChartReady = 'true'
 }
 
 onMounted(() => {

@@ -179,7 +179,9 @@ archive without blocking startup.
 
 Completed and rejected exchange-placement records are portable audit history and
 are included in full backups. Any placement that was unresolved when the backup
-was created is kept separately in an integrity-sealed recovery manifest. On
+was created is kept separately in a SHA-256-checksummed recovery manifest. The
+checksum detects accidental corruption; it does not authenticate a backup from
+an untrusted source. On
 restore, Moonwalker clears its source exchange and client-order identities,
 invalidates any nonportable result, retains the recorded capital reservation,
 and marks the row `restored_quarantined`. Restored quarantined rows are never
