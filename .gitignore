@@ -233,3 +233,7 @@ package-lock.json
 !CLAUDE.md
 .gstack/
 .opencode/
+
+# Playwright visual test snapshots (regenerated per-OS, platform-specific binaries)
+# Note: baseline PNGs must remain tracked for CI regression comparison
+# When baselines change, regenerate with: npx playwright test --update-snapshots
