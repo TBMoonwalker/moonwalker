@@ -210,7 +210,7 @@ class ExchangeBuyManager:
             order["amount_fee"] = order_status["amount_fee"]
         if "base_fee" in order_status:
             order["base_fee"] = order_status["base_fee"]
-        if "ordersize" in order_status:
+        if order_status.get("ordersize") is not None:
             order["ordersize"] = order_status["ordersize"]
         if not order.get("amount") or float(order["amount"]) <= 0:
             self._logger.error(

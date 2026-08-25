@@ -112,7 +112,7 @@ def build_parsed_order_status(
         data["side"] = trade["side"]
         data["amount_fee"] = trade["fee_cost"]
         data["base_fee"] = float(trade.get("base_fee") or 0.0)
-        data["ordersize"] = order["cost"]
+        data["ordersize"] = float(trade.get("cost") or order.get("cost") or 0.0)
         return data
 
     data["timestamp"] = order["timestamp"]
@@ -124,5 +124,5 @@ def build_parsed_order_status(
     data["side"] = order["side"]
     data["amount_fee"] = order["fee"]
     data["base_fee"] = 0.0
-    data["ordersize"] = order["cost"]
+    data["ordersize"] = float(order.get("cost") or 0.0)
     return data

@@ -8,6 +8,7 @@ import ccxt.async_support as ccxt
 import pytest
 from service.exchange import Exchange
 from service.exchange_capabilities import ExchangeOrderLookupStatus
+from service.exchange_order_lookup import build_parsed_order_status
 
 
 class _LookupExchange:
@@ -287,3 +288,71 @@ async def test_bybit_lookup_matches_public_client_order_identity(
     assert result.status == ExchangeOrderLookupStatus.FOUND
     assert result.order is not None
     assert result.order["id"] == "exchange-order-public"
+
+
+def test_bybit_fill_uses_look_up_cost_when_create_order_cost_is_none() -> None:
+    """Regression for "ordersize is non nullable field, but null was passed".
+
+    Bybit's create_order returns a bare async acknowledgment with cost=None; the
+    real notional only appears on the looked-up fill. build_parsed_order_status
+    must source ordersize from the fill, otherwise a None reaches the NOT NULL
+    Trades.ordersize column and Tortoise rejects the insert.
+    """
+    bybit_ack = {
+        "id": "2288831934878872832",
+        "symbol": "BTC/USDC",
+        "side": "buy",
+        "type": "market",
+        "cost": None,
+        "amount": None,
+        "price": None,
+        "status": None,
+        "timestamp": None,
+        "filled": None,
+        "average": None,
+        "info": {
+            "orderId": "2288831934878872832",
+            "orderLinkId": "mw-bb65d20d565c8019bdc8f5c94fe2",
+        },
+        "trades": [],
+    }
+    fill = {
+        "timestamp": 1756124430000,
+        "amount": 0.000149,
+        "total_amount": 0.000149,
+        "price": "79504.6",
+        "order": "2288831934878872832",
+        "symbol": "BTC/USDC",
+        "side": "buy",
+        "fee_cost": 0.0,
+        "base_fee": 0.0,
+        "cost": 11.8461854,
+    }
+
+    parsed = build_parsed_order_status(bybit_ack, fill)
+
+    assert parsed["ordersize"] is not None
+    assert isinstance(parsed["ordersize"], float)
+    assert parsed["ordersize"] == pytest.approx(11.8461854)
+    assert parsed["amount"] == pytest.approx(0.000149)
+
+
+def test_fallback_status_coerces_missing_cost_to_zero() -> None:
+    """With no fill available, ordersize falls back to the create_order cost,
+    coerced to 0.0 when the exchange returns a null cost (bybit bare ack)."""
+    order = {
+        "id": "2288831934878872832",
+        "symbol": "BTC/USDC",
+        "side": "buy",
+        "type": "market",
+        "cost": None,
+        "amount": 0.0,
+        "price": 0.0,
+        "timestamp": 0,
+        "fee": 0.0,
+    }
+
+    parsed = build_parsed_order_status(order, None)
+
+    assert parsed["ordersize"] is not None
+    assert parsed["ordersize"] == 0.0
