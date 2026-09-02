@@ -148,6 +148,72 @@ async def test_arm_tp_limit_order_places_and_persists_order() -> None:
 
 
 @pytest.mark.asyncio
+async def test_arm_tp_limit_order_marks_minimum_notional_remainder_unsellable(
+    monkeypatch,
+) -> None:
+    """Stop retrying a proactive TP order that cannot meet the exchange minimum."""
+    orders = Orders()
+    fake_exchange = _FakeExchange()
+    fake_trades = _FakeTrades()
+    orders.exchange = fake_exchange  # type: ignore[assignment]
+    orders.trades = fake_trades  # type: ignore[assignment]
+
+    async def minimum_notional_limit_sell(
+        order: dict[str, Any],
+        _config: dict[str, Any],
+    ) -> dict[str, Any]:
+        return {
+            "requires_market_fallback": True,
+            "fallback_reason": "minimum_notional",
+            "symbol": order["symbol"],
+            "remaining_amount": order["total_amount"],
+            "partial_filled_amount": 0.0,
+            "partial_avg_price": 0.0,
+        }
+
+    handled: list[dict[str, Any]] = []
+
+    async def record_partial_status(
+        order_status: dict[str, Any],
+        _config: dict[str, Any],
+        **_kwargs: Any,
+    ) -> None:
+        handled.append(order_status)
+
+    fake_exchange.place_spot_limit_sell = minimum_notional_limit_sell  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        orders,
+        "_Orders__handle_partial_sell_status",
+        record_partial_status,
+    )
+
+    armed = await orders.arm_tp_limit_order(
+        {
+            "symbol": "SIGN/USDC",
+            "total_amount": 490.0,
+            "limit_price": 0.0065,
+        },
+        {},
+    )
+
+    assert armed is False
+    assert handled == [
+        {
+            "type": "partial_sell",
+            "symbol": "SIGN/USDC",
+            "partial_filled_amount": 0.0,
+            "partial_avg_price": 0.0,
+            "partial_proceeds": 0.0,
+            "remaining_amount": 490.0,
+            "unsellable": True,
+            "unsellable_reason": "minimum_notional",
+            "unsellable_min_notional": None,
+            "unsellable_estimated_notional": None,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_cancel_tp_limit_order_clears_persisted_metadata() -> None:
     orders = Orders()
     fake_exchange = _FakeExchange()
