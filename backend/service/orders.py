@@ -1029,6 +1029,22 @@ class Orders:
                         ),
                         result=dict(order_status) if order_status else None,
                     )
+                    if (
+                        order_status
+                        and order_status.get("requires_market_fallback")
+                        and order_status.get("fallback_reason") == "minimum_notional"
+                    ):
+                        partial_status = build_partial_status_from_fallback(
+                            order_status,
+                            default_symbol=symbol,
+                        )
+                        partial_status["unsellable"] = True
+                        partial_status["unsellable_reason"] = "minimum_notional"
+                        await self.__handle_partial_sell_status(
+                            partial_status,
+                            config,
+                            placement_operation_id=placement.operation_id,
+                        )
                     logging.info(
                         "Proactive TP limit order for %s was not armed: %s",
                         symbol,
