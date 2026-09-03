@@ -208,6 +208,61 @@ async def test_create_spot_sell_preserves_tp_floor_after_limit_timeout() -> None
 
 
 @pytest.mark.asyncio
+async def test_create_spot_sell_marks_below_minimum_limit_remainder_unsellable() -> (
+    None
+):
+    """Archive dust instead of retrying when a TP guard blocks market fallback."""
+    manager = ExchangeSellManager(
+        logger=_DummyLogger(),
+        get_exchange=lambda: _DummyExchange(),
+    )
+
+    async def fake_limit_sell(
+        _order: dict[str, object], _config: dict[str, object]
+    ) -> dict[str, object]:
+        return {
+            "requires_market_fallback": True,
+            "limit_cancel_confirmed": True,
+            "fallback_reason": "minimum_notional",
+            "symbol": "PYTH/USDC",
+            "remaining_amount": 40.6,
+            "partial_filled_amount": 0.0,
+            "partial_avg_price": 0.0,
+            "unsellable_min_notional": 5.0,
+            "unsellable_estimated_notional": 2.11329,
+        }
+
+    async def should_not_sell(
+        _order: dict[str, object], _config: dict[str, object]
+    ) -> dict[str, object] | None:
+        raise AssertionError("dust must not be retried as a market sell")
+
+    result = await manager.create_spot_sell(
+        order={"symbol": "PYTH/USDC", "fallback_min_price": 0.0521830509},
+        config={"sell_order_type": "limit"},
+        context=SellRoutingContext(
+            create_spot_limit_sell=fake_limit_sell,
+            create_spot_market_sell=should_not_sell,
+            create_spot_market_fallback=should_not_sell,
+            can_fallback_to_market_sell=should_not_sell,
+        ),
+    )
+
+    assert result == {
+        "type": "partial_sell",
+        "symbol": "PYTH/USDC",
+        "partial_filled_amount": 0.0,
+        "partial_avg_price": 0.0,
+        "partial_proceeds": 0.0,
+        "remaining_amount": 40.6,
+        "unsellable": True,
+        "unsellable_reason": "minimum_notional",
+        "unsellable_min_notional": 5.0,
+        "unsellable_estimated_notional": 2.11329,
+    }
+
+
+@pytest.mark.asyncio
 async def test_create_spot_market_sell_skips_below_notional() -> None:
     exchange = _DummyExchange()
     manager = ExchangeSellManager(
