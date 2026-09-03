@@ -227,10 +227,12 @@ needed for recovery.
 
 ## Unsellable Trades
 
-When a sell succeeds only partially, or a proactive take-profit order cannot
-meet the exchange minimum notional, Moonwalker archives the remaining amount as
-an unsellable trade instead of repeatedly retrying an exit the exchange cannot
-accept.
+When a sell succeeds only partially, a proactive take-profit order cannot meet
+the exchange minimum notional, or an active take-profit limit sell leaves a
+remainder below that minimum, Moonwalker archives the remaining amount as an
+unsellable trade instead of repeatedly retrying an exit the exchange cannot
+accept. The active-limit path remains terminal even when its guarded market
+fallback cannot sell below the configured TP price floor.
 
 Important behavior:
 
