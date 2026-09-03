@@ -426,6 +426,9 @@ would bypass that decision and could fill on a wick.
 Moonwalker persists the armed order id on the open trade, reconciles fills on
 later ticker updates, cancels the order before safety/manual buys that change
 the position, and cancels/replaces it when the TP price or amount changes.
+If the remaining position cannot meet the exchange minimum order value when a
+proactive order is armed, Moonwalker moves that remainder to Unsellable instead
+of retrying the same automatic exit on later ticker updates.
 
 ## Limit Sell Timeout And Fallback
 
