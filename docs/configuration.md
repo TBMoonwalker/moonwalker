@@ -444,3 +444,8 @@ enabled, the bot may fall back to a market sell. That fallback is guarded:
   skipped and the trade remains open
 
 This protection is meant to reduce exits at a loss after short-lived spikes.
+
+If an active limit sell leaves a remainder below the exchange minimum order
+value, Moonwalker records that remainder as Unsellable instead of retrying the
+same TP exit. This also applies when the TP market-fallback price guard would
+otherwise keep the remainder open; no market order is sent below that guard.
