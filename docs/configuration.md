@@ -286,6 +286,10 @@ When `trade_mode = sidestep` on spot markets:
 - Waiting-campaign dashboard data comes from the trade read model exposed at
   `/trades/waiting`, while `SpotSidestepCampaignService` owns the campaign
   mutations behind manual stop and activate actions.
+- Sidestep backtests use the saved fresh-long requirement and re-entry premium
+  cap. They evaluate strategies on closed candles and keep a trade open when
+  the next-candle fallback price would breach the configured sell floor. OHLCV
+  replay cannot reproduce exchange order-book fills or the exact timeout.
 
 In the Trades page, open the **Waiting** tab and expand a campaign row with a
 pointer, Enter, or Space to inspect its TradingView replay. The chart shows the

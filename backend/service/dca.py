@@ -22,6 +22,7 @@ from service.dca_decision import (
     SidestepExitContext,
     WaitingReentryContext,
     build_dca_evaluation_context,
+    calculate_sidestep_exit_fallback_minimum_price,
     calculate_sidestep_reentry_maximum_price,
     evaluate_exit_action_decision,
     evaluate_recovery_trigger_decision,
@@ -1929,10 +1930,12 @@ class Dca:
             **self.__order_snapshot_payload(trades),
         }
         sidestep_config = SidestepCampaignConfigView.from_config(self.config or {})
-        if sidestep_config.exit_max_market_fallback_slippage_pct > 0:
-            order["fallback_min_price"] = current_price * (
-                1 - (sidestep_config.exit_max_market_fallback_slippage_pct / 100)
-            )
+        fallback_minimum_price = calculate_sidestep_exit_fallback_minimum_price(
+            current_price,
+            sidestep_config.exit_max_market_fallback_slippage_pct,
+        )
+        if fallback_minimum_price is not None:
+            order["fallback_min_price"] = fallback_minimum_price
         await self.orders.receive_sell_order(order, self.config or {})
         return True
 

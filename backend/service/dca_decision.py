@@ -156,6 +156,18 @@ def calculate_sidestep_reentry_maximum_price(
     return waiting_reference_price * (1 + (max_reentry_premium_pct / 100))
 
 
+def calculate_sidestep_exit_fallback_minimum_price(
+    strategy_trigger_price: float,
+    max_market_fallback_slippage_pct: float,
+) -> float | None:
+    """Return the sidestep market-fallback floor, or ``None`` when disabled."""
+    if max_market_fallback_slippage_pct <= 0:
+        return None
+    if strategy_trigger_price <= 0:
+        return None
+    return strategy_trigger_price * (1 - (max_market_fallback_slippage_pct / 100))
+
+
 def build_dca_evaluation_context(
     *,
     trade: dict[str, Any],

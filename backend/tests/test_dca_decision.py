@@ -12,6 +12,7 @@ from service.dca_decision import (
     SidestepExitContext,
     WaitingReentryContext,
     build_dca_evaluation_context,
+    calculate_sidestep_exit_fallback_minimum_price,
     evaluate_exit_action_decision,
     evaluate_recovery_trigger_decision,
     evaluate_sidestep_exit_decision,
@@ -315,3 +316,22 @@ def test_waiting_reentry_decisions_cover_every_reason_without_mocks(
 
     assert action is expected_action
     assert reason == expected_reason
+
+
+@pytest.mark.parametrize(
+    ("trigger_price", "slippage_pct", "expected"),
+    [
+        (100.0, 1.0, 99.0),
+        (100.0, 0.0, None),
+        (0.0, 1.0, None),
+    ],
+)
+def test_sidestep_exit_fallback_minimum_price(
+    trigger_price: float,
+    slippage_pct: float,
+    expected: float | None,
+) -> None:
+    assert (
+        calculate_sidestep_exit_fallback_minimum_price(trigger_price, slippage_pct)
+        == expected
+    )

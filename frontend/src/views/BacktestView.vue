@@ -689,6 +689,49 @@ onMounted(() => {
                                     <dt>Re-entry strategy</dt>
                                     <dd>{{ result.stats.sidestep_reentry_strategy }}</dd>
                                 </div>
+                                <div v-if="result.stats.trade_mode === 'sidestep'">
+                                    <dt>Signal candles</dt>
+                                    <dd>Closed candle</dd>
+                                </div>
+                                <div v-if="result.stats.trade_mode === 'sidestep'">
+                                    <dt>Fresh long signal</dt>
+                                    <dd>
+                                        {{
+                                            result.stats
+                                                .sidestep_reentry_requires_fresh_long_signal
+                                                ? 'Required'
+                                                : 'Not required'
+                                        }}
+                                    </dd>
+                                </div>
+                                <div v-if="result.stats.trade_mode === 'sidestep'">
+                                    <dt>Re-entry premium cap</dt>
+                                    <dd>
+                                        {{
+                                            formatBacktestNumber(
+                                                result.stats
+                                                    .sidestep_reentry_max_premium_pct,
+                                                2,
+                                            )
+                                        }}%
+                                    </dd>
+                                </div>
+                                <div v-if="result.stats.trade_mode === 'sidestep'">
+                                    <dt>Sell fallback floor</dt>
+                                    <dd>
+                                        {{
+                                            formatBacktestNumber(
+                                                result.stats
+                                                    .sidestep_exit_max_market_fallback_slippage_pct,
+                                                2,
+                                            )
+                                        }}% max slippage
+                                    </dd>
+                                </div>
+                                <div v-if="result.stats.trade_mode === 'sidestep'">
+                                    <dt>Exit floors held</dt>
+                                    <dd>{{ result.stats.sidestep_exit_fallback_blocks ?? 0 }}</dd>
+                                </div>
                                 <div>
                                     <dt>Timeframe</dt>
                                     <dd>{{ result.stats.timeframe }}</dd>
