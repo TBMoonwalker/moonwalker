@@ -24,6 +24,8 @@ def build_market_fallback_status(
     limit_cancel_confirmed: bool = True,
     fallback_reason: str = "limit_order_timeout",
     exchange_order_id: str | None = None,
+    minimum_notional: float | None = None,
+    estimated_notional: float | None = None,
 ) -> MarketFallbackStatus:
     """Build a status payload that signals market fallback handling."""
     return {
@@ -35,6 +37,16 @@ def build_market_fallback_status(
         "remaining_amount": float(remaining_amount),
         "partial_filled_amount": float(partial_filled_amount),
         "partial_avg_price": float(partial_avg_price),
+        **(
+            {"unsellable_min_notional": float(minimum_notional)}
+            if minimum_notional is not None
+            else {}
+        ),
+        **(
+            {"unsellable_estimated_notional": float(estimated_notional)}
+            if estimated_notional is not None
+            else {}
+        ),
         **({"executions": list(executions)} if executions else {}),
     }
 

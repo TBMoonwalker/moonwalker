@@ -426,6 +426,9 @@ would bypass that decision and could fill on a wick.
 Moonwalker persists the armed order id on the open trade, reconciles fills on
 later ticker updates, cancels the order before safety/manual buys that change
 the position, and cancels/replaces it when the TP price or amount changes.
+If the remaining position cannot meet the exchange minimum order value when a
+proactive order is armed, Moonwalker moves that remainder to Unsellable instead
+of retrying the same automatic exit on later ticker updates.
 
 ## Limit Sell Timeout And Fallback
 
@@ -441,3 +444,8 @@ enabled, the bot may fall back to a market sell. That fallback is guarded:
   skipped and the trade remains open
 
 This protection is meant to reduce exits at a loss after short-lived spikes.
+
+If an active limit sell leaves a remainder below the exchange minimum order
+value, Moonwalker records that remainder as Unsellable instead of retrying the
+same TP exit. This also applies when the TP market-fallback price guard would
+otherwise keep the remainder open; no market order is sent below that guard.

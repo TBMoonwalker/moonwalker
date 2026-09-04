@@ -258,6 +258,8 @@ async def test_create_spot_limit_sell_returns_market_fallback_when_below_notiona
         "remaining_amount": 0.01,
         "partial_filled_amount": 0.0,
         "partial_avg_price": 0.0,
+        "unsellable_min_notional": 10.0,
+        "unsellable_estimated_notional": 5.0,
     }
     assert exchange.create_order_calls == 0
 

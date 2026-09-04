@@ -4,6 +4,22 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.6.2.0] - 2026-09-03
+
+### Fixed
+
+- Stop retrying a take-profit limit remainder that is below an exchange's
+  minimum order value. It is now recorded as unsellable, including the minimum
+  and estimated values needed for manual resolution.
+
+## [4.6.1.0] - 2026-09-02
+
+### Fixed
+
+- Stop retrying proactive take-profit exits when an exchange rejects the
+  remaining token amount as below its minimum order value. The remainder is now
+  recorded as unsellable so it is visible for manual resolution.
+
 ## [4.6.0.0] - 2026-07-28
 
 ### Added

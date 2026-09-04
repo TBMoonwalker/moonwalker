@@ -143,6 +143,8 @@ class MarketFallbackStatus(TypedDict, total=False):
     remaining_amount: float
     partial_filled_amount: float
     partial_avg_price: float
+    unsellable_min_notional: float | None
+    unsellable_estimated_notional: float | None
     executions: list[TradeExecutionPayload]
 
 

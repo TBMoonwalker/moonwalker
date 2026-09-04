@@ -45,6 +45,30 @@ class ExchangeSellManager:
             if not order_status.get("requires_market_fallback"):
                 return order_status
 
+            if fallback_reason == "minimum_notional":
+                self._logger.info(
+                    "Marking %s as unsellable: its remaining limit sell amount "
+                    "is below the exchange minimum notional.",
+                    order.get("symbol"),
+                )
+                return build_partial_sell_status(
+                    symbol=str(order_status.get("symbol") or order.get("symbol") or ""),
+                    partial_amount=float(
+                        order_status.get("partial_filled_amount") or 0.0
+                    ),
+                    partial_avg_price=float(
+                        order_status.get("partial_avg_price") or 0.0
+                    ),
+                    remaining_amount=float(order_status.get("remaining_amount") or 0.0),
+                    executions=list(order_status.get("executions") or []),
+                    unsellable=True,
+                    unsellable_reason="minimum_notional",
+                    unsellable_min_notional=order_status.get("unsellable_min_notional"),
+                    unsellable_estimated_notional=order_status.get(
+                        "unsellable_estimated_notional"
+                    ),
+                )
+
             if not bool(order_status.get("limit_cancel_confirmed", False)):
                 self._logger.error(
                     "Skipping market fallback for %s because limit cancel "

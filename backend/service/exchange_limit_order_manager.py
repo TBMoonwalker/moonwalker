@@ -111,6 +111,8 @@ class ExchangeLimitOrderManager:
                 symbol=resolved_symbol,
                 remaining_amount=float(amount_value),
                 fallback_reason="minimum_notional",
+                minimum_notional=min_notional,
+                estimated_notional=estimated_notional,
             )
 
         self._logger.info(

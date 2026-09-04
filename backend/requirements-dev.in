@@ -5,6 +5,8 @@ isort==8.0.1
 mypy==2.3.0
 pip-audit==2.10.1
 pip-tools==7.6.0
+# PYSEC-2026-3721: CI audit requires pip 26.2 or newer.
+pip==26.2.1
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0
