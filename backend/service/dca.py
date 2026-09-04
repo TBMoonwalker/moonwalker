@@ -22,6 +22,7 @@ from service.dca_decision import (
     SidestepExitContext,
     WaitingReentryContext,
     build_dca_evaluation_context,
+    calculate_sidestep_reentry_maximum_price,
     evaluate_exit_action_decision,
     evaluate_recovery_trigger_decision,
     evaluate_sidestep_exit_decision,
@@ -363,12 +364,19 @@ class Dca:
             return False
 
         strategy_timeframe = resolve_timeframe(self.config or {})
+        sidestep_config = SidestepCampaignConfigView.from_config(self.config or {})
         sidestep_strategy_plugin = await self.__get_strategy_plugin(
             bearish_strategy_name,
             strategy_timeframe,
             "sidestep_exit",
         )
-        result = bool(await sidestep_strategy_plugin.run(symbol, "sell"))
+        result = bool(
+            await sidestep_strategy_plugin.run(
+                symbol,
+                "sell",
+                candle_index=-2 if sidestep_config.confirm_closed_candle else None,
+            )
+        )
         self._last_sidestep_exit_identity_by_symbol[symbol] = (
             self.__strategy_identity_from_plugin(
                 sidestep_strategy_plugin,
@@ -392,12 +400,19 @@ class Dca:
             return False
 
         strategy_timeframe = resolve_timeframe(self.config or {})
+        sidestep_config = SidestepCampaignConfigView.from_config(self.config or {})
         reentry_strategy_plugin = await self.__get_strategy_plugin(
             reentry_strategy_name,
             strategy_timeframe,
             "sidestep_reentry",
         )
-        result = bool(await reentry_strategy_plugin.run(symbol, "buy"))
+        result = bool(
+            await reentry_strategy_plugin.run(
+                symbol,
+                "buy",
+                candle_index=-2 if sidestep_config.confirm_closed_candle else None,
+            )
+        )
         self._last_sidestep_reentry_identity_by_symbol[symbol] = (
             self.__strategy_identity_from_plugin(
                 reentry_strategy_plugin,
@@ -527,6 +542,9 @@ class Dca:
             except ValueError:
                 pass
 
+        sidestep_config = SidestepCampaignConfigView.from_config(self.config or {})
+        has_fresh_long_signal = self.__has_fresh_long_signal(campaign)
+
         strategy_gate_action, strategy_gate_reason = evaluate_waiting_reentry_decision(
             WaitingReentryContext(
                 is_sidestep_mode=True,
@@ -536,6 +554,10 @@ class Dca:
                 cooldown_active=cooldown_active,
                 strategy_signal=None,
                 order_size=0.0,
+                requires_fresh_long_signal=(
+                    sidestep_config.reentry_requires_fresh_long_signal
+                ),
+                has_fresh_long_signal=has_fresh_long_signal,
             )
         )
         if strategy_gate_reason != "sidestep_reentry_strategy_required":
@@ -544,6 +566,12 @@ class Dca:
                     trades["symbol"],
                     strategy_gate_reason,
                     cooldown_until=str(cooldown_until),
+                )
+            elif strategy_gate_reason == "waiting_fresh_long_signal_required":
+                self.__log_sidestep_gate(
+                    trades["symbol"],
+                    strategy_gate_reason,
+                    campaign_id=str(trades.get("campaign_id") or ""),
                 )
             return False
         assert strategy_gate_action is DcaAction.WAIT
@@ -565,14 +593,32 @@ class Dca:
                 cooldown_active=False,
                 strategy_signal=strategy_signal,
                 order_size=order_size,
+                current_price=current_price,
+                waiting_reference_price=float(
+                    trades.get("waiting_reference_price") or 0.0
+                ),
+                max_reentry_premium_pct=sidestep_config.reentry_max_premium_pct,
+                requires_fresh_long_signal=(
+                    sidestep_config.reentry_requires_fresh_long_signal
+                ),
+                has_fresh_long_signal=has_fresh_long_signal,
             )
         )
         if reentry_action is not DcaAction.PLACE_REENTRY_BUY:
-            if reentry_reason == "waiting_missing_reserved_quote":
+            if reentry_reason in {
+                "waiting_missing_reserved_quote",
+                "waiting_reentry_reference_price_required",
+                "waiting_reentry_price_above_limit",
+            }:
                 self.__log_sidestep_gate(
                     trades["symbol"],
                     reentry_reason,
                     campaign_id=str(trades.get("campaign_id") or ""),
+                    current_price=round(current_price, 8),
+                    waiting_reference_price=round(
+                        float(trades.get("waiting_reference_price") or 0.0),
+                        8,
+                    ),
                 )
             return False
 
@@ -605,6 +651,10 @@ class Dca:
             "so_percentage": None,
             "side": "buy",
             "current_price": current_price,
+            "maximum_buy_price": calculate_sidestep_reentry_maximum_price(
+                float(trades.get("waiting_reference_price") or 0.0),
+                sidestep_config.reentry_max_premium_pct,
+            ),
             "campaign_id": trades.get("campaign_id"),
             "signal_name": None,
             "strategy_name": reentry_strategy_name,
@@ -628,6 +678,23 @@ class Dca:
                 trades.get("campaign_id"),
             )
         return success
+
+    @staticmethod
+    def __has_fresh_long_signal(campaign: dict[str, Any]) -> bool:
+        """Return whether a recorded long signal arrived after the sidestep exit."""
+        try:
+            metadata = json.loads(str(campaign.get("metadata_json") or "{}"))
+            if not isinstance(metadata, dict):
+                return False
+            long_signal_at = str(metadata.get("last_long_signal_at") or "")
+            exit_at = str(metadata.get("last_exit_at") or "")
+            if not long_signal_at or not exit_at:
+                return False
+            return datetime.fromisoformat(long_signal_at.replace("Z", "+00:00")) > (
+                datetime.fromisoformat(exit_at.replace("Z", "+00:00"))
+            )
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
 
     async def __tp_strategy(self, symbol: str) -> bool:
         result = False
@@ -1861,6 +1928,11 @@ class Dca:
             "timeframe": resolve_timeframe(self.config or {}),
             **self.__order_snapshot_payload(trades),
         }
+        sidestep_config = SidestepCampaignConfigView.from_config(self.config or {})
+        if sidestep_config.exit_max_market_fallback_slippage_pct > 0:
+            order["fallback_min_price"] = current_price * (
+                1 - (sidestep_config.exit_max_market_fallback_slippage_pct / 100)
+            )
         await self.orders.receive_sell_order(order, self.config or {})
         return True
 

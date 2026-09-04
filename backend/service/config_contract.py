@@ -46,6 +46,13 @@ class ConfigFieldContract:
 
 
 CONFIG_FIELDS: dict[str, ConfigFieldContract] = {
+    "sidestep_confirm_closed_candle": ConfigFieldContract("bool", "sidestep", False),
+    "sidestep_reentry_max_premium_pct": ConfigFieldContract(
+        "float", "sidestep", 0.0, minimum=0, maximum=100
+    ),
+    "sidestep_exit_max_market_fallback_slippage_pct": ConfigFieldContract(
+        "float", "sidestep", 0.0, minimum=0, maximum=100
+    ),
     "ss": ConfigFieldContract("float", "recovery_dca", 1.6, minimum=0),
     "dynamic_so_sizing_mode": ConfigFieldContract(
         "str",

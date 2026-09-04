@@ -137,6 +137,23 @@ class WaitingReentryContext:
     cooldown_active: bool
     strategy_signal: bool | None
     order_size: float
+    current_price: float = 0.0
+    waiting_reference_price: float = 0.0
+    max_reentry_premium_pct: float = 0.0
+    requires_fresh_long_signal: bool = False
+    has_fresh_long_signal: bool = False
+
+
+def calculate_sidestep_reentry_maximum_price(
+    waiting_reference_price: float,
+    max_reentry_premium_pct: float,
+) -> float | None:
+    """Return the inclusive re-entry price ceiling, or ``None`` when disabled."""
+    if max_reentry_premium_pct <= 0:
+        return None
+    if waiting_reference_price <= 0:
+        return None
+    return waiting_reference_price * (1 + (max_reentry_premium_pct / 100))
 
 
 def build_dca_evaluation_context(
@@ -336,10 +353,20 @@ def evaluate_waiting_reentry_decision(
         return DcaAction.WAIT, "waiting_campaign_not_found"
     if context.cooldown_active:
         return DcaAction.WAIT, "waiting_cooldown_active"
+    if context.requires_fresh_long_signal and not context.has_fresh_long_signal:
+        return DcaAction.WAIT, "waiting_fresh_long_signal_required"
     if context.strategy_signal is None:
         return DcaAction.WAIT, "sidestep_reentry_strategy_required"
     if not context.strategy_signal:
         return DcaAction.WAIT, "sidestep_reentry_strategy_not_matched"
+    maximum_price = calculate_sidestep_reentry_maximum_price(
+        context.waiting_reference_price,
+        context.max_reentry_premium_pct,
+    )
+    if context.max_reentry_premium_pct > 0 and maximum_price is None:
+        return DcaAction.WAIT, "waiting_reentry_reference_price_required"
+    if maximum_price is not None and context.current_price > maximum_price:
+        return DcaAction.WAIT, "waiting_reentry_price_above_limit"
     if context.order_size <= 0:
         return DcaAction.WAIT, "waiting_missing_reserved_quote"
     return DcaAction.PLACE_REENTRY_BUY, "sidestep_reentry"

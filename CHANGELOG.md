@@ -4,6 +4,19 @@ All notable changes to Moonwalker are documented in this file.
 
 ## [Unreleased]
 
+## [4.6.3.0] - 2026-09-04
+
+### Added
+
+- Added optional sidestep guards that confirm exit and re-entry signals on closed
+  candles, prevent re-entry above a configured premium over the sidestep exit,
+  and protect timed-out sidestep sell fallbacks from excessive slippage.
+
+### Changed
+
+- Added sidestep controls for fresh-long confirmation, spike-safe re-entry, and
+  sell fallback protection, with matching runtime validation and regression tests.
+
 ## [4.6.2.0] - 2026-09-03
 
 ### Fixed

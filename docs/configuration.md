@@ -89,6 +89,9 @@ are not exposed in the UI and must be set via the API.
 | `sidestep_reentry_strategy` | `string` | Required for new sidestep saves and restores. Legacy startup snapshots may still fall back to `dca_strategy` until they are re-saved from a current client. | `ema_swing` |
 | `sidestep_reentry_cooldown_candles` | `int` | Minimum number of candles to wait before a sidestep campaign may re-enter again. | `0` |
 | `sidestep_reentry_requires_fresh_long_signal` | `bool` | Require a fresh long signal before a waiting sidestep campaign may re-enter (advanced). | `false` |
+| `sidestep_confirm_closed_candle` | `bool` | Evaluate both sidestep exit and re-entry strategies against the most recently completed candle instead of the still-forming candle. | `false` |
+| `sidestep_reentry_max_premium_pct` | `float` | Maximum price, as a percentage above the sidestep exit, allowed for a re-entry. When positive, re-entries use a capped IOC limit buy and remain waiting when the market is above the cap. | `0` |
+| `sidestep_exit_max_market_fallback_slippage_pct` | `float` | Minimum-price guard for a sidestep exit's timed-out limit-order fallback. `0` allows any market fallback; a positive value keeps the campaign active if the fallback price would be lower than the configured percentage below the strategy-trigger price. Hard stop-loss exits are unaffected. | `0` |
 | `tp_strategy` | `string` | Strategy for take-profit checks (advanced). | `ema_down` |
 | `trailing_tp` | `float` | Trailing TP deviation (percent). | `0.5` |
 | `max_bots` | `int` | Max concurrent bots. | `3` |

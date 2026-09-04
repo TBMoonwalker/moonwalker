@@ -135,6 +135,9 @@ class SidestepCampaignConfigView:
     reentry_strategy: str | None
     reentry_cooldown_candles: int
     reentry_requires_fresh_long_signal: bool
+    confirm_closed_candle: bool
+    reentry_max_premium_pct: float
+    exit_max_market_fallback_slippage_pct: float
 
     @classmethod
     def from_config(cls, config: dict[str, Any]) -> "SidestepCampaignConfigView":
@@ -148,6 +151,27 @@ class SidestepCampaignConfigView:
             reentry_cooldown_candles=lifecycle.reentry_cooldown_candles,
             reentry_requires_fresh_long_signal=bool(
                 config.get("sidestep_reentry_requires_fresh_long_signal", False)
+            ),
+            confirm_closed_candle=bool(
+                config.get("sidestep_confirm_closed_candle", False)
+            ),
+            reentry_max_premium_pct=max(
+                0.0,
+                _float_config_value(
+                    config,
+                    "sidestep_reentry_max_premium_pct",
+                    default=0.0,
+                    falsey_fallback=0.0,
+                ),
+            ),
+            exit_max_market_fallback_slippage_pct=max(
+                0.0,
+                _float_config_value(
+                    config,
+                    "sidestep_exit_max_market_fallback_slippage_pct",
+                    default=0.0,
+                    falsey_fallback=0.0,
+                ),
             ),
         )
 

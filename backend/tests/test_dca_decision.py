@@ -251,6 +251,14 @@ def test_sidestep_exit_decisions_cover_every_reason_without_mocks(
         ),
         ({"cooldown_active": True}, DcaAction.WAIT, "waiting_cooldown_active"),
         (
+            {
+                "requires_fresh_long_signal": True,
+                "has_fresh_long_signal": False,
+            },
+            DcaAction.WAIT,
+            "waiting_fresh_long_signal_required",
+        ),
+        (
             {"strategy_signal": None},
             DcaAction.WAIT,
             "sidestep_reentry_strategy_required",
@@ -264,6 +272,20 @@ def test_sidestep_exit_decisions_cover_every_reason_without_mocks(
             {"order_size": 0.0},
             DcaAction.WAIT,
             "waiting_missing_reserved_quote",
+        ),
+        (
+            {
+                "current_price": 106.0,
+                "waiting_reference_price": 100.0,
+                "max_reentry_premium_pct": 5.0,
+            },
+            DcaAction.WAIT,
+            "waiting_reentry_price_above_limit",
+        ),
+        (
+            {"max_reentry_premium_pct": 5.0},
+            DcaAction.WAIT,
+            "waiting_reentry_reference_price_required",
         ),
         (
             {"strategy_signal": True},
@@ -285,6 +307,7 @@ def test_waiting_reentry_decisions_cover_every_reason_without_mocks(
         "cooldown_active": False,
         "strategy_signal": True,
         "order_size": 50.0,
+        "has_fresh_long_signal": True,
         **changes,
     }
 
