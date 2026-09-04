@@ -122,6 +122,7 @@ async def test_process_ticker_data_uses_bearish_sidestep_exit_before_dca(
             "dca": True,
             "trade_mode": "sidestep",
             "sidestep_bearish_strategy": "ema_down",
+            "sidestep_exit_max_market_fallback_slippage_pct": 2.0,
             "timeframe": "4h",
             "tp": 10.0,
         },
@@ -136,6 +137,7 @@ async def test_process_ticker_data_uses_bearish_sidestep_exit_before_dca(
     assert order["campaign_id"] == "campaign-1"
     assert order["actual_pnl"] == pytest.approx(-5.0)
     assert order["tp_price"] == pytest.approx(110.0)
+    assert order["fallback_min_price"] == pytest.approx(93.1)
     assert order["strategy_name"] == "ema_down"
     assert order["timeframe"] == "4h"
 
@@ -441,6 +443,147 @@ async def test_attempt_waiting_reentry_uses_reserved_quote_from_waiting_trade(
 
 
 @pytest.mark.asyncio
+async def test_attempt_waiting_reentry_uses_capped_ioc_buy_above_exit_price(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    submitted_orders: list[dict[str, object]] = []
+
+    class _CampaignService:
+        async def get_campaign_snapshot(self, _campaign_id: str):
+            return {
+                "campaign_id": "campaign-1",
+                "reserved_quote": 50.0,
+                "cooldown_until": None,
+            }
+
+    async def fake_get_sidestep_campaigns():
+        return _CampaignService()
+
+    async def fake_reentry_strategy(_symbol: str) -> bool:
+        return True
+
+    async def fake_receive_buy_order(order, _config):
+        submitted_orders.append(dict(order))
+        return True
+
+    monkeypatch.setattr(dca, "_get_sidestep_campaigns", fake_get_sidestep_campaigns)
+    monkeypatch.setattr(dca, "_Dca__sidestep_reentry_strategy", fake_reentry_strategy)
+    monkeypatch.setattr(dca.orders, "receive_buy_order", fake_receive_buy_order)
+    dca.config = {
+        "trade_mode": "sidestep",
+        "market": "spot",
+        "sidestep_reentry_strategy": "ema20_swing",
+        "sidestep_reentry_max_premium_pct": 5.0,
+    }
+
+    success = await dca._Dca__attempt_waiting_reentry(
+        {
+            "symbol": "ETH/USDT",
+            "campaign_id": "campaign-1",
+            "lifecycle_mode": "sidestep_reentry",
+            "exposure_state": "flat_waiting_reentry",
+            "reserved_reentry_quote": 50.0,
+            "waiting_reference_price": 100.0,
+        },
+        current_price=104.0,
+    )
+
+    assert success is True
+    assert submitted_orders[0]["maximum_buy_price"] == pytest.approx(105.0)
+
+
+@pytest.mark.asyncio
+async def test_attempt_waiting_reentry_rejects_a_spike_above_the_configured_cap(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    submitted_orders: list[dict[str, object]] = []
+
+    class _CampaignService:
+        async def get_campaign_snapshot(self, _campaign_id: str):
+            return {"campaign_id": "campaign-1", "reserved_quote": 50.0}
+
+    async def fake_get_sidestep_campaigns():
+        return _CampaignService()
+
+    async def fake_reentry_strategy(_symbol: str) -> bool:
+        return True
+
+    async def fake_receive_buy_order(order, _config):
+        submitted_orders.append(dict(order))
+        return True
+
+    monkeypatch.setattr(dca, "_get_sidestep_campaigns", fake_get_sidestep_campaigns)
+    monkeypatch.setattr(dca, "_Dca__sidestep_reentry_strategy", fake_reentry_strategy)
+    monkeypatch.setattr(dca.orders, "receive_buy_order", fake_receive_buy_order)
+    dca.config = {
+        "trade_mode": "sidestep",
+        "market": "spot",
+        "sidestep_reentry_strategy": "ema20_swing",
+        "sidestep_reentry_max_premium_pct": 5.0,
+    }
+
+    success = await dca._Dca__attempt_waiting_reentry(
+        {
+            "symbol": "ETH/USDT",
+            "campaign_id": "campaign-1",
+            "lifecycle_mode": "sidestep_reentry",
+            "exposure_state": "flat_waiting_reentry",
+            "reserved_reentry_quote": 50.0,
+            "waiting_reference_price": 100.0,
+        },
+        current_price=106.0,
+    )
+
+    assert success is False
+    assert submitted_orders == []
+
+
+@pytest.mark.asyncio
+async def test_sidestep_strategies_use_closed_candles_when_configured(
+    monkeypatch,
+) -> None:
+    dca = Dca()
+    strategy_calls: list[tuple[str, str, int | None]] = []
+
+    class _CampaignService:
+        def is_enabled(self, _config) -> bool:
+            return True
+
+    class _Strategy:
+        async def run(self, symbol: str, side: str, *, candle_index: int | None = None):
+            strategy_calls.append((symbol, side, candle_index))
+            return True
+
+        def last_evaluation_identity(self, _symbol: str, _side: str):
+            return ("strategy", 1)
+
+    async def fake_get_sidestep_campaigns():
+        return _CampaignService()
+
+    async def fake_get_strategy_plugin(*_args, **_kwargs):
+        return _Strategy()
+
+    monkeypatch.setattr(dca, "_get_sidestep_campaigns", fake_get_sidestep_campaigns)
+    monkeypatch.setattr(dca, "_Dca__get_strategy_plugin", fake_get_strategy_plugin)
+    dca.config = {
+        "trade_mode": "sidestep",
+        "market": "spot",
+        "sidestep_bearish_strategy": "ema_down",
+        "sidestep_reentry_strategy": "ema20_swing",
+        "sidestep_confirm_closed_candle": True,
+    }
+
+    assert await dca._Dca__sidestep_exit_strategy("ETH/USDT") is True
+    assert await dca._Dca__sidestep_reentry_strategy("ETH/USDT") is True
+    assert strategy_calls == [
+        ("ETH/USDT", "sell", -2),
+        ("ETH/USDT", "buy", -2),
+    ]
+
+
+@pytest.mark.asyncio
 async def test_process_ticker_data_logs_exit_tp_gate_before_bearish_strategy(
     monkeypatch,
 ) -> None:
@@ -696,6 +839,7 @@ async def test_activate_campaign_submits_manual_reentry_buy(
         lifecycle_mode="sidestep_reentry",
         exposure_state="flat_waiting_reentry",
         reserved_reentry_quote=112.5,
+        waiting_reference_price=100.0,
     )
 
     submitted_orders: list[dict[str, object]] = []
@@ -714,6 +858,7 @@ async def test_activate_campaign_submits_manual_reentry_buy(
         "market": "spot",
         "timeframe": "4h",
         "bo": 50.0,
+        "sidestep_reentry_max_premium_pct": 5.0,
     }
     service._orders = _FakeOrders()
 
@@ -728,6 +873,7 @@ async def test_activate_campaign_submits_manual_reentry_buy(
     assert submitted["strategy_name"] == "manual_reentry"
     assert submitted["side"] == "buy"
     assert submitted["baseorder"] is True
+    assert submitted["maximum_buy_price"] == pytest.approx(105.0)
 
     await Tortoise.close_connections()
 

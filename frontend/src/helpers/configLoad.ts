@@ -522,6 +522,29 @@ export function buildLoadedConfigState(
                 parseBooleanString(
                     response.sidestep_reentry_requires_fresh_long_signal
                 ) ?? false,
+            sidestep_confirm_closed_candle:
+                parseBooleanString(response.sidestep_confirm_closed_candle) ??
+                getConfigContractDefault(
+                    response,
+                    'sidestep_confirm_closed_candle',
+                    false,
+                ),
+            sidestep_reentry_max_premium_pct:
+                toNumberOrNull(response.sidestep_reentry_max_premium_pct) ??
+                getConfigContractDefault(
+                    response,
+                    'sidestep_reentry_max_premium_pct',
+                    0,
+                ),
+            sidestep_exit_max_market_fallback_slippage_pct:
+                toNumberOrNull(
+                    response.sidestep_exit_max_market_fallback_slippage_pct,
+                ) ??
+                getConfigContractDefault(
+                    response,
+                    'sidestep_exit_max_market_fallback_slippage_pct',
+                    0,
+                ),
             tp: toNumberOrNull(response.tp),
             sl: toNumberOrNull(response.sl),
         },

@@ -114,6 +114,9 @@ export interface DcaConfigSection {
     sidestep_reentry_strategy: string | null
     sidestep_reentry_cooldown_candles: number | null
     sidestep_reentry_requires_fresh_long_signal: boolean
+    sidestep_confirm_closed_candle: boolean
+    sidestep_reentry_max_premium_pct: number | null
+    sidestep_exit_max_market_fallback_slippage_pct: number | null
     tp: number | null
     sl: number | null
 }
@@ -480,6 +483,18 @@ export function buildConfigSubmitPayload(
         sidestep_reentry_requires_fresh_long_signal: serializeConfigValue(
             dca.sidestep_reentry_requires_fresh_long_signal ?? false,
             'bool',
+        ),
+        sidestep_confirm_closed_candle: serializeConfigValue(
+            dca.sidestep_confirm_closed_candle ?? false,
+            'bool',
+        ),
+        sidestep_reentry_max_premium_pct: serializeConfigValue(
+            dca.sidestep_reentry_max_premium_pct ?? 0,
+            'float',
+        ),
+        sidestep_exit_max_market_fallback_slippage_pct: serializeConfigValue(
+            dca.sidestep_exit_max_market_fallback_slippage_pct ?? 0,
+            'float',
         ),
         tp: serializeConfigValue(dca.tp || false, 'float'),
         sl: serializeConfigValue(dca.sl || false, 'float'),

@@ -76,6 +76,9 @@ def test_sidestep_campaign_config_view_normalizes_market_and_values() -> None:
             "sidestep_reentry_strategy": "ema20_swing",
             "sidestep_reentry_cooldown_candles": "3",
             "sidestep_reentry_requires_fresh_long_signal": False,
+            "sidestep_confirm_closed_candle": True,
+            "sidestep_reentry_max_premium_pct": "-1",
+            "sidestep_exit_max_market_fallback_slippage_pct": "2.5",
         }
     )
 
@@ -84,6 +87,9 @@ def test_sidestep_campaign_config_view_normalizes_market_and_values() -> None:
     assert config.bearish_strategy == "ema_down"
     assert config.reentry_cooldown_candles == 3
     assert config.reentry_requires_fresh_long_signal is False
+    assert config.confirm_closed_candle is True
+    assert config.reentry_max_premium_pct == 0.0
+    assert config.exit_max_market_fallback_slippage_pct == 2.5
 
 
 def test_trade_lifecycle_config_view_prefers_canonical_mode() -> None:

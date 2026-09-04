@@ -42,6 +42,28 @@ async def test_strategy_adapter_logs_first_result_and_suppresses_unchanged(
 
 
 @pytest.mark.asyncio
+async def test_strategy_adapter_can_evaluate_the_last_completed_candle(
+    monkeypatch,
+) -> None:
+    received_candle_indexes: list[int | None] = []
+
+    async def fake_evaluate_strategy_graph(*_args, **kwargs):
+        received_candle_indexes.append(kwargs.get("candle_index"))
+        return StrategyEvaluationResult(False, 1, "no_match")
+
+    monkeypatch.setattr(
+        strategy_runtime,
+        "evaluate_strategy_graph",
+        fake_evaluate_strategy_graph,
+    )
+
+    adapter = GraphStrategyAdapter("ema_swing", "4h")
+    await adapter.run("UNI/USDC", "buy", candle_index=-2)
+
+    assert received_candle_indexes == [-2]
+
+
+@pytest.mark.asyncio
 async def test_strategy_adapter_logs_unchanged_heartbeat_after_interval(
     monkeypatch,
 ) -> None:

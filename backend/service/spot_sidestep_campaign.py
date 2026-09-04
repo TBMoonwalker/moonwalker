@@ -15,6 +15,7 @@ from service.config import Config, resolve_timeframe
 from service.config_views import SidestepCampaignConfigView, TradeLifecycleConfigView
 from service.data_timeframes import timeframe_to_seconds
 from service.database import run_sqlite_write_with_retry
+from service.dca_decision import calculate_sidestep_reentry_maximum_price
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.spot_campaign_types import (
     SpotCampaignState,
@@ -834,7 +835,7 @@ class SpotSidestepCampaignService:
         open_trade_rows = (
             await model.OpenTrades.filter(symbol=symbol)
             .limit(1)
-            .values("reserved_reentry_quote")
+            .values("reserved_reentry_quote", "waiting_reference_price")
         )
         open_trade = open_trade_rows[0] if open_trade_rows else None
         order_size = float(
@@ -845,6 +846,19 @@ class SpotSidestepCampaignService:
         if order_size <= 0:
             logging.warning(
                 "Manual sidestep re-entry skipped for %s: campaign=%s has no reserved quote.",
+                symbol,
+                campaign_id,
+            )
+            return False
+
+        sidestep_config = SidestepCampaignConfigView.from_config(self.config)
+        maximum_buy_price = calculate_sidestep_reentry_maximum_price(
+            float((open_trade or {}).get("waiting_reference_price") or 0.0),
+            sidestep_config.reentry_max_premium_pct,
+        )
+        if sidestep_config.reentry_max_premium_pct > 0 and maximum_buy_price is None:
+            logging.warning(
+                "Manual sidestep re-entry skipped for %s: campaign=%s has no exit price for the configured re-entry cap.",
                 symbol,
                 campaign_id,
             )
@@ -873,6 +887,7 @@ class SpotSidestepCampaignService:
             "strategy_name": "manual_reentry",
             "timeframe": resolve_timeframe(self.config or {}),
             "metadata_json": None,
+            "maximum_buy_price": maximum_buy_price,
         }
         success = await orders.receive_buy_order_prelocked(order, self.config)
         if success:

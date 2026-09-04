@@ -743,6 +743,9 @@ test('buildConfigSubmitPayload keeps sidestep canonical without compatibility mi
                 sidestep_reentry_strategy: 'ema20_swing',
                 sidestep_reentry_cooldown_candles: 0,
                 sidestep_reentry_requires_fresh_long_signal: true,
+                sidestep_confirm_closed_candle: true,
+                sidestep_reentry_max_premium_pct: 5,
+                sidestep_exit_max_market_fallback_slippage_pct: 2.5,
                 tp: 1.8,
                 sl: null,
             },
@@ -756,5 +759,11 @@ test('buildConfigSubmitPayload keeps sidestep canonical without compatibility mi
     assert.equal(
         parseField(payload, 'sidestep_reentry_requires_fresh_long_signal').value,
         true,
+    )
+    assert.equal(parseField(payload, 'sidestep_confirm_closed_candle').value, true)
+    assert.equal(parseField(payload, 'sidestep_reentry_max_premium_pct').value, 5)
+    assert.equal(
+        parseField(payload, 'sidestep_exit_max_market_fallback_slippage_pct').value,
+        2.5,
     )
 })

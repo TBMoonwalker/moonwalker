@@ -72,14 +72,21 @@ class GraphStrategyAdapter:
         self._log_state_by_key: dict[tuple[str, str], StrategyLogState] = {}
         self._last_result_by_key: dict[tuple[str, str], StrategyEvaluationResult] = {}
 
-    async def run(self, symbol: str, side: str) -> bool:
-        """Evaluate the active graph for one symbol."""
+    async def run(
+        self,
+        symbol: str,
+        side: str,
+        *,
+        candle_index: int | None = None,
+    ) -> bool:
+        """Evaluate the active graph for one symbol and optional candle index."""
         result = await evaluate_strategy_graph(
             self.slug,
             self.timeframe,
             symbol,
             side,
             self.indicators,
+            candle_index=candle_index,
         )
         payload = {
             "symbol": symbol,

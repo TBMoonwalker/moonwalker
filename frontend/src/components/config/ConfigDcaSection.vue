@@ -231,6 +231,46 @@
                             placeholder="0"
                         />
                     </n-form-item>
+                    <n-form-item
+                        label="Require fresh long signal"
+                        path="sidestep_reentry_requires_fresh_long_signal"
+                        label-placement="left"
+                    >
+                        <n-checkbox
+                            v-model:checked="dca.sidestep_reentry_requires_fresh_long_signal"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Confirm sidestep signals on closed candles"
+                        path="sidestep_confirm_closed_candle"
+                        label-placement="left"
+                    >
+                        <n-checkbox
+                            v-model:checked="dca.sidestep_confirm_closed_candle"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Maximum re-entry premium above sidestep exit (%)"
+                        path="sidestep_reentry_max_premium_pct"
+                    >
+                        <n-input-number
+                            v-model:value="dca.sidestep_reentry_max_premium_pct"
+                            :min="0"
+                            :max="100"
+                            placeholder="0 disables the cap"
+                        />
+                    </n-form-item>
+                    <n-form-item
+                        label="Maximum sidestep sell fallback slippage (%)"
+                        path="sidestep_exit_max_market_fallback_slippage_pct"
+                    >
+                        <n-input-number
+                            v-model:value="dca.sidestep_exit_max_market_fallback_slippage_pct"
+                            :min="0"
+                            :max="100"
+                            placeholder="0 allows any fallback price"
+                        />
+                    </n-form-item>
                 </template>
             </template>
         </n-form>

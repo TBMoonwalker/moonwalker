@@ -278,6 +278,22 @@ test('buildLoadedConfigState defaults safety-order reserve to disabled', () => {
     assert.equal(state.capital.reserve_safety_orders, false)
 })
 
+test('buildLoadedConfigState hydrates sidestep spike guards', () => {
+    const state = buildLoadedConfigState(
+        {
+            trade_mode: 'sidestep',
+            sidestep_confirm_closed_candle: 'true',
+            sidestep_reentry_max_premium_pct: '5',
+            sidestep_exit_max_market_fallback_slippage_pct: '2.5',
+        },
+        createLoadDefaults(),
+    )
+
+    assert.equal(state.dca.sidestep_confirm_closed_candle, true)
+    assert.equal(state.dca.sidestep_reentry_max_premium_pct, 5)
+    assert.equal(state.dca.sidestep_exit_max_market_fallback_slippage_pct, 2.5)
+})
+
 test('buildLoadedConfigState derives the weekly history default from timeframe', () => {
     const state = buildLoadedConfigState(
         {
