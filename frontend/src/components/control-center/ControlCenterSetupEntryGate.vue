@@ -28,9 +28,9 @@ const emit = defineEmits<{
                 <n-card size="small" class="entry-choice-card">
                     <n-flex vertical :size="12">
                         <div>
-                            <h3 class="entry-choice-title">
-                                Restore existing installation
-                            </h3>
+                            <h2 class="entry-choice-title">
+                              Restore existing installation
+                              </h2>
                             <n-text depth="3">
                                 Import a config-only or full backup, then review
                                 readiness before anything goes live.
@@ -49,7 +49,7 @@ const emit = defineEmits<{
                 <n-card size="small" class="entry-choice-card">
                     <n-flex vertical :size="12">
                         <div>
-                            <h3 class="entry-choice-title">Start a new setup</h3>
+                            <h2 class="entry-choice-title">Start a new setup</h2>
                             <n-text depth="3">
                                 Configure the essentials needed for a safe dry run
                                 before expert tuning or utilities appear.

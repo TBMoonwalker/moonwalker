@@ -197,7 +197,7 @@ const emit = defineEmits<{
     flex-direction: column;
     gap: 4px;
     padding: 12px 16px;
-    border-bottom: 1px solid var(--color-border);
+    border-bottom: 1px solid var(--mw-color-border-strong);
 }
 
 .systems-workspace-kicker {
@@ -235,7 +235,7 @@ const emit = defineEmits<{
 }
 
 .system-cell + .system-cell {
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--mw-color-border-strong);
 }
 
 .status-card {
@@ -259,7 +259,7 @@ const emit = defineEmits<{
 
 @media (max-width: 767px) {
     .system-cell + .system-cell {
-        border-top: 1px solid var(--color-border);
+        border-top: 1px solid var(--mw-color-border-strong);
     }
 }
 </style>

@@ -439,7 +439,7 @@ const evidenceItems = computed<ConfidenceEvidenceItem[]>(() => [
 
 .evidence-chip {
     padding-top: 10px;
-    border-top: 1px solid var(--color-border);
+    border-top: 1px solid var(--mw-color-border-strong);
     min-width: 0;
 }
 
