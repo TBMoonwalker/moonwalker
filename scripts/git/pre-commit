@@ -1,0 +1,54 @@
+#!/usr/bin/env bash
+#
+# git pre-commit: keep the `impeccable live` debug instrumentation out of the
+# tracked Vite entrypoint so it can never reach a production build.
+#
+# - Strips the marker/keyword instrumentation from frontend/index.html.
+# - Forces the cleaned content into the index and gates on the *staged blob*,
+#   not the working tree — because a commit stores the index, not the worktree.
+# - If a live marker still survives in the staged blob, the commit is BLOCKED
+#   (fail-closed).
+#
+# Portable: real logic lives here (committed); .git/hooks/pre-commit is a thin
+# wrapper installed by scripts/git/install-hooks.sh.
+set -uo pipefail
+
+REPO_ROOT="$(git rev-parse --show-toplevel)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+STRIP="$SCRIPT_DIR/strip-impeccable-live.sh"
+TARGET_FILE="frontend/index.html"
+
+# If the tracked entrypoint does not exist, nothing to guard.
+if [ ! -f "$REPO_ROOT/$TARGET_FILE" ]; then
+    exit 0
+fi
+
+# Strip from the working tree. rc: 0=unchanged, 1=modified, >1=error.
+set +e
+"$STRIP" "$TARGET_FILE"
+strip_rc=$?
+set -e
+
+if [ "$strip_rc" -gt 1 ]; then
+    echo "pre-commit: strip error (rc=$strip_rc) for $TARGET_FILE" >&2
+    exit "$strip_rc"
+fi
+
+if [ "$strip_rc" -eq 1 ]; then
+    echo "pre-commit: stripped impeccable-live instrumentation from $TARGET_FILE; re-staging."
+fi
+
+# Re-stage the cleaned file. Use --all so the index is forced toward the
+# (now clean) working tree regardless of its prior contents.
+git -C "$REPO_ROOT" add --all -- "$TARGET_FILE"
+
+# Fail-closed: the commit stores the INDEX, so gate on the staged blob.
+if git -C "$REPO_ROOT" show ":$TARGET_FILE" 2>/dev/null | grep -qE 'impeccable-live|localhost:[0-9]+/live\.js'; then
+    echo "pre-commit: BLOCKED — a live/injected marker is still in the staged $TARGET_FILE:"
+    git -C "$REPO_ROOT" show ":$TARGET_FILE" 2>/dev/null | grep -nE 'impeccable-live|localhost:[0-9]+/live\.js' | head
+    echo "  Clean the block manually (the strip tool is at scripts/git/strip-impeccable-live.sh),"
+    echo "  re-stage the file, then commit again. Do not commit a live endpoint."
+    exit 1
+fi
+
+exit 0

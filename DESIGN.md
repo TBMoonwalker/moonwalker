@@ -1,72 +1,259 @@
-# Design System — Moonwalker
+---
+name: Moonwalker
+description: Calm, intent-first operator console for a self-hosted crypto trading bot.
+colors:
+  primary: "#1d5c49"
+  primary-strong: "#18413a"
+  primary-soft: "#e3f3ec"
+  secondary: "#b78a2e"
+  surface-base: "#f7f8f6"
+  surface-raised: "#ecefea"
+  surface-panel: "#ffffff"
+  border: "#d5dbd5"
+  text-primary: "#18211d"
+  text-secondary: "#33403a"
+  text-muted: "#8a948d"
+  success: "#2e7d5b"
+  warning: "#b7791f"
+  warning-soft: "#fff8ec"
+  error: "#b4443f"
+  info: "#356d86"
+typography:
+  display:
+    fontFamily: "Space Grotesk, sans-serif"
+    fontSize: "clamp(1.5rem, 2vw, 2.25rem)"
+    fontWeight: 500
+    lineHeight: 1.2
+    letterSpacing: "normal"
+  body:
+    fontFamily: "Source Sans 3, sans-serif"
+    fontSize: "16px"
+    fontWeight: 400
+    lineHeight: 1.5
+    letterSpacing: "normal"
+  label:
+    fontFamily: "Source Sans 3, sans-serif"
+    fontSize: "14px"
+    fontWeight: 600
+    lineHeight: 1.2
+    letterSpacing: "normal"
+  mono:
+    fontFamily: "IBM Plex Mono, monospace"
+    fontSize: "14px"
+    fontWeight: 450
+    lineHeight: 1.4
+    letterSpacing: "normal"
+rounded:
+  sm: "6px"
+  md: "10px"
+  lg: "14px"
+  full: "9999px"
+spacing:
+  "2xs": "4px"
+  "xs": "8px"
+  "sm": "12px"
+  "md": "16px"
+  "lg": "24px"
+  "xl": "32px"
+  "2xl": "48px"
+  "3xl": "64px"
+components:
+  button-primary:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.surface-panel}"
+    typography: "label"
+    rounded: "{rounded.md}"
+    padding: "9px 18px"
+  button-primary-hover:
+    backgroundColor: "{colors.success}"
+    textColor: "{colors.surface-panel}"
+    typography: "label"
+    rounded: "{rounded.md}"
+    padding: "9px 18px"
+  button-secondary:
+    backgroundColor: "{colors.surface-panel}"
+    textColor: "{colors.primary}"
+    typography: "label"
+    rounded: "{rounded.md}"
+    padding: "9px 18px"
+  mission-panel:
+    backgroundColor: "{colors.primary-soft}"
+    textColor: "{colors.text-primary}"
+    typography: "display"
+    rounded: "{rounded.md}"
+    padding: "14px 16px"
+  dashboard-card:
+    backgroundColor: "{colors.surface-panel}"
+    textColor: "{colors.text-primary}"
+    typography: "body"
+    rounded: "{rounded.md}"
+    padding: "16px"
+  status-tag:
+    backgroundColor: "{colors.primary}"
+    textColor: "{colors.surface-panel}"
+    typography: "label"
+    rounded: "{rounded.full}"
+    padding: "4px 10px"
+  input-field:
+    backgroundColor: "{colors.surface-panel}"
+    textColor: "{colors.text-primary}"
+    typography: "body"
+    rounded: "{rounded.md}"
+    padding: "9px 12px"
+---
 
-## Product Context
-- **What this is:** Moonwalker is a self-hosted cryptocurrency trading bot with a web dashboard for configuring exchange access, signal sources, DCA behavior, monitoring, and operational safety.
-- **Who it's for:** Operators who are running a single Moonwalker instance and need to set it up safely, understand readiness quickly, and recover calmly when something is wrong.
-- **Space/industry:** Crypto trading / self-hosted operator tooling / trading automation dashboards.
-- **Project type:** Web app / operator dashboard / setup console.
+# Design System: Moonwalker
 
-## Aesthetic Direction
-- **Direction:** Calm Operator Console
-- **Decoration level:** Intentional
-- **Mood:** Moonwalker should feel like a careful trading workstation, not a generic admin panel and not a flashy crypto marketing site. The emotional goal is calm control: clear status, obvious next steps, and very little decorative noise competing with operational decisions.
-- **Reference sites:** This pass is grounded in Moonwalker's current product and category knowledge rather than external visual research.
+## Overview
+
+**Creative North Star: "The Calm Operator Console"**
+
+Moonwalker is a careful trading workstation, not a generic admin panel and not a flashy crypto marketing site. The emotional goal is calm control: clear status, obvious next steps, and very little decorative noise competing with operational decisions. Hierarchy comes from spacing, borders, contrast, and a single soft card shadow — not from decorative fill. Working surfaces stay flat or near-flat; gradients are reserved for page atmosphere and rare emphasis, which keeps dark mode reading as a night operator console rather than neon-terminal cosplay.
+
+The console asks the operator for intent before exposing breadth. First run does not begin with a mode strip or a dense settings grid; it begins with one intent question (restore an existing installation, or start a new setup) and then a setup-style choice (guided or full control). Each editable setting has exactly one canonical home, readiness gates stand between dry run and live trading, and the dashboard optimizes for calm control and recoverable outcomes rather than marketing or feature density.
+
+The palette is restrained: one operator-green primary carries trust, progress, and primary action; a brass accent is used sparingly only for "review carefully" moments; semantic success/warning/error/info tones mark readiness and risk. Tabular data earns a monospace face, and the type scale steps in an even, calm rhythm so dense configuration surfaces stay legible.
+
+**Key Characteristics:**
+
+- Calm operator console: status and next action first, decoration second.
+- One operator-green primary; brass used sparingly as a review accent.
+- Flat, bordered, single-shadow surfaces; gradients reserved for atmosphere.
+- Intent-first flow: one question, one active task, no equal-weight mode strip.
+- Even type scale (12/14/16/20/24/32/40/56) with a monospace data face.
+
+## Colors
+
+A restrained, cool-slate palette built around a single operator-green primary, with a scarce brass review accent and a small semantic set for readiness and risk.
+
+### Primary
+- **Operator Green** (#1d5c49): The trust color. Primary actions (Save changes, Go live, Restore), progress, and "ready" states. The single voice of the console.
+- **Deep Operator Green** (#18413a): Pressed/active state of primary buttons; used for focus rings and inset selection.
+- **Operator Green Soft** (#e3f3ec): Faint green wash behind mission and admission bands — depth without a shadow.
+- **Brass Review Accent** (#b78a2e): The scarce secondary. "Review carefully" moments only (readiness gates, pending attention). Never the dominant page color.
+
+### Neutral
+- **Console Base** (#f7f8f6): Page ground. Cool, slightly green-tinted off-white.
+- **Raised Surface** (#ecefea): Slightly lifted region ground.
+- **Raised Panel** (#ffffff): Card and form-field ground; the resting working surface.
+- **Border** (#d5dbd5): Default 1px border and divider.
+- **Primary Text** (#18211d): Headings and primary copy.
+- **Secondary Text** (#33403a): Body copy and form labels.
+- **Muted Text** (#8a948d): Tertiary metadata, kickers, placeholders.
+
+### Semantic
+- **Success Green** (#2e7d5b): Ready / healthy / passing states; also primary button hover.
+- **Warning Amber** (#b7791f): Needs attention without being fatal; its soft ground is #fff8ec.
+- **Error Red** (#b4443f): Failed / blocking readiness gate.
+- **Info Blue** (#356d86): Neutral informational notes.
+
+### Named Rules
+**The One Voice Rule.** Operator green is the single primary; the brass secondary is a scarce "review carefully" accent, used on no more than ~10% of any screen. Its rarity is the point.
+**The Night-Console Rule.** Dark mode keeps the same hierarchy, lowers saturation by ~10–15%, and lifts contrast through surfaces rather than brighter accents. It reads as a night operator console, not neon-terminal cosplay.
 
 ## Typography
-- **Display/Hero:** `Space Grotesk` — firm and technical enough for operator headlines without tipping into sci-fi theatrics.
-- **Body:** `Source Sans 3` — high readability, neutral tone, and strong form legibility for long configuration surfaces.
-- **UI/Labels:** `Source Sans 3` semibold — keeps interaction copy calm and direct instead of shouty.
-- **Data/Tables:** `IBM Plex Mono` — supports tabular numerals and gives balances, ratios, and diagnostics a trustworthy machine-readable tone.
-- **Code:** `Fira Code`
-- **Loading:** Google Fonts for `Space Grotesk`, `Source Sans 3`, and `IBM Plex Mono`; `Fira Code` may stay self-hosted or use the existing app asset strategy.
-- **Scale:** `12 / 14 / 16 / 20 / 24 / 32 / 40 / 56 px`
-  - `12`: tertiary metadata
-  - `14`: dense supporting copy
-  - `16`: default body and form labels
-  - `20`: section titles
-  - `24`: card and panel headings
-  - `32`: page-level mission titles
-  - `40`: first-run gateway headline
-  - `56`: marketing/hero use only, rarely needed in product
 
-## Color
-- **Approach:** Restrained
-- **Primary:** `#1D5C49` — operator green; use for trust, progress, and primary actions.
-- **Secondary:** `#B78A2E` — brass accent; use sparingly for “review carefully” moments, never as the dominant page color.
-- **Neutrals:** cool-slate range
-  - `#F7F8F6` surface base
-  - `#ECEFEA` raised surface
-  - `#D5DBD5` borders
-  - `#8A948D` muted text
-  - `#33403A` strong secondary text
-  - `#18211D` primary text
-- **Semantic:**
-  - success `#2E7D5B`
-  - warning `#B7791F`
-  - error `#B4443F`
-  - info `#356D86`
-- **Dark mode:** keep the same hierarchy but reduce saturation by roughly 10 to 15 percent and lift contrast through surfaces rather than brighter accents. Dark mode should read as “night operator console,” not neon terminal cosplay.
-- **Surface treatment:** gradients belong to page atmosphere or rare emphasis, not to primary working surfaces. Headers, cards, shells, and setup panels should stay flat or near-flat so hierarchy comes from spacing, borders, contrast, and shadow instead of decorative fill.
+**Display Font:** Space Grotesk (with system sans fallback)
+**Body Font:** Source Sans 3 (with "Segoe UI", sans-serif fallback)
+**Data/Mono Font:** IBM Plex Mono (with "SFMono-Regular", monospace fallback)
+**Code Font:** Fira Code
 
-## Spacing
-- **Base unit:** `8px`
-- **Density:** Comfortable for setup, compact for advanced
-- **Scale:** `2xs(4) xs(8) sm(12) md(16) lg(24) xl(32) 2xl(48) 3xl(64)`
+**Character:** Firm, technical, and human. Space Grotesk gives operator headlines a precise, slightly engineered tone without sci-fi theatrics; Source Sans 3 keeps dense configuration copy calm and direct; IBM Plex Mono gives balances, ratios, and diagnostics a trustworthy, tabular-numeral, machine-readable voice.
+
+### Hierarchy
+- **Display** (500, clamp(1.5rem–2.25rem) / ~32–40px, 1.2): Page-level mission titles, first-run gateway headlines, section titles. Space Grotesk.
+- **Title** (450, 20–24px, 1.25): Card and panel headings. Space Grotesk.
+- **Body** (400, 16px, 1.5, max 72ch): Default reading copy and form labels. Source Sans 3.
+- **Label** (600, 14px, 1.2, tracked): UI controls, kickers, status tags. Source Sans 3 semibold.
+- **Mono / Data** (450, 14px, 1.4): Balances, ratios, diagnostics, tabular figures. IBM Plex Mono with tabular numerals.
+
+### Scale
+`12 / 14 / 16 / 20 / 24 / 32 / 40 / 56 px` — even, calm rhythm. 12 tertiary metadata · 14 dense supporting copy · 16 default body and form labels · 20 section titles · 24 card/panel headings · 32 page-level mission titles · 40 first-run gateway headline · 56 marketing/hero use only, rarely needed in product.
+
+### Named Rules
+**The Data-Gets-Mono Rule.** Any figure that is money, ratio, or diagnostic (balances, uPNL, ratios, order sizes) is set in IBM Plex Mono with tabular numerals; prose stays in Source Sans 3.
 
 ## Layout
-- **Approach:** Grid-disciplined
-- **Grid:** 12-column desktop, 8-column tablet, 4-column mobile
-- **Max content width:** `1200px`
-- **Border radius:**
-  - `sm: 6px`
-  - `md: 10px`
-  - `lg: 14px`
-  - `full: 9999px`
 
-## Motion
-- **Approach:** Minimal-functional
-- **Easing:** enter `cubic-bezier(0.2, 0.8, 0.2, 1)`, exit `cubic-bezier(0.4, 0, 1, 1)`, move `cubic-bezier(0.2, 0.7, 0.2, 1)`
-- **Duration:** micro `80ms`, short `160ms`, medium `260ms`, long `420ms`
+Grid-disciplined and intent-segmented. A 12-column desktop grid collapses to 8-column tablet and 4-column mobile within a `1200px` max content width. The Control Center is not a static tab layout — it is a lifecycle segment: before readiness it shows only the setup surface (entry gateway or one active setup task); after safe dry-run readiness it unlocks Overview as the default home, Advanced as the full-density tuning surface, and Utilities for operational actions. Density is comfortable for setup and compact for advanced tuning. Spacing rhythm is an 8px base with the scale `2xs(4) / xs(8) / sm(12) / md(16) / lg(24) / xl(32) / 2xl(48) / 3xl(64)`.
+
+**The Intent-Before-Breadth Rule.** First run opens with one intent question, not a mode strip or a wall of fields; breadth is revealed only as far as the chosen intent requires.
+**The One-Home Rule.** Every editable configuration field has exactly one canonical visible home — essentials in Setup, expert tuning in Advanced, status in Overview, operational actions in Utilities. Deeper tuning *extends* an area; it never restates the same field.
+
+## Elevation & Depth
+
+Shadows are rare and calm. Working surfaces are flat or near-flat at rest; hierarchy is carried primarily by spacing, borders, contrast, and a single soft card shadow. Two shadow tokens exist: `ambient-soft` (`0 12px 28px rgba(24, 33, 29, 0.08)`) for emphasis surfaces (mission/admission bands) and `card` (`0 10px 24px rgba(24, 33, 29, 0.05)`) as the default panel resting elevation. In dark mode the same shadows deepen (`0 12px 28px rgba(0,0,0,0.28)` / `0 10px 24px rgba(0,0,0,0.22)`) to preserve legibility on dark surfaces.
+
+### Shadow Vocabulary
+- **Card** (`0 10px 24px rgba(24, 33, 29, 0.05)`): Default resting elevation for dashboard cards, subpanels, and mission panels.
+- **Ambient Soft** (`0 12px 28px rgba(24, 33, 29, 0.08)`): Diffuse ambient lift for emphasis surfaces where a touch more depth is warranted.
+
+### Named Rules
+**The Flat-By-Default Rule.** Headers, cards, shells, and setup panels are flat at rest; a shadow appears only as a response to state (emphasis band, hover elevation). Gradients are reserved for page atmosphere and rare emphasis, never for primary working surfaces.
+
+## Shapes
+
+Soft, consistent corners from a single radius family — `sm` 6px, `md` 10px, `lg` 14px, `full` 9999px for pills — over 1px solid borders in the neutral border tone (#d5dbd5). There is no clipping, no hard-cut geometry, and no bevel; the form language is rounded, bordered, and restrained. Status tags and similar pills use `full` (9999px); cards and fields use `md` (10px); compact chips use `sm` (6px).
+
+**The Single-Radius-Voice Rule.** Every surface draws from the one radius scale at one step; no surface invents an ad-hoc radius. A mismatched corner reads as noise.
+
+## Components
+
+### Buttons
+- **Shape:** Gently rounded (10px, `md`), 9px × 18px padding, 14px semibold label.
+- **Primary:** Operator-green fill (#1d5c49) with light text (#f7f8f6); hover to success green (#2e7d5b) with a 1px lift; active to deep operator green (#18413a). Decisive, the dominant action.
+- **Secondary:** Raised panel ground with operator-green text and a faint green border; hover fills a 6% green wash.
+- **Focus:** 2px operator-green ring, 2px offset — lift by ring, never a hard outline.
+
+### Status Tags (chips)
+- **Style:** Full-radius pill (9999px), 4px × 10px padding, 14px semibold. Success wears operator green on light text; info wears info blue; warning wears a 14% brass wash with brass text.
+- **State:** Tone is set by semantic color, not by a selected/unselected toggle.
+
+### Cards / Containers
+- **Corner Style:** `md` (10px).
+- **Background:** Raised panel (#ffffff) for working surfaces; faint operator-green wash (#e3f3ec) for the mission panel.
+- **Shadow Strategy:** Resting `card` shadow by default; `ambient-soft` for emphasis.
+- **Border:** 1px neutral border (#d5dbd5).
+- **Internal Padding:** `md` (16px) standard, 14px × 16px for the mission panel.
+
+### Inputs / Fields
+- **Style:** 1px neutral border (#d5dbd5), raised-panel ground, `md` (10px) radius, 9px × 12px padding, 16px body text.
+- **Focus:** Border shifts to operator green with a 3px 14% green glow ring; placeholder in muted text.
+- **Label:** 14px semibold secondary text, stacked above with a 6px gap.
+
+### Navigation
+- **Style:** Horizontal header menu; items are rounded (10px), 8px × 12px padding, 14px label.
+- **States:** Default secondary text; hover to a 6% green wash; active to an 18% green wash with an inset 1px green ring and 500 weight.
+
+### Signature Components
+- **Mission Panel:** The signature surface. Readiness state + one next action + concise evidence, on a faint operator-green wash with a resting card shadow.
+- **Admission Strip:** A signaled band (info or warning) carrying one readiness or readiness-gate message with a leading status pill.
+
+## Do's and Don'ts
+
+### Do:
+- **Do** ask the operator for intent before exposing breadth.
+- **Do** give every editable setting exactly one canonical home.
+- **Do** prefer explicit task ownership over component reuse when reuse harms clarity.
+- **Do** keep working surfaces flat and reserve gradients for page atmosphere and rare emphasis.
+- **Do** use intent-based, consequence-aware, state-first copy with no self-labeling.
+- **Do** set money, ratio, and diagnostic figures in IBM Plex Mono with tabular numerals.
+- **Do** lift focus and selection with a 2px operator-green ring, not a hard outline.
+
+### Don't:
+- **Don't** reuse the old Settings page mental model inside the new Control Center.
+- **Don't** show all modes at equal weight during first run.
+- **Don't** expose expert toggles inside Guided Setup.
+- **Don't** make restore discoverable only inside Advanced or Utilities during onboarding.
+- **Don't** duplicate normal editable settings between Setup and Advanced.
+- **Don't** use self-labeling or category terms like "Configuration", "Beginner", or "Advanced user".
+- **Don't** apply gradients to primary working surfaces (headers, cards, shells, setup panels).
+
+---
+
+<!-- The sections below preserve Moonwalker's incumbent operator-UX, Control Center IA,
+     screen-level guidance, copy rules, accessibility, guardrails, and live-measured baseline.
+     They are project-specific extras kept alongside the canonical eight sections above. -->
 
 ## Operator UX Rules
 
@@ -83,7 +270,7 @@ It should begin with one clear question:
 
 This is the correct first decision because it is intent-based, not identity-based.
 Operators know whether they are migrating an existing instance. They do not
-reliably know whether they should self-identify as “advanced.”
+reliably know whether they should self-identify as "advanced."
 
 ### First-Run Flow
 
@@ -91,23 +278,23 @@ reliably know whether they should self-identify as “advanced.”
 FIRST RUN
 |
 |-- Entry Choice
-|   |-- Restore existing installation
-|   `-- Start new setup
+|    |-- Restore existing installation
+|    `-- Start new setup
 |
 |-- If Restore
-|   |-- Choose config-only or full backup
-|   |-- Perform restore
-|   `-- Land in readiness review
+|    |-- Choose config-only or full backup
+|    |-- Perform restore
+|    `-- Land in readiness review
 |
 `-- If Start New
-    |-- Choose setup style
-    |   |-- Guided setup (recommended)
-    |   `-- Full control
-    |
-    `-- Complete safe dry-run setup
+     |-- Choose setup style
+     |    |-- Guided setup (recommended)
+     |    `-- Full control
+     |
+     `-- Complete safe dry-run setup
 ```
 
-### Restore Is Not “Advanced”
+### Restore Is Not "Advanced"
 - Restore is an entry workflow and a utility.
 - On first run, restore belongs on the opening decision screen.
 - After the instance is running, restore belongs in `Utilities`.
@@ -133,9 +320,9 @@ Rules:
 - Show only the setup surface as the primary destination.
 - Do not show `Overview`, `Advanced`, and `Utilities` as equal first-run peers.
 - If needed, keep secondary escapes subtle:
-  - `Restore instead`
-  - `See all controls`
-  - `Skip to advanced setup`
+   - `Restore instead`
+   - `See all controls`
+   - `Skip to advanced setup`
 - The page should feel like a guided operator flow, not a dashboard plus tabs.
 
 #### Guided Setup
@@ -162,14 +349,14 @@ Rules:
 CONTROL CENTER
 |
 |-- Entry / Setup Gateway
-|   |-- Restore existing installation
-|   `-- Start new setup
+|    |-- Restore existing installation
+|    `-- Start new setup
 |
 `-- Setup Workspace
-    |-- Guided or Full Control
-    |-- One dominant active task
-    |-- Collapsed completed tasks
-    `-- Save / review readiness
+     |-- Guided or Full Control
+     |-- One dominant active task
+     |-- Collapsed completed tasks
+     `-- Save / review readiness
 ```
 
 ### Returning Healthy Operator
@@ -178,17 +365,17 @@ CONTROL CENTER
 CONTROL CENTER
 |
 |-- Mission Panel
-|   |-- readiness state
-|   |-- one next action
-|   `-- concise evidence
+|    |-- readiness state
+|    |-- one next action
+|    `-- concise evidence
 |
 |-- Primary Nav
-|   |-- Overview
-|   `-- Setup
+|    |-- Overview
+|    `-- Setup
 |
 `-- Secondary Nav
-    |-- Advanced
-    `-- Utilities
+     |-- Advanced
+     `-- Utilities
 ```
 
 ### One-Home Rule
@@ -208,8 +395,8 @@ adding deeper controls, not by restating the same fields.
 ### 1. Entry Screen
 - Headline: `How do you want to begin?`
 - Two large action cards:
-  - `Restore existing installation`
-  - `Start a new setup`
+   - `Restore existing installation`
+   - `Start a new setup`
 - Supporting copy should explain consequences, not implementation details.
 - This screen should be visually quieter than Overview and more decisive than Settings.
 
@@ -223,15 +410,15 @@ adding deeper controls, not by restating the same fields.
 - Same page structure as Guided Setup
 - Higher field density
 - Expert reveals inline in the relevant section
-- Still anchored on “finish safe dry run,” not on “browse every option”
+- Still anchored on "finish safe dry run," not on "browse every option"
 
 ### 4. Readiness Review After Restore
 - Do not drop the user into raw forms immediately after restore.
 - Show a review state:
-  - what was imported
-  - whether the instance is safe for dry run
-  - what still needs attention
-  - one next action
+   - what was imported
+   - whether the instance is safe for dry run
+   - what still needs attention
+   - one next action
 
 ### 5. Overview After Readiness
 - Calm status first
@@ -252,12 +439,12 @@ adding deeper controls, not by restating the same fields.
 
 ## Copy Rules
 - Prefer intent-based labels over self-labeling:
-  - good: `Restore existing installation`
-  - good: `Start a new setup`
-  - good: `Guided setup`
-  - good: `Full control`
-  - bad: `Beginner`
-  - bad: `Advanced user`
+   - good: `Restore existing installation`
+   - good: `Start a new setup`
+   - good: `Guided setup`
+   - good: `Full control`
+   - bad: `Beginner`
+   - bad: `Advanced user`
 - Use state-first headlines
 - Keep helper text short, operational, and consequence-aware
 - Avoid category terms like `Configuration` unless needed for advanced surfaces
@@ -267,7 +454,7 @@ adding deeper controls, not by restating the same fields.
 - Guided task expansion must preserve clear focus order.
 - Revealing expert controls inline must move focus predictably and announce the change.
 - Restore outcomes and readiness review states must use ARIA live regions.
-- Primary actions must meet minimum touch target sizes.
+- Primary actions must meet minimum touch target sizes (44px).
 
 ## Implementation Guardrails
 - Do not reuse the old Settings page mental model inside the new Control Center.
@@ -276,6 +463,11 @@ adding deeper controls, not by restating the same fields.
 - Do not make restore discoverable only inside Advanced or Utilities during onboarding.
 - Do not duplicate normal editable settings between Setup and Advanced.
 - Prefer explicit task ownership over component reuse when reuse harms clarity.
+
+## Motion
+- **Approach:** Minimal-functional
+- **Easing:** enter `cubic-bezier(0.2, 0.8, 0.2, 1)`, exit `cubic-bezier(0.4, 0, 1, 1)`, move `cubic-bezier(0.2, 0.7, 0.2, 1)`
+- **Duration:** micro `80ms`, short `160ms`, medium `260ms`, long `420ms`
 
 ## Verified Baseline (Live-Measured, 2026-06-05)
 
@@ -304,7 +496,7 @@ These values were extracted from the running site at http://192.168.6.5:8160/sta
 |-------|---------|-----------|----------|
 | Body font size | 14px (Naive UI default) | 16px per scale | Medium |
 | Pagination touch targets | 28x28px on mobile | 44x44px minimum | Medium |
-| Mobile text truncation | “les mo” at 375px | Full text with ellipsis | Low |
+| Mobile text truncation | "les mo" at 375px | Full text with ellipsis | Low |
 
 ### Performance Baseline
 | Metric | Value |
@@ -317,9 +509,10 @@ These values were extracted from the running site at http://192.168.6.5:8160/sta
 | Date | Decision | Rationale |
 |------|----------|-----------|
 | 2026-03-21 | Added repo-level DESIGN.md | Moonwalker had Control Center design intent but no repo-level design source of truth |
-| 2026-03-21 | Made first-run begin with `Restore existing installation` vs `Start a new setup` | Intent is clearer and safer than asking the user whether they are “advanced” |
+| 2026-03-21 | Made first-run begin with `Restore existing installation` vs `Start a new setup` | Intent is clearer and safer than asking the user whether they are "advanced" |
 | 2026-03-21 | Made `Guided setup` vs `Full control` the second decision | This preserves expert agency without forking the information architecture |
 | 2026-03-21 | Declared restore a first-run entry workflow and a later utility, not an advanced setting | Restore is lifecycle-dependent, not expertise-dependent |
 | 2026-03-21 | Declared one-home rule for editable settings | Duplicate fields between Setup and Advanced destroy operator focus |
 | 2026-03-21 | Reserved gradients for atmosphere and rare emphasis, not core work surfaces | Flat panels preserve calm hierarchy and keep dark mode from feeling noisy |
 | 2026-06-05 | Added verified baseline section | Live-measured values confirm design system compliance; deviations tracked for remediation |
+| 2026-09-12 | Canonicalized DESIGN.md to the 8-section format with YAML frontmatter tokens | Tokens extracted from `frontend/src/assets/base.css` `--mw-*` custom properties; incumbent operator-UX content preserved as extra sections |
