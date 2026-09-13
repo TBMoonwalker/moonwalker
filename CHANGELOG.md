@@ -2,6 +2,26 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.7.0.0] - 2026-09-13
+
+### Added
+- A fail-closed git guard (`scripts/git/`) that keeps `impeccable live` injection
+  artifacts out of the tracked Vite entrypoint: `strip-impeccable-live.sh` strips
+  the localhost helper block and fails closed on session-artifact residue,
+  `pre-commit` re-stages and gates the committed blob, and `install-hooks.sh`
+  wires the committed hook after clone.
+- A frontend-staging guard so a missing built SPA surfaces loudly instead of as a
+  bare 500: `run.sh start` now hard-fails fast when assets do not stage, the SPA
+  controller raises an actionable `HTTPException`, and startup logs the gap.
+- `PRODUCT.md` capturing the product record and a design-audit report for the
+  Control Center view.
+
+### Changed
+- Canonicalized the design system in `DESIGN.md` against the open DESIGN.md
+  format.
+- The control-center view and its components received design-audit fixes and
+  reduced-motion handling.
+
 ## [Unreleased]
 
 ## [4.6.3.0] - 2026-09-04
