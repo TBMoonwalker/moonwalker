@@ -8,14 +8,29 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-# Resolve the real git dir through Git so linked worktrees (where .git is a
- # file, not a directory) install into their own hooks dir rather than failing
- # at "mkdir -p .git/hooks" with "Not a directory".
- GIT_DIR="$(git rev-parse --absolute-git-dir)"
- HOOKS_DIR="$GIT_DIR/hooks"
- WRAPPER="$HOOKS_DIR/pre-commit"
 
-mkdir -p "$HOOKS_DIR"
+# Resolve Git's *effective* hooks directory.
+# core.hooksPath (if set) IS a hooks dir and wins; otherwise the default is
+# <common-dir>/hooks. --git-common-dir is the git dir (needs a /hooks suffix),
+# and it is correct even in a linked worktree, where .git is a file and Git runs
+# hooks from the shared .git/hooks, NOT the per-worktree .git/worktrees/<n>/hooks.
+core_hooks_path="$(git -C "$REPO_ROOT" config --get core.hooksPath || true)"
+if [ -n "$core_hooks_path" ]; then
+     HOOKS_PATH="$core_hooks_path"
+     if [[ "$HOOKS_PATH" != /* ]]; then
+         HOOKS_PATH="$REPO_ROOT/$core_hooks_path"
+     fi
+else
+    common_dir="$(git -C "$REPO_ROOT" rev-parse --git-common-dir)"
+    if [[ "$common_dir" != /* ]]; then
+         common_dir="$REPO_ROOT/$common_dir"
+    fi
+    HOOKS_PATH="$common_dir/hooks"
+fi
+
+WRAPPER="$HOOKS_PATH/pre-commit"
+
+mkdir -p "$HOOKS_PATH"
 
 cat > "$WRAPPER" <<EOF
 #!/usr/bin/env bash
@@ -28,4 +43,4 @@ chmod +x "$WRAPPER"
 chmod +x "$REPO_ROOT/scripts/git/pre-commit" "$REPO_ROOT/scripts/git/strip-impeccable-live.sh"
 
 echo "Installed: $WRAPPER"
-echo "  -> $REPO_ROOT/scripts/git/pre-commit"
+echo "   -> $REPO_ROOT/scripts/git/pre-commit"

@@ -1,17 +1,18 @@
 #!/usr/bin/env bash
 #
-# git pre-commit: keep `impeccable live` artifacts out of the *tracked* Vite
-# entrypoint (frontend/index.html) so nothing live-mode can reach a build.
+# git pre-commit: keep `impeccable live` artifacts out of the *staged* Vite
+# entrypoint (frontend/index.html) so nothing live-mode reaches a commit.
 #
 # Two strategies, run by scripts/git/strip-impeccable-live.sh:
-#   - INJECT markers (localhost helper script) are stripped.
-#   - SESSION ARTIFACTS (variant/carbonize wrappers) are NOT auto-mutated; the
-#     commit is BLOCKED with a pointer to `impeccable live-server stop`.
+#    - INJECT markers (the localhost helper) are stripped from the staged blob.
+#    - SESSION ARTIFACTS (variant/carbonize wrappers) are NOT auto-mutated; the
+#      commit is BLOCKED with a pointer to `impeccable live-server stop`.
 #
-# The strip works on the working tree; the hook then forces the cleaned content
-# into the index and gates on the *staged blob* (a commit stores the index, not
-# the worktree). Portable: real logic here (committed); .git/hooks/pre-commit is
-# a thin wrapper installed by scripts/git/install-hooks.sh.
+# The strip acts on a copy of the *staged* blob (git show ":file"), never on the
+# worktree, so a clean file staged alongside unrelated unstaged edits is cleaned
+# in the index only -- the user's unstaged changes are never swept into the commit.
+# Real logic lives here (committed); .git/hooks/pre-commit is a thin wrapper
+# installed by scripts/git/install-hooks.sh.
 set -uo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
@@ -19,10 +20,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STRIP="$SCRIPT_DIR/strip-impeccable-live.sh"
 TARGET_FILE="frontend/index.html"
 
-# If the tracked entrypoint does not exist, nothing to guard.
-if [ ! -f "$REPO_ROOT/$TARGET_FILE" ]; then
-      exit 0
- fi
+# Only guard the entrypoint when it is staged into this commit.
+if ! git -C "$REPO_ROOT" ls-files --error-unmatch -- "$TARGET_FILE" >/dev/null 2>&1; then
+     exit 0
+fi
 
 # INJECT markers in tracked source that must not enter a commit. This is a
 # superset of the marker keyword strip-impeccable-live.sh scrubs; keeping it a
@@ -32,52 +33,61 @@ INJECT_RE='impeccable-live|localhost:[0-9]+/live\.js|data-impeccable-csp|id="imp
 # Mid-session artifacts: fail closed -> clean via live-server stop, do not mutate.
 ARTIFACT_RE='impeccable-variants-start|impeccable-variants-end|impeccable-carbonize-start|impeccable-carbonize-end|data-impeccable-variant=|data-impeccable-variants=|data-impeccable-css=|data-impeccable-carbonize|data-impeccable-params='
 
+# Extract the STAGED blob into a temp file and run the strip against that copy, so
+# the worktree (and its unstaged edits) are never read or written.
+tmp="$(mktemp -t mw-live-strip.XXXXXX)"
+trap "rm -f '$tmp'" EXIT INT TERM
+git -C "$REPO_ROOT" show ":$TARGET_FILE" > "$tmp" 2>/dev/null || true
+
 set +e
-     # rc: 0=clean, 1=INJECT stripped (re-stage), 2=strategy error, 3=artifact residue.
- "$STRIP" "$TARGET_FILE"
+      # rc: 0=clean, 1=INJECT stripped (re-stage), 2=strategy error, 3=artifact residue.
+  "$STRIP" "$tmp"
  strip_rc=$?
 set -e
 
 case "$strip_rc" in
-     0) : ;;                              # nothing to strip; leave the index as-is
+      0)
+           :
+           ;;                          # nothing to strip; leave the index as-is
      1)
-          echo "pre-commit: stripped impeccable-live INJECT from $TARGET_FILE; re-staging."
-         # The strip modified the worktree entrypoint; re-stage it so the
-          # cleanup (and the staged-blob gate below) act on cleaned content.
-         # "git add -- <file>" (not --all) stages the file without pulling in
-           # unrelated edits to other paths.
-         git -C "$REPO_ROOT" add -- "$TARGET_FILE"
-          ;;
-      3)
+           # The strip stripped INJECT markers from the staged copy; write the
+           # cleaned content back into the index only, preserving the staged mode
+           # and leaving the worktree's unstaged edits untouched.
+          echo "pre-commit: stripped impeccable-live INJECT from $TARGET_FILE (index only)."
+          mode="$(git -C "$REPO_ROOT" ls-files -s -- "$TARGET_FILE" | awk '{print $1}')"
+      [ -z "$mode" ] && mode=100644
+      new_hash="$(git -C "$REPO_ROOT" hash-object -w --stdin < "$tmp")"
+       git -C "$REPO_ROOT" update-index --cacheinfo "$mode,$new_hash,$TARGET_FILE"
+           ;;
+     3)
            # Fail closed on session-artifact residue; the strip already printed the
            # offending lines and the cleanup command.
-          echo "pre-commit: BLOCKED — impeccable live session artifact in $TARGET_FILE." >&2
+          echo "pre-commit: BLOCKED - impeccable live session artifact in $TARGET_FILE." >&2
           echo "   Run 'impeccable live-server stop' (then remove any leftover" >&2
           echo "   impeccable-variants-*/impeccable-carbonize-* blocks), then commit." >&2
           exit 1
            ;;
-     *)
-          echo "pre-commit: strip error (rc=$strip_rc) for $TARGET_FILE" >&2
-          exit "$strip_rc"
-           ;;
+    *)
+         echo "pre-commit: strip error (rc=$strip_rc) for $TARGET_FILE" >&2
+         exit "$strip_rc"
+          ;;
 esac
 
-
-# Fail-closed gate on the staged blob for ANY live artifact, in case a residual
-# marker survived the strip (e.g. artifact residue the strip chose not to mutate).
+# Fail-closed gate on the STAGED blob for any live artifact, in case a residual
+# marker survived the strip (e.g. artifact residue the strip chose not to mute).
 if git -C "$REPO_ROOT" show ":$TARGET_FILE" 2>/dev/null | grep -qE "$INJECT_RE"; then
-      echo "pre-commit: BLOCKED — an INJECT marker survived in the staged $TARGET_FILE:"
-     git -C "$REPO_ROOT" show ":$TARGET_FILE" 2>/dev/null | grep -nE "$INJECT_RE" 2>/dev/null | head
-      echo "   Inspect it, then re-stage and commit. Do not commit a live endpoint."
-      exit 1
-fi
+       echo "pre-commit: BLOCKED - an INJECT marker survived in the staged $TARGET_FILE:"
+      git -C "$REPO_ROOT" show ":$TARGET_FILE" 2>/dev/null | grep -nE "$INJECT_RE" 2>/dev/null | head
+       echo "   Inspect it, then re-stage and commit. Do not commit a live endpoint."
+       exit 1
+ fi
 
-if git -C "$REPO_ROOT" show ":$TARGET_FILE" 2>/dev/null | grep -qE "$ARTIFACT_RE"; then
-      echo "pre-commit: BLOCKED — a live session artifact is in the staged $TARGET_FILE:"
-     git -C "$REPO_ROOT" show ":$TARGET_FILE" 2>/dev/null | grep -nE "$ARTIFACT_RE" 2>/dev/null | head
-      echo "   Run 'impeccable live-server stop', clean the leftover wrapper block(s),"
-      echo "   then commit. Do not commit live-session scaffolding."
-      exit 1
-fi
+ if git -C "$REPO_ROOT" show ":$TARGET_FILE" 2>/dev/null | grep -qE "$ARTIFACT_RE"; then
+       echo "pre-commit: BLOCKED - a live session artifact is in the staged $TARGET_FILE:"
+      git -C "$REPO_ROOT" show ":$TARGET_FILE" 2>/dev/null | grep -nE "$ARTIFACT_RE" 2>/dev/null | head
+       echo "   Run 'impeccable live-server stop', clean the leftover wrapper block(s),"
+       echo "   then commit. Do not commit live-session scaffolding."
+       exit 1
+ fi
 
-exit 0
+ exit 0

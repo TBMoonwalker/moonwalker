@@ -3,6 +3,7 @@
 This file provides guidance to agentic coding agents (such as Claude Code) when working with code in this repository.
 
 ## Build, Lint, and Test Commands
+- With the Opencode Agent NEVER use `edit` tool because it breaks indentation. It is disabled. Instead use the write tool
 
 ### Mandatory CI Check
 - After every code change, run CI from the scripts directory directly: `cd scripts && ./ci.sh`

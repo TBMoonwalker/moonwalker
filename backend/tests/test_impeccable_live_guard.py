@@ -58,7 +58,7 @@ def test_strip_script_scrubs_inject_and_short_circuits_on_residue() -> None:
 def test_pre_commit_maps_strip_return_codes_to_actions() -> None:
     script = PRE_COMMIT.read_text()
 
-    strip_call = '"$STRIP" "$TARGET_FILE"'
+    strip_call = '"$STRIP" "$tmp"'
     assert strip_call in script
     assert "set +e" in script
 
@@ -81,10 +81,13 @@ def test_pre_commit_keeps_inject_gate_a_superset_of_strip() -> None:
 def test_pre_commit_gates_the_staged_blob() -> None:
     script = PRE_COMMIT.read_text()
 
-    # A whole-tree --all re-stage is never used: it would pull unrelated,
-    # deliberately-unstaged edits into the commit (partial staging).
-    assert 'git -C "$REPO_ROOT" add -- "$TARGET_FILE"' in script
+    # The cleaned staged blob is written back through the index
+    # (--cacheinfo), never by re-staging a whole tree, so unrelated
+    # unstaged edits are not swept into the commit.
+    assert "update-index --cacheinfo" in script
+    assert "hash-object -w --stdin" in script
     assert "add --all --" not in script
+    assert 'git -C "$REPO_ROOT" add --' not in script
     assert 'git -C "$REPO_ROOT" show ":$TARGET_FILE"' in script
     assert "INJECT_RE=" in script
     assert "ARTIFACT_RE=" in script
@@ -98,7 +101,7 @@ def test_pre_commit_only_re_stages_when_the_strip_modified_the_file() -> None:
     case_idx = script.index('case "$strip_rc" in')
     arm1 = script.index("1)", case_idx)
     arm2 = script.index("3)", arm1)
-    re_stage = script.index('add -- "$TARGET_FILE"', arm1)
+    re_stage = script.index("update-index --cacheinfo", arm1)
     assert arm1 < re_stage < arm2
 
 
@@ -119,16 +122,19 @@ def test_strip_script_fails_closed_on_unbalanced_inject_markers() -> None:
 def test_install_hooks_resolves_the_git_dir_for_worktrees() -> None:
     script = INSTALL_HOOKS.read_text()
 
-    # In a linked worktree .git is a file, not a directory, so the hooks dir must
-    # be resolved through git rather than built by hand.
-    assert "--absolute-git-dir" in script
+    # In a linked worktree .git is a file, not a directory, so the
+    # hooks dir must be resolved through git (common-dir / hooksPath)
+    # rather than built by hand.
+    assert "--git-common-dir" in script
+    assert "core.hooksPath" in script
+    assert "--absolute-git-dir" not in script
     assert 'HOOKS_DIR="$REPO_ROOT/.git/hooks"' not in script
 
 
 def test_install_hooks_writes_idempotent_wrapper() -> None:
     script = INSTALL_HOOKS.read_text()
 
-    assert 'WRAPPER="$HOOKS_DIR/pre-commit"' in script
+    assert 'WRAPPER="$HOOKS_PATH/pre-commit"' in script
     assert 'chmod +x "$WRAPPER"' in script
     assert "exec" in script
     assert "scripts/git/pre-commit" in script
