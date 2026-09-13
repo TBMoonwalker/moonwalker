@@ -163,15 +163,11 @@ async def test_ema_swing_builtin_is_decomposed_into_executable_graph(
     assert {
         "source": "close_previous",
         "target": "higher_swing_low",
-    } in detail[
-        "ir"
-    ]["connections"]
+    } in detail["ir"]["connections"]
     assert {
         "source": "close_two_back",
         "target": "higher_swing_low",
-    } in detail[
-        "ir"
-    ]["connections"]
+    } in detail["ir"]["connections"]
     palette_item = next(
         item for item in detail["palette"] if item["type"] == "swing_low_state"
     )

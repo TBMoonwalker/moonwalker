@@ -407,8 +407,5 @@ async def test_btc_warmup_reload_cancel_does_not_cancel_startup(monkeypatch) -> 
     await watcher._await_btc_warmup_if_needed()
 
     assert warnings == [
-        (
-            "BTC pulse warmup was replaced during watcher startup; "
-            "continuing startup.",
-        )
+        ("BTC pulse warmup was replaced during watcher startup; continuing startup.",)
     ]

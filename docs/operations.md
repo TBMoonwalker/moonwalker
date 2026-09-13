@@ -7,7 +7,7 @@ cd scripts && ./ci.sh
 ```
 
 Current CI checks include:
-- backend format (`black --check`)
+- backend format (`ruff format --check`)
 - backend lint (`ruff`)
 - backend import ordering (`isort --check-only`)
 - backend type checking (`mypy`)

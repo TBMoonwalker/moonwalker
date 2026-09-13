@@ -379,13 +379,17 @@ class AutopilotMemoryService:
                 "entry_reason_code": (
                     _memory_status_reason_code(state)
                     if state["status"] != "fresh"
-                    else "snapshot_missing" if snapshot is None else "neutral_trust"
+                    else "snapshot_missing"
+                    if snapshot is None
+                    else "neutral_trust"
                 ),
                 "memory_status": memory_status,
                 "reason_code": (
                     _memory_status_reason_code(state)
                     if state["status"] != "fresh"
-                    else "snapshot_missing" if snapshot is None else "neutral_trust"
+                    else "snapshot_missing"
+                    if snapshot is None
+                    else "neutral_trust"
                 ),
                 "trust_score": trust_score,
                 "trust_direction": trust_direction,
@@ -727,9 +731,11 @@ class AutopilotMemoryService:
 
         async def _operation() -> None:
             async with in_transaction() as conn:
-                await model.AutopilotMemoryState.filter(id=self.STATE_ROW_ID).using_db(
-                    conn
-                ).delete()
+                await (
+                    model.AutopilotMemoryState.filter(id=self.STATE_ROW_ID)
+                    .using_db(conn)
+                    .delete()
+                )
                 await model.AutopilotMemoryState.create(
                     id=self.STATE_ROW_ID,
                     using_db=conn,
@@ -760,9 +766,11 @@ class AutopilotMemoryService:
                     .values_list("id", flat=True)
                 )
                 if extra_event_ids:
-                    await model.AutopilotMemoryEvent.filter(
-                        id__in=list(extra_event_ids)
-                    ).using_db(conn).delete()
+                    await (
+                        model.AutopilotMemoryEvent.filter(id__in=list(extra_event_ids))
+                        .using_db(conn)
+                        .delete()
+                    )
 
         await run_sqlite_write_with_retry(
             _operation,
@@ -793,9 +801,11 @@ class AutopilotMemoryService:
 
         async def _operation() -> None:
             async with in_transaction() as conn:
-                await model.AutopilotMemoryState.filter(id=self.STATE_ROW_ID).using_db(
-                    conn
-                ).delete()
+                await (
+                    model.AutopilotMemoryState.filter(id=self.STATE_ROW_ID)
+                    .using_db(conn)
+                    .delete()
+                )
                 await model.AutopilotMemoryState.create(
                     id=self.STATE_ROW_ID,
                     using_db=conn,
@@ -817,9 +827,11 @@ class AutopilotMemoryService:
                     .values_list("id", flat=True)
                 )
                 if extra_event_ids:
-                    await model.AutopilotMemoryEvent.filter(
-                        id__in=list(extra_event_ids)
-                    ).using_db(conn).delete()
+                    await (
+                        model.AutopilotMemoryEvent.filter(id__in=list(extra_event_ids))
+                        .using_db(conn)
+                        .delete()
+                    )
 
         await run_sqlite_write_with_retry(
             _operation,

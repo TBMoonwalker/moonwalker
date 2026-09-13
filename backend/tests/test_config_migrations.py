@@ -116,7 +116,7 @@ async def test_signal_settings_migration_canonicalizes_valid_legacy_json(
     await run_config_migrations()
 
     assert (await AppConfig.get(key="signal_settings")).value == (
-        '{"api_url":"https://signals.example","api_version":"v1",' '"schema_version":1}'
+        '{"api_url":"https://signals.example","api_version":"v1","schema_version":1}'
     )
     assert (
         await ConfigMigration.filter(version=SIGNAL_SETTINGS_MIGRATION_VERSION).count()

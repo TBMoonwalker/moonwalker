@@ -158,8 +158,8 @@ class Data:
     ) -> list[str]:
         """Return exchange symbols for the given quote currency."""
         cache_key = (
-            f"{config.get('exchange','')}:"
-            f"{config.get('market','spot')}:"
+            f"{config.get('exchange', '')}:"
+            f"{config.get('market', 'spot')}:"
             f"{bool(config.get('dry_run', True))}:"
             f"{currency.upper()}"
         )
@@ -362,17 +362,18 @@ class Data:
         if latest_timestamp not in existing_timestamps:
             return False
 
-        fetched_timestamps, _inserted_timestamps = (
-            await self.__fetch_and_store_history_range(
-                symbol=symbol,
-                config=config,
-                fetch_since_ms=latest_timestamp,
-                required_since=latest_timestamp,
-                required_until=latest_timestamp,
-                required_timestamps={latest_timestamp},
-                existing_timestamps=existing_timestamps,
-                refresh_existing=True,
-            )
+        (
+            fetched_timestamps,
+            _inserted_timestamps,
+        ) = await self.__fetch_and_store_history_range(
+            symbol=symbol,
+            config=config,
+            fetch_since_ms=latest_timestamp,
+            required_since=latest_timestamp,
+            required_until=latest_timestamp,
+            required_timestamps={latest_timestamp},
+            existing_timestamps=existing_timestamps,
+            refresh_existing=True,
         )
         return latest_timestamp in fetched_timestamps
 
@@ -495,16 +496,17 @@ class Data:
                 window=window,
                 stored_timestamps=sync_state.stored_timestamps,
             ):
-                fetched_timestamps, inserted_timestamps = (
-                    await self.__fetch_and_store_history_range(
-                        symbol=symbol,
-                        config=config,
-                        fetch_since_ms=fetch_since,
-                        required_since=window.required_since,
-                        required_until=window.required_until,
-                        required_timestamps=window.required_timestamps,
-                        existing_timestamps=sync_state.stored_timestamps,
-                    )
+                (
+                    fetched_timestamps,
+                    inserted_timestamps,
+                ) = await self.__fetch_and_store_history_range(
+                    symbol=symbol,
+                    config=config,
+                    fetch_since_ms=fetch_since,
+                    required_since=window.required_since,
+                    required_until=window.required_until,
+                    required_timestamps=window.required_timestamps,
+                    existing_timestamps=sync_state.stored_timestamps,
                 )
                 sync_state.record_fetch(
                     fetched_timestamps=fetched_timestamps,
@@ -546,16 +548,17 @@ class Data:
                 "Retrying full-window refill without deleting local candles.",
                 symbol,
             )
-            refill_fetched_timestamps, refill_inserted_timestamps = (
-                await self.__fetch_and_store_history_range(
-                    symbol=symbol,
-                    config=config,
-                    fetch_since_ms=window.required_since,
-                    required_since=window.required_since,
-                    required_until=window.required_until,
-                    required_timestamps=window.required_timestamps,
-                    existing_timestamps=sync_state.stored_timestamps,
-                )
+            (
+                refill_fetched_timestamps,
+                refill_inserted_timestamps,
+            ) = await self.__fetch_and_store_history_range(
+                symbol=symbol,
+                config=config,
+                fetch_since_ms=window.required_since,
+                required_since=window.required_since,
+                required_until=window.required_until,
+                required_timestamps=window.required_timestamps,
+                existing_timestamps=sync_state.stored_timestamps,
             )
             sync_state.record_fetch(
                 fetched_timestamps=refill_fetched_timestamps,

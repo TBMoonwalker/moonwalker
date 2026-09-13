@@ -576,28 +576,40 @@ class SpotSidestepCampaignService:
                         using_db=conn,
                     )
                 else:
-                    await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(
-                        conn
-                    ).update(
-                        lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
-                        principal_quote=(
-                            float(campaign.get("principal_quote") or 0.0)
-                            if isinstance(campaign, dict)
-                            and float(campaign.get("principal_quote") or 0.0) > 0
-                            else principal_quote
-                        ),
+                    await (
+                        model.SpotCampaigns.filter(campaign_id=campaign_id)
+                        .using_db(conn)
+                        .update(
+                            lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                            principal_quote=(
+                                float(campaign.get("principal_quote") or 0.0)
+                                if isinstance(campaign, dict)
+                                and float(campaign.get("principal_quote") or 0.0) > 0
+                                else principal_quote
+                            ),
+                        )
                     )
-                await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
-                    campaign_id=campaign_id,
-                    lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                await (
+                    model.OpenTrades.filter(symbol=symbol)
+                    .using_db(conn)
+                    .update(
+                        campaign_id=campaign_id,
+                        lifecycle_mode=TradeLifecycleMode.SIDESTEP_REENTRY.value,
+                    )
                 )
-                await model.Trades.filter(symbol=symbol).using_db(conn).update(
-                    campaign_id=campaign_id,
+                await (
+                    model.Trades.filter(symbol=symbol)
+                    .using_db(conn)
+                    .update(
+                        campaign_id=campaign_id,
+                    )
                 )
                 if deal_id:
-                    await model.TradeExecutions.filter(deal_id=deal_id).using_db(
-                        conn
-                    ).update(campaign_id=campaign_id)
+                    await (
+                        model.TradeExecutions.filter(deal_id=deal_id)
+                        .using_db(conn)
+                        .update(campaign_id=campaign_id)
+                    )
 
         await run_sqlite_write_with_retry(
             _attach_campaign,
@@ -746,16 +758,18 @@ class SpotSidestepCampaignService:
                     if principal_quote > 0
                     else float(campaign.cumulative_realized_percent or 0.0)
                 )
-                await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(
-                    conn
-                ).update(
-                    state=SpotCampaignState.STOPPED.value,
-                    last_transition_at=now_iso,
-                    last_exit_reason=TradeCloseReason.MANUAL_STOP.value,
-                    cooldown_until=None,
-                    principal_quote=principal_quote,
-                    reserved_quote=0.0,
-                    cumulative_realized_percent=cumulative_realized_percent,
+                await (
+                    model.SpotCampaigns.filter(campaign_id=campaign_id)
+                    .using_db(conn)
+                    .update(
+                        state=SpotCampaignState.STOPPED.value,
+                        last_transition_at=now_iso,
+                        last_exit_reason=TradeCloseReason.MANUAL_STOP.value,
+                        cooldown_until=None,
+                        principal_quote=principal_quote,
+                        reserved_quote=0.0,
+                        cumulative_realized_percent=cumulative_realized_percent,
+                    )
                 )
 
                 await model.ClosedTrades.create(
@@ -776,12 +790,14 @@ class SpotSidestepCampaignService:
                     close_reason=TradeCloseReason.MANUAL_STOP.value,
                     using_db=conn,
                 )
-                await model.Trades.filter(symbol=campaign.symbol).using_db(
-                    conn
-                ).delete()
-                await model.OpenTrades.filter(symbol=campaign.symbol).using_db(
-                    conn
-                ).delete()
+                await (
+                    model.Trades.filter(symbol=campaign.symbol).using_db(conn).delete()
+                )
+                await (
+                    model.OpenTrades.filter(symbol=campaign.symbol)
+                    .using_db(conn)
+                    .delete()
+                )
                 return True
 
         return await run_sqlite_write_with_retry(

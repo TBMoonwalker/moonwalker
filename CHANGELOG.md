@@ -21,6 +21,10 @@ All notable changes to Moonwalker are documented in this file.
   format.
 - The control-center view and its components received design-audit fixes and
   reduced-motion handling.
+- Switched the Python formatter from Black to Ruff (`ruff format --check`
+  in CI, pinned `ruff==0.15.22` in `requirements-dev`); the backend was
+  reformatted and project config (`pyproject.toml`, `opencode.json`) now
+  targets Ruff with 88-col, double-quote, LF settings.
 
 ## [Unreleased]
 

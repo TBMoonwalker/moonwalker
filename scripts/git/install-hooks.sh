@@ -59,9 +59,13 @@ dir="\$(git rev-parse --show-toplevel 2>/dev/null || true)"
 [ -n "\$dir" ] || exit 0
 user="\$(cd "\$(dirname "\${BASH_SOURCE[0]}")" && pwd)/pre-commit.user"
 if [ -f "\$user" ]; then
-     exec "\$user" "\$@"
+      if ! "\$user" "\$@"; then
+           exit 1
+      fi
 fi
-exec "\$dir/scripts/git/pre-commit" "\$@"
+guard="\$dir/scripts/git/pre-commit"
+[ -x "\$guard" ] || exit 0
+exec "\$guard" "\$@"
 EOF
 
 chmod +x "$WRAPPER"

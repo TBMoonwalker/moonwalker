@@ -57,7 +57,7 @@ def test_critical_module_ratchet_uses_branch_coverage() -> None:
     failures = coverage_module.validate_coverage(payload)
 
     assert failures == [
-        f"{module} branch coverage {floor - 1.0:.2f}% " f"is below {floor:.2f}%"
+        f"{module} branch coverage {floor - 1.0:.2f}% is below {floor:.2f}%"
     ]
 
 

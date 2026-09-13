@@ -1604,9 +1604,11 @@ class Exchange:
                     limit_order,
                     order_check_range_seconds=order_check_range_seconds,
                 ),
-                build_sell_order_status=lambda limit_order: self.__build_sell_order_status(
-                    limit_order,
-                    order_check_range_seconds=order_check_range_seconds,
+                build_sell_order_status=lambda limit_order: (
+                    self.__build_sell_order_status(
+                        limit_order,
+                        order_check_range_seconds=order_check_range_seconds,
+                    )
                 ),
             ),
         )
@@ -1644,9 +1646,11 @@ class Exchange:
                 ),
                 get_price_for_symbol=self.__get_price_for_symbol,
                 log_remaining_sell_dust=self.__log_remaining_sell_dust,
-                build_sell_order_status=lambda sell_order: self.__build_sell_order_status(
-                    sell_order,
-                    order_check_range_seconds=order_check_range_seconds,
+                build_sell_order_status=lambda sell_order: (
+                    self.__build_sell_order_status(
+                        sell_order,
+                        order_check_range_seconds=order_check_range_seconds,
+                    )
                 ),
             ),
         )

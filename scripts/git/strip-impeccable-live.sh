@@ -63,72 +63,42 @@ strip_file() {
          return 2
       fi
 
-      # System temp files only; trap ensures no residue leaks into the tree.
-    local tmp tmp_scrub
+       # System temp file only; trap ensures no residue leaks into the tree.
+    local tmp
     tmp="$(mktemp -t mw-impeccable-live.XXXXXX)"
-    tmp_scrub="$(mktemp -t mw-impeccable-live.XXXXXX)"
-    trap "rm -f '$tmp' '$tmp_scrub'" EXIT INT TERM
+    trap "rm -f '$tmp'" EXIT INT TERM
 
-       # Primary: drop the full INJECT marker block (start..end inclusive).
-      local stripped=0
-      local has_start has_end
-     has_start="$(grep -cE '<!-- *impeccable-live-start *-->' "$file" 2>/dev/null || true)"
-     has_end="$(grep -cE '<!-- *impeccable-live-end *-->' "$file" 2>/dev/null || true)"
-      # Fail closed on a partial injection: a start marker with no matching end
-      # would leave the awk block-open and truncate the rest of the entrypoint
-      # (including the Vue mount and app script). Refuse to rewrite until it is
-      # repaired to a paired block or removed by hand.
-      if [ -n "$has_start" ] && [ "$has_start" -gt 0 ] && [ "$has_end" -lt "$has_start" ]; then
-          echo "strip-impeccable-live: incomplete INJECT marker in $file: a live-start" >&2
-          echo "  marker has no matching live-end. Repair or remove it by hand" >&2
-          echo "  (run 'impeccable live-server stop', then clean the leftover), then commit." >&2
-          return 2
-       fi
-      if [ -n "$has_start" ] && [ "$has_start" -gt 0 ]; then
-         awk -v rs='<!-- *impeccable-live-start *-->' -v re='<!-- *impeccable-live-end *-->' \
-             '
-             {
-              line = $0
-              emit = ""
-              while (1) {
-                if (in_block) {
-                  if (match(line, re)) {
-                    line = substr(line, RSTART + RLENGTH)
-                    in_block = 0
-                   } else { line = ""; break }
-                 } else {
-                  if (match(line, rs)) {
-                    emit = emit substr(line, 1, RSTART - 1)
-                    line = substr(line, RSTART + RLENGTH)
-                    in_block = 1
-                   } else { emit = emit line; break }
-                 }
-               }
-              if (length(emit) > 0) { printf "%s\n", emit }
-             }
-           ' "$file" > "$tmp"
-          stripped=1
-         # Backstop: scrub any INJECT keyword the structured strip missed.
-         if grep -qE "$INJECT_RE" "$tmp" 2>/dev/null; then
-             scrub_inject < "$tmp" > "$tmp_scrub"
-             cat "$tmp_scrub" > "$tmp"
-         fi
-         cat "$tmp" > "$file"
-      # Final-state check: a correct strip leaves no INJECT start marker. If
-      # one survived, a partial injection left the block open and the rewrite
-      # may have truncated entrypoint content; fail closed instead of staging it.
-     if grep -qE 'impeccable-live-start' "$tmp" 2>/dev/null; then
-         echo "strip-impeccable-live: unrepaired INJECT block in $file" >&2
-         echo "   a live-start marker survived. Run 'impeccable live-server stop'," >&2
-         echo "   then repair/remove the leftover block by hand, then commit." >&2
+       # Marker counts. A balanced pair, a standalone keyword, or an orphaned end
+       # marker is handled by per-line removal below; a live-start with no matching
+       # end is refused, since a partial injection would leave a dangling block.
+    local stripped=0
+    local has_start has_end
+    has_start="$(grep -cE '<!-- *impeccable-live-start *-->' "$file" 2>/dev/null || true)"
+    has_end="$(grep -cE '<!-- *impeccable-live-end *-->' "$file" 2>/dev/null || true)"
+    if [ -n "$has_start" ] && [ "$has_start" -gt 0 ] && [ "$has_end" -lt "$has_start" ]; then
+         echo "strip-impeccable-live: incomplete INJECT marker in $file: a live-start" >&2
+         echo "  marker has no matching live-end. Repair or remove it by hand" >&2
+         echo "  (run 'impeccable live-server stop', then clean the leftover), then commit." >&2
          return 2
-     fi
-     elif grep -qE "$INJECT_RE" "$file" 2>/dev/null; then
-           # No paired block, but an INJECT keyword is present: scrub it.
+    fi
+       # Drop every line carrying an INJECT marker or keyword. Per-line removal is
+       # truncation-proof: it deletes only marker-bearing lines, never the text
+       # after a marker, so balanced, same-line, reversed, or orphaned markers are
+       # all handled safely.
+    if grep -qE "$INJECT_RE" "$file" 2>/dev/null; then
          scrub_inject < "$file" > "$tmp"
          cat "$tmp" > "$file"
          stripped=1
-     fi
+    fi
+       # Final-state guard: a correct scrub leaves no INJECT marker. If any
+       # survived, the rewrite misbehaved; fail closed instead of staging a
+       # partial entrypoint.
+    if grep -qE "$INJECT_RE" "$file" 2>/dev/null; then
+         echo "strip-impeccable-live: unrepaired INJECT residue in $file" >&2
+         echo "   an INJECT marker survived the scrub. Run 'impeccable live-server stop'," >&2
+         echo "   then repair/remove the leftover by hand, then commit." >&2
+         return 2
+    fi
 
       # Fail closed on residual SESSION ARTIFACTS (do not auto-mutate them).
     if grep -nE "$ARTIFACT_RE" "$file" >/dev/null 2>&1; then

@@ -161,8 +161,7 @@ class SignalPlugin:
         except (BaseORMException, RuntimeError, TypeError, ValueError) as e:
             # Broad catch to avoid stopping the signal loop.
             logging.error(
-                "Couldn't get actual list of bots - not starting new deals! "
-                "Cause: %s",
+                "Couldn't get actual list of bots - not starting new deals! Cause: %s",
                 e,
             )
             return True

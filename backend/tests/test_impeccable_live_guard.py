@@ -201,14 +201,79 @@ def test_strip_script_strips_same_line_inject_block_without_truncating(
 def test_install_hooks_preserves_and_chains_a_user_hook() -> None:
     # Regression for the P2: installing must not silently destroy a pre-existing,
     # non-Moonwalker pre-commit hook. It is backed up to pre-commit.user and the
-    # wrapper chains it before running the guard.
+    # wrapper chains it first, so the Moonwalker guard is never bypassed; a missing
+    # guard script skips instead of breaking unrelated commits.
     script = INSTALL_HOOKS.read_text()
 
     assert "pre-commit.user" in script
-    assert 'grep -qF "$MARKER"' in script
-    # The wrapper checks for the preserved user hook and runs it first.
-    assert r'user="\$(cd' in script
-    assert r'exec "\$user"' in script
-    # Per-worktree resolution: the wrapper resolves its own checkout at run time
-    # (survives removal of the worktree it was installed in).
+    assert r'grep -qF "$MARKER"' in script
+    assert r'if ! "\$user"' in script
+    assert r'[ -x "\$guard" ] || exit 0' in script
     assert "git rev-parse --show-toplevel" in script
+
+
+def test_install_hooks_chains_user_hook_before_guard_at_runtime(tmp_path) -> None:
+    # P2 guard-bypass regression: a preserved user hook must run first and the
+    # Moonwalker guard must still execute. Proven at runtime in a temp repo.
+    repo = tmp_path / "repo"
+    scripts = repo / "scripts" / "git"
+    scripts.mkdir(parents=True)
+    (repo / "frontend").mkdir()
+    for name in ("pre-commit", "strip-impeccable-live.sh"):
+        dst = scripts / name
+        dst.write_text((ROOT_DIR / "scripts" / "git" / name).read_text())
+        dst.chmod(0o755)
+    (repo / "frontend" / "index.html").write_text("<html>\n</html>\n")
+
+    def git(*args: str) -> None:
+        subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True)
+
+    git("init", "-q")
+    git("config", "user.email", "t@example.com")
+    git("config", "user.name", "t")
+    git("add", "-A")
+    git("commit", "-qm", "init")
+    # Seed a non-Moonwalker user hook, then install the guard over it.
+    wrapper = repo / ".git" / "hooks" / "pre-commit"
+    wrapper.write_text("#!/usr/bin/env bash\necho USER_HOOK_RAN\nexit 0\n")
+    wrapper.chmod(0o755)
+    subprocess.run(
+        [
+            "bash",
+            str(ROOT_DIR / "scripts" / "git" / "install-hooks.sh"),
+        ],
+        cwd=str(repo),
+        capture_output=True,
+        check=False,
+    )
+    result = subprocess.run(
+        ["bash", str(wrapper)],
+        cwd=str(repo),
+        text=True,
+        capture_output=True,
+    )
+    # The chained user hook ran first, proving the guard did not bypass it.
+    assert "USER_HOOK_RAN" in result.stdout
+
+
+def test_wrapper_skips_gracefully_when_guard_script_is_absent(tmp_path) -> None:
+    # P2 worktree-without-guard: a checkout that does not carry the guard
+    # script must not break every commit; the wrapper skips gracefully.
+    repo = tmp_path / "bare"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q"], cwd=str(repo), capture_output=True)
+    wrapper = repo / ".git" / "hooks" / "pre-commit"
+    wrapper.write_text(
+        '#!/usr/bin/env bash\ndir="$(git rev-parse --show-toplevel 2>/dev/null || true)"\n[ -n "$dir" ] || exit 0\nguard="$dir/scripts/git/pre-commit"\n[ -x "$guard" ] || exit 0\nexec "$guard" "$@"\n'.rstrip()
+    )
+    wrapper.chmod(0o755)
+    result = subprocess.run(
+        [
+            "bash",
+            str(wrapper),
+        ],
+        cwd=str(repo),
+        capture_output=True,
+    )
+    # No guard script here -> graceful skip (exit 0), not an exec error.
+    assert result.returncode == 0
