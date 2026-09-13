@@ -34,6 +34,32 @@ UI.
 
 **Depends on:** Three unique confirmed evidence issues linked above.
 
+## Frontend staging guard
+
+### Harden the frontend-staging guard against partial and masked-out failures
+
+**Priority:** P1
+
+**What:** The new frontend-staging guard (shipped v4.7.0.0) was left as-is at
+the 2026-09-13 pre-landing review after deferred findings:
+- **F1 (P2):** a partial deploy (entrypoint `index.html` present but a referenced
+  JS bundle missing) passes both `frontend_staging_warning()` and the
+  `run.sh` stage check, so a dead dashboard returns HTTP 200. The underlying
+  deploy gap predates this branch; the guard should verify the bundles the
+  entrypoint references and carry a partial-deploy regression test.
+- **F2 (P2):** Litestar masks `HTTPException.detail` to a generic
+  "Internal Server Error" body, so the actionable "run ./run.sh start" message
+  the guard was built to surface never reaches the browser. Replace the 500
+  raise with a controlled error body and assert its HTTP response.
+- **F3 (P3):** `app.py` startup calls `frontend_staging_warning()` with a
+  synchronous `Path.is_file()` on the event loop before the timing wrapper;
+  move the probe off the loop to match the request path.
+
+**Deferred from:** pre-landing review on `feature/code-optimizations` (v4.7.0.0).
+The guard is strictly an improvement over the previous bare 500; hardening is
+non-blocking.
+
+
 ## Completed
 
 ### Fix mobile Backtest chart marker label clipping (ISSUE-002)
