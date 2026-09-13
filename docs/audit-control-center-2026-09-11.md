@@ -4,7 +4,7 @@
 - **Target:** `/control-center` and its component tree (`frontend/src/views/ControlCenterView.vue`, `frontend/src/components/control-center/*`, `frontend/src/control-center/*`)
 - **Method:** Source + deterministic-detector audit. Live visual capture was **not** possible this run (no headless browser installed; see "Environment / caveats" below), so findings are grounded in the built assets that render plus `impeccable detect` over the source. Per `audit.md`, this is a code-level audit: it reports what is measurable in the implementation, not a subjective design critique.
 - **Reference:** `DESIGN.md` (design system + 2026-06-05 live baseline), `PRODUCT.md` (product record), `impeccable` 5-dimension rubric.
-- **Detector:** `/Users/tbrandstetter/.config/opencode/skills/impeccable/scripts/impeccable detect` over the Control Center source. Primary findings: **0**. Advisory findings: **1**.
+- **Detector:** `impeccable detect` (the impeccable skill's detector) over the Control Center source. Primary findings: **0**. Advisory findings: **1**.
 
 ---
 
@@ -56,7 +56,7 @@ The only detector signal is **advisory** `codex-grid-background` at `StrategyCan
 - **Location:** `backend/static/`, `backend/templates/` (were empty, held only `.emptyfile`); staging logic `run.sh:169-178`.
 - **Category:** Implementation Integrity / deploy.
 - **Impact:** Every operator route (`/`, `/control-center`, `/stats`, …) returns HTTP 500. The dashboard is the only operational surface; this blocks the operator from reaching the UI and blocks any live visual audit.
-- **Cause:** `backend/static/*` and `backend/templates/*` are only populated by `run.sh` (`cp -r frontend/dist/assets backend/static/; cp frontend/dist/index.html backend/templates/`). The running `Litestar` process (PID 39414, port 8130) was started before/without the staging copy, so it serves an empty static root.
+- **Cause:** `backend/static/*` and `backend/templates/*` are only populated by `run.sh` (`cp -r frontend/dist/assets backend/static/; cp frontend/dist/index.html backend/templates/`). The long-running `Litestar` process was started before/without the staging copy, so it serves an empty static root.
 - **Recommendation:** Run the staging step (`./run.sh start` rebuilds + stages, `run.sh:169-178`) and restart the backend; confirm `curl -s -o /dev/null -w "%{http_code}" http://localhost:8130/control-center` returns 200. Add a guard/warning in `run.sh` (and optionally a startup smoke-check in `backend/app.py` lifespan) when `backend/templates/index.html` is absent so the 500 is loud and explainable instead of silent.
 - **Suggested command:** `/impeccable harden` (start-up/edge-case resilience) — or a one-line deploy fix.
 

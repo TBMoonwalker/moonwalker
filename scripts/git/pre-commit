@@ -24,8 +24,11 @@ if [ ! -f "$REPO_ROOT/$TARGET_FILE" ]; then
       exit 0
  fi
 
-# INJECT markers in tracked source that must not enter a commit.
-INJECT_RE='impeccable-live|localhost:[0-9]+/live\.js|data-impeccable-csp'
+# INJECT markers in tracked source that must not enter a commit. This is a
+# superset of the marker keyword strip-impeccable-live.sh scrubs; keeping it a
+# superset makes the post-strip staged-blob gate fail closed on any marker the
+# strip itself removed.
+INJECT_RE='impeccable-live|localhost:[0-9]+/live\.js|data-impeccable-csp|id="impeccable-live'
 # Mid-session artifacts: fail closed -> clean via live-server stop, do not mutate.
 ARTIFACT_RE='impeccable-variants-start|impeccable-variants-end|impeccable-carbonize-start|impeccable-carbonize-end|data-impeccable-variant=|data-impeccable-variants=|data-impeccable-css=|data-impeccable-carbonize|data-impeccable-params='
 

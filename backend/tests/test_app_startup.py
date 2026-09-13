@@ -4,6 +4,22 @@ import app as app_module
 import pytest
 
 
+class _FullFakeLogger:
+    def __init__(self) -> None:
+        self.info_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.error_calls: list[tuple[str, tuple[object, ...]]] = []
+        self.exception_calls: list[tuple[str, tuple[object, ...]]] = []
+
+    def info(self, message: str, *args: object) -> None:
+        self.info_calls.append((message, args))
+
+    def error(self, message: str, *args: object) -> None:
+        self.error_calls.append((message, args))
+
+    def exception(self, message: str, *args: object) -> None:
+        self.exception_calls.append((message, args))
+
+
 class _FakeConfig:
     def snapshot(self) -> dict[str, object]:
         return {}
@@ -178,6 +194,31 @@ async def test_startup_step_logs_readiness_timing(
     assert fake_logger.info_calls[1][0] == "Startup step finished: %s in %.3fs"
     assert fake_logger.info_calls[1][1][0] == "test step"
     assert isinstance(fake_logger.info_calls[1][1][1], float)
+
+
+@pytest.mark.asyncio
+async def test_startup_logs_when_frontend_not_staged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing staged SPA must surface as an error log before any step runs."""
+    fake_logger = _FullFakeLogger()
+    monkeypatch.setattr(app_module, "logging", fake_logger)
+    monkeypatch.setattr(
+        app_module, "frontend_staging_warning", lambda: "Frontend not staged"
+    )
+    monkeypatch.setattr(app_module, "runtime_state", app_module.RuntimeState())
+
+    def start_redis() -> object:
+        raise RuntimeError("redis start blocked after staging log")
+
+    monkeypatch.setattr(app_module, "start_redis", start_redis)
+
+    with pytest.raises(RuntimeError, match="redis start blocked"):
+        await app_module.startup()
+
+    assert "Frontend not staged; the web dashboard will be unavailable: %s" in {
+        message for message, _args in fake_logger.error_calls
+    }
 
 
 @pytest.mark.asyncio
