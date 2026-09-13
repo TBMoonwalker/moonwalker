@@ -1,106 +1,120 @@
 #!/usr/bin/env bash
 #
-# Strip the `impeccable live` debug instrumentation out of the *tracked*
-# Vite entrypoint (frontend/index.html).
+# Guard the *tracked* Vite entrypoint (frontend/index.html) against the durable
+# artifacts `impeccable live` can leave behind.
 #
-# Why this exists:
-#    `impeccable live` mutates a tracked source file by injecting markers like
-#        <!-- impeccable-live-start -->
-#        <script src="http://localhost:..."?token=...></script>
-#        <!-- impeccable-live-end -->
-#    If that file is ever committed, a live-only localhost script (and its
-#    token) would be baked into the production build. `frontend/dist/` is
-#    already ignored, so this guard covers the one path that can leak: a
-#    `git add` / commit of the source file.
+# Two artifact classes, two strategies:
 #
-# The stripper is intentionally marker-based AND keyword-based so it catches
-# current and future live-tool variants, not just the exact block seen today.
+#   1. INJECT  — the localhost helper <script> + its marker block. Always
+#      unwanted in tracked source; strip it.
+#            <!-- impeccable-live-start -->
+#            <script src="http://localhost:8400/live.js?token=..."></script>
+#            <!-- impeccable-live-end -->
+#      (the block also carries data-impeccable-csp-* and the design-panel /
+#       interaction / pick markers, so the block strip removes them too)
+#
+#   2. SESSION ARTIFACTS — variant/carbonize wrappers written into source during
+#      or after a live session. These are intentional mid-session and must NOT
+#      be silently mutated by a commit strip; they are cleaned by the documented
+#      path (`impeccable live-server stop`, then remove leftover
+#      impeccable-variants-*/impeccable-carbonize-* blocks). The guard therefore
+#      FAILS CLOSED: it detects them, blocks the commit, and prints that command.
+#
+# frontend/dist/ is gitignored, so the only leak path this guards is a `git add`
+# / commit of tracked source. The strip works in system temp files (with a trap)
+# and writes back preserving inode/mode; pre-commit runs it as a subprocess.
 #
 # Usage:
-#   scripts/git/strip-impeccable-live.sh [FILE ...]    # strip the given files
-#   FRONTEND_INDEX=... scripts/git/strip-impeccable-live.sh   # override target
+#   scripts/git/strip-impeccable-live.sh [FILE ...]
+#   MW_LIVE_STRIP_INDEX=... scripts/git/strip-impeccable-live.sh    # override target
 #
 # Exit codes:
-#   0  nothing was stripped (file was already clean)
-#   1  at least one file was modified
+#   0  clean
+#   1  an INJECT marker was stripped (file modified)
 #   2  usage / target-not-found error
+#   3  SESSION ARTIFACT residue present -> run `impeccable live-server stop`
+#      and clean leftover wrapper blocks before committing
 set -uo pipefail
 
-# Standalone CLI (do not source it). Invoked as a subprocess by
-# scripts/git/pre-commit so it cannot collide on caller variables or `$0`.
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-DEFAULT_TARGET="${FRONTEND_INDEX:-$REPO_ROOT/frontend/index.html}"
+DEFAULT_TARGET="${MW_LIVE_STRIP_INDEX:-$REPO_ROOT/frontend/index.html}"
 
-# Keyword scrub: drop any line that still references a live debug endpoint even
-# if the marker pair is malformed or half-present. Best-effort safety net; the
-# block strip is the primary path.
-read_keyword_scrub() {
-    grep -v -E \
-         -e 'impeccable-live' \
-         -e 'localhost:[0-9]+/live\.js' \
-         -e 'id="impeccable-live' \
-         -e 'data-impeccable-live' || true
+# Always-unwanted INJECT markers / keywords.
+INJECT_RE='impeccable-live|localhost:[0-9]+/live\.js|data-impeccable-csp|id="impeccable-live'
+
+# Mid-session SESSION ARTIFACT markers: block the commit, do not auto-mutate.
+ARTIFACT_RE='impeccable-variants-start|impeccable-variants-end|impeccable-carbonize-start|impeccable-carbonize-end|data-impeccable-variant=|data-impeccable-variants=|data-impeccable-css=|data-impeccable-carbonize|data-impeccable-params='
+
+# Remove every whole line that carries an INJECT marker; a malformed/partial
+# block is the safety net under the structured block strip below.
+scrub_inject() {
+     grep -v -E \
+            -e 'impeccable-live' \
+            -e 'localhost:[0-9]+/live\.js' \
+            -e 'data-impeccable-csp' \
+            -e 'id="impeccable-live' || true
 }
 
 strip_file() {
-    local file="$1"
+     local file="$1"
     if [ ! -f "$file" ]; then
-        echo "strip-impeccable-live: target not found: $file" >&2
-        return 2
-    fi
+         echo "strip-impeccable-live: target not found: $file" >&2
+         return 2
+      fi
 
-      # Work in system temp files (never in the source dir) and clean them up
-      # on any return path so no .live-strip.* residue can pollute the tree.
-    local tmp tmp_kw
+      # System temp files only; trap ensures no residue leaks into the tree.
+    local tmp tmp_scrub
     tmp="$(mktemp -t mw-impeccable-live.XXXXXX)"
-    tmp_kw="$(mktemp -t mw-impeccable-live.XXXXXX)"
-    trap "rm -f '$tmp' '$tmp_kw'" EXIT INT TERM
+    tmp_scrub="$(mktemp -t mw-impeccable-live.XXXXXX)"
+    trap "rm -f '$tmp' '$tmp_scrub'" EXIT INT TERM
 
-      # Primary: remove the full marker block (start..end inclusive).
-    if grep -qE '<!-- *impeccable-live-start *-->' "$file"; then
-        awk '
-          /^<!-- *impeccable-live-start *-->/ { in_block = 1; next }
-          in_block {
-              if ($0 ~ /<!-- *impeccable-live-end *-->/) { in_block = 0 }
-              next
-          }
-          { print }
-          ' "$file" > "$tmp"
+      # Primary: drop the full INJECT marker block (start..end inclusive).
+     local stripped=0
+     if grep -qE '<!-- *impeccable-live-start *-->' "$file"; then
+         awk '
+            /^<!-- *impeccable-live-start *-->/ { in_block = 1; next }
+            in_block { if ($0 ~ /<!-- *impeccable-live-end *-->/) { in_block = 0 }; next }
+            { print }
+         ' "$file" > "$tmp"
+         stripped=1
+         # Backstop: scrub any INJECT keyword the structured strip missed.
+         if grep -qE "$INJECT_RE" "$tmp" 2>/dev/null; then
+             scrub_inject < "$tmp" > "$tmp_scrub"
+             cat "$tmp_scrub" > "$tmp"
+         fi
+         cat "$tmp" > "$file"
+     elif grep -qE "$INJECT_RE" "$file" 2>/dev/null; then
+           # No paired block, but an INJECT keyword is present: scrub it.
+         scrub_inject < "$file" > "$tmp"
+         cat "$tmp" > "$file"
+         stripped=1
+     fi
 
-          # Safety net: scrub any surviving live-debug keyword lines the block
-          # pattern did not catch (malformed markers, partial injections).
-    if grep -qE 'impeccable-live|localhost:[0-9]+/live\.js' "$tmp" 2>/dev/null; then
-        read_keyword_scrub < "$tmp" > "$tmp_kw"
-        cat "$tmp_kw" > "$tmp"
-    fi
+      # Fail closed on residual SESSION ARTIFACTS (do not auto-mutate them).
+    if grep -nE "$ARTIFACT_RE" "$file" >/dev/null 2>&1; then
+         echo "strip-impeccable-live: SESSION ARTIFACT residue in $file (live-mode wrapper left in source):" >&2
+         grep -nE "$ARTIFACT_RE" "$file" | head >&2 || true
+         echo "  -> run 'impeccable live-server stop', remove any remaining" >&2
+         echo "     impeccable-variants-*/impeccable-carbonize-* blocks, then commit." >&2
+         return 3
+      fi
 
-            # Write back with `cat > file` (keeps inode/mode) rather than mv.
-        if ! diff -q "$file" "$tmp" >/dev/null 2>&1; then
-            cat "$tmp" > "$file"
-            return 1
-        fi
-        return 0
-    fi
-
-      # No marker pair, but a stray live keyword may still be present.
-    if grep -qE 'impeccable-live|localhost:[0-9]+/live\.js' "$file" 2>/dev/null; then
-        read_keyword_scrub < "$file" > "$tmp"
-        if ! diff -q "$file" "$tmp" >/dev/null 2>&1; then
-            cat "$tmp" > "$file"
-            return 1
-        fi
-    fi
-    return 0
+     [ "$stripped" -eq 1 ] && return 1
+     return 0
 }
 
-# No args: strip the default tracked entrypoint.
+# No args: guard the default tracked entrypoint.
 if [ "$#" -eq 0 ]; then
-    strip_file "$DEFAULT_TARGET"
-    exit
+     strip_file "$DEFAULT_TARGET"
+     exit
 fi
 
 rc=0
 for f in "$@"; do
-    strip_file "$f" || rc=$?
+     strip_file "$f" || rc=$?
+     # 3 (artifact residue) short-circuits; do not keep "stripping".
+     if [ "$rc" -eq 3 ]; then
+         break
+     fi
 done
 exit "$rc"

@@ -4,6 +4,22 @@ All font choices, colors, spacing, and aesthetic direction are defined there.
 Do not deviate without explicit user approval.
 In QA mode, flag any code that doesn't match DESIGN.md.
 
+## Live-mode guard (opencode)
+
+`impeccable live` requires a foreground poll loop to service steer/generate events.
+opencode has no background-task primitive, so a live session cannot stay alive
+across tool calls and every invocation becomes a dead session. Do NOT chase "live
+mode" as functional in opencode; it is not the end-state of the tool here.
+
+The practical safeguard is a commit-time guard on the tracked Vite entrypoint
+(`frontend/index.html`), installed by `scripts/git/install-hooks.sh`:
+- `scripts/git/strip-impeccable-live.sh` strips INJECT markers (the localhost
+  helper script) and fails closed on variant/carbonize session artifacts.
+- `scripts/git/pre-commit` re-stages the cleaned file and blocks any commit whose
+  staged blob still carries a live artifact.
+- To clean a live session, run `impeccable live-server stop` (idempotent; runs
+  `live-inject --remove`), then commit.
+
 ## Skill routing
 
 When the user's request matches an available skill, invoke it via the Skill tool. When in doubt, invoke the skill.
