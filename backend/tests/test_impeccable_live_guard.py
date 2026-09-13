@@ -164,3 +164,51 @@ def test_strip_script_refuses_partial_injection_at_runtime(tmp_path) -> None:
     content = target.read_text()
     assert 'id="app"' in content
     assert "/src/main.ts" in content
+
+
+def test_strip_script_strips_same_line_inject_block_without_truncating(
+    tmp_path,
+) -> None:
+    # Regression for the P1: when a start and end marker sit on the SAME line,
+    # the structured strip must drop the whole block (rc 1) without truncating
+    # the rest of the entrypoint (a block-open awk would discard the Vue mount
+    # and app script to EOF).
+    target = tmp_path / "index.html"
+    target.write_text(
+        "<html>\n"
+        '<!-- impeccable-live-start --><script src="http://localhost:8400/live.js"></'
+        "script><!-- impeccable-live-end -->\n"
+        '<div id="app"></div>\n'
+        '<script type="module" src="/src/main.ts"></script>\n'
+        "</html>\n",
+    )
+
+    result = subprocess.run(
+        ["bash", str(STRIP_SCRIPT), str(target)],
+        text=True,
+        capture_output=True,
+    )
+
+    # Block was stripped (rc 1) and NOTHING after it was truncated.
+    assert result.returncode == 1
+    content = target.read_text()
+    assert "impeccable-live" not in content
+    assert "localhost:" not in content
+    assert 'id="app"' in content
+    assert "/src/main.ts" in content
+
+
+def test_install_hooks_preserves_and_chains_a_user_hook() -> None:
+    # Regression for the P2: installing must not silently destroy a pre-existing,
+    # non-Moonwalker pre-commit hook. It is backed up to pre-commit.user and the
+    # wrapper chains it before running the guard.
+    script = INSTALL_HOOKS.read_text()
+
+    assert "pre-commit.user" in script
+    assert 'grep -qF "$MARKER"' in script
+    # The wrapper checks for the preserved user hook and runs it first.
+    assert r'user="\$(cd' in script
+    assert r'exec "\$user"' in script
+    # Per-worktree resolution: the wrapper resolves its own checkout at run time
+    # (survives removal of the worktree it was installed in).
+    assert "git rev-parse --show-toplevel" in script

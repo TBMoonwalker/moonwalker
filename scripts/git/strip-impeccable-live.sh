@@ -31,7 +31,8 @@
 # Exit codes:
 #   0  clean
 #   1  an INJECT marker was stripped (file modified)
-#   2  usage / target-not-found error
+#   2  usage / target-not-found / partial INJECT block (start without end, or
+#      a start marker surviving the structured strip -> rewrite refused)
 #   3  SESSION ARTIFACT residue present -> run `impeccable live-server stop`
 #      and clean leftover wrapper blocks before committing
 set -uo pipefail
@@ -84,11 +85,28 @@ strip_file() {
           return 2
        fi
       if [ -n "$has_start" ] && [ "$has_start" -gt 0 ]; then
-         awk '
-             /^<!-- *impeccable-live-start *-->/ { in_block = 1; next }
-            in_block { if ($0 ~ /<!-- *impeccable-live-end *-->/) { in_block = 0 }; next }
-             { print }
-          ' "$file" > "$tmp"
+         awk -v rs='<!-- *impeccable-live-start *-->' -v re='<!-- *impeccable-live-end *-->' \
+             '
+             {
+              line = $0
+              emit = ""
+              while (1) {
+                if (in_block) {
+                  if (match(line, re)) {
+                    line = substr(line, RSTART + RLENGTH)
+                    in_block = 0
+                   } else { line = ""; break }
+                 } else {
+                  if (match(line, rs)) {
+                    emit = emit substr(line, 1, RSTART - 1)
+                    line = substr(line, RSTART + RLENGTH)
+                    in_block = 1
+                   } else { emit = emit line; break }
+                 }
+               }
+              if (length(emit) > 0) { printf "%s\n", emit }
+             }
+           ' "$file" > "$tmp"
           stripped=1
          # Backstop: scrub any INJECT keyword the structured strip missed.
          if grep -qE "$INJECT_RE" "$tmp" 2>/dev/null; then
@@ -96,6 +114,15 @@ strip_file() {
              cat "$tmp_scrub" > "$tmp"
          fi
          cat "$tmp" > "$file"
+      # Final-state check: a correct strip leaves no INJECT start marker. If
+      # one survived, a partial injection left the block open and the rewrite
+      # may have truncated entrypoint content; fail closed instead of staging it.
+     if grep -qE 'impeccable-live-start' "$tmp" 2>/dev/null; then
+         echo "strip-impeccable-live: unrepaired INJECT block in $file" >&2
+         echo "   a live-start marker survived. Run 'impeccable live-server stop'," >&2
+         echo "   then repair/remove the leftover block by hand, then commit." >&2
+         return 2
+     fi
      elif grep -qE "$INJECT_RE" "$file" 2>/dev/null; then
            # No paired block, but an INJECT keyword is present: scrub it.
          scrub_inject < "$file" > "$tmp"
