@@ -14,7 +14,6 @@ from litestar.response import File
 _HASHED_ASSET_PATTERN = re.compile(r".+-[A-Za-z0-9_-]{8,}\.[A-Za-z0-9]+$")
 _REMOVED_LEGACY_SPA_PATHS = frozenset({"config", "settings"})
 DOCS_DIR = Path(__file__).resolve().parents[2] / "docs"
-SPA_INDEX_FILE = TEMPLATE_DIR / "index.html"
 
 
 def _resolve_relative_file(root: Path, relative_path: str) -> Path | None:
@@ -35,10 +34,11 @@ def frontend_staging_warning() -> str | None:
     500 with no explanation; this makes the cause obvious at startup and in the
     response detail instead of a bare "Internal Server Error".
     """
-    if SPA_INDEX_FILE.is_file():
+    index_file = TEMPLATE_DIR / "index.html"
+    if index_file.is_file():
         return None
     return (
-        f"Frontend not staged: {SPA_INDEX_FILE} is missing. Run './run.sh start' to "
+        f"Frontend not staged: {index_file} is missing. Run './run.sh start' to "
         "build and copy the Vue app into backend/templates and backend/static."
     )
 

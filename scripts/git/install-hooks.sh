@@ -8,8 +8,12 @@
 set -euo pipefail
 
 REPO_ROOT="$(git rev-parse --show-toplevel)"
-HOOKS_DIR="$REPO_ROOT/.git/hooks"
-WRAPPER="$HOOKS_DIR/pre-commit"
+# Resolve the real git dir through Git so linked worktrees (where .git is a
+ # file, not a directory) install into their own hooks dir rather than failing
+ # at "mkdir -p .git/hooks" with "Not a directory".
+ GIT_DIR="$(git rev-parse --absolute-git-dir)"
+ HOOKS_DIR="$GIT_DIR/hooks"
+ WRAPPER="$HOOKS_DIR/pre-commit"
 
 mkdir -p "$HOOKS_DIR"
 

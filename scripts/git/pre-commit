@@ -39,24 +39,29 @@ set +e
 set -e
 
 case "$strip_rc" in
-     0) : ;;                     # nothing to strip
-     1) echo "pre-commit: stripped impeccable-live INJECT from $TARGET_FILE; re-staging." ;;
-     3)
-         # Fail closed on session-artifact residue; the strip already printed the
-         # offending lines and the cleanup command.
-         echo "pre-commit: BLOCKED — impeccable live session artifact in $TARGET_FILE." >&2
-         echo "   Run 'impeccable live-server stop' (then remove any leftover" >&2
-         echo "   impeccable-variants-*/impeccable-carbonize-* blocks), then commit." >&2
-         exit 1
-         ;;
+     0) : ;;                              # nothing to strip; leave the index as-is
+     1)
+          echo "pre-commit: stripped impeccable-live INJECT from $TARGET_FILE; re-staging."
+         # The strip modified the worktree entrypoint; re-stage it so the
+          # cleanup (and the staged-blob gate below) act on cleaned content.
+         # "git add -- <file>" (not --all) stages the file without pulling in
+           # unrelated edits to other paths.
+         git -C "$REPO_ROOT" add -- "$TARGET_FILE"
+          ;;
+      3)
+           # Fail closed on session-artifact residue; the strip already printed the
+           # offending lines and the cleanup command.
+          echo "pre-commit: BLOCKED — impeccable live session artifact in $TARGET_FILE." >&2
+          echo "   Run 'impeccable live-server stop' (then remove any leftover" >&2
+          echo "   impeccable-variants-*/impeccable-carbonize-* blocks), then commit." >&2
+          exit 1
+           ;;
      *)
           echo "pre-commit: strip error (rc=$strip_rc) for $TARGET_FILE" >&2
           exit "$strip_rc"
-          ;;
+           ;;
 esac
 
-# Re-stage the (possibly cleaned) file so the index reflects the worktree.
-git -C "$REPO_ROOT" add --all -- "$TARGET_FILE"
 
 # Fail-closed gate on the staged blob for ANY live artifact, in case a residual
 # marker survived the strip (e.g. artifact residue the strip chose not to mutate).

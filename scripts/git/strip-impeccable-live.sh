@@ -68,15 +68,28 @@ strip_file() {
     tmp_scrub="$(mktemp -t mw-impeccable-live.XXXXXX)"
     trap "rm -f '$tmp' '$tmp_scrub'" EXIT INT TERM
 
-      # Primary: drop the full INJECT marker block (start..end inclusive).
-     local stripped=0
-     if grep -qE '<!-- *impeccable-live-start *-->' "$file"; then
+       # Primary: drop the full INJECT marker block (start..end inclusive).
+      local stripped=0
+      local has_start has_end
+     has_start="$(grep -cE '<!-- *impeccable-live-start *-->' "$file" 2>/dev/null || true)"
+     has_end="$(grep -cE '<!-- *impeccable-live-end *-->' "$file" 2>/dev/null || true)"
+      # Fail closed on a partial injection: a start marker with no matching end
+      # would leave the awk block-open and truncate the rest of the entrypoint
+      # (including the Vue mount and app script). Refuse to rewrite until it is
+      # repaired to a paired block or removed by hand.
+      if [ -n "$has_start" ] && [ "$has_start" -gt 0 ] && [ "$has_end" -lt "$has_start" ]; then
+          echo "strip-impeccable-live: incomplete INJECT marker in $file: a live-start" >&2
+          echo "  marker has no matching live-end. Repair or remove it by hand" >&2
+          echo "  (run 'impeccable live-server stop', then clean the leftover), then commit." >&2
+          return 2
+       fi
+      if [ -n "$has_start" ] && [ "$has_start" -gt 0 ]; then
          awk '
-            /^<!-- *impeccable-live-start *-->/ { in_block = 1; next }
+             /^<!-- *impeccable-live-start *-->/ { in_block = 1; next }
             in_block { if ($0 ~ /<!-- *impeccable-live-end *-->/) { in_block = 0 }; next }
-            { print }
-         ' "$file" > "$tmp"
-         stripped=1
+             { print }
+          ' "$file" > "$tmp"
+          stripped=1
          # Backstop: scrub any INJECT keyword the structured strip missed.
          if grep -qE "$INJECT_RE" "$tmp" 2>/dev/null; then
              scrub_inject < "$tmp" > "$tmp_scrub"
