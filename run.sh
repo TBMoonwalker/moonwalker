@@ -177,6 +177,12 @@ start_services() {
     cp -r frontend/dist/assets backend/static/
     cp frontend/dist/index.html backend/templates/
 
+    if [ ! -f backend/templates/index.html ] || [ ! -d backend/static/assets ]; then
+        echo "❌ SPA assets did not stage into backend/templates + backend/static."
+        echo "   The backend will return 500 for all dashboard routes."
+        exit 1
+    fi
+
     echo "🐍 Building a verified Python environment..."
     if [ "$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.14" ]; then
         echo "❌ Python 3.14 is required. See .python-version."

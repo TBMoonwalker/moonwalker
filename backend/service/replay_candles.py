@@ -377,9 +377,11 @@ async def archive_replay_candles_for_deal(
 
     if archived_timestamps:
         if conn is not None:
-            await model.TradeReplayCandles.filter(deal_id=normalized_deal_id).using_db(
-                conn
-            ).delete()
+            await (
+                model.TradeReplayCandles.filter(deal_id=normalized_deal_id)
+                .using_db(conn)
+                .delete()
+            )
         else:
             await model.TradeReplayCandles.filter(deal_id=normalized_deal_id).delete()
 

@@ -134,8 +134,9 @@ def _handler() -> tuple[
     handler = PlacementRecoveryHandler(
         exchange=exchange,
         trades=trades,
-        validate_buy=lambda payload: bool(payload.get("price"))
-        and bool(payload.get("amount")),
+        validate_buy=lambda payload: (
+            bool(payload.get("price")) and bool(payload.get("amount"))
+        ),
         validate_sell=lambda payload: payload.get("type") == "sold_check",
         finalize_buy=finalize_buy,
         finalize_sell=finalize_sell,

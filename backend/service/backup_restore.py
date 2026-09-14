@@ -448,9 +448,7 @@ class BackupService:
                         history_days,
                         config,
                     )
-                except (
-                    Exception
-                ) as exc:  # noqa: BLE001 - report restore warnings, continue.
+                except Exception as exc:  # noqa: BLE001 - report restore warnings, continue.
                     logging.error(
                         "Failed refreshing restored ticker history for %s: %s",
                         symbol,

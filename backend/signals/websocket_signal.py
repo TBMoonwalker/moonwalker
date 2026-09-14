@@ -230,8 +230,7 @@ class SignalPlugin:
             )
         except (BaseORMException, RuntimeError, TypeError, ValueError) as exc:
             logging.error(
-                "Couldn't get actual list of bots - not starting new deals! "
-                "Cause: %s",
+                "Couldn't get actual list of bots - not starting new deals! Cause: %s",
                 exc,
             )
             return True

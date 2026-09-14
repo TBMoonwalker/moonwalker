@@ -464,7 +464,7 @@ class SignalPlugin:
 
         except (AttributeError, KeyError, RuntimeError, TypeError, ValueError) as e:
             logging.debug(
-                "No data yet for %s - you need to enable dynamic dca - error: " "%s",
+                "No data yet for %s - you need to enable dynamic dca - error: %s",
                 symbol,
                 e,
             )

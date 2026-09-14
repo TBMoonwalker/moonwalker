@@ -200,7 +200,7 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             "FROM opentrades WHERE symbol = 'BTC/USDC'"
         ).fetchone()
         trade = connection.execute(
-            "SELECT symbol, orderid, deal_id FROM trades " "WHERE symbol = 'BTC/USDC'"
+            "SELECT symbol, orderid, deal_id FROM trades WHERE symbol = 'BTC/USDC'"
         ).fetchone()
         executions = connection.execute(
             "SELECT symbol, order_id, role FROM tradeexecutions "

@@ -1252,7 +1252,9 @@ async def build_analytics_payload() -> dict[str, Any]:
         "status": (
             "disabled"
             if not trust_config.enabled
-            else "missing_model" if not trust_config.ollama_model else "ready"
+            else "missing_model"
+            if not trust_config.ollama_model
+            else "ready"
         ),
         "coverage": {
             "total": total,

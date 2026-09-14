@@ -122,11 +122,13 @@ async def run_config_migrations() -> None:
             except SignalSettingsError:
                 canonical_value = None
             if canonical_value is not None:
-                await AppConfig.filter(key="signal_settings").using_db(
-                    connection
-                ).update(
-                    value=canonical_value,
-                    value_type="str",
+                await (
+                    AppConfig.filter(key="signal_settings")
+                    .using_db(connection)
+                    .update(
+                        value=canonical_value,
+                        value_type="str",
+                    )
                 )
 
         await ConfigMigration.create(

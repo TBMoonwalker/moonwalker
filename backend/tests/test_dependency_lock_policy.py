@@ -45,7 +45,7 @@ def test_validate_python_lock_accepts_hashed_exact_requirement(
 @pytest.mark.parametrize(
     "requirement",
     [
-        ("malicious @ " "https://attacker.invalid/malicious-1.0.0-py3-none-any.whl"),
+        ("malicious @ https://attacker.invalid/malicious-1.0.0-py3-none-any.whl"),
         "git+https://attacker.invalid/repository.git",
         "https://attacker.invalid/malicious-1.0.0-py3-none-any.whl",
         "--trusted-host attacker.invalid",

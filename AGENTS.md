@@ -3,6 +3,7 @@
 This file provides guidance to agentic coding agents (such as Claude Code) when working with code in this repository.
 
 ## Build, Lint, and Test Commands
+- With the OpenCode Desktop/CLI agent, NEVER use the `edit` tool because it breaks indentation. It is disabled. Use the `write` tool and format the written Python file with Ruff.
 
 ### Mandatory CI Check
 - After every code change, run CI from the scripts directory directly: `cd scripts && ./ci.sh`
@@ -21,13 +22,21 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 ### Backend (Python)
 - **Run application:** `cd backend && python app.py` or use the `./run.sh` script
 - **Install dependencies:** `cd backend && pip install -r requirements.txt`
-- **Format code:** `black backend/` (Black is configured with default settings)
-- **Lint code:** `ruff check backend/`
+- **Install development tools (from repository root):** `./scripts/install_python_dependencies.sh "$PWD/.venv/bin/python" "$PWD/backend/requirements-dev.txt"`
+- **Format code (from repository root):** `./.venv/bin/python -m ruff format backend/`
+- **Check formatting:** `./.venv/bin/python -m ruff format --check backend/`
+- **Lint code:** `./.venv/bin/python -m ruff check backend/`
 - **Type check:** `mypy backend/`
-- **Import sort:** `isort backend/`
+- **Import sort:** `./.venv/bin/python -m isort backend/` (run before Ruff formatting)
 - **Run tests:** `pytest` (when tests are added)
 
 Note: Test files (test*.py) are gitignored in the repository. Use pytest for testing.
+
+### Formatter defaults for agents and OpenCode Desktop/CLI
+- `pyproject.toml` is the source of truth for Python formatting: Ruff, Python 3.11-compatible syntax, 88-character lines, four-space indentation, double quotes, LF line endings, and magic trailing commas. Preview formatting and docstring code rewriting are disabled.
+- Use the Ruff version pinned in `backend/requirements-dev.txt` through `./.venv/bin/python -m ruff`; desktop apps do not necessarily inherit an activated virtual environment or shell PATH.
+- After writing a Python file, run `./.venv/bin/python -m ruff format path/to/file.py` from the repository root if automatic formatting did not run. Run the mandatory CI check after code changes.
+- Use isort for import ordering, then Ruff for formatting. Do not run Black; competing formatters can produce repeated changes.
 
 ### Frontend (Vue.js)
 - **Install dependencies:** `cd frontend && npm install`
@@ -285,9 +294,10 @@ The project uses standard Python and JavaScript testing approaches:
 ### Code Style & Formatting
 
 - Follow **PEP 8**.
-- Use **Black** for formatting (default settings).
-- Maximum line length: **88 characters**.
+- Use **Ruff formatter** with the repository's `pyproject.toml` settings.
+- Target line length: **88 characters** (Ruff may retain longer strings or comments).
 - Indentation: **4 spaces**, never tabs.
+- Use **double quotes** and **LF** line endings; preserve magic trailing commas.
 - One logical statement per line.
 
 Example:
@@ -528,8 +538,7 @@ Use the following tools:
 
 | Tool | Purpose |
 |-----|--------|
-| Black | Formatting |
-| Ruff | Linting |
+| Ruff | Formatting and linting |
 | mypy / Pyright | Type checking |
 | pytest | Testing |
 | isort | Import sorting |
@@ -560,7 +569,7 @@ All tools should be configured in `pyproject.toml`.
 
 Before merging any change:
 
-- [ ] Code formatted (Black)
+- [ ] Code formatted (`./.venv/bin/python -m ruff format --check backend/`)
 - [ ] Linting passes
 - [ ] Type checks pass
 - [ ] Tests added and passing

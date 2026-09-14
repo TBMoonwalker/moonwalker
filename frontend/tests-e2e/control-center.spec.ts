@@ -355,14 +355,14 @@ test('opens and duplicates a strategy through the desktop builder workflow', asy
     page.getByRole('heading', { name: 'Strategy Builder' }),
   ).toBeVisible()
   await expect(
-    page.getByRole('main', { name: 'Strategy graph' }),
+    page.getByRole('region', { name: 'Strategy graph' }),
   ).toContainText('Read-only built-in preview')
 
   await page.getByRole('button', { name: 'Duplicate selected' }).click()
 
   await expect(page.getByText('Custom copy created')).toBeVisible()
   await expect(
-    page.getByRole('main', { name: 'Strategy graph' }),
+    page.getByRole('region', { name: 'Strategy graph' }),
   ).toContainText('Editable custom graph')
 })
 
@@ -380,7 +380,7 @@ test('edits, validates, saves, detects conflicts, and deletes a custom strategy'
 
   await page.getByRole('button', { name: /EMA cross copy/ }).click()
   await expect(
-    page.getByRole('main', { name: 'Strategy graph' }),
+    page.getByRole('region', { name: 'Strategy graph' }),
   ).toContainText('Editable custom graph')
 
   await page.getByLabel('Strategy name').fill('EMA momentum')

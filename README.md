@@ -83,4 +83,5 @@ You also need to install the ta-lib library for your OS. Please see: https://ta-
 - CI, runtime operations, backups, logs, and dashboard streams:
    `docs/operations.md`
 - Dependency updates and supply-chain policy: `docs/dependencies.md`
+- Product record: `PRODUCT.md`
 - Statistics dashboard: `/stats` in your browser

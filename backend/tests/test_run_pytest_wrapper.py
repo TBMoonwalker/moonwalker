@@ -8,7 +8,7 @@ def test_run_pytest_wrapper_exits_after_summary(tmp_path: Path) -> None:
     repo_root = Path(__file__).resolve().parents[2]
     test_file = tmp_path / "test_wrapper_smoke.py"
     test_file.write_text(
-        "def test_wrapper_smoke():\n" "    assert True\n",
+        "def test_wrapper_smoke():\n    assert True\n",
         encoding="utf-8",
     )
 

@@ -33,7 +33,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-    <main class="strategy-canvas-shell" aria-label="Strategy graph">
+     <section class="strategy-canvas-shell" aria-label="Strategy graph">
         <div v-if="!detail" class="canvas-empty">
             Select a built-in strategy to preview its graph.
         </div>
@@ -92,8 +92,8 @@ onUnmounted(() => {
                 </button>
             </div>
         </template>
-    </main>
-</template>
+      </section>
+  </template>
 
 <style scoped>
 .strategy-canvas-shell {
@@ -120,8 +120,8 @@ onUnmounted(() => {
 .rete-host {
     height: 680px;
     background:
-        linear-gradient(rgba(29, 92, 73, 0.08) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(29, 92, 73, 0.08) 1px, transparent 1px);
+        linear-gradient(color-mix(in srgb, var(--mw-color-primary) 8%, transparent) 1px, transparent 1px),
+        linear-gradient(90deg, color-mix(in srgb, var(--mw-color-primary) 8%, transparent) 1px, transparent 1px);
     background-color: var(--mw-color-surface-panel);
     background-size: 32px 32px;
 }
@@ -133,7 +133,7 @@ onUnmounted(() => {
     border: 1px solid var(--mw-color-border);
     border-radius: 6px;
     background: var(--mw-color-surface-raised);
-    box-shadow: 0 1px 2px rgba(24, 33, 29, 0.08);
+    box-shadow: 0 1px 2px color-mix(in srgb, var(--mw-color-text-primary) 8%, transparent);
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-body);
     line-height: 1.25;
@@ -148,12 +148,12 @@ onUnmounted(() => {
 .rete-host :deep(.node.selected) {
     border-color: var(--mw-color-primary);
     box-shadow:
-        0 0 0 2px rgba(29, 92, 73, 0.16),
-        0 1px 2px rgba(24, 33, 29, 0.08);
+        0 0 0 2px color-mix(in srgb, var(--mw-color-primary) 16%, transparent),
+        0 1px 2px color-mix(in srgb, var(--mw-color-text-primary) 8%, transparent);
 }
 
 .rete-host :deep(.node .title) {
-    border-bottom: 1px solid rgba(29, 92, 73, 0.14);
+    border-bottom: 1px solid color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-body);
     font-size: 0.96rem;
@@ -199,7 +199,7 @@ onUnmounted(() => {
 }
 
 .rete-host :deep(.socket.input) {
-    border-color: rgba(183, 138, 46, 0.82);
+    border-color: color-mix(in srgb, var(--mw-color-secondary) 82%, transparent);
 }
 
 .rete-host :deep(.socket.output) {
@@ -234,7 +234,7 @@ onUnmounted(() => {
     box-sizing: border-box;
     width: 100%;
     min-height: 32px;
-    border: 1px solid rgba(29, 92, 73, 0.22);
+    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 22%, transparent);
     border-radius: 4px;
     background: var(--mw-color-primary-soft);
     color: var(--mw-color-primary-strong);
@@ -248,13 +248,13 @@ onUnmounted(() => {
 @media (prefers-color-scheme: dark) {
     .rete-host :deep(.node .control input[readonly]) {
         border-color: var(--mw-color-border-strong);
-        background: rgba(36, 95, 78, 0.34);
+        background: color-mix(in srgb, var(--mw-color-primary) 34%, transparent);
         color: var(--mw-color-text-primary);
     }
 }
 
 .rete-host :deep(svg path) {
-    stroke: rgba(29, 92, 73, 0.64);
+    stroke: color-mix(in srgb, var(--mw-color-primary) 64%, transparent);
     stroke-width: 3px;
 }
 
@@ -306,12 +306,12 @@ onUnmounted(() => {
 
 .node-chip.active {
     border-color: var(--mw-color-primary);
-    background: rgba(29, 92, 73, 0.08);
+    background: color-mix(in srgb, var(--mw-color-primary) 8%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {
     .node-chip.active {
-        background: rgba(36, 95, 78, 0.3);
+        background: color-mix(in srgb, var(--mw-color-primary) 30%, transparent);
     }
 }
 

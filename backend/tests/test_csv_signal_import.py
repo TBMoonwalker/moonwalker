@@ -122,8 +122,7 @@ async def test_csv_signal_import_creates_base_and_safety_orders(monkeypatch) -> 
 def test_parse_csv_rows_normalizes_symbol_and_date() -> None:
     importer = CSVSignalImportService()
     csv_content = (
-        "date;symbol;price;amount\n"
-        "18/08/2025 19:32:00;btc-usdc;117644.41;0.00099153\n"
+        "date;symbol;price;amount\n18/08/2025 19:32:00;btc-usdc;117644.41;0.00099153\n"
     )
     grouped = importer._parse_csv_rows(csv_content, "USDC")
     assert list(grouped.keys()) == ["BTC/USDC"]

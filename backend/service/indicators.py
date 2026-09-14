@@ -36,12 +36,12 @@ class Indicators:
         self._ema_cache: dict[
             tuple[str, str, tuple[int, ...]], tuple[float | None, dict[str, Any]]
         ] = {}
-        self._ema_series_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = (
-            {}
-        )
-        self._rsi_series_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = (
-            {}
-        )
+        self._ema_series_cache: dict[
+            tuple[str, str, int], tuple[float | None, Any]
+        ] = {}
+        self._rsi_series_cache: dict[
+            tuple[str, str, int], tuple[float | None, Any]
+        ] = {}
         self._bollinger_series_cache: dict[
             tuple[str, str, int, float], tuple[float | None, dict[str, Any]]
         ] = {}

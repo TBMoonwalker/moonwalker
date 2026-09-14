@@ -1519,13 +1519,14 @@ class Dca:
                         decision_context,
                     )
                 else:
-                    new_so, next_so_percentage = (
-                        await self.__evaluate_dynamic_dca_trigger(
-                            trades,
-                            actual_pnl,
-                            trigger_threshold,
-                            last_so_percentage,
-                        )
+                    (
+                        new_so,
+                        next_so_percentage,
+                    ) = await self.__evaluate_dynamic_dca_trigger(
+                        trades,
+                        actual_pnl,
+                        trigger_threshold,
+                        last_so_percentage,
                     )
             else:
                 static_decision = evaluate_static_dca_decision(
@@ -1541,13 +1542,14 @@ class Dca:
 
             if new_so:
                 if recovery_policy.mode == RECOVERY_TARGET_MODE:
-                    safety_order_size, dynamic_so_details = (
-                        await self.__resolve_recovery_safety_order_size(
-                            trades,
-                            current_price,
-                            recovery_policy,
-                            recovery_trigger_details,
-                        )
+                    (
+                        safety_order_size,
+                        dynamic_so_details,
+                    ) = await self.__resolve_recovery_safety_order_size(
+                        trades,
+                        current_price,
+                        recovery_policy,
+                        recovery_trigger_details,
                     )
                 else:
                     (
@@ -1563,27 +1565,29 @@ class Dca:
                         dynamic_dca=bool(dynamic_dca),
                     )
                     if recovery_policy.mode == RECOVERY_SHADOW_MODE:
-                        shadow_atr, shadow_atr_details = (
-                            await self.__get_recovery_atr_percent(
-                                trades["symbol"],
-                                recovery_policy,
-                            )
+                        (
+                            shadow_atr,
+                            shadow_atr_details,
+                        ) = await self.__get_recovery_atr_percent(
+                            trades["symbol"],
+                            recovery_policy,
                         )
-                        _shadow_size, shadow_details = (
-                            await self.__resolve_recovery_safety_order_size(
-                                trades,
-                                current_price,
-                                recovery_policy,
-                                {
-                                    "enabled": "true",
-                                    "mode": RECOVERY_SHADOW_MODE,
-                                    "atr_percent": shadow_atr,
-                                    "atr_regime": str(
-                                        shadow_atr_details.get("regime", "mid")
-                                    ),
-                                    "reason": "legacy_trigger_shadow_evaluation",
-                                },
-                            )
+                        (
+                            _shadow_size,
+                            shadow_details,
+                        ) = await self.__resolve_recovery_safety_order_size(
+                            trades,
+                            current_price,
+                            recovery_policy,
+                            {
+                                "enabled": "true",
+                                "mode": RECOVERY_SHADOW_MODE,
+                                "atr_percent": shadow_atr,
+                                "atr_regime": str(
+                                    shadow_atr_details.get("regime", "mid")
+                                ),
+                                "reason": "legacy_trigger_shadow_evaluation",
+                            },
                         )
                         dynamic_so_details["recovery_shadow"] = shadow_details
                 if dynamic_so_details.get("skip") == "true":

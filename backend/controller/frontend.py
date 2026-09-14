@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from controller import STATIC_DIR, TEMPLATE_DIR
-from litestar.exceptions import NotFoundException
+from litestar.exceptions import HTTPException, NotFoundException
 from litestar.handlers import get
 from litestar.params import FromPath
 from litestar.response import File
@@ -24,6 +24,25 @@ def _resolve_relative_file(root: Path, relative_path: str) -> Path | None:
     if root_resolved not in target.parents and target != root_resolved:
         return None
     return target
+
+
+def _staging_warning_message(index_file: Path) -> str:
+    """Build the actionable not-staged message for a missing entrypoint."""
+    return f"Frontend not staged: {index_file} is missing. Run './run.sh start' to build and copy the Vue app into backend/templates and backend/static."
+
+
+def frontend_staging_warning() -> str | None:
+    """Return an actionable message when the staged SPA entrypoint is absent.
+
+    The frontend is built by ``run.sh`` and copied into ``backend/static`` and
+    ``backend/templates``. When that copy is missing, every SPA route raises a
+    500 with no explanation; this makes the cause obvious at startup and in the
+    response detail instead of a bare "Internal Server Error".
+    """
+    index_file = TEMPLATE_DIR / "index.html"
+    if index_file.is_file():
+        return None
+    return _staging_warning_message(index_file)
 
 
 def _cache_control_for_file(path: Path) -> str:
@@ -112,6 +131,12 @@ async def _serve_vue_path(path: str) -> File:
         raise NotFoundException("Route not found")
 
     index_file = TEMPLATE_DIR / "index.html"
+    # Check existence off the event loop so a blocking stat cannot stall the loop
+    # shared with trading tasks; the message comes from the shared helper.
+    if not await asyncio.to_thread(index_file.is_file):
+        raise HTTPException(
+            status_code=500, detail=_staging_warning_message(index_file)
+        )
     return _file_response(index_file)
 
 

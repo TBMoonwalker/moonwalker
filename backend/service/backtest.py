@@ -14,8 +14,15 @@ from typing import Any
 import helper
 import pandas as pd
 from service.analytics import compute_stats_from_trades
+from service.config_views import SidestepCampaignConfigView
 from service.data_ohlcv import resample_ohlcv_data
 from service.data_timeframes import timeframe_bucket_origin_milliseconds
+from service.dca_decision import (
+    DcaAction,
+    WaitingReentryContext,
+    calculate_sidestep_exit_fallback_minimum_price,
+    evaluate_waiting_reentry_decision,
+)
 from service.dca_math import (
     BacktestTradeState,
     calculate_actual_pnl_percent,
@@ -27,12 +34,6 @@ from service.dca_math import (
     check_take_profit_hit,
     should_place_safety_order,
 )
-from service.dca_decision import (
-    DcaAction,
-    WaitingReentryContext,
-    calculate_sidestep_exit_fallback_minimum_price,
-    evaluate_waiting_reentry_decision,
-)
 from service.dca_recovery_sizing import (
     RECOVERY_TARGET_MODE,
     RecoverySizingPolicy,
@@ -42,7 +43,6 @@ from service.dca_recovery_sizing import (
     calculate_recovery_trigger_price,
 )
 from service.exchange import Exchange
-from service.config_views import SidestepCampaignConfigView
 from service.indicators import Indicators
 from service.strategy_capability import get_strategy_min_history_candles
 from service.strategy_chart_indicators import StrategyChartIndicatorBuilder

@@ -231,6 +231,7 @@ package-lock.json
 
 # AI
 !CLAUDE.md
+.impeccable/
 .gstack/
 .opencode/
 

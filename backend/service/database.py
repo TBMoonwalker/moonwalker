@@ -109,8 +109,7 @@ def _plan_additive_column_statements(
         if column_name in existing_columns:
             continue
         statements.append(
-            f"ALTER TABLE {table_name} "
-            f"ADD COLUMN {column_name} {column_definition};"
+            f"ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition};"
         )
     return statements
 

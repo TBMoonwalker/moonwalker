@@ -852,12 +852,20 @@ class Trades:
                     await model.UnsellableTrades.all().using_db(conn).delete()
                 )
                 if deal_ids:
-                    await model.TradeReplayCandles.filter(
-                        deal_id__in=deal_ids,
-                    ).using_db(conn).delete()
-                    await model.TradeExecutions.filter(
-                        deal_id__in=deal_ids,
-                    ).using_db(conn).delete()
+                    await (
+                        model.TradeReplayCandles.filter(
+                            deal_id__in=deal_ids,
+                        )
+                        .using_db(conn)
+                        .delete()
+                    )
+                    await (
+                        model.TradeExecutions.filter(
+                            deal_id__in=deal_ids,
+                        )
+                        .using_db(conn)
+                        .delete()
+                    )
                 return deleted_count
 
         try:
@@ -995,9 +1003,13 @@ class Trades:
                 )
                 await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
                 if open_trade and open_trade.deal_id:
-                    await model.TradeExecutions.filter(
-                        deal_id=open_trade.deal_id,
-                    ).using_db(conn).delete()
+                    await (
+                        model.TradeExecutions.filter(
+                            deal_id=open_trade.deal_id,
+                        )
+                        .using_db(conn)
+                        .delete()
+                    )
 
         try:
             await run_sqlite_write_with_retry(
@@ -1061,12 +1073,20 @@ class Trades:
                         .count()
                     )
                     if linked_rows == 0:
-                        await model.TradeReplayCandles.filter(
-                            deal_id=deal_id,
-                        ).using_db(conn).delete()
-                        await model.TradeExecutions.filter(
-                            deal_id=deal_id,
-                        ).using_db(conn).delete()
+                        await (
+                            model.TradeReplayCandles.filter(
+                                deal_id=deal_id,
+                            )
+                            .using_db(conn)
+                            .delete()
+                        )
+                        await (
+                            model.TradeExecutions.filter(
+                                deal_id=deal_id,
+                            )
+                            .using_db(conn)
+                            .delete()
+                        )
                 return deleted_count
 
         try:

@@ -15,6 +15,7 @@ import uvicorn
 from controller import route_handlers
 from controller import statistics as statistics_controller
 from controller import trades as trades_controller
+from controller.frontend import frontend_staging_warning
 from litestar import Litestar
 from litestar.config.compression import CompressionConfig
 from litestar.config.cors import CORSConfig
@@ -114,6 +115,12 @@ async def startup() -> None:
     """Initialize core services before the lifespan starts runtime tasks."""
     started_at = time.perf_counter()
     logging.info("Moonwalker startup sequence started.")
+    staging_warning = frontend_staging_warning()
+    if staging_warning is not None:
+        logging.error(
+            "Frontend not staged; the web dashboard will be unavailable: %s",
+            staging_warning,
+        )
     try:
         runtime_state.redis_proc = await _run_startup_step(
             "redis start",

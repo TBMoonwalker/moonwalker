@@ -275,8 +275,12 @@ async def _resolve_open_deal_state(symbol: str, conn: Any) -> tuple[str, bool]:
 
     deal_id = open_trade.deal_id or _create_deal_id()
     if open_trade.deal_id != deal_id:
-        await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
-            deal_id=deal_id,
+        await (
+            model.OpenTrades.filter(symbol=symbol)
+            .using_db(conn)
+            .update(
+                deal_id=deal_id,
+            )
         )
     return deal_id, bool(open_trade.execution_history_complete)
 
@@ -326,8 +330,12 @@ async def _apply_buy_campaign_context(
             using_db=conn,
         )
     else:
-        await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(conn).update(
-            **update_payload,
+        await (
+            model.SpotCampaigns.filter(campaign_id=campaign_id)
+            .using_db(conn)
+            .update(
+                **update_payload,
+            )
         )
     return campaign_id
 
@@ -362,13 +370,21 @@ async def _apply_close_campaign_context(
         update_payload["principal_quote"] = float(context.get("principal_quote") or 0.0)
     sidestep_increment = int(context.get("sidestep_increment") or 0)
     if sidestep_increment > 0:
-        await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(conn).update(
-            sidestep_count=F("sidestep_count") + sidestep_increment,
-            **update_payload,
+        await (
+            model.SpotCampaigns.filter(campaign_id=campaign_id)
+            .using_db(conn)
+            .update(
+                sidestep_count=F("sidestep_count") + sidestep_increment,
+                **update_payload,
+            )
         )
         return
-    await model.SpotCampaigns.filter(campaign_id=campaign_id).using_db(conn).update(
-        **update_payload,
+    await (
+        model.SpotCampaigns.filter(campaign_id=campaign_id)
+        .using_db(conn)
+        .update(
+            **update_payload,
+        )
     )
 
 
@@ -559,31 +575,43 @@ async def persist_buy_trade(
                         **buy_defaults,
                         **lifecycle_defaults,
                     }
-                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
-                        execution_history_complete=history_complete,
-                        sold_amount=0.0,
-                        sold_proceeds=0.0,
-                        unsellable_amount=0.0,
-                        unsellable_reason=None,
-                        unsellable_min_notional=None,
-                        unsellable_estimated_notional=None,
-                        unsellable_since=None,
-                        unsellable_notice_sent=False,
-                        tp_limit_order_id=None,
-                        tp_limit_order_price=None,
-                        tp_limit_order_amount=None,
-                        tp_limit_order_armed_at=None,
-                        **update_defaults,
+                    await (
+                        model.OpenTrades.filter(symbol=symbol)
+                        .using_db(conn)
+                        .update(
+                            execution_history_complete=history_complete,
+                            sold_amount=0.0,
+                            sold_proceeds=0.0,
+                            unsellable_amount=0.0,
+                            unsellable_reason=None,
+                            unsellable_min_notional=None,
+                            unsellable_estimated_notional=None,
+                            unsellable_since=None,
+                            unsellable_notice_sent=False,
+                            tp_limit_order_id=None,
+                            tp_limit_order_price=None,
+                            tp_limit_order_amount=None,
+                            tp_limit_order_armed_at=None,
+                            **update_defaults,
+                        )
                     )
             elif campaign_id is not None:
-                await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
-                    campaign_id=campaign_id,
+                await (
+                    model.OpenTrades.filter(symbol=symbol)
+                    .using_db(conn)
+                    .update(
+                        campaign_id=campaign_id,
+                    )
                 )
             if not create_open_trade:
                 dca_updates = _build_safety_order_dca_updates(payload)
                 if dca_updates:
-                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
-                        **dca_updates,
+                    await (
+                        model.OpenTrades.filter(symbol=symbol)
+                        .using_db(conn)
+                        .update(
+                            **dca_updates,
+                        )
                     )
             await mark_placement_persisted_in_transaction(
                 placement_operation_id,
@@ -795,36 +823,40 @@ async def persist_sidestep_transition(
             await model.Trades.filter(symbol=symbol).using_db(conn).delete()
             sold_amount = float(payload.get("amount") or 0.0)
             sold_quote = sold_amount * float(payload.get("tp_price") or 0.0)
-            await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
-                deal_id=None,
-                campaign_id=campaign_id,
-                execution_history_complete=history_complete,
-                exposure_state=TradeExposureState.FLAT_WAITING_REENTRY.value,
-                amount=0.0,
-                cost=0.0,
-                profit=0.0,
-                profit_percent=0.0,
-                tp_price=0.0,
-                avg_price=0.0,
-                sold_amount=0.0,
-                sold_proceeds=0.0,
-                current_price=float(payload.get("tp_price") or 0.0),
-                reserved_reentry_quote=float(
-                    (campaign_context or {}).get("reserved_quote") or sold_quote
-                ),
-                waiting_reference_price=float(payload.get("tp_price") or 0.0),
-                waiting_reference_amount=sold_amount,
-                waiting_reference_quote=sold_quote,
-                virtual_waiting_profit=0.0,
-                virtual_waiting_profit_percent=0.0,
-                last_transition_at=(
-                    (campaign_context or {}).get("last_transition_at")
-                    or payload.get("close_date")
-                ),
-                tp_limit_order_id=None,
-                tp_limit_order_price=None,
-                tp_limit_order_amount=None,
-                tp_limit_order_armed_at=None,
+            await (
+                model.OpenTrades.filter(symbol=symbol)
+                .using_db(conn)
+                .update(
+                    deal_id=None,
+                    campaign_id=campaign_id,
+                    execution_history_complete=history_complete,
+                    exposure_state=TradeExposureState.FLAT_WAITING_REENTRY.value,
+                    amount=0.0,
+                    cost=0.0,
+                    profit=0.0,
+                    profit_percent=0.0,
+                    tp_price=0.0,
+                    avg_price=0.0,
+                    sold_amount=0.0,
+                    sold_proceeds=0.0,
+                    current_price=float(payload.get("tp_price") or 0.0),
+                    reserved_reentry_quote=float(
+                        (campaign_context or {}).get("reserved_quote") or sold_quote
+                    ),
+                    waiting_reference_price=float(payload.get("tp_price") or 0.0),
+                    waiting_reference_amount=sold_amount,
+                    waiting_reference_quote=sold_quote,
+                    virtual_waiting_profit=0.0,
+                    virtual_waiting_profit_percent=0.0,
+                    last_transition_at=(
+                        (campaign_context or {}).get("last_transition_at")
+                        or payload.get("close_date")
+                    ),
+                    tp_limit_order_id=None,
+                    tp_limit_order_price=None,
+                    tp_limit_order_amount=None,
+                    tp_limit_order_armed_at=None,
+                )
             )
             await _apply_close_campaign_context(
                 conn,
@@ -940,11 +972,15 @@ async def persist_partial_sell_execution(
             history_complete = bool(open_trade.execution_history_complete) and bool(
                 execution_rows
             )
-            await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
-                deal_id=deal_id,
-                execution_history_complete=history_complete,
-                sold_amount=F("sold_amount") + float(sold_amount),
-                sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
+            await (
+                model.OpenTrades.filter(symbol=symbol)
+                .using_db(conn)
+                .update(
+                    deal_id=deal_id,
+                    execution_history_complete=history_complete,
+                    sold_amount=F("sold_amount") + float(sold_amount),
+                    sold_proceeds=F("sold_proceeds") + float(sold_proceeds),
+                )
             )
 
             ledger_rows = execution_rows or [
@@ -1072,8 +1108,8 @@ async def persist_tp_limit_cancellation(
                     ),
                     using_db=conn,
                 )
-            await model.OpenTrades.filter(symbol=symbol).using_db(conn).update(
-                **updates
+            await (
+                model.OpenTrades.filter(symbol=symbol).using_db(conn).update(**updates)
             )
             await mark_placement_persisted_in_transaction(
                 placement_operation_id,
@@ -1223,8 +1259,12 @@ async def persist_stopped_trade(
                 context=campaign_context,
             )
             if open_trade and open_trade.deal_id:
-                await model.TradeExecutions.filter(
-                    deal_id=open_trade.deal_id,
-                ).using_db(conn).delete()
+                await (
+                    model.TradeExecutions.filter(
+                        deal_id=open_trade.deal_id,
+                    )
+                    .using_db(conn)
+                    .delete()
+                )
 
     await run_sqlite_write_with_retry(_persist_stop, f"stopping symbol {symbol}")

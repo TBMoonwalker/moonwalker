@@ -2,6 +2,25 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.7.0.0] - 2026-09-13
+
+### Added
+- A frontend-staging guard so a missing built SPA surfaces loudly instead of as a
+  bare 500: `run.sh start` now hard-fails fast when assets do not stage, the SPA
+  controller raises an actionable `HTTPException`, and startup logs the gap.
+- `PRODUCT.md` capturing the product record and a design-audit report for the
+  Control Center view.
+
+### Changed
+- Canonicalized the design system in `DESIGN.md` against the open DESIGN.md
+  format.
+- The control-center view and its components received design-audit fixes and
+  reduced-motion handling.
+- Switched the Python formatter from Black to Ruff (`ruff format --check`
+  in CI, pinned `ruff==0.15.22` in `requirements-dev`); the backend was
+  reformatted and project config (`pyproject.toml`, `opencode.json`) now
+  targets Ruff with 88-col, double-quote, LF settings.
+
 ## [Unreleased]
 
 ## [4.6.3.0] - 2026-09-04
