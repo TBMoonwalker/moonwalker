@@ -142,3 +142,32 @@ async def test_drain_reclaim_is_noop_without_pending_request(monkeypatch) -> Non
 
     assert "reload" not in called
     assert watcher._reclaim_stream_requested is False
+
+
+@pytest.mark.asyncio
+async def test_reclaim_failure_does_not_propagate(monkeypatch) -> None:
+    """F1 regression: a failing reclaim must be absorbed, not crash the loop.
+
+    The reclaim runs inside the main loop, so an exchange-client rebuild that
+    raises (misconfigured exchange name or a ccxt-pro error) must not
+    propagate and kill the ticker-watcher task it exists to keep alive.
+    """
+    watcher = Watcher()
+    watcher.config = {}
+    monkeypatch.setattr(watcher_module, "logging", _Logger())
+    watcher.status = True
+
+    async def failing_reclaim() -> None:
+        raise AttributeError("exchange not configured")
+
+    watcher._reclaim_stalled_stream = failing_reclaim  # type: ignore[assignment]
+    watcher._reclaim_stream_requested = True
+
+    try:
+        await watcher._drain_reclaim_request()
+        propagated = False
+    except AttributeError:
+        propagated = True
+
+    assert propagated is False
+    assert watcher._reclaim_stream_requested is False
