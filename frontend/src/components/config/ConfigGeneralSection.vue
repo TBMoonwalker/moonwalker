@@ -10,22 +10,6 @@
                 maxWidth: '640px',
             }"
         >
-            <n-form-item label="Timezone" path="timezone">
-                <n-select
-                    v-model:value="general.timezone"
-                    placeholder="Select"
-                    :options="timezone"
-                    filterable
-                />
-            </n-form-item>
-            <n-form-item
-                v-if="showDebug"
-                label="Debug mode"
-                path="debug"
-                label-placement="left"
-            >
-                <n-checkbox v-model:checked="general.debug" />
-            </n-form-item>
             <n-form-item
                 v-if="showAdvancedToggle"
                 label="Advanced configuration"
@@ -159,13 +143,10 @@ withDefaults(
     defineProps<{
         general: GeneralModel
         rules: FormRules
-        showDebug?: boolean
         showAdvancedGeneral: boolean
         showAdvancedToggle?: boolean
-        timezone: StringSelectOption[]
     }>(),
     {
-        showDebug: true,
         showAdvancedToggle: true,
     },
 )

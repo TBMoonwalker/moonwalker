@@ -145,7 +145,7 @@ test('setup flow pushes browser history and focuses the active task for new setu
     assert.deepEqual(harness.events, [
         ['control_center_setup_entry_selected', { choice: 'new' }],
     ])
-    assert.deepEqual(harness.focusTargets, ['general'])
+    assert.deepEqual(harness.focusTargets, ['exchange'])
 })
 
 test('setup flow restores entry choice from browser history on popstate', () => {
@@ -180,25 +180,25 @@ test('setup flow derives task status, summaries, and expansion state', () => {
                 title: 'Exchange credentials',
                 description: 'Add API credentials.',
                 mode: 'setup',
-                target: 'exchange',
+                target: 'signal',
             },
         ]),
     })
 
-    assert.deepEqual(harness.flow.getSetupTaskStatus('general'), {
+    assert.deepEqual(harness.flow.getSetupTaskStatus('exchange'), {
         label: 'Current',
         type: 'info',
     })
-    assert.deepEqual(harness.flow.getSetupTaskStatus('exchange'), {
+    assert.deepEqual(harness.flow.getSetupTaskStatus('signal'), {
         label: 'Needs attention',
         type: 'warning',
     })
     assert.equal(
-        harness.flow.getSetupTaskSummary('exchange'),
+        harness.flow.getSetupTaskSummary('signal'),
         'Add API credentials.',
     )
-    assert.equal(harness.flow.isSetupTaskExpanded('general'), true)
-    assert.equal(harness.flow.isSetupTaskExpanded('exchange'), false)
+    assert.equal(harness.flow.isSetupTaskExpanded('exchange'), true)
+    assert.equal(harness.flow.isSetupTaskExpanded('signal'), false)
 
     harness.flow.handleSetupStyleChange('full')
 

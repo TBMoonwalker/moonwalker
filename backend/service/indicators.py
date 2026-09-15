@@ -5,6 +5,7 @@ from typing import Any
 
 import helper
 import talib
+from cachetools import TTLCache
 from service.config import resolve_history_lookback_days
 from service.data import Data
 from tortoise.exceptions import BaseORMException
@@ -24,6 +25,9 @@ INDICATOR_CALCULATION_EXCEPTIONS = (
 class Indicators:
     """Compute technical indicators used by strategies."""
 
+    INDICATOR_CACHE_MAXSIZE = 4096
+    INDICATOR_CACHE_TTL_SECONDS = 600
+
     def __init__(self, data: Any | None = None) -> None:
         """Initialize indicators with optional data source override.
 
@@ -33,24 +37,54 @@ class Indicators:
                  in-memory OHLCV data without hitting the DB.
         """
         self.data = data if data is not None else Data()
-        self._ema_cache: dict[
+        self._ema_cache: TTLCache[
             tuple[str, str, tuple[int, ...]], tuple[float | None, dict[str, Any]]
-        ] = {}
-        self._ema_series_cache: dict[
+        ] = TTLCache(
+            maxsize=self.INDICATOR_CACHE_MAXSIZE,
+            ttl=self.INDICATOR_CACHE_TTL_SECONDS,
+        )
+        self._ema_series_cache: TTLCache[
             tuple[str, str, int], tuple[float | None, Any]
-        ] = {}
-        self._rsi_series_cache: dict[
+        ] = TTLCache(
+            maxsize=self.INDICATOR_CACHE_MAXSIZE,
+            ttl=self.INDICATOR_CACHE_TTL_SECONDS,
+        )
+        self._rsi_series_cache: TTLCache[
             tuple[str, str, int], tuple[float | None, Any]
-        ] = {}
-        self._bollinger_series_cache: dict[
+        ] = TTLCache(
+            maxsize=self.INDICATOR_CACHE_MAXSIZE,
+            ttl=self.INDICATOR_CACHE_TTL_SECONDS,
+        )
+        self._bollinger_series_cache: TTLCache[
             tuple[str, str, int, float], tuple[float | None, dict[str, Any]]
-        ] = {}
-        self._macd_series_cache: dict[
+        ] = TTLCache(
+            maxsize=self.INDICATOR_CACHE_MAXSIZE,
+            ttl=self.INDICATOR_CACHE_TTL_SECONDS,
+        )
+        self._macd_series_cache: TTLCache[
             tuple[str, str, int, int, int], tuple[float | None, dict[str, Any]]
-        ] = {}
-        self._close_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
-        self._low_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
-        self._high_cache: dict[tuple[str, str, int], tuple[float | None, Any]] = {}
+        ] = TTLCache(
+            maxsize=self.INDICATOR_CACHE_MAXSIZE,
+            ttl=self.INDICATOR_CACHE_TTL_SECONDS,
+        )
+        self._close_cache: TTLCache[tuple[str, str, int], tuple[float | None, Any]] = (
+            TTLCache(
+                maxsize=self.INDICATOR_CACHE_MAXSIZE,
+                ttl=self.INDICATOR_CACHE_TTL_SECONDS,
+            )
+        )
+        self._low_cache: TTLCache[tuple[str, str, int], tuple[float | None, Any]] = (
+            TTLCache(
+                maxsize=self.INDICATOR_CACHE_MAXSIZE,
+                ttl=self.INDICATOR_CACHE_TTL_SECONDS,
+            )
+        )
+        self._high_cache: TTLCache[tuple[str, str, int], tuple[float | None, Any]] = (
+            TTLCache(
+                maxsize=self.INDICATOR_CACHE_MAXSIZE,
+                ttl=self.INDICATOR_CACHE_TTL_SECONDS,
+            )
+        )
 
     @staticmethod
     def _log_indicator_error(name: str, symbol: str, exc: Exception) -> None:

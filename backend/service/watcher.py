@@ -1,6 +1,7 @@
 """Exchange watcher and ticker event processing."""
 
 import asyncio
+import time
 from typing import Any
 
 import ccxt.pro as ccxtpro
@@ -66,6 +67,8 @@ class Watcher:
     BTC_HISTORY_MIN_ROWS = 120
     DCA_WORKER_TASK_NAME = "watcher:dca_worker"
     OHLCV_WORKER_TASK_NAME = "watcher:ohlcv_worker"
+    STREAM_WATCHDOG_CHECK_INTERVAL_SECONDS = 60.0
+    STREAM_SILENCE_TIMEOUT_SECONDS = 1800.0
     _runtime_state: WatcherRuntimeState | None = None
 
     @classmethod
@@ -113,6 +116,9 @@ class Watcher:
         self._btc_warmup_task: asyncio.Task | None = None
         self._btc_warmup_key: tuple[Any, ...] | None = None
         self._strategy_history_warmup_task: asyncio.Task | None = None
+        self._stream_watchdog_task: asyncio.Task | None = None
+        self._reclaim_stream_requested = False
+        self._last_stream_event_at = time.monotonic()
 
     async def init(self) -> None:
         """Initialize the watcher from current configuration."""
@@ -686,6 +692,10 @@ class Watcher:
             self._consumer_task = None
             await self._cancel_optional_task(consumer_task)
 
+            watchdog_task = self._stream_watchdog_task
+            self._stream_watchdog_task = None
+            await self._cancel_optional_task(watchdog_task)
+
             await self._cancel_symbol_tasks()
             await self._cancel_worker_tasks()
             await self._close_exchange()
@@ -710,6 +720,131 @@ class Watcher:
     def _ensure_worker_tasks(self) -> None:
         ensure_worker_tasks(self._worker_tasks, self._create_worker_task, logging)
 
+    async def _stream_watchdog(self) -> None:
+        """Request a client reclaim when the ticker stream goes silent.
+
+        With watcher_ohlcv off the per-symbol stream is trade-driven, so one
+        quiet pair is normal. A stall is collective silence across every watched
+        symbol, which means the shared ccxt-pro websocket died without raising.
+        Recovery runs in the main loop, the single writer of symbol_tasks.
+        """
+        while self.status:
+            try:
+                await asyncio.sleep(self.STREAM_WATCHDOG_CHECK_INTERVAL_SECONDS)
+            except asyncio.CancelledError:
+                break
+            if not self.symbol_tasks or self._reclaim_stream_requested:
+                continue
+            silence = time.monotonic() - self._last_stream_event_at
+            if silence < self.STREAM_SILENCE_TIMEOUT_SECONDS:
+                continue
+            logging.warning(
+                "Watcher stream silent for %ss across %s active symbol(s); "
+                "requesting exchange client reclaim.",
+                int(silence),
+                len(self.symbol_tasks),
+            )
+            self._reclaim_stream_requested = True
+            self.runtime_state.notify_symbol_update()
+
+    async def _drain_reclaim_request(self) -> None:
+        """Run a pending stale-stream reclaim inside the main loop cycle."""
+        if not self._reclaim_stream_requested:
+            return
+        self._reclaim_stream_requested = False
+        try:
+            await self._reclaim_stalled_stream()
+        except asyncio.CancelledError:
+            raise
+        except (
+            AttributeError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            ccxtpro.BaseError,
+            OSError,
+        ) as exc:
+            logging.error(
+                "Failed to reclaim stalled watcher stream: %s",
+                exc,
+                exc_info=True,
+            )
+
+    async def _reclaim_stalled_stream(self) -> None:
+        """Rebuild the exchange client and respawn symbol tasks after a stall.
+
+        Canceling the hung per-symbol tasks and rebuilding the client forces
+        every coroutine onto a fresh websocket, recovering a stream that stopped
+        without raising. symbol_tasks is mutated only here, in the main loop.
+        """
+        logging.warning(
+            "Reclaiming stalled watcher stream: rebuilding exchange client and "
+            "restarting %s symbol task(s).",
+            len(self.symbol_tasks),
+        )
+        await self._reload_exchange_client(self.config or {})
+        await self._cancel_symbol_tasks()
+        await self.__sync_symbol_tasks()
+        self._last_stream_event_at = time.monotonic()
+
+    async def _unwatch_dropped_symbols(self, dropped_symbols: set[str]) -> None:
+        """Unsubscribe dropped symbols to free their per-symbol state.
+
+        Stopping the ccxt-pro subscription and popping the cached candle/price
+        keeps the in-process footprint bounded to the active watcher set.
+        """
+        if not dropped_symbols:
+            return
+        for symbol in dropped_symbols:
+            self.runtime_state.candles.pop(symbol, None)
+            self.last_price.pop(symbol, None)
+        exchange = self.exchange
+        if exchange is None:
+            return
+        un_watch_ohlcv = getattr(exchange, "un_watch_ohlcv", None)
+        un_watch_trades = getattr(exchange, "un_watch_trades", None)
+        if un_watch_ohlcv is None and un_watch_trades is None:
+            return
+        use_ohlcv = un_watch_ohlcv is not None
+        use_trades = un_watch_trades is not None and not (
+            self.runtime_state.exchange_watcher_ohlcv
+        )
+        if not use_ohlcv and not use_trades:
+            return
+        for symbol in dropped_symbols:
+            if use_ohlcv:
+                try:
+                    await un_watch_ohlcv(symbol, self.runtime_state.timeframe)
+                except (
+                    AttributeError,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                    OSError,
+                    ccxtpro.BaseError,
+                ):
+                    logging.warning(
+                        "Failed to unsubscribe %s; continuing.",
+                        symbol,
+                        exc_info=True,
+                    )
+            if use_trades:
+                try:
+                    await un_watch_trades(symbol)
+                except (
+                    AttributeError,
+                    RuntimeError,
+                    TypeError,
+                    ValueError,
+                    OSError,
+                    ccxtpro.BaseError,
+                ):
+                    logging.warning(
+                        "Failed to unsubscribe trades for %s; continuing.",
+                        symbol,
+                        exc_info=True,
+                    )
+
     async def watch_tickers(self) -> None:
         """Main loop that syncs symbol watchers and restarts them if needed."""
         logging.info("Starting Watcher...")
@@ -722,12 +857,16 @@ class Watcher:
             self.process_events(), name="watcher:event_consumer"
         )
         self._start_worker_tasks()
+        self._stream_watchdog_task = asyncio.create_task(
+            self._stream_watchdog(), name="watcher:stream_watchdog"
+        )
 
         try:
             while self.status:
                 try:
                     await self.__sync_symbol_tasks()
                     self._ensure_worker_tasks()
+                    await self._drain_reclaim_request()
 
                     # Wait for event or periodically refresh
                     await self.__wait_for_updates()
@@ -736,6 +875,7 @@ class Watcher:
                     # Regular refresh to detect crashed tasks
                     await self.__sync_symbol_tasks()
                     self._ensure_worker_tasks()
+                    await self._drain_reclaim_request()
                 except (RuntimeError, TypeError, ValueError) as e:
                     # Broad catch ensures the watcher loop continues.
                     logging.error("Error in watch_tickers: %s", e, exc_info=True)
@@ -756,14 +896,17 @@ class Watcher:
         runtime_state = self.runtime_state
         flat_symbols = self.__normalize_symbols(runtime_state.ticker_symbols)
         runtime_state.ticker_symbols = flat_symbols
+        desired_symbols = set(flat_symbols)
+        previous_symbols = set(self.symbol_tasks.keys())
         await sync_symbol_tasks(
             self.symbol_tasks,
-            set(flat_symbols),
+            desired_symbols,
             lambda symbol: asyncio.create_task(
                 self.watch_symbol_with_reconnect(symbol)
             ),
             logging,
         )
+        await self._unwatch_dropped_symbols(previous_symbols - desired_symbols)
 
     # ------------------------------------------------------------------- #
     #                    Symbol watcher with reconnection                 #
@@ -901,6 +1044,7 @@ class Watcher:
         while self.status:
             try:
                 event = await self.event_queue.get()
+                self._last_stream_event_at = time.monotonic()
                 symbol, price, ohlcv = event["symbol"], event["price"], event["ohlcv"]
                 ticker_price = {
                     "type": self.TICKER_PRICE_TYPE,

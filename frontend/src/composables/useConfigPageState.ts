@@ -135,8 +135,6 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
     const timezone = ref<StringSelectOption[]>([])
 
     const general = ref<GeneralConfigSection>({
-        timezone: null,
-        debug: false,
         ws_watchdog_enabled: true,
         ws_healthcheck_interval_ms: options.defaults.advancedWsHealthcheckIntervalMs,
         ws_stale_timeout_ms: options.defaults.advancedWsStaleTimeoutMs,
@@ -194,6 +192,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
     })
 
     const exchange = ref<ExchangeConfigSection>({
+        timezone: null,
         name: null,
         timeframe: null,
         key: null,

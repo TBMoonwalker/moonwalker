@@ -2,6 +2,28 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.7.1.0] - 2026-09-15
+
+### Added
+- A liveness watchdog that detects a frozen ccxt-pro websocket stream and
+  recovers it after 1800s of silence by reloading the exchange client and
+  respawning the stream.
+- Regression coverage for the stream watchdog and its reclaim path
+  (`backend/tests/test_watcher_stream_watchdog.py`).
+
+### Changed
+- Bounded the indicator result caches to `TTLCache(maxsize=4096, ttl=600s)` to
+  stop unbounded growth; symbols dropped from the watch list are unwatched during
+  task sync.
+- Anchored log output to `<repo>/backend/logs` (`MOONWALKER_LOG_DIR` override) so
+  launching from a foreign CWD no longer creates stray `logs/` directories.
+- Retired the no-op `general.debug` config key, superseded by the
+  `MOONWALKER_LOG_LEVEL` / `MOONWALKER_DEBUG` environment variables.
+- Moved the `timezone` setting from the General section to the Exchange section,
+  where it belongs with the API fields it governs.
+- Hid the now-empty General section from the setup wizard (advanced-only), making
+  Exchange the first setup step.
+
 ## [4.7.0.0] - 2026-09-13
 
 ### Added

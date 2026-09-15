@@ -331,7 +331,7 @@ def test_config_multiple_accepts_2xx_contract(monkeypatch) -> None:
     )
 
     app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
-    payload = {"debug": {"value": False, "type": "bool"}}
+    payload = {"timezone": {"value": "Europe/London", "type": "str"}}
     with TestClient(app=app) as client:
         response = client.post("/config/multiple", json=payload)
 
@@ -544,6 +544,30 @@ def test_config_multiple_rejects_removed_trade_mode_bridge_keys(monkeypatch) -> 
             "Config key 'dynamic_dca' was removed in this release. "
             "Use 'trade_mode' instead."
         ),
+    }
+    assert service.last_batch is None
+
+
+def test_config_multiple_rejects_removed_debug_key(monkeypatch) -> None:
+    """The retired 'debug' config key must be rejected, no successor."""
+    service = _DummyConfigService()
+
+    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
+        return service
+
+    monkeypatch.setattr(
+        config_controller.Config, "instance", classmethod(_fake_instance)
+    )
+
+    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
+    payload = {"debug": {"value": True, "type": "bool"}}
+    with TestClient(app=app) as client:
+        response = client.post("/config/multiple", json=payload)
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": "Config key 'debug' was removed in this release.",
+        "message": "Config key 'debug' was removed in this release.",
     }
     assert service.last_batch is None
 

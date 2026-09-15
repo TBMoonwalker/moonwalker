@@ -89,7 +89,7 @@ test('resolveControlCenterNavigation redirects incomplete routes into setup', ()
         name: 'controlCenter',
         query: {
             mode: 'setup',
-            target: 'general',
+            target: 'exchange',
         },
         replace: true,
     })

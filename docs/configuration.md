@@ -53,7 +53,6 @@ are not exposed in the UI and must be set via the API.
 | Key | Type | Meaning | Example |
 | --- | --- | --- | --- |
 | `timezone` | `string` | Timezone used for logging. | `Europe/London` |
-| `debug` | `bool` | Enable debug logging. | `true` |
 | `trading_paused` | `bool` | Persisted runtime pause state. When true, Moonwalker blocks new exposure while continuing to manage exits for existing positions. Prefer the pause/resume API actions instead of editing this key directly. | `false` |
 | `signal` | `string` | Signal plugin to use (e.g. `sym_signals`, `asap`, `csv_signal`, `websocket_signal`). | `sym_signals` |
 | `signal_settings` | `string (json)` | Plugin settings per selected signal plugin. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |

@@ -426,7 +426,7 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         '<ControlCenterSetupMode',
     ]
     const requiredSetupModeSnippets = [
-        ':show-debug="setupShowsAdvancedFields"',
+        ':show-advanced-general="setupShowsAdvancedFields"',
     ]
     const requiredSetupWorkspaceSnippets = [
         "import ControlCenterSetupProgressGrid from './ControlCenterSetupProgressGrid.vue'",
@@ -949,14 +949,12 @@ test('control center delegates setup mode presentation to dedicated components',
     ]
     const requiredSetupModeSnippets = [
         "import ControlCenterSetupWorkspace from './ControlCenterSetupWorkspace.vue'",
-        "import ConfigGeneralSection from '../config/ConfigGeneralSection.vue'",
         "import ConfigExchangeSection from '../config/ConfigExchangeSection.vue'",
         "import ConfigSignalSection from '../config/ConfigSignalSection.vue'",
         "import ConfigDcaSection from '../config/ConfigDcaSection.vue'",
         "import ConfigCapitalSection from '../config/ConfigCapitalSection.vue'",
         "import ConfigMonitoringSection from '../config/ConfigMonitoringSection.vue'",
         '<ControlCenterSetupWorkspace',
-        '<template #general>',
         '<template #exchange>',
         '<template #signal>',
         '<template #dca>',

@@ -10,6 +10,14 @@
                 maxWidth: '640px',
             }"
         >
+            <n-form-item label="Timezone" path="timezone">
+                <n-select
+                    v-model:value="exchange.timezone"
+                    placeholder="Select"
+                     :options="timezone"
+                    filterable
+                />
+            </n-form-item>
             <n-form-item label="Exchange" path="name">
                 <n-select
                     v-model:value="exchange.name"
@@ -90,6 +98,7 @@ import type { ExchangeModel, StringSelectOption } from '../../config-editor/type
 
 defineProps<{
     currency: StringSelectOption[]
+    timezone: StringSelectOption[]
     dryRunActivationLocked: boolean
     exchange: ExchangeModel
     exchanges: StringSelectOption[]

@@ -5,7 +5,6 @@
             :general="general"
             :rules="rules"
             :show-advanced-general="showAdvancedGeneral"
-            :timezone="timezone"
             @update:show-advanced-general="showAdvancedGeneral = $event"
         />
 
@@ -20,6 +19,7 @@
             :market="market"
             :rules="rules"
             :show-advanced-general="showAdvancedGeneral"
+             :timezone="timezone"
             :timerange="timerange"
         />
 

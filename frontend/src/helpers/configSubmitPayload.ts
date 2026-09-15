@@ -13,8 +13,6 @@ import {
 } from './tradeLifecycle'
 
 export interface GeneralConfigSection {
-    timezone: string | null
-    debug: boolean
     ws_watchdog_enabled: boolean
     ws_healthcheck_interval_ms: number | null
     ws_stale_timeout_ms: number | null
@@ -64,6 +62,7 @@ export interface FilterConfigSection {
 }
 
 export interface ExchangeConfigSection {
+    timezone: string | null
     name: string | null
     timeframe: string | null
     key: string | null
@@ -247,10 +246,9 @@ export function buildConfigSubmitPayload(
 
     return {
         timezone: serializeConfigValue(
-            toNullableConfigString(general.timezone),
+            toNullableConfigString(exchange.timezone),
             'str',
         ),
-        debug: serializeConfigValue(general.debug || false, 'bool'),
         ws_watchdog_enabled: serializeConfigValue(
             general.ws_watchdog_enabled ?? true,
             'bool',

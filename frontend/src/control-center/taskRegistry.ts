@@ -8,16 +8,16 @@ const TASKS: readonly ControlCenterTaskPresentation[] = [
     {
         target: 'general',
         title: 'General runtime',
-        summary: 'Timezone, diagnostics, and platform-level runtime controls.',
-        defaultMode: 'setup',
-        modes: ['setup', 'advanced'],
+        summary: 'WebSocket runtime diagnostics and AI trust controls.',
+        defaultMode: 'advanced',
+        modes: ['advanced'],
         sectionId: 'control-center-general',
         emphasis: 'primary',
     },
     {
         target: 'exchange',
         title: 'Exchange connection',
-        summary: 'Credentials, market selection, and safe dry-run exchange behavior.',
+        summary: 'Timezone, credentials, market selection, and safe dry-run exchange behavior.',
         defaultMode: 'setup',
         modes: ['setup', 'advanced'],
         sectionId: 'control-center-exchange',
@@ -128,8 +128,7 @@ const KEY_TARGET_PREFIXES: ReadonlyArray<[string, ControlCenterTarget]> = [
 ]
 
 const KEY_TARGETS: Record<string, ControlCenterTarget> = {
-    timezone: 'general',
-    debug: 'general',
+    timezone: 'exchange',
     exchange: 'exchange',
     key: 'exchange',
     secret: 'exchange',

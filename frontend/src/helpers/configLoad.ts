@@ -236,8 +236,6 @@ export function buildLoadedConfigState(
     }
 
     const general: GeneralConfigSection = {
-        timezone: toNullableString(response.timezone) || defaults.clientTimezone,
-        debug: parseBooleanString(response.debug) ?? false,
         ws_watchdog_enabled: parseBooleanString(response.ws_watchdog_enabled) ?? true,
         ws_healthcheck_interval_ms:
             toNumberOrNull(response.ws_healthcheck_interval_ms) ??
@@ -280,6 +278,7 @@ export function buildLoadedConfigState(
     }
 
     const exchange: ExchangeConfigSection = {
+timezone: toNullableString(response.timezone) || defaults.clientTimezone,
         name: toNullableString(response.exchange),
         timeframe,
         key: toNullableString(response.key),
