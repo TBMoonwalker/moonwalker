@@ -752,7 +752,23 @@ class Watcher:
         if not self._reclaim_stream_requested:
             return
         self._reclaim_stream_requested = False
-        await self._reclaim_stalled_stream()
+        try:
+            await self._reclaim_stalled_stream()
+        except asyncio.CancelledError:
+            raise
+        except (
+            AttributeError,
+            RuntimeError,
+            TypeError,
+            ValueError,
+            ccxtpro.BaseError,
+            OSError,
+        ) as exc:
+            logging.error(
+                "Failed to reclaim stalled watcher stream: %s",
+                exc,
+                exc_info=True,
+            )
 
     async def _reclaim_stalled_stream(self) -> None:
         """Rebuild the exchange client and respawn symbol tasks after a stall.
@@ -805,6 +821,7 @@ class Watcher:
                     TypeError,
                     ValueError,
                     OSError,
+                    ccxtpro.BaseError,
                 ):
                     logging.warning(
                         "Failed to unsubscribe %s; continuing.",
@@ -820,6 +837,7 @@ class Watcher:
                     TypeError,
                     ValueError,
                     OSError,
+                    ccxtpro.BaseError,
                 ):
                     logging.warning(
                         "Failed to unsubscribe trades for %s; continuing.",
