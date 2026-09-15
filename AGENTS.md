@@ -7,6 +7,8 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 
 ### Mandatory CI Check
 - After every code change, run CI from the scripts directory directly: `cd scripts && ./ci.sh`
+- Frontend CI on OSX needs Homebrew `node@24`/`npm`, which is not on the default PATH. Prefix the run with `PATH="/opt/homebrew/opt/node@24/bin:$PATH"` (binary at `/opt/homebrew/Cellar/node@24/*/bin`).
+- The **Python dependency audit** step in `ci.sh` is a periodic hygiene gate that fails whenever `pip list --outdated` is non-empty. This is expected on many branches and is unrelated to code changes; classify each outdated package as patch/minor (safe), major (needs review), or unsafe (do not bump) per the Dependency Hygiene section below.
 
 ### Dependency Hygiene (Mandatory)
 - Run dependency outdated checks at least weekly and before each release candidate.
@@ -255,6 +257,17 @@ Key configuration sections:
 - **autopilot**: Autopilot mode configuration
 
 
+
+
+### Log File Location
+- All service log files are anchored to one directory, independent of the process
+  CWD: ``<repo_root>/backend/logs`` by default, overridable via the
+  ``MOONWALKER_LOG_DIR`` environment variable.
+- The anchor lives in ``backend/helper/logger.py`` (``LOG_DIR``); the monitoring
+  viewer (``backend/service/log_viewer.py``) reads the same ``LOG_DIR`` so the two
+  can never drift apart.
+- Stray ``logs/`` dirs created by launching with a different CWD (for example the
+  repo root or ``scripts/``) are no longer produced; do not recreate them.
 
 ## Testing
 

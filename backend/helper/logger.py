@@ -1,10 +1,61 @@
-"""Logging factory with support for TRACE level and rotating files."""
+"""Logging factory with support for TRACE level and rotating files.
+
+All service log files live under a single, CWD-independent directory so the
+writer and the monitoring log viewer always agree, regardless of where the
+process was launched from. The directory is anchored to the repository root by
+default and can be overridden with the ``MOONWALKER_LOG_DIR`` environment
+variable.
+"""
 
 import logging
 import logging.handlers
 import os
+from pathlib import Path
 
 TRACE_LEVEL_NUM = 5
+
+
+def _resolve_log_dir() -> Path:
+    """Return the absolute directory that holds all service log files.
+
+    Resolution order:
+
+    1. ``MOONWALKER_LOG_DIR`` when set and non-empty.
+    2. ``<repo_root>/logs`` (three levels up from this module:
+       ``backend/helper/logger.py`` -> repo root).
+
+    Args:
+        None.
+
+    Returns:
+        An absolute ``Path`` for the log directory.
+    """
+    configured = os.getenv("MOONWALKER_LOG_DIR", "").strip()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    return Path(__file__).resolve().parents[2] / "backend" / "logs"
+
+
+LOG_DIR = _resolve_log_dir()
+
+
+def _resolve_log_path(log_file: str | Path) -> Path:
+    """Resolve a caller-supplied log file name against :data:`LOG_DIR`.
+
+    Historical call sites pass names like ``"logs/startup.log"``. Because the
+    location is now anchored, only the file name is retained and joined onto the
+    canonical directory; absolute paths are used unchanged.
+
+    Args:
+        log_file: A relative log file name or an absolute path.
+
+    Returns:
+        The resolved absolute ``Path`` for the log file.
+    """
+    path = Path(log_file)
+    if path.is_absolute():
+        return path
+    return LOG_DIR / path.name
 
 
 def _register_trace_level() -> None:
@@ -65,9 +116,10 @@ class LoggerFactory:
         """
         loglevel = LoggerFactory.__resolve_loglevel()
         logger = logging.getLogger(name)
-        log_dir = os.path.dirname(os.path.abspath(log_file))
+        resolved = _resolve_log_path(log_file)
+        log_dir = resolved.parent
         if log_dir:
-            os.makedirs(log_dir, exist_ok=True)
+            log_dir.mkdir(parents=True, exist_ok=True)
 
         # Set the logging format
         formatter = logging.Formatter(
@@ -75,21 +127,21 @@ class LoggerFactory:
         )
 
         file_handler = logging.handlers.RotatingFileHandler(
-            log_file,
+            str(resolved),
             maxBytes=5000000,
             backupCount=5,
         )
 
         # Windows has a problem with the RotatingFileHandler - so only one file
         if os.name == "nt":
-            file_handler = logging.FileHandler(log_file)
+            file_handler = logging.FileHandler(str(resolved))
 
         existing_handler = next(
             (
                 handler
                 for handler in logger.handlers
                 if isinstance(handler, logging.FileHandler)
-                and getattr(handler, "baseFilename", None) == os.path.abspath(log_file)
+                and getattr(handler, "baseFilename", None) == str(resolved.resolve())
             ),
             None,
         )

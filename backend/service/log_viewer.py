@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+import helper.logger
+
 MAX_LOG_READ_LIMIT = 500
 DEFAULT_LOG_READ_LIMIT = 200
 LOG_READ_CHUNK_SIZE = 64 * 1024
@@ -57,29 +59,29 @@ class LogReadResult:
 
 
 DEFAULT_LOG_SOURCES: tuple[LogSource, ...] = (
-    LogSource("watcher", "Watcher", Path("logs/watcher.log")),
-    LogSource("exchange", "Exchange", Path("logs/exchange.log")),
-    LogSource("orders", "Orders", Path("logs/orders.log")),
-    LogSource("signal", "Signal", Path("logs/signal.log")),
+    LogSource("watcher", "Watcher", helper.logger.LOG_DIR / "watcher.log"),
+    LogSource("exchange", "Exchange", helper.logger.LOG_DIR / "exchange.log"),
+    LogSource("orders", "Orders", helper.logger.LOG_DIR / "orders.log"),
+    LogSource("signal", "Signal", helper.logger.LOG_DIR / "signal.log"),
     LogSource(
         "delisting_protection",
         "Delisting Protection",
-        Path("logs/delisting_protection.log"),
+        helper.logger.LOG_DIR / "delisting_protection.log",
     ),
-    LogSource("monitoring", "Monitoring", Path("logs/monitoring.log")),
-    LogSource("statistics", "Statistics", Path("logs/statistics.log")),
-    LogSource("dca", "DCA", Path("logs/dca.log")),
-    LogSource("database", "Database", Path("logs/database.log")),
-    LogSource("housekeeper", "Housekeeper", Path("logs/housekeeper.log")),
-    LogSource("trades", "Trades", Path("logs/trades.log")),
-    LogSource("data", "Data", Path("logs/data.log")),
-    LogSource("green_phase", "Green Phase", Path("logs/green_phase.log")),
-    LogSource("autopilot", "Autopilot", Path("logs/autopilot.log")),
-    LogSource("ath", "ATH", Path("logs/ath.log")),
-    LogSource("filter", "Filter", Path("logs/filter.log")),
-    LogSource("strategies", "Strategies", Path("logs/strategies.log")),
-    LogSource("config", "Config", Path("logs/config.log")),
-    LogSource("controller", "Controller", Path("logs/controller.log")),
+    LogSource("monitoring", "Monitoring", helper.logger.LOG_DIR / "monitoring.log"),
+    LogSource("statistics", "Statistics", helper.logger.LOG_DIR / "statistics.log"),
+    LogSource("dca", "DCA", helper.logger.LOG_DIR / "dca.log"),
+    LogSource("database", "Database", helper.logger.LOG_DIR / "database.log"),
+    LogSource("housekeeper", "Housekeeper", helper.logger.LOG_DIR / "housekeeper.log"),
+    LogSource("trades", "Trades", helper.logger.LOG_DIR / "trades.log"),
+    LogSource("data", "Data", helper.logger.LOG_DIR / "data.log"),
+    LogSource("green_phase", "Green Phase", helper.logger.LOG_DIR / "green_phase.log"),
+    LogSource("autopilot", "Autopilot", helper.logger.LOG_DIR / "autopilot.log"),
+    LogSource("ath", "ATH", helper.logger.LOG_DIR / "ath.log"),
+    LogSource("filter", "Filter", helper.logger.LOG_DIR / "filter.log"),
+    LogSource("strategies", "Strategies", helper.logger.LOG_DIR / "strategies.log"),
+    LogSource("config", "Config", helper.logger.LOG_DIR / "config.log"),
+    LogSource("controller", "Controller", helper.logger.LOG_DIR / "controller.log"),
     LogSource("run", "Run Output", ROOT_DIR / "run.log"),
 )
 
