@@ -166,7 +166,7 @@ export function useControlCenterSetupFlow(
         if (nextTarget && getTaskPresentation(nextTarget).modes.includes('setup')) {
             return nextTarget
         }
-        return 'general'
+        return 'exchange'
     })
 
     function rememberSetupEntryChoice(choice: SetupEntryChoice | null): void {

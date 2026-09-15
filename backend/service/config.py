@@ -33,6 +33,7 @@ REMOVED_CONFIG_KEY_REPLACEMENTS = {
     "trade_lifecycle_mode": ("trade_mode", "this release"),
     "dynamic_dca": ("trade_mode", "this release"),
     "sidestep_campaign_enabled": ("trade_mode", "this release"),
+    "debug": ("", "this release"),
     "autopilot_entry_stretch_max_multiplier": (
         "autopilot_base_order_stretch_max_multiplier",
         "this release",

@@ -24,7 +24,6 @@ import ControlCenterSetupWorkspace from './ControlCenterSetupWorkspace.vue'
 import ConfigCapitalSection from '../config/ConfigCapitalSection.vue'
 import ConfigDcaSection from '../config/ConfigDcaSection.vue'
 import ConfigExchangeSection from '../config/ConfigExchangeSection.vue'
-import ConfigGeneralSection from '../config/ConfigGeneralSection.vue'
 import ConfigMonitoringSection from '../config/ConfigMonitoringSection.vue'
 import ConfigSignalSection from '../config/ConfigSignalSection.vue'
 
@@ -128,21 +127,11 @@ const emit = defineEmits<{
         @select-setup-target="emit('select-setup-target', $event)"
         @setup-shell-click="(target, event) => emit('setup-shell-click', target, event)"
     >
-        <template #general>
-            <ConfigGeneralSection
-                :ref="generalFormRef"
-                :general="general"
-                :rules="rules"
-                :show-advanced-general="setupShowsAdvancedFields"
-                :show-advanced-toggle="false"
-                :show-debug="setupShowsAdvancedFields"
-                :timezone="timezone"
-            />
-        </template>
 
         <template #exchange>
             <ConfigExchangeSection
                 :ref="exchangeFormRef"
+                :timezone="timezone"
                 :currency="currency"
                 :dry-run-activation-locked="dryRunActivationLocked"
                 :exchange="exchange"

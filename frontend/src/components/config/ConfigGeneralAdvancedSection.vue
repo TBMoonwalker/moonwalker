@@ -10,9 +10,6 @@
                 maxWidth: '640px',
             }"
         >
-            <n-form-item label="Debug mode" path="debug" label-placement="left">
-                <n-checkbox v-model:checked="general.debug" />
-            </n-form-item>
             <n-form-item
                 label="WebSocket watchdog enabled"
                 path="ws_watchdog_enabled"
