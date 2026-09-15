@@ -36,7 +36,7 @@ test('deriveControlCenterReadiness flags a first-run configuration', () => {
     assert.equal(readiness.firstRun, true)
     assert.equal(readiness.attentionNeeded, false)
     assert.equal(readiness.nextMode, 'setup')
-    assert.equal(readiness.nextTarget, 'general')
+    assert.equal(readiness.nextTarget, 'exchange')
 })
 
 test('deriveControlCenterReadiness distinguishes partial setup from healthy setup', () => {

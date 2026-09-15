@@ -38,10 +38,10 @@ test('control center blocker helper ignores malformed blocker rows', () => {
     assert.deepEqual(blockers, [
         {
             key: 'timezone',
-            title: 'General runtime',
+            title: 'Exchange connection',
             description: 'Resolve this blocker before continuing.',
             mode: 'setup',
-            target: 'general',
+            target: 'exchange',
         },
     ])
 })

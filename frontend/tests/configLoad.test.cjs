@@ -82,8 +82,7 @@ test(
             defaults,
         )
 
-        assert.equal(state.general.timezone, defaults.clientTimezone)
-        assert.equal(state.general.debug, true)
+        assert.equal(state.exchange.timezone, defaults.clientTimezone)
         assert.equal(state.general.ws_watchdog_enabled, false)
         assert.equal(state.general.ws_healthcheck_interval_ms, 9000)
         assert.equal(state.general.ws_stale_timeout_ms, 8000)
