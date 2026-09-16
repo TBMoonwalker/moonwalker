@@ -6,7 +6,7 @@ pandas==3.0.5
 litestar==2.24.0
 msgspec==0.21.1
 python-socketio==5.17.0
-websockets==16.1.1
+websockets==17.1
 Telethon==1.45.0
 ta-lib==0.7.1
 tenacity==9.1.4
