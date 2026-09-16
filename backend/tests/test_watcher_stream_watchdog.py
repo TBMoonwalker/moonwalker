@@ -179,7 +179,6 @@ async def test_detect_stalled_symbol_requests_reclaim_when_one_symbol_hung(monke
     watcher = Watcher()
     watcher.config = {"exchange": "binance"}
     monkeypatch.setattr(watcher_module, "logging", _Logger())
-    watcher.PER_SYMBOL_STALE_MULTIPLIER = 0.0
     watcher.STREAM_SILENCE_TIMEOUT_SECONDS = 0.5
 
     async def hung() -> None:
@@ -193,7 +192,7 @@ async def test_detect_stalled_symbol_requests_reclaim_when_one_symbol_hung(monke
     watcher.symbol_tasks = {"ETH/USDC": hung_task, "BTC/USDC": alive_task}
     now = time.monotonic()
     watcher._last_symbol_data_at = {
-        "ETH/USDC": now - 1.0,
+        "ETH/USDC": now - 100.0,
         "BTC/USDC": now,
     }
     watcher._reclaim_stream_requested = False
@@ -214,7 +213,6 @@ async def test_detect_stalled_symbol_ignores_done_tasks(monkeypatch):
     watcher = Watcher()
     watcher.config = {}
     monkeypatch.setattr(watcher_module, "logging", _Logger())
-    watcher.PER_SYMBOL_STALE_MULTIPLIER = 0.0
     watcher.STREAM_SILENCE_TIMEOUT_SECONDS = 0.5
 
     async def done_task() -> None:
@@ -242,7 +240,6 @@ async def test_detect_stalled_symbol_ignores_fresh_heartbeat(monkeypatch):
     watcher = Watcher()
     watcher.config = {}
     monkeypatch.setattr(watcher_module, "logging", _Logger())
-    watcher.PER_SYMBOL_STALE_MULTIPLIER = 0.0
     watcher.STREAM_SILENCE_TIMEOUT_SECONDS = 0.5
 
     async def alive() -> None:
@@ -262,17 +259,30 @@ async def test_detect_stalled_symbol_ignores_fresh_heartbeat(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_per_symbol_timeout_scales_with_timeframe_but_floored(monkeypatch):
-    """Long timeframes widen the budget; short ones fall back to the silence floor."""
+    """A quiet large-timeframe feed waits a candle; short ones use the floor."""
     watcher = Watcher()
     monkeypatch.setattr(watcher_module, "logging", _Logger())
-    watcher.PER_SYMBOL_STALE_MULTIPLIER = 3.0
     watcher.STREAM_SILENCE_TIMEOUT_SECONDS = 1800.0
 
     watcher.runtime_state.timeframe = "1d"
-    assert watcher._per_symbol_stale_timeout() == 86_400.0 * 3.0
+    assert watcher._per_symbol_stale_timeout() == 86_400.0
 
     watcher.runtime_state.timeframe = "1m"
     assert watcher._per_symbol_stale_timeout() == 1800.0
+
+
+@pytest.mark.asyncio
+async def test_per_symbol_timeout_cap_blocks_multi_day_window(monkeypatch):
+    """F3 regression: a long timeframe caps at one candle, not a multi-day window."""
+    watcher = Watcher()
+    monkeypatch.setattr(watcher_module, "logging", _Logger())
+    watcher.STREAM_SILENCE_TIMEOUT_SECONDS = 1800.0
+
+    watcher.runtime_state.timeframe = "1w"
+    assert watcher._per_symbol_stale_timeout() == 7 * 86_400.0
+
+    watcher.runtime_state.timeframe = "1d"
+    assert watcher._per_symbol_stale_timeout() == 86_400.0
 
 
 @pytest.mark.asyncio

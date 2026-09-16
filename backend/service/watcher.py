@@ -70,7 +70,6 @@ class Watcher:
     OHLCV_WORKER_TASK_NAME = "watcher:ohlcv_worker"
     STREAM_WATCHDOG_CHECK_INTERVAL_SECONDS = 60.0
     STREAM_SILENCE_TIMEOUT_SECONDS = 1800.0
-    PER_SYMBOL_STALE_MULTIPLIER = 3.0
     _runtime_state: WatcherRuntimeState | None = None
 
     @classmethod
@@ -763,18 +762,17 @@ class Watcher:
     def _per_symbol_stale_timeout(self) -> float:
         """Return the per-symbol silence budget in seconds.
 
-        The budget scales with the configured timeframe so a quiet long-timeframe
-        symbol is not reclaimed between candle closes, while the collective
-        stream-silence floor stays the safety minimum.
+        The budget is one configured candle interval so a quiet large-timeframe
+        feed is not reclaimed between two candle closes, floored at the collective
+        stream-silence timeout so a dead shared websocket still recovers. Capping
+        at the max timeframe keeps detection bounded on any timeframe instead of
+        opening a multi-day blind window for a hung daily or weekly feed.
 
         Returns:
             Seconds a live symbol may go without a read before it is stalled.
         """
         timeframe_seconds = timeframe_to_seconds(self.runtime_state.timeframe)
-        return max(
-            self.STREAM_SILENCE_TIMEOUT_SECONDS,
-            self.PER_SYMBOL_STALE_MULTIPLIER * timeframe_seconds,
-        )
+        return max(self.STREAM_SILENCE_TIMEOUT_SECONDS, timeframe_seconds)
 
     def _detect_stalled_symbol(self) -> bool:
         """Request a reclaim when a live symbol has not produced a read.
