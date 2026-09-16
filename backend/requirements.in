@@ -26,5 +26,5 @@ click==8.5.0
 cryptography==50.0.1
 idna==3.18
 # Keep CCXT's exact build-tool dependency visible in the direct lock inputs.
-setuptools==83.0.0
+setuptools==84.0.0
 urllib3==2.7.0

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-PIP_TOOLS_VERSION="7.6.0"
+PIP_TOOLS_VERSION="7.6.1"
 cd "$ROOT_DIR/backend"
 
 compile_lock() {
