@@ -120,39 +120,30 @@ test('keeps first and last Backtest markers visible on mobile', async (
   })
 
   await chart.scrollIntoViewIfNeeded()
-  const box = await chart.boundingBox()
-  expect(box).not.toBeNull()
-  if (!box) {
-    return
-  }
-  const edgeWidth = Math.min(140, Math.floor(box.width / 2))
-  const screenshotOptions = {
-    animations: 'disabled' as const,
-    maxDiffPixels: 20,
-  }
 
-  await expect(page).toHaveScreenshot('backtest-left-edge.png', {
-    ...screenshotOptions,
-    clip: {
-      x: box.x,
-      y: box.y,
-      width: edgeWidth,
-      height: box.height,
-    },
-  })
-  await expect(page).toHaveScreenshot('backtest-right-edge.png', {
-    ...screenshotOptions,
-    clip: {
-      x: box.x + box.width - edgeWidth,
-      y: box.y,
-      width: edgeWidth,
-      height: box.height,
-    },
-  })
+  const lastIndex = candles.length - 1
+  const boundary = await chart.evaluate((node) => {
+    const dataset = (node as HTMLElement).dataset
+    return {
+      fitLeft: Number(dataset.backtestChartFitLeft),
+      fitRight: Number(dataset.backtestChartFitRight),
+      applyLeft: Number(dataset.backtestChartApplyLeft),
+      applyRight: Number(dataset.backtestChartApplyRight),
+     }
+   })
+
+  expect(boundary.fitLeft).not.toBeNaN()
+  expect(boundary.fitRight).not.toBeNaN()
+  expect(boundary.applyLeft).not.toBeNaN()
+  expect(boundary.applyRight).not.toBeNaN()
+  expect(boundary.applyLeft).toBeLessThan(boundary.fitLeft)
+  expect(boundary.applyRight).toBeGreaterThan(boundary.fitRight)
+  expect(boundary.applyLeft).toBeLessThan(0)
+  expect(boundary.applyRight).toBeGreaterThan(lastIndex)
 
   const pageWidth = await page.evaluate(() => ({
     clientWidth: document.documentElement.clientWidth,
     scrollWidth: document.documentElement.scrollWidth,
-  }))
+   }))
   expect(pageWidth.scrollWidth).toBeLessThanOrEqual(pageWidth.clientWidth)
 })

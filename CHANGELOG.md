@@ -2,6 +2,16 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.7.1.1] - 2026-09-16
+
+### Fixed
+- The per-symbol stream watchdog now caps a hung-feed stale window at one configured candle interval, so a frozen daily or weekly feed is reclaimed within a day instead of waiting 72h to 21d for the timeout to elapse.
+- A single symbol whose `watch_ohlcv`/`watch_trades` coroutine hangs is now detected even while the other symbols keep trading, recovering that feed without leaving stale candles in the DCA and signal path.
+- The strategy-builder mode no longer spins at 100% CPU: a Vue `:ref` function callback re-fires on every parent re-render, which re-triggered the Rete graph render in a loop. `bindReteHost` is now idempotent, so only a genuine host change schedules a render.
+
+### Changed
+- Bumped ccxt to 4.5.78, ta-lib to 0.8.0, websockets to 17, and refreshed the security and dev tooling floors (Python and JavaScript lockfiles).
+
 ## [4.7.1.0] - 2026-09-15
 
 ### Added

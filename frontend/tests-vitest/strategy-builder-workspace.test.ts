@@ -23,6 +23,10 @@ const apiMocks = vi.hoisted(() => ({
     validateStrategy: vi.fn(),
 }))
 
+const reteHostRenderGraph = vi.hoisted(() =>
+    vi.fn().mockResolvedValue(undefined),
+)
+
 vi.mock('../src/api/strategyBuilder', () => apiMocks)
 
 vi.mock('../src/composables/useStrategyRete', async () => {
@@ -31,7 +35,7 @@ vi.mock('../src/composables/useStrategyRete', async () => {
         useStrategyRete: () => ({
             ready: ref(true),
             error: ref<string | null>(null),
-            renderGraph: vi.fn().mockResolvedValue(undefined),
+            renderGraph: reteHostRenderGraph,
             destroy: vi.fn(),
         }),
     }
@@ -312,6 +316,37 @@ describe('StrategyBuilderWorkspace', () => {
         ).toBeDefined()
         expect(current.ir.root).toBe('indicator_4')
         expect(apiMocks.validateStrategy).toHaveBeenCalled()
+    })
+
+    it('does not re-render the graph when the host ref re-fires', async () => {
+        const mounted = mountWorkspaceState()
+        await flushPromises()
+        await mounted.state.selectStrategy(custom.slug)
+
+        const host = document.createElement('div')
+        mounted.state.bindReteHost(host)
+        reteHostRenderGraph.mockClear()
+
+        // Vue re-invokes a :ref function callback on the same element on every
+        // re-render. The handler must be idempotent so only a genuine host change
+        // (mount, null, or a different element) schedules a render. Without the
+        // guard this drives an infinite render -> ref re-invoke -> render loop
+        // that saturates the event loop (regression: 100%-CPU hang on this mode).
+        for (let i = 0; i < 5; i++) {
+            mounted.state.bindReteHost(host)
+        }
+        await flushPromises()
+
+        expect(reteHostRenderGraph).not.toHaveBeenCalled()
+
+        // A genuine host change (null, then rebinding) still renders exactly once.
+        await mounted.state.bindReteHost(null)
+        reteHostRenderGraph.mockClear()
+        mounted.state.bindReteHost(host)
+        await flushPromises()
+
+        expect(reteHostRenderGraph).toHaveBeenCalledTimes(1)
+        mounted.wrapper.unmount()
     })
 
     it('keeps built-ins read-only and handles cancellation and conflicts', async () => {

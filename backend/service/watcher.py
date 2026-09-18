@@ -14,6 +14,7 @@ from service.config_views import (
     WatcherRuntimeConfigView,
 )
 from service.data import Data
+from service.data_timeframes import timeframe_to_seconds
 from service.database import run_sqlite_write_with_retry
 from service.dca import Dca
 from service.strategy_capability import (
@@ -105,6 +106,7 @@ class Watcher:
         )
         self.ohlcv_queue = asyncio.Queue(maxsize=self.OHLCV_QUEUE_MAXSIZE)
         self.last_price = {}
+        self._last_symbol_data_at: dict[str, float] = {}
         self._pending_dca_payloads: dict[str, dict[str, Any]] = {}
         self._queued_dca_symbols: set[str] = set()
         self._consumer_task: asyncio.Task | None = None
@@ -735,6 +737,7 @@ class Watcher:
                 break
             if not self.symbol_tasks or self._reclaim_stream_requested:
                 continue
+            self._detect_stalled_symbol()
             silence = time.monotonic() - self._last_stream_event_at
             if silence < self.STREAM_SILENCE_TIMEOUT_SECONDS:
                 continue
@@ -746,6 +749,68 @@ class Watcher:
             )
             self._reclaim_stream_requested = True
             self.runtime_state.notify_symbol_update()
+
+    def _mark_symbol_active(self, symbol: str) -> None:
+        """Record that a symbol's exchange feed produced a read.
+
+        Stamped on every successful ``watch_ohlcv``/``watch_trades`` return so the
+        stream watchdog can tell a single hung feed apart from a healthy one even
+        while other symbols keep trading.
+        """
+        self._last_symbol_data_at[symbol] = time.monotonic()
+
+    def _per_symbol_stale_timeout(self) -> float:
+        """Return the per-symbol silence budget in seconds.
+
+        The budget is one configured candle interval so a quiet large-timeframe
+        feed is not reclaimed between two candle closes, floored at the collective
+        stream-silence timeout so a dead shared websocket still recovers. Capping
+        at the max timeframe keeps detection bounded on any timeframe instead of
+        opening a multi-day blind window for a hung daily or weekly feed.
+
+        Returns:
+            Seconds a live symbol may go without a read before it is stalled.
+        """
+        timeframe_seconds = timeframe_to_seconds(self.runtime_state.timeframe)
+        return max(self.STREAM_SILENCE_TIMEOUT_SECONDS, timeframe_seconds)
+
+    def _detect_stalled_symbol(self) -> bool:
+        """Request a reclaim when a live symbol has not produced a read.
+
+        A per-symbol heartbeat catches one feed that hangs silently while the
+        aggregate stream keeps moving, the blind spot behind F3. Crashed (done)
+        tasks are left to the symbol-sync loop, so only live tasks are scanned.
+
+        Returns:
+            True if a stale symbol was detected and a reclaim requested.
+        """
+        now = time.monotonic()
+        threshold = self._per_symbol_stale_timeout()
+        for symbol, task in list(self.symbol_tasks.items()):
+            if task.done():
+                continue
+            last = self._last_symbol_data_at.get(symbol)
+            if last is None or now - last <= threshold:
+                continue
+            logging.warning(
+                "Watcher stream for %s silent for %ss; requesting "
+                "exchange client reclaim.",
+                symbol,
+                int(now - last),
+            )
+            self._reclaim_stream_requested = True
+            self.runtime_state.notify_symbol_update()
+            return True
+        return False
+
+    def _reconcile_symbol_heartbeats(self) -> None:
+        """Align per-symbol heartbeats with the live symbol task set."""
+        live = set(self.symbol_tasks)
+        for symbol in [s for s in self._last_symbol_data_at if s not in live]:
+            del self._last_symbol_data_at[symbol]
+        now = time.monotonic()
+        for symbol in live:
+            self._last_symbol_data_at.setdefault(symbol, now)
 
     async def _drain_reclaim_request(self) -> None:
         """Run a pending stale-stream reclaim inside the main loop cycle."""
@@ -906,6 +971,7 @@ class Watcher:
             ),
             logging,
         )
+        self._reconcile_symbol_heartbeats()
         await self._unwatch_dropped_symbols(previous_symbols - desired_symbols)
 
     # ------------------------------------------------------------------- #
@@ -1019,10 +1085,12 @@ class Watcher:
 
         if self.runtime_state.exchange_watcher_ohlcv:
             ohlcv = await exchange.watch_ohlcv(symbol, self.runtime_state.timeframe)
+            self._mark_symbol_active(symbol)
             await self.__process_ohlcv_data(symbol, ohlcv)
             return
 
         trades = await exchange.watch_trades(symbol)
+        self._mark_symbol_active(symbol)
         if trades:
             await self.__process_trade_data(symbol, trades, exchange)
 

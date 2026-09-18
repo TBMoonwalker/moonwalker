@@ -291,6 +291,8 @@ async function renderChart(): Promise<void> {
 
     const timeScale = priceChart.timeScale()
     timeScale.fitContent()
+    const fittedLogicalRange = timeScale.getVisibleLogicalRange()
+    let appliedBoundaryRange = fittedLogicalRange
     try {
         const canvasContext = document.createElement('canvas').getContext('2d')
         const fittedRange = timeScale.getVisibleLogicalRange()
@@ -320,13 +322,26 @@ async function renderChart(): Promise<void> {
                 })
                 if (paddedRange) {
                     timeScale.setVisibleLogicalRange(paddedRange)
-                }
-            }
-        }
+                    appliedBoundaryRange = paddedRange
+                 }
+             }
+         }
     } catch {
         // Marker padding is best-effort; the fitted chart remains usable.
-    }
+     }
     element.dataset.backtestChartReady = 'true'
+    element.dataset.backtestChartFitLeft = String(
+         fittedLogicalRange?.from ?? 0,
+      )
+    element.dataset.backtestChartFitRight = String(
+         fittedLogicalRange?.to ?? candleData.length - 1,
+      )
+    element.dataset.backtestChartApplyLeft = String(
+         appliedBoundaryRange?.from ?? 0,
+      )
+    element.dataset.backtestChartApplyRight = String(
+         appliedBoundaryRange?.to ?? candleData.length - 1,
+      )
 }
 
 onMounted(() => {

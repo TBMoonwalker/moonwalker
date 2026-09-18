@@ -96,11 +96,14 @@ export function useStrategyBuilderWorkspace(
     })
 
     function bindReteHost(host: HTMLElement | null): void {
+        if (host === reteHost.value) {
+            return
+         }
         reteHost.value = host
         if (host && selectedDetail.value) {
             void renderReteGraph()
-        }
-    }
+         }
+     }
 
     onMounted(async () => {
         await loadStrategies()

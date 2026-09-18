@@ -112,8 +112,8 @@ CCXT `4.5.68` pins `setuptools 83.0.0`, which resolves the previously
 allowlisted `PYSEC-2026-3447` finding in setuptools 82.0.1. Moonwalker's Python
 audit no longer ignores that advisory or any other vulnerability.
 
-The same CCXT release still pins aiohttp `3.14.1`, certifi `2026.6.17`, cffi
-`2.0.0`, charset-normalizer `3.4.7`, and yarl `1.24.2`. Moonwalker keeps those
+The current CCXT release still pins aiohttp `3.14.3`, certifi `2026.6.17`, cffi
+`2.0.0`, charset-normalizer `3.4.7`, and yarl `1.24.5`. Moonwalker keeps those
 audit-clean versions until CCXT relaxes its exact transitive constraints.
 
 ## Rollback
