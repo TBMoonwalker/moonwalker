@@ -348,8 +348,9 @@ test('opens and duplicates a strategy through the desktop builder workflow', asy
 }) => {
   test.skip(isMobile, 'desktop and tablet graph workflow')
   await page.goto(
-    '/control-center?mode=strategy-builder&target=strategy-builder',
-  )
+     '/control-center?mode=strategy-builder&target=strategy-builder',
+     { waitUntil: 'domcontentloaded' },
+   )
 
   await expect(
     page.getByRole('heading', { name: 'Strategy Builder' }),
@@ -375,8 +376,9 @@ test('edits, validates, saves, detects conflicts, and deletes a custom strategy'
     'single desktop mutation workflow',
   )
   await page.goto(
-    '/control-center?mode=strategy-builder&target=strategy-builder',
-  )
+     '/control-center?mode=strategy-builder&target=strategy-builder',
+     { waitUntil: 'domcontentloaded' },
+   )
 
   await page.getByRole('button', { name: /EMA cross copy/ }).click()
   await expect(
@@ -432,8 +434,9 @@ test('keeps mobile strategy review readable without exposing graph editing', asy
 }) => {
   test.skip(!isMobile, 'mobile-only strategy review assertion')
   await page.goto(
-    '/control-center?mode=strategy-builder&target=strategy-builder',
-  )
+     '/control-center?mode=strategy-builder&target=strategy-builder',
+     { waitUntil: 'domcontentloaded' },
+   )
 
   const builder = page.getByLabel('Strategy library')
   await expect(builder).toBeVisible()
