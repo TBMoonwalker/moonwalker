@@ -169,7 +169,6 @@ These streams are fan-out based: one producer loop refreshes shared data every
 | `WS` | `/trades/open` | Stream open trades. |
 | `WS` | `/trades/closed` | Stream the most recent closed trades page. |
 | `WS` | `/trades/unsellable` | Stream unsellable archived remainders. |
-| `WS` | `/trades/waiting` | Stream waiting sidestep campaign summaries. |
 
 ### REST endpoints
 
@@ -177,21 +176,13 @@ These streams are fan-out based: one producer loop refreshes shared data every
 | --- | --- | --- |
 | `GET` | `/trades/closed/length` | Return the total number of closed trades. |
 | `GET` | `/trades/closed/{page}` | Return one closed-trades page. |
-| `GET` | `/trades/executions/{deal_id}` | Return chronological execution rows for one deal replay; Waiting clients may add `campaign_id` to span the persisted sidestep campaign. |
-| `GET` | `/trades/replay/indicators/{deal_id}/{timerange}/{start}/{end}` | Return strategy indicator overlays for one bounded trade replay window; Waiting clients may add `campaign_id` to resolve prior campaign strategy snapshots. |
+| `GET` | `/trades/executions/{deal_id}` | Return chronological execution rows for one deal replay. |
+| `GET` | `/trades/replay/indicators/{deal_id}/{timerange}/{start}/{end}` | Return strategy indicator overlays for one bounded trade replay window. |
 | `POST` | `/trades/closed/delete/{trade_id}` | Delete a closed trade. |
 | `POST` | `/trades/unsellable/delete/{trade_id}` | Delete an unsellable trade after manual cleanup. |
 | `POST` | `/trades/unsellable/delete/all` | Delete all unsellable trades after manual cleanup. |
-| `POST` | `/trades/waiting/stop/{campaign_id}` | Stop a waiting sidestep campaign. |
-| `POST` | `/trades/waiting/activate/{campaign_id}` | Force a waiting sidestep campaign back into an active long leg. |
-| `POST` | `/trades/mission/pause/{symbol}` | Pause automation for one open or waiting mission. |
-| `POST` | `/trades/mission/resume/{symbol}` | Resume automation for one open or waiting mission. |
-
-The optional `campaign_id` query parameter on the execution and indicator
-replay endpoints is a read-only Waiting-chart context. Both identifiers must be
-UUIDs. Moonwalker uses the persisted campaign execution ledger only when the
-campaign is a sidestep replay timeline; Open and Closed clients continue using
-the deal-only form.
+| `POST` | `/trades/mission/pause/{symbol}` | Pause automation for one open mission. |
+| `POST` | `/trades/mission/resume/{symbol}` | Resume automation for one open mission. |
 
 ## Statistics
 

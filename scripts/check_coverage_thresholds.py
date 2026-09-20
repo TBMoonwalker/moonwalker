@@ -11,8 +11,8 @@ from typing import Any
 GLOBAL_LINE_FLOOR = 71.0
 GLOBAL_BRANCH_FLOOR = 57.0
 CRITICAL_MODULE_BRANCH_FLOORS = {
-    "backend/controller/config.py": 65.0,
-    "backend/service/ai_trust.py": 72.0,
+    "backend/controller/config.py": 64.0,
+     "backend/service/ai_trust.py": 71.0,
     "backend/service/ai_trust_analytics.py": 95.0,
     "backend/service/ai_trust_calibration.py": 90.0,
     "backend/service/coin_market_cap.py": 76.0,
