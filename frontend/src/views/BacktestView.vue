@@ -13,7 +13,6 @@ import BacktestResultChart from '../components/BacktestResultChart.vue'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import {
     BACKTEST_TIMEFRAME_OPTIONS,
-    BACKTEST_TRADE_MODE_OPTIONS,
     buildBacktestRequest,
     computeBacktestComparison,
     createDefaultBacktestForm,
@@ -75,27 +74,22 @@ const vAccessibleStepper: Directive<HTMLElement, string> = {
 }
 
 const timeframeOptions = BACKTEST_TIMEFRAME_OPTIONS.map((option) => ({ ...option }))
-const tradeModeOptions = BACKTEST_TRADE_MODE_OPTIONS.map((option) => ({ ...option }))
-const isSidestepMode = computed(() => form.tradeMode === 'sidestep')
 const symbolPlaceholder = computed(() =>
     configuredCurrency.value
-        ? `Select ${configuredCurrency.value} market`
-        : 'Load exchange symbols',
+         ? `Select ${configuredCurrency.value} market`
+          : 'Load exchange symbols',
 )
 
 const canRun = computed(() => {
     if (!dateRange.value) {
         return false
-    }
-    const hasStrategy = isSidestepMode.value
-        ? form.sidestepBearishStrategySlug.trim().length > 0 &&
-          form.sidestepReentryStrategySlug.trim().length > 0
-        : form.strategySlug.trim().length > 0
+       }
+    const hasStrategy = form.strategySlug.trim().length > 0
     return (
         form.symbol.trim().length > 0 &&
         hasStrategy &&
         dateRange.value[1] > dateRange.value[0]
-    )
+      )
 })
 
 const summary = computed(() => getBacktestSummary(result.value))
@@ -438,71 +432,23 @@ onMounted(() => {
                         />
                     </n-form-item>
 
-                    <n-form-item v-if="!isSidestepMode" label="Strategy">
-                        <n-select
-                            v-if="strategyOptions.length > 0"
-                            v-model:value="form.strategySlug"
-                            filterable
-                            :loading="isLoadingStrategies"
-                            :options="strategyOptions"
-                        />
-                        <n-input
-                            v-else
-                            v-model:value="form.strategySlug"
-                            placeholder="ema20_swing"
-                            autocomplete="off"
-                        />
-                    </n-form-item>
+                     <n-form-item label="Strategy">
+                         <n-select
+                             v-if="strategyOptions.length > 0"
+                             v-model:value="form.strategySlug"
+                             filterable
+                              :loading="isLoadingStrategies"
+                              :options="strategyOptions"
+                         />
+                         <n-input
+                             v-else
+                             v-model:value="form.strategySlug"
+                             placeholder="ema20_swing"
+                             autocomplete="off"
+                         />
+                     </n-form-item>
 
-                    <n-form-item label="Trade mode">
-                        <n-radio-group
-                            v-model:value="form.tradeMode"
-                            class="trade-mode-selector"
-                        >
-                            <n-radio-button
-                                v-for="option in tradeModeOptions"
-                                :key="option.value"
-                                :value="option.value"
-                            >
-                                {{ option.label }}
-                            </n-radio-button>
-                        </n-radio-group>
-                    </n-form-item>
-
-                    <div v-if="isSidestepMode" class="control-grid two">
-                        <n-form-item label="Bearish sidestep strategy">
-                            <n-select
-                                v-if="strategyOptions.length > 0"
-                                v-model:value="form.sidestepBearishStrategySlug"
-                                filterable
-                                :loading="isLoadingStrategies"
-                                :options="strategyOptions"
-                            />
-                            <n-input
-                                v-else
-                                v-model:value="form.sidestepBearishStrategySlug"
-                                placeholder="ema_down"
-                                autocomplete="off"
-                            />
-                        </n-form-item>
-                        <n-form-item label="Re-entry strategy">
-                            <n-select
-                                v-if="strategyOptions.length > 0"
-                                v-model:value="form.sidestepReentryStrategySlug"
-                                filterable
-                                :loading="isLoadingStrategies"
-                                :options="strategyOptions"
-                            />
-                            <n-input
-                                v-else
-                                v-model:value="form.sidestepReentryStrategySlug"
-                                placeholder="ema20_swing_reverse"
-                                autocomplete="off"
-                            />
-                        </n-form-item>
-                    </div>
-
-                    <div class="control-grid two numeric-grid">
+                     <div class="control-grid two numeric-grid">
                         <n-form-item label="Timeframe">
                             <n-select
                                 v-model:value="form.timeframe"
@@ -551,8 +497,8 @@ onMounted(() => {
                         </n-form-item>
                     </div>
 
-                    <div v-if="!isSidestepMode" class="control-grid two">
-                        <n-form-item label="Max safety orders">
+                     <div class="control-grid two">
+                          <n-form-item label="Max safety orders">
                             <n-input-number
                                 v-accessible-stepper="'Max safety orders'"
                                 v-model:value="form.maxSafetyOrders"
@@ -671,71 +617,14 @@ onMounted(() => {
                                     <dt>Strategy</dt>
                                     <dd>{{ result.stats.strategy }}</dd>
                                 </div>
-                                <div>
-                                    <dt>Trade mode</dt>
-                                    <dd>
-                                        {{
-                                            result.stats.trade_mode === 'sidestep'
-                                                ? 'Sidestep'
-                                                : 'Dynamic DCA'
-                                        }}
-                                    </dd>
-                                </div>
-                                <div v-if="result.stats.trade_mode === 'sidestep'">
-                                    <dt>Bearish strategy</dt>
-                                    <dd>{{ result.stats.sidestep_bearish_strategy }}</dd>
-                                </div>
-                                <div v-if="result.stats.trade_mode === 'sidestep'">
-                                    <dt>Re-entry strategy</dt>
-                                    <dd>{{ result.stats.sidestep_reentry_strategy }}</dd>
-                                </div>
-                                <div v-if="result.stats.trade_mode === 'sidestep'">
-                                    <dt>Signal candles</dt>
-                                    <dd>Closed candle</dd>
-                                </div>
-                                <div v-if="result.stats.trade_mode === 'sidestep'">
-                                    <dt>Fresh long signal</dt>
-                                    <dd>
-                                        {{
-                                            result.stats
-                                                .sidestep_reentry_requires_fresh_long_signal
-                                                ? 'Required'
-                                                : 'Not required'
-                                        }}
-                                    </dd>
-                                </div>
-                                <div v-if="result.stats.trade_mode === 'sidestep'">
-                                    <dt>Re-entry premium cap</dt>
-                                    <dd>
-                                        {{
-                                            formatBacktestNumber(
-                                                result.stats
-                                                    .sidestep_reentry_max_premium_pct,
-                                                2,
-                                            )
-                                        }}%
-                                    </dd>
-                                </div>
-                                <div v-if="result.stats.trade_mode === 'sidestep'">
-                                    <dt>Sell fallback floor</dt>
-                                    <dd>
-                                        {{
-                                            formatBacktestNumber(
-                                                result.stats
-                                                    .sidestep_exit_max_market_fallback_slippage_pct,
-                                                2,
-                                            )
-                                        }}% max slippage
-                                    </dd>
-                                </div>
-                                <div v-if="result.stats.trade_mode === 'sidestep'">
-                                    <dt>Exit floors held</dt>
-                                    <dd>{{ result.stats.sidestep_exit_fallback_blocks ?? 0 }}</dd>
-                                </div>
-                                <div>
-                                    <dt>Timeframe</dt>
-                                    <dd>{{ result.stats.timeframe }}</dd>
-                                </div>
+                                 <div>
+                                     <dt>Trade mode</dt>
+                                     <dd>Dynamic DCA</dd>
+                                 </div>
+                                 <div>
+                                     <dt>Timeframe</dt>
+                                     <dd>{{ result.stats.timeframe }}</dd>
+                                 </div>
                                 <div>
                                     <dt>Candles fetched</dt>
                                     <dd>{{ result.stats.candles_fetched }}</dd>
@@ -829,16 +718,6 @@ onMounted(() => {
 
 .symbol-fallback-input {
     margin-top: 8px;
-}
-
-.trade-mode-selector {
-    display: flex;
-    width: 100%;
-}
-
-.trade-mode-selector :deep(.n-radio-button) {
-    flex: 1 1 0;
-    text-align: center;
 }
 
 .action-row {

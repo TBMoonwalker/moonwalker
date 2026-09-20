@@ -208,10 +208,8 @@ function getClosedTradeRowProps(rowData: ClosedTradeRow) {
     }
 }
 
-function formatCloseReason(reason: string | null | undefined): string {
+ function formatCloseReason(reason: string | null | undefined): string {
     switch (reason) {
-        case 'sidestep_exit':
-            return 'Sidestep exit'
         case 'trailing_take_profit':
             return 'Trailing TP'
         case 'take_profit':

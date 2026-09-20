@@ -179,100 +179,6 @@
                     placeholder="0.95"
                 />
             </n-form-item>
-            <template v-if="dca.enabled">
-                <n-alert
-                    v-if="showSidestepSpotOnlyNotice"
-                    class="sidestep-campaign-note"
-                    type="info"
-                    :bordered="false"
-                >
-                    Spot sidestep campaigns only run when the exchange market is set
-                    to spot. You can keep these settings configured here, but the
-                    service stays inactive on non-spot markets.
-                </n-alert>
-                <n-alert
-                    v-if="isSidestepMode"
-                    class="sidestep-campaign-note"
-                    type="info"
-                    :bordered="false"
-                >
-                    Sidestep mode keeps the trade active after selling. It waits
-                    flat, tracks a virtual short-style PNL while price falls, and
-                    re-enters from the watcher using its own re-entry strategy.
-                </n-alert>
-                <template v-if="isSidestepMode">
-                    <n-form-item
-                        label="Bearish sidestep strategy"
-                        path="sidestep_bearish_strategy"
-                    >
-                        <n-select
-                            v-model:value="dca.sidestep_bearish_strategy"
-                            placeholder="Select"
-                            :options="strategyOptions"
-                        />
-                    </n-form-item>
-                    <n-form-item
-                        label="Sidestep re-entry strategy"
-                        path="sidestep_reentry_strategy"
-                    >
-                        <n-select
-                            v-model:value="dca.sidestep_reentry_strategy"
-                            placeholder="Select"
-                            :options="strategyOptions"
-                        />
-                    </n-form-item>
-                    <n-form-item
-                        label="Re-entry cooldown (candles)"
-                        path="sidestep_reentry_cooldown_candles"
-                    >
-                        <n-input-number
-                            v-model:value="dca.sidestep_reentry_cooldown_candles"
-                            :min="0"
-                            placeholder="0"
-                        />
-                    </n-form-item>
-                    <n-form-item
-                        label="Require fresh long signal"
-                        path="sidestep_reentry_requires_fresh_long_signal"
-                        label-placement="left"
-                    >
-                        <n-checkbox
-                            v-model:checked="dca.sidestep_reentry_requires_fresh_long_signal"
-                        />
-                    </n-form-item>
-                    <n-form-item
-                        label="Confirm sidestep signals on closed candles"
-                        path="sidestep_confirm_closed_candle"
-                        label-placement="left"
-                    >
-                        <n-checkbox
-                            v-model:checked="dca.sidestep_confirm_closed_candle"
-                        />
-                    </n-form-item>
-                    <n-form-item
-                        label="Maximum re-entry premium above sidestep exit (%)"
-                        path="sidestep_reentry_max_premium_pct"
-                    >
-                        <n-input-number
-                            v-model:value="dca.sidestep_reentry_max_premium_pct"
-                            :min="0"
-                            :max="100"
-                            placeholder="0 disables the cap"
-                        />
-                    </n-form-item>
-                    <n-form-item
-                        label="Maximum sidestep sell fallback slippage (%)"
-                        path="sidestep_exit_max_market_fallback_slippage_pct"
-                    >
-                        <n-input-number
-                            v-model:value="dca.sidestep_exit_max_market_fallback_slippage_pct"
-                            :min="0"
-                            :max="100"
-                            placeholder="0 allows any fallback price"
-                        />
-                    </n-form-item>
-                </template>
-            </template>
         </n-form>
     </n-card>
 </template>
@@ -284,15 +190,12 @@ import type { DcaModel, StringSelectOption } from '../../config-editor/types'
 import type { TradeModeSwitchGuardState } from '../../helpers/configLoad'
 import {
     TRADE_MODE_DYNAMIC_DCA,
-    TRADE_MODE_SIDESTEP,
     isDynamicTradeMode,
-    isSidestepTradeMode,
 } from '../../helpers/tradeLifecycle'
 
 const props = defineProps<{
-    dca: DcaModel
-    market: string | null
-    rules: FormRules
+     dca: DcaModel
+     rules: FormRules
     sellOrderTypeOptions: StringSelectOption[]
     showAdvancedGeneral: boolean
     strategyOptions: StringSelectOption[]
@@ -302,29 +205,20 @@ const props = defineProps<{
 const formRef = ref<FormInst | null>(null)
 const tradeModeOptions: StringSelectOption[] = [
     { label: 'Dynamic DCA', value: TRADE_MODE_DYNAMIC_DCA },
-    { label: 'Sidestep', value: TRADE_MODE_SIDESTEP },
 ]
 const isDynamicDcaMode = computed(
     () => isDynamicTradeMode(props.dca.trade_mode),
 )
-const isSidestepMode = computed(
-    () => isSidestepTradeMode(props.dca.trade_mode),
-)
 const tradeModeSwitchNotice = computed(() => {
     if (!props.tradeModeSwitchGuard?.blocked) {
         return null
-    }
+      }
     const details: string[] = []
     if (props.tradeModeSwitchGuard.open_trade_count > 0) {
         details.push(
-            `${props.tradeModeSwitchGuard.open_trade_count} open trade(s)`,
+             `${props.tradeModeSwitchGuard.open_trade_count} open trade(s)`,
         )
-    }
-    if (props.tradeModeSwitchGuard.waiting_campaign_count > 0) {
-        details.push(
-            `${props.tradeModeSwitchGuard.waiting_campaign_count} waiting sidestep campaign(s)`,
-        )
-    }
+     }
     const detailText =
         details.length > 0 ? ` Current blockers: ${details.join(', ')}.` : ''
     return `${props.tradeModeSwitchGuard.message || 'Trade mode switching is temporarily locked.'}${detailText}`
@@ -351,24 +245,15 @@ const tpLimitPrearmConflictWarningText = computed(() => {
     const conflicts = tpLimitPrearmConflictNames.value
     if (conflicts.length === 0) {
         return ''
-    }
+       }
     const conflictList =
         conflicts.length === 1
-            ? conflicts[0]
-            : `${conflicts.slice(0, -1).join(', ')} and ${
-                  conflicts[conflicts.length - 1]
-              }`
+              ? conflicts[0]
+              : `${conflicts.slice(0, -1).join(', ')} and ${
+                   conflicts[conflicts.length - 1]
+                }`
     return `TP limit pre-arm does not support ${conflictList}. Disable ${conflictList} before using pre-armed limit exits.`
 })
-const normalizedMarket = computed(() =>
-    String(props.market || 'spot').trim().toLowerCase(),
-)
-const showSidestepSpotOnlyNotice = computed(
-    () =>
-        props.dca.enabled &&
-        isSidestepMode.value &&
-        normalizedMarket.value !== 'spot',
-)
 
 function isTradeModeOptionDisabled(value: string): boolean {
     return Boolean(
@@ -393,11 +278,7 @@ defineExpose({
 </script>
 
 <style scoped>
-.tp-limit-prearm-warning {
-    margin-bottom: 18px;
-}
-
-.sidestep-campaign-note {
+ .tp-limit-prearm-warning {
     margin-bottom: 18px;
 }
 
@@ -411,3 +292,4 @@ defineExpose({
     margin-bottom: 18px;
 }
 </style>
+

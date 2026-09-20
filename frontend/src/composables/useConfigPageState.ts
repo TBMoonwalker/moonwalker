@@ -238,12 +238,8 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         dynamic_so_execution_guard_enabled: true,
         dynamic_so_execution_drift_atr_fraction: 0.25,
         dynamic_so_execution_drift_min_pct: 0.15,
-        dynamic_so_execution_drift_max_pct: 0.5,
-        sidestep_bearish_strategy: null,
-        sidestep_reentry_strategy: null,
-        sidestep_reentry_cooldown_candles: 0,
-        sidestep_reentry_requires_fresh_long_signal: false,
-        tp: null,
+         dynamic_so_execution_drift_max_pct: 0.5,
+         tp: null,
         sl: null,
     })
     const tradeModeSwitchGuard = ref<TradeModeSwitchGuardState>({
@@ -252,8 +248,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         current_trade_mode: TRADE_MODE_DYNAMIC_DCA,
         message: null,
         open_trade_count: 0,
-        waiting_campaign_count: 0,
-    })
+     })
 
     const capital = ref<CapitalConfigSection>({
         max_fund: null,

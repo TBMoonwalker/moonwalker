@@ -45,16 +45,15 @@
 
         
 
-        <ConfigDcaSection
-            ref="dcaFormRef"
-            :dca="dca"
-            :market="exchange.market"
-            :rules="rules"
-            :sell-order-type-options="sellOrderTypeOptions"
-            :show-advanced-general="showAdvancedGeneral"
-            :strategy-options="signal.strategy_plugins"
-            :trade-mode-switch-guard="tradeModeSwitchGuard"
-        />
+          <ConfigDcaSection
+             ref="dcaFormRef"
+              :dca="dca"
+              :rules="rules"
+              :sell-order-type-options="sellOrderTypeOptions"
+              :show-advanced-general="showAdvancedGeneral"
+              :strategy-options="signal.strategy_plugins"
+              :trade-mode-switch-guard="tradeModeSwitchGuard"
+          />
 
         <ConfigCapitalSection
             ref="capitalFormRef"

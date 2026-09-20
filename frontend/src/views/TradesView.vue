@@ -15,7 +15,6 @@ import { useTradingPauseStatus } from '@/composables/useTradingPauseStatus'
 import { useViewport } from '@/composables/useViewport'
 
 const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
-const WaitingCampaigns = defineAsyncComponent(() => import('../components/WaitingCampaigns.vue'))
 const ClosedTrades = defineAsyncComponent(() => import('../components/ClosedTrades.vue'))
 const UnsellableTrades = defineAsyncComponent(() => import('../components/UnsellableTrades.vue'))
 const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
@@ -23,8 +22,6 @@ const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'
 
 const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
 const unsellableTradesState = storeToRefs(unsellableTradesStore)
-const waitingCampaignsStore = useWebSocketDataStore('waitingCampaigns')
-const waitingCampaignsState = storeToRefs(waitingCampaignsStore)
 const openTradesStore = useWebSocketDataStore('openTrades')
 const openTradesState = storeToRefs(openTradesStore)
 const configSnapshotStore = useSharedConfigSnapshot()
@@ -37,9 +34,6 @@ const profitTabsSection = ref<HTMLElement | null>(null)
 const tradeTabsSection = ref<HTMLElement | null>(null)
 const unsellableTradesCount = computed(() =>
   Array.isArray(unsellableTradesState.data.value) ? unsellableTradesState.data.value.length : 0
-)
-const waitingCampaignsCount = computed(() =>
-  Array.isArray(waitingCampaignsState.data.value) ? waitingCampaignsState.data.value.length : 0
 )
 type DelistingWarningRow = {
   symbol?: string
@@ -343,36 +337,18 @@ onMounted(() => {
           <template #tab>
             <span class="trade-tab-label">{{ isMobile ? 'Open' : 'Open Trades' }}</span>
           </template>
-          <OpenTrades
-            v-if="activeTradesTab === 'open-trades'"
-            :global-trading-paused="tradingPaused"
-          />
-        </n-tab-pane>
-        <n-tab-pane
-          id="trade-panel-waiting-campaigns"
-          name="waiting-campaigns"
-          role="tabpanel"
-          aria-labelledby="trade-tab-waiting-campaigns"
-          :tab-props="getTradeTabProps('waiting-campaigns')"
-        >
-          <template #tab>
-            <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': waitingCampaignsCount > 0 }">
-              <span>Waiting</span>
-              <span v-if="waitingCampaignsCount > 0" class="trade-tab-count">{{ waitingCampaignsCount }}</span>
-            </span>
-          </template>
-          <WaitingCampaigns
-            v-if="activeTradesTab === 'waiting-campaigns'"
-            :global-trading-paused="tradingPaused"
-          />
-        </n-tab-pane>
-        <n-tab-pane
-          id="trade-panel-unsellable-trades"
-          name="unsellable-trades"
-          role="tabpanel"
-          aria-labelledby="trade-tab-unsellable-trades"
-          :tab-props="getTradeTabProps('unsellable-trades')"
-        >
+            <OpenTrades
+             v-if="activeTradesTab === 'open-trades'"
+              :global-trading-paused="tradingPaused"
+            />
+          </n-tab-pane>
+          <n-tab-pane
+           id="trade-panel-unsellable-trades"
+           name="unsellable-trades"
+           role="tabpanel"
+           aria-labelledby="trade-tab-unsellable-trades"
+            :tab-props="getTradeTabProps('unsellable-trades')"
+          >
           <template #tab>
             <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': unsellableTradesCount > 0 }">
               <span>{{ isMobile ? 'Unsell.' : 'Unsellable' }}</span>
@@ -708,27 +684,13 @@ onMounted(() => {
     width: 44px !important;
     min-height: 44px !important;
     padding: 0 !important;
-  }
-
-  .ledger-panel :deep(.waiting-campaign-mobile-actions .trade-row-actions) {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: flex-start;
-    width: 100%;
-    gap: 8px;
-  }
-
-  .ledger-panel :deep(.waiting-campaign-mobile-actions .trade-row-actions .n-button) {
-    min-width: max-content !important;
-    width: auto !important;
-    padding: 0 14px !important;
-  }
+   }
 
   .ledger-panel :deep(.unsellable-trades .trade-row-actions) {
-    display: flex;
-    justify-content: center;
-    width: 100%;
-  }
+     display: flex;
+     justify-content: center;
+     width: 100%;
+    }
 
   .ledger-panel :deep(.unsellable-trades .trade-row-actions .n-button) {
     min-width: 72px !important;

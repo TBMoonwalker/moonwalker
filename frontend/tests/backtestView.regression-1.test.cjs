@@ -29,30 +29,18 @@ test('backtest view is wired to the backend replay endpoint and chart markers', 
         backtestViewSource.includes('previousResult'),
         'expected the Backtest UI to keep a previous run for comparison',
     )
-    assert.ok(
-        backtestViewSource.includes('tradeModeOptions'),
-        'expected the Backtest UI to expose trade mode selection',
-    )
-    assert.ok(
-        backtestViewSource.includes('sidestepBearishStrategySlug'),
-        'expected the Backtest UI to configure sidestep strategies',
-    )
-    assert.ok(
-        backtestViewSource.includes("fetchJson<ConfigSnapshotResponse>('/config/all')"),
-        'expected the Backtest UI to load configured quote currency',
-    )
-    assert.ok(
-        backtestViewSource.includes('/data/exchange/symbols/'),
-        'expected the Backtest UI to load symbols from the exchange',
-    )
-    assert.ok(
-        backtestViewSource.includes('v-if="!isSidestepMode" class="control-grid two"'),
-        'expected sidestep mode to hide dynamic DCA safety-order controls',
-    )
-    assert.ok(
-        !backtestViewSource.includes('form.stepScale'),
-        'expected Backtest UI to omit manual step scale controls',
-    )
+     assert.ok(
+         backtestViewSource.includes("fetchJson<ConfigSnapshotResponse>('/config/all')"),
+           'expected the Backtest UI to load configured quote currency',
+        )
+     assert.ok(
+         backtestViewSource.includes('/data/exchange/symbols/'),
+           'expected the Backtest UI to load symbols from the exchange',
+        )
+     assert.ok(
+          !backtestViewSource.includes('form.stepScale'),
+           'expected Backtest UI to omit manual step scale controls',
+       )
     assert.ok(
         backtestViewSource.includes("title: 'Opened'") &&
             backtestViewSource.includes("title: 'Closed'"),

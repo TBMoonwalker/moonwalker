@@ -58,43 +58,18 @@ test('deriveControlCenterReadiness distinguishes partial setup from healthy setu
     assert.equal(readyReadiness.nextMode, 'overview')
 })
 
-test('deriveControlCenterReadiness requires sidestep strategies instead of classic DCA ladders', () => {
-    const readiness = deriveControlCenterReadiness({
-        ...createReadyConfig(),
-        dca: true,
-        trade_mode: 'sidestep',
-        market: 'spot',
-        so: null,
-        mstc: null,
-        sos: null,
-        ss: null,
-        os: null,
-        sidestep_bearish_strategy: '',
-        sidestep_reentry_strategy: '',
-    })
-
-    assert.equal(readiness.complete, false)
-    assert.deepEqual(
-        readiness.blockers.map((blocker) => blocker.key),
-        ['sidestep_bearish_strategy', 'sidestep_reentry_strategy'],
-    )
-    assert.equal(readiness.nextTarget, 'dca')
-})
-
-test('deriveControlCenterReadiness uses canonical dynamic_dca blockers when trade_mode is dynamic', () => {
-    const readiness = deriveControlCenterReadiness({
-        ...createReadyConfig(),
-        dca: true,
-        trade_mode: 'dynamic_dca',
-        market: 'spot',
-        so: null,
-        mstc: null,
-        sos: null,
-        ss: null,
-        os: null,
-        sidestep_bearish_strategy: '',
-        sidestep_reentry_strategy: '',
-    })
+ test('deriveControlCenterReadiness uses canonical dynamic_dca blockers when trade_mode is dynamic', () => {
+     const readiness = deriveControlCenterReadiness({
+          ...createReadyConfig(),
+          dca: true,
+          trade_mode: 'dynamic_dca',
+          market: 'spot',
+          so: null,
+          mstc: null,
+          sos: null,
+          ss: null,
+          os: null,
+       })
 
     assert.equal(readiness.complete, false)
     assert.deepEqual(

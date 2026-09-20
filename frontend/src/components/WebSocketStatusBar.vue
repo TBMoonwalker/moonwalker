@@ -6,13 +6,11 @@ import { useWebSocketDataStore, type WebSocketStatus } from '../stores/websocket
 const openTradesStore = useWebSocketDataStore('openTrades')
 const closedTradesStore = useWebSocketDataStore('closedTrades')
 const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
-const waitingCampaignsStore = useWebSocketDataStore('waitingCampaigns')
 const statisticsStore = useWebSocketDataStore('statistics')
 
 const openTradesState = storeToRefs(openTradesStore)
 const closedTradesState = storeToRefs(closedTradesStore)
 const unsellableTradesState = storeToRefs(unsellableTradesStore)
-const waitingCampaignsState = storeToRefs(waitingCampaignsStore)
 const statisticsState = storeToRefs(statisticsStore)
 const now = ref(Date.now())
 let refreshTimer: number | null = null
@@ -86,28 +84,17 @@ const streamCards = computed(() => [
     lastStatusLabel: formatRelativeTime(unsellableTradesState.lastStatusAt.value),
     reconnectCount: unsellableTradesState.reconnectCount.value,
   },
-  {
-    key: 'waitingCampaigns',
-    label: 'Waiting campaigns',
-    description: 'Flat sidestep campaigns waiting for re-entry.',
-    status: waitingCampaignsState.status.value,
-    tagType: getTagType(waitingCampaignsState.status.value),
-    hasReceivedData: waitingCampaignsState.hasReceivedData.value,
-    lastMessageLabel: formatRelativeTime(waitingCampaignsState.lastMessageAt.value),
-    lastStatusLabel: formatRelativeTime(waitingCampaignsState.lastStatusAt.value),
-    reconnectCount: waitingCampaignsState.reconnectCount.value,
-  },
-  {
-    key: 'statistics',
-    label: 'Statistics',
-    description: 'Portfolio profit, funds, and health metrics.',
-    status: statisticsState.status.value,
-    tagType: getTagType(statisticsState.status.value),
-    hasReceivedData: statisticsState.hasReceivedData.value,
-    lastMessageLabel: formatRelativeTime(statisticsState.lastMessageAt.value),
-    lastStatusLabel: formatRelativeTime(statisticsState.lastStatusAt.value),
-    reconnectCount: statisticsState.reconnectCount.value,
-  },
+    {
+     key: 'statistics',
+     label: 'Statistics',
+     description: 'Portfolio profit, funds, and health metrics.',
+     status: statisticsState.status.value,
+     tagType: getTagType(statisticsState.status.value),
+     hasReceivedData: statisticsState.hasReceivedData.value,
+     lastMessageLabel: formatRelativeTime(statisticsState.lastMessageAt.value),
+     lastStatusLabel: formatRelativeTime(statisticsState.lastStatusAt.value),
+     reconnectCount: statisticsState.reconnectCount.value,
+    },
 ])
 
 onMounted(() => {

@@ -98,13 +98,11 @@ type OrderData = {
     so_percentage?: number
 }
 
-type RowData = {
+ type RowData = {
     symbol: string
-    deal_id?: string | null
-    lifecycle_mode?: string | null
-    sidestep_count?: number
-    campaign_started_at?: string | null
-    tp_price: number
+     deal_id?: string | null
+     campaign_started_at?: string | null
+     tp_price: number
     precision: number
     current_price?: number
     dca_sizing_mode?: string | null
@@ -174,42 +172,28 @@ const recoveryModeTagType = computed(() =>
 const safetyOrders = computed(() =>
     Array.isArray(props.rowData.safetyorder) ? props.rowData.safetyorder : [],
 )
-const isSidestepLifecycle = computed(
-    () => String(props.rowData.lifecycle_mode ?? '') === 'sidestep_reentry',
-)
-const requiresExecutionHistory = computed(
-    () => isSidestepLifecycle.value && Boolean(props.rowData.deal_id),
-)
+const requiresExecutionHistory = computed(() => Boolean(props.rowData.deal_id))
 const executionHistoryResolved = ref(!requiresExecutionHistory.value)
-const hasReentered = computed(
-    () =>
-        isSidestepLifecycle.value &&
-        Number(props.rowData.sidestep_count ?? 0) > 0,
-)
 const sortedExecutions = computed(() =>
-    [...executions.value].sort(
-        (left, right) => Number(left.timestamp) - Number(right.timestamp),
-    ),
+      [...executions.value].sort(
+          (left, right) => Number(left.timestamp) - Number(right.timestamp),
+       ),
 )
-const useExecutionHistory = computed(
-    () => isSidestepLifecycle.value && sortedExecutions.value.length > 0,
-)
+const useExecutionHistory = computed(() => sortedExecutions.value.length > 0)
 const chartReady = computed(
     () => !requiresExecutionHistory.value || executionHistoryResolved.value,
 )
 const replayStartTimestamp = computed(() =>
-    useExecutionHistory.value
-        ? sortedExecutions.value[0]?.timestamp ?? props.rowData.baseorder.timestamp
-        : hasReentered.value && props.rowData.campaign_started_at
-        ? props.rowData.campaign_started_at
-        : props.rowData.baseorder.timestamp,
+     useExecutionHistory.value
+          ? sortedExecutions.value[0]?.timestamp ?? props.rowData.baseorder.timestamp
+          : props.rowData.baseorder.timestamp,
 )
 const timelineItems = computed<TimelineItem[]>(() => {
     if (!useExecutionHistory.value) {
         return [
             {
-                key: `base-${props.rowData.baseorder.id ?? 0}`,
-                title: hasReentered.value ? 'Re-entry buy' : 'Base order',
+                 key: `base-${props.rowData.baseorder.id ?? 0}`,
+                title: 'Base order',
                 content: `Order size: ${formatQuoteAmount(props.rowData.baseorder.ordersize)} | Amount: ${formatAssetAmount(props.rowData.baseorder.amount)} | Price: ${formatPrice(props.rowData.baseorder.price)}`,
                 type: 'info',
                 timestamp: props.rowData.baseorder.timestamp,
@@ -282,10 +266,10 @@ const chartMarkers = computed(() => {
             {
                 timestamp: props.rowData.baseorder.timestamp,
                 position: 'belowBar' as const,
-                color: BUY_MARKER_COLOR,
+                 color: BUY_MARKER_COLOR,
                 shape: 'arrowUp' as const,
-                text: hasReentered.value ? 'Re-entry' : 'Buy',
-            },
+                text: 'Buy',
+             },
             ...safetyOrders.value.map((order) => ({
                 timestamp: order.timestamp,
                 position: 'belowBar' as const,
@@ -447,11 +431,11 @@ function getBuyTitle(
     return `Safety order ${Math.max(1, buyIndex - 1)}`
 }
 
-function getSellTitle(execution: TradeExecutionRow, sellIndex: number): string {
-    if (execution.role === 'partial_sell') {
-        return 'Partial sell'
-    }
-    return `Sidestep exit ${sellIndex}`
+ function getSellTitle(execution: TradeExecutionRow, sellIndex: number): string {
+     if (execution.role === 'partial_sell') {
+         return 'Partial sell'
+       }
+    return `Exit ${sellIndex}`
 }
 
 function getBuyLineTitle(

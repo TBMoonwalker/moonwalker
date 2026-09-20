@@ -2,7 +2,6 @@ import type { FormItemRule, FormRules } from 'naive-ui/es/form'
 import type { Ref } from 'vue'
 import {
     isDynamicTradeMode,
-    isSidestepTradeMode,
 } from './tradeLifecycle'
 
 interface DcaRulesState {
@@ -51,19 +50,7 @@ function isRecoveryTargetMode(dca: Ref<DcaRulesState>): boolean {
         dca.value.enabled &&
         isDynamicDcaMode(dca) &&
         dca.value.dynamic_so_sizing_mode === 'recovery_target'
-    )
-}
-
-function isSpotMarket(exchange: Ref<ExchangeRulesState>): boolean {
-    return String(exchange.value.market || 'spot').trim().toLowerCase() === 'spot'
-}
-
-function isSpotSidestepMode(options: BuildConfigRulesOptions): boolean {
-    return (
-        options.dca.value.enabled &&
-        isSidestepTradeMode(options.dca.value.trade_mode) &&
-        isSpotMarket(options.exchange)
-    )
+     )
 }
 
 function createDcaFieldValidator(
@@ -475,41 +462,11 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
             },
             trigger: ['submit', 'change'],
         },
-        tp: {
-            validator: requiredAfterSubmit('Please add tp'),
-            trigger: ['submit', 'change'],
-        },
-        sidestep_bearish_strategy: {
-            validator: (_rule: FormItemRule, value: unknown) => {
-                if (!options.submitAttempted.value || !isSpotSidestepMode(options)) {
-                    return true
-                }
-                if (value === null || value === undefined) {
-                    return new Error('Please select bearish sidestep strategy')
-                }
-                if (typeof value === 'string' && value.trim().length === 0) {
-                    return new Error('Please select bearish sidestep strategy')
-                }
-                return true
-            },
-            trigger: ['submit', 'change'],
-        },
-        sidestep_reentry_strategy: {
-            validator: (_rule: FormItemRule, value: unknown) => {
-                if (!options.submitAttempted.value || !isSpotSidestepMode(options)) {
-                    return true
-                }
-                if (value === null || value === undefined) {
-                    return new Error('Please select sidestep re-entry strategy')
-                }
-                if (typeof value === 'string' && value.trim().length === 0) {
-                    return new Error('Please select sidestep re-entry strategy')
-                }
-                return true
-            },
-            trigger: ['submit', 'change'],
-        },
-        max_fund: {
+         tp: {
+             validator: requiredAfterSubmit('Please add tp'),
+             trigger: ['submit', 'change'],
+          },
+         max_fund: {
             validator: positiveNumberAfterSubmit('Please add global max fund'),
             trigger: ['submit', 'change'],
         },

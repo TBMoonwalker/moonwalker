@@ -109,13 +109,6 @@ export interface DcaConfigSection {
     dynamic_so_execution_drift_atr_fraction: number | null
     dynamic_so_execution_drift_min_pct: number | null
     dynamic_so_execution_drift_max_pct: number | null
-    sidestep_bearish_strategy: string | null
-    sidestep_reentry_strategy: string | null
-    sidestep_reentry_cooldown_candles: number | null
-    sidestep_reentry_requires_fresh_long_signal: boolean
-    sidestep_confirm_closed_candle: boolean
-    sidestep_reentry_max_premium_pct: number | null
-    sidestep_exit_max_market_fallback_slippage_pct: number | null
     tp: number | null
     sl: number | null
 }
@@ -462,39 +455,11 @@ export function buildConfigSubmitPayload(
             dca.dynamic_so_execution_drift_min_pct ?? 0.15,
             'float',
         ),
-        dynamic_so_execution_drift_max_pct: serializeConfigValue(
-            dca.dynamic_so_execution_drift_max_pct ?? 0.5,
-            'float',
-        ),
-        sidestep_bearish_strategy: serializeConfigValue(
-            toNullableConfigString(dca.sidestep_bearish_strategy),
-            'str',
-        ),
-        sidestep_reentry_strategy: serializeConfigValue(
-            toNullableConfigString(dca.sidestep_reentry_strategy),
-            'str',
-        ),
-        sidestep_reentry_cooldown_candles: serializeConfigValue(
-            dca.sidestep_reentry_cooldown_candles ?? 0,
-            'int',
-        ),
-        sidestep_reentry_requires_fresh_long_signal: serializeConfigValue(
-            dca.sidestep_reentry_requires_fresh_long_signal ?? false,
-            'bool',
-        ),
-        sidestep_confirm_closed_candle: serializeConfigValue(
-            dca.sidestep_confirm_closed_candle ?? false,
-            'bool',
-        ),
-        sidestep_reentry_max_premium_pct: serializeConfigValue(
-            dca.sidestep_reentry_max_premium_pct ?? 0,
-            'float',
-        ),
-        sidestep_exit_max_market_fallback_slippage_pct: serializeConfigValue(
-            dca.sidestep_exit_max_market_fallback_slippage_pct ?? 0,
-            'float',
-        ),
-        tp: serializeConfigValue(dca.tp || false, 'float'),
+         dynamic_so_execution_drift_max_pct: serializeConfigValue(
+             dca.dynamic_so_execution_drift_max_pct ?? 0.5,
+              'float',
+          ),
+         tp: serializeConfigValue(dca.tp || false, 'float'),
         sl: serializeConfigValue(dca.sl || false, 'float'),
         autopilot: serializeConfigValue(autopilot.enabled || false, 'bool'),
         autopilot_symbol_entry_sizing_enabled: serializeConfigValue(

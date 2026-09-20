@@ -123,12 +123,8 @@ function createBaseOptions(overrides = {}) {
             dynamic_so_execution_guard_enabled: true,
             dynamic_so_execution_drift_atr_fraction: 0.25,
             dynamic_so_execution_drift_min_pct: 0.15,
-            dynamic_so_execution_drift_max_pct: 0.5,
-            sidestep_bearish_strategy: null,
-            sidestep_reentry_strategy: null,
-            sidestep_reentry_cooldown_candles: 0,
-            sidestep_reentry_requires_fresh_long_signal: false,
-            tp: 1.8,
+             dynamic_so_execution_drift_max_pct: 0.5,
+             tp: 1.8,
             sl: null,
         },
         capital: {
@@ -582,28 +578,7 @@ test('buildConfigSubmitPayload persists configured capital budget and stretch se
     )
 })
 
-test('buildConfigSubmitPayload clears dynamic safety-order buffer for sidestep mode', () => {
-    const payload = buildConfigSubmitPayload(
-        createBaseOptions({
-            dca: {
-                enabled: true,
-                trade_mode: 'sidestep',
-            },
-            capital: {
-                max_fund: 250,
-                reserve_safety_orders: true,
-                budget_buffer_pct: 50,
-            },
-        }),
-    )
-
-    assert.deepEqual(parseField(payload, 'capital_budget_buffer_pct'), {
-        value: 0,
-        type: 'float',
-    })
-})
-
-test('buildConfigSubmitPayload derives the weekly history default from timeframe', () => {
+ test('buildConfigSubmitPayload derives the weekly history default from timeframe', () => {
     const payload = buildConfigSubmitPayload(
         createBaseOptions({
             exchange: {
@@ -627,12 +602,12 @@ test('buildConfigSubmitPayload derives the weekly history default from timeframe
     assert.equal(parseField(payload, 'history_lookback_time').value, '5y')
 })
 
-test('buildConfigSubmitPayload leaves strategy ids unchanged', () => {
-    const payload = buildConfigSubmitPayload(
-        createBaseOptions({
-            dca: {
-                enabled: true,
-                trade_mode: 'sidestep',
+ test('buildConfigSubmitPayload leaves strategy ids unchanged', () => {
+     const payload = buildConfigSubmitPayload(
+         createBaseOptions({
+             dca: {
+                 enabled: true,
+                 trade_mode: 'dynamic_dca',
                 strategy: 'ema_swing_reverse',
                 timeframe: '1h',
                 trailing_tp: null,
@@ -652,26 +627,14 @@ test('buildConfigSubmitPayload leaves strategy ids unchanged', () => {
                 ss: 1.2,
                 os: 1.4,
                 trade_safety_order_budget_ratio: 0.95,
-                sidestep_bearish_strategy: 'ema_swing_reverse',
-                sidestep_reentry_strategy: 'ema_swing_reverse',
-                sidestep_reentry_cooldown_candles: 0,
-                sidestep_reentry_requires_fresh_long_signal: false,
                 tp: 1.8,
                 sl: null,
-            },
-        }),
-    )
+              },
+           }),
+       )
 
-    assert.equal(parseField(payload, 'dca_strategy').value, 'ema_swing_reverse')
-    assert.equal(
-        parseField(payload, 'sidestep_bearish_strategy').value,
-        'ema_swing_reverse',
-    )
-    assert.equal(
-        parseField(payload, 'sidestep_reentry_strategy').value,
-        'ema_swing_reverse',
-    )
-})
+     assert.equal(parseField(payload, 'dca_strategy').value, 'ema_swing_reverse')
+ })
 
 test('buildConfigSubmitPayload persists only the canonical trade mode field', () => {
     const payload = buildConfigSubmitPayload(
@@ -697,73 +660,15 @@ test('buildConfigSubmitPayload persists only the canonical trade mode field', ()
                 sos: 1.5,
                 ss: 1.2,
                 os: 1.4,
-                trade_safety_order_budget_ratio: 0.95,
-                sidestep_bearish_strategy: 'ema_down',
-                sidestep_reentry_strategy: 'ema20_swing',
-                sidestep_reentry_cooldown_candles: 0,
-                sidestep_reentry_requires_fresh_long_signal: false,
-                tp: 1.8,
-                sl: null,
-            },
-        }),
-    )
+                 trade_safety_order_budget_ratio: 0.95,
+                 tp: 1.8,
+                 sl: null,
+               },
+           }),
+       )
 
-    assert.equal(parseField(payload, 'trade_mode').value, 'dynamic_dca')
-    assert.equal('dynamic_dca' in payload, false)
-    assert.equal('trade_lifecycle_mode' in payload, false)
-    assert.equal('sidestep_campaign_enabled' in payload, false)
-})
-
-test('buildConfigSubmitPayload keeps sidestep canonical without compatibility mirrors', () => {
-    const payload = buildConfigSubmitPayload(
-        createBaseOptions({
-            dca: {
-                enabled: true,
-                trade_mode: 'sidestep',
-                strategy: 'ema20_swing',
-                timeframe: '1h',
-                trailing_tp: null,
-                max_bots: 2,
-                bo: 20,
-                sell_order_type: 'market',
-                limit_sell_timeout_sec: 60,
-                limit_sell_fallback_to_market: true,
-                tp_limit_prearm_enabled: false,
-                tp_limit_prearm_margin_percent: 0.25,
-                tp_spike_confirm_enabled: false,
-                tp_spike_confirm_seconds: null,
-                tp_spike_confirm_ticks: null,
-                so: 10,
-                mstc: 3,
-                sos: 1.5,
-                ss: 1.2,
-                os: 1.4,
-                trade_safety_order_budget_ratio: 0.95,
-                sidestep_bearish_strategy: 'ema_down',
-                sidestep_reentry_strategy: 'ema20_swing',
-                sidestep_reentry_cooldown_candles: 0,
-                sidestep_reentry_requires_fresh_long_signal: true,
-                sidestep_confirm_closed_candle: true,
-                sidestep_reentry_max_premium_pct: 5,
-                sidestep_exit_max_market_fallback_slippage_pct: 2.5,
-                tp: 1.8,
-                sl: null,
-            },
-        }),
-    )
-
-    assert.equal(parseField(payload, 'trade_mode').value, 'sidestep')
-    assert.equal('dynamic_dca' in payload, false)
-    assert.equal('trade_lifecycle_mode' in payload, false)
-    assert.equal('sidestep_campaign_enabled' in payload, false)
-    assert.equal(
-        parseField(payload, 'sidestep_reentry_requires_fresh_long_signal').value,
-        true,
-    )
-    assert.equal(parseField(payload, 'sidestep_confirm_closed_candle').value, true)
-    assert.equal(parseField(payload, 'sidestep_reentry_max_premium_pct').value, 5)
-    assert.equal(
-        parseField(payload, 'sidestep_exit_max_market_fallback_slippage_pct').value,
-        2.5,
-    )
-})
+     assert.equal(parseField(payload, 'trade_mode').value, 'dynamic_dca')
+     assert.equal('dynamic_dca' in payload, false)
+     assert.equal('trade_lifecycle_mode' in payload, false)
+     assert.equal('sidestep_campaign_enabled' in payload, false)
+ })

@@ -9,12 +9,8 @@ const tradesViewSource = fs.readFileSync(
     'utf8',
 )
 const openTradeExpandedRowSource = fs.readFileSync(
-    path.join(rootDir, 'src/components/OpenTradeExpandedRow.vue'),
-    'utf8',
-)
-const waitingCampaignsSource = fs.readFileSync(
-    path.join(rootDir, 'src/components/WaitingCampaigns.vue'),
-    'utf8',
+  path.join(rootDir, 'src/components/OpenTradeExpandedRow.vue'),
+  'utf8',
 )
 const closedTradesSource = fs.readFileSync(
     path.join(rootDir, 'src/components/ClosedTrades.vue'),
@@ -46,12 +42,11 @@ test('unsellable tab relies on the count chip without an extra warning icon', ()
     )
 })
 
-test('secondary trade tables reuse the open-trades ledger cell language', () => {
-    for (const [name, source] of [
-        ['waiting campaigns', waitingCampaignsSource],
-        ['closed trades', closedTradesSource],
-        ['unsellable trades', unsellableTradesSource],
-    ]) {
+ test('secondary trade tables reuse the open-trades ledger cell language', () => {
+     for (const [name, source] of [
+         ['closed trades', closedTradesSource],
+          ['unsellable trades', unsellableTradesSource],
+      ]) {
         assert.ok(
             source.includes('trade-symbol-cell') &&
                 source.includes('trade-symbol-main') &&
@@ -61,32 +56,4 @@ test('secondary trade tables reuse the open-trades ledger cell language', () => 
             `expected ${name} to use the shared ledger table classes`,
         )
     }
-})
-
-test('waiting campaigns match the open-trades ledger row rhythm', () => {
-    assert.ok(
-        !waitingCampaignsSource.includes(':single-line="false"'),
-        'expected waiting campaigns to use the same compact table row behavior as open trades',
-    )
-    assert.ok(
-        !waitingCampaignsSource.includes('NSlider'),
-        'expected waiting campaigns to use the shared TP/SO beam instead of a slider control',
-    )
-    assert.ok(
-        waitingCampaignsSource.includes(
-            "class: ['trade-tpso-cell', 'waiting-reentry-cell', toneClass]",
-        ),
-        'expected waiting re-entry state to reuse the shared ledger beam classes',
-    )
-    assert.ok(
-        waitingCampaignsSource.includes(
-            "h('span', { class: getStatusToneClass(rowData) }, status)",
-        ),
-        'expected waiting status to render as ledger text instead of a separate pill style',
-    )
-    assert.ok(
-        waitingCampaignsSource.includes("{ default: () => 'Activate' }") &&
-            !waitingCampaignsSource.includes("{ default: () => 'Switch to active' }"),
-        'expected the visible waiting primary action to stay short enough for the shared action row',
-    )
 })

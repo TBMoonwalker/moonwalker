@@ -241,75 +241,13 @@ test('config rules require only dynamic DCA fields in dynamic mode', () => {
         dynamicContext.rules.mstc.validator({}, null).message,
         'Please add max safety order count',
     )
-    assert.equal(
-        dynamicContext.rules.sos.validator({}, null).message,
-        'Please add price deviation',
-    )
+     assert.equal(
+         dynamicContext.rules.sos.validator({}, null).message,
+           'Please add price deviation',
+        )
+ })
 
-    const sidestepContext = createRuleContext({
-        dca: {
-            value: {
-                enabled: true,
-                trade_mode: 'sidestep',
-            },
-        },
-    })
-    assert.equal(sidestepContext.rules.so.validator({}, null), true)
-    assert.equal(sidestepContext.rules.mstc.validator({}, null), true)
-    assert.equal(sidestepContext.rules.sos.validator({}, null), true)
-    assert.equal(sidestepContext.rules.ss.validator({}, null), true)
-    assert.equal(sidestepContext.rules.os.validator({}, null), true)
-})
-
-test('config rules require sidestep strategies only for spot sidestep mode', () => {
-    const sidestepContext = createRuleContext({
-        dca: {
-            value: {
-                enabled: true,
-                trade_mode: 'sidestep',
-            },
-        },
-        exchange: {
-            value: {
-                market: 'spot',
-            },
-        },
-    })
-
-    assert.equal(
-        sidestepContext.rules.sidestep_bearish_strategy.validator({}, null).message,
-        'Please select bearish sidestep strategy',
-    )
-    assert.equal(
-        sidestepContext.rules.sidestep_reentry_strategy.validator({}, null).message,
-        'Please select sidestep re-entry strategy',
-    )
-
-    const futuresContext = createRuleContext({
-        dca: {
-            value: {
-                enabled: true,
-                trade_mode: 'sidestep',
-            },
-        },
-        exchange: {
-            value: {
-                market: 'future',
-            },
-        },
-    })
-
-    assert.equal(
-        futuresContext.rules.sidestep_bearish_strategy.validator({}, null),
-        true,
-    )
-    assert.equal(
-        futuresContext.rules.sidestep_reentry_strategy.validator({}, null),
-        true,
-    )
-})
-
-test('config rules do not require retired ladder fields in canonical dynamic mode', () => {
+ test('config rules do not require retired ladder fields in canonical dynamic mode', () => {
     const dynamicContext = createRuleContext({
         dca: {
             value: {

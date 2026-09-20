@@ -25,7 +25,6 @@ export type OpenTradeRow = {
     campaign_started_at?: string | null
     lifecycle_mode?: string | null
     exposure_state?: string | null
-    sidestep_count?: number
     automation_paused?: boolean
     automation_paused_at?: string | null
     automation_pause_source?: string | null
@@ -137,22 +136,14 @@ export function tradeSymbolToRouteParam(value: string): string {
 export function getOpenTradeOpenedAt(
     rowData: Pick<
         OpenTradeRow,
-        'open_date' | 'campaign_started_at' | 'lifecycle_mode'
+         'open_date' | 'campaign_started_at'
     >,
 ): string {
-    const lifecycleMode = String(rowData.lifecycle_mode ?? '').trim()
     const openDate = String(rowData.open_date ?? '').trim()
-    const campaignStartedAt = String(rowData.campaign_started_at ?? '').trim()
-    if (lifecycleMode === 'sidestep_reentry') {
-        if (campaignStartedAt) {
-            return campaignStartedAt
-        }
-        return openDate
-    }
     if (openDate) {
         return openDate
-    }
-    return campaignStartedAt
+     }
+     return String(rowData.campaign_started_at ?? '').trim()
 }
 
 export function getSafetyOrderCount(rowData: OpenTradeRow): number {

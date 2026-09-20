@@ -277,23 +277,7 @@ test('buildLoadedConfigState defaults safety-order reserve to disabled', () => {
     assert.equal(state.capital.reserve_safety_orders, false)
 })
 
-test('buildLoadedConfigState hydrates sidestep spike guards', () => {
-    const state = buildLoadedConfigState(
-        {
-            trade_mode: 'sidestep',
-            sidestep_confirm_closed_candle: 'true',
-            sidestep_reentry_max_premium_pct: '5',
-            sidestep_exit_max_market_fallback_slippage_pct: '2.5',
-        },
-        createLoadDefaults(),
-    )
-
-    assert.equal(state.dca.sidestep_confirm_closed_candle, true)
-    assert.equal(state.dca.sidestep_reentry_max_premium_pct, 5)
-    assert.equal(state.dca.sidestep_exit_max_market_fallback_slippage_pct, 2.5)
-})
-
-test('buildLoadedConfigState derives the weekly history default from timeframe', () => {
+ test('buildLoadedConfigState derives the weekly history default from timeframe', () => {
     const state = buildLoadedConfigState(
         {
             timeframe: '1w',
@@ -330,55 +314,37 @@ test('buildLoadedConfigState ignores removed legacy filter shadow payload', () =
     assert.equal(state.filter.cmc_api_key, null)
 })
 
-test('buildLoadedConfigState leaves strategy ids unchanged', () => {
-    const state = buildLoadedConfigState(
-        {
-            dca_strategy: 'ema_swing_reverse',
-            sidestep_reentry_strategy: 'ema_swing_reverse',
-            sidestep_bearish_strategy: 'ema_swing_reverse',
-        },
-        createLoadDefaults(),
-    )
+ test('buildLoadedConfigState leaves strategy ids unchanged', () => {
+     const state = buildLoadedConfigState(
+          {
+             dca_strategy: 'ema_swing_reverse',
+           },
+         createLoadDefaults(),
+       )
 
-    assert.equal(state.dca.strategy, 'ema_swing_reverse')
-    assert.equal(state.dca.sidestep_reentry_strategy, 'ema_swing_reverse')
-    assert.equal(state.dca.sidestep_bearish_strategy, 'ema_swing_reverse')
-})
+     assert.equal(state.dca.strategy, 'ema_swing_reverse')
+ })
 
-test('buildLoadedConfigState reads the canonical sidestep trade_mode', () => {
-    const state = buildLoadedConfigState(
-        {
-            trade_mode: 'sidestep',
-        },
-        createLoadDefaults(),
-    )
+ test('buildLoadedConfigState reads the trade mode switch guard payload', () => {
+     const state = buildLoadedConfigState(
+          {
+             trade_mode: 'dynamic_dca',
+             trade_mode_switch_guard: {
+                 blocked: 'true',
+                 can_switch: 'false',
+                 current_trade_mode: 'dynamic_dca',
+                 message: 'Mode switching is locked while trades are active.',
+                 open_trade_count: '2',
+             },
+           },
+          createLoadDefaults(),
+       )
 
-    assert.equal(state.dca.trade_mode, 'sidestep')
-    assert.equal(state.tradeModeSwitchGuard.current_trade_mode, 'sidestep')
-})
-
-test('buildLoadedConfigState reads the trade mode switch guard payload', () => {
-    const state = buildLoadedConfigState(
-        {
-            trade_mode: 'sidestep',
-            trade_mode_switch_guard: {
-                blocked: 'true',
-                can_switch: 'false',
-                current_trade_mode: 'sidestep',
-                message: 'Mode switching is locked while trades are active.',
-                open_trade_count: '2',
-                waiting_campaign_count: '1',
-            },
-        },
-        createLoadDefaults(),
-    )
-
-    assert.deepEqual(state.tradeModeSwitchGuard, {
-        blocked: true,
-        can_switch: false,
-        current_trade_mode: 'sidestep',
+     assert.deepEqual(state.tradeModeSwitchGuard, {
+          blocked: true,
+         can_switch: false,
+        current_trade_mode: 'dynamic_dca',
         message: 'Mode switching is locked while trades are active.',
-        open_trade_count: 2,
-        waiting_campaign_count: 1,
-    })
-})
+       open_trade_count: 2,
+      })
+ })
