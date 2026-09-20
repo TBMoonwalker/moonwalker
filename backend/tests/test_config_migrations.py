@@ -38,7 +38,7 @@ async def test_trade_mode_migration_is_versioned_idempotent_and_recoverable(
     await config.load_all()
     await config.load_all()
 
-    assert config.get("trade_mode") == "sidestep"
+    assert config.get("trade_mode") == "dynamic_dca"
     assert await AppConfig.filter(key="trade_mode").count() == 1
     migration = await ConfigMigration.get(version=TRADE_MODE_MIGRATION_VERSION)
     assert json.loads(migration.backup_json) == [

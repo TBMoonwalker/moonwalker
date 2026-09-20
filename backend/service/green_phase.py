@@ -21,9 +21,6 @@ from service.green_phase_logic import (
     to_float,
     to_int,
 )
-from service.spot_campaign_types import TradeCloseReason
-from service.trade_lifecycle_config import is_dynamic_dca_enabled
-from tortoise.expressions import Q
 
 logging = helper.LoggerFactory.get_logger("logs/green_phase.log", "green_phase")
 AVAILABLE_QUOTE_UNSET = object()
@@ -137,10 +134,7 @@ class GreenPhaseService:
 
         now = datetime.now(timezone.utc)
         rows = (
-            await model.ClosedTrades.filter(
-                Q(close_reason__isnull=True)
-                | ~Q(close_reason__in=[TradeCloseReason.SIDESTEP_EXIT.value])
-            )
+            await model.ClosedTrades.all()
             .order_by("-id")
             .limit(self.MAX_ANALYSIS_ROWS)
             .values_list("close_date", "profit")
@@ -261,20 +255,5 @@ class GreenPhaseService:
         if remaining_orders <= 0:
             return 0.0
 
-        dynamic_dca = is_dynamic_dca_enabled(config)
         base_order_size = max(0.0, to_float(config.get("bo"), 0.0))
-        if dynamic_dca:
-            return round(base_order_size * remaining_orders, 8)
-
-        safety_order_size = max(0.0, to_float(config.get("so"), 0.0))
-        if safety_order_size <= 0:
-            return 0.0
-
-        volume_scale = to_float(config.get("os"), 1.0)
-        if volume_scale <= 0:
-            volume_scale = 1.0
-
-        reserve = 0.0
-        for order_index in range(max(0, so_count), max_safety_orders):
-            reserve += safety_order_size * (volume_scale**order_index)
-        return round(reserve, 8)
+        return round(base_order_size * remaining_orders, 8)

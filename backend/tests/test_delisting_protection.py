@@ -441,7 +441,7 @@ async def test_unavailable_schedule_warns_open_trades_and_notifies_once() -> Non
     (
         (True, False, None),
         (False, True, None),
-        (True, False, "sidestep-campaign"),
+        (True, False, "campaign-1"),
     ),
 )
 async def test_central_order_guard_blocks_every_buy_role(

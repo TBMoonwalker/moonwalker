@@ -2,8 +2,6 @@ import os
 
 import model
 import pytest
-from service.spot_campaign_types import SpotCampaignState, TradeExposureState
-from service.trades import Trades
 from service.trading_controls import TradingControlsService
 from tortoise import Tortoise
 
@@ -88,57 +86,6 @@ async def test_pause_and_resume_classic_mission_are_idempotent(
 
 
 @pytest.mark.asyncio
-async def test_pause_waiting_campaign_updates_campaign_truth(
-    tmp_path, monkeypatch
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "pause-waiting.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    await model.SpotCampaigns.create(
-        campaign_id="campaign-1",
-        symbol="ETH/USDT",
-        lifecycle_mode="sidestep_reentry",
-        state=SpotCampaignState.FLAT_WAITING_REENTRY.value,
-        started_at="2026-05-01T08:00:00+00:00",
-        last_transition_at="2026-05-14T08:00:00+00:00",
-        reserved_quote=125.0,
-    )
-    await model.OpenTrades.create(
-        symbol="ETH/USDT",
-        campaign_id="campaign-1",
-        lifecycle_mode="sidestep_reentry",
-        exposure_state=TradeExposureState.FLAT_WAITING_REENTRY.value,
-        open_date="2026-05-01T08:00:00+00:00",
-        last_transition_at="2026-05-14T08:00:00+00:00",
-        reserved_reentry_quote=125.0,
-        waiting_reference_price=125.0,
-        waiting_reference_amount=1.0,
-        waiting_reference_quote=125.0,
-    )
-
-    controls = TradingControlsService()
-    paused = await controls.pause_mission("ETH/USDT", {})
-    assert paused.status == "paused"
-    assert paused.campaign_id == "campaign-1"
-
-    campaign = await model.SpotCampaigns.get(campaign_id="campaign-1")
-    open_trade = await model.OpenTrades.get(symbol="ETH/USDT")
-    assert campaign.automation_paused is True
-    assert campaign.automation_paused_at is not None
-    assert open_trade.automation_paused is False
-
-    resumed = await controls.resume_mission("ETH/USDT")
-    assert resumed.status == "resumed"
-
-    campaign = await model.SpotCampaigns.get(campaign_id="campaign-1")
-    assert campaign.automation_paused is False
-    assert campaign.automation_paused_at is None
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
 async def test_pause_mission_reports_tp_cancel_failure(tmp_path, monkeypatch) -> None:
     monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
     db_path = tmp_path / "pause-failed.sqlite"
@@ -166,49 +113,6 @@ async def test_pause_mission_reports_tp_cancel_failure(tmp_path, monkeypatch) ->
     open_trade = await model.OpenTrades.get(symbol="SOL/USDT")
     assert open_trade.automation_paused is False
     assert open_trade.tp_limit_order_id == "tp-limit-9"
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
-async def test_trade_runtime_snapshot_inherits_campaign_pause_state(
-    tmp_path,
-    monkeypatch,
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "pause-runtime.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    await model.SpotCampaigns.create(
-        campaign_id="campaign-9",
-        symbol="ADA/USDT",
-        lifecycle_mode="sidestep_reentry",
-        state=SpotCampaignState.FLAT_WAITING_REENTRY.value,
-        started_at="2026-05-01T08:00:00+00:00",
-        last_transition_at="2026-05-14T08:00:00+00:00",
-        reserved_quote=90.0,
-        automation_paused=True,
-        automation_paused_at="2026-05-14T09:00:00+00:00",
-    )
-    await model.OpenTrades.create(
-        symbol="ADA/USDT",
-        campaign_id="campaign-9",
-        lifecycle_mode="sidestep_reentry",
-        exposure_state=TradeExposureState.FLAT_WAITING_REENTRY.value,
-        open_date="2026-05-01T08:00:00+00:00",
-        last_transition_at="2026-05-14T08:00:00+00:00",
-        reserved_reentry_quote=90.0,
-        waiting_reference_price=90.0,
-        waiting_reference_amount=1.0,
-        waiting_reference_quote=90.0,
-    )
-
-    trades = Trades()
-    trade_data = await trades.get_trades_for_orders("ADA/USDT")
-
-    assert trade_data is not None
-    assert trade_data["automation_paused"] is True
-    assert trade_data["automation_pause_source"] == "campaign"
     await Tortoise.close_connections()
 
 

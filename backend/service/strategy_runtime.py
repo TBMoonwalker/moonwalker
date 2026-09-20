@@ -174,7 +174,7 @@ def invalidate_strategy_runtime_cache(slug: str | None = None) -> None:
 
 
 async def get_strategy_adapter(slug: str, timeframe: str) -> GraphStrategyAdapter:
-    """Return a runtime adapter for DCA, TP, sidestep, and signal paths."""
+    """Return a runtime adapter for DCA, TP, and signal paths."""
     snapshot = await _load_strategy_snapshot(slug)
     missing_hooks = _missing_indicator_methods(snapshot.validation)
     if missing_hooks:

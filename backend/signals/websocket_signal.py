@@ -24,7 +24,6 @@ from service.signal_runtime import (
     resolve_signal_entry_orders,
     update_waiting_log_state,
 )
-from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
 from service.strategy_capability import (
     get_configured_strategy_history_lookback_days,
@@ -635,16 +634,6 @@ class SignalPlugin:
         )
         if not token_old_enough:
             return
-
-        sidestep_campaigns = await SpotSidestepCampaignService.instance()
-        await sidestep_campaigns.record_long_signal(
-            candidate.symbol,
-            signal_name=candidate.signal_name,
-            strategy_name=candidate.strategy_name,
-            timeframe=candidate.timeframe,
-            metadata_json=candidate.metadata_json,
-            source="websocket_signal",
-        )
 
         async def prepare_symbol(_symbol: str) -> bool:
             if (

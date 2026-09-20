@@ -11,7 +11,6 @@ import model
 from service.database import run_sqlite_write_with_retry
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.order_requests import normalize_order_symbol
-from service.spot_campaign_types import TradeLifecycleMode
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger(
@@ -30,19 +29,10 @@ def is_global_trading_paused(config: dict[str, Any] | None) -> bool:
 def resolve_mission_pause_fields(
     *,
     open_trade: dict[str, Any] | None,
-    campaign: dict[str, Any] | None,
+    campaign: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return normalized mission pause fields from existing persistence truth."""
-    campaign_lifecycle_mode = str((campaign or {}).get("lifecycle_mode") or "")
-    if campaign_lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
-        return {
-            "automation_paused": bool((campaign or {}).get("automation_paused", False)),
-            "automation_paused_at": (
-                str((campaign or {}).get("automation_paused_at") or "").strip() or None
-            ),
-            "automation_pause_source": "campaign",
-        }
-
+    _ = campaign
     return {
         "automation_paused": bool((open_trade or {}).get("automation_paused", False)),
         "automation_paused_at": (
@@ -172,23 +162,10 @@ class TradingControlsService:
             return None
 
         campaign_id = str(open_trade.get("campaign_id") or "").strip()
-        campaign = None
-        if campaign_id:
-            campaign_rows = (
-                await model.SpotCampaigns.filter(campaign_id=campaign_id)
-                .limit(1)
-                .values(
-                    "campaign_id",
-                    "lifecycle_mode",
-                    "automation_paused",
-                    "automation_paused_at",
-                )
-            )
-            campaign = campaign_rows[0] if campaign_rows else None
 
         pause_fields = resolve_mission_pause_fields(
             open_trade=open_trade,
-            campaign=campaign,
+            campaign=None,
         )
         pause_source = str(pause_fields.get("automation_pause_source") or "")
         return {
@@ -213,17 +190,6 @@ class TradingControlsService:
 
         async def _write_pause_state() -> bool:
             async with in_transaction() as conn:
-                if pause_source == "campaign" and campaign_id:
-                    updated = (
-                        await model.SpotCampaigns.filter(campaign_id=campaign_id)
-                        .using_db(conn)
-                        .update(
-                            automation_paused=paused,
-                            automation_paused_at=paused_at,
-                        )
-                    )
-                    return updated > 0
-
                 updated = (
                     await model.OpenTrades.filter(symbol=symbol)
                     .using_db(conn)

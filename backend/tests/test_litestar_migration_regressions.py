@@ -2,7 +2,6 @@
 
 import json
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +14,6 @@ from controller import statistics as statistics_controller
 from controller import trades as trades_controller
 from litestar import Litestar
 from litestar.testing import TestClient
-from service.config_contract import public_config_contract
 from service.log_viewer import LogReadResult
 from service.order_mutation_result import (
     OrderMutationResult,
@@ -472,52 +470,6 @@ def test_config_multiple_blocks_switch_to_csv_signal_when_open_trades_exist(
     assert service.last_batch is None
 
 
-def test_config_multiple_blocks_trade_mode_switch_when_runtime_activity_exists(
-    monkeypatch,
-) -> None:
-    """Trade mode changes should be blocked while trades or waiting campaigns exist."""
-    service = _DummyConfigService()
-    service._cache.update(
-        {
-            "trade_mode": "dynamic_dca",
-        }
-    )
-
-    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
-        return service
-
-    monkeypatch.setattr(
-        config_controller.Config, "instance", classmethod(_fake_instance)
-    )
-    _DummyOpenTradesCount.count_value = 1
-    _DummySidestepCampaignService.waiting_count = 2
-    monkeypatch.setattr(config_controller, "OpenTrades", _DummyOpenTradesCount)
-    monkeypatch.setattr(
-        config_controller,
-        "SpotSidestepCampaignService",
-        _DummySidestepCampaignService,
-    )
-
-    app = Litestar(route_handlers=[config_controller.update_multiple_config_keys])
-    payload = {
-        "trade_mode": {"value": "sidestep", "type": "str"},
-        "sidestep_reentry_strategy": {"value": "ema_low", "type": "str"},
-    }
-    with TestClient(app=app) as client:
-        response = client.post("/config/multiple", json=payload)
-
-    assert response.status_code == 409
-    body = response.json()
-    assert body["migration_error"]["code"] == "blocked_live_mode_switch"
-    assert body["migration_error"]["safe_fields"] == {
-        "current_trade_mode": "dynamic_dca",
-        "requested_trade_mode": "sidestep",
-        "open_trade_count": 1,
-        "waiting_campaign_count": 2,
-    }
-    assert service.last_batch is None
-
-
 def test_config_multiple_rejects_removed_trade_mode_bridge_keys(monkeypatch) -> None:
     """Legacy trade-mode bridge keys must be rejected at the API boundary."""
     service = _DummyConfigService()
@@ -955,110 +907,6 @@ def test_live_activation_requires_websocket_signal_url() -> None:
     } in blockers
 
 
-def test_live_activation_endpoint_uses_sidestep_blockers_instead_of_classic_dca(
-    monkeypatch,
-) -> None:
-    """Sidestep mode should require sidestep strategies, not classic DCA ladders."""
-    service = _DummyConfigService()
-    service._cache.update(
-        {
-            "dry_run": True,
-            "timezone": "Europe/Vienna",
-            "signal": "asap",
-            "exchange": "binance",
-            "timeframe": "1h",
-            "key": "api-key",
-            "secret": "api-secret",
-            "currency": "USDT",
-            "market": "spot",
-            "max_bots": 2,
-            "bo": 20,
-            "tp": 1.5,
-            "capital_max_fund": 250,
-            "history_lookback_time": "180d",
-            "symbol_list": "BTC/USDT",
-            "dca": True,
-            "trade_mode": "sidestep",
-            "sidestep_bearish_strategy": "",
-            "sidestep_reentry_strategy": "",
-        }
-    )
-
-    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
-        return service
-
-    monkeypatch.setattr(
-        config_controller.Config, "instance", classmethod(_fake_instance)
-    )
-
-    app = Litestar(route_handlers=[config_controller.activate_live_trading])
-    with TestClient(app=app) as client:
-        response = client.post("/config/live/activate", json={"confirm": True})
-
-    assert response.status_code == 409
-    payload = response.json()
-    assert payload["error"] == "Live activation blocked until setup is complete."
-    assert payload["blockers"] == [
-        {
-            "key": "sidestep_bearish_strategy",
-            "message": "Choose a bearish sidestep strategy.",
-        },
-        {
-            "key": "sidestep_reentry_strategy",
-            "message": "Choose a sidestep re-entry strategy.",
-        },
-    ]
-    assert service.last_single is None
-
-
-def test_live_activation_endpoint_allows_ready_sidestep_without_classic_dca_keys(
-    monkeypatch,
-) -> None:
-    """Sidestep mode should not require classic DCA ladder values."""
-    service = _DummyConfigService()
-    service._cache.update(
-        {
-            "dry_run": True,
-            "timezone": "Europe/Vienna",
-            "signal": "asap",
-            "exchange": "binance",
-            "timeframe": "1h",
-            "key": "api-key",
-            "secret": "api-secret",
-            "currency": "USDT",
-            "market": "spot",
-            "max_bots": 2,
-            "bo": 20,
-            "tp": 1.5,
-            "capital_max_fund": 250,
-            "history_lookback_time": "180d",
-            "symbol_list": "BTC/USDT",
-            "dca": True,
-            "trade_mode": "sidestep",
-            "sidestep_bearish_strategy": "ema_down",
-            "sidestep_reentry_strategy": "ema_low",
-        }
-    )
-
-    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
-        return service
-
-    monkeypatch.setattr(
-        config_controller.Config, "instance", classmethod(_fake_instance)
-    )
-
-    app = Litestar(route_handlers=[config_controller.activate_live_trading])
-    with TestClient(app=app) as client:
-        response = client.post("/config/live/activate", json={"confirm": True})
-
-    assert response.status_code == 201
-    assert response.json()["message"] == "Live trading activated."
-    assert service.last_single == (
-        "dry_run",
-        {"value": False, "type": "bool"},
-    )
-
-
 def test_live_activation_endpoint_switches_dry_run_off(monkeypatch) -> None:
     """Dedicated live activation should persist dry_run=false when ready."""
     service = _DummyConfigService()
@@ -1094,89 +942,6 @@ def test_live_activation_endpoint_switches_dry_run_off(monkeypatch) -> None:
 
     assert response.status_code == 201
     assert response.json() == {
-        "message": "Live trading activated.",
-        "already_live": False,
-    }
-    assert service.last_single == (
-        "dry_run",
-        {"value": False, "type": "bool"},
-    )
-
-
-def test_config_route_handlers_expose_freshness_and_live_activation(
-    monkeypatch,
-) -> None:
-    """The real config route list should expose freshness and live activation."""
-    service = _DummyConfigService()
-    service._cache.update(
-        {
-            "dry_run": True,
-            "timezone": "Europe/Vienna",
-            "signal": "asap",
-            "exchange": "binance",
-            "timeframe": "1h",
-            "key": "api-key",
-            "secret": "api-secret",
-            "currency": "USDT",
-            "max_bots": 2,
-            "bo": 20,
-            "tp": 1.5,
-            "capital_max_fund": 250,
-            "history_lookback_time": "180d",
-            "symbol_list": "BTC/USDT",
-        }
-    )
-
-    async def _fake_instance(cls: type[Any]) -> _DummyConfigService:  # noqa: ANN001
-        return service
-
-    freshness_timestamp = datetime(2026, 3, 20, 17, 38, tzinfo=timezone.utc)
-    _DummyAppConfigModel.latest_row = type(
-        "_DummyAppConfigRow",
-        (),
-        {"updated_at": freshness_timestamp},
-    )()
-
-    monkeypatch.setattr(
-        config_controller.Config, "instance", classmethod(_fake_instance)
-    )
-    monkeypatch.setattr(config_controller, "AppConfig", _DummyAppConfigModel)
-    _DummyOpenTradesCount.count_value = 0
-    _DummySidestepCampaignService.waiting_count = 0
-    monkeypatch.setattr(config_controller, "OpenTrades", _DummyOpenTradesCount)
-    monkeypatch.setattr(
-        config_controller,
-        "SpotSidestepCampaignService",
-        _DummySidestepCampaignService,
-    )
-    expected_config_snapshot = {
-        **service.snapshot(),
-        "trade_mode_switch_guard": {
-            "current_trade_mode": "dynamic_dca",
-            "blocked": False,
-            "can_switch": True,
-            "open_trade_count": 0,
-            "waiting_campaign_count": 0,
-            "message": None,
-        },
-        "config_updated_at": freshness_timestamp.isoformat(),
-        "config_contract": public_config_contract(),
-    }
-
-    app = Litestar(route_handlers=config_controller.route_handlers)
-    with TestClient(app=app) as client:
-        config_response = client.get("/config/all")
-        freshness_response = client.get("/config/freshness")
-        activation_response = client.post(
-            "/config/live/activate", json={"confirm": True}
-        )
-
-    assert config_response.status_code == 200
-    assert config_response.json() == expected_config_snapshot
-    assert freshness_response.status_code == 200
-    assert freshness_response.json() == {"updated_at": freshness_timestamp.isoformat()}
-    assert activation_response.status_code == 201
-    assert activation_response.json() == {
         "message": "Live trading activated.",
         "already_live": False,
     }
@@ -1363,35 +1128,6 @@ def test_closed_trades_websocket_disconnect_is_not_logged_as_error(
         with client.websocket_connect("/trades/closed") as socket:
             payload = json.loads(socket.receive_text())
             assert payload == [{"id": 2}]
-
-    time.sleep(0.05)
-
-    assert errors == []
-
-
-def test_waiting_campaigns_websocket_disconnect_is_not_logged_as_error(
-    monkeypatch,
-) -> None:
-    """Expected waiting-campaign WebSocket disconnect should not log errors."""
-    errors: list[tuple[Any, ...]] = []
-
-    async def _fake_waiting_trades() -> list[dict[str, Any]]:
-        return [{"campaign_id": "campaign-1", "symbol": "BTC/USDT"}]
-
-    monkeypatch.setattr(
-        trades_controller,
-        "_get_waiting_campaigns_cached",
-        _fake_waiting_trades,
-    )
-    monkeypatch.setattr(
-        trades_controller.logging, "error", lambda *args, **kwargs: errors.append(args)
-    )
-
-    app = Litestar(route_handlers=[trades_controller.waiting_campaigns])
-    with TestClient(app=app) as client:
-        with client.websocket_connect("/trades/waiting") as socket:
-            payload = json.loads(socket.receive_text())
-            assert payload == [{"campaign_id": "campaign-1", "symbol": "BTC/USDT"}]
 
     time.sleep(0.05)
 

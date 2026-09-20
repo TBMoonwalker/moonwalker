@@ -4,7 +4,6 @@ import pytest
 import service.config as config_module
 from service.config import Config
 from service.config_persistence import should_persist_config_value
-from service.trade_lifecycle_config import TradeModeConfigError
 from tortoise import Tortoise
 
 
@@ -504,13 +503,13 @@ async def test_config_load_all_derives_sidestep_from_legacy_upgrade_rows(
     config = Config()
     await config.load_all()
 
-    assert config.get("trade_mode") == "sidestep"
-    assert config.snapshot()["trade_mode"] == "sidestep"
+    assert config.get("trade_mode") == "dynamic_dca"
+    assert config.snapshot()["trade_mode"] == "dynamic_dca"
     assert "trade_lifecycle_mode" not in config.snapshot()
     assert "sidestep_campaign_enabled" not in config.snapshot()
     assert "trade_lifecycle_mode" not in config.raw_snapshot()
     assert "sidestep_campaign_enabled" not in config.raw_snapshot()
-    assert (await model.AppConfig.get(key="trade_mode")).value == "sidestep"
+    assert (await model.AppConfig.get(key="trade_mode")).value == "dynamic_dca"
 
     await Tortoise.close_connections()
 
@@ -538,47 +537,6 @@ async def test_config_set_rejects_removed_trade_mode_bridge_key(
             "trade_lifecycle_mode",
             {"value": "classic_dca", "type": "str"},
         )
-
-    await Tortoise.close_connections()
-
-
-@pytest.mark.asyncio
-async def test_config_batch_set_rejects_invalid_trade_mode_snapshot_atomically(
-    tmp_path, monkeypatch
-) -> None:
-    monkeypatch.chdir(os.path.join(os.path.dirname(__file__), ".."))
-    db_path = tmp_path / "test.sqlite"
-    await Tortoise.init(db_url=f"sqlite://{db_path}", modules={"models": ["model"]})
-    await Tortoise.generate_schemas()
-
-    monkeypatch.setattr(config_module, "redis_client", DummyRedis())
-
-    import model
-
-    config = Config()
-    await config.batch_set(
-        {
-            "trade_mode": {"value": "dynamic_dca", "type": "str"},
-        }
-    )
-
-    with pytest.raises(
-        TradeModeConfigError,
-        match="Sidestep mode requires an explicit sidestep_reentry_strategy",
-    ):
-        await config.batch_set(
-            {
-                "trade_mode": {"value": "sidestep", "type": "str"},
-            }
-        )
-
-    assert config.get("trade_mode") == "dynamic_dca"
-    persisted_rows = {
-        row.key: row.value for row in await model.AppConfig.all().order_by("key")
-    }
-    assert persisted_rows == {
-        "trade_mode": "dynamic_dca",
-    }
 
     await Tortoise.close_connections()
 

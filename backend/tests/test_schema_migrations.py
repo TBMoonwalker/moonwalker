@@ -240,7 +240,7 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             ).fetchall()
         }
 
-    assert len(ledger_rows) == 8
+    assert len(ledger_rows) == 7
     assert {status for _, status in ledger_rows} == {MIGRATION_STATUS_APPLIED}
     assert open_trade is not None
     assert open_trade[:3] == ("BTC/USDC", 1.0, 100.0)

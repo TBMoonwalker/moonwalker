@@ -16,7 +16,6 @@ from service import backtest as backtest_service
 from service import strategy_runtime
 from service.analytics import compute_stats_from_trades
 from service.backtest import (
-    TRADE_MODE_SIDESTEP,
     Backtest,
     BacktestValidationError,
     DcaSimulator,
@@ -420,200 +419,14 @@ async def test_backtest_marks_still_open_trade_at_end(
 
 
 @pytest.mark.asyncio
-async def test_sidestep_backtest_exits_on_bearish_and_waits_for_reentry(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine = Backtest(
-        config={},
-        symbol="BTC/USDT",
-        strategy_slug="ema20_swing",
-        timeframe="1m",
-        start_date=datetime(2024, 1, 1, tzinfo=UTC),
-        end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
-        take_profit_pct=50.0,
-        stop_loss_pct=50.0,
-        trade_mode=TRADE_MODE_SIDESTEP,
-        sidestep_bearish_strategy="ema_down",
-        sidestep_reentry_strategy="ema20_swing_reverse",
-    )
-    engine._candles = [
-        OhlcvCandle(1_000, 100.0, 100.0, 100.0, 100.0, 1.0),
-        OhlcvCandle(61_000, 100.0, 101.0, 99.0, 100.0, 1.0),
-        OhlcvCandle(121_000, 105.0, 106.0, 104.0, 105.0, 1.0),
-        OhlcvCandle(181_000, 95.0, 96.0, 94.0, 95.0, 1.0),
-    ]
-
-    async def fake_snapshot(slug: str) -> object:
-        return object()
-
-    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
-        slug = args[0]
-        candle_index = kwargs["candle_index"]
-        matched = (
-            slug == "ema20_swing_reverse"
-            and candle_index == 0
-            or slug == "ema_down"
-            and candle_index == 1
-        )
-        return SimpleNamespace(matched=matched)
-
-    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
-    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
-
-    result = await engine.run()
-
-    assert result["trades"][0]["open_timestamp"] == 61_000
-    assert result["trades"][0]["close_timestamp"] == 121_000
-    assert result["trades"][0]["sell_reason"] == "sidestep_exit"
-    assert result["trades"][0]["safety_orders_count"] == 0
-    assert result["chart"]["markers"][0]["text"] == "RE-ENTRY"
-    assert result["chart"]["markers"][1]["text"] == "SIDESTEP"
-    assert result["stats"]["trade_mode"] == "sidestep"
-    assert result["stats"]["sidestep_waiting_at_end"] is True
-
-
 @pytest.mark.asyncio
-async def test_sidestep_backtest_blocks_spike_reentry_above_live_premium_cap(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine = Backtest(
-        config={"sidestep_reentry_max_premium_pct": 1.0},
-        symbol="BTC/USDT",
-        strategy_slug="ema20_swing",
-        timeframe="1m",
-        start_date=datetime(2024, 1, 1, tzinfo=UTC),
-        end_date=datetime(2024, 1, 1, 0, 5, tzinfo=UTC),
-        take_profit_pct=50.0,
-        stop_loss_pct=50.0,
-        trade_mode=TRADE_MODE_SIDESTEP,
-        sidestep_bearish_strategy="ema_down",
-        sidestep_reentry_strategy="ema20_swing_reverse",
-    )
-    engine._candles = [
-        _candle(0, 100.0),
-        _candle(1, 100.0),
-        _candle(2, 105.0),
-        _candle(3, 100.0),
-        _candle(4, 100.0),
-    ]
-
-    async def fake_snapshot(slug: str) -> object:
-        return object()
-
-    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
-        slug = args[0]
-        candle_index = kwargs["candle_index"]
-        return SimpleNamespace(
-            matched=(slug == "ema20_swing_reverse" and candle_index in {0, 2, 3})
-            or (slug == "ema_down" and candle_index == 1)
-        )
-
-    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
-    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
-
-    result = await engine.run()
-
-    assert [marker["time"] for marker in result["chart"]["markers"]] == [
-        1_700_000_060_000,
-        1_700_000_120_000,
-        1_700_000_180_000,
-    ]
-    assert result["stats"]["sidestep_reentry_max_premium_pct"] == 1.0
-    assert result["stats"]["still_open_at_end"] is True
-
-
 @pytest.mark.asyncio
-async def test_sidestep_backtest_requires_a_fresh_reentry_signal_after_exit(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine = Backtest(
-        config={"sidestep_reentry_requires_fresh_long_signal": True},
-        symbol="BTC/USDT",
-        strategy_slug="ema20_swing",
-        timeframe="1m",
-        start_date=datetime(2024, 1, 1, tzinfo=UTC),
-        end_date=datetime(2024, 1, 1, 0, 6, tzinfo=UTC),
-        take_profit_pct=50.0,
-        stop_loss_pct=50.0,
-        trade_mode=TRADE_MODE_SIDESTEP,
-        sidestep_bearish_strategy="ema_down",
-        sidestep_reentry_strategy="ema20_swing_reverse",
-    )
-    engine._candles = [_candle(index, 100.0) for index in range(6)]
-
-    async def fake_snapshot(slug: str) -> object:
-        return object()
-
-    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
-        slug = args[0]
-        candle_index = kwargs["candle_index"]
-        return SimpleNamespace(
-            matched=(slug == "ema20_swing_reverse" and candle_index in {0, 1, 2, 4})
-            or (slug == "ema_down" and candle_index == 1)
-        )
-
-    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
-    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
-
-    result = await engine.run()
-
-    assert [marker["time"] for marker in result["chart"]["markers"]] == [
-        1_700_000_060_000,
-        1_700_000_120_000,
-        1_700_000_300_000,
-    ]
-    assert result["stats"]["sidestep_reentry_requires_fresh_long_signal"] is True
-
-
 @pytest.mark.asyncio
-async def test_sidestep_backtest_holds_exit_when_fallback_price_breaks_floor(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    engine = Backtest(
-        config={"sidestep_exit_max_market_fallback_slippage_pct": 1.0},
-        symbol="BTC/USDT",
-        strategy_slug="ema20_swing",
-        timeframe="1m",
-        start_date=datetime(2024, 1, 1, tzinfo=UTC),
-        end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
-        take_profit_pct=50.0,
-        stop_loss_pct=50.0,
-        trade_mode=TRADE_MODE_SIDESTEP,
-        sidestep_bearish_strategy="ema_down",
-        sidestep_reentry_strategy="ema20_swing_reverse",
-    )
-    engine._candles = [
-        _candle(0, 100.0),
-        _candle(1, 100.0),
-        _candle(2, 97.0),
-        _candle(3, 100.0),
-    ]
-
-    async def fake_snapshot(slug: str) -> object:
-        return object()
-
-    async def fake_evaluate(*args: Any, **kwargs: Any) -> Any:
-        slug = args[0]
-        candle_index = kwargs["candle_index"]
-        return SimpleNamespace(
-            matched=(slug == "ema20_swing_reverse" and candle_index == 0)
-            or (slug == "ema_down" and candle_index in {1, 2})
-        )
-
-    monkeypatch.setattr(strategy_runtime, "_load_strategy_snapshot", fake_snapshot)
-    monkeypatch.setattr(backtest_service, "evaluate_strategy_graph", fake_evaluate)
-
-    result = await engine.run()
-
-    assert result["trades"][0]["close_timestamp"] == 1_700_000_180_000
-    assert result["stats"]["sidestep_exit_fallback_blocks"] == 1
-
-
 @pytest.mark.asyncio
 async def test_backtest_returns_strategy_indicator_series_for_chart_audit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Sidestep chart evidence includes both entry and exit graph indicators."""
+    """Chart evidence includes both entry and exit graph indicators."""
     engine = Backtest(
         config={},
         symbol="BTC/USDT",
@@ -621,9 +434,6 @@ async def test_backtest_returns_strategy_indicator_series_for_chart_audit(
         timeframe="1m",
         start_date=datetime(2024, 1, 1, tzinfo=UTC),
         end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
-        trade_mode=TRADE_MODE_SIDESTEP,
-        sidestep_bearish_strategy="ema_down",
-        sidestep_reentry_strategy="bollinger_buy",
     )
     engine._candles = [_candle(index, 100.0 + index) for index in range(4)]
 
@@ -692,20 +502,6 @@ async def test_backtest_warms_strategy_state_before_visible_replay(
     assert result["chart"]["markers"][0]["time"] == candles[3].timestamp
     assert result["stats"]["warmup_candles"] == 2
     assert result["stats"]["candles_fetched"] == 4
-
-
-def test_sidestep_backtest_requires_sidestep_strategies() -> None:
-    with pytest.raises(BacktestValidationError):
-        Backtest(
-            config={},
-            symbol="BTC/USDT",
-            strategy_slug="ema20_swing",
-            timeframe="1m",
-            start_date=datetime(2024, 1, 1, tzinfo=UTC),
-            end_date=datetime(2024, 1, 1, 0, 4, tzinfo=UTC),
-            trade_mode=TRADE_MODE_SIDESTEP,
-            sidestep_bearish_strategy="ema_down",
-        )
 
 
 def test_candles_to_dataframe_empty_and_populated() -> None:
@@ -924,9 +720,6 @@ def test_backtest_fetch_start_includes_strategy_warmup() -> None:
         timeframe="1w",
         start_date=start_dt,
         end_date=datetime(2026, 5, 23, tzinfo=UTC),
-        trade_mode=TRADE_MODE_SIDESTEP,
-        sidestep_bearish_strategy="ema20_swing_reverse",
-        sidestep_reentry_strategy="ema20_swing",
     )
 
     assert engine._warmup_candle_count == 200
@@ -972,9 +765,7 @@ async def test_controller_validation_and_success(
             assert self.kwargs["start_date"].tzinfo is not None
             assert self.kwargs["end_date"].tzinfo is not None
             assert self.kwargs["fee"] == 0.002
-            assert self.kwargs["trade_mode"] == "sidestep"
-            assert self.kwargs["sidestep_bearish_strategy"] == "ema_down"
-            assert self.kwargs["sidestep_reentry_strategy"] == "ema20_swing_reverse"
+            assert self.kwargs["trade_mode"] == "dynamic_dca"
             return {"ok": True}
 
     monkeypatch.setattr(backtest_controller, "Config", FakeConfig)
@@ -991,9 +782,6 @@ async def test_controller_validation_and_success(
             "start_date": "2024-01-01T00:00:00Z",
             "end_date": 1_704_070_800_000,
             "fee": 0.002,
-            "trade_mode": "sidestep",
-            "sidestep_bearish_strategy": "ema_down",
-            "sidestep_reentry_strategy": "ema20_swing_reverse",
         }
     )
 

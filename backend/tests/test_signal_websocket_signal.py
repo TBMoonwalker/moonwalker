@@ -4,7 +4,6 @@ import types
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-import model
 import pytest
 import signals.websocket_signal as websocket_signal_module
 from service.signal_runtime import SignalAdmissionBatch, SignalAdmissionDecision
@@ -112,16 +111,6 @@ def _payload(**overrides: Any) -> dict[str, Any]:
 @pytest.fixture(autouse=True)
 def _patch_common_services(monkeypatch):
     DummyOpenTrades.rows = []
-    monkeypatch.setattr(model, "OpenTrades", DummyOpenTrades)
-    monkeypatch.setattr(
-        websocket_signal_module,
-        "SpotSidestepCampaignService",
-        types.SimpleNamespace(
-            instance=_async_result(
-                types.SimpleNamespace(record_long_signal=_async_noop)
-            )
-        ),
-    )
     monkeypatch.setattr(
         websocket_signal_module,
         "resolve_signal_admission_batch",

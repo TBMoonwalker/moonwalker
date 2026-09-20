@@ -5,9 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
-from service.spot_campaign_types import TradeExposureState
-from service.trade_lifecycle_config import is_dynamic_dca_enabled
-
 EPSILON = 1e-12
 
 
@@ -138,8 +135,7 @@ def build_capital_budget_settings(
         if "capital_budget_buffer_pct" in config
         else config.get("buy_fund_buffer_pct")
     )
-    dynamic_dca = is_dynamic_dca_enabled(config)
-    buffer_pct = normalize_buffer_pct(buffer_value) if dynamic_dca else 0.0
+    buffer_pct = normalize_buffer_pct(buffer_value)
     return CapitalBudgetSettings(
         configured=has_capital_budget_config(config),
         principal_limit=resolve_capital_max_fund(config),
@@ -203,26 +199,12 @@ def estimate_remaining_trade_reserve(
     if remaining_orders <= 0:
         return 0.0
 
-    if is_dynamic_dca_enabled(config):
-        unit_cost = (
-            max(0.0, float(base_order_size))
-            if base_order_size is not None
-            else max(0.0, to_float(config.get("bo"), 0.0))
-        )
-        return round(unit_cost * remaining_orders, 8)
-
-    safety_order_size = max(0.0, to_float(config.get("so"), 0.0))
-    if safety_order_size <= 0:
-        return 0.0
-
-    volume_scale = to_float(config.get("os"), 1.0)
-    if volume_scale <= 0:
-        volume_scale = 1.0
-
-    reserve = 0.0
-    for order_index in range(max(0, int(so_count or 0)), max_safety_orders):
-        reserve += safety_order_size * (volume_scale**order_index)
-    return round(reserve, 8)
+    unit_cost = (
+        max(0.0, float(base_order_size))
+        if base_order_size is not None
+        else max(0.0, to_float(config.get("bo"), 0.0))
+    )
+    return round(unit_cost * remaining_orders, 8)
 
 
 def estimate_open_trade_reserve(
@@ -236,12 +218,6 @@ def estimate_open_trade_reserve(
         if float(open_trade.get("unsellable_amount") or 0.0) > 0 and open_trade.get(
             "unsellable_reason"
         ):
-            continue
-        if (
-            str(open_trade.get("exposure_state") or "")
-            == TradeExposureState.FLAT_WAITING_REENTRY.value
-        ):
-            total += max(0.0, float(open_trade.get("reserved_reentry_quote") or 0.0))
             continue
         if not settings.reserve_safety_orders:
             continue
@@ -295,14 +271,8 @@ def calculate_order_budget_requirement(
     order_quote = resolve_order_quote(order)
     if order_quote is None:
         return None, None
-    reserved_reentry_credit = max(
-        0.0,
-        float(order.get("capital_reserved_credit") or 0.0),
-    )
 
     resolved_settings = settings or build_capital_budget_settings(config)
-    if to_bool(order.get("baseorder"), default=False) and reserved_reentry_credit > 0:
-        return order_quote, max(0.0, order_quote - reserved_reentry_credit)
     if not resolved_settings.reserve_safety_orders:
         return order_quote, order_quote
 

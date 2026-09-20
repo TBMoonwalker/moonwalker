@@ -285,109 +285,6 @@ async def _resolve_open_deal_state(symbol: str, conn: Any) -> tuple[str, bool]:
     return deal_id, bool(open_trade.execution_history_complete)
 
 
-async def _apply_buy_campaign_context(
-    conn: Any,
-    *,
-    symbol: str,
-    deal_id: str,
-    context: CampaignPersistenceContext | None,
-) -> str | None:
-    """Persist active campaign state for a buy leg and return campaign id."""
-    if not context:
-        return None
-
-    campaign_id = str(context.get("campaign_id") or "").strip() or None
-    if campaign_id is None:
-        return None
-
-    update_payload = {
-        "symbol": symbol,
-        "lifecycle_mode": str(
-            context.get("lifecycle_mode") or TradeLifecycleMode.SIDESTEP_REENTRY.value
-        ),
-        "state": str(context.get("state") or "active_long"),
-        "started_at": str(context.get("started_at") or ""),
-        "last_transition_at": str(context.get("last_transition_at") or ""),
-        "current_deal_id": deal_id,
-        "tp_percent": float(context.get("tp_percent") or 0.0),
-        "principal_quote": float(context.get("principal_quote") or 0.0),
-        "reserved_quote": float(context.get("reserved_quote") or 0.0),
-        "cumulative_realized_quote": float(
-            context.get("cumulative_realized_quote") or 0.0
-        ),
-        "cumulative_realized_percent": float(
-            context.get("cumulative_realized_percent") or 0.0
-        ),
-        "metadata_json": context.get("metadata_json"),
-        "cooldown_until": None,
-    }
-    if bool(context.get("create_campaign")):
-        await model.SpotCampaigns.create(
-            campaign_id=campaign_id,
-            sidestep_count=int(context.get("sidestep_count") or 0),
-            last_exit_reason=context.get("last_exit_reason"),
-            **update_payload,
-            using_db=conn,
-        )
-    else:
-        await (
-            model.SpotCampaigns.filter(campaign_id=campaign_id)
-            .using_db(conn)
-            .update(
-                **update_payload,
-            )
-        )
-    return campaign_id
-
-
-async def _apply_close_campaign_context(
-    conn: Any,
-    *,
-    campaign_id: str | None,
-    context: CampaignPersistenceContext | None,
-) -> None:
-    """Persist campaign transition after a completed sell leg."""
-    if not context or not campaign_id:
-        return
-
-    update_payload = {
-        "state": str(context.get("state") or ""),
-        "last_transition_at": str(context.get("last_transition_at") or ""),
-        "current_deal_id": None,
-        "last_exit_reason": context.get("last_exit_reason"),
-        "cooldown_until": context.get("cooldown_until"),
-        "tp_percent": float(context.get("tp_percent") or 0.0),
-        "reserved_quote": float(context.get("reserved_quote") or 0.0),
-        "cumulative_realized_quote": float(
-            context.get("cumulative_realized_quote") or 0.0
-        ),
-        "cumulative_realized_percent": float(
-            context.get("cumulative_realized_percent") or 0.0
-        ),
-        "metadata_json": context.get("metadata_json"),
-    }
-    if "principal_quote" in context:
-        update_payload["principal_quote"] = float(context.get("principal_quote") or 0.0)
-    sidestep_increment = int(context.get("sidestep_increment") or 0)
-    if sidestep_increment > 0:
-        await (
-            model.SpotCampaigns.filter(campaign_id=campaign_id)
-            .using_db(conn)
-            .update(
-                sidestep_count=F("sidestep_count") + sidestep_increment,
-                **update_payload,
-            )
-        )
-        return
-    await (
-        model.SpotCampaigns.filter(campaign_id=campaign_id)
-        .using_db(conn)
-        .update(
-            **update_payload,
-        )
-    )
-
-
 def _build_open_trade_lifecycle_defaults(
     *,
     campaign_context: CampaignPersistenceContext | None,
@@ -434,24 +331,11 @@ def _resolve_open_trade_buy_open_date(
     campaign_context: CampaignPersistenceContext | None,
 ) -> str | None:
     """Return the stable original open date for a buy-backed open trade row."""
-    lifecycle_mode = str(
-        (campaign_context or {}).get("lifecycle_mode")
-        or getattr(existing_open_trade, "lifecycle_mode", "")
-        or TradeLifecycleMode.CLASSIC_DCA.value
-    )
-    campaign_started_at = _normalize_preserved_open_date(
-        (campaign_context or {}).get("started_at")
-    )
     existing_open_date = _normalize_preserved_open_date(
         getattr(existing_open_trade, "open_date", None)
     )
 
-    if lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
-        if campaign_started_at:
-            return campaign_started_at
-        if existing_open_date:
-            return existing_open_date
-    elif existing_open_date:
+    if existing_open_date:
         return existing_open_date
 
     timestamp_raw = payload.get("timestamp")
@@ -521,12 +405,7 @@ async def persist_buy_trade(
             else:
                 deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
 
-            campaign_id = await _apply_buy_campaign_context(
-                conn,
-                symbol=symbol,
-                deal_id=deal_id,
-                context=campaign_context,
-            )
+            campaign_id: str | None = None
             payload["deal_id"] = deal_id
             payload["campaign_id"] = campaign_id
             await model.Trades.create(
@@ -595,14 +474,6 @@ async def persist_buy_trade(
                             **update_defaults,
                         )
                     )
-            elif campaign_id is not None:
-                await (
-                    model.OpenTrades.filter(symbol=symbol)
-                    .using_db(conn)
-                    .update(
-                        campaign_id=campaign_id,
-                    )
-                )
             if not create_open_trade:
                 dca_updates = _build_safety_order_dca_updates(payload)
                 if dca_updates:
@@ -709,12 +580,6 @@ async def persist_closed_trade(
             )
             await model.Trades.filter(symbol=symbol).using_db(conn).delete()
             await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
-            await _apply_close_campaign_context(
-                conn,
-                campaign_id=str(summary_payload.get("campaign_id") or "").strip()
-                or None,
-                context=campaign_context,
-            )
             await mark_placements_persisted_in_transaction(
                 _placement_operation_ids(
                     placement_operation_id,
@@ -769,125 +634,6 @@ async def _repair_replay_archive_after_commit(
             deal_id,
             exc_info=True,
         )
-
-
-async def persist_sidestep_transition(
-    symbol: str,
-    payload: ClosedTradePersistenceRecord,
-    *,
-    campaign_context: CampaignPersistenceContext | None = None,
-    unsellable_payload: UnsellableTradePersistenceRecord | None = None,
-    placement_operation_id: str | None = None,
-    placement_operation_ids: Iterable[str] | None = None,
-) -> None:
-    """Persist a sidestep sell while keeping the active open-trade mission alive."""
-
-    closed_deal_id: str | None = None
-
-    async def _persist_sidestep() -> None:
-        nonlocal closed_deal_id
-        async with in_transaction() as conn:
-            deal_id, history_complete = await _resolve_open_deal_state(symbol, conn)
-            closed_deal_id = deal_id
-            campaign_id = (
-                campaign_context.get("campaign_id")
-                if campaign_context
-                else payload.get("campaign_id")
-            )
-            for sell_execution in payload.get("sell_executions") or []:
-                if not isinstance(sell_execution, dict):
-                    continue
-                if float(sell_execution.get("amount") or 0.0) <= 0:
-                    continue
-                await model.TradeExecutions.create(
-                    **(
-                        await _build_trade_execution_payload(
-                            deal_id,
-                            {
-                                **sell_execution,
-                                "campaign_id": campaign_id,
-                            },
-                            role=str(sell_execution.get("role") or "final_sell"),
-                            conn=conn,
-                        )
-                    ),
-                    using_db=conn,
-                )
-            await archive_replay_candles_for_deal(
-                deal_id,
-                symbol,
-                open_date=payload.get("open_date"),
-                close_date=payload.get("close_date"),
-                conn=conn,
-            )
-            await model.Trades.filter(symbol=symbol).using_db(conn).delete()
-            sold_amount = float(payload.get("amount") or 0.0)
-            sold_quote = sold_amount * float(payload.get("tp_price") or 0.0)
-            await (
-                model.OpenTrades.filter(symbol=symbol)
-                .using_db(conn)
-                .update(
-                    deal_id=None,
-                    campaign_id=campaign_id,
-                    execution_history_complete=history_complete,
-                    exposure_state=TradeExposureState.FLAT_WAITING_REENTRY.value,
-                    amount=0.0,
-                    cost=0.0,
-                    profit=0.0,
-                    profit_percent=0.0,
-                    tp_price=0.0,
-                    avg_price=0.0,
-                    sold_amount=0.0,
-                    sold_proceeds=0.0,
-                    current_price=float(payload.get("tp_price") or 0.0),
-                    reserved_reentry_quote=float(
-                        (campaign_context or {}).get("reserved_quote") or sold_quote
-                    ),
-                    waiting_reference_price=float(payload.get("tp_price") or 0.0),
-                    waiting_reference_amount=sold_amount,
-                    waiting_reference_quote=sold_quote,
-                    virtual_waiting_profit=0.0,
-                    virtual_waiting_profit_percent=0.0,
-                    last_transition_at=(
-                        (campaign_context or {}).get("last_transition_at")
-                        or payload.get("close_date")
-                    ),
-                    tp_limit_order_id=None,
-                    tp_limit_order_price=None,
-                    tp_limit_order_amount=None,
-                    tp_limit_order_armed_at=None,
-                )
-            )
-            await _apply_close_campaign_context(
-                conn,
-                campaign_id=str(campaign_id or "").strip() or None,
-                context=campaign_context,
-            )
-            if unsellable_payload is not None:
-                archive_payload = dict(unsellable_payload)
-                archive_payload["deal_id"] = deal_id
-                archive_payload["execution_history_complete"] = history_complete
-                await model.UnsellableTrades.create(
-                    **archive_payload,
-                    using_db=conn,
-                )
-            await mark_placements_persisted_in_transaction(
-                _placement_operation_ids(
-                    placement_operation_id,
-                    placement_operation_ids,
-                ),
-                conn,
-            )
-
-    await run_sqlite_write_with_retry(
-        _persist_sidestep, f"persisting sidestep transition for {symbol}"
-    )
-    await _repair_replay_archive_after_commit(
-        closed_deal_id,
-        symbol,
-        open_date=payload.get("open_date"),
-        close_date=payload.get("close_date"),
-    )
 
 
 async def persist_manual_buy_add(
@@ -1249,15 +995,6 @@ async def persist_stopped_trade(
             )
             await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
             await model.Trades.filter(symbol=symbol).using_db(conn).delete()
-            await _apply_close_campaign_context(
-                conn,
-                campaign_id=(
-                    str(open_trade.campaign_id).strip()
-                    if open_trade is not None and open_trade.campaign_id
-                    else None
-                ),
-                context=campaign_context,
-            )
             if open_trade and open_trade.deal_id:
                 await (
                     model.TradeExecutions.filter(

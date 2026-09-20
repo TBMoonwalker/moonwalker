@@ -9,15 +9,10 @@ from service.dca_decision import (
     DcaAction,
     DcaEvaluationContext,
     ExitActionContext,
-    SidestepExitContext,
-    WaitingReentryContext,
     build_dca_evaluation_context,
-    calculate_sidestep_exit_fallback_minimum_price,
     evaluate_exit_action_decision,
     evaluate_recovery_trigger_decision,
-    evaluate_sidestep_exit_decision,
     evaluate_static_dca_decision,
-    evaluate_waiting_reentry_decision,
 )
 from service.dca_recovery_sizing import RecoverySizingPolicy
 
@@ -31,7 +26,6 @@ def _context(
         trade={
             "symbol": "ETH/USDC",
             "deal_id": "deal-1",
-            "campaign_id": "campaign-1",
             "execution_count": 2,
             "safetyorders_count": 1,
             "dca_sizing_mode": "recovery_target",
@@ -185,153 +179,3 @@ def test_exit_action_decisions_are_pure(
 
     assert action is expected_action
     assert reason == expected_reason
-
-
-@pytest.mark.parametrize(
-    ("changes", "expected_action", "expected_reason"),
-    [
-        ({"enabled": False}, DcaAction.WAIT, "sidestep_disabled"),
-        ({"is_sidestep_mode": False}, DcaAction.WAIT, "not_sidestep_mode"),
-        ({"is_flat_waiting": True}, DcaAction.WAIT, "already_flat_waiting"),
-        ({"is_unsellable": True}, DcaAction.WAIT, "sidestep_unsellable"),
-        ({"has_campaign": False}, DcaAction.WAIT, "active_missing_campaign"),
-        ({"total_amount": 0.0}, DcaAction.WAIT, "active_missing_amount"),
-        ({"current_price": 110.0}, DcaAction.WAIT, "exit_tp_gate"),
-        (
-            {"strategy_signal": None},
-            DcaAction.WAIT,
-            "sidestep_exit_strategy_required",
-        ),
-        (
-            {"strategy_signal": False},
-            DcaAction.WAIT,
-            "sidestep_exit_strategy_not_matched",
-        ),
-        ({"strategy_signal": True}, DcaAction.SELL, "sidestep_exit"),
-    ],
-)
-def test_sidestep_exit_decisions_cover_every_reason_without_mocks(
-    changes: dict[str, object],
-    expected_action: DcaAction,
-    expected_reason: str,
-) -> None:
-    values = {
-        "enabled": True,
-        "is_sidestep_mode": True,
-        "is_flat_waiting": False,
-        "is_unsellable": False,
-        "has_campaign": True,
-        "total_amount": 1.0,
-        "current_price": 90.0,
-        "take_profit_price": 105.0,
-        "strategy_signal": True,
-        **changes,
-    }
-
-    action, reason = evaluate_sidestep_exit_decision(SidestepExitContext(**values))
-
-    assert action is expected_action
-    assert reason == expected_reason
-
-
-@pytest.mark.parametrize(
-    ("changes", "expected_action", "expected_reason"),
-    [
-        ({"is_sidestep_mode": False}, DcaAction.WAIT, "not_sidestep_mode"),
-        ({"is_flat_waiting": False}, DcaAction.WAIT, "not_flat_waiting"),
-        ({"has_campaign_id": False}, DcaAction.WAIT, "waiting_missing_campaign"),
-        (
-            {"campaign_found": None},
-            DcaAction.WAIT,
-            "waiting_campaign_lookup_required",
-        ),
-        (
-            {"campaign_found": False},
-            DcaAction.WAIT,
-            "waiting_campaign_not_found",
-        ),
-        ({"cooldown_active": True}, DcaAction.WAIT, "waiting_cooldown_active"),
-        (
-            {
-                "requires_fresh_long_signal": True,
-                "has_fresh_long_signal": False,
-            },
-            DcaAction.WAIT,
-            "waiting_fresh_long_signal_required",
-        ),
-        (
-            {"strategy_signal": None},
-            DcaAction.WAIT,
-            "sidestep_reentry_strategy_required",
-        ),
-        (
-            {"strategy_signal": False},
-            DcaAction.WAIT,
-            "sidestep_reentry_strategy_not_matched",
-        ),
-        (
-            {"order_size": 0.0},
-            DcaAction.WAIT,
-            "waiting_missing_reserved_quote",
-        ),
-        (
-            {
-                "current_price": 106.0,
-                "waiting_reference_price": 100.0,
-                "max_reentry_premium_pct": 5.0,
-            },
-            DcaAction.WAIT,
-            "waiting_reentry_price_above_limit",
-        ),
-        (
-            {"max_reentry_premium_pct": 5.0},
-            DcaAction.WAIT,
-            "waiting_reentry_reference_price_required",
-        ),
-        (
-            {"strategy_signal": True},
-            DcaAction.PLACE_REENTRY_BUY,
-            "sidestep_reentry",
-        ),
-    ],
-)
-def test_waiting_reentry_decisions_cover_every_reason_without_mocks(
-    changes: dict[str, object],
-    expected_action: DcaAction,
-    expected_reason: str,
-) -> None:
-    values = {
-        "is_sidestep_mode": True,
-        "is_flat_waiting": True,
-        "has_campaign_id": True,
-        "campaign_found": True,
-        "cooldown_active": False,
-        "strategy_signal": True,
-        "order_size": 50.0,
-        "has_fresh_long_signal": True,
-        **changes,
-    }
-
-    action, reason = evaluate_waiting_reentry_decision(WaitingReentryContext(**values))
-
-    assert action is expected_action
-    assert reason == expected_reason
-
-
-@pytest.mark.parametrize(
-    ("trigger_price", "slippage_pct", "expected"),
-    [
-        (100.0, 1.0, 99.0),
-        (100.0, 0.0, None),
-        (0.0, 1.0, None),
-    ],
-)
-def test_sidestep_exit_fallback_minimum_price(
-    trigger_price: float,
-    slippage_pct: float,
-    expected: float | None,
-) -> None:
-    assert (
-        calculate_sidestep_exit_fallback_minimum_price(trigger_price, slippage_pct)
-        == expected
-    )

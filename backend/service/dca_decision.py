@@ -28,7 +28,6 @@ class DcaAction(StrEnum):
     PLACE_SAFETY_ORDER = "place_safety_order"
     SELL = "sell"
     ARM_TP_LIMIT = "arm_tp_limit"
-    PLACE_REENTRY_BUY = "place_reentry_buy"
 
 
 @dataclass(frozen=True)
@@ -109,63 +108,6 @@ class ExitActionContext:
     has_tp_limit_order: bool
     tp_limit_prearm_supported: bool
     tp_limit_prearm_ready: bool
-
-
-@dataclass(frozen=True)
-class SidestepExitContext:
-    """Resolved, immutable inputs for a sidestep exit decision."""
-
-    enabled: bool
-    is_sidestep_mode: bool
-    is_flat_waiting: bool
-    is_unsellable: bool
-    has_campaign: bool
-    total_amount: float
-    current_price: float
-    take_profit_price: float
-    strategy_signal: bool | None
-
-
-@dataclass(frozen=True)
-class WaitingReentryContext:
-    """Resolved, immutable inputs for a sidestep re-entry decision."""
-
-    is_sidestep_mode: bool
-    is_flat_waiting: bool
-    has_campaign_id: bool
-    campaign_found: bool | None
-    cooldown_active: bool
-    strategy_signal: bool | None
-    order_size: float
-    current_price: float = 0.0
-    waiting_reference_price: float = 0.0
-    max_reentry_premium_pct: float = 0.0
-    requires_fresh_long_signal: bool = False
-    has_fresh_long_signal: bool = False
-
-
-def calculate_sidestep_reentry_maximum_price(
-    waiting_reference_price: float,
-    max_reentry_premium_pct: float,
-) -> float | None:
-    """Return the inclusive re-entry price ceiling, or ``None`` when disabled."""
-    if max_reentry_premium_pct <= 0:
-        return None
-    if waiting_reference_price <= 0:
-        return None
-    return waiting_reference_price * (1 + (max_reentry_premium_pct / 100))
-
-
-def calculate_sidestep_exit_fallback_minimum_price(
-    strategy_trigger_price: float,
-    max_market_fallback_slippage_pct: float,
-) -> float | None:
-    """Return the sidestep market-fallback floor, or ``None`` when disabled."""
-    if max_market_fallback_slippage_pct <= 0:
-        return None
-    if strategy_trigger_price <= 0:
-        return None
-    return strategy_trigger_price * (1 - (max_market_fallback_slippage_pct / 100))
 
 
 def build_dca_evaluation_context(
@@ -322,63 +264,3 @@ def evaluate_exit_action_decision(
     ):
         return DcaAction.ARM_TP_LIMIT, "tp_limit_prearm_ready", None
     return DcaAction.WAIT, "no_exit_trigger", None
-
-
-def evaluate_sidestep_exit_decision(
-    context: SidestepExitContext,
-) -> tuple[DcaAction, str]:
-    """Select a sidestep exit action without service or persistence access."""
-    if not context.enabled:
-        return DcaAction.WAIT, "sidestep_disabled"
-    if not context.is_sidestep_mode:
-        return DcaAction.WAIT, "not_sidestep_mode"
-    if context.is_flat_waiting:
-        return DcaAction.WAIT, "already_flat_waiting"
-    if context.is_unsellable:
-        return DcaAction.WAIT, "sidestep_unsellable"
-    if not context.has_campaign:
-        return DcaAction.WAIT, "active_missing_campaign"
-    if context.total_amount <= 0:
-        return DcaAction.WAIT, "active_missing_amount"
-    if context.current_price >= context.take_profit_price:
-        return DcaAction.WAIT, "exit_tp_gate"
-    if context.strategy_signal is None:
-        return DcaAction.WAIT, "sidestep_exit_strategy_required"
-    if not context.strategy_signal:
-        return DcaAction.WAIT, "sidestep_exit_strategy_not_matched"
-    return DcaAction.SELL, "sidestep_exit"
-
-
-def evaluate_waiting_reentry_decision(
-    context: WaitingReentryContext,
-) -> tuple[DcaAction, str]:
-    """Select a waiting-campaign re-entry action without lifecycle I/O."""
-    if not context.is_sidestep_mode:
-        return DcaAction.WAIT, "not_sidestep_mode"
-    if not context.is_flat_waiting:
-        return DcaAction.WAIT, "not_flat_waiting"
-    if not context.has_campaign_id:
-        return DcaAction.WAIT, "waiting_missing_campaign"
-    if context.campaign_found is None:
-        return DcaAction.WAIT, "waiting_campaign_lookup_required"
-    if not context.campaign_found:
-        return DcaAction.WAIT, "waiting_campaign_not_found"
-    if context.cooldown_active:
-        return DcaAction.WAIT, "waiting_cooldown_active"
-    if context.requires_fresh_long_signal and not context.has_fresh_long_signal:
-        return DcaAction.WAIT, "waiting_fresh_long_signal_required"
-    if context.strategy_signal is None:
-        return DcaAction.WAIT, "sidestep_reentry_strategy_required"
-    if not context.strategy_signal:
-        return DcaAction.WAIT, "sidestep_reentry_strategy_not_matched"
-    maximum_price = calculate_sidestep_reentry_maximum_price(
-        context.waiting_reference_price,
-        context.max_reentry_premium_pct,
-    )
-    if context.max_reentry_premium_pct > 0 and maximum_price is None:
-        return DcaAction.WAIT, "waiting_reentry_reference_price_required"
-    if maximum_price is not None and context.current_price > maximum_price:
-        return DcaAction.WAIT, "waiting_reentry_price_above_limit"
-    if context.order_size <= 0:
-        return DcaAction.WAIT, "waiting_missing_reserved_quote"
-    return DcaAction.PLACE_REENTRY_BUY, "sidestep_reentry"

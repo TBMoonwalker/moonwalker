@@ -23,8 +23,6 @@ async def _run_backtest(data: dict[str, Any]) -> Any:
     symbol = data.get("symbol")
     strategy_slug = data.get("strategy_slug")
     trade_mode = str(data.get("trade_mode", "dynamic_dca")).strip().lower()
-    if trade_mode == "sidestep" and not strategy_slug:
-        strategy_slug = data.get("sidestep_reentry_strategy")
     timeframe = data.get("timeframe")
     start_date = data.get("start_date")
     end_date = data.get("end_date")
@@ -74,8 +72,6 @@ async def _run_backtest(data: dict[str, Any]) -> Any:
             safety_order_step_pct=data.get("safety_order_step_pct", 10.0),
             fee=data.get("fee", 0.001),
             trade_mode=trade_mode,
-            sidestep_bearish_strategy=data.get("sidestep_bearish_strategy"),
-            sidestep_reentry_strategy=data.get("sidestep_reentry_strategy"),
         )
         result = await engine.run()
         return json_response(result)

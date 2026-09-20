@@ -1,29 +1,21 @@
-import pytest
 from service.config_views import (
     DcaRuntimeConfigView,
     ExchangeConnectionConfigView,
-    SidestepCampaignConfigView,
     SignalPluginConfigView,
-    TradeLifecycleConfigView,
     WatcherRuntimeConfigView,
-    normalize_trade_mode,
-)
-from service.trade_lifecycle_config import (
-    TradeModeConfigError,
-    resolve_trade_mode_config,
 )
 
 
 def test_exchange_connection_config_view_normalizes_dry_run_and_strings() -> None:
     config = ExchangeConnectionConfigView.from_config(
         {
-            "exchange": "  binance  ",
-            "key": "  key  ",
+            "exchange": "  binance   ",
+            "key": "  key   ",
             "secret": "secret",
             "market": "",
             "dry_run": True,
             "sandbox": True,
-            "exchange_hostname": "  api.exchange.test  ",
+            "exchange_hostname": "  api.exchange.test   ",
         }
     )
 
@@ -39,7 +31,8 @@ def test_exchange_connection_config_view_normalizes_dry_run_and_strings() -> Non
 def test_signal_plugin_config_view_normalizes_blank_signal_name() -> None:
     assert SignalPluginConfigView.from_config({"signal": ""}).signal_name is None
     assert (
-        SignalPluginConfigView.from_config({"signal": "  asap  "}).signal_name == "asap"
+        SignalPluginConfigView.from_config({"signal": "  asap   "}).signal_name
+        == "asap"
     )
 
 
@@ -49,7 +42,7 @@ def test_watcher_runtime_config_view_reuses_exchange_connection_settings() -> No
             "watcher_ohlcv": False,
             "btc_pulse": True,
             "timeframe": " 15m ",
-            "exchange": "  binance  ",
+            "exchange": "  binance   ",
             "market": "",
             "dry_run": True,
             "sandbox": True,
@@ -65,101 +58,6 @@ def test_watcher_runtime_config_view_reuses_exchange_connection_settings() -> No
     assert config.exchange_connection.dry_run is True
     assert config.exchange_connection.sandbox is False
     assert config.exchange_connection.exchange_hostname == "demo.exchange.test"
-
-
-def test_sidestep_campaign_config_view_normalizes_market_and_values() -> None:
-    config = SidestepCampaignConfigView.from_config(
-        {
-            "trade_mode": "sidestep",
-            "market": "  future  ",
-            "sidestep_bearish_strategy": "  ema_down  ",
-            "sidestep_reentry_strategy": "ema20_swing",
-            "sidestep_reentry_cooldown_candles": "3",
-            "sidestep_reentry_requires_fresh_long_signal": False,
-            "sidestep_confirm_closed_candle": True,
-            "sidestep_reentry_max_premium_pct": "-1",
-            "sidestep_exit_max_market_fallback_slippage_pct": "2.5",
-        }
-    )
-
-    assert config.enabled is True
-    assert config.market == "future"
-    assert config.bearish_strategy == "ema_down"
-    assert config.reentry_cooldown_candles == 3
-    assert config.reentry_requires_fresh_long_signal is False
-    assert config.confirm_closed_candle is True
-    assert config.reentry_max_premium_pct == 0.0
-    assert config.exit_max_market_fallback_slippage_pct == 2.5
-
-
-def test_trade_lifecycle_config_view_prefers_canonical_mode() -> None:
-    config = TradeLifecycleConfigView.from_config(
-        {
-            "trade_mode": " dynamic_dca ",
-            "market": "spot",
-            "sidestep_bearish_strategy": "ema_down",
-            "sidestep_reentry_strategy": "ema20_swing",
-        }
-    )
-
-    assert config.trade_mode == "dynamic_dca"
-    assert config.mode == "classic_dca"
-    assert config.enabled is False
-    assert normalize_trade_mode({"trade_mode": "dynamic_dca"}) == "dynamic_dca"
-    assert (
-        resolve_trade_mode_config(
-            {
-                "trade_mode": "dynamic_dca",
-            },
-            source="runtime",
-        ).lifecycle_mode
-        == "classic_dca"
-    )
-    assert (
-        resolve_trade_mode_config(
-            {
-                "trade_mode": "dynamic_dca",
-            },
-            source="runtime",
-        ).sidestep_enabled
-        is False
-    )
-    assert (
-        resolve_trade_mode_config(
-            {"trade_mode": "dynamic_dca"},
-            source="runtime",
-        ).dynamic_dca_enabled
-        is True
-    )
-
-
-def test_trade_lifecycle_config_view_uses_canonical_sidestep_mode() -> None:
-    config = TradeLifecycleConfigView.from_config(
-        {
-            "trade_mode": "sidestep",
-            "market": "spot",
-            "sidestep_bearish_strategy": "ema_down",
-            "dca_strategy": "ema20_swing",
-        }
-    )
-
-    assert config.mode == "sidestep_reentry"
-    assert config.enabled is True
-    assert config.reentry_strategy == "ema20_swing"
-    assert (
-        resolve_trade_mode_config(
-            {"trade_mode": "sidestep"},
-            source="startup",
-        ).lifecycle_mode
-        == "sidestep_reentry"
-    )
-    assert (
-        resolve_trade_mode_config(
-            {"trade_mode": "sidestep"},
-            source="startup",
-        ).sidestep_enabled
-        is True
-    )
 
 
 def test_dca_runtime_config_view_applies_tp_confirmation_defaults() -> None:
@@ -199,33 +97,6 @@ def test_dca_runtime_config_view_applies_tp_confirmation_defaults() -> None:
     assert config.recovery_min_tp_improvement_percent == 5.0
 
 
-def test_trade_mode_config_requires_explicit_sidestep_reentry_on_save() -> None:
-    startup_view = resolve_trade_mode_config(
-        {
-            "trade_mode": "sidestep",
-            "dca_strategy": "ema20_swing",
-        },
-        source="startup",
-        require_explicit_sidestep_reentry=False,
-    )
-
-    assert startup_view.trade_mode == "sidestep"
-    assert startup_view.effective_reentry_strategy == "ema20_swing"
-
-    with pytest.raises(
-        TradeModeConfigError,
-        match="Sidestep mode requires an explicit sidestep_reentry_strategy",
-    ):
-        resolve_trade_mode_config(
-            {
-                "trade_mode": "sidestep",
-                "dca_strategy": "ema20_swing",
-            },
-            source="save",
-            require_explicit_sidestep_reentry=True,
-        )
-
-
 def test_dca_runtime_config_view_normalizes_dynamic_dca_fields() -> None:
     config = DcaRuntimeConfigView.from_config(
         {
@@ -234,8 +105,8 @@ def test_dca_runtime_config_view_normalizes_dynamic_dca_fields() -> None:
             "tp_spike_confirm_ticks": "2",
             "tp_limit_prearm_enabled": True,
             "tp_limit_prearm_margin_percent": "0.75",
-            "dca_strategy": "  ema_swing  ",
-            "tp_strategy": "  ema_down  ",
+            "dca_strategy": "  ema_swing   ",
+            "tp_strategy": "  ema_down   ",
             "dca": True,
             "tp": "2.5",
             "sl": "6.0",
