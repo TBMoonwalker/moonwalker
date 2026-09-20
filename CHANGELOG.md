@@ -2,6 +2,32 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.8.0.0] - 2026-09-20
+
+### Removed
+- Sidestep mode is gone. `dynamic_dca` is now the only trade mode; the
+  `spot_campaigns` table model, `SpotSidestepCampaignService`, the 7
+  `sidestep_*` config keys, the `waitingCampaigns` websocket, and the
+  `/trades/waiting` REST endpoints and stream are all removed. Legacy config
+  keys (`trade_lifecycle_mode`, `dynamic_dca`, `sidestep_campaign_enabled`)
+  migrate on load to the canonical `trade_mode = "dynamic_dca"`. On-disk
+  campaign columns stay dormant. The "Waiting Campaigns" UI tab and its
+  replay surface are removed from the trades page.
+- The `sidestep_exit` close reason and the `TRADE_MODE_SIDESTEP` /
+  `is_sidestep_mode` / waiting-campaign lifecycle machinery are removed from both
+  the backend and the frontend.
+
+### Changed
+- `trade_mode`, `tradeLifecycle`, and the readiness / config-payload paths now
+  canonicalize to `dynamic_dca` only; `normalizeTradeMode` and the
+  `isDynamicTradeMode` / `isDynamicDcaMode` helpers always resolve to
+  `dynamic_dca`.
+- Coverage floors were re-ratcheted after the branch removal:
+   `backend/controller/config.py` to 64.0 and `backend/service/ai_trust.py` to
+  71.0 in `scripts/check_coverage_thresholds.py`.
+- `docs/api.md`, `docs/configuration.md`, and `docs/operations.md` no longer
+  document the removed sidestep / waiting-campaign surface.
+
 ## [4.7.1.1] - 2026-09-16
 
 ### Fixed
@@ -52,8 +78,6 @@ All notable changes to Moonwalker are documented in this file.
   in CI, pinned `ruff==0.15.22` in `requirements-dev`); the backend was
   reformatted and project config (`pyproject.toml`, `opencode.json`) now
   targets Ruff with 88-col, double-quote, LF settings.
-
-## [Unreleased]
 
 ## [4.6.3.0] - 2026-09-04
 
