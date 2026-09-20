@@ -126,13 +126,6 @@ async def test_asap_run_uses_shared_admission_batch(monkeypatch) -> None:
         "resolve_signal_entry_orders",
         fake_resolve_signal_entry_orders,
     )
-    monkeypatch.setattr(
-        asap_module,
-        "SpotSidestepCampaignService",
-        types.SimpleNamespace(
-            instance=_async_value(types.SimpleNamespace(record_long_signal=_async_noop))
-        ),
-    )
 
     orders = []
 

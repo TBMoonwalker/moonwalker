@@ -12,17 +12,17 @@ test('dashboard tab groups implement the ARIA tabs pattern', () => {
     // Regression: ISSUE-003 — chart and trade tabs were pointer-only divs.
     // Found by /qa on 2026-07-17.
     // Report: .gstack/qa-reports/qa-report-192-168-6-5-8150-2026-07-17.md
-    assert.equal(
-        (tradesViewSource.match(/:tab-props="get(?:Profit|Trade)TabProps/g) || [])
-            .length,
-        8,
-        'expected every chart and trade tab to receive semantic tab props',
-    )
-    assert.equal(
-        (tradesViewSource.match(/role="tabpanel"/g) || []).length,
-        8,
-        'expected every tab content pane to expose the tabpanel role',
-    )
+     assert.equal(
+         (tradesViewSource.match(/:tab-props="get(?:Profit|Trade)TabProps/g) || [])
+              .length,
+           7,
+           'expected every chart and trade tab to receive semantic tab props',
+        )
+     assert.equal(
+         (tradesViewSource.match(/role="tabpanel"/g) || []).length,
+           7,
+           'expected every tab content pane to expose the tabpanel role',
+        )
     for (const token of [
         "role: 'tab'",
         "'aria-selected': String(selected)",

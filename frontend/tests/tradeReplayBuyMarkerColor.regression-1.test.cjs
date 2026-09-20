@@ -36,26 +36,14 @@ test('trade replay buy markers use the chart bullish green', () => {
           ),
           'expected open-trade buy markers to use DESIGN.md success green',
       )
-    assert.ok(
-        closedTradeExpandedRowSource.includes(
-              "const BUY_MARKER_COLOR = '#2E7D5B'",
-          ),
-          'expected closed-trade buy markers to use DESIGN.md success green',
+     assert.ok(
+         closedTradeExpandedRowSource.includes(
+                "const BUY_MARKER_COLOR = '#2E7D5B'",
+            ),
+            'expected closed-trade buy markers to use DESIGN.md success green',
+        )
+     assert.ok(
+         tradeReplayChartSource.includes('Date.parse(String(value))'),
+          'expected replay charts to parse timestamp strings when anchoring execution history',
       )
-    assert.ok(
-        openTradeExpandedRowSource.includes('campaign_started_at'),
-        'expected open-trade replay to anchor sidestep missions to the campaign start instead of only the latest leg',
-    )
-    assert.ok(
-        openTradeExpandedRowSource.includes('Re-entry buy'),
-        'expected re-entered sidestep trades to label the current leg as a re-entry buy',
-    )
-    assert.ok(
-        closedTradeExpandedRowSource.includes('Campaign summary:'),
-        'expected closed sidestep replays to expose a compact campaign summary above the timeline',
-    )
-    assert.ok(
-        tradeReplayChartSource.includes('Date.parse(String(value))'),
-        'expected replay charts to parse campaign timestamp strings when anchoring sidestep mission history',
-    )
-})
+ })

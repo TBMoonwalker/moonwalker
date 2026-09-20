@@ -23,7 +23,6 @@ from service.redis import CONFIG_CHANNEL, redis_client
 from service.signal_settings import serialize_signal_settings
 from service.strategy_capability import filter_supported_strategies
 from service.strategy_catalog import PUBLIC_BUILTIN_SLUGS
-from service.trade_lifecycle_config import resolve_trade_mode_config
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "config")
@@ -66,13 +65,6 @@ HISTORY_LOOKBACK_UNIT_TO_DAYS = {
 DEFAULT_CONFIG_VALUES = {
     "trade_mode": "dynamic_dca",
     "trading_paused": False,
-    "sidestep_bearish_strategy": "",
-    "sidestep_reentry_strategy": "",
-    "sidestep_reentry_cooldown_candles": 0,
-    "sidestep_reentry_requires_fresh_long_signal": False,
-    "sidestep_confirm_closed_candle": False,
-    "sidestep_reentry_max_premium_pct": 0.0,
-    "sidestep_exit_max_market_fallback_slippage_pct": 0.0,
     "capital_max_fund": 0.0,
     "capital_reserve_safety_orders": False,
     "capital_budget_buffer_pct": 0.0,
@@ -263,11 +255,6 @@ class Config:
             if is_removed_config_key(row.key):
                 continue
             entries.append(self.__build_entry(row.key, row.value, row.value_type))
-        self.__validate_trade_mode_snapshot(
-            self.__build_snapshot_from_entries(entries),
-            source="startup",
-            require_explicit_sidestep_reentry=False,
-        )
         self._store.replace_entries(entries)
         self.__refresh_runtime_metadata()
 
@@ -292,11 +279,6 @@ class Config:
             if key not in loaded_keys:
                 next_entries.pop(key, None)
 
-        self.__validate_trade_mode_snapshot(
-            self.__build_snapshot_from_entries(next_entries.values()),
-            source="startup",
-            require_explicit_sidestep_reentry=False,
-        )
         self._store.replace_entries(next_entries.values())
         self.__refresh_runtime_metadata()
 
@@ -321,11 +303,7 @@ class Config:
 
     def snapshot(self) -> dict[str, Any]:
         """Return a defensive copy of the current config state."""
-        raw_snapshot = self.__raw_snapshot()
-        trade_mode_state = resolve_trade_mode_config(raw_snapshot, source="runtime")
-        snapshot = dict(raw_snapshot)
-        snapshot["trade_mode"] = trade_mode_state.trade_mode
-        return snapshot
+        return dict(self.__raw_snapshot())
 
     def public_snapshot(self) -> dict[str, Any]:
         """Return a client-safe config snapshot with credentials redacted."""
@@ -373,41 +351,6 @@ class Config:
     def __raw_snapshot(self) -> dict[str, Any]:
         """Return the runtime snapshot."""
         return self._store.snapshot(defaults=DEFAULT_CONFIG_VALUES)
-
-    def __build_snapshot_from_entries(
-        self, entries: list[ConfigEntry] | Any
-    ) -> dict[str, Any]:
-        """Build a raw config snapshot from typed persisted entries."""
-        snapshot = dict(DEFAULT_CONFIG_VALUES)
-        for entry in entries:
-            snapshot[entry.key] = entry.value
-        return snapshot
-
-    def __build_candidate_snapshot(
-        self, actions: list[ConfigUpdateAction]
-    ) -> dict[str, Any]:
-        """Apply pending config actions to the raw runtime snapshot."""
-        snapshot = self.__raw_snapshot()
-        for action in actions:
-            if action.persist:
-                snapshot[action.key] = action.runtime_value
-            else:
-                snapshot.pop(action.key, None)
-        return snapshot
-
-    def __validate_trade_mode_snapshot(
-        self,
-        snapshot: dict[str, Any],
-        *,
-        source: str,
-        require_explicit_sidestep_reentry: bool,
-    ) -> None:
-        """Validate the candidate trade-mode snapshot before it reaches runtime."""
-        resolve_trade_mode_config(
-            snapshot,
-            source=source,
-            require_explicit_sidestep_reentry=require_explicit_sidestep_reentry,
-        )
 
     def __parse_update_payload(self, payload: Any) -> dict[str, Any]:
         """Normalize update payloads from API clients."""
@@ -513,11 +456,6 @@ class Config:
             True if the operation succeeded
         """
         action = self.__build_update_action(key, value)
-        self.__validate_trade_mode_snapshot(
-            self.__build_candidate_snapshot([action]),
-            source="save",
-            require_explicit_sidestep_reentry=True,
-        )
 
         async with in_transaction() as conn:
             if action.persist:
@@ -565,12 +503,6 @@ class Config:
         for key, raw_value in updates.items():
             self.__assert_supported_key(key)
             actions.append(self.__build_update_action(key, raw_value))
-
-        self.__validate_trade_mode_snapshot(
-            self.__build_candidate_snapshot(actions),
-            source="save",
-            require_explicit_sidestep_reentry=True,
-        )
 
         async with in_transaction() as conn:
             for action in actions:

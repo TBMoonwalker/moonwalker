@@ -142,7 +142,7 @@ const entryFlowDetail = computed(() => {
     if (props.tradingPaused) {
         return 'Moonwalker is not starting anything new right now, but it is still managing exits on trades that are already open.'
     }
-    return 'Moonwalker is free to start new trades and bring waiting sidestep deals back in when their conditions line up.'
+     return 'Moonwalker is free to start new trades and manage the ones already open.'
 })
 
 const toggleTradingPauseLabel = computed(() =>

@@ -193,18 +193,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         return 'red'
     }
 
-    function getReentryLabel(rowData: OpenTradeRow): string | null {
-        const sidestepCount = Number(rowData.sidestep_count ?? 0)
-        if (
-            String(rowData.lifecycle_mode ?? '') !== 'sidestep_reentry' ||
-            sidestepCount <= 0
-        ) {
-            return null
-        }
-        return `Re-entered x${sidestepCount}`
-    }
-
-    function renderCellStack(
+     function renderCellStack(
         main: string,
         secondary?: string,
         mainClass = 'trade-cell-main',
@@ -217,23 +206,9 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
         ])
     }
 
-    function renderSymbolCell(rowData: OpenTradeRow, index: number) {
+     function renderSymbolCell(rowData: OpenTradeRow, index: number) {
         const [symbol, currency] = splitTradeSymbol(rowData.symbol)
-        const reentryLabel = getReentryLabel(rowData)
         const tags = []
-        if (reentryLabel) {
-            tags.push(
-                h(
-                    NTag,
-                    {
-                        size: 'small',
-                        bordered: false,
-                        type: 'warning',
-                    },
-                    { default: () => reentryLabel },
-                ),
-            )
-        }
         if (rowData.automation_paused) {
             tags.push(
                 h(

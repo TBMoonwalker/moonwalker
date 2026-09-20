@@ -33,8 +33,6 @@ _STRATEGY_CONFIG_KEYS = (
     "signal_strategy",
     "dca_strategy",
     "tp_strategy",
-    "sidestep_bearish_strategy",
-    "sidestep_reentry_strategy",
 )
 
 

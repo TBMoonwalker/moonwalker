@@ -220,11 +220,9 @@ class CampaignPersistenceContext(TypedDict, total=False):
     metadata_json: str | None
     cooldown_until: str | None
     create_campaign: bool
-    sidestep_count: int
     last_exit_reason: str | None
     close_reason: str | None
     summary_overrides: dict[str, Any]
-    sidestep_increment: int
 
 
 class ClosedTradePayloadBundle(TypedDict):

@@ -119,10 +119,7 @@ async def test_warmup_active_trade_strategy_history_backfills_insufficient_symbo
 ) -> None:
     watcher = Watcher()
     watcher.config = {
-        "trade_lifecycle_mode": "sidestep_reentry",
         "market": "spot",
-        "sidestep_bearish_strategy": "ema_down",
-        "sidestep_reentry_strategy": "ema20_swing_reverse",
         "timeframe": "4h",
     }
     history_checks: list[str] = []
@@ -154,7 +151,6 @@ async def test_warmup_active_trade_strategy_history_backfills_insufficient_symbo
             **_kwargs,
         ) -> bool:
             history_adds.append((symbol, history_data))
-            assert config["trade_lifecycle_mode"] == "sidestep_reentry"
             return True
 
         async def close(self) -> None:
@@ -259,15 +255,6 @@ async def test_active_trade_strategy_health_check_skips_without_dynamic_strategy
         fake_run_strategy_health_check,
     )
 
-    await watcher._run_active_trade_strategy_health_check(
-        {
-            "trade_mode": "sidestep",
-            "dca_strategy": "ema_swing",
-            "dca": True,
-        },
-        timeframe="4h",
-        symbols=["BARD/USDC"],
-    )
     await watcher._run_active_trade_strategy_health_check(
         {
             "trade_mode": "dynamic_dca",

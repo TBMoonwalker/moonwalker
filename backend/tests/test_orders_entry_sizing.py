@@ -5,17 +5,11 @@ import service.orders as orders_module
 from service.orders import Orders
 
 
-class _FakeSidestepCampaignService:
-    async def resolve_buy_context(self, _symbol, _order, _config) -> dict:
-        return {}
-
-
 @pytest.mark.asyncio
 async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
     monkeypatch,
 ) -> None:
     orders = Orders()
-    orders.sidestep_campaigns = _FakeSidestepCampaignService()
     attempts: list[dict] = []
     persisted: list[tuple[str, dict, bool]] = []
     notifications: list[tuple[str, dict]] = []

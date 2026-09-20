@@ -8,7 +8,6 @@ from typing import Any, Iterable
 
 import helper
 from service.strategy_catalog import BUILTIN_STRATEGY_BY_SLUG
-from service.trade_lifecycle_config import TradeLifecycleConfigView
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_capability")
 
@@ -87,19 +86,10 @@ def _configured_strategy_names(
     include_signal_strategy: bool,
 ) -> list[str | None]:
     """Return configured strategy names for the active lifecycle mode."""
-    lifecycle = TradeLifecycleConfigView.from_config(config)
-    sidestep_mode = lifecycle.is_sidestep_mode()
-    strategy_names: list[str | None] = [config.get("tp_strategy")]
-
-    if sidestep_mode:
-        strategy_names.extend(
-            [
-                lifecycle.bearish_exit_strategy,
-                lifecycle.reentry_strategy,
-            ]
-        )
-    else:
-        strategy_names.append(config.get("dca_strategy"))
+    strategy_names: list[str | None] = [
+        config.get("tp_strategy"),
+        config.get("dca_strategy"),
+    ]
 
     if include_signal_strategy:
         strategy_names.append(config.get("signal_strategy"))

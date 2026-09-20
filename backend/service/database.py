@@ -329,18 +329,6 @@ class Database:
                 ("symbol", "timestamp"),
             ),
             ("tradeexecutions", "idx_tradeexecutions_side_role", ("side", "role")),
-            ("spotcampaigns", "idx_spotcampaigns_symbol", ("symbol",)),
-            ("spotcampaigns", "idx_spotcampaigns_state_symbol", ("state", "symbol")),
-            (
-                "spotcampaigns",
-                "idx_spotcampaigns_current_deal_id",
-                ("current_deal_id",),
-            ),
-            (
-                "spotcampaigns",
-                "idx_spotcampaigns_last_transition_at",
-                ("last_transition_at",),
-            ),
             (
                 "opentrades",
                 "idx_opentrades_exposure_state_symbol",
@@ -350,11 +338,6 @@ class Database:
                 "opentrades",
                 "idx_opentrades_lifecycle_mode",
                 ("lifecycle_mode",),
-            ),
-            (
-                "spotcampaigns",
-                "idx_spotcampaigns_lifecycle_state_symbol",
-                ("lifecycle_mode", "state", "symbol"),
             ),
             (
                 "tradereplaycandles",
@@ -407,7 +390,6 @@ class Database:
         desired_unique_indexes: tuple[tuple[str, str, tuple[str, ...]], ...] = (
             ("opentrades", "uidx_opentrades_deal_id", ("deal_id",)),
             ("closedtrades", "uidx_closedtrades_deal_id", ("deal_id",)),
-            ("spotcampaigns", "uidx_spotcampaigns_campaign_id", ("campaign_id",)),
             ("unsellabletrades", "uidx_unsellabletrades_deal_id", ("deal_id",)),
             ("strategy_definitions", "uidx_strategy_definitions_slug", ("slug",)),
             (
@@ -508,16 +490,6 @@ class Database:
             "unsellabletrades": (
                 ("deal_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
-            ),
-            "spotcampaigns": (
-                (
-                    "lifecycle_mode",
-                    "TEXT NOT NULL DEFAULT 'sidestep_reentry'",
-                ),
-                ("principal_quote", "REAL NOT NULL DEFAULT 0.0"),
-                ("reserved_quote", "REAL NOT NULL DEFAULT 0.0"),
-                ("cumulative_realized_quote", "REAL NOT NULL DEFAULT 0.0"),
-                ("cumulative_realized_percent", "REAL NOT NULL DEFAULT 0.0"),
             ),
         }
 
@@ -709,31 +681,6 @@ class Database:
                 ", ".join(_extract_added_column_names(alter_statements)),
             )
 
-    async def _ensure_spot_campaign_columns(self) -> None:
-        """Ensure additive SpotCampaigns columns exist on existing SQLite databases."""
-        if not self.db_url.startswith("sqlite://"):
-            return
-
-        connection = Tortoise.get_connection("default")
-        _, columns = await connection.execute_query(
-            "PRAGMA table_info('spotcampaigns')"
-        )
-        existing = {row["name"] for row in columns}
-        alter_statements = _plan_additive_column_statements(
-            "spotcampaigns",
-            existing,
-            (
-                ("automation_paused", "INTEGER NOT NULL DEFAULT 0"),
-                ("automation_paused_at", "TEXT NULL"),
-            ),
-        )
-        if alter_statements:
-            await connection.execute_script("\n".join(alter_statements))
-            logging.info(
-                "Added missing SpotCampaigns columns: %s",
-                ", ".join(_extract_added_column_names(alter_statements)),
-            )
-
     async def _ensure_upnl_history_columns(self) -> None:
         """Ensure additive UpnlHistory columns exist on existing SQLite databases."""
         if not self.db_url.startswith("sqlite://"):
@@ -891,12 +838,6 @@ class Database:
                     phase="schema",
                     description="Add backward-compatible open-trade runtime columns.",
                     apply=self._ensure_open_trades_columns,
-                ),
-                MigrationDefinition(
-                    version="2026-07-28-002-campaign-expand",
-                    phase="schema",
-                    description="Add backward-compatible campaign runtime columns.",
-                    apply=self._ensure_spot_campaign_columns,
                 ),
                 MigrationDefinition(
                     version="2026-07-28-003-trade-ledger-expand",

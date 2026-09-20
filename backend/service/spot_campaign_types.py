@@ -1,4 +1,4 @@
-"""Shared spot sidestep campaign types and constants."""
+"""Shared trade-lifecycle close-reason constants and helpers."""
 
 from __future__ import annotations
 
@@ -10,23 +10,12 @@ class TradeLifecycleMode(StrEnum):
     """Stable persistence values for mutually exclusive trade lifecycles."""
 
     CLASSIC_DCA = "classic_dca"
-    SIDESTEP_REENTRY = "sidestep_reentry"
 
 
 class TradeExposureState(StrEnum):
     """Stable persistence values for active trade exposure state."""
 
     LONG_EXPOSED = "long_exposed"
-    FLAT_WAITING_REENTRY = "flat_waiting_reentry"
-
-
-class SpotCampaignState(StrEnum):
-    """Stable persistence values for sidestep campaign state."""
-
-    ACTIVE_LONG = "active_long"
-    FLAT_WAITING_REENTRY = "flat_waiting_reentry"
-    COMPLETED_TP = "completed_tp"
-    STOPPED = "stopped"
 
 
 class TradeCloseReason(StrEnum):
@@ -36,7 +25,6 @@ class TradeCloseReason(StrEnum):
     TRAILING_TAKE_PROFIT = "trailing_take_profit"
     STOP_LOSS = "stop_loss"
     AUTOPILOT_TIMEOUT = "autopilot_timeout"
-    SIDESTEP_EXIT = "sidestep_exit"
     MANUAL_SELL = "manual_sell"
     MANUAL_STOP = "manual_stop"
 
@@ -52,13 +40,15 @@ TERMINAL_CLOSE_REASONS = frozenset(
     }
 )
 
-NON_TERMINAL_CLOSE_REASONS = frozenset({TradeCloseReason.SIDESTEP_EXIT})
 
-NON_TERMINAL_CLOSE_REASON_VALUES = tuple(
-    reason.value for reason in NON_TERMINAL_CLOSE_REASONS
-)
+def normalize_close_reason(value: Any) -> str:
+    """Return a stable close-reason persistence value.
 
-
-def is_non_terminal_close_reason(value: Any) -> bool:
-    """Return whether a close reason represents an ongoing campaign transition."""
-    return str(value or "").strip().lower() in NON_TERMINAL_CLOSE_REASON_VALUES
+    Any unrecognized value falls back to take profit, the terminal default for a
+    completed sell leg.
+    """
+    normalized = str(value or "").strip().lower()
+    for reason in TradeCloseReason:
+        if normalized == reason.value:
+            return reason.value
+    return TradeCloseReason.TAKE_PROFIT.value

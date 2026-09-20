@@ -188,20 +188,6 @@ class _DummyTradeExecutionsModel:
         cls.created_payload = kwargs
 
 
-class _DummySpotCampaignsFilter:
-    def using_db(self, _conn: Any) -> "_DummySpotCampaignsFilter":
-        return self
-
-    async def update(self, **_kwargs: Any) -> int:
-        return 1
-
-
-class _DummySpotCampaignsModel:
-    @classmethod
-    def filter(cls, **_kwargs: Any) -> _DummySpotCampaignsFilter:
-        return _DummySpotCampaignsFilter()
-
-
 class _DummyOpenTradeRow:
     deal_id = "a2f3a070-875a-49c3-87cf-06f9514dfac0"
     campaign_id = None
@@ -619,11 +605,6 @@ async def test_persist_manual_buy_add_requires_matching_open_trade(
     monkeypatch.setattr(persistence_module.model, "OpenTrades", _DummyOpenTradesModel)
     monkeypatch.setattr(
         persistence_module.model,
-        "SpotCampaigns",
-        _DummySpotCampaignsModel,
-    )
-    monkeypatch.setattr(
-        persistence_module.model,
         "TradeExecutions",
         _DummyTradeExecutionsModel,
     )
@@ -636,62 +617,3 @@ async def test_persist_manual_buy_add_requires_matching_open_trade(
             _trade_record(),
             {"amount": 1.5},
         )
-
-
-@pytest.mark.asyncio
-async def test_persist_buy_trade_preserves_original_open_date_on_sidestep_reentry(
-    monkeypatch,
-) -> None:
-    _DummyTradesModel.created_payload = None
-    _DummyOpenTradesModel.updated_payload = None
-    _DummyTradeExecutionsModel.created_payload = None
-
-    async def fake_run_sqlite(operation, _name) -> None:
-        await operation()
-
-    monkeypatch.setattr(
-        persistence_module, "run_sqlite_write_with_retry", fake_run_sqlite
-    )
-    monkeypatch.setattr(persistence_module, "in_transaction", lambda: _DummyTx())
-    monkeypatch.setattr(persistence_module.model, "Trades", _DummyTradesModel)
-    monkeypatch.setattr(persistence_module.model, "OpenTrades", _DummyOpenTradesModel)
-    monkeypatch.setattr(
-        persistence_module.model,
-        "SpotCampaigns",
-        _DummySpotCampaignsModel,
-    )
-    monkeypatch.setattr(
-        persistence_module.model,
-        "TradeExecutions",
-        _DummyTradeExecutionsModel,
-    )
-    monkeypatch.setattr(
-        persistence_module,
-        "is_entry_observation_enabled",
-        lambda: _async_value(False),
-    )
-
-    await persistence_module.persist_buy_trade(
-        "BTC/USDC",
-        _trade_record(
-            timestamp="1714726800000",
-            ordersize=100.0,
-            amount=1.0,
-            price=100.0,
-            baseorder=True,
-            safetyorder=False,
-        ),
-        create_open_trade=True,
-        campaign_context={
-            "campaign_id": "campaign-1",
-            "lifecycle_mode": "sidestep_reentry",
-            "started_at": "2024-05-01 07:00:00+00:00",
-        },
-    )
-
-    assert _DummyOpenTradesModel.updated_payload is not None
-    assert _DummyOpenTradesModel.updated_payload["open_date"] == (
-        "2024-05-01 07:00:00+00:00"
-    )
-    assert _DummyOpenTradesModel.updated_payload["amount"] == 1.0
-    assert _DummyOpenTradesModel.updated_payload["cost"] == 100.0

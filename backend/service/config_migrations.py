@@ -9,7 +9,7 @@ from model import AppConfig, ConfigMigration
 from service.signal_settings import SignalSettingsError, serialize_signal_settings
 from tortoise.transactions import in_transaction
 
-TRADE_MODE_MIGRATION_VERSION = "2026-07-trade-mode-v1"
+TRADE_MODE_MIGRATION_VERSION = "2026-09-sidestep-removal-v1"
 SIGNAL_SETTINGS_MIGRATION_VERSION = "2026-07-signal-settings-v1"
 LEGACY_TRADE_MODE_KEYS = frozenset(
     {
@@ -20,26 +20,12 @@ LEGACY_TRADE_MODE_KEYS = frozenset(
 )
 
 
-def _deserialize_bool(value: Any) -> bool:
-    """Normalize a persisted legacy boolean."""
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, str):
-        normalized = value.strip().lower()
-        if normalized in {"true", "1", "yes", "on"}:
-            return True
-        if normalized in {"false", "0", "no", "off", ""}:
-            return False
-    return bool(value)
+def resolve_legacy_trade_mode(_rows: list[dict[str, Any]]) -> str:
+    """Resolve the canonical trade mode represented by legacy rows.
 
-
-def resolve_legacy_trade_mode(rows: list[dict[str, Any]]) -> str:
-    """Resolve the canonical trade mode represented by legacy rows."""
-    values = {str(row["key"]): row.get("value") for row in rows}
-    lifecycle_mode = str(values.get("trade_lifecycle_mode") or "").strip()
-    sidestep_enabled = _deserialize_bool(values.get("sidestep_campaign_enabled", False))
-    if lifecycle_mode == "sidestep_reentry" or sidestep_enabled:
-        return "sidestep"
+    Sidestep mode has been removed, so every legacy representation collapses to
+    dynamic DCA.
+    """
     return "dynamic_dca"
 
 
@@ -50,13 +36,13 @@ def canonicalize_trade_mode_rows(
     canonical_rows = [
         dict(row) for row in rows if str(row.get("key")) not in LEGACY_TRADE_MODE_KEYS
     ]
-    if any(str(row.get("key")) == "trade_mode" for row in canonical_rows):
-        return canonical_rows
-
-    legacy_rows = [
-        dict(row) for row in rows if str(row.get("key")) in LEGACY_TRADE_MODE_KEYS
-    ]
-    if legacy_rows:
+    has_canonical_mode = any(
+        str(row.get("key")) == "trade_mode" for row in canonical_rows
+    )
+    if not has_canonical_mode:
+        legacy_rows = [
+            dict(row) for row in rows if str(row.get("key")) in LEGACY_TRADE_MODE_KEYS
+        ]
         canonical_rows.append(
             {
                 "key": "trade_mode",
@@ -64,6 +50,10 @@ def canonicalize_trade_mode_rows(
                 "value_type": "str",
             }
         )
+    for row in canonical_rows:
+        if str(row.get("key")) == "trade_mode":
+            row["value"] = "dynamic_dca"
+            row["value_type"] = "str"
     return canonical_rows
 
 
@@ -82,14 +72,27 @@ async def run_config_migrations() -> None:
                 .values("key", "value", "value_type")
             )
             backup_rows = sorted(rows, key=lambda row: str(row["key"]))
-            has_canonical_mode = any(row["key"] == "trade_mode" for row in rows)
             legacy_rows = [row for row in rows if row["key"] in LEGACY_TRADE_MODE_KEYS]
-            if legacy_rows and not has_canonical_mode:
+            canonical_value = resolve_legacy_trade_mode(legacy_rows or rows)
+            existing_mode = next(
+                (row for row in rows if row["key"] == "trade_mode"),
+                None,
+            )
+            if existing_mode is None:
                 await AppConfig.create(
                     using_db=connection,
                     key="trade_mode",
-                    value=resolve_legacy_trade_mode(legacy_rows),
+                    value=canonical_value,
                     value_type="str",
+                )
+            elif existing_mode.get("value") != canonical_value:
+                await (
+                    AppConfig.filter(key="trade_mode")
+                    .using_db(connection)
+                    .update(
+                        value=canonical_value,
+                        value_type="str",
+                    )
                 )
 
             await ConfigMigration.create(

@@ -957,9 +957,8 @@ test('control center delegates setup mode presentation to dedicated components',
         '<ControlCenterSetupWorkspace',
         '<template #exchange>',
         '<template #signal>',
-        '<template #dca>',
-        ':market="exchange.market"',
-        '<template #capital>',
+         '<template #dca>',
+          '<template #capital>',
         '<template #monitoring>',
     ]
     const requiredSetupWorkspaceSnippets = [

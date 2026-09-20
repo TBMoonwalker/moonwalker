@@ -3,7 +3,6 @@ import { deriveSignalModeBlockers } from './signalMode'
 import { getTaskPresentation } from './taskRegistry'
 import {
     isDynamicTradeMode,
-    isSidestepTradeMode,
     normalizeTradeMode,
 } from '../helpers/tradeLifecycle'
 import type {
@@ -41,16 +40,6 @@ function hasPositiveNumber(value: unknown): boolean {
 
 function getTradeMode(config: SharedConfigPayload): string {
     return normalizeTradeMode(config.trade_mode)
-}
-
-function isSpotMarket(config: SharedConfigPayload): boolean {
-    return String(config.market ?? 'spot').trim().toLowerCase() === 'spot'
-}
-
-function resolveSidestepReentryStrategy(
-    config: SharedConfigPayload,
-): unknown {
-    return config.sidestep_reentry_strategy
 }
 
 function collectAlwaysRequiredBlockers(
@@ -91,77 +80,18 @@ function collectAlwaysRequiredBlockers(
 function collectDcaBlockers(config: SharedConfigPayload): ControlCenterBlocker[] {
     if (!Boolean(config.dca)) {
         return []
-    }
-
-    if (
-        isSidestepTradeMode(getTradeMode(config)) &&
-        isSpotMarket(config)
-    ) {
-        const blockers: ControlCenterBlocker[] = []
-
-        if (!hasRequiredValue(config.sidestep_bearish_strategy)) {
-            blockers.push(
-                resolveControlCenterBlocker(
-                    'sidestep_bearish_strategy',
-                    'Choose the bearish strategy that should move a live trade into flat sidestep mode.',
-                    'Bearish sidestep strategy missing',
-                ),
-            )
         }
 
-        if (!hasRequiredValue(resolveSidestepReentryStrategy(config))) {
-            blockers.push(
-                resolveControlCenterBlocker(
-                    'sidestep_reentry_strategy',
-                    'Choose the re-entry strategy that should buy back into flat sidestep trades.',
-                    'Sidestep re-entry strategy missing',
-                ),
-            )
-        }
-
-        return blockers
-    }
-
-    const requiredKeys: Array<[string, string, string]> = isDynamicTradeMode(
-        getTradeMode(config),
-    )
-        ? [
-              [
-                  'mstc',
-                  'Max safety count missing',
-                  'Set max safety order count for dynamic DCA.',
+        const requiredKeys: Array<[string, string, string]> = [
+             [
+                 'mstc',
+                 'Max safety count missing',
+                 'Set max safety order count for dynamic DCA.',
               ],
-              [
-                  'sos',
-                  'Safety deviation missing',
-                  'Set the first safety order deviation for dynamic DCA.',
-              ],
-          ]
-        : [
-              [
-                  'so',
-                  'Safety order amount missing',
-                  'Set the safety order amount before using classic DCA.',
-              ],
-              [
-                  'mstc',
-                  'Max safety count missing',
-                  'Set max safety order count before using classic DCA.',
-              ],
-              [
-                  'sos',
-                  'Safety deviation missing',
-                  'Set the first safety order deviation before using classic DCA.',
-              ],
-              [
-                  'ss',
-                  'Step scale missing',
-                  'Set the safety order step scale before using classic DCA.',
-              ],
-              [
-                  'os',
-                  'Volume scale missing',
-                  'Set the safety order volume scale before using classic DCA.',
+             [
+                 'sos',
+                 'Safety deviation missing',
+                 'Set the first safety order deviation for dynamic DCA.',
               ],
           ]
 

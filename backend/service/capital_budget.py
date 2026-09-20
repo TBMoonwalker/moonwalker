@@ -18,7 +18,6 @@ from service.capital_budget_logic import (
     resolve_capital_max_fund,
 )
 from service.placement_intents import PlacementIntentState
-from service.spot_campaign_types import TradeExposureState
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
 
@@ -32,7 +31,6 @@ class CapitalBudgetUsage:
     funds_locked: float
     open_trade_reserve: float
     closed_profit: float
-    reserved_reentry_by_symbol: dict[str, float]
     durable_pending_quote: float
     unavailable_reason: str | None = None
 
@@ -157,7 +155,6 @@ class CapitalBudgetService:
                 closed_profit=0.0,
             )
         usage = await self._load_usage(config)
-        order = self._apply_reserved_reentry_credit(order, usage)
         pending_quote = (
             self._pending_reserved_quote() + usage.durable_pending_quote
             if include_pending
@@ -197,7 +194,6 @@ class CapitalBudgetService:
             return CapitalBudgetLease(self, None), check
         async with self._lock:
             usage = await self._load_usage(config)
-            order = self._apply_reserved_reentry_credit(order, usage)
             pending_quote = self._pending_reserved_quote() + usage.durable_pending_quote
             if usage.unavailable_reason is not None:
                 check = self._unavailable_check(
@@ -261,26 +257,6 @@ class CapitalBudgetService:
             if operation_id is not None
         }
 
-    @staticmethod
-    def _apply_reserved_reentry_credit(
-        order: dict,
-        usage: CapitalBudgetUsage,
-    ) -> dict:
-        """Attach any already-reserved sidestep re-entry quote to the order."""
-        symbol = str(order.get("symbol") or "").strip()
-        if not symbol:
-            return order
-        reserved_credit = max(
-            0.0,
-            float(usage.reserved_reentry_by_symbol.get(symbol) or 0.0),
-        )
-        if reserved_credit <= 0:
-            return order
-        return {
-            **order,
-            "capital_reserved_credit": reserved_credit,
-        }
-
     async def _load_usage(self, config: dict) -> CapitalBudgetUsage:
         """Load a fresh DB-backed capital usage snapshot."""
         try:
@@ -288,8 +264,6 @@ class CapitalBudgetService:
                 "symbol",
                 "so_count",
                 "cost",
-                "exposure_state",
-                "reserved_reentry_quote",
                 "unsellable_amount",
                 "unsellable_reason",
             )
@@ -311,18 +285,8 @@ class CapitalBudgetService:
                     )
 
             funds_locked = 0.0
-            reserved_reentry_by_symbol: dict[str, float] = {}
             for row in open_trades:
                 symbol = str(row.get("symbol") or "")
-                if (
-                    str(row.get("exposure_state") or "")
-                    == TradeExposureState.FLAT_WAITING_REENTRY.value
-                ):
-                    reserved_reentry_by_symbol[symbol] = max(
-                        0.0,
-                        float(row.get("reserved_reentry_quote") or 0.0),
-                    )
-                    continue
                 open_cost = float(row.get("cost") or 0.0)
                 trade_cost = trades_by_symbol.get(symbol, 0.0)
                 funds_locked += open_cost if open_cost > 0 else trade_cost
@@ -364,7 +328,6 @@ class CapitalBudgetService:
                 funds_locked=round(funds_locked, 8),
                 open_trade_reserve=estimate_open_trade_reserve(config, open_trades),
                 closed_profit=round(closed_profit, 8),
-                reserved_reentry_by_symbol=reserved_reentry_by_symbol,
                 durable_pending_quote=round(durable_pending_quote, 8),
             )
         except BaseORMException as exc:
@@ -377,7 +340,6 @@ class CapitalBudgetService:
                 funds_locked=0.0,
                 open_trade_reserve=0.0,
                 closed_profit=0.0,
-                reserved_reentry_by_symbol={},
                 durable_pending_quote=0.0,
                 unavailable_reason="capital_budget_unavailable",
             )

@@ -52,7 +52,6 @@ from service.order_persistence import (
     persist_closed_trade,
     persist_manual_buy_add,
     persist_partial_sell_execution,
-    persist_sidestep_transition,
     persist_stopped_trade,
     persist_unsellable_remainder,
 )
@@ -71,8 +70,7 @@ from service.placement_reconciliation import (
 from service.placement_recovery import PlacementRecoveryHandler
 from service.placement_workflow import PlacementWorkflow
 from service.sell_fallback_workflow import DurableSellFallback
-from service.spot_campaign_types import TradeCloseReason
-from service.spot_sidestep_campaign import SpotSidestepCampaignService
+from service.spot_campaign_types import normalize_close_reason
 from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades, TradeStateUnavailableError
 from service.trading_contracts import BuyIntent, SellIntent
@@ -101,7 +99,6 @@ class Orders:
         self.placement_workflow = PlacementWorkflow()
         self.placement_intents = self.placement_workflow.intents
         self.trades = Trades()
-        self.sidestep_campaigns: SpotSidestepCampaignService | None = None
 
     async def close(self) -> None:
         """Close exchange resources owned by this order service."""
@@ -280,12 +277,6 @@ class Orders:
             config,
         )
 
-    async def _get_sidestep_campaigns(self) -> SpotSidestepCampaignService:
-        """Return the shared sidestep campaign service instance."""
-        if self.sidestep_campaigns is None:
-            self.sidestep_campaigns = await SpotSidestepCampaignService.instance()
-        return self.sidestep_campaigns
-
     async def reconcile_placement_intents(
         self,
         config: dict[str, Any],
@@ -443,23 +434,9 @@ class Orders:
             metadata["dca_policy"] = build_recovery_sizing_policy(config).to_dict()
             order_status["metadata_json"] = json.dumps(metadata, sort_keys=True)
         payload = build_buy_trade_payload(order_status)
-        sidestep_campaigns = await self._get_sidestep_campaigns()
-        campaign_context = await sidestep_campaigns.resolve_buy_context(
-            order_status["symbol"],
-            original_order,
-            config,
-        )
-        if str(campaign_context.get("campaign_id") or "").strip():
-            logging.info(
-                "Persisting campaign buy for %s: campaign=%s strategy=%s signal=%s.",
-                order_status["symbol"],
-                campaign_context.get("campaign_id"),
-                original_order.get("strategy_name"),
-                original_order.get("signal_name"),
-            )
         persistence_options: dict[str, Any] = {
             "create_open_trade": not bool(order_status["safetyorder"]),
-            "campaign_context": campaign_context,
+            "campaign_context": None,
             "entry_evaluation": original_order.get("_ai_entry_evaluation"),
         }
         if placement_operation_id:
@@ -561,55 +538,23 @@ class Orders:
         placement_operation_ids: list[str] | None = None,
     ) -> None:
         """Persist a completed sell status and emit monitoring."""
-        normalized_close_reason = SpotSidestepCampaignService.normalize_close_reason(
+        normalized_close_reason = normalize_close_reason(
             order_status.get("close_reason")
         )
         order_status["close_reason"] = normalized_close_reason
-        closed_at = (
-            trade_datetime_from_ms(float(order_status["timestamp"]))
-            if order_status.get("timestamp") is not None
-            else datetime.now(timezone.utc)
-        )
         close_context = await self.__calculate_closed_trade_stats(order_status)
-        sidestep_campaigns = await self._get_sidestep_campaigns()
-        campaign_context = await sidestep_campaigns.resolve_close_context(
+        close_options: dict[str, Any] = {
+            "campaign_context": None,
+        }
+        if placement_operation_id:
+            close_options["placement_operation_id"] = placement_operation_id
+        if placement_operation_ids:
+            close_options["placement_operation_ids"] = placement_operation_ids
+        await persist_closed_trade(
             order_status["symbol"],
-            normalized_close_reason,
-            config,
-            closed_at=closed_at,
-            closed_payload=close_context["payload"],
+            close_context["payload"],
+            **close_options,
         )
-        if normalized_close_reason == TradeCloseReason.SIDESTEP_EXIT.value:
-            logging.info(
-                "Persisting sidestep transition for %s: campaign=%s -> flat waiting.",
-                order_status["symbol"],
-                campaign_context.get("campaign_id"),
-            )
-            sidestep_options: dict[str, Any] = {
-                "campaign_context": campaign_context,
-            }
-            if placement_operation_id:
-                sidestep_options["placement_operation_id"] = placement_operation_id
-            if placement_operation_ids:
-                sidestep_options["placement_operation_ids"] = placement_operation_ids
-            await persist_sidestep_transition(
-                order_status["symbol"],
-                close_context["payload"],
-                **sidestep_options,
-            )
-        else:
-            close_options: dict[str, Any] = {
-                "campaign_context": campaign_context,
-            }
-            if placement_operation_id:
-                close_options["placement_operation_id"] = placement_operation_id
-            if placement_operation_ids:
-                close_options["placement_operation_ids"] = placement_operation_ids
-            await persist_closed_trade(
-                order_status["symbol"],
-                close_context["payload"],
-                **close_options,
-            )
         await self.trades.invalidate_trade_caches()
         await self.monitoring.notify_trade(
             "trade.sell",
@@ -1262,12 +1207,6 @@ class Orders:
     ) -> bool:
         """Execute one sell order with the symbol prelocked."""
         logging.info("Incoming sell order for %s", order["symbol"])
-        if order.get("sell_reason") == TradeCloseReason.SIDESTEP_EXIT.value:
-            logging.info(
-                "Incoming sidestep exit sell for %s: campaign=%s.",
-                order["symbol"],
-                order.get("campaign_id"),
-            )
         async with lifecycle_mutation_coordinator.prelocked(order["symbol"]):
             try:
                 if not await self._order_snapshot_is_current(order, config):
@@ -1605,57 +1544,6 @@ class Orders:
             closed_at=closed_at,
             unsellable_since=closed_at.isoformat(),
         )
-
-        normalized_close_reason = SpotSidestepCampaignService.normalize_close_reason(
-            order_status.get("close_reason")
-        )
-
-        if (
-            normalized_close_reason == TradeCloseReason.SIDESTEP_EXIT.value
-            and context.closed_trade_payload is not None
-        ):
-            sidestep_campaigns = await self._get_sidestep_campaigns()
-            sidestep_payload = {
-                **context.closed_trade_payload,
-                "close_reason": normalized_close_reason,
-                "sell_executions": list(snapshot.partial_executions),
-            }
-            campaign_context = await sidestep_campaigns.resolve_close_context(
-                snapshot.symbol,
-                normalized_close_reason,
-                config,
-                closed_at=closed_at,
-                closed_payload=sidestep_payload,
-            )
-            logging.info(
-                "Persisting sidestep transition for %s with unsellable remainder: campaign=%s -> flat waiting.",
-                snapshot.symbol,
-                campaign_context.get("campaign_id"),
-            )
-            await persist_sidestep_transition(
-                snapshot.symbol,
-                sidestep_payload,
-                campaign_context=campaign_context,
-                unsellable_payload=context.unsellable_payload,
-                placement_operation_id=placement_operation_id,
-                placement_operation_ids=placement_operation_ids,
-            )
-            await self.trades.invalidate_trade_caches()
-            if not context.already_notified:
-                await self.monitoring.notify_trade(
-                    "trade.unsellable_notional",
-                    context.monitor_payload,
-                    config,
-                )
-            logging.warning(
-                "Marked %s remainder as unsellable (reason=%s, remaining=%s, min_notional=%s, estimated_notional=%s).",
-                context.symbol,
-                context.reason,
-                context.remaining_amount,
-                context.min_notional,
-                context.estimated_notional,
-            )
-            return
 
         await persist_unsellable_remainder(
             snapshot.symbol,
@@ -2377,14 +2265,7 @@ class Orders:
             )
             if not canceled:
                 return False
-            sidestep_campaigns = await self._get_sidestep_campaigns()
-            campaign_context = await sidestep_campaigns.resolve_close_context(
-                symbol,
-                "manual_stop",
-                config or {},
-                closed_at=datetime.now(timezone.utc),
-            )
-            await persist_stopped_trade(symbol, campaign_context=campaign_context)
+            await persist_stopped_trade(symbol)
             await self.trades.invalidate_trade_caches()
             return True
         except (

@@ -12,18 +12,13 @@ export const BACKTEST_TIMEFRAME_OPTIONS = [
 
 export const BACKTEST_TRADE_MODE_OPTIONS = [
     { label: 'Dynamic DCA', value: 'dynamic_dca' },
-    { label: 'Sidestep', value: 'sidestep' },
 ] as const
 
-export type BacktestTradeMode =
-    (typeof BACKTEST_TRADE_MODE_OPTIONS)[number]['value']
+export type BacktestTradeMode = 'dynamic_dca'
 
 export interface BacktestFormState {
     symbol: string
     strategySlug: string
-    tradeMode: BacktestTradeMode
-    sidestepBearishStrategySlug: string
-    sidestepReentryStrategySlug: string
     timeframe: string
     baseOrderSize: number
     takeProfitPct: number
@@ -37,8 +32,6 @@ export interface BacktestRunRequest {
     symbol: string
     strategy_slug: string
     trade_mode: BacktestTradeMode
-    sidestep_bearish_strategy: string
-    sidestep_reentry_strategy: string
     timeframe: string
     start_date: number
     end_date: number
@@ -118,17 +111,9 @@ export interface BacktestStats {
     symbol?: string
     strategy?: string
     trade_mode?: BacktestTradeMode
-    sidestep_bearish_strategy?: string
-    sidestep_reentry_strategy?: string
-    sidestep_signal_evaluation?: string
-    sidestep_reentry_requires_fresh_long_signal?: boolean
-    sidestep_reentry_max_premium_pct?: number
-    sidestep_exit_max_market_fallback_slippage_pct?: number
-    sidestep_exit_fallback_blocks?: number
     dca_sizing_mode?: string
     dca_atr_timeframe?: string
     still_open_at_end?: boolean
-    sidestep_waiting_at_end?: boolean
 }
 
 export interface BacktestResult {
@@ -151,9 +136,6 @@ export function createDefaultBacktestForm(): BacktestFormState {
     return {
         symbol: 'BTC/USDT',
         strategySlug: 'ema20_swing',
-        tradeMode: 'dynamic_dca',
-        sidestepBearishStrategySlug: 'ema_down',
-        sidestepReentryStrategySlug: 'ema20_swing_reverse',
         timeframe: '1h',
         baseOrderSize: 20,
         takeProfitPct: 2.5,
@@ -161,7 +143,7 @@ export function createDefaultBacktestForm(): BacktestFormState {
         maxSafetyOrders: 5,
         safetyOrderStepPct: 3,
         fee: 0.001,
-    }
+     }
 }
 
 export function createDefaultBacktestRange(now = Date.now()): [number, number] {
@@ -175,13 +157,8 @@ export function buildBacktestRequest(
 ): BacktestRunRequest {
     return {
         symbol: form.symbol.trim(),
-        strategy_slug:
-            form.tradeMode === 'sidestep'
-                ? form.sidestepReentryStrategySlug.trim()
-                : form.strategySlug.trim(),
-        trade_mode: form.tradeMode,
-        sidestep_bearish_strategy: form.sidestepBearishStrategySlug.trim(),
-        sidestep_reentry_strategy: form.sidestepReentryStrategySlug.trim(),
+        strategy_slug: form.strategySlug.trim(),
+        trade_mode: 'dynamic_dca',
         timeframe: form.timeframe,
         start_date: dateRange[0],
         end_date: dateRange[1],

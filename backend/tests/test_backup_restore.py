@@ -7,7 +7,6 @@ import service.backup_restore as backup_module
 import service.config as config_module
 from service.backup_restore import BackupService
 from service.config import Config
-from service.trade_lifecycle_config import TradeModeConfigError
 from tortoise import Tortoise
 
 
@@ -488,31 +487,26 @@ async def test_restore_backup_preflights_trade_mode_before_destructive_writes(
     )
 
     backup_service = BackupService()
-    with pytest.raises(
-        TradeModeConfigError,
-        match="Sidestep mode requires an explicit sidestep_reentry_strategy",
-    ):
-        await backup_service.restore_backup(
-            {
-                "schema_version": 1,
-                "config": [
-                    {"key": "trade_mode", "value": "sidestep", "value_type": "str"},
-                    {
-                        "key": "dca_strategy",
-                        "value": "ema20_swing",
-                        "value_type": "str",
-                    },
-                ],
-            },
-            restore_trade_data=False,
-        )
+    await backup_service.restore_backup(
+        {
+            "schema_version": 1,
+            "config": [
+                {"key": "trade_mode", "value": "sidestep", "value_type": "str"},
+                {
+                    "key": "dca_strategy",
+                    "value": "ema20_swing",
+                    "value_type": "str",
+                },
+            ],
+        },
+        restore_trade_data=False,
+    )
 
     persisted_rows = {
         row.key: row.value for row in await model.AppConfig.all().order_by("key")
     }
-    assert persisted_rows == {
-        "trade_mode": "dynamic_dca",
-    }
+    assert persisted_rows["trade_mode"] == "dynamic_dca"
+    assert "sidestep" not in {row.value for row in await model.AppConfig.all()}
 
     await Tortoise.close_connections()
     Config._instance = None

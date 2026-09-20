@@ -25,17 +25,10 @@ from service.config_redaction import (
     redact_config_value,
     restore_redacted_config_value,
 )
-from service.config_views import TradeLifecycleConfigView
 from service.runtime_services import runtime_service_proxy
 from service.signal_settings import SignalSettingsError, canonicalize_signal_settings
-from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.strategy_builder import list_strategy_options, list_strategy_summaries
-from service.trade_lifecycle_config import (
-    TradeModeConfigError,
-    TradeModeSwitchGuard,
-    build_blocked_live_mode_switch_error,
-    resolve_trade_mode_config,
-)
+from service.trade_lifecycle_config import TradeModeConfigError
 from service.trading_controls import GLOBAL_TRADING_PAUSED_KEY
 from service.trading_maintenance import trading_maintenance_barrier
 
@@ -158,99 +151,6 @@ def _merge_config_snapshot_with_updates(
     return merged
 
 
-def _updates_touch_trade_mode(updates: ConfigUpdateMap) -> bool:
-    """Return whether the request mutates the canonical trade-mode field."""
-    return "trade_mode" in updates
-
-
-def _requested_trade_mode_snapshot(
-    config_snapshot: dict[str, Any],
-    updates: ConfigUpdateMap,
-) -> dict[str, Any]:
-    """Return the mode-resolution snapshot with typed API updates applied."""
-    return _merge_config_snapshot_with_updates(config_snapshot, updates)
-
-
-async def _get_trade_mode_switch_guard(
-    config_snapshot: dict[str, Any],
-    *,
-    strict: bool = True,
-) -> TradeModeSwitchGuard:
-    """Return lightweight runtime guard data for trade-mode switch UX."""
-    current_trade_mode = resolve_trade_mode_config(
-        config_snapshot,
-        source="runtime",
-        require_explicit_sidestep_reentry=False,
-    ).trade_mode
-    try:
-        open_trade_count = await OpenTrades.all().count()
-        waiting_campaign_count = (
-            await SpotSidestepCampaignService.count_waiting_campaigns()
-        )
-    except Exception:  # noqa: BLE001 - keep snapshot reads resilient.
-        if strict:
-            raise
-        logging.warning(
-            "Falling back to an unlocked trade-mode guard after a runtime guard read failed.",
-            exc_info=True,
-        )
-        open_trade_count = 0
-        waiting_campaign_count = 0
-    blocked = open_trade_count > 0 or waiting_campaign_count > 0
-    message = None
-    if blocked:
-        message = (
-            "Close open trades and clear waiting sidestep campaigns before "
-            "switching trade modes."
-        )
-    return TradeModeSwitchGuard(
-        current_trade_mode=current_trade_mode,
-        blocked=blocked,
-        open_trade_count=open_trade_count,
-        waiting_campaign_count=waiting_campaign_count,
-        message=message,
-    )
-
-
-async def _prepare_trade_mode_updates(
-    config_snapshot: dict[str, Any],
-    updates: ConfigUpdateMap,
-) -> ConfigUpdateMap:
-    """Validate canonical trade-mode updates against runtime switch rules."""
-    prepared_updates = dict(updates)
-    if not _updates_touch_trade_mode(prepared_updates):
-        return prepared_updates
-
-    merged_snapshot = _requested_trade_mode_snapshot(config_snapshot, prepared_updates)
-    current_trade_mode = resolve_trade_mode_config(
-        config_snapshot,
-        source="runtime",
-        require_explicit_sidestep_reentry=False,
-    ).trade_mode
-    requested_trade_mode = resolve_trade_mode_config(
-        merged_snapshot,
-        source="save",
-        require_explicit_sidestep_reentry=False,
-    ).trade_mode
-
-    if requested_trade_mode != current_trade_mode:
-        guard = await _get_trade_mode_switch_guard(config_snapshot, strict=True)
-        if guard.blocked:
-            raise build_blocked_live_mode_switch_error(
-                source="save",
-                current_trade_mode=current_trade_mode,
-                requested_trade_mode=requested_trade_mode,
-                open_trade_count=guard.open_trade_count,
-                waiting_campaign_count=guard.waiting_campaign_count,
-            )
-
-    prepared_updates["trade_mode"] = {
-        "value": requested_trade_mode,
-        "type": "str",
-    }
-    return prepared_updates
-
-
 def _find_live_activation_blockers(
     config_snapshot: dict[str, Any],
 ) -> list[dict[str, str]]:
@@ -285,56 +185,28 @@ def _find_live_activation_blockers(
 
     dca_enabled = bool(config_snapshot.get("dca"))
     if dca_enabled:
-        lifecycle = TradeLifecycleConfigView.from_config(config_snapshot)
-        if lifecycle.is_sidestep_mode():
-            if not _has_required_value(lifecycle.bearish_exit_strategy):
-                blockers.append(
-                    {
-                        "key": "sidestep_bearish_strategy",
-                        "message": "Choose a bearish sidestep strategy.",
-                    }
-                )
-            if not _has_required_value(lifecycle.reentry_strategy):
-                blockers.append(
-                    {
-                        "key": "sidestep_reentry_strategy",
-                        "message": "Choose a sidestep re-entry strategy.",
-                    }
-                )
-        else:
-            dynamic_dca_enabled = lifecycle.trade_mode == "dynamic_dca"
-            recovery_mode = (
-                str(config_snapshot.get("dynamic_so_sizing_mode") or "legacy_factors")
-                .strip()
-                .lower()
-            )
-            dca_required_keys = (
-                [
-                    ("mstc", "Set max safety order count."),
-                    ("sos", "Set the first safety order deviation."),
-                ]
-                if dynamic_dca_enabled
-                else [
-                    ("so", "Set the safety order amount."),
-                    ("mstc", "Set max safety order count."),
-                    ("sos", "Set the first safety order deviation."),
-                    ("ss", "Set the safety order step scale."),
-                    ("os", "Set the safety order volume scale."),
-                ]
-            )
-            for key, message in dca_required_keys:
-                if not _has_required_value(config_snapshot.get(key)):
+        recovery_mode = (
+            str(config_snapshot.get("dynamic_so_sizing_mode") or "legacy_factors")
+            .strip()
+            .lower()
+        )
+        dca_required_keys = [
+            ("mstc", "Set max safety order count."),
+            ("sos", "Set the first safety order deviation."),
+        ]
+        for key, message in dca_required_keys:
+            if not _has_required_value(config_snapshot.get(key)):
+                blockers.append({"key": key, "message": message})
+        if recovery_mode == "recovery_target":
+            for key, message in [
+                ("ss", "Set a positive recovery SO spacing scale."),
+                (
+                    "dynamic_so_max_deal_quote",
+                    "Set a positive recovery-mode max deal quote.",
+                ),
+            ]:
+                if not _has_positive_number(config_snapshot.get(key)):
                     blockers.append({"key": key, "message": message})
-            if dynamic_dca_enabled and recovery_mode == "recovery_target":
-                for key, message in [
-                    ("ss", "Set a positive recovery SO spacing scale."),
-                    (
-                        "dynamic_so_max_deal_quote",
-                        "Set a positive recovery-mode max deal quote.",
-                    ),
-                ]:
-                    if not _has_positive_number(config_snapshot.get(key)):
-                        blockers.append({"key": key, "message": message})
 
     signal_name = str(config_snapshot.get("signal", "") or "").strip().lower()
     try:
@@ -600,13 +472,7 @@ async def _validate_config_updates(
     if error_message:
         return None, _config_update_conflict(error_message)
 
-    try:
-        prepared_updates = await _prepare_trade_mode_updates(
-            raw_snapshot,
-            prepared_sensitive_updates,
-        )
-    except TradeModeConfigError as exc:
-        return None, _config_update_conflict(exc)
+    prepared_updates = prepared_sensitive_updates
 
     if "signal" in prepared_updates:
         error_message = await _validate_csv_signal_switch(
@@ -639,9 +505,6 @@ async def get_config() -> Any:
     """
     config = await Config.instance()
     snapshot = _get_public_config_snapshot(config)
-    snapshot["trade_mode_switch_guard"] = (
-        await _get_trade_mode_switch_guard(snapshot, strict=False)
-    ).to_dict()
     try:
         snapshot["strategies"] = await list_strategy_options()
         snapshot["strategy_details"] = await list_strategy_summaries()

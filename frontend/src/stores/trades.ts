@@ -8,7 +8,6 @@ export type OpenTradeRow = {
   campaign_started_at?: string | null
   lifecycle_mode?: string | null
   exposure_state?: string | null
-  sidestep_count?: number
   automation_paused?: boolean
   automation_paused_at?: string | null
   automation_pause_source?: string | null
@@ -45,18 +44,9 @@ export type OpenTradeRow = {
   waiting_reference_quote?: number
   virtual_waiting_profit?: number
   virtual_waiting_profit_percent?: number
-  campaign_principal_quote?: number
-  campaign_realized_profit?: number
-  campaign_realized_profit_percent?: number
-  campaign_total_profit?: number
-  campaign_total_profit_percent?: number
   display_profit?: number
   display_profit_percent?: number
   last_transition_at?: string | null
-  last_exit_reason?: string | null
-  cooldown_until?: string | null
-  reentry_status?: string | null
-  last_long_signal_at?: string | null
   key: number
 }
 
@@ -80,8 +70,6 @@ export type ClosedTradeRow = {
   precision: number
   key: number
 }
-
-export type WaitingCampaignRow = OpenTradeRow
 
 export type UnsellableTradeRow = {
   id: number
@@ -179,8 +167,7 @@ export const useTradesStore = defineStore('trades', {
     openTrades: [] as OpenTradeRow[],
     closedTrades: [] as ClosedTradeRow[],
     unsellableTrades: [] as UnsellableTradeRow[],
-    waitingCampaigns: [] as WaitingCampaignRow[]
-  }),
+   }),
   actions: {
     normalizeOpenTradeRow(val: any) {
       const amountPrecision = isFloat(val.amount)
@@ -213,12 +200,11 @@ export const useTradesStore = defineStore('trades', {
         deal_id: val.deal_id ?? null,
         campaign_id: val.campaign_id ?? null,
         campaign_started_at: val.campaign_started_at ?? null,
-        lifecycle_mode: val.lifecycle_mode ?? null,
-        exposure_state: val.exposure_state ?? null,
-        sidestep_count: Number(val.sidestep_count ?? 0),
-        automation_paused: Boolean(val.automation_paused ?? false),
-        automation_paused_at: val.automation_paused_at ?? null,
-        automation_pause_source: val.automation_pause_source ?? null,
+         lifecycle_mode: val.lifecycle_mode ?? null,
+         exposure_state: val.exposure_state ?? null,
+         automation_paused: Boolean(val.automation_paused ?? false),
+         automation_paused_at: val.automation_paused_at ?? null,
+         automation_pause_source: val.automation_pause_source ?? null,
         dca_sizing_mode: val.dca_sizing_mode ?? 'legacy_factors',
         dca_reference_price: Number(val.dca_reference_price ?? 0),
         dca_reference_atr_percent: Number(
@@ -244,23 +230,14 @@ export const useTradesStore = defineStore('trades', {
         waiting_reference_price: Number(val.waiting_reference_price ?? 0),
         waiting_reference_amount: Number(val.waiting_reference_amount ?? 0),
         waiting_reference_quote: Number(val.waiting_reference_quote ?? 0),
-        virtual_waiting_profit: Number(val.virtual_waiting_profit ?? 0),
-        virtual_waiting_profit_percent: Number(val.virtual_waiting_profit_percent ?? 0),
-        campaign_principal_quote: Number(val.campaign_principal_quote ?? 0),
-        campaign_realized_profit: Number(val.campaign_realized_profit ?? 0),
-        campaign_realized_profit_percent: Number(val.campaign_realized_profit_percent ?? 0),
-        campaign_total_profit: Number(val.campaign_total_profit ?? 0),
-        campaign_total_profit_percent: Number(val.campaign_total_profit_percent ?? 0),
-        display_profit: Number(val.display_profit ?? Number(val.profit ?? 0)),
-        display_profit_percent: Number(
-          val.display_profit_percent ?? Number(val.profit_percent ?? 0)
-        ),
-        last_transition_at: val.last_transition_at ?? null,
-        last_exit_reason: val.last_exit_reason ?? null,
-        cooldown_until: val.cooldown_until ?? null,
-        reentry_status: val.reentry_status ?? null,
-        last_long_signal_at: val.last_long_signal_at ?? null
-      }
+         virtual_waiting_profit: Number(val.virtual_waiting_profit ?? 0),
+         virtual_waiting_profit_percent: Number(val.virtual_waiting_profit_percent ?? 0),
+         display_profit: Number(val.display_profit ?? Number(val.profit ?? 0)),
+         display_profit_percent: Number(
+           val.display_profit_percent ?? Number(val.profit_percent ?? 0)
+          ),
+         last_transition_at: val.last_transition_at ?? null,
+        }
     },
     setOpenTrades(raw: any[]) {
       this.openTrades = raw.map((val: any) => this.normalizeOpenTradeRow(val))
@@ -322,12 +299,9 @@ export const useTradesStore = defineStore('trades', {
             val.unsellable_estimated_notional === null || val.unsellable_estimated_notional === undefined
               ? null
               : Number(val.unsellable_estimated_notional),
-          unsellable_since: val.unsellable_since ?? null
-        }
-      })
-    },
-    setWaitingCampaigns(raw: any[]) {
-      this.waitingCampaigns = raw.map((val: any) => this.normalizeOpenTradeRow(val))
+           unsellable_since: val.unsellable_since ?? null
+          }
+        })
+      },
     }
-  }
 })

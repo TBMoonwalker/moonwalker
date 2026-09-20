@@ -32,7 +32,6 @@ import { useAutopilotMemoryFeed } from '../composables/useAutopilotMemoryFeed'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
 import { serializeConfigValue } from '../helpers/configForm'
-import { normalizeTradeMode } from '../helpers/tradeLifecycle'
 
 const route = useRoute()
 const router = useRouter()
@@ -194,10 +193,7 @@ const {
     snapshotStore: configSnapshotStore,
     transitionIntent,
 })
-const tradeModeLabel = computed(() => {
-    const tradeMode = normalizeTradeMode(configSnapshotStore.snapshot.value?.trade_mode)
-    return tradeMode === 'sidestep' ? 'Sidestep' : 'Dynamic DCA'
-})
+const tradeModeLabel = computed(() => 'Dynamic DCA')
 const tradingPaused = computed(
     () => Boolean(configSnapshotStore.snapshot.value?.trading_paused),
 )

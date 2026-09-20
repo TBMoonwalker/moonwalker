@@ -19,17 +19,15 @@ export type ControlCenterMonitoringHealth =
     | 'attention_needed'
 
 export function useControlCenterMonitoringSummary() {
-    const openTradesStore = useWebSocketDataStore('openTrades')
-    const closedTradesStore = useWebSocketDataStore('closedTrades')
-    const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
-    const waitingCampaignsStore = useWebSocketDataStore('waitingCampaigns')
-    const statisticsStore = useWebSocketDataStore('statistics')
+     const openTradesStore = useWebSocketDataStore('openTrades')
+     const closedTradesStore = useWebSocketDataStore('closedTrades')
+     const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
+     const statisticsStore = useWebSocketDataStore('statistics')
 
-    const openTradesState = storeToRefs(openTradesStore)
-    const closedTradesState = storeToRefs(closedTradesStore)
-    const unsellableTradesState = storeToRefs(unsellableTradesStore)
-    const waitingCampaignsState = storeToRefs(waitingCampaignsStore)
-    const statisticsState = storeToRefs(statisticsStore)
+     const openTradesState = storeToRefs(openTradesStore)
+     const closedTradesState = storeToRefs(closedTradesStore)
+     const unsellableTradesState = storeToRefs(unsellableTradesStore)
+     const statisticsState = storeToRefs(statisticsStore)
 
     const streams = computed<ControlCenterMonitoringStreamSummary[]>(() => [
         {
@@ -54,20 +52,13 @@ export function useControlCenterMonitoringSummary() {
             reconnectCount: unsellableTradesState.reconnectCount.value,
         },
         {
-            key: 'statistics',
-            label: 'Statistics',
-            status: statisticsState.status.value,
-            hasReceivedData: statisticsState.hasReceivedData.value,
-            reconnectCount: statisticsState.reconnectCount.value,
-        },
-        {
-            key: 'waiting-campaigns',
-            label: 'Waiting campaigns',
-            status: waitingCampaignsState.status.value,
-            hasReceivedData: waitingCampaignsState.hasReceivedData.value,
-            reconnectCount: waitingCampaignsState.reconnectCount.value,
-        },
-    ])
+             key: 'statistics',
+             label: 'Statistics',
+             status: statisticsState.status.value,
+             hasReceivedData: statisticsState.hasReceivedData.value,
+             reconnectCount: statisticsState.reconnectCount.value,
+             },
+         ])
 
     const totalStreams = computed(() => streams.value.length)
     const openCount = computed(

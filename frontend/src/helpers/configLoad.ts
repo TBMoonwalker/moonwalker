@@ -87,7 +87,6 @@ export interface TradeModeSwitchGuardState {
     current_trade_mode: string | null
     message: string | null
     open_trade_count: number
-    waiting_campaign_count: number
 }
 
 function toNullableString(value: unknown): string | null {
@@ -190,9 +189,8 @@ function buildTradeModeSwitchGuard(
             current_trade_mode: normalizeTradeMode(response.trade_mode),
             message: null,
             open_trade_count: 0,
-            waiting_campaign_count: 0,
-        }
-    }
+          }
+      }
 
     return {
         blocked: parseBooleanString(rawGuard.blocked) ?? false,
@@ -202,9 +200,7 @@ function buildTradeModeSwitchGuard(
             normalizeTradeMode(response.trade_mode),
         message: toNullableString(rawGuard.message),
         open_trade_count: toNumberOrNull(rawGuard.open_trade_count) ?? 0,
-        waiting_campaign_count:
-            toNumberOrNull(rawGuard.waiting_campaign_count) ?? 0,
-    }
+      }
 }
 
 export function buildLoadedConfigState(
@@ -508,43 +504,8 @@ timezone: toNullableString(response.timezone) || defaults.clientTimezone,
                     response,
                     'dynamic_so_execution_drift_max_pct',
                     0.5,
-                ),
-            sidestep_bearish_strategy: toNullableString(
-                response.sidestep_bearish_strategy,
-            ),
-            sidestep_reentry_strategy: toNullableString(
-                response.sidestep_reentry_strategy,
-            ),
-            sidestep_reentry_cooldown_candles:
-                toNumberOrNull(response.sidestep_reentry_cooldown_candles) ?? 0,
-            sidestep_reentry_requires_fresh_long_signal:
-                parseBooleanString(
-                    response.sidestep_reentry_requires_fresh_long_signal
-                ) ?? false,
-            sidestep_confirm_closed_candle:
-                parseBooleanString(response.sidestep_confirm_closed_candle) ??
-                getConfigContractDefault(
-                    response,
-                    'sidestep_confirm_closed_candle',
-                    false,
-                ),
-            sidestep_reentry_max_premium_pct:
-                toNumberOrNull(response.sidestep_reentry_max_premium_pct) ??
-                getConfigContractDefault(
-                    response,
-                    'sidestep_reentry_max_premium_pct',
-                    0,
-                ),
-            sidestep_exit_max_market_fallback_slippage_pct:
-                toNumberOrNull(
-                    response.sidestep_exit_max_market_fallback_slippage_pct,
-                ) ??
-                getConfigContractDefault(
-                    response,
-                    'sidestep_exit_max_market_fallback_slippage_pct',
-                    0,
-                ),
-            tp: toNumberOrNull(response.tp),
+                  ),
+             tp: toNumberOrNull(response.tp),
             sl: toNumberOrNull(response.sl),
         },
         tradeModeSwitchGuard,

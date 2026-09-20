@@ -22,16 +22,6 @@ from tortoise import Tortoise
 from tortoise.transactions import in_transaction
 
 
-class _FakeSidestepCampaignService:
-    async def resolve_buy_context(
-        self,
-        _symbol: str,
-        _order: dict[str, Any],
-        _config: dict[str, Any],
-    ) -> dict[str, Any]:
-        return {}
-
-
 class _FakeProactiveExchange:
     def __init__(self, *, indeterminate_cancel: bool = False) -> None:
         self.indeterminate_cancel = indeterminate_cancel
@@ -301,7 +291,6 @@ async def test_filled_buy_is_persisted_once_and_duplicate_is_deduplicated(
     CapitalBudgetService._leases.clear()
     try:
         orders = Orders()
-        orders.sidestep_campaigns = _FakeSidestepCampaignService()
         submissions: list[dict[str, Any]] = []
 
         async def create_spot_market_buy(

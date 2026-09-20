@@ -16,7 +16,6 @@ from .listings import Listings as Listings
 from .opentrades import OpenTrades as OpenTrades
 from .placementintent import PlacementIntent as PlacementIntent
 from .schemamigration import SchemaMigration as SchemaMigration
-from .spotcampaigns import SpotCampaigns as SpotCampaigns
 from .strategybuilder import StrategyDefinition as StrategyDefinition
 from .strategybuilder import StrategyGraphState as StrategyGraphState
 from .strategybuilder import StrategyVersion as StrategyVersion
@@ -42,7 +41,6 @@ __all__ = [
     "OpenTrades",
     "PlacementIntent",
     "SchemaMigration",
-    "SpotCampaigns",
     "StrategyDefinition",
     "StrategyGraphState",
     "StrategyVersion",
@@ -69,7 +67,6 @@ if __name__ == "__main__":
         "OpenTrades",
         "PlacementIntent",
         "SchemaMigration",
-        "SpotCampaigns",
         "StrategyDefinition",
         "StrategyGraphState",
         "StrategyVersion",

@@ -12,7 +12,6 @@ from service.autopilot import Autopilot
 from service.autopilot_memory import AutopilotMemoryService, SymbolAdmissionProfile
 from service.config import resolve_timeframe
 from service.signal_settings import canonicalize_signal_settings
-from service.spot_sidestep_campaign import SpotSidestepCampaignService
 from service.statistic import Statistic
 from service.trading_contracts import BuyIntent
 from service.trading_controls import is_global_trading_paused
@@ -556,7 +555,6 @@ async def resolve_signal_admission_batch(
         )
 
     async with _PENDING_ADMISSION_LOCK:
-        sidestep_campaigns = await SpotSidestepCampaignService.instance()
         active_symbols, effective_max_bots = await _resolve_runtime_capacity(
             config,
             statistic,
@@ -566,9 +564,6 @@ async def resolve_signal_admission_batch(
         reserved_symbol_set = set(_PENDING_ADMISSION_SYMBOLS)
         occupied_symbols = active_symbol_set | reserved_symbol_set
         available_slots = max(0, effective_max_bots - len(occupied_symbols))
-        campaign_blocks = await sidestep_campaigns.get_admission_blocks(
-            normalized_candidates
-        )
 
         try:
             memory_service = await AutopilotMemoryService.instance()
@@ -605,9 +600,7 @@ async def resolve_signal_admission_batch(
             [
                 symbol
                 for symbol in normalized_candidates
-                if symbol not in active_symbol_set
-                and symbol not in reserved_symbol_set
-                and symbol not in campaign_blocks
+                if symbol not in active_symbol_set and symbol not in reserved_symbol_set
             ],
             key=lambda symbol: _admission_sort_key(profiles[symbol]),
         )
@@ -628,9 +621,6 @@ async def resolve_signal_admission_batch(
             elif symbol in reserved_symbol_set:
                 admitted = False
                 reason_code = "skipped_slot_reserved"
-            elif symbol in campaign_blocks:
-                admitted = False
-                reason_code = campaign_blocks[symbol].reason_code
             elif symbol in admitted_symbol_set:
                 admitted = True
                 reason_code = _admitted_reason_code(

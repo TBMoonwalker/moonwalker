@@ -14,7 +14,6 @@ from service.config import Config
 from service.database import run_sqlite_write_with_retry
 from service.green_phase import AVAILABLE_QUOTE_UNSET
 from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
-from service.spot_campaign_types import TradeExposureState, TradeLifecycleMode
 from service.trades import Trades
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
@@ -116,82 +115,23 @@ class Statistic:
             self._log_orm_error(error_message)
             return []
 
-    async def _get_open_trade_profit_snapshot(self) -> tuple[float, float, float]:
-        """Return sidestep-aware open-mission totals.
-
-        Returns:
-            A tuple of `(upnl, sidestep_realized_profit, funds_locked)`.
-        """
+    async def _get_open_trade_profit_snapshot(self) -> tuple[float, float]:
+        """Return open-trade upnl and funds-locked totals."""
         try:
             open_trade_rows = await model.OpenTrades.all().values(
-                "campaign_id",
-                "exposure_state",
                 "profit",
                 "cost",
-                "virtual_waiting_profit",
-                "waiting_reference_quote",
-                "reserved_reentry_quote",
             )
-            if not open_trade_rows:
-                return 0.0, 0.0, 0.0
-
-            campaign_ids = [
-                str(row.get("campaign_id") or "").strip()
-                for row in open_trade_rows
-                if str(row.get("campaign_id") or "").strip()
-            ]
-            campaign_metrics: dict[str, dict[str, float]] = {}
-            if campaign_ids:
-                campaign_rows = await model.SpotCampaigns.filter(
-                    campaign_id__in=campaign_ids
-                ).values(
-                    "campaign_id",
-                    "cumulative_realized_quote",
-                )
-                campaign_metrics = {
-                    str(row.get("campaign_id") or "").strip(): {
-                        "realized_profit": float(
-                            row.get("cumulative_realized_quote") or 0.0
-                        ),
-                    }
-                    for row in campaign_rows
-                    if str(row.get("campaign_id") or "").strip()
-                }
-
             upnl_value = 0.0
             funds_locked = 0.0
-            sidestep_realized_profit = 0.0
-            counted_campaigns: set[str] = set()
             for row in open_trade_rows:
-                campaign_id = str(row.get("campaign_id") or "").strip()
-                campaign_metric = campaign_metrics.get(campaign_id, {})
-                realized_profit = float(campaign_metric.get("realized_profit") or 0.0)
-                exposure_state = str(row.get("exposure_state") or "").strip()
-                if exposure_state == TradeExposureState.FLAT_WAITING_REENTRY.value:
-                    upnl_value += float(row.get("virtual_waiting_profit") or 0.0)
-                    committed_quote = max(
-                        0.0,
-                        float(row.get("reserved_reentry_quote") or 0.0)
-                        or float(row.get("waiting_reference_quote") or 0.0),
-                    )
-                    funds_locked += max(0.0, committed_quote - realized_profit)
-                else:
-                    upnl_value += float(row.get("profit") or 0.0)
-                    committed_quote = float(row.get("cost") or 0.0)
-                    funds_locked += max(0.0, committed_quote - realized_profit)
-
-                if campaign_id and campaign_id not in counted_campaigns:
-                    sidestep_realized_profit += realized_profit
-                    counted_campaigns.add(campaign_id)
-
-            return (
-                float(upnl_value),
-                float(sidestep_realized_profit),
-                float(funds_locked),
-            )
+                upnl_value += float(row.get("profit") or 0.0)
+                committed_quote = float(row.get("cost") or 0.0)
+                funds_locked += max(0.0, committed_quote)
+            return float(upnl_value), float(funds_locked)
         except BaseORMException as exc:
-            logging.error("Error getting sidestep-aware open-trade snapshot: %s", exc)
-            return 0.0, 0.0, 0.0
+            logging.error("Error getting open-trade profit snapshot: %s", exc)
+            return 0.0, 0.0
 
     @staticmethod
     def _resample_profit_data_sync(
@@ -357,11 +297,11 @@ class Statistic:
             closed_profit_task,
             profit_week_task,
         )
-        upnl_value, sidestep_realized_profit, funds_locked = open_trade_snapshot
+        upnl_value, funds_locked = open_trade_snapshot
 
         profit_data["upnl"] = upnl_value
-        profit_data["profit_overall"] = (
-            closed_profit + sidestep_realized_profit + float(profit_data["upnl"] or 0.0)
+        profit_data["profit_overall"] = closed_profit + float(
+            profit_data["upnl"] or 0.0
         )
         profit_data["funds_locked"] = funds_locked
         profit_data["profit_week"] = self._group_profit_rows_by_date(profit_week_rows)
@@ -605,29 +545,9 @@ class Statistic:
             open_date_value = format_trade_datetime(
                 trade_datetime_from_ms(float(open_timestamp))
             )
-            lifecycle_mode = str(open_trade.get("lifecycle_mode") or "")
-            if lifecycle_mode == TradeLifecycleMode.SIDESTEP_REENTRY.value:
-                campaign_id = str(open_trade.get("campaign_id") or "").strip()
-                if campaign_id:
-                    campaign_rows = (
-                        await model.SpotCampaigns.filter(campaign_id=campaign_id)
-                        .limit(1)
-                        .values("started_at")
-                    )
-                    started_at = str(
-                        (campaign_rows[0] if campaign_rows else {}).get("started_at")
-                        or ""
-                    ).strip()
-                    if started_at:
-                        open_date_value = started_at
-                if not str(open_date_value).strip():
-                    preserved_open_date = str(open_trade.get("open_date") or "").strip()
-                    if preserved_open_date:
-                        open_date_value = preserved_open_date
-            else:
-                preserved_open_date = str(open_trade.get("open_date") or "").strip()
-                if preserved_open_date and not has_base_order_timestamp:
-                    open_date_value = preserved_open_date
+            preserved_open_date = str(open_trade.get("open_date") or "").strip()
+            if preserved_open_date and not has_base_order_timestamp:
+                open_date_value = preserved_open_date
 
             # Update open trade statistics
             payload = {

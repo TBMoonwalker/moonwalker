@@ -7,20 +7,12 @@ from typing import Any
 
 from service.config import resolve_timeframe
 from service.dca_recovery_sizing import resolve_recovery_atr_timeframe
-from service.trade_lifecycle_config import (
-    TradeLifecycleConfigView,
-    normalize_trade_mode,
-    resolve_trade_mode_config,
-)
 
 __all__ = [
     "DcaRuntimeConfigView",
     "ExchangeConnectionConfigView",
-    "SidestepCampaignConfigView",
     "SignalPluginConfigView",
-    "TradeLifecycleConfigView",
     "WatcherRuntimeConfigView",
-    "normalize_trade_mode",
 ]
 
 
@@ -126,57 +118,6 @@ class SignalPluginConfigView:
 
 
 @dataclass(frozen=True)
-class SidestepCampaignConfigView:
-    """Backward-compatible sidestep settings view for existing call sites."""
-
-    enabled: bool
-    market: str
-    bearish_strategy: str | None
-    reentry_strategy: str | None
-    reentry_cooldown_candles: int
-    reentry_requires_fresh_long_signal: bool
-    confirm_closed_candle: bool
-    reentry_max_premium_pct: float
-    exit_max_market_fallback_slippage_pct: float
-
-    @classmethod
-    def from_config(cls, config: dict[str, Any]) -> "SidestepCampaignConfigView":
-        """Build normalized sidestep campaign settings from raw config."""
-        lifecycle = TradeLifecycleConfigView.from_config(config)
-        return cls(
-            enabled=lifecycle.enabled,
-            market=lifecycle.market,
-            bearish_strategy=lifecycle.bearish_exit_strategy,
-            reentry_strategy=lifecycle.reentry_strategy,
-            reentry_cooldown_candles=lifecycle.reentry_cooldown_candles,
-            reentry_requires_fresh_long_signal=bool(
-                config.get("sidestep_reentry_requires_fresh_long_signal", False)
-            ),
-            confirm_closed_candle=bool(
-                config.get("sidestep_confirm_closed_candle", False)
-            ),
-            reentry_max_premium_pct=max(
-                0.0,
-                _float_config_value(
-                    config,
-                    "sidestep_reentry_max_premium_pct",
-                    default=0.0,
-                    falsey_fallback=0.0,
-                ),
-            ),
-            exit_max_market_fallback_slippage_pct=max(
-                0.0,
-                _float_config_value(
-                    config,
-                    "sidestep_exit_max_market_fallback_slippage_pct",
-                    default=0.0,
-                    falsey_fallback=0.0,
-                ),
-            ),
-        )
-
-
-@dataclass(frozen=True)
 class WatcherRuntimeConfigView:
     """Typed watcher runtime settings derived from the config snapshot."""
 
@@ -237,7 +178,6 @@ class DcaRuntimeConfigView:
     def from_config(cls, config: dict[str, Any]) -> "DcaRuntimeConfigView":
         """Build normalized DCA settings from the raw config snapshot."""
         atr_timeframe = resolve_recovery_atr_timeframe(config)
-        trade_mode = resolve_trade_mode_config(config, source="runtime")
         return cls(
             tp_spike_confirm_enabled=bool(
                 config.get("tp_spike_confirm_enabled", False)
@@ -293,7 +233,7 @@ class DcaRuntimeConfigView:
                 default=0,
                 falsey_fallback=0,
             ),
-            dynamic_dca=trade_mode.dynamic_dca_enabled,
+            dynamic_dca=True,
             safety_order_volume_scale=_float_config_value(
                 config,
                 "os",

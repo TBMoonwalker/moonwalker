@@ -219,18 +219,6 @@ class TradeReplayIndicatorService:
             return []
 
         strategy_candidates: list[Any] = []
-        has_campaign_execution = any(
-            str(execution.get("campaign_id") or "").strip()
-            or str(execution.get("role") or "").strip() in {"partial_sell"}
-            for execution in executions
-        )
-        if has_campaign_execution:
-            strategy_candidates.extend(
-                [
-                    config.get("sidestep_bearish_strategy"),
-                    config.get("sidestep_reentry_strategy"),
-                ]
-            )
 
         strategy_candidates.extend(
             [

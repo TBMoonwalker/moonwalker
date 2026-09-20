@@ -29,10 +29,7 @@ from service.placement_intents import (
     is_terminal_placement_state,
     quarantine_restored_intent,
 )
-from service.trade_lifecycle_config import (
-    build_invalid_backup_shape_error,
-    resolve_trade_mode_config,
-)
+from service.trade_lifecycle_config import build_invalid_backup_shape_error
 from tortoise import fields
 from tortoise.transactions import in_transaction
 
@@ -97,12 +94,7 @@ class BackupService:
                 self._validate_config_rows(backup_payload.get("config"))
             )
         )
-        candidate_config = self._build_config_snapshot(config_rows)
-        resolve_trade_mode_config(
-            candidate_config,
-            source="restore",
-            require_explicit_sidestep_reentry=True,
-        )
+
         trade_data = backup_payload.get("trade_data")
         if restore_trade_data:
             if not isinstance(trade_data, dict):
