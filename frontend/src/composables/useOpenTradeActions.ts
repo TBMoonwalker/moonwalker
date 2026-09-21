@@ -32,6 +32,7 @@ interface UseOpenTradeActionsOptions {
     availableFunds: Ref<number>
     dialog: ReturnType<typeof useDialog>
     message: ReturnType<typeof useMessage>
+    onAfterDeny?: () => void | Promise<void>
 }
 
 export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
@@ -392,36 +393,99 @@ export function useOpenTradeActions(options: UseOpenTradeActionsOptions) {
             negativeText: 'Do not stop',
             onPositiveClick: async () => {
                 d.loading = true
-                const [symbol, currency] = splitTradeSymbol(
-                    data.symbol.toLowerCase(),
-                )
-                const result = await fetchJson<OrderMutationResponse>(
-                    `/orders/stop/${symbol}-${currency}`,
-                    { method: 'POST' },
-                )
-                if (orderMutationApplied(result, 'stop')) {
-                    options.message.success(
-                        `Stopped ${data.symbol} Please trade it manually on your exchange`,
-                    )
-                } else {
+                try {
+                    const [symbol, currency] = splitTradeSymbol(
+                        data.symbol.toLowerCase(),
+                     )
+                    const result = await fetchJson<OrderMutationResponse>(
+                         `/orders/stop/${symbol}-${currency}`,
+                         { method: 'POST' },
+                     )
+                    if (orderMutationApplied(result, 'stop')) {
+                        options.message.success(
+                             `Stopped ${data.symbol} Please trade it manually on your exchange`,
+                         )
+                     } else {
+                        options.message.error(
+                            orderMutationFailureMessage(
+                                result,
+                                 `Failed to stop ${data.symbol}`,
+                             ),
+                         )
+                     }
+                    return true
+                 } catch (error) {
+                    d.loading = false
                     options.message.error(
-                        orderMutationFailureMessage(
-                            result,
-                            `Failed to stop ${data.symbol}`,
-                        ),
-                    )
-                }
-            },
+                        extractApiErrorMessage(
+                            error,
+                             `Failed to stop ${data.symbol}`,
+                         ),
+                         { duration: 0, closable: true },
+                     )
+                    return false
+                 }
+             },
             onNegativeClick: () => {
                 options.message.error('Cancelled')
-            },
-        })
-    }
+             },
+         })
+     }
+
+    function handleDealDeny(data: OpenTradeRow): void {
+        const d = options.dialog.warning({
+            title: 'Deny symbol from new entries',
+            content: `Deny ${data.symbol} from opening new signal deals? The open deal keeps running.`,
+            positiveText: 'Deny',
+            negativeText: 'Do not deny',
+            onPositiveClick: async () => {
+                d.loading = true
+                try {
+                    const result = await fetchJson<{
+                        pair_denylist?: string[] | string
+                        status?: string
+                     }>('/config/denylist/deny', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ symbol: String(data.symbol) }),
+                     })
+                    if (
+                        result.status === 'denied' ||
+                        Array.isArray(result.pair_denylist)
+                     ) {
+                        options.message.success(
+                             `${data.symbol} denied from new signal entries`,
+                         )
+                        void options.onAfterDeny?.()
+                     } else {
+                        options.message.error(
+                             `Failed to deny ${data.symbol}`,
+                         )
+                     }
+                    return true
+                 } catch (error) {
+                    d.loading = false
+                    options.message.error(
+                        extractApiErrorMessage(
+                            error,
+                             'The deny request failed. Retry to append the symbol to the denylist.',
+                         ),
+                         { duration: 0, closable: true },
+                     )
+                    return false
+                 }
+             },
+            onNegativeClick: () => {
+                options.message.error('Cancelled')
+             },
+         })
+     }
 
     return {
         handleAddManualBuy,
         handleDealBuy,
         handleDealSell,
         handleDealStop,
-    }
+        handleDealDeny,
+     }
 }

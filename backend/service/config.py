@@ -166,6 +166,41 @@ def resolve_history_lookback_days(
     return default_days or 90
 
 
+def parse_denylist_tokens(raw_value: Any) -> list[str]:
+    """Return the de-duplicated base tokens from a stored pair_denylist value.
+
+    The stored value is a comma/newline separated CSV string of base tokens.
+    A sentinel (falsey or "false"/"none"/"null") yields no tokens.
+    """
+    if raw_value is None or raw_value is False:
+        return []
+    normalized = str(raw_value).strip()
+    if not normalized or normalized.lower() in {"false", "none", "null"}:
+        return []
+    deduped: list[str] = []
+    seen: set[str] = set()
+    for entry in re.split(r"[\n,]+", normalized):
+        token = entry.strip().replace("-", "/").split("/")[0].strip().upper()
+        if not token or token in seen:
+            continue
+        seen.add(token)
+        deduped.append(token)
+    return deduped
+
+
+def to_base_token(symbol: Any) -> str:
+    """Return the base token for a symbol like "FO0USDT", "fo0/usdt", or "FO0"."""
+    normalized = str(symbol or "").strip().upper().replace("-", "/")
+    if not normalized:
+        return ""
+    return normalized.split("/")[0].split("-")[0]
+
+
+def serialize_denylist_tokens(tokens: list[str]) -> str:
+    """Serialize base tokens back into a CSV pair_denylist string."""
+    return ",".join(tokens)
+
+
 def deserialize_config_value(value: Any, value_type: str) -> Any:
     """Convert a serialized config value into its typed runtime representation."""
     if value_type == "int":
@@ -220,6 +255,7 @@ class Config:
         self._subscribers: set[Callable[[dict[str, Any]], None]] = set()
         self._listener_task: asyncio.Task | None = None
         self._instance_id = uuid.uuid4().hex
+        self._write_lock: asyncio.Lock | None = None
 
     @classmethod
     async def instance(cls) -> "Config":
@@ -445,16 +481,38 @@ class Config:
         """
         return self._store.get(key, defaults=DEFAULT_CONFIG_VALUES, default=default)
 
+    async def _acquire_write_lock(self) -> asyncio.Lock:
+        """Return the process-wide config write lock, creating it lazily.
+
+        Creating the lock on first access keeps the lock bound to the running
+        event loop (an asyncio.Lock created on another loop is unusable).
+        """
+        if self._write_lock is None:
+            self._write_lock = asyncio.Lock()
+        return self._write_lock
+
     async def set(self, key: str, value: Any) -> bool:
         """Set a configuration value in the database and notify subscribers.
 
         Args:
-            key: The configuration key to set
-            value: Update payload containing "value" and "type" keys
+             key: The configuration key to set
+              value: Update payload containing "value" and "type" keys
 
         Returns:
             True if the operation succeeded
         """
+        lock = await self._acquire_write_lock()
+        async with lock:
+            return await self._set_locked(key, value)
+
+    async def _set_locked(
+        self,
+        key: str,
+        value: Any,
+        *,
+        notify_subscribers: bool = True,
+    ) -> bool:
+        """Persist one config key. The caller must hold the write lock."""
         action = self.__build_update_action(key, value)
 
         async with in_transaction() as conn:
@@ -475,10 +533,11 @@ class Config:
             self._store.upsert_entry(entry)
         else:
             self._store.remove_entry(key)
-        changed_keys = [key]
-        self.__notify_subscribers()
-        # Notify all subscribers across processes (best effort)
-        await self.__publish_change(changed_keys)
+        if notify_subscribers:
+            changed_keys = [key]
+            self.__notify_subscribers()
+            # Notify all subscribers across processes (best effort)
+            await self.__publish_change(changed_keys)
 
         return True
 
@@ -499,6 +558,20 @@ class Config:
         Returns:
             True if the operation succeeded
         """
+        lock = await self._acquire_write_lock()
+        async with lock:
+            return await self._batch_set_locked(
+                updates,
+                notify_subscribers=notify_subscribers,
+            )
+
+    async def _batch_set_locked(
+        self,
+        updates: dict[str, Any],
+        *,
+        notify_subscribers: bool = True,
+    ) -> bool:
+        """Persist several config keys. The caller must hold the write lock."""
         actions: list[ConfigUpdateAction] = []
         for key, raw_value in updates.items():
             self.__assert_supported_key(key)
@@ -531,6 +604,52 @@ class Config:
             await self.__publish_change(changed_keys)
 
         return True
+
+    async def append_denylist_token(self, symbol: str) -> list[str]:
+        """Atomically append one base token to the pair_denylist.
+
+        Reads the current list, de-duplicates the appended token, and writes the
+        whole list back under the config write lock so concurrent appends from
+        multiple dashboard clients cannot clobber each other. The existing open
+        trades for the symbol are untouched; only future signal entries are gated.
+
+        Returns:
+            The resulting de-duplicated denylist tokens.
+        """
+        lock = await self._acquire_write_lock()
+        async with lock:
+            current = self.get("pair_denylist")
+            tokens = parse_denylist_tokens(current)
+            base_token = to_base_token(symbol)
+            if base_token and base_token not in tokens:
+                tokens.append(base_token)
+            serialized = serialize_denylist_tokens(tokens)
+            await self._set_locked(
+                "pair_denylist", {"value": serialized, "type": "str"}
+            )
+            return tokens
+
+    async def merge_denylist_tokens(self, tokens: list[str]) -> list[str]:
+        """Atomically replace the pair_denylist with a de-duplicated token list.
+
+        Used when a client submits a full config form. The list is persisted under
+            the same write lock as appends to keep the denylist consistent.
+        """
+        lock = await self._acquire_write_lock()
+        async with lock:
+            ordered: list[str] = []
+            seen: set[str] = set()
+            for raw_token in tokens:
+                base_token = to_base_token(raw_token)
+                if not base_token or base_token in seen:
+                    continue
+                seen.add(base_token)
+                ordered.append(base_token)
+            serialized = serialize_denylist_tokens(ordered)
+            await self._set_locked(
+                "pair_denylist", {"value": serialized, "type": "str"}
+            )
+            return ordered
 
     def subscribe(self, callback: Callable[[dict[str, Any]], None]) -> None:
         """Subscribe a callback function to configuration changes.

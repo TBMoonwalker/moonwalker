@@ -246,11 +246,50 @@ export function calculateSoPercentage(
     previousPrice: number,
 ): number {
     if (
-        !Number.isFinite(price) ||
-        !Number.isFinite(previousPrice) ||
+         !Number.isFinite(price) ||
+         !Number.isFinite(previousPrice) ||
         previousPrice <= 0
-    ) {
+     ) {
         return 0
-    }
+     }
     return Number((((price - previousPrice) / previousPrice) * 100).toFixed(2))
+}
+
+const DENYLIST_SENTINELS = new Set(['false', 'none', 'null', ''])
+
+function normalizeDenyToken(rawValue: string): string {
+    const normalized = String(rawValue).trim().toUpperCase().replace('-', '/')
+    if (!normalized || DENYLIST_SENTINELS.has(normalized.toLowerCase())) {
+        return ''
+     }
+    return normalized.split('/')[0].split('-')[0]
+}
+
+export function parseDenylistTokens(rawValue: string | null | undefined): string[] {
+    const source =
+        typeof rawValue === 'string' ? rawValue : Array.isArray(rawValue)
+          ? (rawValue as string[]).join(',')
+          : ''
+    const tokens: string[] = []
+    const seen = new Set<string>()
+    for (const entry of source.split(/[\n,]+/)) {
+        const token = normalizeDenyToken(entry)
+        if (token && !seen.has(token)) {
+            seen.add(token)
+            tokens.push(token)
+          }
+     }
+    return tokens
+}
+
+export function isSymbolDenied(
+    symbol: string,
+    denylistValue: string | null | undefined,
+): boolean {
+    const [baseToken] = splitTradeSymbol(String(symbol))
+    const normalized = baseToken.trim().toUpperCase()
+    if (!normalized) {
+        return false
+     }
+    return parseDenylistTokens(denylistValue).includes(normalized)
 }
