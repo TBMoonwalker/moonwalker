@@ -2,6 +2,26 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.9.0.0] - 2026-09-21
+
+### Added
+- Add a per-open-trade "Deny from new entries" row action. Clicking it appends
+  the trade's base token to `pair_denylist` so the symbol is blocked from
+  opening new signal deals while its existing open trade runs to its natural end.
+- Render a "Denylisted" tag on open-trade rows whose base token is present in
+   `pair_denylist`, driven by the live config snapshot.
+- Add `POST /config/denylist/deny`, a server-side endpoint that reads the current
+   `pair_denylist`, de-duplicates the base token, and writes the whole list back
+  atomically under a new global `Config` write lock so concurrent dashboard
+  clients cannot clobber each other's denylist appends.
+- Add `Config.append_denylist_token` / `Config.merge_denylist_tokens` and the
+   module helpers `parse_denylist_tokens`, `to_base_token`, and
+   `serialize_denylist_tokens` in `service/config.py`, plus the frontend
+   `parseDenylistTokens` / `isSymbolDenied` helpers.
+- Add regression coverage for token normalization, de-duplication, concurrent
+   appends (no lost update), future-entry gating, leaving open trades untouched,
+   full-list replacement, and the denylist deny endpoint.
+
 ## [4.8.0.0] - 2026-09-20
 
 ### Removed
