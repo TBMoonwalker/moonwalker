@@ -67,18 +67,68 @@ describe('open trade order actions', () => {
         info: vi.fn((options: Record<string, unknown>) => {
             dialogs.push(options)
             return { loading: false }
-        }),
-        warning: vi.fn(),
-    }
+          }),
+        warning: vi.fn((options: Record<string, unknown>) => {
+            dialogs.push(options)
+            return { loading: false }
+          }),
+      }
 
     beforeEach(() => {
         dialogs.length = 0
         fetchJsonMock.mockReset()
         message.error.mockReset()
         message.success.mockReset()
-        dialog.info.mockClear()
-        dialog.warning.mockClear()
-    })
+         dialog.info.mockClear()
+         dialog.warning.mockClear()
+      })
+
+    it('denies a symbol from new entries and refreshes the denylist', async () => {
+        fetchJsonMock.mockResolvedValueOnce({
+            status: 'denied',
+            pair_denylist: ['BTC'],
+          })
+        const onAfterDeny = vi.fn()
+        const actions = useOpenTradeActions({
+            availableFunds: ref(100),
+            dialog: dialog as never,
+            message: message as never,
+            onAfterDeny,
+          })
+
+        actions.handleDealDeny(trade())
+        await (dialogs[0].onPositiveClick as () => Promise<unknown>)()
+
+        const [path, init] = fetchJsonMock.mock.calls[0]
+        expect(path).toBe('/config/denylist/deny')
+        expect(init.method).toBe('POST')
+        expect(JSON.parse(init.body as string)).toEqual({
+            symbol: 'BTC/USDC',
+          })
+        expect(message.success).toHaveBeenCalledTimes(1)
+        expect(onAfterDeny).toHaveBeenCalledTimes(1)
+       })
+
+       it('resets the loading spinner when the deny request fails', async () => {
+         const deniedHandle = { loading: false }
+         dialog.warning.mockImplementationOnce((options: Record<string, unknown>) => {
+             dialogs.push(options)
+             return deniedHandle
+            })
+         fetchJsonMock.mockRejectedValueOnce(new Error('boom'))
+
+         const actions = useOpenTradeActions({
+             availableFunds: ref(100),
+             dialog: dialog as never,
+             message: message as never,
+            })
+
+         actions.handleDealDeny(trade())
+         await (dialogs[0].onPositiveClick as () => Promise<unknown>)()
+
+         expect(deniedHandle.loading).toBe(false)
+         expect(message.error).toHaveBeenCalledTimes(1)
+        })
 
     it('reuses an indeterminate buy operation and releases it after success', async () => {
         fetchJsonMock

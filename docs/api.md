@@ -28,6 +28,7 @@ runtime and multiple concurrent dashboard clients.
 | `POST` | `/config/live/activate` | Switch the instance from dry run to live mode after backend readiness checks pass. |
 | `POST` | `/config/trading/pause` | Pause new exposure while existing exit management continues. |
 | `POST` | `/config/trading/resume` | Resume admission of new exposure. |
+| `POST` | `/config/denylist/deny` | Append an open trade's base token to `pair_denylist` atomically, blocking future signal entries while existing open trades continue. |
 | `GET` | `/config/backup/export?include_trade_data=false` | Export config-only backup payload. |
 | `GET` | `/config/backup/export?include_trade_data=true` | Export full backup payload including trade data. |
 | `POST` | `/config/backup/restore` | Restore config-only or full backup payloads. |
@@ -57,8 +58,13 @@ Notes:
 - `POST /config/live/activate` expects `{"confirm": true}` and returns `409`
   with a `blockers` array when required setup is still incomplete.
 - `POST /config/trading/pause` and `POST /config/trading/resume` both expect
-  `{"confirm": true}`. Pausing blocks new exposure but does not block protective
+   `{"confirm": true}`. Pausing blocks new exposure but does not block protective
   exits for existing positions.
+- `POST /config/denylist/deny` expects a JSON body like
+   `{"symbol": "FO0/USDT"}` and returns the resulting `pair_denylist` plus a
+   `denied` marker. The append de-duplicates the base token and writes under a
+  global config write lock so concurrent dashboard clients cannot clobber each
+  other's denylists. Reversal is done by editing `pair_denylist`.
 - `POST /config/backup/restore` expects a JSON body with `backup`,
   `confirm: true`, and optional `restore_trade_data`. Restore drains active
   exchange-order work, rejects new order work until replacement completes, and

@@ -1,5 +1,21 @@
 # TODOS
 
+## Next up
+
+### Denylist from open trade: symmetric re-enable + DESIGN.md badge pass
+
+**Status:** Ready to design when picked up
+
+**What:** v4.9.0.0 ships a one-way "Deny from new entries" row action gated by
+`D3` (config-only undo by editing `pair_denylist`). A symmetric "Re-enable" /
+"Remove from denylist" row action, plus a DESIGN.md pass on the "Denylisted" tag
+color/label, would close the loop. Keep it an entry-only change; do not touch
+open trades.
+
+**Effort:** M
+
+**Priority:** P3
+
 ## Analytics
 
 ### Extend sidestep campaign analytics beyond grouped replay polish

@@ -776,6 +776,41 @@ async def resume_trading(data: ConfirmMutationRequest) -> Any:
     }
 
 
+class DenySymbolRequest(msgspec.Struct, forbid_unknown_fields=True):
+    """Strict body for the per-trade denylist append endpoint."""
+
+    symbol: str
+
+
+@post(path="/config/denylist/deny")
+async def deny_symbol(data: DenySymbolRequest) -> Any:
+    """Append a base token to the pair_denylist atomically.
+
+    The existing open trades for the symbol continue to their natural end;
+    only future signal entries are gated.
+    """
+    symbol = str(data.symbol or "").strip()
+    if not symbol:
+        return json_response(
+            {"error": "A symbol is required."},
+            400,
+        )
+
+    config = await Config.instance()
+    tokens = await config.append_denylist_token(symbol)
+    logging.info(
+        "Symbol %s denied from new signal entries. Denylist now: %s",
+        symbol,
+        ", ".join(tokens) if tokens else "(empty)",
+    )
+    return {
+        "message": f"Symbol '{symbol}' denied from new signal entries.",
+        "status": "denied",
+        "denied": symbol,
+        "pair_denylist": tokens,
+    }
+
+
 @post(path="/config/backup/restore")
 async def restore_backup(data: RestoreBackupRequest) -> Any:
     """Restore config-only or full backup payloads."""
@@ -851,5 +886,6 @@ route_handlers = [
     activate_live_trading,
     pause_trading,
     resume_trading,
+    deny_symbol,
     restore_backup,
 ]

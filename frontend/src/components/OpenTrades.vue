@@ -55,6 +55,7 @@ import { useOpenTradeColumns } from '../composables/useOpenTradeColumns'
 import { useTradeTableFeed } from '../composables/useTradeTableFeed'
 import { useViewport } from '../composables/useViewport'
 import {
+    isSymbolDenied,
     getOpenTradeOpenedAt,
     toFiniteNonNegative,
     type OpenTradeRow,
@@ -146,14 +147,21 @@ const availableFunds = computed(() => {
 const maxSafetyOrders = computed(() =>
     Math.trunc(toFiniteNonNegative(configSnapshotStore.snapshot.value?.mstc)),
 )
+const denylistValue = computed(() =>
+    (configSnapshotStore.snapshot.value?.pair_denylist as
+      | string
+      | undefined) ?? null,
+)
 const {
     handleAddManualBuy,
     handleDealSell,
     handleDealStop,
+    handleDealDeny,
 } = useOpenTradeActions({
     availableFunds,
     dialog,
     message,
+    onAfterDeny: () => configSnapshotStore.refresh(),
 })
 const {
     handlePauseMission,
@@ -177,10 +185,13 @@ const {
     onAddManualBuy: handleAddManualBuy,
     onDealSell: handleDealSell,
     onDealStop: handleDealStop,
+    onDealDeny: handleDealDeny,
     onPauseMission: (rowData) => handlePauseMission(rowData.symbol),
     onResumeMission: (rowData) => handleResumeMission(rowData.symbol),
     sortState,
     maxSafetyOrders,
+    denylistValue,
+    isDenied: isSymbolDenied,
 })
 
 function handleSorterChange(sorter: unknown): void {

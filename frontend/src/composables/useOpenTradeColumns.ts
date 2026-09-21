@@ -45,10 +45,13 @@ interface UseOpenTradeColumnsOptions {
     onAddManualBuy: (rowData: OpenTradeRow) => void
     onDealSell: (rowData: OpenTradeRow) => void
     onDealStop: (rowData: OpenTradeRow) => void
+    onDealDeny: (rowData: OpenTradeRow) => void
     onPauseMission: (rowData: OpenTradeRow) => void | Promise<void>
     onResumeMission: (rowData: OpenTradeRow) => void | Promise<void>
     sortState: Ref<TradeTableSortState | null>
     maxSafetyOrders: Ref<number>
+    denylistValue: Ref<string | null | undefined>
+    isDenied: (symbol: string, denylistValue: string | null | undefined) => boolean
 }
 
 const tradeActionButtonStyle = {
@@ -107,30 +110,39 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                     automationAction,
                 ),
             },
-            {
+             {
                 key: 'manual-buy',
                 label: 'Add manual buy',
                 disabled: isBuyBlocked(rowData),
-            },
-        ]
+              },
+              {
+                key: 'deny',
+                label: 'Deny from new entries',
+                disabled: false,
+              },
+          ]
         if (options.isMobile.value) {
             overflowOptions.unshift({
                 key: 'stop',
                 label: 'Stop trade',
                 disabled: false,
-            })
-        }
+             })
+          }
         return h(
             NDropdown,
             {
                 trigger: 'click',
                 options: overflowOptions,
-                onSelect: (key: string | number) => {
-                    if (key === 'stop') {
-                        options.onDealStop(rowData)
-                        return
-                    }
-                    if (key === 'resume') {
+                 onSelect: (key: string | number) => {
+                     if (key === 'stop') {
+                         options.onDealStop(rowData)
+                         return
+                      }
+                     if (key === 'deny') {
+                         options.onDealDeny(rowData)
+                         return
+                      }
+                     if (key === 'resume') {
                         void options.onResumeMission(rowData)
                         return
                     }
@@ -226,26 +238,39 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
             tags.push(
                 h(
                     NTooltip,
-                    {},
-                    {
+                      {},
+                      {
                         trigger: () =>
-                            h(
-                                NTag,
-                                {
+                             h(
+                                 NTag,
+                                   {
                                     size: 'small',
                                     bordered: false,
                                     type: 'error',
-                                },
-                                { default: () => 'Delisting risk' },
-                            ),
+                                  },
+                                   { default: () => 'Delisting risk' },
+                              ),
                         default: () =>
-                            rowData.delisting_at
-                                ? `Scheduled for delisting at ${rowData.delisting_at}`
-                                : 'The exchange marks this market inactive',
-                    },
-                ),
-            )
-        }
+                             rowData.delisting_at
+                                    ? `Scheduled for delisting at ${rowData.delisting_at}`
+                                    : 'The exchange marks this market inactive',
+                      },
+                   ),
+               )
+           }
+        if (options.isDenied(rowData.symbol, options.denylistValue.value)) {
+            tags.push(
+                h(
+                    NTag,
+                      {
+                        size: 'small',
+                        bordered: false,
+                        type: 'info',
+                       },
+                       { default: () => 'Denylisted' },
+                   ),
+               )
+           }
         return h('div', { class: 'trade-symbol-cell' }, [
             h('span', { class: 'trade-symbol-main' }, `${symbol}/${currency}`),
             h('div', { class: 'trade-symbol-meta' }, [
