@@ -2,6 +2,22 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.10.0.0] - 2026-09-22
+
+### Removed
+- The unrouted config view chain (`views/ConfigView.vue`,
+   `components/Config.vue`, `components/config/ConfigGeneralSection.vue`) is
+   deleted. After the `/config` route was retired in favor of the control
+   center, these three files were unreachable from the app and the router;
+   the shared section components still used by the control center are kept.
+   Five path-anchored regression tests are repointed onto the live
+   control-center surfaces that provide the same coverage.
+- The unused `OpenTrades.__dict__` method (it returned an f-string and had no
+   callers) and the orphaned `idx_opentrades_lifecycle_mode` index, which no
+   query filters on, are dropped. `exposure_state` and
+   `idx_opentrades_exposure_state_symbol` are retained: they back the
+   open-trades read path and `LifecycleSnapshotIdentity`.
+
 ## [4.9.0.0] - 2026-09-21
 
 ### Added
