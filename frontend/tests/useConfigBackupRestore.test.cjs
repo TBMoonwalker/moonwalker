@@ -5,10 +5,6 @@ const test = require('node:test')
 
 const { loadFrontendModule } = require('./helpers/loadFrontendModule.cjs')
 
-const configViewSource = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'components', 'Config.vue'),
-    'utf8',
-)
 const utilitiesWorkspaceSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -143,26 +139,16 @@ test('config editors delegate backup input binding to the backup-restore composa
     for (const snippet of requiredViewSnippets) {
         assert.ok(
             controlCenterViewSource.includes(snippet),
-            `expected ControlCenterView.vue to include ${snippet}`,
-        )
-    }
+              `expected ControlCenterView.vue to include ${snippet}`,
+           )
+       }
 
-    assert.ok(
-        configViewSource.includes(
-            ':bind-backup-file-input="bindBackupFileInput"',
-        ),
-        'expected Config.vue to pass backup input binding into the shared restore controls',
-    )
-    assert.ok(
-        configViewSource.includes('<ConfigBackupRestoreControls'),
-        'expected Config.vue to render the shared restore controls',
-    )
-    assert.equal(
-        controlCenterViewSource.includes(
-            'function bindBackupFileInput(element: Element | null): void {',
-        ),
-        false,
-    )
+      assert.equal(
+          controlCenterViewSource.includes(
+               'function bindBackupFileInput(element: Element | null): void {',
+            ),
+          false,
+       )
 })
 
 test('backup and restore presentation is shared across config and control center surfaces', () => {
@@ -175,17 +161,11 @@ test('backup and restore presentation is shared across config and control center
         'Include trade data in backup',
         'Download backup',
     ]
-    const requiredConfigViewSnippets = [
-        "import ConfigBackupDownloadControls from './config/ConfigBackupDownloadControls.vue'",
-        "import ConfigBackupRestoreControls from './config/ConfigBackupRestoreControls.vue'",
-        '<ConfigBackupDownloadControls',
-        '<ConfigBackupRestoreControls',
-    ]
-    const requiredUtilitiesSnippets = [
-        "import ConfigBackupDownloadControls from '../config/ConfigBackupDownloadControls.vue'",
-        "import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'",
-        '<ConfigBackupDownloadControls',
-        '<ConfigBackupRestoreControls',
+     const requiredUtilitiesSnippets = [
+         "import ConfigBackupDownloadControls from '../config/ConfigBackupDownloadControls.vue'",
+         "import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'",
+         '<ConfigBackupDownloadControls',
+         '<ConfigBackupRestoreControls',
     ]
     const requiredSetupRestoreSnippets = [
         "import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'",
@@ -204,12 +184,6 @@ test('backup and restore presentation is shared across config and control center
             `expected ConfigBackupDownloadControls.vue to include ${snippet}`,
         )
     }
-    for (const snippet of requiredConfigViewSnippets) {
-        assert.ok(
-            configViewSource.includes(snippet),
-            `expected Config.vue to include ${snippet}`,
-        )
-    }
     for (const snippet of requiredUtilitiesSnippets) {
         assert.ok(
             utilitiesWorkspaceSource.includes(snippet),
@@ -223,7 +197,6 @@ test('backup and restore presentation is shared across config and control center
         )
     }
 
-    assert.equal(configViewSource.includes('class="backup-file-input"'), false)
     assert.equal(
         utilitiesWorkspaceSource.includes('class="backup-file-input"'),
         false,

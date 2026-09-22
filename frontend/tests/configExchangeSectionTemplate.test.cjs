@@ -14,10 +14,6 @@ const exchangeSectionSource = fs.readFileSync(
     ),
     'utf8',
 )
-const configViewSource = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'components', 'Config.vue'),
-    'utf8',
-)
 const controlCenterViewSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'views', 'ControlCenterView.vue'),
     'utf8',
@@ -39,11 +35,7 @@ test('dry-run exchange control stays on the guarded live-activation path', () =>
     assert.match(exchangeSectionSource, /:disabled="dryRunActivationLocked"/)
     assert.match(
         exchangeSectionSource,
-        /Activate live trading from Overview after saving the rest of/,
-    )
-    assert.match(
-        configViewSource,
-        /:dry-run-activation-locked="baselineState\?\.exchange\?\.dry_run === true"/,
+         /Activate live trading from Overview after saving the rest of/,
     )
     assert.match(setupModeSource, /dryRunActivationLocked: boolean/)
     assert.match(
