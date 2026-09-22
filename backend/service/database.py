@@ -335,11 +335,6 @@ class Database:
                 ("exposure_state", "symbol"),
             ),
             (
-                "opentrades",
-                "idx_opentrades_lifecycle_mode",
-                ("lifecycle_mode",),
-            ),
-            (
                 "tradereplaycandles",
                 "idx_tradereplaycandles_deal_time",
                 ("deal_id", "timestamp"),
