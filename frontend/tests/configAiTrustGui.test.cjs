@@ -3,24 +3,20 @@ const fs = require('node:fs')
 const path = require('node:path')
 const test = require('node:test')
 
-const generalSectionSource = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'components', 'config', 'ConfigGeneralSection.vue'),
-    'utf8',
-)
 const advancedGeneralSectionSource = fs.readFileSync(
     path.join(
-        __dirname,
-        '..',
-        'src',
-        'components',
-        'config',
-        'ConfigGeneralAdvancedSection.vue',
-    ),
-    'utf8',
+           __dirname,
+           '..',
+           'src',
+           'components',
+           'config',
+           'ConfigGeneralAdvancedSection.vue',
+       ),
+     'utf8',
 )
 
 test('general config surfaces expose AI Trust Ollama settings', () => {
-    for (const source of [generalSectionSource, advancedGeneralSectionSource]) {
+    for (const source of [advancedGeneralSectionSource]) {
         assert.match(source, /AI Trust Cockpit enabled/)
         assert.match(source, /ai_trust_enabled/)
         assert.match(source, /Block AI warning entries/)

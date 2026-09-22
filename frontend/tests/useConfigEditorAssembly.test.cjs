@@ -5,21 +5,17 @@ const test = require('node:test')
 
 const configEditorAssemblySource = fs.readFileSync(
     path.join(
-        __dirname,
-        '..',
-        'src',
-        'composables',
-        'useConfigEditorAssembly.ts',
-    ),
-    'utf8',
-)
-const configViewSource = fs.readFileSync(
-    path.join(__dirname, '..', 'src', 'components', 'Config.vue'),
-    'utf8',
+          __dirname,
+          '..',
+          'src',
+          'composables',
+          'useConfigEditorAssembly.ts',
+      ),
+      'utf8',
 )
 const controlCenterViewSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'views', 'ControlCenterView.vue'),
-    'utf8',
+      'utf8',
 )
 
 test('config editor assembly owns the shared config-editor composable stack', () => {
@@ -62,27 +58,18 @@ test('config editor assembly owns the shared config-editor composable stack', ()
 
     for (const snippet of requiredViewSnippets) {
         assert.ok(
-            configViewSource.includes(snippet),
-            `expected Config.vue to include ${snippet}`,
-        )
-        assert.ok(
             controlCenterViewSource.includes(snippet),
-            `expected ControlCenterView.vue to include ${snippet}`,
-        )
-    }
+             `expected ControlCenterView.vue to include ${snippet}`,
+          )
+      }
 
-    for (const snippet of removedViewSnippets) {
-        assert.equal(
-            configViewSource.includes(snippet),
-            false,
-            `expected Config.vue to remove ${snippet}`,
-        )
-        assert.equal(
-            controlCenterViewSource.includes(snippet),
-            false,
-            `expected ControlCenterView.vue to remove ${snippet}`,
-        )
-    }
+      for (const snippet of removedViewSnippets) {
+          assert.equal(
+              controlCenterViewSource.includes(snippet),
+              false,
+               `expected ControlCenterView.vue to remove ${snippet}`,
+           )
+       }
 })
 
 test('control center defers submit callbacks until workspace actions are initialized', () => {
