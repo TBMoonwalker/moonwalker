@@ -89,7 +89,8 @@ const emit = defineEmits<{
 
 .task-section-header:focus,
 .task-section-header:focus-visible {
-    outline: none;
+    outline: var(--mw-focus-ring);
+    outline-offset: var(--mw-focus-offset);
     box-shadow: none;
 }
 

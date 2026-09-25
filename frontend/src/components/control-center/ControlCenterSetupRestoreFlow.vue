@@ -86,7 +86,7 @@ const emit = defineEmits<{
 }
 
 .setup-flow-card {
-    border: 1px solid rgba(29, 92, 73, 0.14);
+    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
     background: var(--mw-surface-shell);
 }
 </style>

@@ -234,23 +234,15 @@ onUnmounted(() => {
     box-sizing: border-box;
     width: 100%;
     min-height: 32px;
-    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 22%, transparent);
+    border: 1px solid var(--mw-control-readonly-border);
     border-radius: 4px;
-    background: var(--mw-color-primary-soft);
-    color: var(--mw-color-primary-strong);
+    background: var(--mw-control-readonly-bg);
+    color: var(--mw-control-readonly-text);
     cursor: default;
     font-family: var(--mw-font-mono);
     font-size: 0.8rem;
     font-weight: 700;
     padding: 4px 7px;
-}
-
-@media (prefers-color-scheme: dark) {
-    .rete-host :deep(.node .control input[readonly]) {
-        border-color: var(--mw-color-border-strong);
-        background: color-mix(in srgb, var(--mw-color-primary) 34%, transparent);
-        color: var(--mw-color-text-primary);
-    }
 }
 
 .rete-host :deep(svg path) {
@@ -306,13 +298,7 @@ onUnmounted(() => {
 
 .node-chip.active {
     border-color: var(--mw-color-primary);
-    background: color-mix(in srgb, var(--mw-color-primary) 8%, transparent);
-}
-
-@media (prefers-color-scheme: dark) {
-    .node-chip.active {
-        background: color-mix(in srgb, var(--mw-color-primary) 30%, transparent);
-    }
+    background: var(--mw-surface-active);
 }
 
 @media (max-width: 900px) {

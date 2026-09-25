@@ -152,7 +152,7 @@ const customStrategies = computed(() =>
 
 .strategy-row.active {
     border-color: var(--mw-color-primary);
-    background: rgba(29, 92, 73, 0.08);
+    background: var(--mw-surface-active);
 }
 
 .strategy-row-meta,
@@ -160,12 +160,6 @@ const customStrategies = computed(() =>
 .empty-copy {
     color: var(--mw-color-text-secondary);
     font-size: 0.82rem;
-}
-
-@media (prefers-color-scheme: dark) {
-    .strategy-row.active {
-        background: rgba(36, 95, 78, 0.3);
-    }
 }
 
 @media (max-width: 900px) {

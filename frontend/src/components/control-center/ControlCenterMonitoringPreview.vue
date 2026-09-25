@@ -133,7 +133,7 @@ const monitoring = useControlCenterMonitoringSummary()
     gap: 10px 16px;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     padding-top: 8px;
-    border-top: 1px solid rgba(29, 92, 73, 0.1);
+    border-top: 1px solid color-mix(in srgb, var(--mw-color-primary) 10%, transparent);
 }
 
 .metric-chip {

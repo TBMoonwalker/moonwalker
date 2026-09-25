@@ -1003,7 +1003,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
   padding: 8px 10px;
   border: 1px solid var(--mw-color-border);
   border-radius: var(--mw-radius-sm, 6px);
-  background: rgba(29, 92, 73, 0.05);
+  background: color-mix(in srgb, var(--mw-color-primary) 5%, transparent);
 }
 
 .heatmap-metrics dt {
