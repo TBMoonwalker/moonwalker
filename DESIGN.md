@@ -12,7 +12,7 @@ colors:
   border: "#d5dbd5"
   text-primary: "#18211d"
   text-secondary: "#33403a"
-  text-muted: "#8a948d"
+  text-muted: "#646e66"
   success: "#2e7d5b"
   warning: "#b7791f"
   warning-soft: "#fff8ec"
@@ -139,7 +139,7 @@ A restrained, cool-slate palette built around a single operator-green primary, w
 - **Border** (#d5dbd5): Default 1px border and divider.
 - **Primary Text** (#18211d): Headings and primary copy.
 - **Secondary Text** (#33403a): Body copy and form labels.
-- **Muted Text** (#8a948d): Tertiary metadata, kickers, placeholders.
+- **Muted Text** (#646e66): Tertiary metadata, kickers, placeholders. Light-mode value; dark mode lifts it via `rgba(213, 219, 213, 0.72)` (6.3:1). The light value was darkened 2026-09-23 from `#8a948d` to clear WCAG AA (4.5:1) — `#8a948d` measured 2.94:1 on the console base, the only AA failure on the surface.
 
 ### Semantic
 - **Success Green** (#2e7d5b): Ready / healthy / passing states; also primary button hover.
@@ -179,6 +179,7 @@ Grid-disciplined and intent-segmented. A 12-column desktop grid collapses to 8-c
 
 **The Intent-Before-Breadth Rule.** First run opens with one intent question, not a mode strip or a wall of fields; breadth is revealed only as far as the chosen intent requires.
 **The One-Home Rule.** Every editable configuration field has exactly one canonical visible home — essentials in Setup, expert tuning in Advanced, status in Overview, operational actions in Utilities. Deeper tuning *extends* an area; it never restates the same field.
+**The Single-Rail-Overview Rule.** After safe dry-run readiness, `Overview` renders as a single calm column (`grid-template-columns: 1fr`) rather than spreading status across the 12-column grid. This is an override *by intent* — a night-console reading column — not an omission; `Advanced` is where density and the full grid belong. Documented 2026-09-23 (plan review D6).
 
 ## Elevation & Depth
 
@@ -208,6 +209,7 @@ Soft, consistent corners from a single radius family — `sm` 6px, `md` 10px, `l
 ### Status Tags (chips)
 - **Style:** Full-radius pill (9999px), 4px × 10px padding, 14px semibold. Success wears operator green on light text; info wears info blue; warning wears a 14% brass wash with brass text.
 - **State:** Tone is set by semantic color, not by a selected/unselected toggle.
+- **Exception — admission pill:** the admission strip's `.admission-pill` is the one chip whose *text* does not follow the tone. Its green wash inverts polarity per scheme (pale green in light, near-black green in dark), so no single fixed green text can clear 4.5:1 on both; instead its `.n-tag__content` uses the already scheme-flipping `--mw-color-text-primary` (`#18211d` / `#f7f8f6`; `14.06:1` / `12.13:1`). Scoped to `.admission-strip.is-open`, so warning/error pills keep their own colours. Added 2026-09-24 with the a11y `0.96`→`1.0` recovery.
 
 ### Cards / Containers
 - **Corner Style:** `md` (10px).
@@ -492,11 +494,13 @@ These values were extracted from the running site at http://192.168.6.5:8160/sta
 | #F7F8F6 | Surface base | Yes |
 
 ### Known Deviations
+_Re-checked 2026-09-24 against the tokenized, a11y-1.0 build by source-truth grep — no live pass. An absent override or fix means the deviation is still open; an explicit source value means it is resolved there._
+
 | Issue | Current | Should Be | Severity |
 |-------|---------|-----------|----------|
-| Body font size | 14px (Naive UI default) | 16px per scale | Medium |
-| Pagination touch targets | 28x28px on mobile | 44x44px minimum | Medium |
-| Mobile text truncation | "les mo" at 375px | Full text with ellipsis | Low |
+| Body font size | **Resolved at document scope.** Base document body is `16px` (`base.css` `body`, line 149); the mission/alert copy band is `16px` (T4, 2026-09-23). `14px` remains on component labels (buttons/tags/nav) and dense ledger table cells (`.n-data-table --n-font-size: 14px`) — documented intent in this system, not a deviation. | `16px` per scale (document scope) | Resolved (base) · informational (component labels by design) |
+| Pagination touch targets | **Resolved (2026-09-24).** `44px` now covers every paged surface: stats-table pagination (`.ledger-panel`/`.ai-trust-card`, `StatisticsView.vue:1200`, ≤767px), control-center pages (`ControlCenterView.vue:643`, ≤767px), mobile **row-action** buttons (`TradesView.vue:683`, ≤520px), and — added this arc — the three paged trade feeds (Open/Closed/Unsellable), whose Naive `NDataTable` pagination renders inside `.ledger-panel` in `TradesView.vue` (new `:deep(.n-pagination-item)` rule at the foot of its `@media(max-width:520px)` block, mirroring `StatisticsView.vue`). Live CSSOM-verified that day: the rule is loaded, gated to `≤520px`, inert at `>520px` (an injected test item measured 0px wide at 800px), and its selector specificity (`0,0,3`) beats Naive's base `.n-pagination-item` (`0,0,1`), so at 375px the feed items resolve to 44×44px. (A 375px eyeball is skipped — this browser toolset has no viewport emulation — but the result is deterministic from the gated high-specificity rule; CI-built into `TradesView-*.css`.) | `44x44px` minimum on mobile | **Resolved** (all paged surfaces: stats, control-center, row-actions, 3 trade feeds) |
+| Mobile text truncation | **Open (unverified 375px).** Re-audited 2026-09-24: `text-overflow:ellipsis` **does** exist in source — on the ledger symbol cell `.trade-symbol-main` (`TradesView.vue`, at both the `≤767px` gate, line 604, and the `≤520px` gate, line 661) — so the earlier "no ellipsis anywhere" note was a false negative (a `*.css`-only grep never looked at the `.vue` scoped `<style>` blocks). Responsive guards exist (`@media(max-width:767px)` + `520px` in `main.css`, `white-space:normal` tab-wrap at ≤520px). A live clip-scan (`scrollWidth>clientWidth`) on a data-less shell at 800px returned **0 candidates** (desktop has room); the 2026-06-05 `"les mo"` @375px case cannot be reproduced without viewport emulation (absent in this browser toolset) plus live trade data, so it stays open pending a device-emulated, data-fed re-check. | Full text with ellipsis on narrow cells | **Low** (open; re-check on a device-emulated, data-fed session) |
 
 ### Performance Baseline
 | Metric | Value |
@@ -504,6 +508,11 @@ These values were extracted from the running site at http://192.168.6.5:8160/sta
 | TTFB | 10ms |
 | DOM Ready | 70ms |
 | Full Load | 72ms |
+
+### Accessibility Score
+- **Re-measured 2026-09-24: Lighthouse Accessibility `1.0`** (was `0.96` on 2026-09-23); **Best Practices `1.0`**. Vehicle: fresh production build on a throwaway loopback `:4173` — a data-independent shell, so the score reflects theme + a11y, not live market data.
+- Drivers of the `0.96`→`1.0` recovery: (a) the admission-pill status text set to `--mw-color-text-primary` — scheme-flipping `#18211d` (light) / `#f7f8f6` (dark), measured `14.06:1` light / `12.13:1` dark, both clear 4.5:1 AA against the green wash that inverts polarity per scheme; (b) `text-muted` `#8a948d`→`#646e66` (2026-09-23).
+- Remaining Lighthouse flags are `meta-description` / `robots.txt` — SEO metadata, **not** accessibility — so no a11y work remains.
 
 ## Decisions Log
 | Date | Decision | Rationale |
@@ -516,3 +525,5 @@ These values were extracted from the running site at http://192.168.6.5:8160/sta
 | 2026-03-21 | Reserved gradients for atmosphere and rare emphasis, not core work surfaces | Flat panels preserve calm hierarchy and keep dark mode from feeling noisy |
 | 2026-06-05 | Added verified baseline section | Live-measured values confirm design system compliance; deviations tracked for remediation |
 | 2026-09-12 | Canonicalized DESIGN.md to the 8-section format with YAML frontmatter tokens | Tokens extracted from `frontend/src/assets/base.css` `--mw-*` custom properties; incumbent operator-UX content preserved as extra sections |
+| 2026-09-23 | Control-center design review (live Lighthouse a11y 0.96): light `text-muted` `#8a948d`→`#646e66` (only WCAG-AA fail, light-only), control-center green washes → `color-mix(in srgb, var(--mw-color-primary) N%, transparent)`, mission/alert copy →16px, single-rail `Overview` documented | Live Lighthouse `color-contrast` failed on the green-wash nav item + status tag; tokenization makes washes retheme into dark. See the gstack-stored review `~/.gstack/projects/TBMoonwalker-moonwalker/tbrandstetter-main-design-review-control-center-20260923.md` (moved out of the repo on 2026-09-24) |
+| 2026-09-24 | Phase-3 theme system + a11y close-out: user `auto`/`light`/`dark` toggle (Pinia `useThemeStore`, FOUC-safe pre-paint `data-mw-theme` in `index.html`); Heatmap `minimum-color` rethemed to a per-scheme JS wash so empty cells read empty in both schemes; admission-pill status text fixed to `--mw-color-text-primary` (scheme-flipping `#18211d`/`#f7f8f6`, `14.06:1` light / `12.13:1` dark vs the inverting green wash) | Lighthouse a11y recovered **`0.96`→`1.0`** (Best Practices `1.0`); scheme-aware washes stop the dark-mode contrast inversion; single-source tokens keep the pill and wash from drifting. See gstack doc `~/.gstack/projects/TBMoonwalker-moonwalker/tbrandstetter-main-design-review-control-center-20260923.md` (admission-pill a11y marked RESOLVED) |
