@@ -14,109 +14,20 @@ import { NGlobalStyle } from 'naive-ui/es/global-style'
 import { NMessageProvider } from 'naive-ui/es/message'
 import { NModalProvider } from 'naive-ui/es/modal'
 import { NNotificationProvider } from 'naive-ui/es/notification'
+import { storeToRefs } from 'pinia'
 import { darkTheme } from 'naive-ui/es/themes'
-import { useOsTheme } from 'vooks'
+import { themeTokens } from './theme/tokens'
+import { useThemeStore } from './theme/themeStore'
 
 const DEFAULT_WS_WATCHDOG_ENABLED = false
 const DEFAULT_WS_HEALTHCHECK_INTERVAL_MS = 5000
 const DEFAULT_WS_STALE_TIMEOUT_MS = 20000
 const DEFAULT_WS_RECONNECT_DEBOUNCE_MS = 2000
 
-const osThemeRef = useOsTheme()
-const theme = computed(() => (osThemeRef.value === 'dark' ? darkTheme : null))
-const themeOverrides = computed(() => {
-  if (osThemeRef.value === 'dark') {
-    return {
-      common: {
-        fontFamily: "'Source Sans 3', 'Segoe UI', sans-serif",
-        fontFamilyMono: "'IBM Plex Mono', 'SFMono-Regular', monospace",
-        fontWeightStrong: '600',
-        primaryColor: '#245f4e',
-        primaryColorHover: '#2e7d5b',
-        primaryColorPressed: '#1b4b3d',
-        primaryColorSuppl: '#245f4e',
-        infoColor: '#356d86',
-        successColor: '#2e7d5b',
-        warningColor: '#b7791f',
-        errorColor: '#b4443f',
-        bodyColor: '#111714',
-        baseColor: '#1d2823',
-        cardColor: '#1d2823',
-        modalColor: '#1d2823',
-        popoverColor: '#1d2823',
-        borderColor: 'rgba(213, 219, 213, 0.2)',
-        dividerColor: 'rgba(213, 219, 213, 0.16)',
-        textColorBase: '#f7f8f6',
-        textColor1: '#f7f8f6',
-        textColor2: 'rgba(247, 248, 246, 0.84)',
-        textColor3: 'rgba(213, 219, 213, 0.72)',
-        borderRadius: '10px',
-        borderRadiusSmall: '6px',
-      },
-      Tabs: {
-        tabTextColorLine: 'rgba(247, 248, 246, 0.82)',
-        tabTextColorActiveLine: '#8fd9bb',
-        tabTextColorHoverLine: '#b7ead8',
-        tabTextColorDisabledLine: 'rgba(213, 219, 213, 0.5)',
-        barColor: '#8fd9bb',
-        tabFontWeight: '450',
-        tabFontWeightActive: '500',
-      },
-      Button: {
-        textColorPrimary: '#f7f8f6',
-        textColorHoverPrimary: '#f7f8f6',
-        textColorPressedPrimary: '#f7f8f6',
-        textColorFocusPrimary: '#f7f8f6',
-        fontWeightStrong: '500',
-      },
-    }
-  }
-
-  return {
-    common: {
-      fontFamily: "'Source Sans 3', 'Segoe UI', sans-serif",
-      fontFamilyMono: "'IBM Plex Mono', 'SFMono-Regular', monospace",
-      fontWeightStrong: '600',
-      primaryColor: '#1d5c49',
-      primaryColorHover: '#2e7d5b',
-      primaryColorPressed: '#18413a',
-      primaryColorSuppl: '#1d5c49',
-      infoColor: '#356d86',
-      successColor: '#2e7d5b',
-      warningColor: '#b7791f',
-      errorColor: '#b4443f',
-      bodyColor: '#f7f8f6',
-      baseColor: '#ffffff',
-      cardColor: '#f4f6f2',
-      modalColor: '#f5f7f4',
-      popoverColor: '#f5f7f4',
-      borderColor: '#d5dbd5',
-      dividerColor: 'rgba(24, 33, 29, 0.08)',
-      textColorBase: '#18211d',
-      textColor1: '#18211d',
-      textColor2: '#33403a',
-      textColor3: '#8a948d',
-      borderRadius: '10px',
-      borderRadiusSmall: '6px',
-    },
-    Tabs: {
-      tabTextColorLine: '#33403a',
-      tabTextColorActiveLine: '#1d5c49',
-      tabTextColorHoverLine: '#18413a',
-      tabTextColorDisabledLine: '#8a948d',
-      barColor: '#1d5c49',
-      tabFontWeight: '450',
-      tabFontWeightActive: '500',
-    },
-    Button: {
-      textColorPrimary: '#f7f8f6',
-      textColorHoverPrimary: '#f7f8f6',
-      textColorPressedPrimary: '#f7f8f6',
-      textColorFocusPrimary: '#f7f8f6',
-      fontWeightStrong: '500',
-    },
-  }
-})
+const themeStore = useThemeStore()
+const { scheme } = storeToRefs(themeStore)
+const theme = computed(() => (scheme.value === "dark" ? darkTheme : null))
+const themeOverrides = computed(() => themeTokens[scheme.value].naive)
 
 // Stores
 const open_trade_store = useWebSocketDataStore("openTrades")

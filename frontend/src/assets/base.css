@@ -18,7 +18,7 @@
 
   --mw-color-text-primary: #18211d;
   --mw-color-text-secondary: #33403a;
-  --mw-color-text-muted: #8a948d;
+  --mw-color-text-muted: #646e66;
 
   --mw-color-success: #2e7d5b;
   --mw-color-warning: #b7791f;
@@ -34,8 +34,15 @@
   --mw-surface-header: rgba(255, 255, 255, 0.9);
   --mw-surface-shell: rgba(255, 255, 255, 0.88);
   --mw-surface-mission: rgba(227, 243, 236, 0.72);
+  --mw-surface-active: color-mix(in srgb, var(--mw-color-primary) 8%, transparent);
+  --mw-control-readonly-border: color-mix(in srgb, var(--mw-color-primary) 22%, transparent);
+  --mw-control-readonly-bg: var(--mw-color-primary-soft);
+  --mw-control-readonly-text: var(--mw-color-primary-strong);
   --mw-shadow-soft: 0 12px 28px rgba(24, 33, 29, 0.08);
   --mw-shadow-card: 0 10px 24px rgba(24, 33, 29, 0.05);
+
+  --mw-focus-ring: 2px solid color-mix(in srgb, var(--mw-color-primary) 70%, transparent);
+  --mw-focus-offset: 2px;
 
   --mw-radius-sm: 6px;
   --mw-radius-md: 10px;
@@ -52,7 +59,7 @@
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-mw-theme]) {
     --mw-color-primary: #245f4e;
     --mw-color-primary-strong: #1b4b3d;
     --mw-color-primary-soft: rgba(36, 95, 78, 0.18);
@@ -72,6 +79,10 @@
     --mw-surface-header: rgba(24, 33, 29, 0.92);
     --mw-surface-shell: rgba(24, 33, 29, 0.9);
     --mw-surface-mission: rgba(36, 95, 78, 0.22);
+    --mw-surface-active: color-mix(in srgb, var(--mw-color-primary) 30%, transparent);
+    --mw-control-readonly-border: var(--mw-color-border-strong);
+    --mw-control-readonly-bg: color-mix(in srgb, var(--mw-color-primary) 34%, transparent);
+    --mw-control-readonly-text: var(--mw-color-text-primary);
     --mw-shadow-soft: 0 12px 28px rgba(0, 0, 0, 0.28);
     --mw-shadow-card: 0 10px 24px rgba(0, 0, 0, 0.22);
 
@@ -83,6 +94,42 @@
     --color-heading: var(--mw-color-text-primary);
     --color-text: var(--mw-color-text-secondary);
   }
+}
+
+:root[data-mw-theme="dark"] {
+  --mw-color-primary: #245f4e;
+  --mw-color-primary-strong: #1b4b3d;
+  --mw-color-primary-soft: rgba(36, 95, 78, 0.18);
+  --mw-color-surface-base: #111714;
+  --mw-color-surface-raised: #17201c;
+  --mw-color-surface-panel: #1d2823;
+  --mw-color-border: rgba(213, 219, 213, 0.2);
+  --mw-color-border-strong: rgba(213, 219, 213, 0.28);
+  --mw-color-text-primary: #f7f8f6;
+  --mw-color-text-secondary: rgba(247, 248, 246, 0.84);
+  --mw-color-text-muted: rgba(213, 219, 213, 0.72);
+  --mw-surface-card: rgba(29, 40, 35, 0.94);
+  --mw-surface-card-muted: rgba(23, 32, 28, 0.92);
+  --mw-surface-card-subtle: rgba(17, 23, 20, 0.78);
+  --mw-surface-card-success: rgba(36, 95, 78, 0.22);
+  --mw-surface-card-warning: rgba(183, 121, 31, 0.16);
+  --mw-surface-header: rgba(24, 33, 29, 0.92);
+  --mw-surface-shell: rgba(24, 33, 29, 0.9);
+  --mw-surface-mission: rgba(36, 95, 78, 0.22);
+  --mw-surface-active: color-mix(in srgb, var(--mw-color-primary) 30%, transparent);
+  --mw-control-readonly-border: var(--mw-color-border-strong);
+  --mw-control-readonly-bg: color-mix(in srgb, var(--mw-color-primary) 34%, transparent);
+  --mw-control-readonly-text: var(--mw-color-text-primary);
+  --mw-shadow-soft: 0 12px 28px rgba(0, 0, 0, 0.28);
+  --mw-shadow-card: 0 10px 24px rgba(0, 0, 0, 0.22);
+
+  --color-background: var(--mw-color-surface-base);
+  --color-background-soft: var(--mw-color-surface-raised);
+  --color-background-mute: var(--mw-color-surface-panel);
+  --color-border: rgba(213, 219, 213, 0.16);
+  --color-border-hover: var(--mw-color-border-strong);
+  --color-heading: var(--mw-color-text-primary);
+  --color-text: var(--mw-color-text-secondary);
 }
 
 *,
