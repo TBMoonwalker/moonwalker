@@ -1,26 +1,90 @@
 <script setup lang="ts">
+import { nextTick, ref } from 'vue'
+import { CONTROL_CENTER_MODES } from '../../control-center/types'
 import type { ControlCenterMode } from '../../control-center/types'
 
-defineProps<{
+const props = defineProps<{
     routeMode: ControlCenterMode
 }>()
 
 const emit = defineEmits<{
     'select-mode': [mode: ControlCenterMode]
 }>()
+
+// Logical order for roving-tabindex + arrow-key navigation, independent of the
+// visual grouping below (a screen reader user traverses the flat tablist).
+const ORDER = [...CONTROL_CENTER_MODES] as ControlCenterMode[]
+const PANEL_ID = 'cc-workspace-panel'
+const tablistRef = ref<HTMLElement | null>(null)
+
+const tabId = (mode: ControlCenterMode) => `cc-mode-tab-${mode}`
+
+function selectMode(mode: ControlCenterMode) {
+    emit('select-mode', mode)
+}
+
+function focusTab(mode: ControlCenterMode) {
+    tablistRef.value
+        ?.querySelector<HTMLElement>(`[id="${tabId(mode)}"]`)
+        ?.focus()
+}
+
+// Roving tabindex: only the active tab is in the tab order. Arrow keys move
+// focus AND select (automatic-activation pattern, matching that a mode switch
+// is also a route change), with wrap + Home/End.
+function onKeydown(event: KeyboardEvent) {
+    const i = ORDER.indexOf(props.routeMode)
+    if (i === -1) return
+    let next: number
+    switch (event.key) {
+        case 'ArrowRight':
+        case 'ArrowDown':
+            next = (i + 1) % ORDER.length
+            break
+        case 'ArrowLeft':
+        case 'ArrowUp':
+            next = (i - 1 + ORDER.length) % ORDER.length
+            break
+        case 'Home':
+            next = 0
+            break
+        case 'End':
+            next = ORDER.length - 1
+            break
+        default:
+            return
+    }
+    event.preventDefault()
+    const mode = ORDER[next]
+    selectMode(mode)
+    // Selection (routeMode) updates on the parent side; focus after the DOM
+    // re-renders so the roving tabindex has moved to `mode` first.
+    void nextTick(() => focusTab(mode))
+}
 </script>
 
 <template>
     <n-card class="mode-strip-card dashboard-panel" content-style="padding: 10px 14px;">
-        <div class="mode-strip-shell">
+        <div
+            ref="tablistRef"
+            role="tablist"
+            aria-label="Control center workspaces"
+            class="mode-strip-shell"
+            @keydown="onKeydown"
+        >
             <div class="mode-group">
-                <n-text depth="3" class="mode-group-label">Operate</n-text>
+                <span class="mode-group-label" aria-hidden="true">Operate</span>
                 <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
+                        role="tab"
+                        :id="tabId('overview')"
+                        :aria-selected="routeMode === 'overview'"
+                        :aria-controls="PANEL_ID"
+                        :tabindex="routeMode === 'overview' ? 0 : -1"
                         :type="routeMode === 'overview' ? 'primary' : 'default'"
                         :secondary="routeMode !== 'overview'"
                         :strong="routeMode === 'overview'"
-                        @click="emit('select-mode', 'overview')"
+                        @click="selectMode('overview')"
                     >
                         Overview
                     </n-button>
@@ -28,21 +92,31 @@ const emit = defineEmits<{
             </div>
 
             <div class="mode-group">
-                <n-text depth="3" class="mode-group-label">Configure</n-text>
+                <span class="mode-group-label" aria-hidden="true">Configure</span>
                 <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
+                        role="tab"
+                        :id="tabId('setup')"
+                        :aria-selected="routeMode === 'setup'"
+                        :aria-controls="PANEL_ID"
+                        :tabindex="routeMode === 'setup' ? 0 : -1"
                         :type="routeMode === 'setup' ? 'primary' : 'default'"
                         :secondary="routeMode !== 'setup'"
                         :strong="routeMode === 'setup'"
-                        @click="emit('select-mode', 'setup')"
+                        @click="selectMode('setup')"
                     >
                         Setup
                     </n-button>
                     <n-button
+                        role="tab"
+                        :id="tabId('advanced')"
+                        :aria-selected="routeMode === 'advanced'"
+                        :aria-controls="PANEL_ID"
+                        :tabindex="routeMode === 'advanced' ? 0 : -1"
                         :type="routeMode === 'advanced' ? 'primary' : 'default'"
                         :secondary="routeMode !== 'advanced'"
                         :strong="routeMode === 'advanced'"
-                        @click="emit('select-mode', 'advanced')"
+                        @click="selectMode('advanced')"
                     >
                         Advanced
                     </n-button>
@@ -50,21 +124,37 @@ const emit = defineEmits<{
             </div>
 
             <div class="mode-group">
-                <n-text depth="3" class="mode-group-label">Utilities</n-text>
+                <span class="mode-group-label" aria-hidden="true">Build</span>
                 <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
+                        role="tab"
+                        :id="tabId('strategy-builder')"
+                        :aria-selected="routeMode === 'strategy-builder'"
+                        :aria-controls="PANEL_ID"
+                        :tabindex="routeMode === 'strategy-builder' ? 0 : -1"
                         :type="routeMode === 'strategy-builder' ? 'primary' : 'default'"
                         :secondary="routeMode !== 'strategy-builder'"
                         :strong="routeMode === 'strategy-builder'"
-                        @click="emit('select-mode', 'strategy-builder')"
+                        @click="selectMode('strategy-builder')"
                     >
                         Strategy Builder
                     </n-button>
+                </n-flex>
+            </div>
+
+            <div class="mode-group">
+                <span class="mode-group-label" aria-hidden="true">Utilities</span>
+                <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
+                        role="tab"
+                        :id="tabId('utilities')"
+                        :aria-selected="routeMode === 'utilities'"
+                        :aria-controls="PANEL_ID"
+                        :tabindex="routeMode === 'utilities' ? 0 : -1"
                         :type="routeMode === 'utilities' ? 'primary' : 'default'"
                         :secondary="routeMode !== 'utilities'"
                         :strong="routeMode === 'utilities'"
-                        @click="emit('select-mode', 'utilities')"
+                        @click="selectMode('utilities')"
                     >
                         Utilities
                     </n-button>
@@ -99,10 +189,10 @@ const emit = defineEmits<{
 }
 
 .mode-strip :deep(.n-button) {
-    --n-border: 0 !important;
-    --n-border-hover: 0 !important;
-    --n-border-pressed: 0 !important;
-    --n-border-focus: 0 !important;
+     --n-border: 0 !important;
+     --n-border-hover: 0 !important;
+     --n-border-pressed: 0 !important;
+     --n-border-focus: 0 !important;
     min-height: 36px;
     padding-inline: 6px;
     border: 0;

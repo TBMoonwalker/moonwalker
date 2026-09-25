@@ -441,7 +441,7 @@ async function handleToggleAutopilot(): Promise<void> {
             />
         </n-flex>
 
-        <n-flex class="page-section workspace-section" vertical>
+        <n-flex id="cc-workspace-panel" role="tabpanel" :aria-labelledby="'cc-mode-tab-' + routeState.mode" class="page-section workspace-section" vertical>
             <template v-if="routeState.mode === 'overview'">
                 <ControlCenterOverviewWorkspace
                     :activation-loading="activationLoading"

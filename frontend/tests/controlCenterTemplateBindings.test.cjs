@@ -859,10 +859,18 @@ test('control center delegates mission, mode, and overview presentation to dedic
     const requiredModeStripSnippets = [
         'Operate',
         'Configure',
-        'Utilities',
-        "emit('select-mode', 'overview')",
-        "emit('select-mode', 'strategy-builder')",
-        "emit('select-mode', 'utilities')",
+        'Utilities',        'Build',
+        'role="tablist"',
+        'role="tab"',
+        ':aria-selected=',
+        ':aria-controls="PANEL_ID"',
+        "'cc-workspace-panel'",
+        'cc-mode-tab',
+        '@keydown="onKeydown"',
+        "emit('select-mode', mode)",
+        "selectMode('overview')",
+        "selectMode('strategy-builder')",
+        "selectMode('utilities')",
     ]
     const requiredOverviewSnippets = [
         'Recovery priorities',
