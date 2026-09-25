@@ -279,8 +279,9 @@ onMounted(() => {
           role="tabpanel"
           aria-labelledby="profit-tab-profit-overall"
           :tab-props="getProfitTabProps('profit-overall')"
+          display-directive="show"
         >
-          <UpnlChart v-if="activeProfitTab === 'profit-overall'" />
+          <UpnlChart />
         </n-tab-pane>
         <n-tab-pane
           id="profit-panel-daily-profit"
@@ -289,8 +290,9 @@ onMounted(() => {
           role="tabpanel"
           aria-labelledby="profit-tab-daily-profit"
           :tab-props="getProfitTabProps('daily-profit')"
+          display-directive="show"
         >
-          <Charts v-if="activeProfitTab === 'daily-profit'" period="daily" />
+          <Charts period="daily" />
         </n-tab-pane>
         <n-tab-pane
           id="profit-panel-monthly-profit"
@@ -299,8 +301,9 @@ onMounted(() => {
           role="tabpanel"
           aria-labelledby="profit-tab-monthly-profit"
           :tab-props="getProfitTabProps('monthly-profit')"
+          display-directive="show"
         >
-          <Charts v-if="activeProfitTab === 'monthly-profit'" period="monthly" />
+          <Charts period="monthly" />
         </n-tab-pane>
         <n-tab-pane
           id="profit-panel-yearly-profit"
@@ -309,8 +312,9 @@ onMounted(() => {
           role="tabpanel"
           aria-labelledby="profit-tab-yearly-profit"
           :tab-props="getProfitTabProps('yearly-profit')"
+          display-directive="show"
         >
-          <Charts v-if="activeProfitTab === 'yearly-profit'" period="yearly" />
+          <Charts period="yearly" />
         </n-tab-pane>
       </n-tabs>
     </section>

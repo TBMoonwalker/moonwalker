@@ -34,7 +34,7 @@ const { data } = storeToRefs(upnlStore)
 const statisticsStore = useWebSocketDataStore('statistics')
 const statisticsData = storeToRefs(statisticsStore)
 
-const isLoading = ref(true)
+const isLoading = ref(data.value.length === 0)
 const showEmptyState = ref(false)
 const emptyStateText = ref('No profit history yet')
 const chartHeight = ref('40vh')
@@ -179,7 +179,7 @@ onMounted(async () => {
     await upnlStore.load_upnl_history_data()
     showEmptyState.value = data.value.length === 0
   } catch {
-    showEmptyState.value = true
+    showEmptyState.value = data.value.length === 0
     emptyStateText.value = 'No profit history yet'
   } finally {
     isLoading.value = false
