@@ -246,6 +246,13 @@ const statusTagType = computed(() => {
     return 'default'
 })
 
+const statusToneClass = computed(
+   () =>
+    statusTagType.value === 'error' || statusTagType.value === 'warning'
+      ? 'is-warning'
+      : 'is-open',
+)
+
 const lastRunLabel = computed(() =>
     lastRunAt.value ? new Date(lastRunAt.value).toLocaleString() : 'No run yet',
 )
@@ -368,7 +375,11 @@ onMounted(() => {
 
 <template>
     <div class="page-shell backtest-page operator-console-page">
-        <section class="admission-strip backtest-status-strip" aria-live="polite">
+        <section
+          class="admission-strip backtest-status-strip"
+          :class="statusToneClass"
+          aria-live="polite"
+        >
             <n-tag
                 class="admission-pill"
                 :type="statusTagType"

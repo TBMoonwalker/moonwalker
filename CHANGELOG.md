@@ -2,6 +2,36 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.11.0.0] - 2026-09-25
+
+### Added
+- Theme control: choose light, dark, or "auto" (follow the operating system)
+   from the header. The choice is remembered across reloads, and a chosen theme
+   is applied before the first paint, so the dashboard no longer flashes the
+   wrong colors when it loads.
+
+### Changed
+- Every control-center surface, panel, and status wash now recollors from the
+   chosen theme instead of the operating system, so light and dark read the same
+   everywhere: mission copy, the strategy canvas and library, the setup, progress,
+   and restore panels, and the heatmap's empty cells.
+- The control-center mode tabs now expose full keyboard and screen-reader
+   behavior (arrow keys, Home and End, and tab / panel roles), and the backtest
+   screen's status chip now colors through the same theme as the rest of the app.
+
+### Fixed
+- The admission strip's "open" chip no longer fails the 4.5:1 text-contrast
+   check in either theme; its text now picks a color that reads in both
+   (14.06:1 on light, 12.13:1 on dark) while warning and error chips keep
+   their own colors.
+- Muted secondary text that was hard to read is made darker to clear the
+   WCAG-A contrast threshold.
+- Pagination controls on the Open, Closed, and Unsellable trade feeds now meet
+   the 44px touch-target minimum on phones, matching the rest of the app.
+
+### Removed
+- No removals in this release.
+
 ## [4.10.0.0] - 2026-09-22
 
 ### Removed

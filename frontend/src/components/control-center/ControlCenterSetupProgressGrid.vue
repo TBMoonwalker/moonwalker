@@ -59,7 +59,7 @@ const emit = defineEmits<{
     align-items: flex-start;
     gap: 6px;
     padding: 14px 16px;
-    border: 1px solid rgba(29, 92, 73, 0.12);
+    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 12%, transparent);
     border-radius: var(--mw-radius-lg, 12px);
     background: var(--mw-surface-card-muted);
     color: inherit;
@@ -72,7 +72,7 @@ const emit = defineEmits<{
 }
 
 .setup-progress-card:hover {
-    border-color: rgba(29, 92, 73, 0.28);
+    border-color: color-mix(in srgb, var(--mw-color-primary) 28%, transparent);
     box-shadow: 0 8px 18px rgba(24, 33, 29, 0.06);
     transform: translateY(-1px);
 }
@@ -92,12 +92,12 @@ const emit = defineEmits<{
     font-size: 0.72rem;
     letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: rgba(29, 92, 73, 0.78);
+    color: color-mix(in srgb, var(--mw-color-primary) 78%, transparent);
     font-family: var(--mw-font-mono);
 }
 
 .setup-progress-card-active {
-    border-color: rgba(29, 92, 73, 0.35);
+    border-color: color-mix(in srgb, var(--mw-color-primary) 35%, transparent);
     background: var(--mw-surface-card-success);
 }
 

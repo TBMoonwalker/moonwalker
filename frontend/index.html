@@ -5,6 +5,19 @@
     <link rel="icon" href="/favicon.ico">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Vite App</title>
+    <script>
+      // FOUC guard (T1 Phase 3): apply an explicit light/dark choice
+      // BEFORE first paint. Mirrors src/theme/themeMode.ts — an explicit
+      // value in localStorage sets the attribute the forced CSS blocks read;
+      // "auto" / absent leaves it unset so @media (prefers-color-scheme)
+      // decides. No flash; the default (auto, no choice) path is unchanged.
+      try {
+        var mwMode = localStorage.getItem("mw-theme-mode")
+        if (mwMode === "light" || mwMode === "dark") {
+          document.documentElement.setAttribute("data-mw-theme", mwMode)
+        }
+      } catch (e) {}
+    </script>
   </head>
   <body>
     <div id="app"></div>

@@ -148,8 +148,8 @@ defineEmits<{
 }
 
 .mission-panel {
-    border-color: rgba(29, 92, 73, 0.14);
-    background: rgba(29, 92, 73, 0.05);
+    border-color: color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
+    background: color-mix(in srgb, var(--mw-color-primary) 5%, transparent);
 }
 
 .mission-heading-group {
@@ -209,7 +209,7 @@ defineEmits<{
     display: block;
     min-width: 0;
     max-width: 72ch;
-    font-size: 0.95rem;
+    font-size: 1rem;
     line-height: 1.45;
 }
 
@@ -224,12 +224,12 @@ defineEmits<{
 
 .mission-panel :deep(.n-alert-body__title) {
     margin-bottom: 2px;
-    font-size: 0.95rem;
+    font-size: 1rem;
     font-weight: 550;
 }
 
 .mission-panel :deep(.n-alert-body__content) {
-    font-size: 0.9rem;
+    font-size: 1rem;
     line-height: 1.35;
 }
 

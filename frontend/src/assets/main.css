@@ -94,9 +94,9 @@ body {
   gap: 12px;
   min-width: 0;
   padding: 16px;
-  border: 1px solid rgba(29, 92, 73, 0.14);
+  border: 1px solid color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
   border-radius: var(--mw-radius-md);
-  background: rgba(29, 92, 73, 0.05);
+  background: color-mix(in srgb, var(--mw-color-primary) 5%, transparent);
   box-shadow: var(--mw-shadow-card);
 }
 
@@ -107,6 +107,15 @@ body {
 
 .admission-pill {
   width: max-content;
+}
+
+/* The "open"/success status pill pairs its green wash with green (successColor)
+   text, which under-meets WCAG AA (4.26:1 light / 2.58:1 dark). The wash stays as
+   the "ok" status signal; the text takes the scheme-flipping --mw-color-text-primary
+   (≈14:1 light / ≈12:1 dark). Scoping to the .is-open strip leaves the warning and
+   error pills on their own colours. */
+.admission-strip.is-open .admission-pill .n-tag__content {
+  color: var(--mw-color-text-primary);
 }
 
 .admission-copy {
@@ -270,8 +279,8 @@ body {
 }
 
 :focus-visible {
-  outline: 2px solid rgba(29, 92, 73, 0.7);
-  outline-offset: 2px;
+  outline: var(--mw-focus-ring);
+  outline-offset: var(--mw-focus-offset);
   border-radius: var(--mw-radius-sm);
 }
 

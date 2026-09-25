@@ -5,6 +5,7 @@ import type { MenuOption } from 'naive-ui/es/menu'
 import { NIcon } from 'naive-ui/es/icon'
 import { BarChartOutline, FlaskOutline, SettingsOutline } from '@vicons/ionicons5'
 import logoImage from '../assets/logo.png'
+import ThemeToggle from './ThemeToggle.vue'
 
 function renderMenuIcon(icon: Component) {
   return () =>
@@ -90,6 +91,7 @@ function handleMenuSelect(key: string | number): void {
             :node-props="getMenuNodeProps"
             @update:value="handleMenuSelect"
           />
+          <ThemeToggle />
         </div>
       </div>
     </n-card>
@@ -167,7 +169,9 @@ function handleMenuSelect(key: string | number): void {
 
 .header-menu-wrap {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
+  gap: 12px;
 }
 
 .header-menu {
@@ -200,8 +204,8 @@ function handleMenuSelect(key: string | number): void {
 }
 
 :deep(.header-menu .n-menu-item-content--selected) {
-  background: rgba(29, 92, 73, 0.18);
-  box-shadow: inset 0 0 0 1px rgba(29, 92, 73, 0.22);
+  background: color-mix(in srgb, var(--mw-color-primary) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mw-color-primary) 22%, transparent);
 }
 
 :deep(.header-menu .n-menu-item-content--selected .n-menu-item-content-header) {

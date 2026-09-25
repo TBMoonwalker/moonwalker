@@ -107,7 +107,7 @@ const emit = defineEmits<{
 .entry-choice-card {
     min-width: min(320px, 100%);
     flex: 1 1 320px;
-    border: 1px solid rgba(29, 92, 73, 0.16);
+    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 16%, transparent);
     background: var(--mw-surface-card);
     box-shadow: var(--mw-shadow-card);
 }
@@ -121,7 +121,7 @@ const emit = defineEmits<{
 }
 
 .setup-entry-card {
-    border: 1px solid rgba(29, 92, 73, 0.14);
+    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
     background: var(--mw-surface-shell);
 }
 </style>

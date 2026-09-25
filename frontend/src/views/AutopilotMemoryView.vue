@@ -331,9 +331,9 @@ function formatTrustBoardSymbol(symbol: string): string {
 .autopilot-status-row {
     margin-bottom: 0;
     padding: 14px 16px;
-    border: 1px solid rgba(29, 92, 73, 0.14);
+    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
     border-radius: var(--mw-radius-md);
-    background: rgba(29, 92, 73, 0.05);
+    background: color-mix(in srgb, var(--mw-color-primary) 5%, transparent);
     box-shadow: var(--mw-shadow-card);
 }
 
@@ -438,18 +438,18 @@ function formatTrustBoardSymbol(symbol: string): string {
 }
 
 .trust-row:hover {
-    box-shadow: inset 0 0 0 1px rgba(29, 92, 73, 0.08);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mw-color-primary) 8%, transparent);
 }
 
 .trust-row:focus-visible {
-    outline: 2px solid rgba(29, 92, 73, 0.45);
+    outline: 2px solid color-mix(in srgb, var(--mw-color-primary) 45%, transparent);
     outline-offset: 3px;
 }
 
 .trust-row[aria-pressed='true'] {
     background: #eef4ef;
-    border-color: rgba(29, 92, 73, 0.32);
-    box-shadow: inset 0 0 0 1px rgba(29, 92, 73, 0.08);
+    border-color: color-mix(in srgb, var(--mw-color-primary) 32%, transparent);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mw-color-primary) 8%, transparent);
 }
 
 .trust-row strong,
