@@ -723,5 +723,12 @@ onMounted(() => {
     white-space: nowrap;
   }
 
+   /* Paged feeds render Naive pagination internally; bump item boxes to 44px so
+    Open/Closed/Unsellable match StatisticsView.vue, not the 28px Naive default. */
+   .ledger-panel :deep(.n-pagination-item) {
+     min-width: 44px;
+     height: 44px;
+   }
+
 }
 </style>
