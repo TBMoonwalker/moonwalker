@@ -357,6 +357,7 @@ class Exchange:
                     timeframe=timeframe,
                     since=since,
                     limit=limit,
+                    **({"params": {"until": upper_bound}} if until is not None else {}),
                 )
 
                 if not candles:

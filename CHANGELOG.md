@@ -2,6 +2,22 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.12.1.0] - 2026-09-26
+
+### Fixed
+- The pair-age filter no longer wrongly rejects established pairs. Some
+   exchanges return candles newest-first, so a cached listing date could be the
+   most recent candle, making an old pair look freshly listed and be held out of
+   the bot. The gate now rechecks a recent cached date against a bounded history
+   window, treats an old candle as proof of sufficient age, and corrects a stale
+   cached date with an upsert, so eligible pairs are admitted and their signals
+   stop being dropped.
+
+### Changed
+- When a signal is ignored because a pair's age can't be verified, the bot
+   now logs the symbol and the `pair_age` threshold instead of dropping it
+   silently.
+
 ## [4.12.0.0] - 2026-09-26
 
 ### Added
