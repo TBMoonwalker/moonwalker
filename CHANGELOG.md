@@ -2,6 +2,20 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.13.0.0] - 2026-09-26
+
+### Added
+- Optional Pathfinder closed-trade feedback for the WebSocket signal plugin.
+  Enable the feedback switch to report final net outcomes for live and demo
+  trades, including DCA buys and partial exits. Feedback defaults off.
+- Durable feedback receipts retry temporary delivery failures after restarts.
+  Disabling feedback pauses delivery; changing providers cannot send an old
+  trade to the new provider. Incomplete fee accounting blocks submission.
+
+### Fixed
+- Account for CCXT's multiple-fee representation and fallback order fees when
+  deducting base-asset buy fees, so inventory and feedback use the same fees.
+
 ## [4.12.1.0] - 2026-09-26
 
 ### Fixed

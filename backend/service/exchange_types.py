@@ -78,6 +78,7 @@ class ExecutionFill(TypedDict):
     orderid: str
     symbol: str
     side: str
+    metadata_json: NotRequired[str]
     amount_fee: NotRequired[Any]
     base_fee: NotRequired[float]
     ordersize: NotRequired[float]
@@ -174,6 +175,7 @@ class SoldCheckStatus(TypedDict, total=False):
     amount_fee: Any
     base_fee: float
     ordersize: float
+    metadata_json: str | None
     executions: list[TradeExecutionPayload]
 
 

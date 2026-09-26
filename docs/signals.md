@@ -92,3 +92,45 @@ and order-sizing flow as the other signal plugins.
 Messages with `type: "keepalive"` are treated as connection control messages,
 acknowledged with `{"type":"keepalive_ack","id":"<keepalive id>"}`, and do not
 trigger trade validation.
+
+### Pathfinder closed-trade feedback
+
+With `websocket_signal` selected, enable **Send trade feedback** in Signal
+settings, or set `"feedback_enabled": true` in `signal_settings`. It defaults to
+false. Both live and CCXT demo trades are eligible. Feedback is sent only for
+newly closed deals with persisted WebSocket signal provenance, while this
+plugin is selected and the option is enabled. There is no historical backfill.
+
+Moonwalker posts to `/v1/feedback/closed-trades` on the WebSocket URL's origin
+(`wss` becomes `https`, `ws` becomes `http`). It uses the existing Authorization
+header, or the WebSocket URL's `token` query parameter as a bearer credential.
+Credentials are not stored in the outbox, and HTTP redirects are not followed.
+The destination is recorded with the signal so changing providers cannot route
+old deals to the new provider.
+
+A final close and its immutable feedback payload are committed together. The
+`tradefeedback` table retains delivery state across restarts: `pending`, `sent`,
+`rejected`, or `blocked`. Network errors, HTTP 429, and server errors retry with
+bounded exponential backoff. A matching accepted acknowledgement completes the
+receipt, including Pathfinder's `created:false` duplicate response. Other HTTP
+errors are retained as rejected with the status code in `last_error`; correct
+the underlying authentication/scope/contract problem before explicitly resetting
+such a receipt to `pending`. Payloads must not be edited after submission.
+
+Disabling feedback or selecting another plugin pauses queued sends. Re-enabling
+feedback for the same provider resumes pending deliveries. Deals closed while
+feedback is disabled are not queued. Partial sells and unsellable remainders do
+not independently generate a final outcome.
+
+Net results use execution cash flows and recorded CCXT fees, including DCA buys
+and partial sells. Base-asset buy fees already reflected in reduced inventory
+are not deducted again. Missing fee data, unsupported third-asset fee valuation,
+or invalid accounting blocks delivery rather than labelling a gross result as
+net. Such deals remain in the local outbox with a diagnostic in
+`backend/logs/feedback.log`. Existing deals without the new provider provenance
+are skipped. Incomplete execution history, when fee accounting is available,
+is reported as incomplete so Pathfinder can exclude it from quality statistics.
+
+Pathfinder currently has no demo/live discriminator in this request contract;
+its quality totals therefore include both modes when submitted with the same
+client credential.

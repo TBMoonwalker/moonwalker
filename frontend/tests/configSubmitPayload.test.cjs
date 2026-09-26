@@ -672,3 +672,18 @@ test('buildConfigSubmitPayload persists only the canonical trade mode field', ()
      assert.equal('trade_lifecycle_mode' in payload, false)
      assert.equal('sidestep_campaign_enabled' in payload, false)
  })
+
+
+test('WebSocket feedback round-trips through submission and can be disabled', () => {
+    for (const enabled of [true, false]) {
+        const payload = buildConfigSubmitPayload(createBaseOptions({
+            signal: {
+                signal: 'websocket_signal',
+                websocket_url: 'wss://pathfinder.example/v1/signals/stream',
+                websocket_feedback_enabled: enabled,
+            },
+        }))
+        const settings = parseField(payload, 'signal_settings').value
+        assert.equal(settings.feedback_enabled === true, enabled)
+    }
+})

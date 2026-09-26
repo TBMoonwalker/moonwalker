@@ -25,6 +25,7 @@ export interface SignalSettingsInput {
     csvsignal_mode: string | null
     csvsignal_source: string | null
     csvsignal_inline: string | null
+    websocket_feedback_enabled?: boolean
     websocket_url?: string | null
     websocket_headers?: string | null
     websocket_subscribe_message?: string | null
@@ -268,6 +269,9 @@ export function buildSignalSettingsValue(
     if (input.signal === 'websocket_signal') {
         const settings: StructuredConfigValue = {
             websocket_url: toNullableConfigString(input.websocket_url),
+        }
+        if (input.websocket_feedback_enabled) {
+            settings.feedback_enabled = true
         }
         const headers = parseOptionalJsonConfigValue(input.websocket_headers)
         if (headers !== null) {

@@ -512,6 +512,7 @@ async def persist_closed_trade(
     campaign_context: CampaignPersistenceContext | None = None,
     placement_operation_id: str | None = None,
     placement_operation_ids: Iterable[str] | None = None,
+    feedback_config: dict[str, Any] | None = None,
 ) -> None:
     """Persist a closed trade and remove its open-trade rows."""
 
@@ -571,6 +572,10 @@ async def persist_closed_trade(
                     ),
                     using_db=conn,
                 )
+            if feedback_config is not None:
+                from service.trade_feedback import enqueue_feedback
+
+                await enqueue_feedback(summary_payload, feedback_config, conn)
             await archive_replay_candles_for_deal(
                 deal_id,
                 symbol,

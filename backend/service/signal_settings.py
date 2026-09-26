@@ -38,7 +38,7 @@ _KNOWN_FIELDS = (
     | _SIGNAL_ID_LIST_FIELDS
     | _NUMBER_FIELDS
     | _OPEN_JSON_FIELDS
-    | {"schema_version"}
+    | {"schema_version", "feedback_enabled"}
 )
 
 
@@ -123,6 +123,8 @@ def canonicalize_signal_settings(raw_value: Any) -> dict[str, Any]:
             or not math.isfinite(float(value))
         ):
             raise SignalSettingsError(f"signal_settings.{key} must be a finite number.")
+    if "feedback_enabled" in payload and type(payload["feedback_enabled"]) is not bool:
+        raise SignalSettingsError("signal_settings.feedback_enabled must be a boolean.")
     headers = payload.get("headers")
     if headers is not None and not isinstance(headers, dict):
         raise SignalSettingsError("signal_settings.headers must be a JSON object.")

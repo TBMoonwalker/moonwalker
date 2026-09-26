@@ -225,6 +225,18 @@
             </template>
 
             <template v-if="signal.signal === 'websocket_signal'">
+                <n-form-item label="Send trade feedback" label-placement="left">
+                    <n-flex vertical :size="4">
+                        <n-switch
+                            v-model:value="signal.websocket_feedback_enabled"
+                            aria-label="Send trade feedback to Pathfinder"
+                        />
+                        <n-text depth="3">
+                            Send final outcomes for live and demo trades to
+                            Pathfinder. Turning this off pauses pending feedback.
+                        </n-text>
+                    </n-flex>
+                </n-form-item>
                 <n-form-item label="WebSocket URL" path="websocket_url">
                     <n-input
                         v-model:value="signal.websocket_url"

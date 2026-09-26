@@ -21,12 +21,14 @@ from .strategybuilder import StrategyGraphState as StrategyGraphState
 from .strategybuilder import StrategyVersion as StrategyVersion
 from .tickers import Tickers as Tickers
 from .tradeexecutions import TradeExecutions as TradeExecutions
+from .tradefeedback import TradeFeedback as TradeFeedback
 from .tradereplaycandles import TradeReplayCandles as TradeReplayCandles
 from .trades import Trades as Trades
 from .unsellabletrades import UnsellableTrades as UnsellableTrades
 from .upnlhistory import UpnlHistory as UpnlHistory
 
 __all__ = [
+    "TradeFeedback",
     "AppConfig",
     "AthCache",
     "AiTrustAnalyticsRevision",

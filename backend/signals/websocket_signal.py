@@ -29,6 +29,7 @@ from service.strategy_capability import (
     get_configured_strategy_history_lookback_days,
     get_configured_strategy_min_history_candles,
 )
+from service.trade_feedback import feedback_destination
 from tortoise.exceptions import BaseORMException
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, WebSocketException
@@ -585,8 +586,20 @@ class SignalPlugin:
 
     def __build_metadata_json(self, payload: dict[str, Any]) -> str:
         """Build persisted metadata from non-secret signal fields."""
+        destination = feedback_destination(
+            {
+                **(self.config or {}),
+                "signal": "websocket_signal",
+                "signal_settings": {
+                    **parse_signal_settings((self.config or {}).get("signal_settings")),
+                    "feedback_enabled": True,
+                },
+            }
+        )
         metadata = {
             "websocket_signal": {
+                "feedback_endpoint": destination[0] if destination else None,
+                "execution_exchange": (self.config or {}).get("exchange"),
                 "exchange": payload.get("exchange"),
                 "symbol": payload.get("symbol"),
                 "timeframe": payload.get("timeframe"),

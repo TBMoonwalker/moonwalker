@@ -173,6 +173,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         csvsignal_source: null,
         csvsignal_inline: null,
         csvsignal_file_name: null,
+        websocket_feedback_enabled: false,
         websocket_url: null,
         websocket_headers: null,
         websocket_subscribe_message: null,

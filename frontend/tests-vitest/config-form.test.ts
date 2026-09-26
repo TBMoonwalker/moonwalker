@@ -136,6 +136,7 @@ describe('config form contracts', () => {
         csvsignal_mode: null,
         csvsignal_source: null,
         csvsignal_inline: null,
+        websocket_feedback_enabled: true,
         websocket_url: 'wss://signals.test',
         websocket_headers: '{"Authorization":"redacted"}',
         websocket_subscribe_message: '{"type":"subscribe"}',
@@ -145,6 +146,7 @@ describe('config form contracts', () => {
         websocket_accepted_market_states: 'bullish',
       }),
     ).toMatchObject({
+      feedback_enabled: true,
       websocket_url: 'wss://signals.test',
       headers: { Authorization: 'redacted' },
       subscribe_message: { type: 'subscribe' },
@@ -172,4 +174,20 @@ describe('config form contracts', () => {
       }),
     ).toBeNull()
   })
+})
+
+it.each([true, false])('persists feedback opt-in as %s', (enabled) => {
+  const settings = buildSignalSettingsValue({
+    signal: 'websocket_signal',
+    symsignal_url: null,
+    symsignal_key: null,
+    symsignal_version: null,
+    symsignal_allowedsignals: [],
+    csvsignal_mode: null,
+    csvsignal_source: null,
+    csvsignal_inline: null,
+    websocket_url: 'wss://pathfinder.example/v1/signals/stream',
+    websocket_feedback_enabled: enabled,
+  })
+  expect(settings?.feedback_enabled === true).toBe(enabled)
 })

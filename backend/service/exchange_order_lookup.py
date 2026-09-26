@@ -5,6 +5,11 @@ from typing import Any, Protocol
 import ccxt.async_support as ccxt
 from service.exchange_helpers import aggregate_matched_trades, is_matching_order_id
 from service.exchange_types import ExchangeOrderPayload, ParsedOrderStatus
+from service.feedback_accounting import (
+    execution_accounting,
+    execution_fees,
+    merge_accounting_metadata,
+)
 
 
 class LoggerLike(Protocol):
@@ -103,6 +108,10 @@ def build_parsed_order_status(
     }
 
     if trade:
+        if "feedback_accounting" in trade:
+            data["metadata_json"] = merge_accounting_metadata(
+                None, trade["feedback_accounting"]
+            )
         data["timestamp"] = trade["timestamp"]
         data["amount"] = float(trade["amount"])
         data["total_amount"] = float(trade["amount"])
@@ -115,6 +124,9 @@ def build_parsed_order_status(
         data["ordersize"] = float(trade.get("cost") or order.get("cost") or 0.0)
         return data
 
+    data["metadata_json"] = merge_accounting_metadata(
+        None, execution_accounting([dict(order)], order["symbol"])
+    )
     data["timestamp"] = order["timestamp"]
     data["amount"] = float(order["amount"])
     data["total_amount"] = float(order["amount"])
@@ -122,7 +134,18 @@ def build_parsed_order_status(
     data["orderid"] = order["id"]
     data["symbol"] = order["symbol"]
     data["side"] = order["side"]
-    data["amount_fee"] = order["fee"]
-    data["base_fee"] = 0.0
+    data["amount_fee"] = sum(
+        float(fee.get("cost") or 0.0)
+        for fee in execution_fees(dict(order))
+        if isinstance(fee, dict)
+    )
+    data["base_fee"] = sum(
+        float(fee.get("cost") or 0.0)
+        for fee in execution_fees(dict(order))
+        if isinstance(fee, dict)
+        and order.get("side") == "buy"
+        and str(fee.get("currency") or "").upper()
+        == order["symbol"].split("/")[0].upper()
+    )
     data["ordersize"] = float(order.get("cost") or 0.0)
     return data

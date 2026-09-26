@@ -174,6 +174,11 @@ def build_final_sell_executions(
             "symbol": str(order_status["symbol"]),
             "side": str(order_status.get("side") or "sell"),
             "role": "final_sell",
+            **(
+                {"metadata_json": order_status["metadata_json"]}
+                if order_status.get("metadata_json")
+                else {}
+            ),
             "campaign_id": order_status.get("campaign_id"),
             "timestamp": str(timestamp),
             "price": float(order_status.get("price") or 0.0),

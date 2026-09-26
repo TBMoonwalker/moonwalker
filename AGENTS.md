@@ -151,6 +151,8 @@ The backend is a Python application using Litestar with the following structure:
     - `redis.py` - Redis client setup and pub/sub helpers
     - `strategy_capability.py` - Strategy availability validation
     - `analytics.py` - On-demand closed-trade analytics: KPIs, heatmaps, drawdown, profit distribution
+    - `trade_feedback.py` - Opt-in Pathfinder closed-trade outbox and asynchronous delivery retries; setup and limits are documented in [Signal plugins](docs/signals.md#pathfinder-closed-trade-feedback)
+    - `feedback_accounting.py` - Normalize CCXT execution fees for net feedback outcomes and reject incomplete fee accounting
 
 3. **Signal Plugins** (`backend/signals/`)
    - `asap.py` - Signal plugin for ASAP signals
@@ -165,6 +167,7 @@ The backend is a Python application using Litestar with the following structure:
 5. **Models** (`backend/model/`)
    - 9 Tortoise ORM models: `AppConfig`, `AthCache`, `Autopilot`, `Trades`, `OpenTrades`, `ClosedTrades`, `Tickers`, `Listings`, `UpnlHistory`
    - Database: SQLite (configurable via `MOONWALKER_DB_URL`)
+   - `TradeFeedback` persists immutable Pathfinder outcome payloads and their pending, sent, rejected, or blocked delivery state.
 
 6. **Helper** (`backend/helper/`)
    - `logger.py` - Logging factory with different log levels

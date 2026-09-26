@@ -49,6 +49,7 @@ from service.runtime_services import (
     deactivate_runtime_services,
 )
 from service.signal import Signal
+from service.trade_feedback import run_feedback_worker
 from service.watcher import Watcher
 
 logging = helper.LoggerFactory.get_logger("logs/startup.log", "startup")
@@ -393,6 +394,10 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
                 recover_pending_outcome_attributions
             )
             runtime_state.background_tasks = [
+                task_group.create_task(
+                    runtime_state.database.run_with_context(run_feedback_worker),
+                    name="moonwalker:trade-feedback",
+                ),
                 task_group.create_task(
                     _run_critical_runtime_task(
                         "symbol-intake",
