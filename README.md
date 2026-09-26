@@ -79,7 +79,8 @@ You also need to install the ta-lib library for your OS. Please see: https://ta-
 - API and websocket reference: `docs/api.md`
 - Monitoring (Telegram): `docs/monitoring.md`
 - Dynamic SO details and formulas: `docs/dynamic-so.md`
-- Signal plugin setup (SymSignals, ASAP, CSV): `docs/signals.md`
+- Signal plugin setup (SymSignals, ASAP, CSV, WebSocket) and optional Pathfinder
+  closed-trade feedback: [Signal plugins](docs/signals.md)
 - CI, runtime operations, backups, logs, and dashboard streams:
    `docs/operations.md`
 - Dependency updates and supply-chain policy: `docs/dependencies.md`
