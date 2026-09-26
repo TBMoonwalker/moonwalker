@@ -32,7 +32,9 @@ const chart_data = ref({
 })
 const option = ref({})
 const chartHeight = ref('40vh')
-const isLoading = ref(true)
+const isLoading = ref(
+    Object.keys(profit_store.get_profit_history_data(range.period)).length === 0
+)
 const showNoProfit = ref(false)
 const emptyStateText = ref('')
 const isMobile = ref(false)
