@@ -550,6 +550,8 @@ class Orders:
             close_options["placement_operation_id"] = placement_operation_id
         if placement_operation_ids:
             close_options["placement_operation_ids"] = placement_operation_ids
+        if config.get("signal") == "websocket_signal":
+            close_options["feedback_config"] = config
         await persist_closed_trade(
             order_status["symbol"],
             close_context["payload"],

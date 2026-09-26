@@ -1,5 +1,6 @@
 """Market buy execution and finalization helpers."""
 
+import json
 import math
 from typing import Any, cast
 
@@ -192,6 +193,22 @@ class ExchangeBuyManager:
         order_status: ParsedOrderStatus = await context.parse_order_status(order)
         if "timestamp" in order_status:
             order["timestamp"] = order_status["timestamp"]
+        if order_status.get("metadata_json"):
+            raw_metadata = order.get("metadata_json")
+            try:
+                metadata = json.loads(raw_metadata) if raw_metadata else {}
+            except (ValueError, TypeError):
+                metadata = {}
+            if not isinstance(metadata, dict):
+                metadata = {}
+            accounting_metadata = json.loads(order_status["metadata_json"])
+            metadata.update(accounting_metadata)
+            # Base-denominated fees must actually reduce inventory to be net.
+            if config.get("fee_deduction", False) and order_status.get("base_fee"):
+                metadata["feedback_accounting"]["external_buy_fees"] += float(
+                    order_status["base_fee"]
+                ) * float(order_status.get("price") or 0)
+            order["metadata_json"] = json.dumps(metadata, sort_keys=True)
         if "amount" in order_status:
             order["amount"] = order_status["amount"]
         if "total_amount" in order_status:

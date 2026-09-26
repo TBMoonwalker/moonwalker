@@ -348,6 +348,7 @@ timezone: toNullableString(response.timezone) || defaults.clientTimezone,
             csvsignal_source: csvsignalSource,
             csvsignal_inline: csvsignalInline,
             csvsignal_file_name: null,
+            websocket_feedback_enabled: signalSettings?.feedback_enabled === true,
             websocket_url:
                 toNullableString(signalSettings?.websocket_url) ??
                 toNullableString(signalSettings?.api_url),

@@ -285,10 +285,20 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
         _noop_async,
     )
 
+    feedback_stopped = asyncio.Event()
+
+    async def fake_feedback_worker():
+        try:
+            await asyncio.Event().wait()
+        finally:
+            feedback_stopped.set()
+
+    monkeypatch.setattr(app_module, "run_feedback_worker", fake_feedback_worker)
+
     async with app_module.runtime_lifespan(None):
         await asyncio.sleep(0)
 
-        assert len(app_module.runtime_state.background_tasks) == 4
+        assert len(app_module.runtime_state.background_tasks) == 5
         assert {
             task.get_name() for task in app_module.runtime_state.background_tasks
         } == {
@@ -296,6 +306,7 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
             "moonwalker:ticker-watcher",
             "moonwalker:housekeeping",
             "moonwalker:replay-candle-backfill",
+            "moonwalker:trade-feedback",
         }
         assert fake_database.run_calls[:2] == [
             "instance",
@@ -310,6 +321,7 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
             is app_module.runtime_state.placement_orders
         )
 
+    assert feedback_stopped.is_set()
     assert fake_market_cap_service.shutdown_calls == 1
     assert app_module.runtime_state.controller_services is None
 
@@ -511,13 +523,23 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
         stop_statistics_fanout,
     )
 
+    monkeypatch.setattr(
+        app_module, "run_feedback_worker", lambda: owned_loop("feedback")
+    )
+
     async with app_module.runtime_lifespan(None):
         events.append("running")
         await asyncio.sleep(0)
 
     assert events.index("ai-queue:stop") < events.index("symbol-intake:done")
     assert events.index("replay-repair-queue:stop") < events.index("symbol-intake:done")
-    for task_name in ("symbol-intake", "ticker-watcher", "housekeeping", "replay"):
+    for task_name in (
+        "symbol-intake",
+        "ticker-watcher",
+        "housekeeping",
+        "replay",
+        "feedback",
+    ):
         assert events.index(f"{task_name}:done") < events.index("trades-fanout:stop")
     ordered_shutdown_events = [
         "trades-fanout:stop",

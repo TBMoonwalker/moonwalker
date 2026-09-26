@@ -67,6 +67,7 @@ function buildPersistableState(
             csvsignal_mode: options.signal.value.csvsignal_mode,
             csvsignal_source: options.signal.value.csvsignal_source,
             csvsignal_inline: options.signal.value.csvsignal_inline,
+            websocket_feedback_enabled: options.signal.value.websocket_feedback_enabled,
             websocket_url: options.signal.value.websocket_url,
             websocket_headers: options.signal.value.websocket_headers,
             websocket_subscribe_message:

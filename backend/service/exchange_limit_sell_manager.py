@@ -444,6 +444,11 @@ class ExchangeLimitSellManager:
                                 or partial_fill_status.get("amount_fee")
                                 or 0.0
                             ),
+                            **(
+                                {"metadata_json": partial_fill_status["metadata_json"]}
+                                if partial_fill_status.get("metadata_json")
+                                else {}
+                            ),
                             "order_id": str(
                                 partial_fill_status.get("orderid") or sell_order["id"]
                             ),

@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from service.feedback_accounting import execution_accounting, execution_fees
+
 
 def is_matching_order_id(candidate_order_id: Any, expected_order_id: str) -> bool:
     """Compare order ids safely across string/int exchange payloads."""
@@ -22,15 +24,17 @@ def aggregate_matched_trades(
 
     for order in matched_orders:
         amount += float(order["amount"])
-        fee_data = order.get("fee") or {}
-        fee_cost = float(fee_data.get("cost") or 0.0)
-        fee += fee_cost
         cost += float(order["cost"])
-        fee_currency = str(fee_data.get("currency") or "").upper()
         base_asset = str(order.get("symbol", symbol)).split("/")[0].upper()
         side = str(order.get("side") or "").lower()
-        if side == "buy" and fee_currency == base_asset:
-            base_fee += fee_cost
+        for fee_data in execution_fees(order):
+            if not isinstance(fee_data, dict):
+                continue
+            fee_cost = float(fee_data.get("cost") or 0.0)
+            fee += fee_cost
+            fee_currency = str(fee_data.get("currency") or "").upper()
+            if side == "buy" and fee_currency == base_asset:
+                base_fee += fee_cost
 
     last_order = max(matched_orders, key=lambda o: int(o.get("timestamp") or 0))
 
@@ -45,6 +49,7 @@ def aggregate_matched_trades(
     trade["symbol"] = last_order["symbol"]
     trade["side"] = last_order["side"]
     trade["fee_cost"] = fee
+    trade["feedback_accounting"] = execution_accounting(matched_orders, symbol)
 
     return trade
 

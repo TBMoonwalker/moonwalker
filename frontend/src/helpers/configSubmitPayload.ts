@@ -43,6 +43,7 @@ export interface SignalConfigSection {
     csvsignal_mode: string | null
     csvsignal_source: string | null
     csvsignal_inline: string | null
+    websocket_feedback_enabled?: boolean
     websocket_url?: string | null
     websocket_headers?: string | null
     websocket_subscribe_message?: string | null
@@ -320,6 +321,7 @@ export function buildConfigSubmitPayload(
                 csvsignal_mode: signal.csvsignal_mode,
                 csvsignal_source: signal.csvsignal_source,
                 csvsignal_inline: signal.csvsignal_inline,
+                websocket_feedback_enabled: signal.websocket_feedback_enabled,
                 websocket_url: signal.websocket_url,
                 websocket_headers: signal.websocket_headers,
                 websocket_subscribe_message: signal.websocket_subscribe_message,

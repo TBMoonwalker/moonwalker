@@ -43,6 +43,7 @@ def _build_sell_execution_from_status(
         "amount": amount,
         "ordersize": float(order_status.get("ordersize") or amount * fallback_price),
         "fee": float(fee or 0.0),
+        "metadata_json": order_status.get("metadata_json"),
         "order_id": (
             str(order_status.get("orderid"))
             if order_status.get("orderid") is not None

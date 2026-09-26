@@ -348,3 +348,14 @@ test('buildLoadedConfigState ignores removed legacy filter shadow payload', () =
        open_trade_count: 2,
       })
  })
+
+
+test('WebSocket feedback loads as an explicit opt-in', () => {
+    for (const enabled of [true, false]) {
+        const result = buildLoadedConfigState({
+            signal: 'websocket_signal',
+            signal_settings: JSON.stringify({ feedback_enabled: enabled }),
+        }, createLoadDefaults())
+        assert.equal(result.signal.websocket_feedback_enabled, enabled)
+    }
+})
