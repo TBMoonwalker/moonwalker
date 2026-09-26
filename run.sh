@@ -137,6 +137,31 @@ stop_services() {
     fi
 }
 
+# Configure the single-instance Python/NumPy backend's runtime allocator.
+#
+# The bot is a single-instance workload, yet on multi-core remotes glibc allocates
+# one malloc arena per core group and OpenBLAS spins a worker thread per core, so
+# RSS climbs to a plateau: glibc retains the freed arenas and the BLAS pool never
+# fully releases. Each variable is operator-overridable via ${VAR:-default}; the
+# jemalloc hook is opportunistic and non-fatal, so a host without jemalloc keeps
+# tuned glibc. Env-only: no application behaviour changes.
+configure_runtime_memory_env() {
+    export MALLOC_ARENA_MAX="${MALLOC_ARENA_MAX:-2}"
+    export OMP_NUM_THREADS="${OMP_NUM_THREADS:-1}"
+    export OPENBLAS_NUM_THREADS="${OPENBLAS_NUM_THREADS:-1}"
+
+    local jemalloc=""
+    if command -v ldconfig >/dev/null 2>&1; then
+        jemalloc="$(ldconfig -p 2>/dev/null | grep -i libjemalloc | grep -oE '/[^ ]+\.so[^ ]*' | head -n1 || true)"
+    fi
+    if [ -n "${jemalloc}" ] && [ -f "${jemalloc}" ]; then
+        export LD_PRELOAD="${jemalloc}${LD_PRELOAD:+:${LD_PRELOAD}}"
+        echo "🧠 jemalloc active (backend allocator): $(basename "${jemalloc}")."
+    else
+        echo "ℹ️  jemalloc not found; using glibc with MALLOC_ARENA_MAX=${MALLOC_ARENA_MAX}."
+    fi
+}
+
 # Function to start all services
 start_services() {
     local debug="${1:-false}"
@@ -221,6 +246,9 @@ start_services() {
     # has succeeded. EXIT/interrupt cleanup protects the short launch window.
     touch "$LOCK_FILE"
     trap 'rm -f "$LOCK_FILE" "$PID_FILE"' EXIT INT TERM
+
+    echo "🧠 Applying runtime memory tuning..."
+    configure_runtime_memory_env
 
     echo "🚀 Starting Litestar..."
     cd backend
