@@ -2,6 +2,25 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.12.0.0] - 2026-09-26
+
+### Added
+- A client-side stale-while-revalidate cache for the uPNL timeline and the
+   per-period profit history. After a page reload the charts paint instantly
+   from the cache and reconcile in the background, so the "overall" and profit
+   views no longer blank out or spin on first open. A guarded `localStorage`
+   helper backs it, so blocked or full storage never breaks the dashboard.
+
+### Changed
+- Switching between the profit tabs (Overall / Daily / Monthly / Yearly) keeps
+   each chart mounted through naive-ui's per-pane `display-directive`, so a
+   switch is a pure show/hide: no ECharts re-animation and no refetch. This
+   removes the "timecap" that made a tab change feel like a fresh load, and a
+   switch now costs no network request.
+
+### Removed
+- No removals in this release.
+
 ## [4.11.0.0] - 2026-09-25
 
 ### Added
