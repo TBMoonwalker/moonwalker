@@ -478,3 +478,75 @@ async def test_history_sync_accepts_strategy_warmup_when_full_window_has_gap(
     assert [int(float(row)) for row in rows] == [1000, 3000, 4000, 5000]
 
     await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("cached_days", [None, 6])
+async def test_pair_age_rechecks_recent_cache_with_bounded_history(
+    monkeypatch, cached_days
+):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import AsyncMock
+
+    now = datetime.now(timezone.utc)
+    cached = (
+        None
+        if cached_days is None
+        else types.SimpleNamespace(listing_date=now - timedelta(days=cached_days))
+    )
+    old = now - timedelta(days=40)
+    lookup = AsyncMock(return_value=cached)
+    save = AsyncMock()
+    monkeypatch.setattr(data_module.model.Listings, "get_or_none", lookup)
+    monkeypatch.setattr(data_module.model.Listings, "update_or_create", save)
+    data = Data(persist_exchange=True)
+    fetch = AsyncMock(return_value=[_make_candle(int(old.timestamp() * 1000), 1.0)])
+    data.exchange = types.SimpleNamespace(get_history_for_symbol=fetch)
+
+    assert await data.is_token_old_enough({}, "AERO/USDC") is True
+    kwargs = fetch.call_args.kwargs
+    assert kwargs["limit"] == 1000
+    assert abs(kwargs["until"] / 1000 - (now - timedelta(days=30)).timestamp()) < 5
+    assert save.call_args.kwargs["defaults"]["listing_date"] == old.replace(
+        microsecond=(old.microsecond // 1000) * 1000
+    )
+
+
+@pytest.mark.asyncio
+async def test_pair_age_keeps_proven_old_cache(monkeypatch):
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import AsyncMock
+
+    old = datetime.now(timezone.utc) - timedelta(days=60)
+    monkeypatch.setattr(
+        data_module.model.Listings,
+        "get_or_none",
+        AsyncMock(return_value=types.SimpleNamespace(listing_date=old)),
+    )
+    data = Data(persist_exchange=True)
+    fetch = AsyncMock()
+    data.exchange = types.SimpleNamespace(get_history_for_symbol=fetch)
+    assert await data.is_token_old_enough({}, "WIF/USDC") is True
+    fetch.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pair_age_without_old_history_remains_blocked(monkeypatch):
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(
+        data_module.model.Listings,
+        "get_or_none",
+        AsyncMock(
+            return_value=types.SimpleNamespace(listing_date=datetime.now(timezone.utc))
+        ),
+    )
+    save = AsyncMock()
+    monkeypatch.setattr(data_module.model.Listings, "update_or_create", save)
+    data = Data(persist_exchange=True)
+    data.exchange = types.SimpleNamespace(
+        get_history_for_symbol=AsyncMock(return_value=[])
+    )
+    assert await data.is_token_old_enough({}, "NEW/USDC") is False
+    save.assert_not_awaited()

@@ -81,16 +81,26 @@ class Data:
     async def get_listing_date(
         self, config: dict[str, Any], symbol: str
     ) -> datetime | None:
-        """Fetch the listing date of a token, using SQLite cache."""
-        # Check cache first
+        """Return cached or historical evidence that a pair meets the age gate.
+
+        Recent cached dates are rechecked: exchanges that return newest-first
+        candles may have previously cached the latest candle as the listing date.
+        An old candle proves sufficient age without needing the exact listing date.
+        """
+        threshold_date = datetime.now(timezone.utc) - timedelta(
+            days=config.get("pair_age", 30)
+        )
         listing = await model.Listings.get_or_none(symbol=symbol)
-        if listing:
+        if listing and listing.listing_date <= threshold_date:
             return listing.listing_date
 
-        # If not cached -> fetch from exchange
         try:
             ohlcv = await self.exchange.get_history_for_symbol(
-                config, symbol, timeframe="1d"
+                config,
+                symbol,
+                timeframe="1d",
+                limit=1000,
+                until=int(threshold_date.timestamp() * 1000),
             )
             if not ohlcv:
                 logging.error("No OHLCV data available for %s", symbol)
@@ -102,8 +112,8 @@ class Data:
 
                 # Save to DB cache
                 await run_sqlite_write_with_retry(
-                    lambda: model.Listings.create(
-                        symbol=symbol, listing_date=listing_date
+                    lambda: model.Listings.update_or_create(
+                        symbol=symbol, defaults={"listing_date": listing_date}
                     ),
                     f"storing listing date for {symbol}",
                 )

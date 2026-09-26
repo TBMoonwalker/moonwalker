@@ -22,7 +22,9 @@ class _DummyHistoryExchange:
         timeframe: str,
         since: int,
         limit: int,
+        params: dict[str, int],
     ) -> list[list[float]]:
+        assert params == {"until": 120_000}
         self.fetch_calls.append((symbol, timeframe, since, limit))
         return [
             [0, 1.0, 2.0, 0.5, 1.5, 10.0],

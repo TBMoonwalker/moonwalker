@@ -633,6 +633,13 @@ class SignalPlugin:
             candidate.symbol,
         )
         if not token_old_enough:
+            logging.info(
+                "Ignoring websocket signal %s for %s: pair age could not be "
+                "verified against the %s-day minimum.",
+                candidate.signal_name,
+                candidate.symbol,
+                self.config.get("pair_age", 30),
+            )
             return
 
         async def prepare_symbol(_symbol: str) -> bool:
