@@ -75,7 +75,7 @@ const delistingCheckUnavailableCopy = computed(() => {
     (candidate) => Boolean(candidate.delisting_check_unavailable),
   )
   return row?.delisting_check_message ||
-    `Moonwalker cannot verify Binance's production delisting schedule. New buys are blocked. Existing sell and take-profit orders remain active.`
+    `Moonwalker cannot verify the exchange delisting schedule. New buys are blocked. Existing sell and take-profit orders remain active.`
 })
 function configFlagEnabled(value: unknown): boolean {
   return value === true || value === 'true'
@@ -120,7 +120,7 @@ const admissionStatusCopy = computed(() => {
     return 'New trades and re-entries are paused. Existing exits can keep running.'
   }
   if (delistingCheckUnavailable.value) {
-    return `Binance's production delisting schedule is unavailable. All new buys are blocked until verification succeeds. Existing exits can keep running.`
+    return `The exchange delisting schedule is unavailable. All new buys are blocked until verification succeeds. Existing exits can keep running.`
   }
   if (aiTrustProviderUnavailable.value) {
     const provider = aiTrustRuntimeProviderStatus.value || 'unscored'
@@ -229,7 +229,7 @@ onMounted(() => {
     <n-alert
       v-if="delistingCheckUnavailable"
       class="delisting-alert"
-      title="Delisting protection cannot verify Binance"
+      title="Delisting protection cannot verify the exchange schedule"
       type="warning"
       role="alert"
       aria-live="assertive"

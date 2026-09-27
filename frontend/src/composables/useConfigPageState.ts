@@ -152,10 +152,6 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         symbol_list: null,
         asap_use_url: true,
         asap_symbol_select: [],
-        delisting_protection_enabled: false,
-        delisting_schedule_use_trading_credentials: false,
-        delisting_schedule_api_key: null,
-        delisting_schedule_api_secret: null,
         asap_symbol_options: [],
         asap_symbols_loading: false,
         asap_symbol_fetch_error: null,
@@ -203,6 +199,10 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         currency: null,
         market: 'spot',
         watcher_ohlcv: false,
+        delisting_protection_enabled: false,
+        delisting_schedule_use_trading_credentials: false,
+        delisting_schedule_api_key: null,
+        delisting_schedule_api_secret: null,
     })
 
     const dca = ref<DcaConfigSection>({

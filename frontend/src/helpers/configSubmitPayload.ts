@@ -29,10 +29,6 @@ export interface SignalConfigSection {
     symbol_list: string | null
     asap_use_url: boolean
     asap_symbol_select: string[]
-    delisting_protection_enabled: boolean
-    delisting_schedule_use_trading_credentials?: boolean
-    delisting_schedule_api_key?: string | null
-    delisting_schedule_api_secret?: string | null
     signal: string | null
     strategy: string | null
     strategy_enabled: boolean
@@ -73,6 +69,10 @@ export interface ExchangeConfigSection {
     currency: string | null
     market: string | null
     watcher_ohlcv: boolean
+    delisting_protection_enabled: boolean
+    delisting_schedule_use_trading_credentials?: boolean
+    delisting_schedule_api_key?: string | null
+    delisting_schedule_api_secret?: string | null
 }
 
 export interface DcaConfigSection {
@@ -288,19 +288,19 @@ export function buildConfigSubmitPayload(
         ),
         signal: serializeConfigValue(toNullableConfigString(signal.signal), 'str'),
         delisting_protection_enabled: serializeConfigValue(
-            signal.delisting_protection_enabled ?? false,
+            exchange.delisting_protection_enabled ?? false,
             'bool',
         ),
         delisting_schedule_use_trading_credentials: serializeConfigValue(
-            signal.delisting_schedule_use_trading_credentials ?? false,
+            exchange.delisting_schedule_use_trading_credentials ?? false,
             'bool',
         ),
         delisting_schedule_api_key: serializeConfigValue(
-            toNullableConfigString(signal.delisting_schedule_api_key),
+            toNullableConfigString(exchange.delisting_schedule_api_key),
             'str',
         ),
         delisting_schedule_api_secret: serializeConfigValue(
-            toNullableConfigString(signal.delisting_schedule_api_secret),
+            toNullableConfigString(exchange.delisting_schedule_api_secret),
             'str',
         ),
         signal_strategy: serializeConfigValue(

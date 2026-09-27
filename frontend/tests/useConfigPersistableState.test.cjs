@@ -29,10 +29,6 @@ function createPersistableStateOptions() {
             symbol_list: 'BTC/USDT',
             asap_use_url: false,
             asap_symbol_select: ['BTC/USDT'],
-            delisting_protection_enabled: false,
-            delisting_schedule_use_trading_credentials: false,
-            delisting_schedule_api_key: null,
-            delisting_schedule_api_secret: null,
             asap_symbol_fetch_error: null,
             asap_symbol_options: [
                 { label: 'BTC/USDT', value: 'BTC/USDT' },
@@ -72,6 +68,10 @@ function createPersistableStateOptions() {
             currency: 'USDT',
             market: 'spot',
             watcher_ohlcv: false,
+            delisting_protection_enabled: false,
+            delisting_schedule_use_trading_credentials: false,
+            delisting_schedule_api_key: null,
+            delisting_schedule_api_secret: null,
         }),
         dca: ref({
             enabled: true,
@@ -182,22 +182,22 @@ test('useConfigPersistableState tracks persistable section changes by label', ()
     assert.deepEqual(tracking.changedSectionLabels.value, ['Signal'])
 
     tracking.syncBaselineState()
-    options.signal.value.delisting_protection_enabled = true
+    options.exchange.value.delisting_protection_enabled = true
 
     assert.equal(tracking.isDirty.value, true)
-    assert.deepEqual(tracking.changedSections.value, ['signal'])
+    assert.deepEqual(tracking.changedSections.value, ['exchange'])
 
     tracking.syncBaselineState()
-    options.signal.value.delisting_schedule_use_trading_credentials = true
+    options.exchange.value.delisting_schedule_use_trading_credentials = true
 
     assert.equal(tracking.isDirty.value, true)
-    assert.deepEqual(tracking.changedSections.value, ['signal'])
+    assert.deepEqual(tracking.changedSections.value, ['exchange'])
 
     tracking.syncBaselineState()
-    options.signal.value.delisting_schedule_api_key = 'read-only-key'
+    options.exchange.value.delisting_schedule_api_key = 'read-only-key'
 
     assert.equal(tracking.isDirty.value, true)
-    assert.deepEqual(tracking.changedSections.value, ['signal'])
+    assert.deepEqual(tracking.changedSections.value, ['exchange'])
 
     tracking.syncBaselineState()
     options.signal.value.csvsignal_file_name = 'signals.csv'

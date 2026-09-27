@@ -61,6 +61,8 @@ class Exchange:
     HISTORY_RETRY_SLEEP_SECONDS = 1
     HISTORY_MAX_CONSECUTIVE_ERRORS = 5
     BALANCE_CACHE_TTL_SECONDS = 2.0
+    BYBIT_SCHEDULE_PAGE_SIZE = 50
+    BYBIT_SCHEDULE_MAX_PAGES = 10
 
     def __init__(
         self,
@@ -205,6 +207,77 @@ class Exchange:
             if not isinstance(response, list):
                 raise ValueError("Exchange returned an invalid spot delist schedule.")
             return [dict(entry) for entry in response if isinstance(entry, dict)]
+        finally:
+            try:
+                await schedule_exchange.close()
+            except (ccxt.BaseError, OSError, RuntimeError) as exc:
+                logging.warning(
+                    "Failed to close delisting schedule client cleanly: %s",
+                    exc,
+                )
+
+    async def fetch_bybit_delisting_schedule(
+        self,
+        config: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        """Return Bybit's public spot delisting announcements.
+
+        Bybit does not publish an authenticated delisting schedule like
+        Binance; spot delistings are announced through a public,
+        unauthenticated endpoint. A short-lived CCXT client with no
+        credentials is therefore sufficient. The schedule is advisory, so a
+        transient feed failure must not freeze trading: CCXT market status
+        remains the backstop. Operators may supply a hostname override for
+        Bybit EU.
+        """
+        exchange_id = str(config.get("exchange") or "").strip().lower()
+        if exchange_id not in ("bybit", "bybiteu"):
+            raise NotImplementedError(
+                "The configured exchange does not expose a spot delist schedule."
+            )
+
+        options: dict[str, Any] = {"defaultType": "spot"}
+        hostname = str(config.get("exchange_hostname") or "").strip()
+        if hostname:
+            options["hostname"] = hostname
+
+        exchange_class = getattr(ccxt, exchange_id)
+        schedule_exchange = exchange_class({"options": options})
+        schedule_exchange.enableRateLimit = True
+        try:
+            fetch_announcements = getattr(
+                schedule_exchange,
+                "public_get_v5_announcements_index",
+                None,
+            )
+            if not callable(fetch_announcements):
+                raise NotImplementedError(
+                    "The configured exchange does not expose a spot delist schedule."
+                )
+
+            schedule: list[dict[str, Any]] = []
+            # Bound the work so a large feed cannot stall a refresh loop.
+            for page in range(1, self.BYBIT_SCHEDULE_MAX_PAGES + 1):
+                response = await fetch_announcements(
+                    {
+                        "locale": "en-US",
+                        "type": "delistings",
+                        "page": page,
+                        "limit": self.BYBIT_SCHEDULE_PAGE_SIZE,
+                    }
+                )
+                if not isinstance(response, dict):
+                    break
+                result = response.get("result")
+                if not isinstance(result, dict):
+                    break
+                items = result.get("list")
+                if not isinstance(items, list) or not items:
+                    break
+                for item in items:
+                    if isinstance(item, dict):
+                        schedule.append(dict(item))
+            return schedule
         finally:
             try:
                 await schedule_exchange.close()

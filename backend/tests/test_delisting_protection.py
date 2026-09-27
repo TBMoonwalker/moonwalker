@@ -22,12 +22,17 @@ class FakeDelistingExchange:
         markets: list[dict[str, Any]],
         schedule: list[dict[str, Any]] | None = None,
         schedule_error: Exception | None = None,
+        bybit_schedule: list[dict[str, Any]] | None = None,
+        bybit_schedule_error: Exception | None = None,
     ) -> None:
         self.markets = markets
         self.schedule = schedule or []
         self.schedule_error = schedule_error
+        self.bybit_schedule = bybit_schedule or []
+        self.bybit_schedule_error = bybit_schedule_error
         self.market_calls = 0
         self.schedule_calls = 0
+        self.bybit_schedule_calls = 0
         self.close_calls = 0
 
     async def fetch_market_metadata(
@@ -48,6 +53,15 @@ class FakeDelistingExchange:
         if self.schedule_error is not None:
             raise self.schedule_error
         return self.schedule
+
+    async def fetch_bybit_delisting_schedule(
+        self,
+        _config: dict[str, Any],
+    ) -> list[dict[str, Any]]:
+        self.bybit_schedule_calls += 1
+        if self.bybit_schedule_error is not None:
+            raise self.bybit_schedule_error
+        return self.bybit_schedule
 
     async def close(self) -> None:
         self.close_calls += 1
@@ -497,3 +511,424 @@ async def test_central_order_guard_blocks_every_buy_role(
 
     assert accepted is False
     assert executed is False
+
+
+@pytest.mark.asyncio
+async def test_bybit_announcement_blocks_matching_spot_market() -> None:
+    service = DelistingProtectionService()
+    await _disable_open_trade_notifications(service)
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybit",
+        "market": "spot",
+        "dry_run": False,
+    }
+    fake_exchange = FakeDelistingExchange(
+        markets=[{"id": "ADAUSDT", "symbol": "ADA/USDT", "active": True}],
+        bybit_schedule=[
+            {
+                "title": "Delisting of ADA on Feb 15, 2027",
+                "tags": ["Delisting"],
+                "dateTimestamp": "1900000000000",
+            }
+        ],
+    )
+    service.exchange = fake_exchange  # type: ignore[assignment]
+
+    await service.refresh(service.config)
+    decision = await service.evaluate_buy("ADA/USDT", service.config)
+
+    assert decision.allowed is False
+    assert decision.reason_code == "blocked_scheduled_delisting"
+    assert decision.source == "bybit_announcement_schedule"
+    assert decision.delist_at is not None
+    assert fake_exchange.bybit_schedule_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_bybit_schedule_failure_warns_not_blocks() -> None:
+    service = DelistingProtectionService()
+    await _disable_open_trade_notifications(service)
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybit",
+        "market": "spot",
+        "dry_run": False,
+    }
+    fake_exchange = FakeDelistingExchange(
+        markets=[{"id": "ADAUSDT", "symbol": "ADA/USDT", "active": True}],
+        bybit_schedule_error=RuntimeError("announcement feed unavailable"),
+    )
+    service.exchange = fake_exchange  # type: ignore[assignment]
+
+    await service.refresh(service.config)
+    decision = await service.evaluate_buy("ADA/USDT", service.config)
+
+    assert decision.allowed is True
+    assert decision.degraded is True
+    assert decision.reason_code is None
+    enriched = service.enrich_open_trades([{"id": 1, "symbol": "ADA/USDT"}])
+    assert "delisting_check_unavailable" not in enriched[0]
+    assert "delisting_warning" not in enriched[0]
+
+
+@pytest.mark.asyncio
+async def test_bybit_derivatives_announcement_is_ignored() -> None:
+    service = DelistingProtectionService()
+    await _disable_open_trade_notifications(service)
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybit",
+        "market": "spot",
+        "dry_run": False,
+    }
+    fake_exchange = FakeDelistingExchange(
+        markets=[{"id": "ICXUSDT", "symbol": "ICX/USDT", "active": True}],
+        bybit_schedule=[
+            {
+                "title": "Delisting of ICXUSDT Perpetual Contract",
+                "tags": ["Perpetual"],
+                "dateTimestamp": "1900000000000",
+            }
+        ],
+    )
+    service.exchange = fake_exchange  # type: ignore[assignment]
+
+    await service.refresh(service.config)
+    decision = await service.evaluate_buy("ICX/USDT", service.config)
+
+    assert decision.allowed is True
+    assert decision.source == "bybit_announcement_schedule"
+    assert service.get_state()["scheduled_symbols"] == []
+
+
+@pytest.mark.asyncio
+async def test_bybiteu_routes_to_announcement_provider() -> None:
+    service = DelistingProtectionService()
+    await _disable_open_trade_notifications(service)
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybiteu",
+        "market": "spot",
+        "dry_run": False,
+    }
+    fake_exchange = FakeDelistingExchange(
+        markets=[{"id": "ADAUSDT", "symbol": "ADA/USDT", "active": True}],
+        bybit_schedule=[
+            {
+                "title": "Delisting of ADA on Feb 15, 2027",
+                "tags": ["Delisting"],
+                "dateTimestamp": "1900000000000",
+            }
+        ],
+    )
+    service.exchange = fake_exchange  # type: ignore[assignment]
+
+    await service.refresh(service.config)
+    decision = await service.evaluate_buy("ADA/USDT", service.config)
+
+    assert decision.allowed is False
+    assert decision.source == "bybit_announcement_schedule"
+    assert service.get_state()["provider"] == "bybit_announcement_schedule"
+    assert fake_exchange.bybit_schedule_calls == 1
+    assert fake_exchange.schedule_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_bybit_stale_announcement_is_ignored() -> None:
+    service = DelistingProtectionService()
+    await _disable_open_trade_notifications(service)
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybit",
+        "market": "spot",
+        "dry_run": False,
+    }
+    fake_exchange = FakeDelistingExchange(
+        markets=[{"id": "ADAUSDT", "symbol": "ADA/USDT", "active": True}],
+        bybit_schedule=[
+            {
+                "title": "Delisting of ADA on Jan 1, 2001",
+                "tags": ["Delisting"],
+                "dateTimestamp": "1000000000000",
+            }
+        ],
+    )
+    service.exchange = fake_exchange  # type: ignore[assignment]
+
+    await service.refresh(service.config)
+    decision = await service.evaluate_buy("ADA/USDT", service.config)
+
+    assert decision.allowed is True
+    assert service.get_state()["scheduled_symbols"] == []
+
+
+@pytest.mark.asyncio
+async def test_bybit_schedule_uses_public_unauthenticated_client(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[Any] = []
+
+    class PublicAnnouncementExchange:
+        """Capture a credential-free CCXT client for the public feed."""
+
+        def __init__(self, params: dict[str, Any]) -> None:
+            self.params = params
+            self.enableRateLimit = False
+            self.closed = False
+            created.append(self)
+
+        async def public_get_v5_announcements_index(
+            self, params: dict[str, Any]
+        ) -> dict[str, Any]:
+            assert "locale" in params
+            assert params["type"] == "delistings"
+            if int(params.get("page", 1)) == 1:
+                return {"result": {"list": [{"title": "Delisting of ADA"}]}}
+            return {"result": {"list": []}}
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(
+        "service.exchange.ccxt.bybit",
+        PublicAnnouncementExchange,
+    )
+    exchange = Exchange()
+
+    result = await exchange.fetch_bybit_delisting_schedule(
+        {"exchange": "bybit", "market": "spot", "dry_run": False}
+    )
+
+    assert result[0]["title"] == "Delisting of ADA"
+    assert len(created) == 1
+    assert created[0].params == {"options": {"defaultType": "spot"}}
+    assert "apiKey" not in created[0].params
+    assert "secret" not in created[0].params
+    assert created[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_bybit_schedule_rejects_unsupported_exchange() -> None:
+    exchange = Exchange()
+
+    with pytest.raises(NotImplementedError, match="spot delist schedule"):
+        await exchange.fetch_bybit_delisting_schedule(
+            {"exchange": "kraken", "market": "spot"}
+        )
+
+
+@pytest.mark.asyncio
+async def test_bybit_far_future_text_date_is_ignored() -> None:
+    service = DelistingProtectionService()
+    await _disable_open_trade_notifications(service)
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybit",
+        "market": "spot",
+        "dry_run": False,
+    }
+    fake_exchange = FakeDelistingExchange(
+        markets=[{"id": "ADAUSDT", "symbol": "ADA/USDT", "active": True}],
+        bybit_schedule=[
+            {
+                "title": "Delisting of ADA on December 01, 9999",
+                "tags": ["Delisting"],
+            }
+        ],
+    )
+    service.exchange = fake_exchange  # type: ignore[assignment]
+
+    await service.refresh(service.config)
+    decision = await service.evaluate_buy("ADA/USDT", service.config)
+
+    assert decision.allowed is True
+    assert decision.reason_code is None
+    assert service.get_state()["scheduled_symbols"] == []
+    assert fake_exchange.bybit_schedule_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_bybit_futures_market_has_no_dedicated_provider() -> None:
+    service = DelistingProtectionService()
+    await _disable_open_trade_notifications(service)
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybit",
+        "market": "futures",
+        "dry_run": False,
+    }
+    fake_exchange = FakeDelistingExchange(
+        markets=[{"id": "ADAUSDT", "symbol": "ADA/USDT", "active": True}],
+    )
+    service.exchange = fake_exchange  # type: ignore[assignment]
+
+    await service.refresh(service.config)
+    decision = await service.evaluate_buy("ADA/USDT", service.config)
+
+    assert decision.allowed is True
+    assert decision.source == "ccxt_market_status"
+    assert decision.reason_code is None
+    assert service.get_state()["scheduled_symbols"] == []
+    assert fake_exchange.bybit_schedule_calls == 0
+    assert fake_exchange.schedule_calls == 0
+
+
+@pytest.mark.asyncio
+async def test_bybit_schedule_forwards_hostname_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created: list[Any] = []
+
+    class PublicAnnouncementExchange:
+        """Capture a credential-free CCXT client for the public feed."""
+
+        def __init__(self, params: dict[str, Any]) -> None:
+            self.params = params
+            self.enableRateLimit = False
+            self.closed = False
+            created.append(self)
+
+        async def public_get_v5_announcements_index(
+            self, params: dict[str, Any]
+        ) -> dict[str, Any]:
+            if int(params.get("page", 1)) == 1:
+                return {"result": {"list": [{"title": "Delisting of ADA"}]}}
+            return {"result": {"list": []}}
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(
+        "service.exchange.ccxt.bybit",
+        PublicAnnouncementExchange,
+    )
+    exchange = Exchange()
+
+    result = await exchange.fetch_bybit_delisting_schedule(
+        {
+            "exchange": "bybit",
+            "market": "spot",
+            "dry_run": False,
+            "exchange_hostname": "api.bybit.eu",
+        }
+    )
+
+    assert result[0]["title"] == "Delisting of ADA"
+    assert created[0].params == {
+        "options": {"defaultType": "spot", "hostname": "api.bybit.eu"}
+    }
+    assert "apiKey" not in created[0].params["options"]
+    assert "secret" not in created[0].params["options"]
+    assert created[0].closed is True
+
+
+@pytest.mark.asyncio
+async def test_bybit_text_date_blocks_spot_market() -> None:
+    service = DelistingProtectionService()
+    await _disable_open_trade_notifications(service)
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybit",
+        "market": "spot",
+        "dry_run": False,
+    }
+    fake_exchange = FakeDelistingExchange(
+        markets=[{"id": "ADAUSDT", "symbol": "ADA/USDT", "active": True}],
+        bybit_schedule=[
+            {
+                "title": "Delisting of ADA on March 15, 2027",
+                "tags": ["Delisting"],
+            }
+        ],
+    )
+    service.exchange = fake_exchange  # type: ignore[assignment]
+
+    await service.refresh(service.config)
+    decision = await service.evaluate_buy("ADA/USDT", service.config)
+
+    assert decision.allowed is False
+    assert decision.reason_code == "blocked_scheduled_delisting"
+    assert decision.source == "bybit_announcement_schedule"
+    assert service.get_state()["scheduled_symbols"] == ["ADAUSDT"]
+    assert fake_exchange.bybit_schedule_calls == 1
+
+
+@pytest.mark.asyncio
+async def test_bybit_schedule_failure_does_not_notify_blocked_when_fail_open() -> None:
+    service = DelistingProtectionService()
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybit",
+        "market": "spot",
+        "dry_run": False,
+        "monitoring_enabled": True,
+    }
+    service.exchange = FakeDelistingExchange(  # type: ignore[assignment]
+        markets=[{"id": "ADAUSDT", "symbol": "ADA/USDT", "active": True}],
+        bybit_schedule_error=RuntimeError("announcement feed unavailable"),
+    )
+    notifications: list[tuple[str, dict[str, Any]]] = []
+
+    async def get_open_trades() -> list[dict[str, Any]]:
+        return [{"id": 1, "symbol": "ADA/USDT"}]
+
+    async def notify(
+        event_type: str,
+        payload: dict[str, Any],
+        _config: dict[str, Any],
+    ) -> None:
+        notifications.append((event_type, payload))
+
+    service.trades.get_open_trades = get_open_trades  # type: ignore[method-assign]
+    service.monitoring.notify_trade = notify  # type: ignore[method-assign]
+
+    await service.refresh(service.config)
+    await service.refresh(service.config)
+    enriched = service.enrich_open_trades([{"id": 1, "symbol": "ADA/USDT"}])
+    decision = await service.evaluate_buy("ADA/USDT", service.config)
+
+    assert decision.allowed is True
+    assert decision.degraded is True
+    assert "delisting_check_unavailable" not in enriched[0]
+    assert "delisting_warning" not in enriched[0]
+    assert notifications == []
+
+
+@pytest.mark.asyncio
+async def test_bybit_single_announcement_blocks_all_named_spot_markets() -> None:
+    service = DelistingProtectionService()
+    await _disable_open_trade_notifications(service)
+    service.config = {
+        "delisting_protection_enabled": True,
+        "exchange": "bybit",
+        "market": "spot",
+        "dry_run": False,
+    }
+    fake_exchange = FakeDelistingExchange(
+        markets=[
+            {"id": "ADAUSDT", "symbol": "ADA/USDT", "active": True},
+            {"id": "BNBUSDT", "symbol": "BNB/USDT", "active": True},
+        ],
+        bybit_schedule=[
+            {
+                "title": "Delisting of ADA and BNB on March 15, 2027",
+                "tags": ["Delisting"],
+            }
+        ],
+    )
+    service.exchange = fake_exchange  # type: ignore[assignment]
+
+    await service.refresh(service.config)
+
+    ada = await service.evaluate_buy("ADA/USDT", service.config)
+    bnb = await service.evaluate_buy("BNB/USDT", service.config)
+
+    assert ada.allowed is False
+    assert ada.reason_code == "blocked_scheduled_delisting"
+    assert ada.source == "bybit_announcement_schedule"
+    assert bnb.allowed is False
+    assert bnb.reason_code == "blocked_scheduled_delisting"
+    assert bnb.source == "bybit_announcement_schedule"
+    assert set(service.get_state()["scheduled_symbols"]) == {"ADAUSDT", "BNBUSDT"}
+    assert fake_exchange.bybit_schedule_calls == 1
