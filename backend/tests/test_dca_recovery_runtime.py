@@ -260,3 +260,36 @@ async def test_recovery_mode_places_target_sized_0g_order(monkeypatch) -> None:
     assert metadata["recovery_so"]["projected_tp_price"] == pytest.approx(0.35880670)
     assert metadata["recovery_so"]["execution_guard_enabled"] is True
     assert metadata["recovery_so"]["execution_drift_percent"] == pytest.approx(0.5)
+
+
+@pytest.mark.asyncio
+async def test_recovery_diagnostics_refresh_without_writing_every_tick(monkeypatch):
+    """Keep waiting diagnostics fresh while preserving bounded database writes."""
+    from datetime import datetime
+    from unittest.mock import AsyncMock
+
+    dca = Dca()
+    update = AsyncMock()
+    monkeypatch.setattr(dca.trades, "update_open_trades", update)
+    details = {"mode": "recovery_target", "reason": "waiting_for_atr_spacing"}
+    now = int(datetime.now().timestamp() * 1000)
+    trade = {
+        "symbol": "WIF/USDC",
+        "dca_last_decision_json": json.dumps({**details, "evaluated_at_ms": now}),
+    }
+    await dca._Dca__persist_recovery_dca_diagnostics(trade, dict(details))
+    update.assert_not_awaited()
+
+    trade["dca_last_decision_json"] = json.dumps(
+        {**details, "evaluated_at_ms": now - 31_000}
+    )
+    await dca._Dca__persist_recovery_dca_diagnostics(trade, dict(details))
+    assert update.await_count == 1
+    payload = json.loads(update.call_args.args[0]["dca_last_decision_json"])
+    assert payload["evaluated_at_ms"] >= now
+
+    trade["dca_last_decision_json"] = json.dumps(payload)
+    await dca._Dca__persist_recovery_dca_diagnostics(
+        trade, {**details, "reason": "recovery_signal_not_matched"}
+    )
+    assert update.await_count == 2

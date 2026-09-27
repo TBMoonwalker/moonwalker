@@ -115,6 +115,16 @@ executable price may rise above the trigger; it does not guarantee a fill.
 
 ## Why an order may be skipped
 
+The expanded trade card shows the current price, the next trigger and the
+remaining percentage drop from the current price. **How this is calculated**
+explains the required gap from the preceding buy and the saved ATR policy.
+The status identifies the current price, signal or sizing gate; reaching the
+trigger does not guarantee a buy. Sizing estimates are shown only for their
+evaluated price. Diagnostics refresh at least every 30 seconds while recovery
+evaluation is running; after 90 seconds without a recent evaluation, or when
+price crosses an outdated gate, the card shows **Updating status**. Shadow
+deals are explicitly marked as comparisons because legacy DCA controls them.
+
 - Price has not reached the required gap, or there is no qualifying fresh
   strategy signal.
 - Existing projected TP is already within the target rebound distance.

@@ -23,15 +23,10 @@ test('advanced DCA settings expose shadow and bounded recovery modes', () => {
     assert.match(source, /only when a new deal opens/)
 })
 
-test('open trade expansion exposes recovery trigger and projected TP', () => {
+test('open trade expansion delegates to the recovery status card', () => {
     const source = fs.readFileSync(
         path.join(rootDir, 'src/components/OpenTradeExpandedRow.vue'),
         'utf8',
     )
-
-    assert.match(source, /Recovery DCA status/)
-    assert.match(source, /Next trigger/)
-    assert.match(source, /Reference ATR/)
-    assert.match(source, /Projected TP/)
-    assert.match(source, /Last sized SO/)
+    assert.match(source, /<RecoveryDcaStatus :trade="rowData"/)
 })
