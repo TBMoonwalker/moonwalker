@@ -1554,6 +1554,7 @@ class Orders:
             partial_proceeds=context.partial_proceeds,
             sell_executions=snapshot.partial_executions,
             closed_trade_payload=context.closed_trade_payload,
+            feedback_config=config,
             placement_operation_id=placement_operation_id,
             placement_operation_ids=placement_operation_ids,
         )

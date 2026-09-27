@@ -119,8 +119,11 @@ such a receipt to `pending`. Payloads must not be edited after submission.
 
 Disabling feedback or selecting another plugin pauses queued sends. Re-enabling
 feedback for the same provider resumes pending deliveries. Deals closed while
-feedback is disabled are not queued. Partial sells and unsellable remainders do
-not independently generate a final outcome.
+feedback is disabled are not queued. Partial sells that leave the deal active
+and archives without a sale do not generate a final outcome. A sale that closes
+the managed deal and archives unsellable dust does queue feedback in the same
+transaction. Its net result includes the full entry cost and actual sell
+proceeds; the unsold remainder contributes no proceeds or estimated value.
 
 Net results use execution cash flows and recorded CCXT fees, including DCA buys
 and partial sells. Base-asset buy fees already reflected in reduced inventory
@@ -130,6 +133,12 @@ net. Such deals remain in the local outbox with a diagnostic in
 `backend/logs/feedback.log`. Existing deals without the new provider provenance
 are skipped. Incomplete execution history, when fee accounting is available,
 is reported as incomplete so Pathfinder can exclude it from quality statistics.
+
+In **Monitoring**, select **Trade Feedback** to inspect `feedback.log`. It records
+delivery becoming enabled or paused, skipped provenance/provider checks,
+successful acknowledgements, retry attempts, and permanent rejections. Retry
+diagnostics use safe error codes such as `transport_error`, `http_503`, and
+`invalid_acknowledgement`; credentials and response bodies are never logged.
 
 Pathfinder currently has no demo/live discriminator in this request contract;
 its quality totals therefore include both modes when submitted with the same

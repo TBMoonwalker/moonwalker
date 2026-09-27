@@ -144,10 +144,18 @@ async def enqueue_feedback(
         _metadata(entry.metadata_json).get("websocket_signal") if entry else None
     )
     if not isinstance(provenance, dict) or not provenance.get("signal_id"):
+        logging.info(
+            "Feedback for deal %s skipped: missing signal provenance.",
+            summary["deal_id"],
+        )
         return
     # Never send a deal to a different provider after a configuration change.
     endpoint = provenance.get("feedback_endpoint")
     if not endpoint or endpoint != destination[0]:
+        logging.info(
+            "Feedback for deal %s skipped: missing or changed provider destination.",
+            summary["deal_id"],
+        )
         return
     payload = None
     error = None
@@ -214,9 +222,20 @@ async def deliver_feedback(
         # URLs, headers, and response bodies may contain credentials.
         row.last_error = "transport_error"
     await row.save()
-    if row.status == "rejected":
+    if row.status == "sent":
+        logging.info(
+            "Feedback for deal %s sent (attempt %s).", row.deal_id, row.attempts
+        )
+    elif row.status == "rejected":
         logging.warning(
             "Feedback for deal %s rejected (%s).", row.deal_id, row.last_error
+        )
+    else:
+        logging.warning(
+            "Feedback for deal %s pending retry (%s, attempt %s).",
+            row.deal_id,
+            row.last_error,
+            row.attempts,
         )
 
 
@@ -225,10 +244,17 @@ async def run_feedback_worker() -> None:
     from service.config import Config
 
     config = await Config.instance()
+    delivery_enabled: bool | None = None
     async with httpx.AsyncClient(timeout=10.0, follow_redirects=False) as client:
         while True:
             try:
                 destination = feedback_destination(config.snapshot())
+                enabled = destination is not None
+                if enabled != delivery_enabled:
+                    logging.info(
+                        "Feedback delivery %s.", "enabled" if enabled else "paused"
+                    )
+                    delivery_enabled = enabled
                 if destination is not None:
                     rows = (
                         await model.TradeFeedback.filter(

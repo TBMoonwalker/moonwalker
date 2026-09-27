@@ -124,7 +124,13 @@ def test_unvalued_fee_is_not_reported_as_net_profit():
         (503, "pending"),
     ],
 )
-async def test_delivery_response_and_immutable_retries(status, expected):
+async def test_delivery_response_and_immutable_retries(status, expected, monkeypatch):
+    from unittest.mock import MagicMock
+
+    import service.trade_feedback as feedback
+
+    logger = MagicMock()
+    monkeypatch.setattr(feedback, "logging", logger)
     payload = json.dumps({"signal_id": "sig-1", "deal_id": "deal-1"})
     row = SimpleNamespace(
         endpoint=ENDPOINT,
@@ -156,6 +162,13 @@ async def test_delivery_response_and_immutable_retries(status, expected):
     assert all(request.content.decode() == payload for request in requests)
     assert row.payload_json == payload
     assert row.next_attempt_at > 0
+    if expected == "sent":
+        logger.info.assert_called_once_with(
+            "Feedback for deal %s sent (attempt %s).", "deal-1", 1
+        )
+    elif expected == "pending":
+        assert logger.warning.call_count == 2
+        assert row.last_error in logger.warning.call_args.args
 
 
 @pytest.mark.asyncio
@@ -643,3 +656,128 @@ async def test_ccxt_base_fees_reach_inventory_and_feedback(
     )
     assert outcome["net_profit_quote"] == pytest.approx(9.78011)
     assert outcome["fees_quote"] == pytest.approx(0.20989)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sold_amount,enabled,rollback,expected_count",
+    [
+        (0.999, True, False, 1),
+        (0.0, True, False, 0),
+        (0.999, False, False, 0),
+        (0.999, True, True, 0),
+    ],
+)
+async def test_archived_dust_close_queues_feedback_atomically(
+    tmp_path, monkeypatch, sold_amount, enabled, rollback, expected_count
+):
+    """A terminal sell with dust must reach the same outbox as a full sell."""
+    import model
+    import service.trade_feedback as feedback
+    from service.orders import Orders
+
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'dust.sqlite'}", modules={"models": ["model"]}
+    )
+    try:
+        await Tortoise.generate_schemas()
+        await model.OpenTrades.create(
+            symbol="BTC/USDC", deal_id="deal-1", execution_history_complete=True
+        )
+        buy = execution("buy", 100, 0, "USDC")
+        await model.TradeExecutions.create(
+            deal_id="deal-1",
+            symbol="BTC/USDC",
+            side="buy",
+            role="base_order",
+            timestamp="1760000000000",
+            price=100,
+            amount=1,
+            ordersize=100,
+            metadata_json=buy.metadata_json,
+        )
+        orders = Orders()
+        monkeypatch.setattr(
+            orders.trades,
+            "get_open_trades_by_symbol",
+            AsyncMock(
+                return_value=[
+                    {
+                        "symbol": "BTC/USDC",
+                        "deal_id": "deal-1",
+                        "amount": 1,
+                        "cost": 100,
+                        "current_price": 110,
+                        "open_date": "1760000000000",
+                    }
+                ]
+            ),
+        )
+        monkeypatch.setattr(
+            orders, "_Orders__resolve_so_count", AsyncMock(return_value=0)
+        )
+        monkeypatch.setattr(
+            orders,
+            "_Orders__resolve_open_timestamp",
+            AsyncMock(return_value=1760000000000),
+        )
+        monkeypatch.setattr(orders.trades, "invalidate_trade_caches", AsyncMock())
+        monkeypatch.setattr(orders.monitoring, "notify_trade", AsyncMock())
+        sell = execution("sell", sold_amount * 110, 0.10989, "USDC")
+        config = {
+            **CONFIG,
+            "signal_settings": {
+                **CONFIG["signal_settings"],
+                "feedback_enabled": enabled,
+            },
+        }
+        if rollback:
+            original_enqueue = feedback.enqueue_feedback
+
+            async def fail_after_enqueue(*args):
+                await original_enqueue(*args)
+                raise RuntimeError("simulate close transaction failure")
+
+            monkeypatch.setattr(feedback, "enqueue_feedback", fail_after_enqueue)
+        status = {
+            "type": "partial_sell",
+            "symbol": "BTC/USDC",
+            "partial_filled_amount": sold_amount,
+            "partial_proceeds": sold_amount * 110,
+            "remaining_amount": 1 - sold_amount,
+            "unsellable": True,
+            "unsellable_reason": "minimum_notional",
+            "executions": [
+                {
+                    "symbol": "BTC/USDC",
+                    "side": "sell",
+                    "role": "final_sell",
+                    "amount": sold_amount,
+                    "price": 110,
+                    "ordersize": sold_amount * 110,
+                    "timestamp": "1760003600000",
+                    "metadata_json": sell.metadata_json,
+                }
+            ],
+        }
+        if rollback:
+            with pytest.raises(RuntimeError, match="simulate close"):
+                await orders._Orders__handle_unsellable_remainder(status, config)
+        else:
+            await orders._Orders__handle_unsellable_remainder(status, config)
+        assert await model.TradeFeedback.all().count() == expected_count
+        assert await model.OpenTrades.all().count() == int(rollback)
+        assert await model.ClosedTrades.all().count() == int(
+            sold_amount > 0 and not rollback
+        )
+        assert await model.UnsellableTrades.all().count() == int(not rollback)
+        if expected_count:
+            row = await model.TradeFeedback.get(deal_id="deal-1")
+            assert row.status == "pending"
+            payload = json.loads(row.payload_json)
+            assert payload["execution_history_complete"] is True
+            # All entry cost is counted; unsold dust contributes no proceeds.
+            assert payload["entry_value_quote"] == 100
+            assert payload["net_profit_quote"] == pytest.approx(9.78011)
+    finally:
+        await Tortoise.close_connections()

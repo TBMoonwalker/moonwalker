@@ -63,6 +63,7 @@ DEFAULT_LOG_SOURCES: tuple[LogSource, ...] = (
     LogSource("exchange", "Exchange", helper.logger.LOG_DIR / "exchange.log"),
     LogSource("orders", "Orders", helper.logger.LOG_DIR / "orders.log"),
     LogSource("signal", "Signal", helper.logger.LOG_DIR / "signal.log"),
+    LogSource("feedback", "Trade Feedback", helper.logger.LOG_DIR / "feedback.log"),
     LogSource(
         "delisting_protection",
         "Delisting Protection",
