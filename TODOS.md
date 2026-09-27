@@ -16,6 +16,31 @@ open trades.
 
 **Priority:** P3
 
+### Add the recovery DCA status card to the vitest coverage guard
+
+**Status:** Follow-up from the v4.15.0.0 pre-landing review (P3, informational).
+
+**What:** The new `RecoveryDcaStatus.vue` component is not in the vitest
+`coverage.include` list, so its rendering branch is excluded from the reported
+coverage even though `recovery-dca-status.test.ts` exercises it. Ratchet the
+component into `frontend/vitest.config.ts` `coverage.include`, verify the
+component-level tests assert the card surface, and reinstate the surface
+assertions the old `recoveryDcaSurface.test.cjs` guard checked before they moved
+to the card.
+
+**Context:** v4.15.0.0 moved the recovery DCA diagnostics out of
+`OpenTradeExpandedRow.vue` into the reusable `RecoveryDcaStatus.vue` card. The
+CJS guard was intentionally reduced to a single delegation assertion
+(`OpenTradeExpandedRow` renders
+`<RecoveryDcaStatus :trade="rowData" />`), and the new component coverage lives in
+`frontend/tests-vitest/recovery-dca-status.test.ts`. The card is correct today;
+this only tightens the guard so a future edit to the card surface or a
+coverage-include regression is caught.
+
+**Effort:** S
+
+**Priority:** P3
+
 ## Dashboard history
 
 ### Evaluate server caching and incremental timeline loading
