@@ -103,17 +103,17 @@ test(
             'pair;side\nBTC/USDT;buy',
         )
         assert.equal(state.signal.csvsignal_source, null)
-        assert.equal(state.signal.delisting_protection_enabled, true)
+        assert.equal(state.exchange.delisting_protection_enabled, true)
         assert.equal(
-            state.signal.delisting_schedule_use_trading_credentials,
+            state.exchange.delisting_schedule_use_trading_credentials,
             true,
         )
         assert.equal(
-            state.signal.delisting_schedule_api_key,
+            state.exchange.delisting_schedule_api_key,
             '__MOONWALKER_SECRET_REDACTED__',
         )
         assert.equal(
-            state.signal.delisting_schedule_api_secret,
+            state.exchange.delisting_schedule_api_secret,
             '__MOONWALKER_SECRET_REDACTED__',
         )
         assert.equal(state.indicator.history_lookback_time, '180d')

@@ -2,6 +2,32 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.14.0.0] - 2026-09-27
+
+### Added
+- Delisting protection now lives in the Exchange settings and adapts to the
+   exchange you trade on. Binance uses an isolated production schedule client
+   (with optional dedicated read-only credentials); Bybit and Bybit EU follow
+   the public delisting announcement feed and fall back to the exchange's own
+   market status if that feed is briefly unavailable; exchanges without a
+   supported schedule show no delisting control at all.
+- When a Bybit feed blip leaves the schedule unverified, Bybit stays fail-open:
+   new buys trade off the exchange market status rather than freezing, and open
+   trades are not spammed with an "all buys blocked" alert. Binance still fails
+   closed.
+
+### Fixed
+- The Bybit announcement date parser now rejects far-future years, matching the
+   cap already applied to timestamped entries, so a malformed announcement can no
+   longer mint a delisting event that freezes new buys on a matched spot market.
+   Existing exits keep running throughout.
+
+### Changed
+- The four delisting configuration keys moved from Signal settings to Exchange
+   settings so they travel with the exchange they belong to.
+- UI wording that assumed Binance now refers to "the exchange," so the trade
+   screen and alerts read correctly on any supported exchange.
+
 ## [4.13.0.0] - 2026-09-26
 
 ### Added

@@ -2,6 +2,18 @@
 
 This file provides guidance to agentic coding agents (such as Claude Code) when working with code in this repository.
 
+## Documentation Placement
+
+- Keep user guides, configuration/API reference, and maintained architecture or
+  design explanations in the repository. Link them from `docs/README.md`.
+- Store temporary agent plans, session notes, review scorecards, local audit
+  reports, and handoffs under `~/.gstack/projects/TBMoonwalker-moonwalker/`.
+- Before archiving a repository document, preserve its original and retain
+  durable decisions and unfinished work in maintained docs or `TODOS.md`.
+- Describe shipped behavior as current and label proposals explicitly. Do not
+  require machine-local agent artifacts to understand or maintain the project.
+- See [documentation ownership](docs/development.md) for the full policy.
+
 ## Build, Lint, and Test Commands
 - With the OpenCode Desktop/CLI agent, NEVER use the `edit` tool because it breaks indentation. It is disabled. Use the `write` tool and format the written Python file with Ruff.
 

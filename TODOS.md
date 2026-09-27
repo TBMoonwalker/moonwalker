@@ -6,8 +6,8 @@
 
 **Status:** Ready to design when picked up
 
-**What:** v4.9.0.0 ships a one-way "Deny from new entries" row action gated by
-`D3` (config-only undo by editing `pair_denylist`). A symmetric "Re-enable" /
+**What:** v4.9.0.0 ships a one-way "Deny from new entries" row action with
+config-only undo by editing `pair_denylist`. A symmetric "Re-enable" /
 "Remove from denylist" row action, plus a DESIGN.md pass on the "Denylisted" tag
 color/label, would close the loop. Keep it an entry-only change; do not touch
 open trades.
@@ -16,39 +16,44 @@ open trades.
 
 **Priority:** P3
 
-## Analytics
+## Dashboard history
 
-### Extend sidestep campaign analytics beyond grouped replay polish
+### Evaluate server caching and incremental timeline loading
 
-**Status:** Discovery only — 0/3 confirmed evidence issues.
+**Status:** Proposed; browser caching and profit-tab persistence are implemented.
 
-**What:** Collect concrete operator decisions or questions that the shipped
-grouped replay, waiting-campaign status, and campaign summary cannot answer.
-At three unique confirmed issues, bring the item through a fresh product and
-engineering review. Reaching the threshold does not pre-authorize a new screen,
-table, read model, projection, or event pipeline.
+**What:** Measure repeated timeline resampling under concurrent dashboard use.
+Consider a short-lived server cache with snapshot-write invalidation first,
+then an additive delta cursor only if measurements justify it. Preserve the
+existing full response and verify bucket updates, disconnect recovery, and
+retention cleanup. Configurable snapshot cadence is a separate optional step.
 
-**Confirmed evidence issues:** None linked.
+**Design:** [Dashboard history loading](docs/designs/delta-loading.md).
+Open trades remain full-state and closed history remains paginated.
 
-**Evidence format:** Link a
-[GitHub issue](https://github.com/TBMoonwalker/moonwalker/issues/new) containing:
+## Control Center verification
 
-- Operator role
-- Decision being made
-- Question the current UI cannot answer
-- Manual reconstruction required
-- Why grouped replay or the campaign summary was insufficient
-- Maintainer confirmation
+### Verify remaining rendered accessibility observations
 
-Duplicate questions about the same operator decision count once. An issue only
-increments the counter after a maintainer confirms the gap against the current
-UI.
+**Status:** Follow-up verification from the historical source audit; not a
+claim that the current UI has these defects.
 
-**Effort:** L
+**What:** Check rendered dark-mode contrast, mobile pagination touch targets,
+and the intentional scope of compact table typography against DESIGN.md.
+The old theme-ownership concern is already addressed by the shared theme store.
 
-**Priority:** P4
+## Denylist concurrency
 
-**Depends on:** Three unique confirmed evidence issues linked above.
+### Review stale full-form saves against concurrent denylist appends
+
+**Status:** Design follow-up; atomic append is implemented.
+
+**What:** The append endpoint preserves concurrent appends, but full config
+saves replace the list. Verify stale-form conflict handling and decide whether
+server-side revision checks are needed to avoid silently losing a newer deny.
+Preserve the ability to intentionally remove tokens through configuration.
+
+**Design:** [Denylist semantics](docs/designs/denylist-symbol-from-open-trade.md).
 
 ## Frontend staging guard
 
@@ -75,6 +80,15 @@ the 2026-09-13 pre-landing review after deferred findings:
 The guard is strictly an improvement over the previous bare 500; hardening is
 non-blocking.
 
+
+## Retired
+
+### Extend sidestep campaign analytics beyond grouped replay polish
+
+**Retired:** 2026-09-26 documentation cleanup. Sidestep has been removed; its
+proposed campaign analytics are no longer an active backlog item. The former
+discovery gate had no confirmed evidence issues. Historical completed Sidestep
+items below remain release history, not descriptions of current capabilities.
 
 ## Completed
 

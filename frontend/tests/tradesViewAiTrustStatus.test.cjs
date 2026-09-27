@@ -54,7 +54,7 @@ test('trades page prominently warns when an open trade is being delisted', () =>
 
 test('trades page fails closed when the delisting provider is unavailable', () => {
     assert.match(tradesViewSource, /delistingCheckUnavailable/)
-    assert.match(tradesViewSource, /Delisting protection cannot verify Binance/)
+    assert.match(tradesViewSource, /Delisting protection cannot verify the exchange schedule/)
     assert.match(
         tradesViewSource,
         /All new buys are blocked until verification succeeds/,

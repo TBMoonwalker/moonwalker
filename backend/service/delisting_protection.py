@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -26,6 +27,71 @@ MARKET_MAX_STALE_SECONDS = 600.0
 SCHEDULE_REFRESH_SECONDS = 1800.0
 SCHEDULE_MAX_STALE_SECONDS = 3600.0
 IDLE_LOOP_SECONDS = 60.0
+
+# Bybit publishes spot delistings through a public, unauthenticated
+# announcement feed. Entries are advisory, so a transient feed failure must
+# never freeze trading; only recent announcements are considered, and stale
+# entries are dropped on refresh.
+BYBIT_ANNOUNCEMENT_LOOKBACK_SECONDS = 24 * 3600
+BYBIT_ANNOUNCEMENT_MAX_FUTURE_YEAR = 2100
+
+_MONTHS = {
+    "jan": 1,
+    "feb": 2,
+    "mar": 3,
+    "apr": 4,
+    "may": 5,
+    "jun": 6,
+    "jul": 7,
+    "aug": 8,
+    "sep": 9,
+    "oct": 10,
+    "nov": 11,
+    "dec": 12,
+}
+_DATE_PATTERN = re.compile(
+    r"((?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)"
+    r"[a-z]*)\D+(\d{1,2})\D+(\d{4})",
+    re.IGNORECASE,
+)
+_BASE_ASSET_PATTERN = re.compile(r"[A-Z][A-Z0-9&]{1,8}")
+_BASE_ASSET_STOPWORDS = frozenset(
+    {
+        "USDT",
+        "USDC",
+        "BUSD",
+        "TUSD",
+        "DAI",
+        "USD",
+        "EUR",
+        "BYT",
+        "BTC",
+        "ETH",
+        "TRADING",
+        "PAIR",
+        "PAIRS",
+        "MARKET",
+        "MARKETS",
+        "LIST",
+        "LISTING",
+        "DELIST",
+        "DELISTING",
+        "DELISTS",
+        "ANNOUNCEMENT",
+        "ANNOUNCEMENTS",
+        "CONTRACT",
+        "SPOT",
+    }
+)
+_DERIVATIVES_INDICATORS = (
+    "perpetual",
+    "future",
+    "inverse",
+    "option",
+    "derivat",
+    "delivery",
+    "swap",
+)
 
 
 @dataclass(frozen=True)
@@ -64,6 +130,8 @@ class DelistingProvider(Protocol):
 
     source: str
 
+    fail_closed: bool
+
     async def fetch(self, exchange: Exchange, config: dict[str, Any]) -> list[Any]:
         """Return raw schedule entries from the exchange."""
 
@@ -72,10 +140,257 @@ class BinanceSpotDelistingProvider:
     """Fetch Binance's authenticated Spot delisting schedule."""
 
     source = "binance_spot_schedule"
+    fail_closed = True
 
     async def fetch(self, exchange: Exchange, config: dict[str, Any]) -> list[Any]:
         """Return Binance Spot delisting schedule entries."""
         return await exchange.fetch_spot_delist_schedule(config)
+
+
+class BybitDelistingProvider:
+    """Fetch Bybit's public, advisory spot delisting announcements.
+
+    Unlike Binance, Bybit exposes no authenticated delisting schedule; spot
+    delistings are published through a public announcement feed. Because the
+    schedule is advisory, a transient feed failure must not freeze trading.
+    """
+
+    source = "bybit_announcement_schedule"
+    fail_closed = False
+
+    async def fetch(self, exchange: Exchange, config: dict[str, Any]) -> list[Any]:
+        """Return Bybit public spot delisting announcements."""
+        return await exchange.fetch_bybit_delisting_schedule(config)
+
+
+def _is_fail_closed(provider: DelistingProvider) -> bool:
+    """Return whether an unverified schedule must block new buys."""
+    return bool(getattr(provider, "fail_closed", True))
+
+
+def _announcement_text(announcement: dict[str, Any]) -> str:
+    """Return the joined title and description of one announcement."""
+    parts: list[str] = []
+    for key in ("title", "description"):
+        value = announcement.get(key)
+        if isinstance(value, str):
+            parts.append(value)
+    return " ".join(part for part in parts if part)
+
+
+def _announcement_tags(announcement: dict[str, Any]) -> list[str]:
+    """Return normalized tag strings attached to an announcement."""
+    raw_tags = announcement.get("tags")
+    if not isinstance(raw_tags, list):
+        return []
+    result: list[str] = []
+    for tag in raw_tags:
+        if isinstance(tag, str):
+            result.append(tag)
+        elif isinstance(tag, dict):
+            key = tag.get("key")
+            if isinstance(key, str):
+                result.append(key)
+    return result
+
+
+def _announcement_is_derivatives_only(
+    announcement: dict[str, Any],
+) -> bool:
+    """Return whether an announcement concerns a derivatives-only market."""
+    haystack = _announcement_text(announcement)
+    for tag in _announcement_tags(announcement):
+        haystack = f"{haystack} {tag}"
+    haystack = haystack.lower()
+    return any(indicator in haystack for indicator in _DERIVATIVES_INDICATORS)
+
+
+def _parse_text_date_ms(text: str) -> int | None:
+    """Return a 'Mon D, YYYY' date parsed from text as UTC milliseconds."""
+    match = _DATE_PATTERN.search(text)
+    if match is None:
+        return None
+    month_number = _MONTHS.get(match.group(1).lower()[:3])
+    if month_number is None:
+        return None
+    try:
+        day = int(match.group(2))
+        year = int(match.group(3))
+        if year >= BYBIT_ANNOUNCEMENT_MAX_FUTURE_YEAR:
+            return None
+        parsed = datetime(year, month_number, day, tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    return int(parsed.timestamp() * 1000)
+
+
+def _parse_announcement_date_ms(
+    announcement: dict[str, Any],
+) -> int | None:
+    """Return the delist timestamp for an announcement, if resolvable."""
+    raw_timestamp = announcement.get("dateTimestamp")
+    try:
+        timestamp_ms = int(raw_timestamp)
+    except (TypeError, ValueError):
+        timestamp_ms = 0
+    if timestamp_ms > 0:
+        try:
+            parsed_year = datetime.fromtimestamp(
+                timestamp_ms / 1000,
+                tz=timezone.utc,
+            ).year
+        except (OverflowError, OSError, ValueError):
+            parsed_year = 0
+        if 0 < parsed_year < BYBIT_ANNOUNCEMENT_MAX_FUTURE_YEAR:
+            return timestamp_ms
+    return _parse_text_date_ms(_announcement_text(announcement))
+
+
+def _announcement_delist_time(
+    announcement: dict[str, Any],
+    *,
+    now_ms: int,
+) -> int | None:
+    """Return a non-stale delist timestamp, skipping unavailable entries."""
+    delist_ms = _parse_announcement_date_ms(announcement)
+    if delist_ms is None:
+        return None
+    if delist_ms < now_ms - BYBIT_ANNOUNCEMENT_LOOKBACK_SECONDS * 1000:
+        return None
+    return delist_ms
+
+
+def _announcement_base_assets(text: str) -> list[str]:
+    """Return candidate base asset tokens from announcement text."""
+    candidates: list[str] = []
+    seen: set[str] = set()
+    for match in _BASE_ASSET_PATTERN.finditer(text):
+        token = match.group(0)
+        if token in seen or token in _BASE_ASSET_STOPWORDS:
+            continue
+        seen.add(token)
+        candidates.append(token)
+    return candidates
+
+
+def _market_base(market: dict[str, Any]) -> str:
+    """Return the normalized base asset of a CCXT market symbol."""
+    symbol = market.get("symbol")
+    if not isinstance(symbol, str) or "/" not in symbol:
+        return ""
+    base, _, _ = symbol.partition("/")
+    return _normalize_symbol(base)
+
+
+def _is_spot_market(market: dict[str, Any]) -> bool:
+    """Return whether a market belongs to the spot product."""
+    market_type = market.get("type")
+    return market_type in (None, "", "spot")
+
+
+def _parse_binance_spot_schedule(
+    raw_entries: list[Any],
+    config: dict[str, Any],
+    markets_by_id: dict[str, dict[str, Any]],
+) -> dict[str, DelistingEvent]:
+    """Normalize Binance Spot delisting schedule entries into events."""
+    events: dict[str, DelistingEvent] = {}
+    exchange_id = str(config.get("exchange") or "").strip().lower()
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            delist_time_ms = int(entry.get("delistTime"))
+        except (TypeError, ValueError):
+            continue
+        if delist_time_ms <= 0:
+            continue
+        symbols = entry.get("symbols")
+        if not isinstance(symbols, list):
+            continue
+        for raw_symbol in symbols:
+            market_id = _normalize_market_id(raw_symbol)
+            if not market_id:
+                continue
+            market = markets_by_id.get(market_id)
+            symbol = (
+                str(market.get("symbol"))
+                if isinstance(market, dict) and market.get("symbol")
+                else None
+            )
+            events[market_id] = DelistingEvent(
+                exchange_id=exchange_id,
+                market_id=market_id,
+                symbol=symbol,
+                delist_time_ms=delist_time_ms,
+                source="binance_spot_schedule",
+            )
+    return events
+
+
+def _parse_bybit_announcements(
+    raw_entries: list[Any],
+    config: dict[str, Any],
+    markets_by_id: dict[str, dict[str, Any]],
+    *,
+    now_ms: int,
+) -> dict[str, DelistingEvent]:
+    """Normalize Bybit delisting announcements into spot events."""
+    events: dict[str, DelistingEvent] = {}
+    exchange_id = str(config.get("exchange") or "").strip().lower()
+    markets_by_base: dict[str, list[dict[str, Any]]] = {}
+    for market in markets_by_id.values():
+        if not isinstance(market, dict) or not _is_spot_market(market):
+            continue
+        base = _market_base(market)
+        if base:
+            markets_by_base.setdefault(base, []).append(market)
+    for entry in raw_entries:
+        if not isinstance(entry, dict):
+            continue
+        if _announcement_is_derivatives_only(entry):
+            continue
+        delist_ms = _announcement_delist_time(entry, now_ms=now_ms)
+        if delist_ms is None:
+            continue
+        text = _announcement_text(entry)
+        for base in _announcement_base_assets(text):
+            for market in markets_by_base.get(base, []):
+                market_id = _normalize_market_id(market.get("id"))
+                if not market_id:
+                    continue
+                symbol = (
+                    str(market.get("symbol"))
+                    if isinstance(market, dict) and market.get("symbol")
+                    else None
+                )
+                events[market_id] = DelistingEvent(
+                    exchange_id=exchange_id,
+                    market_id=market_id,
+                    symbol=symbol,
+                    delist_time_ms=delist_ms,
+                    source="bybit_announcement_schedule",
+                )
+    return events
+
+
+def _normalize_schedule(
+    provider: DelistingProvider,
+    raw_entries: list[Any],
+    config: dict[str, Any],
+    markets_by_id: dict[str, dict[str, Any]],
+    *,
+    now_ms: int,
+) -> dict[str, DelistingEvent]:
+    """Dispatch raw provider entries to the matching schedule normalizer."""
+    if provider.source == "bybit_announcement_schedule":
+        return _parse_bybit_announcements(
+            raw_entries,
+            config,
+            markets_by_id,
+            now_ms=now_ms,
+        )
+    return _parse_binance_spot_schedule(raw_entries, config, markets_by_id)
 
 
 def _normalize_symbol(value: Any) -> str:
@@ -96,6 +411,8 @@ def _provider_for(config: dict[str, Any]) -> DelistingProvider | None:
     market = str(config.get("market") or "spot").strip().lower()
     if exchange_id == "binance" and market == "spot":
         return BinanceSpotDelistingProvider()
+    if exchange_id in ("bybit", "bybiteu") and market == "spot":
+        return BybitDelistingProvider()
     return None
 
 
@@ -345,37 +662,13 @@ class DelistingProtectionService:
         previous_age = now - self._schedule_checked_at
         try:
             raw_entries = await provider.fetch(self.exchange, config)
-            events: dict[str, DelistingEvent] = {}
-            for entry in raw_entries:
-                if not isinstance(entry, dict):
-                    continue
-                try:
-                    delist_time_ms = int(entry.get("delistTime"))
-                except (TypeError, ValueError):
-                    continue
-                if delist_time_ms <= 0:
-                    continue
-                symbols = entry.get("symbols")
-                if not isinstance(symbols, list):
-                    continue
-                for raw_symbol in symbols:
-                    market_id = _normalize_market_id(raw_symbol)
-                    if not market_id:
-                        continue
-                    market = self._markets_by_id.get(market_id)
-                    symbol = (
-                        str(market.get("symbol"))
-                        if isinstance(market, dict) and market.get("symbol")
-                        else None
-                    )
-                    events[market_id] = DelistingEvent(
-                        exchange_id=str(config.get("exchange") or ""),
-                        market_id=market_id,
-                        symbol=symbol,
-                        delist_time_ms=delist_time_ms,
-                        source=provider.source,
-                    )
-            self._events_by_market_id = events
+            self._events_by_market_id = _normalize_schedule(
+                provider,
+                raw_entries,
+                config,
+                self._markets_by_id,
+                now_ms=int(time.time() * 1000),
+            )
             self._schedule_checked_at = now
             self._schedule_verified = True
         except (
@@ -437,7 +730,8 @@ class DelistingProtectionService:
             )
 
         provider = _provider_for(config)
-        if provider is not None and not self._schedule_verified:
+        schedule_unverified = provider is not None and not self._schedule_verified
+        if schedule_unverified and _is_fail_closed(provider):
             return DelistingDecision(
                 allowed=False,
                 reason_code="blocked_delisting_check_unavailable",
@@ -482,7 +776,11 @@ class DelistingProtectionService:
                 if provider is not None and self._schedule_verified
                 else "ccxt_market_status"
             ),
-            degraded=bool(self._degraded_reason) or market.get("active") is None,
+            degraded=(
+                bool(self._degraded_reason)
+                or market.get("active") is None
+                or schedule_unverified
+            ),
         )
 
     def enrich_open_trades(
@@ -493,7 +791,11 @@ class DelistingProtectionService:
         enriched: list[dict[str, Any]] = []
         enabled = bool(self.config.get("delisting_protection_enabled", False))
         provider = _provider_for(self.config) if enabled else None
-        schedule_unavailable = provider is not None and not self._schedule_verified
+        schedule_unavailable = (
+            provider is not None
+            and not self._schedule_verified
+            and _is_fail_closed(provider)
+        )
         for source_row in rows:
             row = dict(source_row)
             symbol = str(row.get("symbol") or "")
@@ -504,8 +806,8 @@ class DelistingProtectionService:
                     {
                         "delisting_check_unavailable": True,
                         "delisting_check_message": (
-                            "Binance's production delisting schedule could not "
-                            "be verified. New buys are blocked while existing "
+                            "The exchange delisting schedule could not be "
+                            "verified. New buys are blocked while existing "
                             "exits remain enabled."
                         ),
                         "delisting_check_source": provider.source,
@@ -541,7 +843,12 @@ class DelistingProtectionService:
             return
         rows = self.enrich_open_trades(await self.trades.get_open_trades())
         provider = _provider_for(config)
-        if rows and provider is not None and not self._schedule_verified:
+        if (
+            rows
+            and provider is not None
+            and not self._schedule_verified
+            and _is_fail_closed(provider)
+        ):
             notification_key = (
                 str(config.get("exchange") or ""),
                 "__schedule__",

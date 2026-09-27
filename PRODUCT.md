@@ -40,7 +40,7 @@ The meaningfully different claim a neighboring product could not truthfully copy
 
 ## Capabilities and Constraints
 
-- Trade modes (canonical operator-facing control is `trade_mode`): `dynamic_dca` (standard DCA with dynamic safety orders) and `sidestep` (spot-only campaigns that can sell a bearish leg, hold the campaign in a waiting state, and re-enter it later).
+- Trade mode: `dynamic_dca` is the only supported value of `trade_mode`. Expert safeguards provides Legacy factors, Recovery shadow, and Recovery target safety-order sizing; each new deal retains its selected recovery policy.
 - Signal plugins: `sym_signals`, `asap`, `csv_signal`, `websocket_signal`.
 - Strategies included: EMA cross, Bollinger Bands cross, Ichimoku, and others; indicators are computed via TA-Lib.
 - Autopilot / Autopilot Memory cockpit surfaces favored and cooling symbols, suggested base orders, and plain-language trust signals in the Control Center.
@@ -60,7 +60,7 @@ The following are binding for all future work:
 ## Evidence on Hand
 
 - Repository sources of truth: `DESIGN.md` (design system + verified live baseline measured 2026-06-05), `README.md`, `CHANGELOG.md`, and the `docs/` reference set (`configuration.md`, `api.md`, `monitoring.md`, `dynamic-so.md`, `signals.md`, `operations.md`, `dependencies.md`, `strategies.md`).
-- Current tracked release: `VERSION` = 4.6.3.0.
+- Current tracked release: see [VERSION](VERSION).
 - Logo asset: `docs/assets/logo-moonwalker.png`.
 - **Absences to preserve:** there are **no** external testimonials, customer logos, published benchmarks, or case studies. Future work must not fabricate these.
 
