@@ -11,19 +11,15 @@ signal-driven entries and dynamic DCA management. It also includes an
 Autopilot Memory cockpit that surfaces favored and cooling symbols, suggested
 base orders, and plain-language trust signals in the Control Center.
 
-## Trade Modes
-- `trade_mode` is the canonical operator-facing trade setting for config writes
-  and dashboard flows. Supported values are `dynamic_dca` and `sidestep`.
-- In `sidestep`, Moonwalker can exit a bearish spot leg, keep the campaign in a
-  waiting state, and later re-enter that same campaign instead of treating it
-  as a brand-new trade.
-- Waiting campaign rows expand into the same TradingView replay used by open
-  and closed trades, with strategy indicators plus buy, re-entry, safety-order,
-  and exit markers. Sparse legacy campaigns fall back to their campaign and
-  last-exit context.
-- Supported config writes and dashboard snapshots now use `trade_mode` only.
-  Older stored rows and backup payloads can still be canonicalized during load
-  and restore, but operator workflows should not use the removed bridge keys.
+## Trade Mode and Safety Orders
+
+`dynamic_dca` is the only supported trade mode. Expert safeguards offers three
+safety-order sizing modes: Legacy factors, Recovery shadow, and Recovery target.
+See [safety-order sizing](docs/dynamic-so.md) for their behavior, budget limits,
+and the policy retained by existing deals.
+
+Older stored trade-mode settings and backups are normalized during startup and
+restore. Sidestep is no longer a supported runtime mode.
 
 ## Disclaimer
 **Moonwalker is meant to be used for educational purposes only. Use with real funds at your own risk**
@@ -72,13 +68,15 @@ CCXT exception are covered in `docs/dependencies.md`.
 You also need to install the ta-lib library for your OS. Please see: https://ta-lib.org/install/#linux-debian-packages
 
 ## Documentation
-- Documentation index: `docs/README.md`
+- [Documentation index](docs/README.md)
 - Release notes: `CHANGELOG.md`
 - Current tracked release version: `VERSION`
 - Configuration and full key reference: `docs/configuration.md`
 - API and websocket reference: `docs/api.md`
 - Monitoring (Telegram): `docs/monitoring.md`
-- Dynamic SO details and formulas: `docs/dynamic-so.md`
+- [Expert safeguards and safety-order sizing modes](docs/dynamic-so.md)
+- [AI Trust local calibration](docs/ai-trust.md)
+- [Developer documentation and documentation policy](docs/development.md)
 - Signal plugin setup (SymSignals, ASAP, CSV, WebSocket) and optional Pathfinder
   closed-trade feedback: [Signal plugins](docs/signals.md)
 - CI, runtime operations, backups, logs, and dashboard streams:

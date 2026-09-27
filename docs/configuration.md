@@ -28,6 +28,10 @@ Use `/control-center` as the supported dashboard configuration entry path.
 
 For signal-plugin-specific payloads and examples, see [signals.md](signals.md).
 For backup/restore and related config endpoints, see [api.md](api.md).
+For the Expert safeguards sizing modes, examples, budgets, and existing-deal
+behavior, see [Safety-order sizing](dynamic-so.md).
+For interpreting the Statistics calibration diagnostics, see
+[AI Trust local calibration](ai-trust.md).
 
 ## Trade Modes
 `trade_mode` is the canonical operator-facing lifecycle control. The only
@@ -53,10 +57,6 @@ are not exposed in the UI and must be set via the API.
 | `signal_settings` | `string (json)` | Plugin settings per selected signal plugin. | `{"api_url":"https://stream.3cqs.com","api_key":"xxx","api_version":"v1","allowed_signals":[66]}` |
 | `symbol_list` | `string` | CSV list or URL for ASAP symbol list. | `BTC/USDT,ETH/USDT` |
 | `signal_strategy` | `string` | Strategy name for signal entry filter. | `ema20_swing` |
-| `delisting_protection_enabled` | `bool` | Use exchange delisting schedules when available and otherwise CCXT market status to block new exposure. Existing exits remain enabled. | `false` |
-| `delisting_schedule_use_trading_credentials` | `bool` | Reuse the configured exchange trading key and secret for the isolated production Binance delisting schedule request. Dedicated read-only credentials remain the safer default. | `false` |
-| `delisting_schedule_api_key` | `str` | Dedicated production read-only Binance API key used only for delisting schedule checks when trading credential reuse is disabled. | empty |
-| `delisting_schedule_api_secret` | `str` | Secret for the production read-only Binance schedule key. Stored and returned through the same redaction boundary as exchange credentials. | empty |
 | `pair_allowlist` | `string` | Comma-separated allowed symbols. | `BTC,ETH` |
 | `pair_denylist` | `string` | Comma-separated denied symbols. | `SCAM,XYZ` |
 | `volume` | `string (json)` | Minimum 24h volume filter. | `{"size":5,"range":"M"}` |
@@ -73,6 +73,10 @@ are not exposed in the UI and must be set via the API.
 | `currency` | `string` | Quote currency for pairs. | `USDT` |
 | `dry_run` | `bool` | Enable CCXT demo trading mode (if supported by exchange). | `true` |
 | `watcher_ohlcv` | `bool` | Use OHLCV watcher mode. | `false` |
+| `delisting_protection_enabled` | `bool` | Configured in Exchange settings and shown only for exchanges with a supported delisting schedule source. Binance is fail-closed: when its verified production schedule cannot be confirmed, new buys are blocked. Bybit and Bybit EU use a public, unauthenticated announcement feed that is advisory, so a failed check degrades to CCXT market status instead of blocking. Exits for existing positions always remain enabled. | `false` |
+| `delisting_schedule_use_trading_credentials` | `bool` | Binance only — ignored for Bybit and Bybit EU. Reuse the configured trading key and secret for the isolated production delisting schedule request instead of dedicated read-only credentials. | `false` |
+| `delisting_schedule_api_key` | `str` | Binance only — ignored for Bybit and Bybit EU. Dedicated production read-only API key used solely for delisting schedule checks when trading credential reuse is disabled. | empty |
+| `delisting_schedule_api_secret` | `str` | Binance only — ignored for Bybit and Bybit EU. Secret for the production read-only schedule key. Stored and returned through the same redaction boundary as exchange credentials. | empty |
 | `fee_deduction` | `bool` | Use exchange fee token (e.g., BNB). | `false` |
 | `sandbox` | `bool` | Enable exchange sandbox mode (advanced). | `false` |
 | `order_check_range` | `int` | Seconds for post-order trade lookup (advanced). | `5` |
@@ -110,17 +114,11 @@ are not exposed in the UI and must be set via the API.
 | `dynamic_so_execution_drift_atr_fraction` | `float` | Fraction of ATR% allowed between the recovery trigger and the executable buy price before the SO is rejected. | `0.25` |
 | `dynamic_so_execution_drift_min_pct` | `float` | Minimum execution-price allowance used when the ATR-derived allowance is very small. | `0.15` |
 | `dynamic_so_execution_drift_max_pct` | `float` | Hard maximum execution-price allowance. The effective allowance is clamped between the configured minimum and maximum. | `0.5` |
-| `dynamic_so_volume_enabled` | `bool` | Enable dynamic scaling for safety order amount. Trigger logic stays unchanged; only SO size is scaled. | `false` |
-| `dynamic_so_ath_lookback_value` | `int` | ATH lookback amount used by dynamic SO scaling. | `1` |
-| `dynamic_so_ath_lookback_unit` | `string` | Lookback unit for ATH: `day`, `week`, `month`, or `year`. | `month` |
-| `dynamic_so_ath_timeframe` | `string` | Candle timeframe used for ATH fetch via ccxt: `4h`, `1d`, or `1w`. | `4h` |
-| `dynamic_so_ath_cache_ttl` | `int` | Cache TTL in seconds for ATH lookup (in-memory + DB cache freshness). | `60` |
-| `dynamic_so_loss_weight` | `float` | Weight for current trade loss contribution in dynamic scale formula. | `0.5` |
-| `dynamic_so_drawdown_weight` | `float` | Weight for ATH drawdown contribution in dynamic scale formula. | `0.8` |
-| `dynamic_so_exponent` | `float` | Curve exponent applied to drawdown term. Higher values emphasize deeper drawdowns. | `1.1` |
-| `dynamic_so_min_scale` | `float` | Lower bound for dynamic SO multiplier. | `0.5` |
-| `dynamic_so_max_scale` | `float` | Upper bound for dynamic SO multiplier. | `3.0` |
-| `dynamic_so_loss_max_scale_threshold` | `float` | Absolute loss percentage at which dynamic SO uses `dynamic_so_max_scale` directly. | `30.0` |
+| `dynamic_dca_ath_timeframe` | `string` | Exchange candle timeframe for Legacy factors ATH lookups: `4h`, `1d`, or `1w`. The lookback uses `history_lookback_time`. | `4h` |
+| `dynamic_dca_ath_cache_ttl` | `int` | Freshness of the Legacy factors ATH cache in seconds (minimum effective TTL: 5 seconds). | `60` |
+| `dynamic_so_atr_regime_low_k` | `float` | Legacy factors amount multiplier for the low ATR regime. | `2.2` |
+| `dynamic_so_atr_regime_mid_k` | `float` | Legacy factors amount multiplier for the middle ATR regime. | `1.8` |
+| `dynamic_so_atr_regime_high_k` | `float` | Legacy factors amount multiplier for the high ATR regime. | `1.4` |
 | `tp` | `float` | Take profit (percent). | `1.0` |
 | `sl` | `float` | Stop loss (percent). | `2.0` |
 | `ordersize` | `float` | ASAP base order size (advanced). | `12` |
