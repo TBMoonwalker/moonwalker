@@ -28,6 +28,7 @@ defineProps<{
     getSetupTaskSummary: (target: ControlCenterTarget) => string
     hasSelectedBackupPayload: boolean
     isSetupTaskExpanded: (target: ControlCenterTarget) => boolean
+    readinessComplete: boolean
     readinessFirstRun: boolean
     restoreLoading: boolean
     restoreReview: RestoreReviewState | null
@@ -86,6 +87,7 @@ const emit = defineEmits<{
         />
 
         <ControlCenterSetupProgressGrid
+            v-if="!readinessComplete"
             :get-setup-task-status="getSetupTaskStatus"
             :get-setup-task-summary="getSetupTaskSummary"
             :setup-tasks="setupTasks"

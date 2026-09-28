@@ -112,7 +112,7 @@ General Sans is the display and UI face, with Source Sans 3 as fallback. IBM Ple
 
 ## Layout
 
-Desktop uses a 224px left rail and a 64px top bar. The content width is at most 1500px. The overview starts with a compact Moonwalker status card containing admission and Autopilot sections. The wide Performance card sits beside a narrower, taller portfolio exposure card; its chart fills the available card height. Net profit and loss is the sole prominent financial figure. The budget bar is one continuous line with separate segments for funds in deals, available to trade, and other exchange free; together the latter two equal Exchange free. Its legend shows those amounts and the portfolio value. At narrower widths the two cards stack and the trade selector wraps. The first-run Control Center keeps its one-task-at-a-time layout, and its own ready-state Overview stays a calm reading column. These are separate screens.
+Desktop uses a 224px left rail and a 64px top bar. The content width is at most 1500px. The trading overview starts with a compact Moonwalker status card containing admission and Autopilot sections. The wide Performance card sits beside a narrower, taller portfolio exposure card; its chart fills the available card height. Net profit and loss is the sole prominent financial figure. The budget bar is one continuous line with separate segments for funds in deals, available to trade, and other exchange free; together the latter two equal Exchange free. Its legend shows those amounts and the portfolio value. At narrower widths the two cards stack and the trade selector wraps. Configuration keeps its one-task-at-a-time first-run flow and opens on Setup after readiness.
 
 Spacing follows `4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 px`. Use borders, surface differences, and whitespace for hierarchy. Preserve the actual Moonwalker logo. Do not add decorative punctuation to the product name or page headings.
 
@@ -214,7 +214,7 @@ Rules:
 
 #### Before Readiness
 - Show only the setup surface as the primary destination.
-- Do not show `Overview`, `Advanced`, and `Utilities` as equal first-run peers.
+- Do not show `Advanced` or operational utilities as equal first-run peers.
 - If needed, keep secondary escapes subtle:
    - `Restore instead`
    - `See all controls`
@@ -233,9 +233,10 @@ Rules:
 - Never fork into a separate advanced page during first run.
 
 #### After Safe Dry-Run Readiness
-- Unlock `Overview` as the default home.
+- Keep `Setup` as the default Configuration home.
 - Unlock `Advanced` as the full-density tuning surface.
-- Keep `Utilities` available for operational tasks like backup/restore and connectivity checks.
+- Show a guarded live-trading readiness review at the end of Setup for a saved, ready dry-run configuration.
+- Keep `Strategy Builder` and `Utilities` as separate navigation destinations.
 
 ## Control Center Information Architecture
 
@@ -258,20 +259,22 @@ CONTROL CENTER
 ### Returning Healthy Operator
 
 ```text
-CONTROL CENTER
+CONFIGURATION
 |
-|-- Mission Panel
-|    |-- readiness state
-|    |-- one next action
-|    `-- concise evidence
+|-- Compact configuration header
+|    |-- draft/save state
+|    `-- stale snapshot or readiness blocker when actionable
 |
-|-- Primary Nav
-|    |-- Overview
-|    `-- Setup
-|
-`-- Secondary Nav
-     |-- Advanced
-     `-- Utilities
+|-- Setup (default)
+|    `-- Live trading readiness review when safe dry run is ready
+`-- Advanced
+
+SEPARATE DESTINATIONS
+|-- Trading Overview: operating status and Autopilot summary
+|-- Strategy Builder
+|-- Utilities
+|-- Autopilot Memory
+`-- Monitoring
 ```
 
 ### One-Home Rule
@@ -279,8 +282,11 @@ Every configuration field gets exactly one canonical visible home.
 
 - Essentials live in `Setup`
 - Expert tuning lives in `Advanced`
-- Status lives in `Overview`
-- Operational actions live in `Utilities`
+- Runtime status lives in Trading Overview, Autopilot Memory, or Monitoring.
+- Pause/Resume Moonwalker lives in the persistent top bar.
+- Autopilot on/off lives with Autopilot settings in Advanced.
+- Live activation lives in the guarded readiness review at the end of Setup.
+- Backup/restore and connectivity tests live in Utilities.
 
 No field should appear as a normal editable control in both Setup and Advanced.
 If Advanced extends an area already introduced in Setup, it should do so by
@@ -294,7 +300,7 @@ adding deeper controls, not by restating the same fields.
    - `Restore existing installation`
    - `Start a new setup`
 - Supporting copy should explain consequences, not implementation details.
-- This screen should be visually quieter than Overview and more decisive than Settings.
+- This screen should be visually quieter than Trading Overview and decisive about the next setup action.
 
 ### 2. Guided Setup
 - One dominant mission panel: current progress + next action
@@ -316,11 +322,12 @@ adding deeper controls, not by restating the same fields.
    - what still needs attention
    - one next action
 
-### 5. Overview After Readiness
-- Calm status first
-- One next recommended action
-- Evidence row for recent changes or warnings
-- Setup remains reachable but no longer dominates
+### 5. Configuration After Readiness
+- Setup remains the landing surface.
+- Show the setup groups as collapsed links; expand the requested group when selected.
+- Keep the header compact; show save state, stale configuration, and blockers only when actionable.
+- Put the guarded live activation action after the Setup tasks.
+- Do not repeat runtime, Autopilot, or Monitoring summaries here.
 
 ### 6. Advanced
 - Dense, deliberate, operator-owned tuning
@@ -343,7 +350,7 @@ adding deeper controls, not by restating the same fields.
    - bad: `Advanced user`
 - Use state-first headlines
 - Keep helper text short, operational, and consequence-aware
-- Avoid category terms like `Configuration` unless needed for advanced surfaces
+- Use `Configuration` for the setup and tuning destination.
 
 ## Accessibility Requirements
 - The first-run entry choice must be fully keyboard navigable and understandable without color.
@@ -353,7 +360,7 @@ adding deeper controls, not by restating the same fields.
 - Primary actions must meet minimum touch target sizes (44px).
 
 ## Implementation Guardrails
-- Do not reuse the old Settings page mental model inside the new Control Center.
+- Keep first-run guidance while making returning Configuration task-focused.
 - Do not show all modes at equal weight during first run.
 - Do not expose expert toggles inside Guided Setup.
 - Do not make restore discoverable only inside Advanced or Utilities during onboarding.

@@ -34,7 +34,7 @@ export function deriveControlCenterViewState(
             title: 'Control Center needs a fresh config load',
             summary:
                 'Moonwalker could not load the latest configuration. Retry the shared snapshot before editing or activating anything.',
-            defaultMode: 'overview',
+            defaultMode: 'setup',
         }
     }
 
@@ -45,7 +45,7 @@ export function deriveControlCenterViewState(
             title: options.transition?.message || 'Control Center updated',
             summary:
                 'The shared workspace is refreshed. Review the current status before making the next operator action.',
-            defaultMode: options.transition?.mode ?? 'overview',
+            defaultMode: options.transition?.mode ?? 'setup',
         }
     }
 
@@ -67,7 +67,7 @@ export function deriveControlCenterViewState(
             title: 'Setup still needs attention',
             summary:
                 'Moonwalker has partial configuration, but the current setup is not yet safe enough to trust end to end.',
-            defaultMode: 'overview',
+            defaultMode: 'setup',
         }
     }
 
@@ -75,19 +75,19 @@ export function deriveControlCenterViewState(
         return {
             kind: 'healthy',
             badge: 'Ready',
-            title: 'Safe dry-run setup is ready',
+            title: 'Configuration',
             summary:
-                'The essential runtime is configured. Review the configuration or activate live trading when you are ready.',
-            defaultMode: 'overview',
+                'Review exchange, signal, trading, and operator settings.',
+            defaultMode: 'setup',
         }
     }
 
     return {
         kind: 'healthy',
         badge: 'Live',
-        title: 'Live trading is active',
+        title: 'Configuration',
         summary:
-            'Moonwalker is operating live. Use the Control Center to review readiness, recover from issues, or adjust operator settings carefully.',
-        defaultMode: 'overview',
+            'Review exchange, signal, trading, and operator settings for this live instance.',
+        defaultMode: 'setup',
     }
 }

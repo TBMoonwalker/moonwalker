@@ -13,7 +13,7 @@ const emit = defineEmits<{
 
 // Logical order for roving-tabindex + arrow-key navigation, independent of the
 // visual grouping below (a screen reader user traverses the flat tablist).
-const ORDER = [...CONTROL_CENTER_MODES] as ControlCenterMode[]
+const ORDER = CONTROL_CENTER_MODES.filter((mode) => mode === 'setup' || mode === 'advanced') as ControlCenterMode[]
 const PANEL_ID = 'cc-workspace-panel'
 const tablistRef = ref<HTMLElement | null>(null)
 
@@ -73,25 +73,6 @@ function onKeydown(event: KeyboardEvent) {
             @keydown="onKeydown"
         >
             <div class="mode-group">
-                <span class="mode-group-label" aria-hidden="true">Operate</span>
-                <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
-                    <n-button
-                        role="tab"
-                        :id="tabId('overview')"
-                        :aria-selected="routeMode === 'overview'"
-                        :aria-controls="PANEL_ID"
-                        :tabindex="routeMode === 'overview' ? 0 : -1"
-                        :type="routeMode === 'overview' ? 'primary' : 'default'"
-                        :secondary="routeMode !== 'overview'"
-                        :strong="routeMode === 'overview'"
-                        @click="selectMode('overview')"
-                    >
-                        Overview
-                    </n-button>
-                </n-flex>
-            </div>
-
-            <div class="mode-group">
                 <span class="mode-group-label" aria-hidden="true">Configure</span>
                 <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
                     <n-button
@@ -123,43 +104,6 @@ function onKeydown(event: KeyboardEvent) {
                 </n-flex>
             </div>
 
-            <div class="mode-group">
-                <span class="mode-group-label" aria-hidden="true">Build</span>
-                <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
-                    <n-button
-                        role="tab"
-                        :id="tabId('strategy-builder')"
-                        :aria-selected="routeMode === 'strategy-builder'"
-                        :aria-controls="PANEL_ID"
-                        :tabindex="routeMode === 'strategy-builder' ? 0 : -1"
-                        :type="routeMode === 'strategy-builder' ? 'primary' : 'default'"
-                        :secondary="routeMode !== 'strategy-builder'"
-                        :strong="routeMode === 'strategy-builder'"
-                        @click="selectMode('strategy-builder')"
-                    >
-                        Strategy Builder
-                    </n-button>
-                </n-flex>
-            </div>
-
-            <div class="mode-group">
-                <span class="mode-group-label" aria-hidden="true">Utilities</span>
-                <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
-                    <n-button
-                        role="tab"
-                        :id="tabId('utilities')"
-                        :aria-selected="routeMode === 'utilities'"
-                        :aria-controls="PANEL_ID"
-                        :tabindex="routeMode === 'utilities' ? 0 : -1"
-                        :type="routeMode === 'utilities' ? 'primary' : 'default'"
-                        :secondary="routeMode !== 'utilities'"
-                        :strong="routeMode === 'utilities'"
-                        @click="selectMode('utilities')"
-                    >
-                        Utilities
-                    </n-button>
-                </n-flex>
-            </div>
         </div>
     </n-card>
 </template>

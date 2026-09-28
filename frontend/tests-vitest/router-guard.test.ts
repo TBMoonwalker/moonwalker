@@ -9,7 +9,7 @@ const completeReadiness: ControlCenterReadiness = {
   firstRun: false,
   attentionNeeded: false,
   blockers: [],
-  nextMode: 'overview',
+  nextMode: 'setup',
   nextTarget: 'live-activation',
   dryRun: true,
   configuredEssentials: 7,

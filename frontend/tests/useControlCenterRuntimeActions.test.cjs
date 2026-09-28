@@ -40,13 +40,13 @@ function createRuntimeHarness(overrides = {}) {
             firstRun: false,
             attentionNeeded: false,
             blockers: [],
-            nextMode: 'overview',
+            nextMode: 'setup',
             nextTarget: null,
             dryRun: false,
             configuredEssentials: 5,
         })),
         routeState: computed(() => ({
-            mode: 'overview',
+            mode: 'setup',
             target: 'live-activation',
         })),
         setTransitionIntent(nextIntent) {
@@ -138,10 +138,10 @@ test('runtime actions activate live trading through the extracted seam', async (
         'control_center_live_activation_requested',
     ])
     assert.deepEqual(harness.syncCalls, ['live_activation'])
-    assert.deepEqual(harness.navigation, [['overview', 'live-activation']])
+    assert.deepEqual(harness.navigation, [['setup', 'live-activation']])
     assert.equal(harness.intents.length, 1)
     assert.equal(harness.intents[0].status, 'success')
-    assert.equal(harness.intents[0].mode, 'overview')
+    assert.equal(harness.intents[0].mode, 'setup')
     assert.equal(harness.intents[0].target, 'live-activation')
     assert.deepEqual(harness.announcements, ['Live trading activated.'])
 })

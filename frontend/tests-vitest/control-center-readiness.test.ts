@@ -27,7 +27,7 @@ describe('deriveControlCenterReadiness', () => {
 
     expect(readiness.complete).toBe(true)
     expect(readiness.dryRun).toBe(true)
-    expect(readiness.nextMode).toBe('overview')
+    expect(readiness.nextMode).toBe('setup')
     expect(readiness.nextTarget).toBe('live-activation')
   })
 

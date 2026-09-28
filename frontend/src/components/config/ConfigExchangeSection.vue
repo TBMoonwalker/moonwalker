@@ -58,15 +58,15 @@
                     placeholder="e.g. bybit.eu"
                 />
             </n-form-item>
-            <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="left">
+            <n-form-item label="Dry Run (Demo Trading)" path="dryrun" label-placement="top">
                 <n-flex vertical :size="6">
                     <n-checkbox
                         v-model:checked="exchange.dry_run"
                         :disabled="dryRunActivationLocked"
                     />
                     <n-text v-if="dryRunActivationLocked" depth="3">
-                        Activate live trading from Overview after saving the rest of
-                        this configuration.
+                        Activate live trading in the readiness review at the end
+                        of Setup after saving this configuration.
                     </n-text>
                 </n-flex>
             </n-form-item>
@@ -92,7 +92,7 @@
                   <n-form-item
                        label="Protect against delisting"
                        path="delisting_protection_enabled"
-                       label-placement="left"
+                       label-placement="top"
                   >
                        <n-flex vertical :size="4">
                            <n-switch
@@ -113,7 +113,7 @@
                            <n-form-item
                                label="Use trading API credentials"
                                path="delisting_schedule_use_trading_credentials"
-                               label-placement="left"
+                               label-placement="top"
                            >
                                <n-flex vertical :size="4">
                                    <n-switch

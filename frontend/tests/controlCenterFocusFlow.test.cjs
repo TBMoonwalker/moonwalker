@@ -30,7 +30,7 @@ test('buildLiveRegionAnnouncement reuses transition copy for polite announcement
         status: 'success',
         message: 'Restore completed successfully.',
         at: Date.now(),
-        mode: 'overview',
+        mode: 'setup',
     })
 
     assert.equal(message, 'Restore completed successfully.')

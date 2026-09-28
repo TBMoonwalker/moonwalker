@@ -51,15 +51,6 @@ const selectedSnapshot = computed<AutopilotMemorySnapshot | null>(() => {
     return allRows.value.find((row) => row.symbol === selectedSymbol.value) ?? null
 })
 
-function openControlCenterOverview(): void {
-    void router.push({
-        name: 'controlCenter',
-        query: {
-            mode: 'overview',
-        },
-    })
-}
-
 function openAutopilotAdvanced(): void {
     void router.push({
         name: 'controlCenter',
@@ -85,18 +76,18 @@ function formatTrustBoardSymbol(symbol: string): string {
             <n-flex vertical :size="16">
                 <n-flex class="autopilot-status-row" justify="space-between" align="start" :wrap="true" :size="[12, 12]">
                     <div class="autopilot-status-copy">
-                        <n-text depth="3">Control Center / Autopilot</n-text>
+                        <n-text depth="3">Autopilot / Memory</n-text>
                         <h2 class="autopilot-status-title">{{ formatAutopilotStatusTitle(data) }}</h2>
                         <p class="autopilot-status-summary">
                             {{ formatAutopilotStatusBody(data) }}
                         </p>
                     </div>
                     <div class="autopilot-status-actions">
-                        <n-button secondary @click="openControlCenterOverview">
-                            Back to Control Center
+                        <n-button secondary @click="router.push({ name: 'trades' })">
+                            Trading overview
                         </n-button>
                         <n-button type="primary" secondary @click="openAutopilotAdvanced">
-                            Tune Autopilot
+                            Configure Autopilot
                         </n-button>
                     </div>
                 </n-flex>

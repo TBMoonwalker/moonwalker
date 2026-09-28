@@ -8,7 +8,7 @@ Moonwalker monitoring sends Telegram messages for executed trades:
 The implementation uses [Telethon](https://docs.telethon.dev/en/stable/).
 
 ## Configuration Keys
-Configure these keys in the Control Center's `Operator alerts` section or via
+Configure these keys in Configuration's `Operator alerts` section or via
 API:
 
 | Key | Type | Required | Description |
@@ -44,7 +44,7 @@ Messages are sent in HTML parse mode for readability and include:
 All dynamic values are escaped before sending.
 
 ## Test Telegram From UI
-Use **Control Center -> Setup or Advanced -> Operator alerts -> Test Telegram**.
+Use **Utilities -> Test Telegram**.
 
 Behavior:
 - Endpoint: `POST /monitoring/test`

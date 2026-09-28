@@ -7,7 +7,7 @@ const {
     submitControlCenterWorkspace,
 } = loadFrontendModule('src/control-center/saveWorkflow.ts')
 
-test('submitControlCenterWorkspace routes successful saves into overview', async () => {
+test('submitControlCenterWorkspace routes successful saves into setup', async () => {
     const calls = []
     const result = await submitControlCenterWorkspace({
         announce(message) {
@@ -35,7 +35,7 @@ test('submitControlCenterWorkspace routes successful saves into overview', async
     assert.equal(result.status, 'success')
     assert.deepEqual(calls, [
         ['submit'],
-        ['navigate', 'overview'],
+        ['navigate', 'setup'],
         [
             'transition',
             {
@@ -43,7 +43,7 @@ test('submitControlCenterWorkspace routes successful saves into overview', async
                 status: 'success',
                 message: 'Configuration saved.',
                 at: 123,
-                mode: 'overview',
+                mode: 'setup',
             },
         ],
         ['announce', 'Configuration saved.'],

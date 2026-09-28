@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, h, ref, type Component } from 'vue'
+import axios from 'axios'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'
 import type { MenuOption } from 'naive-ui/es/menu'
 import { NIcon } from 'naive-ui/es/icon'
+import { useMessage } from 'naive-ui/es/message'
 import {
   AnalyticsOutline,
   BarChartOutline,
@@ -16,11 +18,15 @@ import {
 import logoImage from '../assets/logo.png'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 import { useWebSocketDataStore } from '../stores/websocket'
+import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
+import { extractApiErrorMessage } from '../helpers/apiErrors'
 import ThemeToggle from './ThemeToggle.vue'
 
 const route = useRoute()
 const router = useRouter()
+const message = useMessage()
 const mobileMenuOpen = ref(false)
+const tradingPauseLoading = ref(false)
 const configSnapshotStore = useSharedConfigSnapshot()
 const statisticsStore = useWebSocketDataStore('statistics')
 const tradesStore = useWebSocketDataStore('openTrades')
@@ -32,10 +38,20 @@ const titles: Record<string, string> = {
   stats: 'Statistics',
   backtest: 'Backtest',
   controlCenterAutopilot: 'Autopilot Memory',
-  controlCenter: 'Control Center',
+  controlCenter: 'Configuration',
   monitoring: 'Monitoring',
 }
-const currentTitle = computed(() => titles[String(route.name)] ?? 'Overview')
+const currentTitle = computed(() => {
+  if (route.name === 'controlCenter' && route.query.mode === 'strategy-builder') return 'Strategy Builder'
+  if (route.name === 'controlCenter' && route.query.mode === 'utilities') return 'Utilities'
+  return titles[String(route.name)] ?? 'Overview'
+})
+const currentNavigationKey = computed(() => {
+  if (route.name !== 'controlCenter') return String(route.name ?? 'trades')
+  if (route.query.mode === 'strategy-builder') return 'strategyBuilder'
+  if (route.query.mode === 'utilities') return 'utilities'
+  return 'controlCenter'
+})
 const tradingMode = computed(() => {
   const snapshot = configSnapshotStore.snapshot.value
   if (!snapshot) return 'Checking mode'
@@ -46,6 +62,29 @@ const tradingMode = computed(() => {
 const streamsConnected = computed(
   () => statisticsStatus.value === 'OPEN' && tradesStatus.value === 'OPEN',
 )
+const tradingPaused = computed(() => configSnapshotStore.snapshot.value?.trading_paused === true)
+const pauseActionLabel = computed(() => tradingPaused.value ? 'Resume Moonwalker' : 'Pause Moonwalker')
+
+async function toggleTradingPause(): Promise<void> {
+  if (tradingPauseLoading.value || !configSnapshotStore.snapshot.value) return
+  const action = tradingPaused.value ? 'resume' : 'pause'
+  const confirmation = tradingPaused.value
+    ? 'Resume Moonwalker now? New trades and re-entries will be allowed again.'
+    : 'Pause Moonwalker now? Existing exits can keep running, but new trades and re-entries will stop.'
+  if (!window.confirm(confirmation)) return
+
+  tradingPauseLoading.value = true
+  try {
+    const response = await axios.post(buildMoonwalkerApiUrl(`/config/trading/${action}`), { confirm: true })
+    await configSnapshotStore.refresh()
+    configSnapshotStore.emitLocalInvalidation('trading_pause')
+    message.success(response.data?.message ?? (action === 'pause' ? 'Moonwalker paused.' : 'Moonwalker resumed.'))
+  } catch (error) {
+    message.error(extractApiErrorMessage(error, 'Could not change Moonwalker pause state.'))
+  } finally {
+    tradingPauseLoading.value = false
+  }
+}
 
 function icon(component: Component) {
   return () => h(NIcon, null, { default: () => h(component) })
@@ -62,12 +101,18 @@ const workspaceOptions: MenuOption[] = [
   },
 ]
 const operationOptions: MenuOption[] = [
-  { label: 'Control Center', key: 'controlCenter', icon: icon(SettingsOutline) },
+  { label: 'Configuration', key: 'controlCenter', icon: icon(SettingsOutline) },
+  { label: 'Strategy Builder', key: 'strategyBuilder', icon: icon(AnalyticsOutline) },
+  { label: 'Utilities', key: 'utilities', icon: icon(GridOutline) },
   { label: 'Monitoring', key: 'monitoring', icon: icon(PulseOutline) },
 ]
 
 function navigate(key: string | number): void {
   mobileMenuOpen.value = false
+  if (key === 'strategyBuilder' || key === 'utilities') {
+    void router.push({ name: 'controlCenter', query: { mode: key === 'strategyBuilder' ? 'strategy-builder' : 'utilities' } })
+    return
+  }
   void router.push({ name: String(key) })
 }
 
@@ -93,14 +138,14 @@ function navigate(key: string | number): void {
       <div class="nav-caption">Workspace</div>
       <n-menu
         class="side-menu"
-        :value="String(route.name ?? 'trades')"
+        :value="currentNavigationKey"
         :options="workspaceOptions"
         @update:value="navigate"
       />
       <div class="nav-caption operations-caption">Operations</div>
       <n-menu
         class="side-menu"
-        :value="String(route.name ?? 'trades')"
+        :value="currentNavigationKey"
         :options="operationOptions"
         @update:value="navigate"
       />
@@ -117,14 +162,14 @@ function navigate(key: string | number): void {
           <div class="nav-caption">Workspace</div>
           <n-menu
             class="side-menu"
-            :value="String(route.name ?? 'trades')"
+            :value="currentNavigationKey"
             :options="workspaceOptions"
             @update:value="navigate"
           />
           <div class="nav-caption operations-caption">Operations</div>
           <n-menu
             class="side-menu"
-            :value="String(route.name ?? 'trades')"
+            :value="currentNavigationKey"
             :options="operationOptions"
             @update:value="navigate"
           />
@@ -137,6 +182,19 @@ function navigate(key: string | number): void {
         <strong>{{ currentTitle }}</strong>
       </div>
       <div class="topbar-actions">
+        <n-button
+          class="trading-pause-button"
+          :type="tradingPaused ? 'warning' : 'default'"
+          secondary
+          size="small"
+          :loading="tradingPauseLoading"
+          :disabled="!configSnapshotStore.snapshot.value"
+          :aria-label="pauseActionLabel"
+          @click="toggleTradingPause"
+        >
+          <span class="pause-label-desktop">{{ pauseActionLabel }}</span>
+          <span class="pause-label-mobile">{{ tradingPaused ? 'Resume' : 'Pause' }}</span>
+        </n-button>
         <span class="mode-badge" :class="{ 'is-live': tradingMode === 'Live trading' }">
           {{ tradingMode }}
         </span>
@@ -241,6 +299,8 @@ function navigate(key: string | number): void {
 .breadcrumb { color: var(--mw-color-text-muted); font-size: 12px; white-space: nowrap; }
 .breadcrumb strong { color: var(--mw-color-text-primary); }
 .topbar-actions { color: var(--mw-color-text-muted); font-size: 11px; }
+.trading-pause-button { min-height: 36px; }
+.pause-label-mobile { display: none; }
 .mode-badge, .connection-badge {
   display: inline-flex;
   align-items: center;
@@ -281,6 +341,9 @@ function navigate(key: string | number): void {
   .app-topbar { min-height: 50px; padding: 0 18px; }
 }
 @media (max-width: 560px) {
+  .pause-label-desktop { display: none; }
+  .pause-label-mobile { display: inline; }
+  .trading-pause-button { min-height: 44px; min-width: 64px; }
   .connection-badge { display: none; }
   .app-topbar { padding: 0 12px; gap: 8px; }
   .breadcrumb > span { display: none; }

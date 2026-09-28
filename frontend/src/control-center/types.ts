@@ -1,5 +1,4 @@
 export const CONTROL_CENTER_MODES = [
-    'overview',
     'setup',
     'advanced',
     'strategy-builder',

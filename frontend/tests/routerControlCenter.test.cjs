@@ -67,7 +67,7 @@ test('resolveControlCenterNavigation normalizes invalid control-center query sta
     assert.deepEqual(result, {
         name: 'controlCenter',
         query: {
-            mode: 'overview',
+            mode: 'setup',
         },
         replace: true,
     })

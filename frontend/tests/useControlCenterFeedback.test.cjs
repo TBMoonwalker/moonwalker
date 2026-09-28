@@ -77,7 +77,7 @@ test('feedback clears successful transitions after the configured timeout', () =
         status: 'success',
         message: 'Restored.',
         at: 1,
-        mode: 'overview',
+        mode: 'setup',
     })
 
     assert.equal(harness.feedback.transitionIntent.value.status, 'success')

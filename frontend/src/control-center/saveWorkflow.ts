@@ -21,13 +21,13 @@ export async function submitControlCenterWorkspace(
     const at = (options.now ?? Date.now)()
 
     if (result.status === 'success') {
-        await options.navigateToMode('overview')
+        await options.navigateToMode('setup')
         options.setTransitionIntent({
             kind: 'save',
             status: 'success',
             message: 'Configuration saved.',
             at,
-            mode: 'overview',
+            mode: 'setup',
         })
         options.announce('Configuration saved.')
         return result

@@ -40,9 +40,7 @@ defineEmits<{
                 class="mission-header-row"
             >
                 <n-flex vertical :size="6" class="mission-copy">
-                    <n-text depth="3" class="control-center-kicker">
-                        Control Center
-                    </n-text>
+                    <n-text depth="3" class="control-center-kicker">Operator settings</n-text>
                     <div class="mission-heading-group">
                         <n-tag class="mission-status-tag" :type="missionSummaryTone">
                             {{ viewState.badge }}
@@ -73,7 +71,7 @@ defineEmits<{
                         Save changes
                     </n-button>
                     <n-button
-                        v-if="!(readiness.complete && readiness.dryRun)"
+                        v-if="!readiness.complete"
                         type="primary"
                         strong
                         :loading="activationLoading"
@@ -91,6 +89,7 @@ defineEmits<{
             </n-flex>
 
             <n-alert
+                v-if="isDirty || transitionIntent || configTrustState.kind !== 'trusted' || !readiness.complete || viewState.kind === 'rescue'"
                 :type="missionAlertTone"
                 :title="dirtySummary"
                 role="status"

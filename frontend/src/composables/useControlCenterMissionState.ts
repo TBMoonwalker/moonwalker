@@ -29,9 +29,16 @@ function isStaleConfigTrustState(kind: ControlCenterConfigTrustKind): boolean {
 export function useControlCenterMissionState(
     options: UseControlCenterMissionStateOptions,
 ) {
-    const showModeStrip = computed(() => options.readiness.value.complete)
+    const showModeStrip = computed(() =>
+        options.readiness.value.complete &&
+        ['setup', 'advanced'].includes(options.routeState.value.mode),
+    )
     const showMissionPanel = computed(
         () =>
+            (['setup', 'advanced'].includes(options.routeState.value.mode) ||
+                options.isDirty.value ||
+                options.transitionIntent.value !== null ||
+                isStaleConfigTrustState(options.configTrustState.value.kind)) &&
             !(
                 options.routeState.value.mode === 'setup' &&
                 (options.showSetupEntryGate.value ||
@@ -85,7 +92,7 @@ export function useControlCenterMissionState(
         if (options.readiness.value.dryRun) {
             return 'Activate live trading'
         }
-        return 'Review overview'
+        return 'Review setup'
     })
     const missionSummaryTone = computed(() => {
         if (options.viewState.value.kind === 'rescue') {

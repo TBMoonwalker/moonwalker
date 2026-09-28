@@ -64,13 +64,13 @@ export function useControlCenterWorkspaceActions(
     ): Promise<void> {
         const result = await options.handleRestoreBackup(mode)
         if (result.status === 'success') {
-            await options.navigateToControlCenter('overview')
+            await options.navigateToControlCenter('setup')
             options.setTransitionIntent({
                 kind: 'restore',
                 status: 'success',
                 message: result.message,
                 at: buildTransitionAt(options.now),
-                mode: 'overview',
+                mode: 'setup',
             })
             options.announce(result.message)
             return

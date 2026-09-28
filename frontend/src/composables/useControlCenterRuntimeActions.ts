@@ -158,7 +158,7 @@ export function useControlCenterRuntimeActions(
             if (syncResult.status === 'error') {
                 throw new Error(syncResult.message)
             }
-            await options.navigateToControlCenter('overview', 'live-activation')
+            await options.navigateToControlCenter('setup', 'live-activation')
             const successMessage =
                 response.data?.message || 'Live trading activated.'
             options.setTransitionIntent({
@@ -166,7 +166,7 @@ export function useControlCenterRuntimeActions(
                 status: 'success',
                 message: successMessage,
                 at: Date.now(),
-                mode: 'overview',
+                mode: 'setup',
                 target: 'live-activation',
             })
             options.announce(successMessage)

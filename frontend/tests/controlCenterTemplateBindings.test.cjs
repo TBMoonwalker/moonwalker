@@ -65,28 +65,6 @@ const modeStripSource = fs.readFileSync(
     ),
     'utf8',
 )
-const overviewWorkspaceSource = fs.readFileSync(
-    path.join(
-        __dirname,
-        '..',
-        'src',
-        'components',
-        'control-center',
-        'ControlCenterOverviewWorkspace.vue',
-    ),
-    'utf8',
-)
-const ownerConfidenceSummarySource = fs.readFileSync(
-    path.join(
-        __dirname,
-        '..',
-        'src',
-        'components',
-        'control-center',
-        'ControlCenterOwnerConfidenceSummary.vue',
-    ),
-    'utf8',
-)
 const setupWorkspaceSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -322,20 +300,10 @@ test('control center target sections use dynamic element refs', () => {
         false,
     )
     assert.ok(
-        controlCenterViewSource.includes(
-            ":live-activation-ref=\"bindTargetElement('live-activation')\"",
+        setupModeSource.includes(
+            ":ref=\"bindTargetElement('live-activation')\"",
         ),
-        'expected live activation anchor to stay wired through the overview component',
-    )
-    assert.equal(
-        overviewWorkspaceSource.includes(':ref="liveActivationRef"'),
-        false,
-    )
-    assert.ok(
-        overviewWorkspaceSource.includes(
-            ':ref="visibleBlockers.length === 0 ? liveActivationRef : undefined"',
-        ),
-        'expected overview workspace to expose the live activation anchor ref on the overview shell',
+        'expected live activation anchor in the setup readiness review',
     )
     assert.ok(
         targetRegistrySource.includes(
@@ -838,18 +806,16 @@ test('control center delegates feedback and mission-state handling to dedicated 
     )
 })
 
-test('control center delegates mission, mode, and overview presentation to dedicated components', () => {
+test('control center delegates mission, setup, and advanced presentation to dedicated components', () => {
     const requiredViewSnippets = [
         "import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'",
         "import ControlCenterModeStrip from '../components/control-center/ControlCenterModeStrip.vue'",
-        "import ControlCenterOverviewWorkspace from '../components/control-center/ControlCenterOverviewWorkspace.vue'",
+        "import ControlCenterSetupMode from '../components/control-center/ControlCenterSetupMode.vue'",
         '<ControlCenterMissionPanel',
         '<ControlCenterModeStrip',
-        '<ControlCenterOverviewWorkspace',
-        'function openMonitoringPage(): void {',
+        '<ControlCenterSetupMode',
         '@activate-live="handleActivateLiveTrading"',
-        "@open-config=\"handleModeSelect('setup')\"",
-        "@open-monitoring=\"openMonitoringPage\"",
+        ':live-activation-available="readiness.complete && readiness.dryRun"',
     ]
     const requiredMissionPanelSnippets = [
         'Save changes',
@@ -857,9 +823,7 @@ test('control center delegates mission, mode, and overview presentation to dedic
         'The shared snapshot changed in another browser or tab.',
     ]
     const requiredModeStripSnippets = [
-        'Operate',
         'Configure',
-        'Utilities',        'Build',
         'role="tablist"',
         'role="tab"',
         ':aria-selected=',
@@ -868,18 +832,8 @@ test('control center delegates mission, mode, and overview presentation to dedic
         'cc-mode-tab',
         '@keydown="onKeydown"',
         "emit('select-mode', mode)",
-        "selectMode('overview')",
-        "selectMode('strategy-builder')",
-        "selectMode('utilities')",
-    ]
-    const requiredOverviewSnippets = [
-        'Recovery priorities',
-        'Operator overview',
-        'Operator systems',
-        'ControlCenterOwnerConfidenceSummary',
-        'ControlCenterConfigPreview',
-        'ControlCenterMonitoringPreview',
-        ':ref="visibleBlockers.length === 0 ? liveActivationRef : undefined"',
+        "selectMode('setup')",
+        "selectMode('advanced')",
     ]
 
     for (const snippet of requiredViewSnippets) {
@@ -900,48 +854,12 @@ test('control center delegates mission, mode, and overview presentation to dedic
             `expected mode strip component to include ${snippet}`,
         )
     }
-    for (const snippet of requiredOverviewSnippets) {
-        assert.ok(
-            overviewWorkspaceSource.includes(snippet),
-            `expected overview workspace component to include ${snippet}`,
-        )
-    }
-
     assert.equal(
         controlCenterViewSource.includes('Operator overview'),
         false,
     )
     assert.equal(
-        overviewWorkspaceSource.includes('Current operating baseline'),
-        false,
-    )
-    assert.equal(
         controlCenterViewSource.includes('Reload latest config'),
-        false,
-    )
-})
-
-test('owner confidence summary stays compact and evidence-based', () => {
-    const requiredSnippets = [
-        'Owner confidence',
-        'Operating mode',
-        'Configuration',
-        'Autopilot',
-        'Live data',
-        'High confidence',
-        'Guarded confidence',
-        'Low confidence',
-    ]
-
-    for (const snippet of requiredSnippets) {
-        assert.ok(
-            ownerConfidenceSummarySource.includes(snippet),
-            `expected owner confidence summary to include ${snippet}`,
-        )
-    }
-
-    assert.equal(
-        ownerConfidenceSummarySource.includes('Reconnects'),
         false,
     )
 })

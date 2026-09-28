@@ -55,7 +55,7 @@ test('deriveControlCenterReadiness distinguishes partial setup from healthy setu
     const readyReadiness = deriveControlCenterReadiness(createReadyConfig())
     assert.equal(readyReadiness.complete, true)
     assert.equal(readyReadiness.nextTarget, 'live-activation')
-    assert.equal(readyReadiness.nextMode, 'overview')
+    assert.equal(readyReadiness.nextMode, 'setup')
 })
 
  test('deriveControlCenterReadiness uses canonical dynamic_dca blockers when trade_mode is dynamic', () => {
@@ -108,7 +108,7 @@ test('deriveControlCenterViewState adapts to rescue and post-action success stat
         transition: null,
     })
     assert.equal(rescueState.kind, 'rescue')
-    assert.equal(rescueState.defaultMode, 'overview')
+    assert.equal(rescueState.defaultMode, 'setup')
 
     const successState = deriveControlCenterViewState({
         loadError: null,
@@ -118,7 +118,7 @@ test('deriveControlCenterViewState adapts to rescue and post-action success stat
             status: 'success',
             message: 'Configuration saved.',
             at: Date.now(),
-            mode: 'overview',
+            mode: 'setup',
         },
     })
     assert.equal(successState.kind, 'post_action_success')
