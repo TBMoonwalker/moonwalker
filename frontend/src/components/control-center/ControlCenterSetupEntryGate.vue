@@ -107,7 +107,7 @@ const emit = defineEmits<{
 .entry-choice-card {
     min-width: min(320px, 100%);
     flex: 1 1 320px;
-    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 16%, transparent);
+    border: 1px solid var(--mw-color-border);
     background: var(--mw-surface-card);
     box-shadow: var(--mw-shadow-card);
 }
@@ -116,12 +116,12 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.12rem;
-    font-weight: 450;
+    font-weight: 600;
     letter-spacing: 0;
 }
 
 .setup-entry-card {
-    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
+    border: 1px solid var(--mw-color-border);
     background: var(--mw-surface-shell);
 }
 </style>

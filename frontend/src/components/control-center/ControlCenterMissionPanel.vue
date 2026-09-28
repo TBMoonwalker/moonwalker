@@ -148,8 +148,8 @@ defineEmits<{
 }
 
 .mission-panel {
-    border-color: color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
-    background: color-mix(in srgb, var(--mw-color-primary) 5%, transparent);
+    border-color: var(--mw-color-border);
+    background: var(--mw-color-surface-panel);
 }
 
 .mission-heading-group {
@@ -199,10 +199,10 @@ defineEmits<{
 .mission-title {
     margin: 0;
     font-family: var(--mw-font-display);
-    font-size: 1.35rem;
+    font-size: clamp(1.5rem, 2vw, 2.25rem);
     line-height: 1.2;
-    font-weight: 450;
-    letter-spacing: 0;
+    font-weight: 600;
+    letter-spacing: -0.03em;
 }
 
 .mission-summary {

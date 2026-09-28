@@ -155,13 +155,11 @@ test('mobile trade ledger reduces first column indentation', () => {
     assert.match(tradesViewSource, /max-width: 64px;/)
 })
 
-test('mobile trade ledger tabs avoid clipped horizontal scroll labels', () => {
-    assert.match(tradesViewSource, /\.ledger-tabs :deep\(\.n-tabs-wrapper\)/)
-    assert.match(tradesViewSource, /\.ledger-tabs :deep\(\.n-tabs-tab-wrapper\)/)
-    assert.match(tradesViewSource, /isMobile \? 'Open' : 'Open Trades'/)
-    assert.match(tradesViewSource, /isMobile \? 'Unsell\.' : 'Unsellable'/)
-    assert.match(tradesViewSource, /isMobile \? 'Closed' : 'Closed Trades'/)
-    assert.match(tradesViewSource, /\.ledger-tabs \.trade-tab-label/)
+test('mobile trade ledger uses a wrapping title selector', () => {
+    assert.match(tradesViewSource, /class="trade-view-selector"/)
+    assert.match(tradesViewSource, /\.trade-view-selector \{[^}]*flex-wrap: wrap/)
+    assert.match(tradesViewSource, /class="dashboard-panel ledger-panel trade-table-panel"/)
+    assert.doesNotMatch(tradesViewSource, /class="calm-tabs ledger-tabs"/)
     assert.match(tradesViewSource, /text-overflow: ellipsis;/)
 })
 

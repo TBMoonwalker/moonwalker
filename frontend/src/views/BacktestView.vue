@@ -375,6 +375,10 @@ onMounted(() => {
 
 <template>
     <div class="page-shell backtest-page operator-console-page">
+        <header class="operator-page-heading">
+            <h1>Backtest</h1>
+            <p>Replay a strategy against historical market data and inspect the results.</p>
+        </header>
         <section
           class="admission-strip backtest-status-strip"
           :class="statusToneClass"
@@ -686,8 +690,8 @@ onMounted(() => {
 
 .panel-title-row h2 {
     margin: 0;
-    font-size: 1.25rem;
-    font-weight: 450;
+    font-size: 1rem;
+    font-weight: 600;
 }
 
 .backtest-form {

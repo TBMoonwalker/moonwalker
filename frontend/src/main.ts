@@ -1,8 +1,3 @@
-// General Font
-import 'vfonts/Lato.css'
-// Monospace Font
-import 'vfonts/FiraCode.css'
-
 import axios from 'axios'
 import { createApp } from 'vue'
 import { createPinia } from 'pinia'

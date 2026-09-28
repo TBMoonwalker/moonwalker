@@ -2,14 +2,13 @@
   <div class="chart-wrap">
     <n-spin :show="isLoading" size="small">
       <v-chart
-        v-if="!isLoading && !showEmptyState"
+        v-if="!isLoading && !showEmptyState && visiblePoints.length > 0"
         class="chart"
         :option="option"
-        :style="{ height: chartHeight }"
         autoresize
       />
-      <div v-else class="chart-placeholder chart-empty" :style="{ height: chartHeight }">
-        {{ emptyStateText }}
+      <div v-else class="chart-placeholder chart-empty">
+        {{ placeholderText }}
       </div>
     </n-spin>
   </div>
@@ -26,18 +25,29 @@ import VChart from 'vue-echarts'
 import { useUpnlDatastore } from '../stores/upnl'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { formatTradingViewDate } from '../helpers/date'
+import { filterPerformancePoints, type PerformanceRange } from '../helpers/performanceRange'
+import { getEffectiveCss } from '../theme/tokens'
+import { useThemeStore } from '../theme/themeStore'
 
 use([GridComponent, LegendComponent, TooltipComponent, LineChart, CanvasRenderer])
 
+const props = defineProps<{ range: PerformanceRange }>()
 const upnlStore = useUpnlDatastore()
 const { data } = storeToRefs(upnlStore)
 const statisticsStore = useWebSocketDataStore('statistics')
 const statisticsData = storeToRefs(statisticsStore)
+const themeStore = useThemeStore()
+const { scheme } = storeToRefs(themeStore)
 
 const isLoading = ref(data.value.length === 0)
 const showEmptyState = ref(false)
 const emptyStateText = ref('No profit history yet')
-const chartHeight = ref('40vh')
+const visiblePoints = computed(() => filterPerformancePoints(data.value, props.range))
+const placeholderText = computed(() =>
+  visiblePoints.value.length === 0 && data.value.length > 0
+    ? 'No performance data in this range'
+    : emptyStateText.value,
+)
 
 function toMinuteBucket(timestamp: string): string {
   const date = new Date(timestamp.replace(' ', 'T') + 'Z')
@@ -86,16 +96,23 @@ function pushRealtimePoint(profitOverall: number, fundsLocked: number, timestamp
 }
 
 const option = computed(() => {
-  const labels = data.value.map((point) => point.timestamp)
-  const profitValues = data.value.map((point) => Number(point.profit_overall))
-  const lockedValues = data.value.map((point) => Number(point.funds_locked))
+  const colors = getEffectiveCss(scheme.value)
+  const labels = visiblePoints.value.map((point) => point.timestamp)
+  const profitValues = visiblePoints.value.map((point) => Number(point.profit_overall))
+  const lockedValues = visiblePoints.value.map((point) => Number(point.funds_locked))
   const latestProfitValue = profitValues.length > 0 ? profitValues[profitValues.length - 1] : 0
   const isNegative = latestProfitValue < 0
-  const profitLineColor = isNegative ? '#B4443F' : '#2E7D5B'
-  const profitAreaColor = isNegative ? 'rgba(180, 68, 63, 0.18)' : 'rgba(46, 125, 91, 0.18)'
-  const lockedLineColor = 'rgb(245, 166, 35)'
-  const chartLegendTextColor = '#ECEFEA'
-  const chartMutedTextColor = '#8A948D'
+  const profitLineColor = isNegative
+    ? colors['--mw-color-error']
+    : colors['--mw-color-primary']
+  const profitAreaColor = isNegative
+    ? 'rgba(180, 68, 63, 0.13)'
+    : scheme.value === 'dark'
+      ? 'rgba(156, 219, 115, 0.12)'
+      : 'rgba(39, 107, 71, 0.1)'
+  const lockedLineColor = colors['--mw-color-warning']
+  const chartLegendTextColor = colors['--mw-color-text-secondary']
+  const chartMutedTextColor = colors['--mw-color-text-muted']
 
   return {
     grid: {
@@ -135,7 +152,10 @@ const option = computed(() => {
     yAxis: {
       type: 'value',
       axisLabel: { color: chartMutedTextColor },
-      splitLine: { show: false },
+      splitLine: {
+        show: true,
+        lineStyle: { color: colors['--mw-color-border'], width: 1 },
+      },
     },
     series: [
       {
@@ -220,17 +240,32 @@ watch(
 .chart {
   width: 100%;
   max-width: 100%;
+  flex: 1;
+  min-height: 230px;
 }
 
 .chart-wrap {
   width: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 230px;
   overflow: hidden;
-  padding: 8px 0 16px;
   border-radius: var(--mw-radius-sm, 6px);
+}
+
+.chart-wrap :deep(.n-spin-container),
+.chart-wrap :deep(.n-spin-content) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
 }
 
 .chart-placeholder {
   width: 100%;
+  flex: 1;
+  min-height: 230px;
   border-radius: var(--mw-radius-sm, 6px);
   background: rgba(255, 255, 255, 0.04);
 }

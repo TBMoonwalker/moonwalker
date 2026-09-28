@@ -5,6 +5,10 @@ import WebSocketStatusBar from '../components/WebSocketStatusBar.vue'
 
 <template>
   <div class="page-shell monitoring-page operator-console-page">
+    <header class="operator-page-heading">
+      <h1>Monitoring</h1>
+      <p>Inspect realtime streams and operational logs.</p>
+    </header>
     <n-flex class="page-section" vertical>
       <WebSocketStatusBar />
     </n-flex>

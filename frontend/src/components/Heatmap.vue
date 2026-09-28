@@ -70,6 +70,7 @@ function formatTooltip(timestamp: number, value: number | null | undefined): str
 .heatmap-container {
     width: 100%;
     overflow-x: auto;
+    overflow-y: hidden;
     line-height: 1;
     padding-bottom: 0;
 }

@@ -30,15 +30,15 @@ test('expanded open trade manual-order action keeps readable dark-mode text', ()
     )
 })
 
-test('unsellable tab relies on the count chip without an extra warning icon', () => {
+test('unsellable trade heading shows its count without an extra warning icon', () => {
     assert.ok(
         !tradesViewSource.includes('AlertCircleOutline') &&
             !tradesViewSource.includes('<n-icon v-if="unsellableTradesCount > 0"'),
-        'expected the unsellable tab to avoid a duplicate warning icon',
+        'expected the unsellable heading to avoid a duplicate warning icon',
     )
     assert.ok(
-        tradesViewSource.includes('class="trade-tab-count"'),
-        'expected the unsellable count chip to remain as the status indicator',
+        tradesViewSource.includes('Unsellable trades <span>{{ unsellableTradesCount }}</span>'),
+        'expected the unsellable count to appear in the trade heading',
     )
 })
 

@@ -361,13 +361,16 @@ onUnmounted(() => {
 
 <style scoped>
 .log-kicker {
-  font-size: 0.76rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--mw-color-text-secondary);
+  font-size: 0.75rem;
+  letter-spacing: 0;
 }
 
 .log-title {
-  font-size: 1rem;
+  color: var(--mw-color-text-primary);
+  font-family: var(--mw-font-display);
+  font-size: 0.875rem;
+  font-weight: 600;
 }
 
 .log-controls {

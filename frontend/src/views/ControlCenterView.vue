@@ -613,7 +613,7 @@ async function handleToggleAutopilot(): Promise<void> {
 
 :deep(.utility-action-button.n-button--primary-type.n-button--secondary:not(.n-button--disabled) .n-button__content),
 :deep(.utility-action-button.n-button--primary-type.n-button--secondary:not(.n-button--disabled) .n-button__icon) {
-    color: #18413a;
+    color: var(--mw-color-primary-strong);
 }
 
 :deep(.utility-action-button.n-button--default-type.n-button--secondary:not(.n-button--disabled) .n-button__content) {

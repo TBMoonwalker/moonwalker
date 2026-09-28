@@ -2,39 +2,105 @@
 import {
   computed,
   defineAsyncComponent,
-  nextTick,
-  onMounted,
   ref,
-  type HTMLAttributes,
 } from 'vue'
 import Statistics from '@/components/Statistics.vue'
+import { formatAutopilotMemoryHint } from '@/autopilot/presentation'
 import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
 import { useSharedConfigSnapshot } from '@/control-center/configSnapshotStore'
 import { useTradingPauseStatus } from '@/composables/useTradingPauseStatus'
-import { useViewport } from '@/composables/useViewport'
+import { RouterLink } from 'vue-router'
+import type { PerformanceRange } from '@/helpers/performanceRange'
 
 const OpenTrades = defineAsyncComponent(() => import('../components/OpenTrades.vue'))
 const ClosedTrades = defineAsyncComponent(() => import('../components/ClosedTrades.vue'))
 const UnsellableTrades = defineAsyncComponent(() => import('../components/UnsellableTrades.vue'))
-const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
 const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'))
+const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
 
 const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
 const unsellableTradesState = storeToRefs(unsellableTradesStore)
 const openTradesStore = useWebSocketDataStore('openTrades')
 const openTradesState = storeToRefs(openTradesStore)
+const closedTradesStore = useWebSocketDataStore('closedTrades')
+const closedTradesState = storeToRefs(closedTradesStore)
+const statisticsStore = useWebSocketDataStore('statistics')
+const statisticsState = storeToRefs(statisticsStore)
 const configSnapshotStore = useSharedConfigSnapshot()
-const { isMobile } = useViewport()
 const { tradingPaused } = useTradingPauseStatus()
-const tabPadding = computed(() => (isMobile.value ? 12 : 20))
-const activeProfitTab = ref('profit-overall')
-const activeTradesTab = ref('open-trades')
-const profitTabsSection = ref<HTMLElement | null>(null)
-const tradeTabsSection = ref<HTMLElement | null>(null)
+const performanceRange = ref<PerformanceRange>('all')
+const performanceRanges: { value: PerformanceRange; label: string }[] = [
+  { value: 'all', label: 'ALL' },
+  { value: '1d', label: '1D' },
+  { value: '30d', label: '30D' },
+  { value: '365d', label: '1Y' },
+]
+const profitPeriod = computed(() => ({
+  '1d': 'daily',
+  '30d': 'monthly',
+  '365d': 'yearly',
+}[performanceRange.value] ?? 'daily'))
+const performanceDescription = computed(() => ({
+  all: 'Cumulative profit and funds in deals',
+  '1d': 'Daily closed-trade profit this month',
+  '30d': 'Monthly closed-trade profit this year',
+  '365d': 'Yearly closed-trade profit',
+}[performanceRange.value]))
+const activeTradeView = ref<'open' | 'closed' | 'unsellable'>('open')
 const unsellableTradesCount = computed(() =>
   Array.isArray(unsellableTradesState.data.value) ? unsellableTradesState.data.value.length : 0
 )
+const openTradesCount = computed(() =>
+  Array.isArray(openTradesState.data.value) ? openTradesState.data.value.length : 0,
+)
+const closedTradesCount = computed(() =>
+  Array.isArray(closedTradesState.data.value) ? closedTradesState.data.value.length : 0,
+)
+const streamsConnected = computed(
+  () => statisticsState.status.value === 'OPEN' && openTradesState.status.value === 'OPEN',
+)
+const autopilotPayload = computed(() => statisticsState.data.value as Record<string, unknown> | null)
+const autopilotState = computed(() => String(autopilotPayload.value?.autopilot ?? 'none'))
+const autopilotModeLabel = computed(() => {
+  if (!statisticsState.hasReceivedData.value || !autopilotPayload.value) return 'Unavailable'
+  if (!['high', 'medium', 'low'].includes(autopilotState.value)) return 'Disabled'
+  return autopilotState.value.charAt(0).toUpperCase() + autopilotState.value.slice(1)
+})
+const autopilotTone = computed(() => ({
+  high: 'red', medium: 'orange', low: 'green',
+}[autopilotState.value] ?? 'muted'))
+const autopilotSummary = computed(() =>
+  ['high', 'medium', 'low'].includes(autopilotState.value)
+    ? `Effective max bots ${safeNumber(autopilotPayload.value?.autopilot_effective_max_bots)}`
+    : '',
+)
+const greenPhaseHint = computed(() => {
+  const payload = autopilotPayload.value
+  if (!payload || !['high', 'medium', 'low'].includes(autopilotState.value)) return ''
+  const memoryStatus = typeof payload.autopilot_memory_status === 'string' ? payload.autopilot_memory_status : null
+  const staleReason = typeof payload.autopilot_memory_stale_reason === 'string' ? payload.autopilot_memory_stale_reason : null
+  if (payload.autopilot_memory_stale || memoryStatus === 'warming_up') {
+    return formatAutopilotMemoryHint({
+      currentCloses: safeNumber(payload.autopilot_memory_current_closes),
+      requiredCloses: safeNumber(payload.autopilot_memory_required_closes),
+      stale: Boolean(payload.autopilot_memory_stale),
+      staleReason,
+      status: memoryStatus,
+    })
+  }
+  if (payload.autopilot_green_phase_active) {
+    return `Green phase active (+${safeNumber(payload.autopilot_green_phase_extra_deals)} deals)`
+  }
+  if (payload.autopilot_green_phase_detected && typeof payload.autopilot_green_phase_block_reason === 'string') {
+    return `Green phase blocked: ${payload.autopilot_green_phase_block_reason.replaceAll('_', ' ')}`
+  }
+  return 'Green phase idle'
+})
+function safeNumber(value: unknown): number {
+  const parsed = Number(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
 type DelistingWarningRow = {
   symbol?: string
   delisting_warning?: boolean
@@ -113,6 +179,7 @@ const admissionStatusLabel = computed(() => {
   if (delistingCheckUnavailable.value) return 'Delisting check unavailable'
   if (aiTrustProviderUnavailable.value) return 'AI unavailable'
   if (aiTrustWarningBlocked.value) return 'AI blocked entry'
+  if (!streamsConnected.value) return 'Entry status pending'
   return 'Moonwalker open'
 })
 const admissionStatusCopy = computed(() => {
@@ -129,91 +196,36 @@ const admissionStatusCopy = computed(() => {
   if (aiTrustWarningBlocked.value) {
     return 'AI enforcement blocked the latest warned entry. New entries continue only after AI returns no warning.'
   }
+  if (!streamsConnected.value) {
+    return 'Trade admission will be confirmed when live data arrives.'
+  }
   return 'New trades and re-entries are currently allowed.'
 })
 const admissionStatusTagType = computed(() =>
-  tradingPaused.value || tradeAdmissionWarning.value ? 'warning' : 'success'
+  tradingPaused.value || tradeAdmissionWarning.value
+    ? 'warning'
+    : streamsConnected.value ? 'success' : 'info'
 )
 const admissionToneClass = computed(() =>
-  tradingPaused.value || tradeAdmissionWarning.value ? 'is-warning' : 'is-open'
+  tradingPaused.value || tradeAdmissionWarning.value || !streamsConnected.value
+    ? 'is-warning'
+    : 'is-open'
 )
 
-function buildTabProps(
-  group: 'profit' | 'trade',
-  name: string,
-  activeName: string,
-): HTMLAttributes {
-  const selected = activeName === name
-  return {
-    id: `${group}-tab-${name}`,
-    role: 'tab',
-    tabindex: selected ? 0 : -1,
-    'aria-selected': String(selected),
-    'aria-controls': `${group}-panel-${name}`,
-    onKeydown: handleTabKeydown,
-  }
-}
-
-function getProfitTabProps(name: string): HTMLAttributes {
-  return buildTabProps('profit', name, activeProfitTab.value)
-}
-
-function getTradeTabProps(name: string): HTMLAttributes {
-  return buildTabProps('trade', name, activeTradesTab.value)
-}
-
-function handleTabKeydown(event: KeyboardEvent): void {
-  const currentTab = event.currentTarget as HTMLElement | null
-  const tablist = currentTab?.closest<HTMLElement>('[role="tablist"]')
-  if (!currentTab || !tablist) return
-
-  const tabs = Array.from(
-    tablist.querySelectorAll<HTMLElement>('[role="tab"]:not([aria-disabled="true"])'),
-  )
-  const currentIndex = tabs.indexOf(currentTab)
-  if (currentIndex < 0) return
-
-  if (event.key === 'Enter' || event.key === ' ') {
-    event.preventDefault()
-    currentTab.click()
-    return
-  }
-
-  let nextIndex: number | null = null
-  if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length
-  if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length
-  if (event.key === 'Home') nextIndex = 0
-  if (event.key === 'End') nextIndex = tabs.length - 1
-  if (nextIndex === null) return
-
-  event.preventDefault()
-  const nextTab = tabs[nextIndex]
-  nextTab.click()
-  void nextTick(() => nextTab.focus())
-}
-
-function syncTablistRoles(): void {
-  const groups = [
-    { root: profitTabsSection.value, label: 'Profit chart range' },
-    { root: tradeTabsSection.value, label: 'Trade state' },
-  ]
-  for (const { root, label } of groups) {
-    const tablist = root?.querySelector<HTMLElement>('.n-tabs-nav')
-    tablist?.setAttribute('role', 'tablist')
-    tablist?.setAttribute('aria-label', label)
-  }
-}
-
-onMounted(() => {
-  void nextTick(syncTablistRoles)
-})
 </script>
 
 <template>
   <div class="page-shell trades-page operator-console-page">
-    <section class="page-section trades-metrics" aria-label="Trade metrics">
-      <Statistics />
-    </section>
+    <header class="overview-heading">
+      <div>
+        <p class="overview-eyebrow">Operator console</p>
+        <h1>Trading overview</h1>
+        <p>Active deals, portfolio position, and system state in one place.</p>
+      </div>
+      <RouterLink class="overview-action" :to="{ name: 'stats' }">
+        View statistics <span aria-hidden="true">↗</span>
+      </RouterLink>
+    </header>
 
     <n-alert
       v-if="delistingWarnings.length > 0"
@@ -240,196 +252,291 @@ onMounted(() => {
     </n-alert>
 
     <section
-      class="admission-strip"
+      class="dashboard-panel admission-strip moonwalker-status"
       :class="admissionToneClass"
+      aria-labelledby="moonwalker-status-title"
       aria-live="polite"
     >
-      <n-tag
-        class="admission-pill"
-        :type="admissionStatusTagType"
-        :bordered="false"
-      >
-        {{ admissionStatusLabel }}
-      </n-tag>
-      <span class="admission-copy">
-        {{ admissionStatusCopy }}
-        <template v-if="!tradingPaused && !tradeAdmissionWarning">
-          Queue counts live only in the trade tabs below.
-        </template>
-      </span>
+      <div class="status-main">
+        <div class="status-heading">
+          <h2 id="moonwalker-status-title">Moonwalker status</h2>
+          <RouterLink :to="{ name: 'monitoring' }">Monitoring ↗</RouterLink>
+        </div>
+        <div class="status-state">
+          <n-tag class="admission-pill" :type="admissionStatusTagType" :bordered="false">
+            {{ admissionStatusLabel }}
+          </n-tag>
+          <span class="admission-copy">{{ admissionStatusCopy }}</span>
+        </div>
+      </div>
+      <div class="status-autopilot">
+        <h3>Autopilot</h3>
+        <div class="status-autopilot-value" :class="autopilotTone">{{ autopilotModeLabel }}</div>
+        <p v-if="autopilotSummary">{{ autopilotSummary }}</p>
+        <p v-if="greenPhaseHint">{{ greenPhaseHint }}</p>
+        <p v-if="!statisticsState.hasReceivedData.value || !autopilotPayload">Waiting for live status</p>
+        <RouterLink :to="{ name: 'controlCenterAutopilot' }">Open Autopilot ↗</RouterLink>
+      </div>
     </section>
 
-    <section
-      ref="profitTabsSection"
-      class="dashboard-panel chart-panel"
-      aria-label="Profit charts"
-    >
-      <n-tabs
-        v-model:value="activeProfitTab"
-        class="calm-tabs profit-tabs"
-        type="line"
-        size="large"
-        :tabs-padding="tabPadding"
-        pane-class="chart-pane"
-      >
-        <n-tab-pane
-          id="profit-panel-profit-overall"
-          name="profit-overall"
-          tab="Overall"
-          role="tabpanel"
-          aria-labelledby="profit-tab-profit-overall"
-          :tab-props="getProfitTabProps('profit-overall')"
-          display-directive="show"
-        >
-          <UpnlChart />
-        </n-tab-pane>
-        <n-tab-pane
-          id="profit-panel-daily-profit"
-          name="daily-profit"
-          tab="Daily"
-          role="tabpanel"
-          aria-labelledby="profit-tab-daily-profit"
-          :tab-props="getProfitTabProps('daily-profit')"
-          display-directive="show"
-        >
-          <Charts period="daily" />
-        </n-tab-pane>
-        <n-tab-pane
-          id="profit-panel-monthly-profit"
-          name="monthly-profit"
-          tab="Monthly"
-          role="tabpanel"
-          aria-labelledby="profit-tab-monthly-profit"
-          :tab-props="getProfitTabProps('monthly-profit')"
-          display-directive="show"
-        >
-          <Charts period="monthly" />
-        </n-tab-pane>
-        <n-tab-pane
-          id="profit-panel-yearly-profit"
-          name="yearly-profit"
-          tab="Yearly"
-          role="tabpanel"
-          aria-labelledby="profit-tab-yearly-profit"
-          :tab-props="getProfitTabProps('yearly-profit')"
-          display-directive="show"
-        >
-          <Charts period="yearly" />
-        </n-tab-pane>
-      </n-tabs>
-    </section>
-
-    <section
-      ref="tradeTabsSection"
-      class="dashboard-panel ledger-panel"
-      aria-label="Trades"
-    >
-      <n-tabs
-        v-model:value="activeTradesTab"
-        class="calm-tabs ledger-tabs"
-        type="line"
-        size="large"
-        :tabs-padding="tabPadding"
-      >
-        <n-tab-pane
-          id="trade-panel-open-trades"
-          name="open-trades"
-          role="tabpanel"
-          aria-labelledby="trade-tab-open-trades"
-          :tab-props="getTradeTabProps('open-trades')"
-        >
-          <template #tab>
-            <span class="trade-tab-label">{{ isMobile ? 'Open' : 'Open Trades' }}</span>
-          </template>
-            <OpenTrades
-             v-if="activeTradesTab === 'open-trades'"
-              :global-trading-paused="tradingPaused"
-            />
-          </n-tab-pane>
-          <n-tab-pane
-           id="trade-panel-unsellable-trades"
-           name="unsellable-trades"
-           role="tabpanel"
-           aria-labelledby="trade-tab-unsellable-trades"
-            :tab-props="getTradeTabProps('unsellable-trades')"
+    <div class="overview-middle">
+    <section class="dashboard-panel chart-panel" aria-label="Performance chart">
+      <div class="overview-panel-heading">
+        <div>
+          <h2>Performance</h2>
+          <p>{{ performanceDescription }}</p>
+        </div>
+        <div class="range-switcher" role="group" aria-label="Performance range">
+          <button
+            v-for="range in performanceRanges"
+            :key="range.value"
+            type="button"
+            :aria-pressed="performanceRange === range.value"
+            :class="{ 'is-active': performanceRange === range.value }"
+            @click="performanceRange = range.value"
           >
-          <template #tab>
-            <span class="trade-tab-label" :class="{ 'trade-tab-label-warning': unsellableTradesCount > 0 }">
-              <span>{{ isMobile ? 'Unsell.' : 'Unsellable' }}</span>
-              <span v-if="unsellableTradesCount > 0" class="trade-tab-count">{{ unsellableTradesCount }}</span>
-            </span>
-          </template>
-          <UnsellableTrades v-if="activeTradesTab === 'unsellable-trades'" />
-        </n-tab-pane>
-        <n-tab-pane
-          id="trade-panel-closed-trades"
-          name="closed-trades"
-          role="tabpanel"
-          aria-labelledby="trade-tab-closed-trades"
-          :tab-props="getTradeTabProps('closed-trades')"
-        >
-          <template #tab>
-            <span class="trade-tab-label">{{ isMobile ? 'Closed' : 'Closed Trades' }}</span>
-          </template>
-          <ClosedTrades v-if="activeTradesTab === 'closed-trades'" />
-        </n-tab-pane>
-      </n-tabs>
+            {{ range.label }}
+          </button>
+        </div>
+      </div>
+      <UpnlChart v-if="performanceRange === 'all'" :range="performanceRange" />
+      <Charts v-else :key="performanceRange" :period="profitPeriod" />
+    </section>
+    <section class="trades-metrics" aria-label="Portfolio exposure">
+      <Statistics />
+    </section>
+    </div>
+
+    <section class="overview-trades" aria-label="Trade records">
+      <div class="trade-view-selector" role="group" aria-label="Trade records">
+        <button type="button" :aria-pressed="activeTradeView === 'open'" :class="{ 'is-active': activeTradeView === 'open' }" @click="activeTradeView = 'open'">Open trades <span>{{ openTradesCount }}</span></button>
+        <span class="trade-view-divider" aria-hidden="true">|</span>
+        <button type="button" :aria-pressed="activeTradeView === 'closed'" :class="{ 'is-active': activeTradeView === 'closed' }" @click="activeTradeView = 'closed'">Closed trades <span>{{ closedTradesCount }}</span></button>
+        <span class="trade-view-divider" aria-hidden="true">|</span>
+        <button type="button" :aria-pressed="activeTradeView === 'unsellable'" :class="{ 'is-active': activeTradeView === 'unsellable' }" @click="activeTradeView = 'unsellable'">Unsellable trades <span>{{ unsellableTradesCount }}</span></button>
+      </div>
+      <div class="dashboard-panel ledger-panel trade-table-panel">
+        <OpenTrades v-if="activeTradeView === 'open'" :global-trading-paused="tradingPaused" />
+        <ClosedTrades v-else-if="activeTradeView === 'closed'" />
+        <UnsellableTrades v-else />
+      </div>
     </section>
   </div>
 </template>
 
 <style scoped>
+.overview-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  margin-bottom: 2px;
+}
+
+.overview-eyebrow {
+  margin: 0 0 8px;
+  color: var(--mw-color-primary);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.overview-heading h1 {
+  margin: 0 0 8px;
+  color: var(--mw-color-text-primary);
+  font-family: var(--mw-font-display);
+  font-size: clamp(25px, 2.5vw, 32px);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 1.1;
+}
+
+.overview-heading p:last-child {
+  margin: 0;
+  color: var(--mw-color-text-muted);
+  font-size: 13px;
+}
+
+.overview-action {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--mw-color-primary);
+  border-radius: 6px;
+  background: var(--mw-color-primary);
+  color: var(--mw-color-surface-base);
+  font-size: 12px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.overview-action:focus-visible,
+.overview-section-heading a:focus-visible {
+  outline: 2px solid var(--mw-color-primary);
+  outline-offset: 3px;
+}
+
+.admission-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.42fr);
+  gap: 18px;
+  padding: 14px 18px;
+  border: 1px solid var(--mw-color-border);
+  background: var(--mw-color-surface-panel);
+  box-shadow: none;
+}
+
+.status-heading,
+.status-state { display: flex; align-items: center; gap: 12px; }
+.status-heading { justify-content: space-between; margin-bottom: 8px; }
+.status-heading h2 { margin: 0; color: var(--mw-color-text-primary); font-size: 14px; font-weight: 600; }
+.status-heading a { color: var(--mw-color-primary); font-size: 11px; font-weight: 600; text-decoration: none; }
+.status-state { align-items: flex-start; flex-wrap: wrap; }
+.admission-copy { flex: 1 1 220px; color: var(--mw-color-text-muted); font-size: 12px; line-height: 1.45; }
+.status-autopilot { min-width: 0; padding-left: 18px; border-left: 1px solid var(--mw-color-border); }
+.status-autopilot h3 { margin: 0 0 6px; color: var(--mw-color-text-primary); font-size: 12px; font-weight: 600; }
+.status-autopilot-value { color: var(--mw-color-text-primary); font-family: var(--mw-font-display); font-size: 18px; font-weight: 600; line-height: 1; }
+.status-autopilot-value.green { color: var(--mw-color-success); }
+.status-autopilot-value.orange { color: var(--mw-color-warning); }
+.status-autopilot-value.red { color: var(--mw-color-error); }
+.status-autopilot-value.muted { color: var(--mw-color-text-muted); }
+.status-autopilot p { margin: 5px 0 0; color: var(--mw-color-text-muted); font-size: 11px; line-height: 1.3; }
+.status-autopilot a { display: inline-block; margin-top: 5px; color: var(--mw-color-primary); font-size: 11px; font-weight: 600; text-decoration: none; }
+.status-autopilot a:focus-visible { outline: 2px solid var(--mw-color-primary); outline-offset: 3px; }
+
 .trades-metrics {
   width: 100%;
-}
-
-.trades-metrics :deep(.n-alert) {
-  display: none;
-}
-
-.chart-panel :deep(.chart-wrap) {
-  height: 190px;
-  min-height: 190px;
-  overflow: hidden;
-  border: 1px solid var(--mw-color-border);
-  border-radius: 9px;
-  background: linear-gradient(180deg, var(--mw-color-surface-panel), var(--mw-surface-card-muted));
-}
-
-.chart-panel :deep(.chart),
-.chart-panel :deep(.chart-placeholder) {
-  height: 190px !important;
-  min-height: 190px;
-}
-
-.chart-pane {
   min-width: 0;
 }
 
-.trade-tab-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-weight: 450;
+.overview-middle {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(290px, 0.85fr);
+  align-items: stretch;
+  gap: 14px;
+  min-width: 0;
 }
 
-.trade-tab-label-warning {
-  color: var(--mw-color-warning);
+.overview-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 19px 20px 12px;
 }
 
-.trade-tab-count {
+.range-switcher {
   display: inline-flex;
+  flex: none;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--mw-color-border);
+  border-radius: 7px;
+  background: var(--mw-surface-card-muted);
+}
+
+.range-switcher button {
+  min-width: 42px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--mw-color-text-muted);
+  font: 600 11px var(--mw-font-body);
+  cursor: pointer;
+}
+
+.range-switcher button:hover { color: var(--mw-color-text-primary); }
+.range-switcher button.is-active {
+  background: var(--mw-color-surface-panel);
+  color: var(--mw-color-primary);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+}
+.range-switcher button:focus-visible { outline: 2px solid var(--mw-color-primary); }
+
+.overview-panel-heading h2,
+.overview-section-heading h2 {
+  margin: 0;
+  color: var(--mw-color-text-primary);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.overview-panel-heading p {
+  margin: 5px 0 0;
+  color: var(--mw-color-text-muted);
+  font-size: 11px;
+}
+
+.overview-trades {
+  min-width: 0;
+}
+
+.trade-view-selector { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.trade-view-selector button { min-height: 36px; padding: 0 6px; border: 0; background: transparent; color: var(--mw-color-text-muted); font: 600 16px var(--mw-font-body); cursor: pointer; }
+.trade-view-selector button.is-active { color: var(--mw-color-text-primary); }
+.trade-view-selector button:hover { color: var(--mw-color-primary); }
+.trade-view-selector button:focus-visible { outline: 2px solid var(--mw-color-primary); outline-offset: 2px; border-radius: 4px; }
+.trade-view-selector button span { margin-left: 3px; color: var(--mw-color-text-muted); font-size: 13px; font-weight: 500; }
+.trade-view-divider { color: var(--mw-color-border-strong); font-size: 16px; }
+
+.trade-table-panel {
+  overflow: visible;
+  padding: 12px 16px 16px;
+}
+
+.trade-table-panel :deep(.n-data-table) {
+  width: 100%;
+  min-width: 0;
+  font-family: var(--mw-font-body);
+}
+
+.trade-table-panel :deep(.n-data-table-td) {
+  font-family: var(--mw-font-body);
+  font-size: 13px;
+}
+
+.trade-table-panel :deep(.n-data-table-th) {
+  border-bottom-color: var(--mw-color-border);
+  font-family: var(--mw-font-body);
+  font-size: 11px;
+}
+
+.overview-section-heading {
+  display: flex;
   align-items: center;
-  min-width: 20px;
-  justify-content: center;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: rgba(183, 138, 46, 0.14);
-  color: var(--mw-color-warning);
-  font-family: var(--mw-font-mono);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.2;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 32px;
+  margin-bottom: 10px;
+}
+
+.overview-section-heading h2 {
+  font-size: 16px;
+}
+
+.overview-section-heading h2 span {
+  margin-left: 4px;
+  color: var(--mw-color-text-muted);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.chart-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.chart-panel :deep(.chart-wrap) {
+  flex: 1;
+  min-height: 230px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 .ledger-panel :deep(.trade-symbol-cell),
@@ -443,8 +550,8 @@ onMounted(() => {
 .ledger-panel :deep(.trade-symbol-main) {
   color: var(--mw-color-text-primary);
   font-family: var(--mw-font-body);
-  font-size: 16px;
-  font-weight: 500;
+  font-size: 13px;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
@@ -458,7 +565,9 @@ onMounted(() => {
 
 .ledger-panel :deep(.trade-cell-main) {
   color: var(--mw-color-text-primary);
-  font-size: 14px;
+  font-family: var(--mw-font-body);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
   line-height: 1.2;
 }
 
@@ -476,6 +585,7 @@ onMounted(() => {
 
 .ledger-panel :deep(.trade-cell-sub) {
   color: var(--mw-color-text-muted);
+  font-family: var(--mw-font-body);
   font-size: 12px;
   line-height: 1.2;
 }
@@ -521,7 +631,7 @@ onMounted(() => {
 
 .ledger-panel :deep(.trade-progress-label) {
   color: var(--mw-color-text-muted);
-  font-family: var(--mw-font-mono);
+  font-family: var(--mw-font-body);
   font-size: 12px;
   line-height: 1.2;
 }
@@ -542,13 +652,39 @@ onMounted(() => {
   color: var(--mw-color-primary);
 }
 
+@media (max-width: 700px) {
+  .admission-strip { grid-template-columns: minmax(0, 1fr); }
+  .status-autopilot { padding-left: 0; padding-top: 12px; border-left: 0; border-top: 1px solid var(--mw-color-border); }
+}
+
+@media (max-width: 980px) {
+  .overview-middle { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 650px) {
+  .trade-view-selector { gap: 2px; }
+  .trade-view-selector button { min-height: 44px; font-size: 13px; }
+  .trade-view-selector button span { font-size: 12px; }
+}
+
 @media (max-width: 767px) {
-  .chart-panel :deep(.chart-wrap),
-  .chart-panel :deep(.chart),
-  .chart-panel :deep(.chart-placeholder) {
-    height: 240px !important;
-    min-height: 240px;
+  .overview-heading {
+    align-items: flex-start;
   }
+
+  .overview-action {
+    display: none;
+  }
+
+  .overview-panel-heading {
+    flex-wrap: wrap;
+    padding: 16px 14px 10px;
+  }
+
+  .range-switcher { width: 100%; }
+  .range-switcher button { flex: 1; min-height: 36px; }
+  .trade-table-panel { padding: 8px 10px 10px; }
+
 }
 
 @media (max-width: 520px) {
@@ -572,41 +708,6 @@ onMounted(() => {
     width: 0 !important;
     min-width: 0 !important;
     max-width: 0 !important;
-  }
-
-  .profit-tabs :deep(.n-tabs-wrapper) {
-    display: flex;
-    width: 100%;
-  }
-
-  .ledger-tabs :deep(.n-tabs-wrapper) {
-    display: flex;
-    width: 100%;
-  }
-
-  .profit-tabs :deep(.n-tabs-tab-wrapper),
-  .ledger-tabs :deep(.n-tabs-tab-wrapper) {
-    flex: 1 1 0;
-    min-width: 0;
-  }
-
-  .profit-tabs :deep(.n-tabs-tab),
-  .ledger-tabs :deep(.n-tabs-tab) {
-    justify-content: center;
-    width: 100%;
-  }
-
-  .ledger-tabs :deep(.n-tabs-tab) {
-    padding-left: 4px;
-    padding-right: 4px;
-  }
-
-  .ledger-tabs .trade-tab-label {
-    min-width: 0;
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   .ledger-panel :deep(.n-data-table-th[data-col-key="symbol"]),

@@ -1,196 +1,98 @@
 <template>
-    <n-flex vertical :size="8" class="statistics-shell">
-        <n-alert
-            v-if="!hasStatisticsData"
-            title="Waiting for live statistics..."
-            type="info"
-            role="status"
-            aria-live="polite"
-        />
-        <div class="statistics-grid">
-            <div class="stat-cell">
-                <n-statistic
-                    :class="profit_class"
-                    label="Profit overall"
-                    :value="formatFixed2(profit_overall)"
-                />
-            </div>
-            <div class="stat-cell">
-                <n-statistic
-                    :class="upnl_class"
-                    label="UPNL"
-                    :value="formatFixed2(upnl)"
-                />
-            </div>
-            <div class="stat-cell autopilot-cell">
-                <div class="stacked-stat autopilot-stat">
-                    <span class="autopilot-label">Autopilot mode</span>
-                    <span
-                        class="autopilot-value"
-                        :class="autopilot_class"
-                    >
-                        {{ autopilot_mode_label }}
-                    </span>
-                    <span v-if="autopilot_summary" class="autopilot-subtext">{{ autopilot_summary }}</span>
-                    <span v-if="green_phase_hint" class="autopilot-detail">{{ green_phase_hint }}</span>
-                    <RouterLink
-                        class="autopilot-action"
-                        :to="{ name: 'controlCenterAutopilot' }"
-                    >
-                        Open Autopilot
-                    </RouterLink>
+    <div class="statistics-shell">
+        <section class="portfolio-card" aria-labelledby="portfolio-exposure-title">
+                <div class="stat-heading">
+                    <h2 id="portfolio-exposure-title">Portfolio exposure</h2>
+                    <p>Free quote and capital committed to open deals</p>
                 </div>
-            </div>
-            <div class="stat-cell">
-                <n-statistic label="Funds locked" :value="formatFixed2(funds_locked)" />
-            </div>
-            <div class="stat-cell">
-                <div class="stacked-stat funds-stat">
-                    <span class="funds-label">Funds available</span>
-                    <span class="funds-value">
-                        {{ formatOptionalFixed2(funds_tradable) }}
-                    </span>
-                    <span class="stat-detail">
-                        Exchange free {{ formatOptionalFixed2(funds_available) }}
-                    </span>
-                    <span v-if="capital_available_quote !== null" class="stat-detail">
-                        Budget headroom {{ formatFixed2(Math.max(0, capital_available_quote)) }}
-                    </span>
+                <div class="profit-summary">
+                    <div class="profit-label">Net profit &amp; loss</div>
+                    <n-statistic :class="hasStatisticsData ? profit_class : undefined" :value="hasStatisticsData ? formatFixed2(profit_overall) : 'Unavailable'" />
+                    <div v-if="hasStatisticsData" class="stat-detail">Realized {{ formatFixed2(profit_overall - upnl) }} · Unrealized {{ formatFixed2(upnl) }}</div>
                 </div>
-            </div>
-        </div>
-    </n-flex>
+                <template v-if="exposure">
+                    <div class="budget-heading"><span>Budget allocation</span><strong>{{ exposure.percent }}% in active positions</strong></div>
+                    <div class="exposure-track" role="img" :aria-label="`${formatFixed2(exposure.locked)} ${quote_currency} in deals, ${formatFixed2(exposure.tradable)} ${quote_currency} available to trade, ${formatFixed2(exposure.remainingFree)} ${quote_currency} other exchange free`">
+                        <span class="exposure-locked" :style="{ width: `${exposure.lockedPercent}%` }" />
+                        <span class="exposure-tradable" :style="{ width: `${exposure.tradablePercent}%` }" />
+                        <span class="exposure-free" :style="{ width: `${exposure.remainingFreePercent}%` }" />
+                    </div>
+                    <div class="exposure-legend">
+                        <span><i class="legend-key is-locked" aria-hidden="true" />Funds in deals <strong>{{ formatFixed2(exposure.locked) }} {{ quote_currency }}</strong></span>
+                        <span><i class="legend-key is-tradable" aria-hidden="true" />Available to trade <strong>{{ formatFixed2(exposure.tradable) }} {{ quote_currency }}</strong></span>
+                        <span><i class="legend-key is-free" aria-hidden="true" />Other exchange free <strong>{{ formatFixed2(exposure.remainingFree) }} {{ quote_currency }}</strong></span>
+                    </div>
+                    <div class="exposure-totals"><span>Exchange free <strong>{{ formatFixed2(exposure.available) }} {{ quote_currency }}</strong></span><span>Portfolio value <strong>{{ portfolio_value === null ? 'Unavailable' : formatFixed2(portfolio_value) }} {{ quote_currency }}</strong></span></div>
+                </template>
+                <p v-else class="exposure-unavailable" role="status">Waiting for live balances</p>
+        </section>
+    </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
-import { formatAutopilotMemoryHint } from '../autopilot/presentation'
+import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
+const configSnapshotStore = useSharedConfigSnapshot()
 const hasStatisticsData = computed(() => statistics_data.hasReceivedData.value)
 const profit_overall = ref(0)
 const profit_class = ref<'green' | 'red'>('green')
 const upnl = ref(0)
-const upnl_class = ref<'green' | 'red'>('green')
 const funds_locked = ref(0)
 const funds_available = ref<number | null>(null)
 const funds_tradable = ref<number | null>(null)
-const capital_available_quote = ref<number | null>(null)
-const autopilot_class = ref<'green' | 'red' | 'orange' | 'muted'>('muted')
-const autopilot_state = ref<'high' | 'medium' | 'low' | 'none'>('none')
-const autopilot_effective_max_bots = ref(0)
-const autopilot_green_phase_detected = ref(false)
-const autopilot_green_phase_active = ref(false)
-const autopilot_green_phase_extra_deals = ref(0)
-const autopilot_green_phase_block_reason = ref<string | null>(null)
-const autopilot_memory_status = ref<string | null>(null)
-const autopilot_memory_stale = ref(false)
-const autopilot_memory_stale_reason = ref<string | null>(null)
-const autopilot_memory_current_closes = ref(0)
-const autopilot_memory_required_closes = ref(0)
-
-const autopilot_summary = computed(() => {
-    if (autopilot_state.value === 'none') {
-        return ''
+const portfolio_value = computed(() =>
+    funds_available.value === null
+        ? null
+        : Math.max(0, funds_available.value + funds_locked.value + upnl.value),
+)
+const exposure = computed(() => {
+    const available = funds_available.value
+    if (available === null) return null
+    const locked = Math.max(0, funds_locked.value)
+    const free = Math.max(0, available)
+    const total = locked + free
+    const tradable = Math.min(free, Math.max(0, funds_tradable.value ?? free))
+    const remainingFree = free - tradable
+    const lockedPercent = total > 0 ? (locked / total) * 100 : 0
+    return {
+        available: free,
+        locked,
+        tradable,
+        remainingFree,
+        percent: Math.round(lockedPercent),
+        lockedPercent,
+        tradablePercent: total > 0 ? (tradable / total) * 100 : 0,
+        remainingFreePercent: total > 0 ? (remainingFree / total) * 100 : 0,
     }
-    return `Effective max bots ${autopilot_effective_max_bots.value}`
 })
-
-const autopilot_mode_label = computed(() => {
-    if (autopilot_state.value === 'none') {
-        return 'Disabled'
-    }
-    return autopilot_state.value.charAt(0).toUpperCase() + autopilot_state.value.slice(1)
-})
-
-const green_phase_hint = computed(() => {
-    if (autopilot_state.value === 'none') {
-        return ''
-    }
-    if (autopilot_memory_stale.value || autopilot_memory_status.value === 'warming_up') {
-        return formatAutopilotMemoryHint({
-            currentCloses: autopilot_memory_current_closes.value,
-            requiredCloses: autopilot_memory_required_closes.value,
-            stale: autopilot_memory_stale.value,
-            staleReason: autopilot_memory_stale_reason.value,
-            status: autopilot_memory_status.value,
-        })
-    }
-    if (autopilot_green_phase_active.value) {
-        return `Green phase active (+${autopilot_green_phase_extra_deals.value} deals)`
-    }
-    if (autopilot_green_phase_detected.value && autopilot_green_phase_block_reason.value) {
-        return `Green phase blocked: ${formatBlockReason(autopilot_green_phase_block_reason.value)}`
-    }
-    return 'Green phase idle'
-})
+const quote_currency = computed(() =>
+    String(configSnapshotStore.snapshot.value?.currency ?? '').toUpperCase(),
+)
 
 // Get new statistics data
 watch(statistics_data.data, (newData) => {
     if (newData !== undefined && newData !== null) {
         const websocket_data = newData as any
         upnl.value = toNumberOrZero(websocket_data.upnl)
-        upnl_class.value = row_classes(upnl.value)
         profit_overall.value = toNumberOrZero(websocket_data.profit_overall)
         profit_class.value = row_classes(profit_overall.value)
         funds_locked.value = toNumberOrZero(websocket_data.funds_locked)
         funds_available.value = toOptionalNumber(websocket_data.funds_available)
-        capital_available_quote.value = toOptionalNumber(
-            websocket_data.capital_available_quote,
-        )
-        funds_tradable.value =
-            toOptionalNumber(websocket_data.funds_tradable) ??
-            deriveTradableFunds(
-                funds_available.value,
-                capital_available_quote.value,
-                websocket_data.capital_budget_reason,
+        const capitalAvailable = toOptionalNumber(websocket_data.capital_available_quote)
+        const reportedTradable = toOptionalNumber(websocket_data.funds_tradable)
+        funds_tradable.value = funds_available.value === null
+            ? null
+            : Math.min(
+                Math.max(0, funds_available.value),
+                Math.max(0, reportedTradable ?? (
+                    capitalAvailable === null || websocket_data.capital_budget_reason === 'capital_budget_unconfigured'
+                        ? funds_available.value : capitalAvailable
+                )),
             )
-        autopilot_effective_max_bots.value =
-            toNumberOrZero(websocket_data.autopilot_effective_max_bots)
-        autopilot_green_phase_detected.value =
-            Boolean(websocket_data.autopilot_green_phase_detected)
-        autopilot_green_phase_active.value =
-            Boolean(websocket_data.autopilot_green_phase_active)
-        autopilot_green_phase_extra_deals.value =
-            toNumberOrZero(websocket_data.autopilot_green_phase_extra_deals)
-        autopilot_green_phase_block_reason.value =
-            typeof websocket_data.autopilot_green_phase_block_reason === 'string'
-                ? websocket_data.autopilot_green_phase_block_reason
-                : null
-        autopilot_memory_status.value =
-            typeof websocket_data.autopilot_memory_status === 'string'
-                ? websocket_data.autopilot_memory_status
-                : null
-        autopilot_memory_stale.value = Boolean(
-            websocket_data.autopilot_memory_stale,
-        )
-        autopilot_memory_stale_reason.value =
-            typeof websocket_data.autopilot_memory_stale_reason === 'string'
-                ? websocket_data.autopilot_memory_stale_reason
-                : null
-        autopilot_memory_current_closes.value = toNumberOrZero(
-            websocket_data.autopilot_memory_current_closes,
-        )
-        autopilot_memory_required_closes.value = toNumberOrZero(
-            websocket_data.autopilot_memory_required_closes,
-        )
-        if (websocket_data.autopilot == "high") {
-            autopilot_state.value = 'high'
-            autopilot_class.value = "red"
-        } else if (websocket_data.autopilot == "medium") {
-            autopilot_state.value = 'medium'
-            autopilot_class.value = "orange"
-        } else if (websocket_data.autopilot == "low") {
-            autopilot_state.value = 'low'
-            autopilot_class.value = "green"
-        } else {
-            autopilot_state.value = 'none'
-            autopilot_class.value = "muted"
-        }
-
     }
 
 }, { immediate: true })
@@ -216,224 +118,97 @@ function toOptionalNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null
 }
 
-function deriveTradableFunds(
-    exchangeAvailable: number | null,
-    capitalAvailable: number | null,
-    capitalReason: unknown,
-): number | null {
-    if (exchangeAvailable === null) {
-        return null
-    }
-    if (
-        capitalAvailable === null ||
-        capitalReason === 'capital_budget_unconfigured'
-    ) {
-        return Math.max(0, exchangeAvailable)
-    }
-    return Math.min(Math.max(0, exchangeAvailable), Math.max(0, capitalAvailable))
-}
-
 function formatFixed2(value: number): string {
     return value.toFixed(2)
-}
-
-function formatOptionalFixed2(value: number | null): string {
-    return value === null ? 'Unavailable' : formatFixed2(value)
-}
-
-function formatBlockReason(value: string): string {
-    return value.replaceAll('_', ' ')
 }
 
 </script>
 
 <style scoped>
-.statistics-shell {
-    width: 100%;
-}
-
-.statistics-grid {
-    width: 100%;
-    display: grid;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 12px;
-}
-
-.stat-cell {
+.statistics-shell { height: 100%; }
+.portfolio-card {
+    display: flex;
+    flex-direction: column;
     min-width: 0;
-    min-height: 92px;
-    padding: 16px;
+    min-height: 320px;
+    height: 100%;
+    padding: 19px 20px;
     border: 1px solid var(--mw-color-border);
     border-radius: var(--mw-radius-md, 10px);
-    background: var(--mw-surface-card);
-    display: flex;
-    align-items: stretch;
-    justify-content: flex-start;
-    box-shadow: var(--mw-shadow-card);
+    background: var(--mw-color-surface-panel);
 }
-
-.stat-detail {
-    color: var(--mw-color-text-muted);
-    font-size: 12px;
-    line-height: 1.25;
-    text-align: left;
-    overflow-wrap: anywhere;
+.stat-heading h2 {
+    margin: 0;
+    color: var(--mw-color-text-primary);
+    font-size: 14px;
+    font-weight: 600;
 }
-
-:deep(.n-statistic) {
-    width: 100%;
-    text-align: left;
-}
-
-:deep(.n-statistic__label) {
-    color: var(--mw-color-text-muted);
-    font-size: 12px;
-    font-weight: 450;
-    letter-spacing: 0.075em;
-    line-height: 1.2;
-    text-transform: uppercase;
-}
-
+.stat-heading p { margin: 5px 0 0; color: var(--mw-color-text-muted); font-size: 11px; }
+.profit-summary { margin-top: 20px; }
+.profit-label { margin-bottom: 8px; color: var(--mw-color-text-primary); font-size: 13px; font-weight: 600; }
+.stat-detail,
+.exposure-unavailable { color: var(--mw-color-text-muted); font-size: 11px; line-height: 1.35; }
+.stat-detail { margin-top: 5px; }
 :deep(.n-statistic-value) {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-mono);
-    font-size: 23px;
-    font-weight: 450;
+    font-size: clamp(21px, 2vw, 29px);
     font-variant-numeric: tabular-nums;
-    line-height: 1.12;
-    margin-top: 6px;
-}
-
-:deep(.n-statistic-value__content) {
-    font-weight: 450;
-}
-
-.red {
-     --n-value-text-color: #B4443F !important;
-}
-
-.green {
-     --n-value-text-color: #2E7D5B !important;
-}
-
-.orange {
-     --n-value-text-color: #B7791F !important;
-}
-
-.stacked-stat {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    justify-content: flex-start;
-    text-align: left;
-    gap: 6px;
-    height: 100%;
-    width: 100%;
-}
-
-.funds-value {
-    color: var(--n-value-text-color);
-    font-family: var(--mw-font-mono);
-    font-size: 23px;
-    font-weight: 450;
-    font-variant-numeric: tabular-nums;
+    font-weight: 600;
     line-height: 1.15;
 }
-
-.autopilot-value {
-    color: var(--mw-color-text-primary);
-    font-family: var(--mw-font-display);
-    font-size: 23px;
-    font-weight: 450;
-    line-height: 1.12;
-    margin-top: 6px;
-}
-
-.autopilot-action {
-    color: var(--mw-color-primary);
-    font-size: 12px;
-    font-weight: 600;
-    line-height: 1.2;
-    text-decoration: underline;
-    text-underline-offset: 3px;
-}
-
-.autopilot-action:focus-visible {
-    border-radius: 2px;
-    outline: 2px solid var(--mw-color-primary);
-    outline-offset: 3px;
-}
-
-.autopilot-label,
-.funds-label {
+:deep(.n-statistic-value__content) { font-weight: 600; }
+.green { --n-value-text-color: var(--mw-color-success) !important; }
+.red { --n-value-text-color: var(--mw-color-error) !important; }
+.budget-heading {
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: auto;
+    padding-top: 24px;
     color: var(--mw-color-text-muted);
-    font-size: 12px;
-    font-weight: 450;
-    letter-spacing: 0.075em;
-    line-height: 1.2;
-    text-transform: uppercase;
+    font-size: 11px;
 }
-
-.autopilot-subtext,
-.autopilot-detail {
-    font-size: 12px;
+.budget-heading strong { color: var(--mw-color-text-primary); font-weight: 600; }
+.exposure-track {
+    display: flex;
+    height: 17px;
+    margin-top: 10px;
+    overflow: hidden;
+    border-radius: 9px;
+    background: var(--mw-surface-card-muted);
+}
+.exposure-track > span { height: 100%; min-width: 0; }
+.exposure-track > span + span { border-left: 2px solid var(--mw-color-surface-panel); }
+.exposure-locked { background: var(--mw-color-primary); }
+.exposure-tradable { background: var(--mw-color-info); }
+.exposure-free { background: var(--mw-color-text-muted); }
+.exposure-legend { display: grid; gap: 8px; margin-top: 16px; }
+.exposure-legend > span {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
     color: var(--mw-color-text-muted);
+    font-size: 11px;
 }
-
-.autopilot-value.red {
-    color: #B4443F;
+.exposure-legend strong,
+.exposure-totals strong { margin-left: auto; color: var(--mw-color-text-primary); font-weight: 600; white-space: nowrap; }
+.legend-key { flex: none; width: 8px; height: 8px; border-radius: 2px; }
+.legend-key.is-locked { background: var(--mw-color-primary); }
+.legend-key.is-tradable { background: var(--mw-color-info); }
+.legend-key.is-free { background: var(--mw-color-text-muted); }
+.exposure-totals {
+    display: grid;
+    gap: 7px;
+    margin-top: 15px;
+    padding-top: 12px;
+    border-top: 1px solid var(--mw-color-border);
 }
-
-.autopilot-value.orange {
-    color: #B7791F;
-}
-
-.muted {
-    color: var(--mw-color-text-muted);
-}
-
+.exposure-totals span { display: flex; gap: 10px; color: var(--mw-color-text-muted); font-size: 11px; }
+.exposure-unavailable { margin: auto 0 0; padding-top: 24px; }
 @media (max-width: 767px) {
-    .statistics-grid {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        overflow: visible;
-        gap: 8px;
-    }
-
-    .stat-cell {
-        min-width: 0;
-        min-height: 82px;
-        padding: 12px;
-        border-radius: 6px;
-    }
-
-    :deep(.n-statistic__label) {
-        font-size: 12px;
-        line-height: 1.2;
-    }
-
-    :deep(.n-statistic-value) {
-        font-size: 24px;
-        line-height: 1.15;
-    }
-
-    .autopilot-label,
-    .funds-label {
-        font-size: 12px;
-        line-height: 1.2;
-    }
-
-}
-
-@media (min-width: 769px) and (max-width: 1200px) {
-      .statistics-grid {
-         grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-}
-
-@media (max-width: 520px) {
-    .statistics-grid {
-        grid-template-columns: 1fr;
-        gap: 12px;
-    }
+    .portfolio-card { min-height: 300px; padding: 16px; }
 }
 </style>

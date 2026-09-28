@@ -66,6 +66,10 @@ const statisticsSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'Statistics.vue'),
     'utf8',
 )
+const tradesViewSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'views', 'TradesView.vue'),
+    'utf8',
+)
 const headerSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'components', 'AppHeader.vue'),
     'utf8',
@@ -98,22 +102,26 @@ test('preview exposes the required Autopilot actions and state copy', () => {
 })
 
 test('main dashboard Autopilot navigation uses an explicit action', () => {
-    assert.match(statisticsSource, /<div class="stat-cell autopilot-cell">/)
-    assert.match(statisticsSource, /class="autopilot-action"/)
-    assert.match(statisticsSource, /:to="\{ name: 'controlCenterAutopilot' \}"/)
-    assert.match(statisticsSource, />\s*Open Autopilot\s*<\/RouterLink>/)
-    assert.doesNotMatch(statisticsSource, /class="stat-cell autopilot-cell autopilot-link"/)
-    assert.doesNotMatch(statisticsSource, /role="link"/)
-    assert.doesNotMatch(statisticsSource, /tabindex="0"/)
-    assert.doesNotMatch(statisticsSource, /@click="openAutopilotPage"/)
-    assert.doesNotMatch(statisticsSource, /router\.push\(\{ name: 'controlCenterAutopilot' \}\)/)
+    assert.match(tradesViewSource, /<div class="status-autopilot">/)
+    assert.match(tradesViewSource, /:to="\{ name: 'controlCenterAutopilot' \}"/)
+    assert.match(tradesViewSource, />\s*Open Autopilot ↗\s*<\/RouterLink>/)
+    assert.doesNotMatch(tradesViewSource, /class="stat-cell autopilot-cell autopilot-link"/)
+    assert.doesNotMatch(tradesViewSource, /role="link"/)
+    assert.doesNotMatch(tradesViewSource, /tabindex="0"/)
+    assert.doesNotMatch(tradesViewSource, /@click="openAutopilotPage"/)
+    assert.doesNotMatch(tradesViewSource, /router\.push\(\{ name: 'controlCenterAutopilot' \}\)/)
 })
 
-test('main dashboard funds card shows tradable funds with exchange context', () => {
+test('main dashboard exposure shows tradable funds with exchange context', () => {
     assert.match(statisticsSource, /funds_tradable/)
     assert.match(statisticsSource, /capital_available_quote/)
+    assert.match(statisticsSource, /Portfolio value/)
+    assert.match(statisticsSource, /Net profit &amp; loss/)
+    assert.match(statisticsSource, /Funds in deals/)
+    assert.match(statisticsSource, /Available to trade/)
     assert.match(statisticsSource, /Exchange free/)
-    assert.match(statisticsSource, /Budget headroom/)
+    assert.match(statisticsSource, /exposure-free/)
+    assert.match(statisticsSource, /exposure-tradable/)
 })
 
 test('full Autopilot page stays read-only and links tuning back to Advanced', () => {
@@ -166,7 +174,7 @@ test('owner confidence summary reuses Autopilot and live-data signals', () => {
     assert.doesNotMatch(ownerConfidenceSource, /Receiving payloads/)
 })
 
-test('header navigation keeps Control Center and removes duplicate Monitoring entry', () => {
+test('sidebar navigation keeps Control Center and one Monitoring entry', () => {
     assert.match(headerSource, /Control Center/)
-    assert.doesNotMatch(headerSource, /label:\s*'Monitoring'/)
+    assert.equal((headerSource.match(/label:\s*'Monitoring'/g) ?? []).length, 1)
 })

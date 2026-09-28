@@ -278,14 +278,23 @@ watch(
 <style scoped>
 .app-layout {
   width: 100%;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  grid-template-rows: 64px minmax(0, 1fr);
 }
 
 .app-content {
   width: 100%;
-  max-width: 1392px;
-  margin: 0 auto;
+  min-width: 0;
+  grid-column: 2;
+  grid-row: 2;
+}
+
+@media (max-width: 820px) {
+  .app-layout {
+    display: flex;
+    flex-direction: column;
+  }
 }
 </style>

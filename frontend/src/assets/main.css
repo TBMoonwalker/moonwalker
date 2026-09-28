@@ -3,8 +3,8 @@
 #app {
   width: 100%;
   min-height: 100vh;
-  margin: 0 auto;
-  padding: clamp(12px, 2vw, 24px);
+  margin: 0;
+  padding: 0;
   font-weight: normal;
 }
 
@@ -16,11 +16,12 @@ body {
 
 .page-shell {
   width: 100%;
-  max-width: var(--mw-content-width);
+  max-width: 1500px;
   margin: 0 auto;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 18px;
+  padding: clamp(18px, 2.5vw, 38px);
 }
 
 .page-header {
@@ -32,8 +33,31 @@ body {
 }
 
 .operator-console-page {
-  gap: 12px;
-  max-width: 1392px;
+  gap: 18px;
+}
+
+.operator-page-heading {
+  display: grid;
+  gap: 6px;
+  padding: 2px 0 6px;
+}
+
+.operator-page-heading h1 {
+  margin: 0;
+  color: var(--mw-color-text-primary);
+  font-family: var(--mw-font-display);
+  font-size: clamp(1.5rem, 2vw, 2.25rem);
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.operator-page-heading p {
+  max-width: 72ch;
+  margin: 0;
+  color: var(--mw-color-text-secondary);
+  font-size: 0.875rem;
+  line-height: 1.45;
 }
 
 .dashboard-panel {
@@ -43,7 +67,7 @@ body {
   border: 1px solid var(--mw-color-border);
   border-radius: var(--mw-radius-md);
   background: var(--mw-color-surface-panel);
-  box-shadow: var(--mw-shadow-card);
+  box-shadow: none;
   color: var(--mw-color-text-primary);
 }
 
@@ -52,7 +76,7 @@ body {
   border: 1px solid var(--mw-color-border);
   border-radius: var(--mw-radius-md);
   background: var(--mw-color-surface-panel);
-  box-shadow: var(--mw-shadow-card);
+  box-shadow: none;
   color: var(--mw-color-text-primary);
 }
 
@@ -76,7 +100,7 @@ body {
   color: var(--mw-color-text-primary);
   font-family: var(--mw-font-display);
   font-size: 1.25rem;
-  font-weight: 450;
+  font-weight: 600;
   letter-spacing: 0;
   line-height: 1.2;
 }
@@ -94,10 +118,10 @@ body {
   gap: 12px;
   min-width: 0;
   padding: 16px;
-  border: 1px solid color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
+  border: 1px solid var(--mw-color-border);
   border-radius: var(--mw-radius-md);
-  background: color-mix(in srgb, var(--mw-color-primary) 5%, transparent);
-  box-shadow: var(--mw-shadow-card);
+  background: var(--mw-color-surface-panel);
+  box-shadow: none;
 }
 
 .admission-strip.is-warning {

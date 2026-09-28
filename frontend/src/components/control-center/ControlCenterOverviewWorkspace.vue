@@ -181,7 +181,7 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.12rem;
-    font-weight: 450;
+    font-weight: 600;
     letter-spacing: 0;
 }
 
@@ -214,7 +214,7 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
-    font-weight: 450;
+    font-weight: 600;
     letter-spacing: 0;
 }
 
@@ -247,7 +247,7 @@ const emit = defineEmits<{
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1.05rem;
-    font-weight: 450;
+    font-weight: 600;
     letter-spacing: 0;
 }
 
