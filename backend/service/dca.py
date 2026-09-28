@@ -59,6 +59,8 @@ from service.trading_maintenance import trading_maintenance_barrier
 
 logging = helper.LoggerFactory.get_logger("logs/dca.log", "dca")
 
+RECOVERY_DIAGNOSTIC_REFRESH_MS = 30_000
+
 
 class Dca:
     """DCA engine for processing ticker data and managing orders."""
@@ -529,11 +531,21 @@ class Dca:
             "spacing_percent",
             "trigger_price",
         )
-        if existing and all(
+        evaluated_at_ms = int(datetime.now().timestamp() * 1000)
+        previous_evaluation = existing.get("evaluated_at_ms")
+        recently_evaluated = (
+            isinstance(previous_evaluation, (int, float))
+            and 0
+            <= evaluated_at_ms - previous_evaluation
+            < RECOVERY_DIAGNOSTIC_REFRESH_MS
+        )
+        if recently_evaluated and all(
             existing.get(key) == details.get(key) for key in stable_keys
         ):
             return
 
+        # A bounded heartbeat lets clients distinguish waiting from stale diagnostics.
+        details["evaluated_at_ms"] = evaluated_at_ms
         await self.trades.update_open_trades(
             {"dca_last_decision_json": json.dumps(details, sort_keys=True)},
             trades["symbol"],
@@ -701,6 +713,7 @@ class Dca:
         details = {
             **trigger_details,
             **sizing.to_dict(),
+            "evaluated_at_ms": int(datetime.now().timestamp() * 1000),
             "mode": policy.mode,
             "minimum_order_quote": float(minimum_order_quote or 0.0),
             "free_quote_balance": (

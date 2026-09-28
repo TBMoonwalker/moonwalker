@@ -2,6 +2,31 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [4.15.0.0] - 2026-09-27
+
+### Added
+- The expanded open-trade card now shows a live Recovery DCA status panel with the
+    distance to the next trigger, the ATR-based spacing, and a buy / projected
+    take-profit estimate for the price last evaluated. It refreshes at least every
+    30 seconds while recovery evaluation runs, collapses to "Updating status" after
+    90 seconds without a fresh evaluation, and explains how the numbers are
+    calculated in a "How this is calculated" disclosure.
+- "Trade Feedback" is now selectable in Monitoring so you can inspect feedback
+    delivery from one view: delivery becoming enabled or paused, skipped
+    provenance or provider checks, acknowledgements, retry attempts, and permanent
+    rejections, all with safe error codes.
+
+### Changed
+- Recovery detail moved out of the order timeline into its own reusable panel, so
+    the status and its explanation read on their own instead of only inside the
+    expanded trade row.
+
+### Fixed
+- Closing a deal that leaves unsellable dust now records its final outcome to the
+    Pathfinder feedback outbox in the same operation that closes the trade, using
+    the full entry cost and the actual sell proceeds; the unsold remainder
+    contributes nothing. Previously a dust-close could silently skip feedback.
+
 ## [4.14.0.0] - 2026-09-27
 
 ### Added

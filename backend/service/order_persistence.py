@@ -900,6 +900,7 @@ async def persist_unsellable_remainder(
     partial_proceeds: float = 0.0,
     sell_executions: Iterable[Mapping[str, Any]] | None = None,
     closed_trade_payload: ClosedTradeSummaryRecord | None = None,
+    feedback_config: dict[str, Any] | None = None,
     placement_operation_id: str | None = None,
     placement_operation_ids: Iterable[str] | None = None,
 ) -> None:
@@ -965,6 +966,12 @@ async def persist_unsellable_remainder(
                     **summary_payload,
                     using_db=conn,
                 )
+                # This path also terminates the managed deal after a sell, even
+                # when precision/minimum-notional dust remains in the archive.
+                if feedback_config is not None:
+                    from service.trade_feedback import enqueue_feedback
+
+                    await enqueue_feedback(summary_payload, feedback_config, conn)
 
             summary_payload = dict(payload)
             summary_payload["deal_id"] = deal_id

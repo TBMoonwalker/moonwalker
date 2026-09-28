@@ -3,6 +3,17 @@ from pathlib import Path
 from service.log_viewer import LogSource, LogViewerService
 
 
+def test_feedback_log_is_available_to_monitoring() -> None:
+    from helper.logger import LOG_DIR
+    from service.log_viewer import DEFAULT_LOG_SOURCES
+
+    source = next(
+        source for source in DEFAULT_LOG_SOURCES if source.source == "feedback"
+    )
+    assert source.path == LOG_DIR / "feedback.log"
+    assert source.label == "Trade Feedback"
+
+
 def _build_service(log_path: Path) -> LogViewerService:
     return LogViewerService(
         (
