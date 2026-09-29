@@ -2,6 +2,12 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.0.2.0] - 2026-09-29
+
+### Fixed
+- The Closed trades title now shows the full trade count instead of the ten rows
+  loaded on the current page.
+
 ## [5.0.1.0] - 2026-09-29
 
 ### Fixed
