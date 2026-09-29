@@ -98,17 +98,6 @@ const setupEntryGateSource = fs.readFileSync(
     ),
     'utf8',
 )
-const setupProgressGridSource = fs.readFileSync(
-    path.join(
-        __dirname,
-        '..',
-        'src',
-        'components',
-        'control-center',
-        'ControlCenterSetupProgressGrid.vue',
-    ),
-    'utf8',
-)
 const setupRestoreFlowSource = fs.readFileSync(
     path.join(
         __dirname,
@@ -397,15 +386,10 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         ':show-advanced-general="setupShowsAdvancedFields"',
     ]
     const requiredSetupWorkspaceSnippets = [
-        "import ControlCenterSetupProgressGrid from './ControlCenterSetupProgressGrid.vue'",
         "import ControlCenterSetupStyleSelector from './ControlCenterSetupStyleSelector.vue'",
         "import ControlCenterSetupTaskSection from './ControlCenterSetupTaskSection.vue'",
-        '<ControlCenterSetupProgressGrid',
         '<ControlCenterSetupStyleSelector',
         '<ControlCenterSetupTaskSection',
-    ]
-    const requiredSetupProgressSnippets = [
-        'class="setup-progress-grid"',
     ]
     const requiredSetupStyleSnippets = [
         'Choose your setup pace',
@@ -436,12 +420,6 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         assert.ok(
             setupWorkspaceSource.includes(snippet),
             `expected setup workspace to include ${snippet}`,
-        )
-    }
-    for (const snippet of requiredSetupProgressSnippets) {
-        assert.ok(
-            setupProgressGridSource.includes(snippet),
-            `expected setup progress grid to include ${snippet}`,
         )
     }
     for (const snippet of requiredSetupStyleSnippets) {
@@ -823,7 +801,7 @@ test('control center delegates mission, setup, and advanced presentation to dedi
         'The shared snapshot changed in another browser or tab.',
     ]
     const requiredModeStripSnippets = [
-        'Configure',
+        'Configuration sections',
         'role="tablist"',
         'role="tab"',
         ':aria-selected=',

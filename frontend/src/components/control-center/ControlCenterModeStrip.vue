@@ -64,123 +64,70 @@ function onKeydown(event: KeyboardEvent) {
 </script>
 
 <template>
-    <n-card class="mode-strip-card dashboard-panel" content-style="padding: 10px 14px;">
-        <div
-            ref="tablistRef"
-            role="tablist"
-            aria-label="Control center workspaces"
-            class="mode-strip-shell"
-            @keydown="onKeydown"
+    <div
+        ref="tablistRef"
+        role="tablist"
+        aria-label="Configuration sections"
+        class="mode-strip-shell"
+        @keydown="onKeydown"
+    >
+        <n-button
+            role="tab"
+            :id="tabId('setup')"
+            :aria-selected="routeMode === 'setup'"
+            :aria-controls="PANEL_ID"
+            :tabindex="routeMode === 'setup' ? 0 : -1"
+            :class="{ 'is-selected': routeMode === 'setup' }"
+            @click="selectMode('setup')"
         >
-            <div class="mode-group">
-                <span class="mode-group-label" aria-hidden="true">Configure</span>
-                <n-flex class="mode-strip" :wrap="true" :size="[10, 10]">
-                    <n-button
-                        role="tab"
-                        :id="tabId('setup')"
-                        :aria-selected="routeMode === 'setup'"
-                        :aria-controls="PANEL_ID"
-                        :tabindex="routeMode === 'setup' ? 0 : -1"
-                        :type="routeMode === 'setup' ? 'primary' : 'default'"
-                        :secondary="routeMode !== 'setup'"
-                        :strong="routeMode === 'setup'"
-                        @click="selectMode('setup')"
-                    >
-                        Setup
-                    </n-button>
-                    <n-button
-                        role="tab"
-                        :id="tabId('advanced')"
-                        :aria-selected="routeMode === 'advanced'"
-                        :aria-controls="PANEL_ID"
-                        :tabindex="routeMode === 'advanced' ? 0 : -1"
-                        :type="routeMode === 'advanced' ? 'primary' : 'default'"
-                        :secondary="routeMode !== 'advanced'"
-                        :strong="routeMode === 'advanced'"
-                        @click="selectMode('advanced')"
-                    >
-                        Advanced
-                    </n-button>
-                </n-flex>
-            </div>
-
-        </div>
-    </n-card>
+            <span class="mode-title">Setup</span>
+            <span class="mode-description">Exchange, signals, and trade rules</span>
+        </n-button>
+        <n-button
+            role="tab"
+            :id="tabId('advanced')"
+            :aria-selected="routeMode === 'advanced'"
+            :aria-controls="PANEL_ID"
+            :tabindex="routeMode === 'advanced' ? 0 : -1"
+            :class="{ 'is-selected': routeMode === 'advanced' }"
+            @click="selectMode('advanced')"
+        >
+            <span class="mode-title">Advanced</span>
+            <span class="mode-description">Safeguards, filters, and Autopilot</span>
+        </n-button>
+    </div>
 </template>
 
 <style scoped>
 .mode-strip-shell {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 16px 28px;
-    justify-content: space-between;
-}
-
-.mode-group {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 4px;
+    padding: 4px;
+    border: 1px solid var(--mw-color-border);
+    border-radius: var(--mw-radius-md);
+    background: var(--mw-color-surface-panel);
 }
-
-.mode-group-label {
-    font-size: 0.78rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-}
-
-.mode-strip {
-    align-items: center;
-}
-
-.mode-strip :deep(.n-button) {
-     --n-border: 0 !important;
-     --n-border-hover: 0 !important;
-     --n-border-pressed: 0 !important;
-     --n-border-focus: 0 !important;
-    min-height: 36px;
-    padding-inline: 6px;
+.mode-strip-shell :deep(.n-button) {
+    width: 100%;
+    min-height: 62px;
+    height: auto;
+    padding: 10px 14px;
     border: 0;
-    border-radius: 0;
+    border-radius: var(--mw-radius-sm);
     background: transparent;
-    box-shadow: none;
+    text-align: left;
 }
-
-.mode-strip :deep(.n-button::before),
-.mode-strip :deep(.n-button::after) {
-    display: none;
+.mode-strip-shell :deep(.n-button .n-button__content) {
+    display: grid;
+    justify-items: start;
+    gap: 2px;
+    white-space: normal;
 }
-
-.mode-strip :deep(.n-button .n-button__content) {
-    color: var(--mw-color-text-secondary);
-    font-weight: 450;
+.mode-strip-shell :deep(.n-button.is-selected) {
+    background: var(--mw-color-primary-soft);
 }
-
-.mode-strip :deep(.n-button--primary-type) {
-    position: relative;
-    background: transparent;
-}
-
-.mode-strip :deep(.n-button--primary-type::after) {
-    display: block;
-    position: absolute;
-    right: 6px;
-    bottom: 0;
-    left: 6px;
-    height: 2px;
-    border-radius: 999px;
-    background: var(--mw-color-primary);
-    content: "";
-}
-
-.mode-strip :deep(.n-button--primary-type .n-button__content) {
-    color: var(--mw-color-primary);
-    font-weight: 450;
-    letter-spacing: 0;
-}
-
-@media (max-width: 767px) {
-    .mode-strip-shell {
-        gap: 12px;
-    }
-}
+.mode-title { color: var(--mw-color-text-primary); font-size: 14px; font-weight: 600; }
+.is-selected .mode-title { color: var(--mw-color-primary-strong); }
+.mode-description { color: var(--mw-color-text-muted); font-size: 12px; font-weight: 400; }
 </style>

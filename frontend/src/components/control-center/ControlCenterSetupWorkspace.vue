@@ -6,7 +6,6 @@ import type {
 } from '../../control-center/types'
 import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
 import ControlCenterSetupEntryGate from './ControlCenterSetupEntryGate.vue'
-import ControlCenterSetupProgressGrid from './ControlCenterSetupProgressGrid.vue'
 import ControlCenterSetupRestoreFlow from './ControlCenterSetupRestoreFlow.vue'
 import ControlCenterSetupStyleSelector from './ControlCenterSetupStyleSelector.vue'
 import ControlCenterSetupTaskSection from './ControlCenterSetupTaskSection.vue'
@@ -84,14 +83,6 @@ const emit = defineEmits<{
             :setup-style="setupStyle"
             @select-entry-choice="emit('select-entry-choice', $event)"
             @select-setup-style="emit('select-setup-style', $event)"
-        />
-
-        <ControlCenterSetupProgressGrid
-            v-if="!readinessComplete"
-            :get-setup-task-status="getSetupTaskStatus"
-            :get-setup-task-summary="getSetupTaskSummary"
-            :setup-tasks="setupTasks"
-            @select-setup-target="emit('select-setup-target', $event)"
         />
 
         <ControlCenterSetupTaskSection
