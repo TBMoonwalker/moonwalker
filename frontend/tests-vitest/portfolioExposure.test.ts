@@ -20,12 +20,10 @@ describe('resolveBudgetAllocation', () => {
             locked: 400,
             reserved: 150,
             tradable: 300,
-            unallocated: 150,
             otherExchangeFree: 400,
             lockedPercent: 40,
             reservedPercent: 15,
             tradablePercent: 30,
-            unallocatedPercent: 15,
             usedPercent: 55,
         })
     })

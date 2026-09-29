@@ -149,12 +149,6 @@ function navigate(key: string | number): void {
         :options="operationOptions"
         @update:value="navigate"
       />
-      <div class="sidebar-foot">
-        <strong>Moonwalker node</strong>
-        <span>Single instance</span>
-        <span :class="['connection-dot', { 'is-connected': streamsConnected }]" />
-        {{ streamsConnected ? 'Streams connected' : 'Checking streams' }}
-      </div>
     </aside>
     <n-drawer v-model:show="mobileMenuOpen" placement="left" :width="280">
       <n-drawer-content closable title="Moonwalker navigation">
@@ -273,16 +267,6 @@ function navigate(key: string | number): void {
   color: var(--mw-color-primary);
 }
 .side-menu :deep(.n-menu-item-content-header) { font-size: 13px; font-weight: 600; }
-.sidebar-foot {
-  margin-top: auto;
-  padding: 16px 10px 0;
-  border-top: 1px solid var(--mw-color-border);
-  color: var(--mw-color-text-muted);
-  font-size: 11px;
-  line-height: 1.7;
-}
-.sidebar-foot strong, .sidebar-foot > span:first-of-type { display: block; }
-.sidebar-foot strong { color: var(--mw-color-text-primary); }
 .app-topbar {
   grid-column: 2;
   grid-row: 1;
@@ -336,7 +320,6 @@ function navigate(key: string | number): void {
   .brand-logo { width: 40px; height: 38px; }
   .app-sidebar > .nav-caption,
   .app-sidebar > .side-menu,
-  .sidebar-foot { display: none; }
   .mobile-menu-toggle { display: inline-flex; min-width: 44px; min-height: 44px; }
   .app-topbar { min-height: 50px; padding: 0 18px; }
 }

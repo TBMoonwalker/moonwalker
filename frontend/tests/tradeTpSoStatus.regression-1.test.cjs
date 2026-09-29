@@ -11,6 +11,10 @@ const tradesViewSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'views', 'TradesView.vue'),
     'utf8',
 )
+const openTradesSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'components', 'OpenTrades.vue'),
+    'utf8',
+)
 
 test('open trade TP/SO beam keeps price status separate from SO count', () => {
     // Regression: the design refresh changed the beam to SO-count progress only.
@@ -41,4 +45,5 @@ test('open trade TP/SO beam keeps price status separate from SO count', () => {
         tradesViewSource,
         /\.trade-tpso-cell\.is-negative \.trade-tpso-fill\) \{\s*background: var\(--mw-color-error\)/,
     )
+    assert.match(openTradesSource, /\.red \.profit\) \{\s*color: var\(--mw-color-error\)/)
 })

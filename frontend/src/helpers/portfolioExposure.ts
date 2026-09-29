@@ -13,12 +13,10 @@ export interface BudgetAllocation {
     locked: number
     reserved: number
     tradable: number
-    unallocated: number
     otherExchangeFree: number
     lockedPercent: number
     reservedPercent: number
     tradablePercent: number
-    unallocatedPercent: number
     usedPercent: number
     exceeded: boolean
 }
@@ -45,7 +43,6 @@ export function resolveBudgetAllocation(input: BudgetAllocationInput): BudgetAll
         exchangeFree,
         Math.max(0, input.tradableQuote ?? 0),
     )
-    const unallocated = Math.max(0, remaining - tradable)
     const visibleLocked = Math.min(locked, limit)
     const visibleReserved = Math.min(reserved, Math.max(0, limit - visibleLocked))
 
@@ -54,12 +51,10 @@ export function resolveBudgetAllocation(input: BudgetAllocationInput): BudgetAll
         locked,
         reserved,
         tradable,
-        unallocated,
         otherExchangeFree: Math.max(0, exchangeFree - tradable),
         lockedPercent: (visibleLocked / limit) * 100,
         reservedPercent: (visibleReserved / limit) * 100,
         tradablePercent: (tradable / limit) * 100,
-        unallocatedPercent: (unallocated / limit) * 100,
         usedPercent: Math.round(((locked + reserved) / limit) * 100),
         exceeded: locked + reserved > limit,
     }

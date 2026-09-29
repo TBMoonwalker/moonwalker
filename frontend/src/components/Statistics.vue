@@ -14,17 +14,15 @@
                     <template v-if="budgetAllocation">
                         <div class="budget-heading"><span>Budget allocation</span><strong>{{ formatFixed2(budgetAllocation.limit) }} {{ quote_currency }} capital budget</strong></div>
                         <div class="budget-subheading">{{ budgetAllocation.usedPercent }}% committed to deals and reserves<span v-if="budgetAllocation.exceeded"> · Over budget</span></div>
-                        <div class="exposure-track" role="img" :aria-label="`${formatFixed2(budgetAllocation.limit)} ${quote_currency} capital budget: ${formatFixed2(budgetAllocation.locked)} in deals, ${formatFixed2(budgetAllocation.reserved)} reserved, ${formatFixed2(budgetAllocation.tradable)} available to trade, ${formatFixed2(budgetAllocation.unallocated)} not currently tradable`">
+                        <div class="exposure-track" role="img" :aria-label="`${formatFixed2(budgetAllocation.limit)} ${quote_currency} capital budget: ${formatFixed2(budgetAllocation.locked)} in deals, ${formatFixed2(budgetAllocation.reserved)} reserved, ${formatFixed2(budgetAllocation.tradable)} available to trade`">
                             <span class="exposure-locked" :style="{ width: `${budgetAllocation.lockedPercent}%` }" />
                             <span class="exposure-reserved" :style="{ width: `${budgetAllocation.reservedPercent}%` }" />
                             <span class="exposure-tradable" :style="{ width: `${budgetAllocation.tradablePercent}%` }" />
-                            <span class="exposure-unallocated" :style="{ width: `${budgetAllocation.unallocatedPercent}%` }" />
                         </div>
                         <div class="exposure-legend">
                             <span><i class="legend-key is-locked" aria-hidden="true" />Funds in deals <strong>{{ formatFixed2(budgetAllocation.locked) }} {{ quote_currency }}</strong></span>
                             <span><i class="legend-key is-reserved" aria-hidden="true" />Reserved for open and pending orders <strong>{{ formatFixed2(budgetAllocation.reserved) }} {{ quote_currency }}</strong></span>
                             <span><i class="legend-key is-tradable" aria-hidden="true" />Available to trade <strong>{{ formatFixed2(budgetAllocation.tradable) }} {{ quote_currency }}</strong></span>
-                            <span><i class="legend-key is-unallocated" aria-hidden="true" />Budget awaiting exchange funds <strong>{{ formatFixed2(budgetAllocation.unallocated) }} {{ quote_currency }}</strong></span>
                         </div>
                     </template>
                     <p v-else class="budget-unavailable" role="status">{{ budgetMessage }}</p>
@@ -201,7 +199,6 @@ function formatFixed2(value: number): string {
 .exposure-locked { background: var(--mw-color-primary); }
 .exposure-reserved { background: var(--mw-color-warning); }
 .exposure-tradable { background: var(--mw-color-info); }
-.exposure-unallocated { background: var(--mw-color-border); }
 .exposure-legend { display: grid; gap: 8px; margin-top: 16px; }
 .exposure-legend > span {
     display: flex;
@@ -217,7 +214,6 @@ function formatFixed2(value: number): string {
 .legend-key.is-locked { background: var(--mw-color-primary); }
 .legend-key.is-reserved { background: var(--mw-color-warning); }
 .legend-key.is-tradable { background: var(--mw-color-info); }
-.legend-key.is-unallocated { background: var(--mw-color-border); }
 .exposure-totals {
     display: grid;
     gap: 7px;

@@ -40,7 +40,6 @@ test('main dashboard exposure shows tradable funds with exchange context', () =>
     assert.match(statisticsSource, /Available to trade/)
     assert.match(statisticsSource, /Exchange free/)
     assert.match(statisticsSource, /exposure-reserved/)
-    assert.match(statisticsSource, /exposure-unallocated/)
     assert.match(statisticsSource, /capital_effective_max_fund/)
     assert.match(statisticsSource, /exposure-tradable/)
 })

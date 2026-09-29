@@ -297,7 +297,7 @@ onMounted(async () => {
 
 <style scoped>
 :deep(.red .profit) {
-    color: #B4443F !important;
+    color: var(--mw-color-error) !important;
 }
 
 :deep(.green .profit) {
