@@ -15,11 +15,17 @@ DEAL_ID = "11111111-1111-4111-8111-111111111111"
 
 
 class _FakeTrades:
-    def __init__(self, executions: list[dict[str, Any]]) -> None:
+    def __init__(
+        self, executions: list[dict[str, Any]], *, open_deal: bool = False
+    ) -> None:
         self.executions = executions
+        self.open_deal = open_deal
 
     async def get_trade_executions(self, deal_id: str) -> list[dict[str, Any]]:
         return self.executions
+
+    async def is_open_deal(self, deal_id: str) -> bool:
+        return self.open_deal
 
 
 class _FakeBuilder:
@@ -38,7 +44,9 @@ class _FakeBuilder:
         self.calls.append(tuple(references))
         return list(
             dict.fromkeys(
-                slug for slug, _version in references if slug != "missing_strategy"
+                slug
+                for slug, _version in references
+                if slug not in {"missing_strategy", "momentum-confirmation"}
             )
         )
 
@@ -126,6 +134,75 @@ async def test_replay_indicators_return_series_for_persisted_strategy(
     assert payload["timeframe"] == "1h"
     assert payload["strategies"] == ["ema20_swing"]
     assert payload["indicators"][0]["label"] == "EMA 20"
+    assert _FakeBuilder.calls == [(("ema20_swing", None),)]
+
+
+@pytest.mark.asyncio
+async def test_open_replay_includes_current_dca_indicators_before_first_safety_order(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """External base entries still display the active recovery strategy."""
+    _FakeBuilder.calls = []
+    _FakeBuilder.build_calls = []
+    _FakeBuilder.warmup_candles = 0
+
+    async def fake_config() -> dict[str, Any]:
+        return {"dca_strategy": "ema_low"}
+
+    service = TradeReplayIndicatorService(
+        _FakeTrades([_execution("momentum-confirmation")], open_deal=True),
+        config_snapshot_provider=fake_config,
+    )
+
+    async def fake_load_candles(
+        *args: Any, **kwargs: Any
+    ) -> list[ReplayIndicatorCandle]:
+        return [_candle(0), _candle(1)]
+
+    monkeypatch.setattr(service, "_load_candles", fake_load_candles)
+    monkeypatch.setattr(replay_module, "StrategyChartIndicatorBuilder", _FakeBuilder)
+
+    payload = await service.get_indicators(
+        DEAL_ID, "1h", 1_700_000_000_000, 1_700_000_060_000
+    )
+
+    assert payload["source"] == "execution_ledger_and_active_dca"
+    assert payload["strategies"] == ["ema_low"]
+    assert payload["indicators"][0]["label"] == "EMA 20"
+    assert _FakeBuilder.calls == [(("momentum-confirmation", None), ("ema_low", None))]
+
+
+@pytest.mark.asyncio
+async def test_closed_replay_does_not_show_current_dca_strategy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Changing today's config must not rewrite a closed deal's overlays."""
+    _FakeBuilder.calls = []
+    _FakeBuilder.build_calls = []
+    _FakeBuilder.warmup_candles = 0
+
+    async def fake_config() -> dict[str, Any]:
+        raise AssertionError("closed deals must not load current config")
+
+    service = TradeReplayIndicatorService(
+        _FakeTrades([_execution("ema20_swing")]),
+        config_snapshot_provider=fake_config,
+    )
+
+    async def fake_load_candles(
+        *args: Any, **kwargs: Any
+    ) -> list[ReplayIndicatorCandle]:
+        return [_candle(0), _candle(1)]
+
+    monkeypatch.setattr(service, "_load_candles", fake_load_candles)
+    monkeypatch.setattr(replay_module, "StrategyChartIndicatorBuilder", _FakeBuilder)
+
+    payload = await service.get_indicators(
+        DEAL_ID, "1h", 1_700_000_000_000, 1_700_000_060_000
+    )
+
+    assert payload["source"] == "execution_ledger"
+    assert payload["strategies"] == ["ema20_swing"]
     assert _FakeBuilder.calls == [(("ema20_swing", None),)]
 
 
@@ -232,6 +309,40 @@ async def test_replay_indicators_backfill_legacy_missing_strategy_from_config(
     assert payload["strategies"] == ["ema_swing"]
     assert payload["indicators"][0]["label"] == "EMA 20"
     assert _FakeBuilder.calls == [(("ema_swing", None),)]
+
+
+@pytest.mark.asyncio
+async def test_open_legacy_replay_keeps_signal_and_active_dca_indicators(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An open legacy deal retains its signal overlay alongside active DCA."""
+    _FakeBuilder.calls = []
+    _FakeBuilder.build_calls = []
+    _FakeBuilder.warmup_candles = 0
+
+    async def fake_config() -> dict[str, Any]:
+        return {"signal_strategy": "ema20_swing", "dca_strategy": "ema_low"}
+
+    service = TradeReplayIndicatorService(
+        _FakeTrades([_execution(None)], open_deal=True),
+        config_snapshot_provider=fake_config,
+    )
+
+    async def fake_load_candles(
+        *args: Any, **kwargs: Any
+    ) -> list[ReplayIndicatorCandle]:
+        return [_candle(0), _candle(1)]
+
+    monkeypatch.setattr(service, "_load_candles", fake_load_candles)
+    monkeypatch.setattr(replay_module, "StrategyChartIndicatorBuilder", _FakeBuilder)
+
+    payload = await service.get_indicators(
+        DEAL_ID, "1h", 1_700_000_000_000, 1_700_000_060_000
+    )
+
+    assert payload["strategies"] == ["ema20_swing", "ema_low"]
+    assert payload["indicators"][0]["label"] == "EMA 20"
+    assert _FakeBuilder.calls == [(("ema20_swing", None), ("ema_low", None))]
 
 
 @pytest.mark.asyncio

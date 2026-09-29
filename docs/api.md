@@ -190,6 +190,14 @@ These streams are fan-out based: one producer loop refreshes shared data every
 | `POST` | `/trades/mission/pause/{symbol}` | Pause automation for one open mission. |
 | `POST` | `/trades/mission/resume/{symbol}` | Resume automation for one open mission. |
 
+The replay indicator response uses the strategies recorded in the deal's
+execution history. For an open deal, it also includes the currently configured
+`dca_strategy`, even before a safety order executes. The `source` field is
+`execution_ledger_and_active_dca` when both contribute. Closed deals use their
+recorded strategy history; later DCA configuration changes do not alter their
+indicator overlays. A plotted indicator shows the strategy's calculated values,
+not that a safety-order signal or fill occurred at that candle.
+
 ## Statistics
 
 | Method | Path | Purpose |
