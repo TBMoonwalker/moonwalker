@@ -8,6 +8,8 @@ All notable changes to Moonwalker are documented in this file.
 - Open trade charts now show the active DCA strategy indicators alongside entry
   indicators, including before the first safety order. Historical closed-trade
   charts continue to show the strategies recorded for those trades.
+- The Closed trades title now shows the full trade count instead of the ten rows
+  loaded on the current page.
 
 ## [5.0.0.0] - 2026-09-29
 
