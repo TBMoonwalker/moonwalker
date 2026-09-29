@@ -158,6 +158,13 @@ export function useControlCenterSetupFlow(
     const activeSetupTarget = computed<ControlCenterTarget>(() => {
         const requestedTarget = options.routeState.value.target
         if (
+            requestedTarget === 'live-activation' &&
+            options.readiness.value.complete &&
+            options.readiness.value.dryRun
+        ) {
+            return requestedTarget
+        }
+        if (
             requestedTarget &&
             requestedTarget !== 'live-activation' &&
             getTaskPresentation(requestedTarget).modes.includes('setup')
@@ -256,7 +263,7 @@ export function useControlCenterSetupFlow(
 
     function isSetupTaskExpanded(target: ControlCenterTarget): boolean {
         if (options.readiness.value.complete) {
-            return options.routeState.value.target === target
+            return activeSetupTarget.value === target
         }
         return setupStyle.value === 'full' || activeSetupTarget.value === target
     }

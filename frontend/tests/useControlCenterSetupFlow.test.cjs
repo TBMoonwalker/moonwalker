@@ -204,7 +204,7 @@ test('setup flow derives task status, summaries, and expansion state', () => {
     assert.equal(harness.flow.isSetupTaskExpanded('exchange'), true)
 })
 
-test('ready setup excludes the activation task and opens only a selected section', () => {
+test('ready setup opens the first section and can select the activation review', () => {
     const readiness = computed(() => ({
         complete: true,
         firstRun: false,
@@ -220,7 +220,7 @@ test('ready setup excludes the activation task and opens only a selected section
         routeState: computed(() => ({ mode: 'setup', target: null })),
     })
     assert.equal(defaultHarness.flow.setupTasks.value.some((task) => task.target === 'live-activation'), false)
-    assert.equal(defaultHarness.flow.isSetupTaskExpanded('exchange'), false)
+    assert.equal(defaultHarness.flow.isSetupTaskExpanded('exchange'), true)
     assert.deepEqual(defaultHarness.flow.getSetupTaskStatus('exchange'), {
         label: 'Ready',
         type: 'success',
@@ -232,6 +232,13 @@ test('ready setup excludes the activation task and opens only a selected section
     })
     assert.equal(selectedHarness.flow.isSetupTaskExpanded('exchange'), true)
     assert.equal(selectedHarness.flow.isSetupTaskExpanded('signal'), false)
+
+    const activationHarness = createSetupFlowHarness({
+        readiness,
+        routeState: computed(() => ({ mode: 'setup', target: 'live-activation' })),
+    })
+    assert.equal(activationHarness.flow.activeSetupTarget.value, 'live-activation')
+    assert.equal(activationHarness.flow.isSetupTaskExpanded('exchange'), false)
 })
 
 test('setup flow mission action guides incomplete readiness to the next blocker', async () => {

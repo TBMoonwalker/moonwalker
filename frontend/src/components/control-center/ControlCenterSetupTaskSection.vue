@@ -15,6 +15,7 @@ defineProps<{
     ) => (element: Element | null) => void
     getSetupTaskStatus: (target: ControlCenterTarget) => SetupTaskStatus
     isSetupTaskExpanded: (target: ControlCenterTarget) => boolean
+    readyLayout?: boolean
     task: ControlCenterTaskPresentation
 }>()
 
@@ -28,7 +29,10 @@ const emit = defineEmits<{
     <div
         :ref="bindTargetElement(task.target)"
         class="task-section task-section-shell"
-        :class="{ 'task-section-collapsed': !isSetupTaskExpanded(task.target) }"
+        :class="{
+            'task-section-collapsed': !isSetupTaskExpanded(task.target),
+            'is-ready': readyLayout,
+        }"
         :id="task.sectionId"
         @click="emit('setup-shell-click', task.target, $event)"
     >
@@ -41,7 +45,7 @@ const emit = defineEmits<{
                 <h2>{{ task.title }}</h2>
                 <n-text v-if="isSetupTaskExpanded(task.target)" depth="3">{{ task.summary }}</n-text>
             </div>
-            <span v-if="isSetupTaskExpanded(task.target)" class="current-step-label">Current step</span>
+            <span v-if="isSetupTaskExpanded(task.target) && !readyLayout" class="current-step-label">Current step</span>
             <n-button
                 v-else
                 quaternary
@@ -68,6 +72,7 @@ const emit = defineEmits<{
     padding: 4px 0 12px;
     background: transparent;
 }
+.task-section-shell.is-ready { gap: 12px; padding: 0; }
 
 .task-section-collapsed {
     padding: 10px 12px;
@@ -97,6 +102,7 @@ const emit = defineEmits<{
     outline-offset: var(--mw-focus-offset);
     box-shadow: none;
 }
+.is-ready .task-section-header:focus { outline: none; }
 
 .task-section-header h2 {
     margin: 0;
@@ -106,6 +112,7 @@ const emit = defineEmits<{
     font-weight: 600;
     letter-spacing: 0;
 }
+.is-ready .task-section-header h2 { font-size: 1.25rem; }
 
 .task-section-body {
     margin-top: 4px;

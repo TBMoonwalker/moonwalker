@@ -240,6 +240,7 @@ const {
     syncControlCenterConfigChange,
 })
 const {
+    activeSetupTarget,
     getSetupTaskStatus,
     getSetupTaskSummary,
     handleMissionPrimaryAction,
@@ -385,6 +386,7 @@ useControlCenterLifecycle({
         <n-flex id="cc-workspace-panel" :role="showModeStrip ? 'tabpanel' : undefined" :aria-labelledby="showModeStrip ? 'cc-mode-tab-' + routeState.mode : undefined" class="page-section workspace-section" vertical>
             <template v-if="routeState.mode === 'setup'">
                 <ControlCenterSetupMode
+                    :active-target="activeSetupTarget"
                     :activation-disabled="isDirty || configTrustState.kind !== 'trusted'"
                     :activation-loading="activationLoading"
                     :bind-backup-file-input="bindBackupFileInput"

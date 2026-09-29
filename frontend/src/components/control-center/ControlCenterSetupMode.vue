@@ -34,6 +34,7 @@ interface SetupTaskStatus {
 }
 
 defineProps<{
+    activeTarget: ControlCenterTarget
     activationDisabled: boolean
     activationLoading: boolean
     bindBackupFileInput: (element: Element | null) => void
@@ -106,12 +107,14 @@ const emit = defineEmits<{
 
 <template>
     <ControlCenterSetupWorkspace
+        :active-target="activeTarget"
         :bind-backup-file-input="bindBackupFileInput"
         :bind-target-element="bindTargetElement"
         :get-setup-task-status="getSetupTaskStatus"
         :get-setup-task-summary="getSetupTaskSummary"
         :has-selected-backup-payload="hasSelectedBackupPayload"
         :is-setup-task-expanded="isSetupTaskExpanded"
+        :live-activation-available="liveActivationAvailable"
         :readiness-complete="readinessComplete"
         :readiness-first-run="readinessFirstRun"
         :restore-loading="restoreLoading"
@@ -200,33 +203,33 @@ const emit = defineEmits<{
                 :test-loading="monitoringTestLoading"
             />
         </template>
+        <template #readiness-review>
+            <section
+                id="control-center-live-activation"
+                :ref="bindTargetElement('live-activation')"
+                class="readiness-review dashboard-panel"
+                aria-labelledby="readiness-review-title"
+            >
+                <div>
+                    <p class="readiness-kicker">Final step</p>
+                    <h2 id="readiness-review-title">Readiness review</h2>
+                    <p>Configuration is saved and Moonwalker is operating in dry run. Activating live trading will submit orders to the configured exchange.</p>
+                    <p v-if="activationDisabled" class="readiness-caution">
+                        Save changes or reload the latest configuration before activating live trading.
+                    </p>
+                </div>
+                <n-button
+                    type="primary"
+                    strong
+                    :loading="activationLoading"
+                    :disabled="activationDisabled"
+                    @click="emit('activate-live')"
+                >
+                    Activate live trading
+                </n-button>
+            </section>
+        </template>
     </ControlCenterSetupWorkspace>
-
-    <section
-        v-if="liveActivationAvailable"
-        id="control-center-live-activation"
-        :ref="bindTargetElement('live-activation')"
-        class="readiness-review dashboard-panel"
-        aria-labelledby="readiness-review-title"
-    >
-        <div>
-            <p class="readiness-kicker">Final step</p>
-            <h2 id="readiness-review-title">Readiness review</h2>
-            <p>Configuration is saved and Moonwalker is operating in dry run. Activating live trading will submit orders to the configured exchange.</p>
-            <p v-if="activationDisabled" class="readiness-caution">
-                Save changes or reload the latest configuration before activating live trading.
-            </p>
-        </div>
-        <n-button
-            type="primary"
-            strong
-            :loading="activationLoading"
-            :disabled="activationDisabled"
-            @click="emit('activate-live')"
-        >
-            Activate live trading
-        </n-button>
-    </section>
 </template>
 
 <style scoped>

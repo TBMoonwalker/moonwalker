@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { ControlCenterTarget } from '../../control-center/types'
+import ControlCenterSectionNavigation from './ControlCenterSectionNavigation.vue'
 
 interface AdvancedSection {
     sectionId: string
@@ -24,36 +25,18 @@ const selectedTarget = computed(() =>
         ? props.activeTarget
         : props.advancedSections[0]?.target,
 )
-const sectionOptions = computed(() =>
-    props.advancedSections.map((section) => ({ label: section.title, value: section.target })),
-)
 </script>
 
 <template>
     <div class="advanced-layout">
-        <nav class="advanced-navigation" aria-label="Advanced settings sections">
-            <div class="advanced-navigation-heading">Expert settings</div>
-            <n-select
-                class="advanced-mobile-select"
-                :value="selectedTarget"
-                :options="sectionOptions"
-                aria-label="Choose advanced settings section"
-                @update:value="emit('select-target', $event)"
-            />
-            <div class="advanced-navigation-list">
-                <button
-                    v-for="section in advancedSections"
-                    :key="section.target"
-                    type="button"
-                    class="advanced-navigation-item"
-                    :class="{ 'is-active': selectedTarget === section.target }"
-                    :aria-current="selectedTarget === section.target ? 'page' : undefined"
-                    @click="emit('select-target', section.target)"
-                >
-                    {{ section.title }}
-                </button>
-            </div>
-        </nav>
+        <ControlCenterSectionNavigation
+            aria-label="Advanced settings sections"
+            heading="Expert settings"
+            select-label="Choose advanced settings section"
+            :sections="advancedSections"
+            :selected-target="selectedTarget ?? null"
+            @select-target="emit('select-target', $event)"
+        />
 
         <div class="advanced-content">
             <div
@@ -82,39 +65,6 @@ const sectionOptions = computed(() =>
     gap: 24px;
     width: 100%;
 }
-.advanced-navigation {
-    position: sticky;
-    top: 20px;
-    display: grid;
-    gap: 12px;
-    min-width: 0;
-}
-.advanced-navigation-heading {
-    color: var(--mw-color-text-muted);
-    font-size: 12px;
-    font-weight: 600;
-}
-.advanced-navigation-list { display: grid; gap: 4px; }
-.advanced-navigation-item {
-    min-height: 42px;
-    padding: 10px 12px;
-    border: 0;
-    border-radius: var(--mw-radius-sm);
-    background: transparent;
-    color: var(--mw-color-text-secondary);
-    font: inherit;
-    font-size: 14px;
-    text-align: left;
-    cursor: pointer;
-}
-.advanced-navigation-item:hover { background: var(--mw-color-surface-raised); }
-.advanced-navigation-item:focus-visible { outline: var(--mw-focus-ring); outline-offset: var(--mw-focus-offset); }
-.advanced-navigation-item.is-active {
-    background: var(--mw-color-primary-soft);
-    color: var(--mw-color-primary-strong);
-    font-weight: 600;
-}
-.advanced-mobile-select { display: none; }
 .advanced-content { min-width: 0; }
 .task-section { display: flex; flex-direction: column; gap: 12px; }
 .task-section-header { display: grid; gap: 4px; }
@@ -129,8 +79,5 @@ const sectionOptions = computed(() =>
 .task-section-header p { margin: 0; color: var(--mw-color-text-secondary); font-size: 14px; }
 @media (max-width: 900px) {
     .advanced-layout { grid-template-columns: 1fr; gap: 16px; }
-    .advanced-navigation { position: static; }
-    .advanced-navigation-list { display: none; }
-    .advanced-mobile-select { display: block; }
 }
 </style>

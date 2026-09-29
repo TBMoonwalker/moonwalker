@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { SetupEntryChoice } from '../../control-center/setupEntryHistory'
 import type {
     ControlCenterTarget,
@@ -9,6 +10,7 @@ import ControlCenterSetupEntryGate from './ControlCenterSetupEntryGate.vue'
 import ControlCenterSetupRestoreFlow from './ControlCenterSetupRestoreFlow.vue'
 import ControlCenterSetupStyleSelector from './ControlCenterSetupStyleSelector.vue'
 import ControlCenterSetupTaskSection from './ControlCenterSetupTaskSection.vue'
+import ControlCenterSectionNavigation from './ControlCenterSectionNavigation.vue'
 import type { SetupStyle } from '../../composables/useControlCenterSetupFlow'
 
 type BackupRestoreMode = 'config' | 'full'
@@ -18,7 +20,8 @@ interface SetupTaskStatus {
     type: 'default' | 'info' | 'warning' | 'success'
 }
 
-defineProps<{
+const props = defineProps<{
+    activeTarget: ControlCenterTarget
     bindBackupFileInput: (element: Element | null) => void
     bindTargetElement: (
         target: ControlCenterTarget,
@@ -27,6 +30,7 @@ defineProps<{
     getSetupTaskSummary: (target: ControlCenterTarget) => string
     hasSelectedBackupPayload: boolean
     isSetupTaskExpanded: (target: ControlCenterTarget) => boolean
+    liveActivationAvailable: boolean
     readinessComplete: boolean
     readinessFirstRun: boolean
     restoreLoading: boolean
@@ -40,6 +44,17 @@ defineProps<{
     showSetupEntryGate: boolean
     showSetupStyleSelector: boolean
 }>()
+
+const setupSections = computed(() => [
+    ...props.setupTasks,
+    ...(props.liveActivationAvailable
+        ? [{ target: 'live-activation' as ControlCenterTarget, title: 'Readiness review' }]
+        : []),
+])
+
+function isTaskExpanded(target: ControlCenterTarget): boolean {
+    return props.readinessComplete || props.isSetupTaskExpanded(target)
+}
 
 const emit = defineEmits<{
     'backup-file-selected': [event: Event]
@@ -85,17 +100,50 @@ const emit = defineEmits<{
             @select-setup-style="emit('select-setup-style', $event)"
         />
 
-        <ControlCenterSetupTaskSection
-            v-for="task in setupTasks"
-            :key="task.sectionId"
-            :bind-target-element="bindTargetElement"
-            :get-setup-task-status="getSetupTaskStatus"
-            :is-setup-task-expanded="isSetupTaskExpanded"
-            :task="task"
-            @select-setup-target="emit('select-setup-target', $event)"
-            @setup-shell-click="(target, event) => emit('setup-shell-click', target, event)"
-        >
-            <slot :name="task.target" />
-        </ControlCenterSetupTaskSection>
+        <div :class="{ 'setup-layout': readinessComplete }">
+            <ControlCenterSectionNavigation
+                v-if="readinessComplete"
+                aria-label="Setup sections"
+                heading="Setup sections"
+                select-label="Choose setup section"
+                :sections="setupSections"
+                :selected-target="activeTarget"
+                @select-target="emit('select-setup-target', $event)"
+            />
+            <div class="setup-content">
+                <ControlCenterSetupTaskSection
+                    v-for="task in setupTasks"
+                    v-show="!readinessComplete || activeTarget === task.target"
+                    :key="task.sectionId"
+                    :bind-target-element="bindTargetElement"
+                    :get-setup-task-status="getSetupTaskStatus"
+                    :is-setup-task-expanded="isTaskExpanded"
+                    :ready-layout="readinessComplete"
+                    :task="task"
+                    @select-setup-target="emit('select-setup-target', $event)"
+                    @setup-shell-click="(target, event) => emit('setup-shell-click', target, event)"
+                >
+                    <slot :name="task.target" />
+                </ControlCenterSetupTaskSection>
+                <slot
+                    v-if="liveActivationAvailable && activeTarget === 'live-activation'"
+                    name="readiness-review"
+                />
+            </div>
+        </div>
     </template>
 </template>
+
+<style scoped>
+.setup-layout {
+    display: grid;
+    grid-template-columns: minmax(190px, 230px) minmax(0, 1fr);
+    align-items: start;
+    gap: 24px;
+    width: 100%;
+}
+.setup-content { display: grid; gap: 12px; min-width: 0; }
+@media (max-width: 900px) {
+    .setup-layout { grid-template-columns: 1fr; gap: 16px; }
+}
+</style>

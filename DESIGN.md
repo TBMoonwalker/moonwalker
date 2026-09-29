@@ -325,8 +325,9 @@ adding deeper controls, not by restating the same fields.
 
 ### 5. Configuration After Readiness
 - Setup remains the landing surface.
-- Show the setup groups as collapsed links; expand the requested group when selected.
-- Use the task rows themselves as the progress summary; avoid repeating them in a separate grid.
+- Show Setup groups as a left-side section menu, matching Advanced; display the selected group in the right pane.
+- Use a mobile selector for the same sections, and include the readiness review as a final section when live activation is available.
+- Keep first-run Guided and Full Control presentation separate from this ready-state layout.
 - Keep the header compact; show save state, stale configuration, and blockers only when actionable.
 - Put the guarded live activation action after the Setup tasks.
 - Do not repeat runtime, Autopilot, or Monitoring summaries here.
