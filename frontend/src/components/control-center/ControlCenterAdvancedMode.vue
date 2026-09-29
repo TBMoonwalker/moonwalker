@@ -31,6 +31,7 @@ interface AdvancedSection {
 }
 
 defineProps<{
+    activeTarget: ControlCenterTarget | null
     advancedSections: AdvancedSection[]
     autopilot: AutopilotModel
     autopilotFormRef?: VNodeRef
@@ -53,12 +54,18 @@ defineProps<{
     rules: FormRules
     signal: SignalEditorModel
 }>()
+
+const emit = defineEmits<{
+    'select-target': [target: ControlCenterTarget]
+}>()
 </script>
 
 <template>
     <ControlCenterAdvancedWorkspace
+        :active-target="activeTarget"
         :advanced-sections="advancedSections"
         :bind-target-element="bindTargetElement"
+        @select-target="emit('select-target', $event)"
     >
         <template #general>
             <ConfigGeneralAdvancedSection
@@ -89,6 +96,7 @@ defineProps<{
                 :ref="capitalFormRef"
                 :capital="capital"
                 :card-title="null"
+                :show-base-fields="false"
                 :dynamic-dca-enabled="
                     dca.enabled && dca.trade_mode === 'dynamic_dca'
                 "

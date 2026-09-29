@@ -44,7 +44,7 @@ const TASKS: readonly ControlCenterTaskPresentation[] = [
     {
         target: 'capital',
         title: 'Capital budget',
-        summary: 'Global hard cap and reserve buffer for every live buy path.',
+        summary: 'Set the global capital limit for live buys.',
         defaultMode: 'setup',
         modes: ['setup', 'advanced'],
         sectionId: 'control-center-capital',

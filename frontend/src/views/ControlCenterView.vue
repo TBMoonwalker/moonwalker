@@ -454,6 +454,7 @@ useControlCenterLifecycle({
 
             <template v-else-if="routeState.mode === 'advanced'">
                 <ControlCenterAdvancedMode
+                    :active-target="routeState.target"
                     :advanced-sections="advancedSections"
                     :autopilot="autopilot"
                     :autopilot-form-ref="autopilotFormRef"
@@ -473,6 +474,7 @@ useControlCenterLifecycle({
                     :indicator-form-ref="indicatorFormRef"
                     :rules="rules"
                     :signal="signal"
+                    @select-target="navigateToControlCenter('advanced', $event)"
                 />
             </template>
 

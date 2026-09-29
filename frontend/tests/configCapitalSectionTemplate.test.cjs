@@ -20,7 +20,7 @@ test('Capital settings expose buffer only for dynamic DCA', () => {
         capitalSectionSource,
         /Budget buffer for dynamic safety orders \(%\)/,
     )
-    assert.match(capitalSectionSource, /v-if="dynamicDcaEnabled"/)
+    assert.match(capitalSectionSource, /v-if="showExpertFields && dynamicDcaEnabled"/)
     assert.match(capitalSectionSource, /dynamicDcaEnabled: boolean/)
     assert.doesNotMatch(capitalSectionSource, /Budget buffer \(%\)/)
 })

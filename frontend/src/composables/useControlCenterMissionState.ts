@@ -81,7 +81,7 @@ export function useControlCenterMissionState(
                 target: 'capital',
                 title: 'Capital guardrails',
                 summary:
-                    'Global max fund, safety-order reserve, and buy-admission buffer.',
+                    'Safety-order reserve and buy-admission buffer for the limit set in Setup.',
                 sectionId: 'control-center-capital',
             },
             ...expertDomains,

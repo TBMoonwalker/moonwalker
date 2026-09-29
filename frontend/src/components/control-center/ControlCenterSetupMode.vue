@@ -180,6 +180,8 @@ const emit = defineEmits<{
             <ConfigCapitalSection
                 :ref="capitalFormRef"
                 :capital="capital"
+                :card-title="null"
+                :show-expert-fields="setupShowsAdvancedFields"
                 :dynamic-dca-enabled="
                     dca.enabled && dca.trade_mode === 'dynamic_dca'
                 "

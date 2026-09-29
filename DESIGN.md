@@ -282,6 +282,7 @@ Every configuration field gets exactly one canonical visible home.
 
 - Essentials live in `Setup`
 - Expert tuning lives in `Advanced`
+- Setup owns the global capital limit. Advanced owns capital reserve and buffer tuning.
 - Runtime status lives in Trading Overview, Autopilot Memory, or Monitoring.
 - Pause/Resume Moonwalker lives in the persistent top bar.
 - Autopilot on/off lives with Autopilot settings in Advanced.
@@ -325,6 +326,7 @@ adding deeper controls, not by restating the same fields.
 ### 5. Configuration After Readiness
 - Setup remains the landing surface.
 - Show the setup groups as collapsed links; expand the requested group when selected.
+- Use the task rows themselves as the progress summary; avoid repeating them in a separate grid.
 - Keep the header compact; show save state, stale configuration, and blockers only when actionable.
 - Put the guarded live activation action after the Setup tasks.
 - Do not repeat runtime, Autopilot, or Monitoring summaries here.
@@ -332,6 +334,7 @@ adding deeper controls, not by restating the same fields.
 ### 6. Advanced
 - Dense, deliberate, operator-owned tuning
 - Group by expert domain, not by leftover form inheritance
+- Show one expert domain at a time with a persistent section navigator on desktop and a selector on mobile.
 - Never used as the first-run dumping ground
 
 ### 7. Utilities
