@@ -2,6 +2,41 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.0.0.0] - 2026-09-29
+
+### Added
+- Pause and resume live trading now sit in the persistent top bar on every page.
+    Pausing blocks new entries and re-entries while existing exits keep running,
+    and a pause or resume triggers the same cross-tab configuration
+    invalidation as a save so open dashboards react at once.
+- A section-navigation rail in the Control Center jumps to the advanced
+    configuration you need instead of scrolling past every section.
+- A capital-budget portfolio-exposure readout (with tests) reports locked,
+    reserved, and tradable amounts as percentages of the configured budget,
+    with an over-budget flag.
+
+### Changed
+- The console adopts a calmer charcoal design language with selective green
+    accents. Typography and surface tokens move to a neutral base so data and
+    status read as the priority over chrome.
+- Configuration is the first thing you see: the Control Center now opens on a
+    setup-first workspace. Setup opens by section, Advanced is grouped by domain
+    for expert tuning, and a ready dry-run instance ends Setup with a guarded
+    live activation review.
+- Autopilot on/off moves to Advanced → Autopilot, and backup/restore and the
+    Telegram test move to Utilities.
+- The per-section live preview panels (overview, autopilot, monitoring,
+    owner-confidence) are removed to cut duplicated UI; those surfaces live in
+    their own views. The budget bar and sidebar status were simplified to read
+    at a glance.
+- On phones, desktop-only navigation hides itself so the layout fits a narrow
+    screen instead of overflowing.
+
+### Fixed
+- Portfolio exposure now scales to the configured capital budget instead of a
+    raw figure, so it reads correctly against how much you are actually
+    invested.
+
 ## [4.15.0.0] - 2026-09-27
 
 ### Added
