@@ -319,7 +319,7 @@ function navigate(key: string | number): void {
   .brand-link { min-height: 42px; }
   .brand-logo { width: 40px; height: 38px; }
   .app-sidebar > .nav-caption,
-  .app-sidebar > .side-menu,
+  .app-sidebar > .side-menu { display: none; }
   .mobile-menu-toggle { display: inline-flex; min-width: 44px; min-height: 44px; }
   .app-topbar { min-height: 50px; padding: 0 18px; }
 }
