@@ -1,38 +1,38 @@
 ---
 name: Moonwalker
-description: Calm, intent-first operator console for a self-hosted crypto trading bot.
+description: Charcoal operator console with selective green accents for a self-hosted trading bot.
 colors:
-  primary: "#1d5c49"
-  primary-strong: "#18413a"
-  primary-soft: "#e3f3ec"
-  secondary: "#b78a2e"
-  surface-base: "#f7f8f6"
-  surface-raised: "#ecefea"
+  primary: "#276b47"
+  primary-strong: "#205a3b"
+  primary-soft: "#e5f3e8"
+  secondary: "#995d14"
+  surface-base: "#f5f5f7"
+  surface-raised: "#ededf0"
   surface-panel: "#ffffff"
-  border: "#d5dbd5"
-  text-primary: "#18211d"
-  text-secondary: "#33403a"
-  text-muted: "#646e66"
-  success: "#2e7d5b"
-  warning: "#b7791f"
-  warning-soft: "#fff8ec"
+  border: "#d9d9e0"
+  text-primary: "#19191d"
+  text-secondary: "#45454e"
+  text-muted: "#65656f"
+  success: "#157651"
+  warning: "#995d14"
+  warning-soft: "#fff2dd"
   error: "#b4443f"
   info: "#356d86"
 typography:
   display:
-    fontFamily: "Space Grotesk, sans-serif"
+    fontFamily: "General Sans, Source Sans 3, sans-serif"
     fontSize: "clamp(1.5rem, 2vw, 2.25rem)"
-    fontWeight: 500
+    fontWeight: 600
     lineHeight: 1.2
-    letterSpacing: "normal"
+    letterSpacing: "-0.03em"
   body:
-    fontFamily: "Source Sans 3, sans-serif"
+    fontFamily: "General Sans, Source Sans 3, sans-serif"
     fontSize: "16px"
     fontWeight: 400
     lineHeight: 1.5
     letterSpacing: "normal"
   label:
-    fontFamily: "Source Sans 3, sans-serif"
+    fontFamily: "General Sans, Source Sans 3, sans-serif"
     fontSize: "14px"
     fontWeight: 600
     lineHeight: 1.2
@@ -64,24 +64,12 @@ components:
     typography: "label"
     rounded: "{rounded.md}"
     padding: "9px 18px"
-  button-primary-hover:
-    backgroundColor: "{colors.success}"
-    textColor: "{colors.surface-panel}"
-    typography: "label"
-    rounded: "{rounded.md}"
-    padding: "9px 18px"
   button-secondary:
     backgroundColor: "{colors.surface-panel}"
     textColor: "{colors.primary}"
     typography: "label"
     rounded: "{rounded.md}"
     padding: "9px 18px"
-  mission-panel:
-    backgroundColor: "{colors.primary-soft}"
-    textColor: "{colors.text-primary}"
-    typography: "display"
-    rounded: "{rounded.md}"
-    padding: "14px 16px"
   dashboard-card:
     backgroundColor: "{colors.surface-panel}"
     textColor: "{colors.text-primary}"
@@ -89,8 +77,8 @@ components:
     rounded: "{rounded.md}"
     padding: "16px"
   status-tag:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.surface-panel}"
+    backgroundColor: "{colors.primary-soft}"
+    textColor: "{colors.primary-strong}"
     typography: "label"
     rounded: "{rounded.full}"
     padding: "4px 10px"
@@ -106,156 +94,62 @@ components:
 
 ## Overview
 
-**Creative North Star: "The Calm Operator Console"**
+Moonwalker is a calm trading workstation. Its visual language now uses a charcoal and neutral-grey shell with green reserved for selected navigation, key figures, chart emphasis, focus, and primary actions. It takes inspiration from the density and typographic clarity of the approved mockup while retaining Moonwalker's astronaut logo, product name, operational copy, and Naive UI components. Neither the wordmark nor the “Trading overview” title carries an ornamental underscore.
 
-Moonwalker is a careful trading workstation, not a generic admin panel and not a flashy crypto marketing site. The emotional goal is calm control: clear status, obvious next steps, and very little decorative noise competing with operational decisions. Hierarchy comes from spacing, borders, contrast, and a single soft card shadow — not from decorative fill. Working surfaces stay flat or near-flat; gradients are reserved for page atmosphere and rare emphasis, which keeps dark mode reading as a night operator console rather than neon-terminal cosplay.
+The dashboard presents live status and actions in a left navigation rail, a slim status bar, a Moonwalker status card with a separate Autopilot section, side-by-side performance and portfolio exposure cards, and the existing trade tables. Net profit and loss is the portfolio card's main figure; portfolio value and funds in deals appear beneath the budget bar. Figures are derived from current WebSocket and configuration data; missing feeds are shown as unavailable rather than invented. The Control Center keeps its intent-first setup flow and safety gates.
 
-The console asks the operator for intent before exposing breadth. First run does not begin with a mode strip or a dense settings grid; it begins with one intent question (restore an existing installation, or start a new setup) and then a setup-style choice (guided or full control). Each editable setting has exactly one canonical home, readiness gates stand between dry run and live trading, and the dashboard optimizes for calm control and recoverable outcomes rather than marketing or feature density.
-
-The palette is restrained: one operator-green primary carries trust, progress, and primary action; a brass accent is used sparingly only for "review carefully" moments; semantic success/warning/error/info tones mark readiness and risk. Tabular data earns a monospace face, and the type scale steps in an even, calm rhythm so dense configuration surfaces stay legible.
-
-**Key Characteristics:**
-
-- Calm operator console: status and next action first, decoration second.
-- One operator-green primary; brass used sparingly as a review accent.
-- Flat, bordered, single-shadow surfaces; gradients reserved for atmosphere.
-- Intent-first flow: one question, one active task, no equal-weight mode strip.
-- Even type scale (12/14/16/20/24/32/40/56) with a monospace data face.
+Statistics, Backtest, Monitoring, Autopilot Memory, Configuration, Strategy Builder, and Utilities use the same compact page heading and neutral panel treatment. Configuration's mission panel appears below that heading only for readiness, draft, recovery, and freshness states. Within those views, semantic status tags and warnings retain their meaning; ordinary cards and labels stay neutral. Naive UI remains the control and data-display framework throughout.
 
 ## Colors
 
-A restrained, cool-slate palette built around a single operator-green primary, with a scarce brass review accent and a small semantic set for readiness and risk.
+Light mode uses base `#f5f5f7`, rail `#ededf0`, panels `#ffffff`, border `#d9d9e0`, primary text `#19191d`, and accent `#276b47`. Dark mode uses base `#19191d`, rail `#17171b`, panels `#222227`, raised panels `#28282e`, border `#34343b`, primary text `#f5f5f7`, and accent `#9cdb73`. The semantic success, warning, error, and info colors remain separate from the brand accent.
 
-### Primary
-- **Operator Green** (#1d5c49): The trust color. Primary actions (Save changes, Go live, Restore), progress, and "ready" states. The single voice of the console.
-- **Deep Operator Green** (#18413a): Pressed/active state of primary buttons; used for focus rings and inset selection.
-- **Operator Green Soft** (#e3f3ec): Faint green wash behind mission and admission bands — depth without a shadow.
-- **Brass Review Accent** (#b78a2e): The scarce secondary. "Review carefully" moments only (readiness gates, pending attention). Never the dominant page color.
-
-### Neutral
-- **Console Base** (#f7f8f6): Page ground. Cool, slightly green-tinted off-white.
-- **Raised Surface** (#ecefea): Slightly lifted region ground.
-- **Raised Panel** (#ffffff): Card and form-field ground; the resting working surface.
-- **Border** (#d5dbd5): Default 1px border and divider.
-- **Primary Text** (#18211d): Headings and primary copy.
-- **Secondary Text** (#33403a): Body copy and form labels.
-- **Muted Text** (#646e66): Tertiary metadata, kickers, placeholders. Light-mode value; dark mode lifts it via `rgba(213, 219, 213, 0.72)` (6.3:1). The light value was darkened 2026-09-23 from `#8a948d` to clear WCAG AA (4.5:1) — `#8a948d` measured 2.94:1 on the console base, the only AA failure on the surface.
-
-### Semantic
-- **Success Green** (#2e7d5b): Ready / healthy / passing states; also primary button hover.
-- **Warning Amber** (#b7791f): Needs attention without being fatal; its soft ground is #fff8ec.
-- **Error Red** (#b4443f): Failed / blocking readiness gate.
-- **Info Blue** (#356d86): Neutral informational notes.
-
-### Named Rules
-**The One Voice Rule.** Operator green is the single primary; the brass secondary is a scarce "review carefully" accent, used on no more than ~10% of any screen. Its rarity is the point.
-**The Night-Console Rule.** Dark mode keeps the same hierarchy, lowers saturation by ~10–15%, and lifts contrast through surfaces rather than brighter accents. It reads as a night operator console, not neon-terminal cosplay.
+Use green selectively on active navigation, primary controls, highlighted data, and chart emphasis. Keep most headings, labels, cards, and backgrounds neutral. Warning and failure states retain amber and red; a positive financial value alone does not imply a healthy trading state. CSS custom properties in `frontend/src/assets/base.css` mirror `frontend/src/theme/tokens.ts`; the theme drift test enforces their correspondence.
 
 ## Typography
 
-**Display Font:** Space Grotesk (with system sans fallback)
-**Body Font:** Source Sans 3 (with "Segoe UI", sans-serif fallback)
-**Data/Mono Font:** IBM Plex Mono (with "SFMono-Regular", monospace fallback)
-**Code Font:** Fira Code
-
-**Character:** Firm, technical, and human. Space Grotesk gives operator headlines a precise, slightly engineered tone without sci-fi theatrics; Source Sans 3 keeps dense configuration copy calm and direct; IBM Plex Mono gives balances, ratios, and diagnostics a trustworthy, tabular-numeral, machine-readable voice.
-
-### Hierarchy
-- **Display** (500, clamp(1.5rem–2.25rem) / ~32–40px, 1.2): Page-level mission titles, first-run gateway headlines, section titles. Space Grotesk.
-- **Title** (450, 20–24px, 1.25): Card and panel headings. Space Grotesk.
-- **Body** (400, 16px, 1.5, max 72ch): Default reading copy and form labels. Source Sans 3.
-- **Label** (600, 14px, 1.2, tracked): UI controls, kickers, status tags. Source Sans 3 semibold.
-- **Mono / Data** (450, 14px, 1.4): Balances, ratios, diagnostics, tabular figures. IBM Plex Mono with tabular numerals.
-
-### Scale
-`12 / 14 / 16 / 20 / 24 / 32 / 40 / 56 px` — even, calm rhythm. 12 tertiary metadata · 14 dense supporting copy · 16 default body and form labels · 20 section titles · 24 card/panel headings · 32 page-level mission titles · 40 first-run gateway headline · 56 marketing/hero use only, rarely needed in product.
-
-### Named Rules
-**The Data-Gets-Mono Rule.** Any figure that is money, ratio, or diagnostic (balances, uPNL, ratios, order sizes) is set in IBM Plex Mono with tabular numerals; prose stays in Source Sans 3.
+General Sans is the display and UI face, with Source Sans 3 as fallback. IBM Plex Mono is for monetary values, ratios, diagnostics, and other tabular figures. The scale remains `12 / 14 / 16 / 20 / 24 / 32 / 40 / 56 px`; body text defaults to 16px, labels to 14px, and dense table text may be 14px. Use short, plain labels and tabular numerals. Preserve readable system fallbacks when web fonts are unavailable.
 
 ## Layout
 
-Grid-disciplined and intent-segmented. A 12-column desktop grid collapses to 8-column tablet and 4-column mobile within a `1200px` max content width. The Control Center is not a static tab layout — it is a lifecycle segment: before readiness it shows only the setup surface (entry gateway or one active setup task); after safe dry-run readiness it unlocks Overview as the default home, Advanced as the full-density tuning surface, and Utilities for operational actions. Density is comfortable for setup and compact for advanced tuning. Spacing rhythm is an 8px base with the scale `2xs(4) / xs(8) / sm(12) / md(16) / lg(24) / xl(32) / 2xl(48) / 3xl(64)`.
+Desktop uses a 224px left rail and a 64px top bar. The content width is at most 1500px. The trading overview starts with a compact Moonwalker status card containing admission and Autopilot sections. The wide Performance card sits beside a narrower, taller portfolio exposure card; its chart fills the available card height. Net profit and loss is the sole prominent financial figure. The budget bar is one continuous line scaled to the effective capital budget, with segments for funds in deals, open and pending order reserves, and available to trade. Any unused portion remains the empty track. Its legend shows those amounts; exchange free and portfolio value sit below the bar. When budget telemetry is unavailable, the card says so rather than presenting exchange balance as a budget. At narrower widths the two cards stack and the trade selector wraps. Configuration keeps its one-task-at-a-time first-run flow and opens on Setup after readiness.
 
-**The Intent-Before-Breadth Rule.** First run opens with one intent question, not a mode strip or a wall of fields; breadth is revealed only as far as the chosen intent requires.
-**The One-Home Rule.** Every editable configuration field has exactly one canonical visible home — essentials in Setup, expert tuning in Advanced, status in Overview, operational actions in Utilities. Deeper tuning *extends* an area; it never restates the same field.
-**The Single-Rail-Overview Rule.** After safe dry-run readiness, `Overview` renders as a single calm column (`grid-template-columns: 1fr`) rather than spreading status across the 12-column grid. This is an override *by intent* — a night-console reading column — not an omission; `Advanced` is where density and the full grid belong. Documented 2026-09-23 (plan review D6).
+Spacing follows `4 / 8 / 12 / 16 / 24 / 32 / 48 / 64 px`. Use borders, surface differences, and whitespace for hierarchy. Preserve the actual Moonwalker logo. Do not add decorative punctuation to the product name or page headings.
 
 ## Elevation & Depth
 
-Shadows are rare and calm. Working surfaces are flat or near-flat at rest; hierarchy is carried primarily by spacing, borders, contrast, and a single soft card shadow. Two shadow tokens exist: `ambient-soft` (`0 12px 28px rgba(24, 33, 29, 0.08)`) for emphasis surfaces (mission/admission bands) and `card` (`0 10px 24px rgba(24, 33, 29, 0.05)`) as the default panel resting elevation. In dark mode the same shadows deepen (`0 12px 28px rgba(0,0,0,0.28)` / `0 10px 24px rgba(0,0,0,0.22)`) to preserve legibility on dark surfaces.
-
-### Shadow Vocabulary
-- **Card** (`0 10px 24px rgba(24, 33, 29, 0.05)`): Default resting elevation for dashboard cards, subpanels, and mission panels.
-- **Ambient Soft** (`0 12px 28px rgba(24, 33, 29, 0.08)`): Diffuse ambient lift for emphasis surfaces where a touch more depth is warranted.
-
-### Named Rules
-**The Flat-By-Default Rule.** Headers, cards, shells, and setup panels are flat at rest; a shadow appears only as a response to state (emphasis band, hover elevation). Gradients are reserved for page atmosphere and rare emphasis, never for primary working surfaces.
+Working panels are flat at rest with a 1px neutral border. A soft shadow may be used for exceptional emphasis or transient hover state; it is not the default for cards. Do not use gradients on working surfaces. Dark mode gains depth through adjacent charcoal values rather than green fills.
 
 ## Shapes
 
-Soft, consistent corners from a single radius family — `sm` 6px, `md` 10px, `lg` 14px, `full` 9999px for pills — over 1px solid borders in the neutral border tone (#d5dbd5). There is no clipping, no hard-cut geometry, and no bevel; the form language is rounded, bordered, and restrained. Status tags and similar pills use `full` (9999px); cards and fields use `md` (10px); compact chips use `sm` (6px).
-
-**The Single-Radius-Voice Rule.** Every surface draws from the one radius scale at one step; no surface invents an ad-hoc radius. A mismatched corner reads as noise.
+Use the existing radius family: 6px for compact controls, 10px for cards and fields, 14px for large shells, and full radius for true pills. One-pixel borders define panels and separators.
 
 ## Components
 
-### Buttons
-- **Shape:** Gently rounded (10px, `md`), 9px × 18px padding, 14px semibold label.
-- **Primary:** Operator-green fill (#1d5c49) with light text (#f7f8f6); hover to success green (#2e7d5b) with a 1px lift; active to deep operator green (#18413a). Decisive, the dominant action.
-- **Secondary:** Raised panel ground with operator-green text and a faint green border; hover fills a 6% green wash.
-- **Focus:** 2px operator-green ring, 2px offset — lift by ring, never a hard outline.
+Keep Naive UI as the component framework. Apply the design through `NConfigProvider` overrides and the Moonwalker CSS tokens. Reuse Naive UI menus, tabs, cards, tables, tags, dialogs, and controls instead of creating a parallel component library. Selected navigation uses a neutral surface and a green icon/accent; buttons and focus use the green brand tone. Readiness and trade admission retain their semantic status colors and accessible labels.
 
-### Status Tags (chips)
-- **Style:** Full-radius pill (9999px), 4px × 10px padding, 14px semibold. Success wears operator green on light text; info wears info blue; warning wears a 14% brass wash with brass text.
-- **State:** Tone is set by semantic color, not by a selected/unselected toggle.
-- **Exception — admission pill:** the admission strip's `.admission-pill` is the one chip whose *text* does not follow the tone. Its green wash inverts polarity per scheme (pale green in light, near-black green in dark), so no single fixed green text can clear 4.5:1 on both; instead its `.n-tag__content` uses the already scheme-flipping `--mw-color-text-primary` (`#18211d` / `#f7f8f6`; `14.06:1` / `12.13:1`). Scoped to `.admission-strip.is-open`, so warning/error pills keep their own colours. Added 2026-09-24 with the a11y `0.96`→`1.0` recovery.
-
-### Cards / Containers
-- **Corner Style:** `md` (10px).
-- **Background:** Raised panel (#ffffff) for working surfaces; faint operator-green wash (#e3f3ec) for the mission panel.
-- **Shadow Strategy:** Resting `card` shadow by default; `ambient-soft` for emphasis.
-- **Border:** 1px neutral border (#d5dbd5).
-- **Internal Padding:** `md` (16px) standard, 14px × 16px for the mission panel.
-
-### Inputs / Fields
-- **Style:** 1px neutral border (#d5dbd5), raised-panel ground, `md` (10px) radius, 9px × 12px padding, 16px body text.
-- **Focus:** Border shifts to operator green with a 3px 14% green glow ring; placeholder in muted text.
-- **Label:** 14px semibold secondary text, stacked above with a 6px gap.
-
-### Navigation
-- **Style:** Horizontal header menu; items are rounded (10px), 8px × 12px padding, 14px label.
-- **States:** Default secondary text; hover to a 6% green wash; active to an 18% green wash with an inset 1px green ring and 500 weight.
-
-### Signature Components
-- **Mission Panel:** The signature surface. Readiness state + one next action + concise evidence, on a faint operator-green wash with a resting card shadow.
-- **Admission Strip:** A signaled band (info or warning) carrying one readiness or readiness-gate message with a leading status pill.
+The real dashboard keeps all open, closed, and unsellable trade tables and their actions. Open trades get the full content width so columns and row actions remain visible on large windows. Trade-table primary text shares one UI face and size, with tabular numerals; secondary details are one step smaller. Larger monetary summaries may use the mono face. The performance switcher starts on ALL with the cumulative profit and funds-in-deals line chart, and offers historical profit bar charts for 1D (daily), 30D (monthly), and 1Y (yearly). The historical charts keep their running-average line. Their descriptions identify the actual aggregation periods; the “ALL” feed currently contains at most the latest 12 months. Explanatory labels must accurately identify those data; exchange balance is not a complete exchange portfolio. On mobile, the navigation rail becomes a menu button that opens a drawer with the same destinations.
 
 ## Do's and Don'ts
 
-### Do:
-- **Do** ask the operator for intent before exposing breadth.
-- **Do** give every editable setting exactly one canonical home.
-- **Do** prefer explicit task ownership over component reuse when reuse harms clarity.
-- **Do** keep working surfaces flat and reserve gradients for page atmosphere and rare emphasis.
-- **Do** use intent-based, consequence-aware, state-first copy with no self-labeling.
-- **Do** set money, ratio, and diagnostic figures in IBM Plex Mono with tabular numerals.
-- **Do** lift focus and selection with a 2px operator-green ring, not a hard outline.
+### Do
+- Ask the operator for intent before exposing setup breadth.
+- Give every editable setting one canonical home.
+- Keep working surfaces neutral and use green as a selective accent.
+- Use live data, explicit loading states, and honest metric labels.
+- Keep visible keyboard focus and minimum 44px touch targets on mobile.
+- Preserve trade admission, delisting, and pause warnings near the trades they affect.
 
-### Don't:
-- **Don't** reuse the old Settings page mental model inside the new Control Center.
-- **Don't** show all modes at equal weight during first run.
-- **Don't** expose expert toggles inside Guided Setup.
-- **Don't** make restore discoverable only inside Advanced or Utilities during onboarding.
-- **Don't** duplicate normal editable settings between Setup and Advanced.
-- **Don't** use self-labeling or category terms like "Configuration", "Beginner", or "Advanced user".
-- **Don't** apply gradients to primary working surfaces (headers, cards, shells, setup panels).
+### Don't
+- Copy another product's wordmark decoration or substitute its logo.
+- Turn every surface or heading green.
+- Invent portfolio, exposure, or alert values when feeds are unavailable.
+- Duplicate normal editable settings between Setup and Advanced.
+- Apply gradients to headers, cards, shells, or setup panels.
 
 ---
 
-<!-- The sections below preserve Moonwalker's incumbent operator-UX, Control Center IA,
-     screen-level guidance, copy rules, accessibility, guardrails, and live-measured baseline.
-     They are project-specific extras kept alongside the canonical eight sections above. -->
+The sections below preserve Moonwalker's operator flow, Control Center information architecture, accessibility, and implementation rules.
 
 ## Operator UX Rules
 
@@ -320,7 +214,7 @@ Rules:
 
 #### Before Readiness
 - Show only the setup surface as the primary destination.
-- Do not show `Overview`, `Advanced`, and `Utilities` as equal first-run peers.
+- Do not show `Advanced` or operational utilities as equal first-run peers.
 - If needed, keep secondary escapes subtle:
    - `Restore instead`
    - `See all controls`
@@ -339,9 +233,10 @@ Rules:
 - Never fork into a separate advanced page during first run.
 
 #### After Safe Dry-Run Readiness
-- Unlock `Overview` as the default home.
+- Keep `Setup` as the default Configuration home.
 - Unlock `Advanced` as the full-density tuning surface.
-- Keep `Utilities` available for operational tasks like backup/restore and connectivity checks.
+- Show a guarded live-trading readiness review at the end of Setup for a saved, ready dry-run configuration.
+- Keep `Strategy Builder` and `Utilities` as separate navigation destinations.
 
 ## Control Center Information Architecture
 
@@ -364,20 +259,22 @@ CONTROL CENTER
 ### Returning Healthy Operator
 
 ```text
-CONTROL CENTER
+CONFIGURATION
 |
-|-- Mission Panel
-|    |-- readiness state
-|    |-- one next action
-|    `-- concise evidence
+|-- Compact configuration header
+|    |-- draft/save state
+|    `-- stale snapshot or readiness blocker when actionable
 |
-|-- Primary Nav
-|    |-- Overview
-|    `-- Setup
-|
-`-- Secondary Nav
-     |-- Advanced
-     `-- Utilities
+|-- Setup (default)
+|    `-- Live trading readiness review when safe dry run is ready
+`-- Advanced
+
+SEPARATE DESTINATIONS
+|-- Trading Overview: operating status and Autopilot summary
+|-- Strategy Builder
+|-- Utilities
+|-- Autopilot Memory
+`-- Monitoring
 ```
 
 ### One-Home Rule
@@ -385,8 +282,12 @@ Every configuration field gets exactly one canonical visible home.
 
 - Essentials live in `Setup`
 - Expert tuning lives in `Advanced`
-- Status lives in `Overview`
-- Operational actions live in `Utilities`
+- Setup owns the global capital limit. Advanced owns capital reserve and buffer tuning.
+- Runtime status lives in Trading Overview, Autopilot Memory, or Monitoring.
+- Pause/Resume Moonwalker lives in the persistent top bar.
+- Autopilot on/off lives with Autopilot settings in Advanced.
+- Live activation lives in the guarded readiness review at the end of Setup.
+- Backup/restore and connectivity tests live in Utilities.
 
 No field should appear as a normal editable control in both Setup and Advanced.
 If Advanced extends an area already introduced in Setup, it should do so by
@@ -400,7 +301,7 @@ adding deeper controls, not by restating the same fields.
    - `Restore existing installation`
    - `Start a new setup`
 - Supporting copy should explain consequences, not implementation details.
-- This screen should be visually quieter than Overview and more decisive than Settings.
+- This screen should be visually quieter than Trading Overview and decisive about the next setup action.
 
 ### 2. Guided Setup
 - One dominant mission panel: current progress + next action
@@ -422,15 +323,19 @@ adding deeper controls, not by restating the same fields.
    - what still needs attention
    - one next action
 
-### 5. Overview After Readiness
-- Calm status first
-- One next recommended action
-- Evidence row for recent changes or warnings
-- Setup remains reachable but no longer dominates
+### 5. Configuration After Readiness
+- Setup remains the landing surface.
+- Show Setup groups as a left-side section menu, matching Advanced; display the selected group in the right pane.
+- Use a mobile selector for the same sections, and include the readiness review as a final section when live activation is available.
+- Keep first-run Guided and Full Control presentation separate from this ready-state layout.
+- Keep the header compact; show save state, stale configuration, and blockers only when actionable.
+- Put the guarded live activation action after the Setup tasks.
+- Do not repeat runtime, Autopilot, or Monitoring summaries here.
 
 ### 6. Advanced
 - Dense, deliberate, operator-owned tuning
 - Group by expert domain, not by leftover form inheritance
+- Show one expert domain at a time with a persistent section navigator on desktop and a selector on mobile.
 - Never used as the first-run dumping ground
 
 ### 7. Utilities
@@ -449,7 +354,7 @@ adding deeper controls, not by restating the same fields.
    - bad: `Advanced user`
 - Use state-first headlines
 - Keep helper text short, operational, and consequence-aware
-- Avoid category terms like `Configuration` unless needed for advanced surfaces
+- Use `Configuration` for the setup and tuning destination.
 
 ## Accessibility Requirements
 - The first-run entry choice must be fully keyboard navigable and understandable without color.
@@ -459,7 +364,7 @@ adding deeper controls, not by restating the same fields.
 - Primary actions must meet minimum touch target sizes (44px).
 
 ## Implementation Guardrails
-- Do not reuse the old Settings page mental model inside the new Control Center.
+- Keep first-run guidance while making returning Configuration task-focused.
 - Do not show all modes at equal weight during first run.
 - Do not expose expert toggles inside Guided Setup.
 - Do not make restore discoverable only inside Advanced or Utilities during onboarding.
@@ -471,9 +376,9 @@ adding deeper controls, not by restating the same fields.
 - **Easing:** enter `cubic-bezier(0.2, 0.8, 0.2, 1)`, exit `cubic-bezier(0.4, 0, 1, 1)`, move `cubic-bezier(0.2, 0.7, 0.2, 1)`
 - **Duration:** micro `80ms`, short `160ms`, medium `260ms`, long `420ms`
 
-## Verified Baseline (Live-Measured, 2026-06-05)
+## Historical Verified Baseline (Live-Measured, 2026-06-05)
 
-These values were extracted from the running site at http://192.168.6.5:8160/stats — not from source code. They confirm what actually renders.
+These values describe the previous design, measured on 2026-06-05 at http://192.168.6.5:8160/stats. They are retained as historical evidence and do not describe the current palette or typography.
 
 ### Fonts Rendered
 | Font | Where | Matches Design System? |
@@ -493,7 +398,10 @@ These values were extracted from the running site at http://192.168.6.5:8160/sta
 | #8A948D | Muted text | Yes |
 | #F7F8F6 | Surface base | Yes |
 
-### Known Deviations
+### Historical Audit Notes
+
+The following notes predate the 2026-09-28 dashboard redesign. Recheck them against a data-fed build before treating any status as current.
+
 _Re-checked 2026-09-24 against the tokenized, a11y-1.0 build by source-truth grep — no live pass. An absent override or fix means the deviation is still open; an explicit source value means it is resolved there._
 
 | Issue | Current | Should Be | Severity |
@@ -502,14 +410,14 @@ _Re-checked 2026-09-24 against the tokenized, a11y-1.0 build by source-truth gre
 | Pagination touch targets | **Resolved (2026-09-24).** `44px` now covers every paged surface: stats-table pagination (`.ledger-panel`/`.ai-trust-card`, `StatisticsView.vue:1200`, ≤767px), control-center pages (`ControlCenterView.vue:643`, ≤767px), mobile **row-action** buttons (`TradesView.vue:683`, ≤520px), and — added this arc — the three paged trade feeds (Open/Closed/Unsellable), whose Naive `NDataTable` pagination renders inside `.ledger-panel` in `TradesView.vue` (new `:deep(.n-pagination-item)` rule at the foot of its `@media(max-width:520px)` block, mirroring `StatisticsView.vue`). Live CSSOM-verified that day: the rule is loaded, gated to `≤520px`, inert at `>520px` (an injected test item measured 0px wide at 800px), and its selector specificity (`0,0,3`) beats Naive's base `.n-pagination-item` (`0,0,1`), so at 375px the feed items resolve to 44×44px. (A 375px eyeball is skipped — this browser toolset has no viewport emulation — but the result is deterministic from the gated high-specificity rule; CI-built into `TradesView-*.css`.) | `44x44px` minimum on mobile | **Resolved** (all paged surfaces: stats, control-center, row-actions, 3 trade feeds) |
 | Mobile text truncation | **Open (unverified 375px).** Re-audited 2026-09-24: `text-overflow:ellipsis` **does** exist in source — on the ledger symbol cell `.trade-symbol-main` (`TradesView.vue`, at both the `≤767px` gate, line 604, and the `≤520px` gate, line 661) — so the earlier "no ellipsis anywhere" note was a false negative (a `*.css`-only grep never looked at the `.vue` scoped `<style>` blocks). Responsive guards exist (`@media(max-width:767px)` + `520px` in `main.css`, `white-space:normal` tab-wrap at ≤520px). A live clip-scan (`scrollWidth>clientWidth`) on a data-less shell at 800px returned **0 candidates** (desktop has room); the 2026-06-05 `"les mo"` @375px case cannot be reproduced without viewport emulation (absent in this browser toolset) plus live trade data, so it stays open pending a device-emulated, data-fed re-check. | Full text with ellipsis on narrow cells | **Low** (open; re-check on a device-emulated, data-fed session) |
 
-### Performance Baseline
+### Historical Performance Baseline
 | Metric | Value |
 |--------|-------|
 | TTFB | 10ms |
 | DOM Ready | 70ms |
 | Full Load | 72ms |
 
-### Accessibility Score
+### Historical Accessibility Score
 - **Re-measured 2026-09-24: Lighthouse Accessibility `1.0`** (was `0.96` on 2026-09-23); **Best Practices `1.0`**. Vehicle: fresh production build on a throwaway loopback `:4173` — a data-independent shell, so the score reflects theme + a11y, not live market data.
 - Drivers of the `0.96`→`1.0` recovery: (a) the admission-pill status text set to `--mw-color-text-primary` — scheme-flipping `#18211d` (light) / `#f7f8f6` (dark), measured `14.06:1` light / `12.13:1` dark, both clear 4.5:1 AA against the green wash that inverts polarity per scheme; (b) `text-muted` `#8a948d`→`#646e66` (2026-09-23).
 - Remaining Lighthouse flags are `meta-description` / `robots.txt` — SEO metadata, **not** accessibility — so no a11y work remains.
@@ -517,6 +425,7 @@ _Re-checked 2026-09-24 against the tokenized, a11y-1.0 build by source-truth gre
 ## Decisions Log
 | Date | Decision | Rationale |
 |------|----------|-----------|
+| 2026-09-28 | Adopted the approved charcoal dashboard layout and restrained green brand accent, retained the Moonwalker logo and Naive UI, and removed decorative underscores | Distinguishes Moonwalker from the reference design while preserving its operator workflow |
 | 2026-03-21 | Added repo-level DESIGN.md | Moonwalker had Control Center design intent but no repo-level design source of truth |
 | 2026-03-21 | Made first-run begin with `Restore existing installation` vs `Start a new setup` | Intent is clearer and safer than asking the user whether they are "advanced" |
 | 2026-03-21 | Made `Guided setup` vs `Full control` the second decision | This preserves expert agency without forking the information architecture |

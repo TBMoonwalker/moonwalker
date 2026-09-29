@@ -67,9 +67,6 @@ function createSetupFlowHarness(overrides = {}) {
         async guideToTarget(target) {
             guidedTargets.push(target)
         },
-        async handleActivateLiveTrading() {
-            liveActivations.push('activate')
-        },
         async navigateToControlCenter(mode, target = null) {
             navigation.push([mode, target])
         },
@@ -207,6 +204,43 @@ test('setup flow derives task status, summaries, and expansion state', () => {
     assert.equal(harness.flow.isSetupTaskExpanded('exchange'), true)
 })
 
+test('ready setup opens the first section and can select the activation review', () => {
+    const readiness = computed(() => ({
+        complete: true,
+        firstRun: false,
+        attentionNeeded: false,
+        blockers: [],
+        nextMode: 'setup',
+        nextTarget: 'live-activation',
+        dryRun: true,
+        configuredEssentials: 8,
+    }))
+    const defaultHarness = createSetupFlowHarness({
+        readiness,
+        routeState: computed(() => ({ mode: 'setup', target: null })),
+    })
+    assert.equal(defaultHarness.flow.setupTasks.value.some((task) => task.target === 'live-activation'), false)
+    assert.equal(defaultHarness.flow.isSetupTaskExpanded('exchange'), true)
+    assert.deepEqual(defaultHarness.flow.getSetupTaskStatus('exchange'), {
+        label: 'Ready',
+        type: 'success',
+    })
+
+    const selectedHarness = createSetupFlowHarness({
+        readiness,
+        routeState: computed(() => ({ mode: 'setup', target: 'exchange' })),
+    })
+    assert.equal(selectedHarness.flow.isSetupTaskExpanded('exchange'), true)
+    assert.equal(selectedHarness.flow.isSetupTaskExpanded('signal'), false)
+
+    const activationHarness = createSetupFlowHarness({
+        readiness,
+        routeState: computed(() => ({ mode: 'setup', target: 'live-activation' })),
+    })
+    assert.equal(activationHarness.flow.activeSetupTarget.value, 'live-activation')
+    assert.equal(activationHarness.flow.isSetupTaskExpanded('exchange'), false)
+})
+
 test('setup flow mission action guides incomplete readiness to the next blocker', async () => {
     const harness = createSetupFlowHarness({
         readiness: computed(() => ({
@@ -228,14 +262,14 @@ test('setup flow mission action guides incomplete readiness to the next blocker'
     assert.deepEqual(harness.navigation, [])
 })
 
-test('setup flow mission action activates dry-run setups and otherwise navigates home', async () => {
+test('setup mission action never activates live trading after readiness', async () => {
     const dryRunHarness = createSetupFlowHarness({
         readiness: computed(() => ({
             complete: true,
             firstRun: false,
             attentionNeeded: false,
             blockers: [],
-            nextMode: 'overview',
+            nextMode: 'setup',
             nextTarget: 'live-activation',
             dryRun: true,
             configuredEssentials: 8,
@@ -244,7 +278,7 @@ test('setup flow mission action activates dry-run setups and otherwise navigates
 
     await dryRunHarness.flow.handleMissionPrimaryAction()
 
-    assert.deepEqual(dryRunHarness.liveActivations, ['activate'])
+    assert.deepEqual(dryRunHarness.liveActivations, [])
     assert.deepEqual(dryRunHarness.navigation, [])
 
     const liveHarness = createSetupFlowHarness({
@@ -253,7 +287,7 @@ test('setup flow mission action activates dry-run setups and otherwise navigates
             firstRun: false,
             attentionNeeded: false,
             blockers: [],
-            nextMode: 'overview',
+            nextMode: 'setup',
             nextTarget: 'live-activation',
             dryRun: false,
             configuredEssentials: 8,
@@ -263,5 +297,5 @@ test('setup flow mission action activates dry-run setups and otherwise navigates
     await liveHarness.flow.handleMissionPrimaryAction()
 
     assert.deepEqual(liveHarness.liveActivations, [])
-    assert.deepEqual(liveHarness.navigation, [['overview', null]])
+    assert.deepEqual(liveHarness.navigation, [])
 })

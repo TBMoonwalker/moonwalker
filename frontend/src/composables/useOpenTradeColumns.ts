@@ -314,8 +314,8 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
             : 0
         const toneClass = !hasPriceStatus
             ? 'is-idle'
-            : currentPrice < avgPrice
-              ? 'is-warning'
+            : getDisplayedProfitPercent(rowData) < 0
+              ? 'is-negative'
               : 'is-active'
         const label = maxSafetyOrders
             ? `SO ${safetyOrderCount} / ${maxSafetyOrders}`

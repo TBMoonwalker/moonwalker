@@ -7,6 +7,14 @@ const openTradeColumnsSource = fs.readFileSync(
     path.join(__dirname, '..', 'src', 'composables', 'useOpenTradeColumns.ts'),
     'utf8',
 )
+const tradesViewSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'views', 'TradesView.vue'),
+    'utf8',
+)
+const openTradesSource = fs.readFileSync(
+    path.join(__dirname, '..', 'src', 'components', 'OpenTrades.vue'),
+    'utf8',
+)
 
 test('open trade TP/SO beam keeps price status separate from SO count', () => {
     // Regression: the design refresh changed the beam to SO-count progress only.
@@ -18,10 +26,10 @@ test('open trade TP/SO beam keeps price status separate from SO count', () => {
         'expected the TP/SO beam to derive status from current, average, and take-profit prices',
     )
     assert.ok(
-        openTradeColumnsSource.includes('currentPrice < avgPrice') &&
-            openTradeColumnsSource.includes("? 'is-warning'") &&
+        openTradeColumnsSource.includes('getDisplayedProfitPercent(rowData) < 0') &&
+            openTradeColumnsSource.includes("? 'is-negative'") &&
             openTradeColumnsSource.includes(": 'is-active'"),
-        'expected the TP/SO beam tone to show warning/active price status independently of SO count',
+        'expected the TP/SO beam tone to follow the displayed P&L independently of SO count',
     )
     assert.ok(
         openTradeColumnsSource.includes('left: `${fillStart}%`') &&
@@ -33,4 +41,9 @@ test('open trade TP/SO beam keeps price status separate from SO count', () => {
             !openTradeColumnsSource.includes("? 'is-idle'"),
         'expected zero safety orders not to force the TP/SO beam into grey idle state',
     )
+    assert.match(
+        tradesViewSource,
+        /\.trade-tpso-cell\.is-negative \.trade-tpso-fill\) \{\s*background: var\(--mw-color-error\)/,
+    )
+    assert.match(openTradesSource, /\.red \.profit\) \{\s*color: var\(--mw-color-error\)/)
 })

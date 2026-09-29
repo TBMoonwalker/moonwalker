@@ -40,18 +40,15 @@ defineEmits<{
                 class="mission-header-row"
             >
                 <n-flex vertical :size="6" class="mission-copy">
-                    <n-text depth="3" class="control-center-kicker">
-                        Control Center
-                    </n-text>
                     <div class="mission-heading-group">
                         <n-tag class="mission-status-tag" :type="missionSummaryTone">
                             {{ viewState.badge }}
                         </n-tag>
-                        <h1 class="mission-title">
+                        <h2 v-if="viewState.kind !== 'healthy'" class="mission-title">
                             {{ viewState.title }}
-                        </h1>
+                        </h2>
                     </div>
-                    <n-text depth="3" class="mission-summary">
+                    <n-text v-if="viewState.kind !== 'healthy'" depth="3" class="mission-summary">
                         {{ viewState.summary }}
                     </n-text>
                 </n-flex>
@@ -73,7 +70,7 @@ defineEmits<{
                         Save changes
                     </n-button>
                     <n-button
-                        v-if="!(readiness.complete && readiness.dryRun)"
+                        v-if="!readiness.complete"
                         type="primary"
                         strong
                         :loading="activationLoading"
@@ -91,6 +88,7 @@ defineEmits<{
             </n-flex>
 
             <n-alert
+                v-if="isDirty || transitionIntent || configTrustState.kind !== 'trusted' || !readiness.complete || viewState.kind === 'rescue'"
                 :type="missionAlertTone"
                 :title="dirtySummary"
                 role="status"
@@ -138,18 +136,9 @@ defineEmits<{
 </template>
 
 <style scoped>
-.control-center-kicker {
-    font-size: 0.82rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--mw-color-text-muted);
-    font-family: var(--mw-font-body);
-    font-weight: 600;
-}
-
 .mission-panel {
-    border-color: color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
-    background: color-mix(in srgb, var(--mw-color-primary) 5%, transparent);
+    border-color: var(--mw-color-border);
+    background: var(--mw-color-surface-panel);
 }
 
 .mission-heading-group {
@@ -199,10 +188,10 @@ defineEmits<{
 .mission-title {
     margin: 0;
     font-family: var(--mw-font-display);
-    font-size: 1.35rem;
+    font-size: clamp(1.5rem, 2vw, 2.25rem);
     line-height: 1.2;
-    font-weight: 450;
-    letter-spacing: 0;
+    font-weight: 600;
+    letter-spacing: -0.03em;
 }
 
 .mission-summary {

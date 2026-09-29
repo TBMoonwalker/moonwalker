@@ -178,7 +178,7 @@ onUnmounted(() => {
 .stream-row {
   min-height: 66px;
   padding: 10px 16px;
-  border-bottom: 1px solid rgba(213, 219, 213, 0.7);
+  border-bottom: 1px solid var(--mw-color-border);
 }
 
 .stream-row:last-child {
@@ -196,8 +196,8 @@ onUnmounted(() => {
 .stream-title {
   display: block;
   color: var(--mw-color-text-primary);
-  font-family: var(--mw-font-mono);
-  font-size: 0.95rem;
+  font-family: var(--mw-font-body);
+  font-size: 0.875rem;
   font-weight: 600;
 }
 

@@ -51,15 +51,6 @@ const selectedSnapshot = computed<AutopilotMemorySnapshot | null>(() => {
     return allRows.value.find((row) => row.symbol === selectedSymbol.value) ?? null
 })
 
-function openControlCenterOverview(): void {
-    void router.push({
-        name: 'controlCenter',
-        query: {
-            mode: 'overview',
-        },
-    })
-}
-
 function openAutopilotAdvanced(): void {
     void router.push({
         name: 'controlCenter',
@@ -77,22 +68,26 @@ function formatTrustBoardSymbol(symbol: string): string {
 
 <template>
     <div class="page-shell autopilot-memory-page operator-console-page">
+        <header class="operator-page-heading">
+            <h1>Autopilot Memory</h1>
+            <p>Review the evidence behind Autopilot's symbol decisions.</p>
+        </header>
         <n-card class="autopilot-shell dashboard-panel" content-style="padding: 18px 20px;">
             <n-flex vertical :size="16">
                 <n-flex class="autopilot-status-row" justify="space-between" align="start" :wrap="true" :size="[12, 12]">
                     <div class="autopilot-status-copy">
-                        <n-text depth="3">Control Center / Autopilot</n-text>
-                        <h1 class="autopilot-status-title">{{ formatAutopilotStatusTitle(data) }}</h1>
+                        <n-text depth="3">Autopilot / Memory</n-text>
+                        <h2 class="autopilot-status-title">{{ formatAutopilotStatusTitle(data) }}</h2>
                         <p class="autopilot-status-summary">
                             {{ formatAutopilotStatusBody(data) }}
                         </p>
                     </div>
                     <div class="autopilot-status-actions">
-                        <n-button secondary @click="openControlCenterOverview">
-                            Back to Control Center
+                        <n-button secondary @click="router.push({ name: 'trades' })">
+                            Trading overview
                         </n-button>
                         <n-button type="primary" secondary @click="openAutopilotAdvanced">
-                            Tune Autopilot
+                            Configure Autopilot
                         </n-button>
                     </div>
                 </n-flex>
@@ -331,10 +326,10 @@ function formatTrustBoardSymbol(symbol: string): string {
 .autopilot-status-row {
     margin-bottom: 0;
     padding: 14px 16px;
-    border: 1px solid color-mix(in srgb, var(--mw-color-primary) 14%, transparent);
+    border: 1px solid var(--mw-color-border);
     border-radius: var(--mw-radius-md);
-    background: color-mix(in srgb, var(--mw-color-primary) 5%, transparent);
-    box-shadow: var(--mw-shadow-card);
+    background: var(--mw-color-surface-panel);
+    box-shadow: none;
 }
 
 .autopilot-shell {
@@ -345,7 +340,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     box-shadow: none;
 }
 
-.autopilot-shell :deep(.n-card__content) {
+.autopilot-shell > :deep(.n-card-content) {
     padding: 0 !important;
 }
 
@@ -359,8 +354,8 @@ function formatTrustBoardSymbol(symbol: string): string {
     margin: 4px 0 4px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
-    font-size: 1.12rem;
-    font-weight: 450;
+    font-size: 1.25rem;
+    font-weight: 600;
     letter-spacing: 0;
     line-height: 1.2;
 }
@@ -384,7 +379,9 @@ function formatTrustBoardSymbol(symbol: string): string {
     margin: 0 0 6px;
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
-    letter-spacing: -0.02em;
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: 0;
 }
 
 .autopilot-section-card {
@@ -392,7 +389,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     align-self: start;
     border-radius: var(--mw-radius-md);
     background: var(--mw-color-surface-panel);
-    box-shadow: var(--mw-shadow-card);
+    box-shadow: none;
 }
 
 .grid-shell {
@@ -415,14 +412,14 @@ function formatTrustBoardSymbol(symbol: string): string {
     padding: 12px;
     border-radius: var(--mw-radius-sm);
     background: var(--mw-surface-card-subtle);
-    border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    border: 1px solid var(--mw-color-border);
 }
 
 .trust-row {
     width: 100%;
     padding: 10px 12px;
     border-radius: var(--mw-radius-sm);
-    border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    border: 1px solid var(--mw-color-border);
     background: var(--mw-surface-card-muted);
     color: var(--mw-color-text-primary);
     display: flex;
@@ -447,7 +444,7 @@ function formatTrustBoardSymbol(symbol: string): string {
 }
 
 .trust-row[aria-pressed='true'] {
-    background: #eef4ef;
+    background: var(--mw-surface-active);
     border-color: color-mix(in srgb, var(--mw-color-primary) 32%, transparent);
     box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--mw-color-primary) 8%, transparent);
 }
@@ -553,7 +550,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     padding: 12px 14px;
     border-radius: 10px;
     background: var(--mw-surface-card-muted);
-    border: 1px solid var(--mw-color-border-subtle, #d5dbd5);
+    border: 1px solid var(--mw-color-border);
 }
 
 .metric-label {
@@ -580,7 +577,7 @@ function formatTrustBoardSymbol(symbol: string): string {
     min-height: 48px;
     padding: 10px 12px;
     border: 0;
-    border-bottom: 1px solid rgba(213, 219, 213, 0.7);
+    border-bottom: 1px solid var(--mw-color-border);
     border-radius: 0;
     background: var(--mw-color-surface-panel);
     display: flex;

@@ -77,7 +77,7 @@ Notes:
 
 | Method | Path | Purpose |
 | --- | --- | --- |
-| `GET` | `/autopilot/memory` | Return the persisted Autopilot Memory cockpit read model used by `/control-center/autopilot` and the Control Center overview preview. |
+| `GET` | `/autopilot/memory` | Return the persisted Autopilot Memory read model used by `/control-center/autopilot`. |
 
 The Autopilot Memory payload is read-only. It includes:
 - current memory status (`fresh`, `warming_up`, `stale`, or baseline-only)

@@ -518,6 +518,10 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
 <template>
    <div class="page-shell stats-page operator-console-page">
+      <header class="operator-page-heading">
+        <h1>Statistics</h1>
+        <p>Closed-trade performance, activity, and AI trust in one view.</p>
+      </header>
       <!-- Empty / error state -->
       <template v-if="!summary">
         <n-flex class="page-section" vertical>
@@ -905,9 +909,10 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 }
 
 .stats-kicker {
-  font-size: 0.82rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  color: var(--mw-color-text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  letter-spacing: 0;
 }
 
 .tab-content {
@@ -945,15 +950,25 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 }
 
 :deep(.n-statistic-value) {
+  font-family: var(--mw-font-mono);
+  font-size: 1.5rem;
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
 }
 
+:deep(.n-statistic-label) {
+  color: var(--mw-color-text-secondary);
+  font-family: var(--mw-font-body);
+  font-size: 0.875rem;
+  font-weight: 600;
+}
+
 .red {
-    --n-value-text-color: #B4443F !important;
+    --n-value-text-color: var(--mw-color-error) !important;
 }
 
 .green {
-    --n-value-text-color: #2E7D5B !important;
+    --n-value-text-color: var(--mw-color-primary) !important;
 }
 
 .risk-stat {
@@ -986,7 +1001,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
 
 .heatmap-body {
   display: grid;
-  grid-template-columns: minmax(220px, max-content) minmax(220px, 1fr);
+  grid-template-columns: minmax(160px, max-content) minmax(0, 1fr);
   align-items: start;
   gap: 16px;
 }
@@ -1003,7 +1018,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
   padding: 8px 10px;
   border: 1px solid var(--mw-color-border);
   border-radius: var(--mw-radius-sm, 6px);
-  background: color-mix(in srgb, var(--mw-color-primary) 5%, transparent);
+  background: var(--mw-surface-card-muted);
 }
 
 .heatmap-metrics dt {
@@ -1016,6 +1031,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
   margin: 3px 0 0;
   color: var(--mw-color-text-primary);
   font-size: 0.95rem;
+  font-family: var(--mw-font-mono);
   font-variant-numeric: tabular-nums;
   font-weight: 500;
   line-height: 1.25;
@@ -1060,7 +1076,7 @@ function getAiTrustColumns(): DataTableColumns<AiTrustPrediction> {
   padding: 12px;
   border: 1px solid var(--mw-color-border);
   border-radius: var(--mw-radius-sm, 6px);
-  background: rgba(53, 109, 134, 0.05);
+  background: var(--mw-surface-card-muted);
 }
 
 .ai-calibration-summary {

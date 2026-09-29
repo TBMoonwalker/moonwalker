@@ -51,7 +51,6 @@ interface WindowLike {
 interface UseControlCenterSetupFlowOptions {
     focusTarget: (target: ControlCenterTarget) => Promise<boolean>
     guideToTarget: (target: ControlCenterTarget) => Promise<void>
-    handleActivateLiveTrading: () => Promise<void>
     navigateToControlCenter: (
         mode: ControlCenterMode,
         target?: ControlCenterTarget | null,
@@ -153,17 +152,27 @@ export function useControlCenterSetupFlow(
             !showSetupEntryGate.value &&
             !showRestoreSetupFlow.value,
     )
-    const setupTasks = computed(() => getTasksForMode('setup'))
+    const setupTasks = computed(() =>
+        getTasksForMode('setup').filter((task) => task.target !== 'live-activation'),
+    )
     const activeSetupTarget = computed<ControlCenterTarget>(() => {
         const requestedTarget = options.routeState.value.target
         if (
+            requestedTarget === 'live-activation' &&
+            options.readiness.value.complete &&
+            options.readiness.value.dryRun
+        ) {
+            return requestedTarget
+        }
+        if (
             requestedTarget &&
+            requestedTarget !== 'live-activation' &&
             getTaskPresentation(requestedTarget).modes.includes('setup')
         ) {
             return requestedTarget
         }
         const nextTarget = options.readiness.value.nextTarget
-        if (nextTarget && getTaskPresentation(nextTarget).modes.includes('setup')) {
+        if (nextTarget && nextTarget !== 'live-activation' && getTaskPresentation(nextTarget).modes.includes('setup')) {
             return nextTarget
         }
         return 'exchange'
@@ -253,6 +262,9 @@ export function useControlCenterSetupFlow(
     }
 
     function isSetupTaskExpanded(target: ControlCenterTarget): boolean {
+        if (options.readiness.value.complete) {
+            return activeSetupTarget.value === target
+        }
         return setupStyle.value === 'full' || activeSetupTarget.value === target
     }
 
@@ -260,6 +272,9 @@ export function useControlCenterSetupFlow(
         label: string
         type: 'default' | 'info' | 'warning' | 'success'
     } {
+        if (options.readiness.value.complete) {
+            return { label: 'Ready', type: 'success' }
+        }
         if (activeSetupTarget.value === target) {
             return {
                 label: 'Current',
@@ -281,6 +296,9 @@ export function useControlCenterSetupFlow(
     }
 
     function getSetupTaskSummary(target: ControlCenterTarget): string {
+        if (options.readiness.value.complete) {
+            return 'Saved and ready to review.'
+        }
         const blocker = findSetupBlocker(target)
         if (blocker) {
             return blocker.description
@@ -317,17 +335,12 @@ export function useControlCenterSetupFlow(
     }
 
     async function handleMissionPrimaryAction(): Promise<void> {
-        if (!options.readiness.value.complete) {
-            await options.guideToTarget(
-                options.readiness.value.nextTarget ?? 'exchange',
-            )
+        if (options.readiness.value.complete) {
             return
         }
-        if (options.readiness.value.dryRun) {
-            await options.handleActivateLiveTrading()
-            return
-        }
-        await options.navigateToControlCenter('overview')
+        await options.guideToTarget(
+            options.readiness.value.nextTarget ?? 'exchange',
+        )
     }
 
     return {

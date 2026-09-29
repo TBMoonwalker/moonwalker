@@ -10,7 +10,7 @@
                 maxWidth: '640px',
             }"
         >
-            <n-form-item label="Global max fund" path="max_fund">
+            <n-form-item v-if="showBaseFields" label="Global max fund" path="max_fund">
                 <n-input-number
                     v-model:value="capital.max_fund"
                     placeholder="Global max fund"
@@ -18,6 +18,7 @@
                 />
             </n-form-item>
             <n-form-item
+                v-if="showExpertFields"
                 label="Reserve safety-order budget"
                 path="reserve_safety_orders"
                 label-placement="left"
@@ -25,7 +26,7 @@
                 <n-checkbox v-model:checked="capital.reserve_safety_orders" />
             </n-form-item>
             <n-form-item
-                v-if="dynamicDcaEnabled"
+                v-if="showExpertFields && dynamicDcaEnabled"
                 label="Budget buffer for dynamic safety orders (%)"
                 path="budget_buffer_pct"
             >
@@ -51,9 +52,13 @@ withDefaults(
         cardTitle?: string | null
         dynamicDcaEnabled: boolean
         rules: FormRules
+        showBaseFields?: boolean
+        showExpertFields?: boolean
     }>(),
     {
         cardTitle: undefined,
+        showBaseFields: true,
+        showExpertFields: true,
     },
 )
 

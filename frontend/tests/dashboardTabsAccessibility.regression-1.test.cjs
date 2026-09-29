@@ -8,45 +8,27 @@ const tradesViewSource = fs.readFileSync(
     'utf8',
 )
 
-test('dashboard tab groups implement the ARIA tabs pattern', () => {
-    // Regression: ISSUE-003 — chart and trade tabs were pointer-only divs.
-    // Found by /qa on 2026-07-17.
-    // Report: .gstack/qa-reports/qa-report-192-168-6-5-8150-2026-07-17.md
-     assert.equal(
-         (tradesViewSource.match(/:tab-props="get(?:Profit|Trade)TabProps/g) || [])
-              .length,
-           7,
-           'expected every chart and trade tab to receive semantic tab props',
-        )
-     assert.equal(
-         (tradesViewSource.match(/role="tabpanel"/g) || []).length,
-           7,
-           'expected every tab content pane to expose the tabpanel role',
-        )
-    for (const token of [
-        "role: 'tab'",
-        "'aria-selected': String(selected)",
-        "'aria-controls': `${group}-panel-${name}`",
-        "setAttribute('role', 'tablist')",
-    ]) {
-        assert.ok(
-            tradesViewSource.includes(token),
-            `expected dashboard tab semantics to include ${token}`,
-        )
+test('performance range uses labelled native buttons with pressed state', () => {
+    assert.match(tradesViewSource, /const performanceRange = ref<PerformanceRange>\('all'\)/)
+    assert.match(tradesViewSource, /role="group" aria-label="Performance range"/)
+    assert.match(tradesViewSource, /:aria-pressed="performanceRange === range\.value"/)
+    assert.match(tradesViewSource, /<UpnlChart v-if="performanceRange === 'all'" :range="performanceRange" \/>/)
+    assert.match(tradesViewSource, /<Charts v-else :key="performanceRange" :period="profitPeriod" \/>/)
+    for (const [range, period] of [['1d', 'daily'], ['30d', 'monthly'], ['365d', 'yearly']]) {
+        assert.ok(tradesViewSource.includes(`'${range}': '${period}'`))
+    }
+    for (const label of ['ALL', '1D', '30D', '1Y']) {
+        assert.ok(tradesViewSource.includes(`label: '${label}'`))
     }
 })
 
-test('dashboard tabs support standard keyboard navigation', () => {
-    for (const key of ['ArrowRight', 'ArrowLeft', 'Home', 'End', 'Enter']) {
-        assert.ok(
-            tradesViewSource.includes(`event.key === '${key}'`),
-            `expected tab keyboard handling for ${key}`,
-        )
+test('trade heading switches the three full-width ledgers', () => {
+    assert.match(tradesViewSource, /role="group" aria-label="Trade records"/)
+    for (const view of ['open', 'closed', 'unsellable']) {
+        assert.ok(tradesViewSource.includes(`:aria-pressed="activeTradeView === '${view}'"`))
     }
-    assert.ok(
-        tradesViewSource.includes("event.key === ' '") &&
-            tradesViewSource.includes('nextTab.click()') &&
-            tradesViewSource.includes('nextTab.focus()'),
-        'expected Space activation and roving focus between tabs',
-    )
+    assert.match(tradesViewSource, /<OpenTrades v-if="activeTradeView === 'open'"/)
+    assert.match(tradesViewSource, /<ClosedTrades v-else-if="activeTradeView === 'closed'"/)
+    assert.match(tradesViewSource, /<UnsellableTrades v-else \/>/)
+    assert.doesNotMatch(tradesViewSource, /<n-tabs/)
 })

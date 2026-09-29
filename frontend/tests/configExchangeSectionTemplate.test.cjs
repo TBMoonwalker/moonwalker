@@ -35,7 +35,7 @@ test('dry-run exchange control stays on the guarded live-activation path', () =>
     assert.match(exchangeSectionSource, /:disabled="dryRunActivationLocked"/)
     assert.match(
         exchangeSectionSource,
-         /Activate live trading from Overview after saving the rest of/,
+         /Activate live trading in the readiness review at the end/,
     )
     assert.match(setupModeSource, /dryRunActivationLocked: boolean/)
     assert.match(

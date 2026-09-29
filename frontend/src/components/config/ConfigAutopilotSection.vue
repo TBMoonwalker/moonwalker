@@ -10,8 +10,14 @@
                 maxWidth: '640px',
             }"
         >
-            <n-form-item label="Enabled" path="enabled" label-placement="left">
-                <n-checkbox v-model:checked="autopilot.enabled" />
+            <n-form-item label="Autopilot" path="enabled" label-placement="left">
+                <n-flex align="center" :size="10">
+                    <n-switch
+                        v-model:value="autopilot.enabled"
+                        :aria-label="autopilot.enabled ? 'Deactivate Autopilot' : 'Activate Autopilot'"
+                    />
+                    <n-text depth="3">{{ autopilot.enabled ? 'On' : 'Off' }}</n-text>
+                </n-flex>
             </n-form-item>
 
             <template v-if="showFields">

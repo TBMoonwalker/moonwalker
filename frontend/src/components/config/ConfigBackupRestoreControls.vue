@@ -36,7 +36,7 @@ const emit = defineEmits<{
         @change="emit('backup-file-selected', $event)"
     >
 
-    <n-flex align="center" :wrap="true" :size="[12, 12]">
+    <n-flex class="backup-picker" align="center" :wrap="true" :size="[12, 12]">
         <n-button
             :class="actionButtonClass || undefined"
             secondary
@@ -72,7 +72,7 @@ const emit = defineEmits<{
         </div>
     </n-alert>
 
-    <n-flex align="center" :wrap="true" :size="[12, 12]">
+    <n-flex class="backup-restore-actions" align="center" :wrap="true" :size="[12, 12]">
         <n-button
             :class="actionButtonClass || undefined"
             type="warning"

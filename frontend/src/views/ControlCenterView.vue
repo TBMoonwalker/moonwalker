@@ -1,5 +1,4 @@
 <script setup lang="ts">
-import axios from 'axios'
 import { computed, nextTick, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useMessage } from 'naive-ui/es/message'
@@ -7,7 +6,6 @@ import { useMessage } from 'naive-ui/es/message'
 import ControlCenterAdvancedMode from '../components/control-center/ControlCenterAdvancedMode.vue'
 import ControlCenterMissionPanel from '../components/control-center/ControlCenterMissionPanel.vue'
 import ControlCenterModeStrip from '../components/control-center/ControlCenterModeStrip.vue'
-import ControlCenterOverviewWorkspace from '../components/control-center/ControlCenterOverviewWorkspace.vue'
 import ControlCenterSetupMode from '../components/control-center/ControlCenterSetupMode.vue'
 import ControlCenterUtilitiesWorkspace from '../components/control-center/ControlCenterUtilitiesWorkspace.vue'
 import StrategyBuilderWorkspace from '../components/control-center/StrategyBuilderWorkspace.vue'
@@ -28,24 +26,31 @@ import { useControlCenterSetupFlow } from '../composables/useControlCenterSetupF
 import { useControlCenterTargetRegistry } from '../composables/useControlCenterTargetRegistry'
 import { useControlCenterWorkspaceRefresh } from '../composables/useControlCenterWorkspaceRefresh'
 import { useControlCenterWorkspaceActions } from '../composables/useControlCenterWorkspaceActions'
-import { useAutopilotMemoryFeed } from '../composables/useAutopilotMemoryFeed'
-import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
-import { serializeConfigValue } from '../helpers/configForm'
 
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const pageHeading = computed(() => {
+    if (routeState.value.mode === 'strategy-builder') {
+        return {
+            title: 'Strategy Builder',
+            description: 'Build and validate trading strategies.',
+        }
+    }
+    if (routeState.value.mode === 'utilities') {
+        return {
+            title: 'Utilities',
+            description: 'Back up Moonwalker and check saved connections.',
+        }
+    }
+    return {
+        title: 'Configuration',
+        description: 'Set up Moonwalker and adjust its trading behavior.',
+    }
+})
 const configSnapshotStore = useSharedConfigSnapshot()
-const {
-    data: autopilotMemory,
-    error: autopilotMemoryError,
-    loading: autopilotMemoryLoading,
-    refresh: refreshAutopilotMemory,
-} = useAutopilotMemoryFeed()
-
 const loadRescueMessage = ref<string | null>(null)
-const autopilotToggleLoading = ref(false)
 
 const STALE_CHECK_INTERVAL_MS = 15000
 
@@ -193,10 +198,7 @@ const {
     snapshotStore: configSnapshotStore,
     transitionIntent,
 })
-const tradeModeLabel = computed(() => 'Dynamic DCA')
-const tradingPaused = computed(
-    () => Boolean(configSnapshotStore.snapshot.value?.trading_paused),
-)
+const tradingPaused = computed(() => configSnapshotStore.snapshot.value?.trading_paused === true)
 const { refreshWorkspaceFromSnapshot } = useControlCenterWorkspaceRefresh({
     fetchDefaultValues,
     loadRescueMessage,
@@ -223,8 +225,6 @@ const {
     handleActivateLiveTrading,
     handleDetectedExternalConfigChange,
     handleReloadAfterStalePrompt,
-    handleToggleTradingPause,
-    tradingPauseLoading,
 } = useControlCenterRuntimeActions({
     announce,
     apiUrl: buildMoonwalkerApiUrl,
@@ -240,6 +240,7 @@ const {
     syncControlCenterConfigChange,
 })
 const {
+    activeSetupTarget,
     getSetupTaskStatus,
     getSetupTaskSummary,
     handleMissionPrimaryAction,
@@ -259,7 +260,6 @@ const {
 } = useControlCenterSetupFlow({
     focusTarget,
     guideToTarget,
-    handleActivateLiveTrading,
     navigateToControlCenter,
     readiness,
     routeState,
@@ -327,83 +327,6 @@ useControlCenterLifecycle({
     syncSetupChoiceForReadiness,
 })
 
-function openAutopilotAdvanced(): void {
-    void router.push({
-        name: 'controlCenter',
-        query: { mode: 'advanced', target: 'autopilot' },
-    })
-}
-
-function openMonitoringPage(): void {
-    void router.push({ name: 'monitoring' })
-}
-
-async function handleToggleAutopilot(): Promise<void> {
-    if (autopilotToggleLoading.value) {
-        return
-    }
-
-    if (isDirty.value) {
-        const blockedMessage =
-            'Save or discard the current draft before changing Autopilot from Overview.'
-        setTransitionIntent({
-            kind: 'save',
-            status: 'blocked',
-            message: blockedMessage,
-            at: Date.now(),
-            mode: 'advanced',
-            target: 'autopilot',
-        })
-        announce(blockedMessage)
-        return
-    }
-
-    const nextEnabled = !Boolean(autopilot.enabled)
-    autopilotToggleLoading.value = true
-
-    try {
-        await axios.post(buildMoonwalkerApiUrl('/config/multiple'), {
-            autopilot: serializeConfigValue(nextEnabled, 'bool'),
-        })
-
-        const syncResult = await syncControlCenterConfigChange('save')
-        if (syncResult.status === 'error') {
-            throw new Error(syncResult.message)
-        }
-
-        await refreshAutopilotMemory()
-
-        const successMessage = nextEnabled
-            ? 'Autopilot activated.'
-            : 'Autopilot disabled.'
-        setTransitionIntent({
-            kind: 'save',
-            status: 'success',
-            message: successMessage,
-            at: Date.now(),
-            mode: 'overview',
-        })
-        announce(successMessage)
-    } catch (error) {
-        const messageText = extractApiErrorMessage(
-            error,
-            'Autopilot update failed.',
-        )
-        setTransitionIntent({
-            kind: 'save',
-            status: axios.isAxiosError(error) && error.response?.status === 409
-                ? 'blocked'
-                : 'error',
-            message: messageText,
-            at: Date.now(),
-            mode: 'advanced',
-            target: 'autopilot',
-        })
-        announce(messageText)
-    } finally {
-        autopilotToggleLoading.value = false
-    }
-}
 </script>
 
 <template>
@@ -412,7 +335,26 @@ async function handleToggleAutopilot(): Promise<void> {
             {{ liveRegionMessage }}
         </div>
 
-        <n-flex v-if="showMissionPanel" class="page-section" vertical>
+        <header class="operator-page-heading">
+            <h1>{{ pageHeading.title }}</h1>
+            <p>{{ pageHeading.description }}</p>
+        </header>
+
+        <n-alert
+            v-if="showMissionPanel && viewState.kind === 'rescue'"
+            class="config-recovery-alert"
+            type="warning"
+            title="Configuration unavailable"
+        >
+            <div class="recovery-content">
+                <span>{{ viewState.summary }}</span>
+                <n-button secondary type="warning" @click="refreshWorkspaceFromSnapshot(true)">
+                    Retry config load
+                </n-button>
+            </div>
+        </n-alert>
+
+        <n-flex v-else-if="showMissionPanel" class="page-section" vertical>
             <ControlCenterMissionPanel
                 :activation-loading="activationLoading"
                 :config-trust-state="configTrustState"
@@ -441,35 +383,12 @@ async function handleToggleAutopilot(): Promise<void> {
             />
         </n-flex>
 
-        <n-flex id="cc-workspace-panel" role="tabpanel" :aria-labelledby="'cc-mode-tab-' + routeState.mode" class="page-section workspace-section" vertical>
-            <template v-if="routeState.mode === 'overview'">
-                <ControlCenterOverviewWorkspace
-                    :activation-loading="activationLoading"
-                    :autopilot-enabled="autopilot.enabled"
-                    :autopilot-memory="autopilotMemory"
-                    :autopilot-memory-error="autopilotMemoryError"
-                    :autopilot-memory-loading="autopilotMemoryLoading"
-                    :autopilot-toggle-loading="autopilotToggleLoading"
-                    :config-trust-state="configTrustState"
-                    :formatted-trust-timestamp="formattedTrustTimestamp"
-                    :live-activation-ref="bindTargetElement('live-activation')"
-                    :readiness="readiness"
-                    :trading-pause-loading="tradingPauseLoading"
-                    :trading-paused="tradingPaused"
-                    :trade-mode-label="tradeModeLabel"
-                    :visible-blockers="visibleBlockers"
-                    @activate-live="handleActivateLiveTrading"
-                    @open-config="handleModeSelect('setup')"
-                    @open-monitoring="openMonitoringPage"
-                    @select-target="guideToTarget"
-                    @toggle-trading-pause="handleToggleTradingPause"
-                    @toggle-autopilot="handleToggleAutopilot"
-                    @tune-autopilot="openAutopilotAdvanced"
-                />
-            </template>
-
-            <template v-else-if="routeState.mode === 'setup'">
+        <n-flex id="cc-workspace-panel" :role="showModeStrip ? 'tabpanel' : undefined" :aria-labelledby="showModeStrip ? 'cc-mode-tab-' + routeState.mode : undefined" class="page-section workspace-section" vertical>
+            <template v-if="routeState.mode === 'setup'">
                 <ControlCenterSetupMode
+                    :active-target="activeSetupTarget"
+                    :activation-disabled="isDirty || configTrustState.kind !== 'trusted'"
+                    :activation-loading="activationLoading"
                     :bind-backup-file-input="bindBackupFileInput"
                     :bind-target-element="bindTargetElement"
                     :capital="capital"
@@ -497,10 +416,12 @@ async function handleToggleAutopilot(): Promise<void> {
                     :has-selected-backup-payload="!!selectedBackupPayload"
                     :is-asap-exchange-ready="isAsapExchangeReady()"
                     :is-setup-task-expanded="isSetupTaskExpanded"
+                    :live-activation-available="readiness.complete && readiness.dryRun"
                     :market="market"
                     :monitoring="monitoring"
                     :monitoring-form-ref="monitoringFormRef"
                     :monitoring-test-loading="monitoringTestLoading"
+                    :readiness-complete="readiness.complete"
                     :readiness-first-run="readiness.firstRun"
                     :restore-loading="restoreLoading"
                     :restore-review="restoreReview"
@@ -521,6 +442,7 @@ async function handleToggleAutopilot(): Promise<void> {
                     :timerange="timerange"
                     :trade-mode-switch-guard="tradeModeSwitchGuard"
                     :timezone="timezone"
+                    @activate-live="handleActivateLiveTrading"
                     @backup-file-selected="handleBackupFileSelected"
                     @clear-selected-backup="clearSelectedBackup"
                     @open-backup-file-picker="openBackupFilePicker"
@@ -534,6 +456,7 @@ async function handleToggleAutopilot(): Promise<void> {
 
             <template v-else-if="routeState.mode === 'advanced'">
                 <ControlCenterAdvancedMode
+                    :active-target="routeState.target"
                     :advanced-sections="advancedSections"
                     :autopilot="autopilot"
                     :autopilot-form-ref="autopilotFormRef"
@@ -553,6 +476,7 @@ async function handleToggleAutopilot(): Promise<void> {
                     :indicator-form-ref="indicatorFormRef"
                     :rules="rules"
                     :signal="signal"
+                    @select-target="navigateToControlCenter('advanced', $event)"
                 />
             </template>
 
@@ -606,6 +530,18 @@ async function handleToggleAutopilot(): Promise<void> {
     gap: 12px;
 }
 
+.recovery-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.config-recovery-alert :deep(.n-alert-body__content) {
+    width: 100%;
+}
+
 :deep(.utility-action-button:not(.n-button--disabled) .n-button__content) {
     font-weight: 500;
     letter-spacing: 0.01em;
@@ -613,7 +549,7 @@ async function handleToggleAutopilot(): Promise<void> {
 
 :deep(.utility-action-button.n-button--primary-type.n-button--secondary:not(.n-button--disabled) .n-button__content),
 :deep(.utility-action-button.n-button--primary-type.n-button--secondary:not(.n-button--disabled) .n-button__icon) {
-    color: #18413a;
+    color: var(--mw-color-primary-strong);
 }
 
 :deep(.utility-action-button.n-button--default-type.n-button--secondary:not(.n-button--disabled) .n-button__content) {

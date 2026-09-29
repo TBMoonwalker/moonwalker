@@ -189,7 +189,7 @@ describe('StrategyBuilderWorkspace', () => {
         await flushPromises()
 
         expect(wrapper.get('#strategy-builder-title').text()).toBe(
-            'Strategy Builder',
+            'Current strategy',
         )
         expect(wrapper.get('[aria-label="Strategy library"]').text()).toContain(
             'EMA cross',

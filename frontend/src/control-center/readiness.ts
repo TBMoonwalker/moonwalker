@@ -149,16 +149,11 @@ function countConfiguredEssentials(config: SharedConfigPayload): number {
 
 function deriveNextMode(
     blockers: ControlCenterBlocker[],
-    complete: boolean,
-    dryRun: boolean,
 ): ControlCenterMode {
     if (blockers.length > 0) {
         return blockers[0].mode
     }
-    if (complete && dryRun) {
-        return 'overview'
-    }
-    return complete ? 'overview' : 'setup'
+    return 'setup'
 }
 
 export function deriveControlCenterReadiness(
@@ -198,7 +193,7 @@ export function deriveControlCenterReadiness(
         firstRun,
         attentionNeeded,
         blockers,
-        nextMode: deriveNextMode(blockers, complete, dryRun),
+        nextMode: deriveNextMode(blockers),
         nextTarget,
         dryRun,
         configuredEssentials,

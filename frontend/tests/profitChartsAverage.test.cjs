@@ -24,35 +24,15 @@ const profitStoreSource = fs.readFileSync(
     'utf8',
 )
 
-test('daily monthly and yearly profit charts render a visible running average line', () => {
+test('historical profit charts retain their running average implementation', () => {
     assert.match(chartsSource, /BarChart,\s*LineChart/)
     assert.match(chartsSource, /const runningAverageProfit = profitValues\.map/)
     assert.match(chartsSource, /return cumulativeProfit \/ \(index \+ 1\)/)
     assert.match(chartsSource, /name:\s*'Running average'/)
     assert.match(chartsSource, /data:\s*runningAverageProfit/)
     assert.match(chartsSource, /type:\s*'dashed'/)
-    // Charts render bare: the pane-level display-directive="show" (guarded below)
-    // keeps them mounted, so a child v-show is redundant and asserted absent here.
-    assert.match(tradesViewSource, /<UpnlChart\s*\/>/)
-    assert.match(tradesViewSource, /<Charts period="daily" \/>/)
-    assert.match(tradesViewSource, /<Charts period="monthly" \/>/)
-    assert.match(tradesViewSource, /<Charts period="yearly" \/>/)
-    // Keep-alive: naive-ui 2.45.3 reads display-directive from EACH <n-tab-pane>,
-    // NOT from <n-tabs> (a value placed on <n-tabs> is a no-op), so every profit pane
-    // must carry display-directive="show" — that keeps each chart
-    // mounted, so a switch is a pure show/hide with no remount, re-animate, or refetch.
-    // The count guards against regressing to a single <n-tabs> no-op or a dropped
-    // directive (the earlier /display-directive="show"/ presence check was too weak).
-    const panelShowCount = (tradesViewSource.match(/display-directive="show"/g) || []).length
-    assert.ok(panelShowCount >= 4, 'each profit n-tab-pane must set display-directive="show" (found ' + panelShowCount + ')')
-    for (const period of ['profit-overall', 'daily-profit', 'monthly-profit', 'yearly-profit']) {
-      const tab = "getProfitTabProps('" + period + "')"
-      const fromIdx = tradesViewSource.indexOf(tab)
-      assert.ok(fromIdx >= 0, "tab-props for " + period + " is present")
-      // display-directive must live on this pane's opening tag, not on the parent <n-tabs>
-      const win = tradesViewSource.slice(fromIdx, fromIdx + 160)
-      assert.ok(win.includes('display-directive="show"'), "pane " + period + " must enable display-directive on its own n-tab-pane")
-    }
+    assert.match(tradesViewSource, /<UpnlChart v-if="performanceRange === 'all'" :range="performanceRange" \/>/)
+    assert.match(tradesViewSource, /<Charts v-else :key="performanceRange" :period="profitPeriod" \/>/)
 })
 
 test('profit charts stay mounted and reuse cached history across navigation', () => {

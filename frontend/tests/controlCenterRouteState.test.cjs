@@ -12,11 +12,11 @@ test('normalizeControlCenterRouteState falls back for unknown values', () => {
     const state = normalizeControlCenterRouteState({
         requestedMode: 'unknown',
         requestedTarget: 'missing',
-        fallbackMode: 'overview',
+        fallbackMode: 'setup',
     })
 
     assert.deepEqual(state, {
-        mode: 'overview',
+        mode: 'setup',
         target: null,
     })
 })
@@ -25,7 +25,7 @@ test('normalizeControlCenterRouteState uses the task default mode when needed', 
     const state = normalizeControlCenterRouteState({
         requestedMode: 'utilities',
         requestedTarget: 'exchange',
-        fallbackMode: 'overview',
+        fallbackMode: 'setup',
     })
 
     assert.deepEqual(state, {
@@ -42,7 +42,7 @@ test('normalizeControlCenterRouteState treats strategy builder as a dedicated mo
     const state = normalizeControlCenterRouteState({
         requestedMode: 'advanced',
         requestedTarget: 'strategy-builder',
-        fallbackMode: 'overview',
+        fallbackMode: 'setup',
     })
 
     assert.deepEqual(state, {
@@ -58,11 +58,18 @@ test('normalizeControlCenterRouteState treats strategy builder as a dedicated mo
 test('buildControlCenterQuery omits target when route state has no target', () => {
     assert.deepEqual(
         buildControlCenterQuery({
-            mode: 'overview',
+            mode: 'setup',
             target: null,
         }),
         {
-            mode: 'overview',
+            mode: 'setup',
         },
     )
+})
+
+test('normalizeControlCenterRouteState redirects legacy overview links to setup', () => {
+    assert.deepEqual(normalizeControlCenterRouteState({
+        requestedMode: 'overview',
+        fallbackMode: 'setup',
+    }), { mode: 'setup', target: null })
 })

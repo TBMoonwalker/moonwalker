@@ -89,13 +89,13 @@ test('mission state surfaces stale trust timestamps and matching alert tone', ()
             firstRun: false,
             attentionNeeded: false,
             blockers: [],
-            nextMode: 'overview',
+            nextMode: 'setup',
             nextTarget: 'live-activation',
             dryRun: true,
             configuredEssentials: 8,
         })),
         routeState: computed(() => ({
-            mode: 'overview',
+            mode: 'setup',
             target: 'live-activation',
         })),
         viewState: computed(() => ({
@@ -103,7 +103,7 @@ test('mission state surfaces stale trust timestamps and matching alert tone', ()
             badge: 'Healthy',
             title: 'Ready to go',
             summary: 'Everything is configured.',
-            defaultMode: 'overview',
+            defaultMode: 'setup',
         })),
     })
 
@@ -128,13 +128,13 @@ test('mission state uses the mission tone while a transition is active', () => {
             firstRun: false,
             attentionNeeded: false,
             blockers: [],
-            nextMode: 'overview',
+            nextMode: 'setup',
             nextTarget: 'live-activation',
             dryRun: false,
             configuredEssentials: 8,
         })),
         routeState: computed(() => ({
-            mode: 'overview',
+            mode: 'setup',
             target: 'live-activation',
         })),
         viewState: computed(() => ({
@@ -142,7 +142,7 @@ test('mission state uses the mission tone while a transition is active', () => {
             badge: 'Updated',
             title: 'Saved',
             summary: 'Changes are live.',
-            defaultMode: 'overview',
+            defaultMode: 'setup',
         })),
     })
     harness.transitionIntent.value = {
@@ -150,10 +150,10 @@ test('mission state uses the mission tone while a transition is active', () => {
         status: 'success',
         message: 'Saved.',
         at: 1,
-        mode: 'overview',
+        mode: 'setup',
     }
 
     assert.equal(harness.missionState.missionSummaryTone.value, 'success')
     assert.equal(harness.missionState.missionAlertTone.value, 'success')
-    assert.equal(harness.missionState.missionPrimaryLabel.value, 'Review overview')
+    assert.equal(harness.missionState.missionPrimaryLabel.value, 'Review setup')
 })

@@ -62,7 +62,7 @@ test('navigation normalizes control-center routes for push and replace', async (
     const harness = createNavigationHarness()
 
     await harness.flow.navigateToControlCenter('setup', 'signal')
-    await harness.flow.navigateToControlCenter('overview', 'signal', true)
+    await harness.flow.navigateToControlCenter('advanced', 'signal', true)
 
     assert.deepEqual(harness.pushes, [
         {
@@ -155,7 +155,7 @@ test('navigation guides to a target and focuses immediately when already on the 
 test('navigation avoids early focus when the route must change first', async () => {
     const harness = createNavigationHarness({
         routeState: computed(() => ({
-            mode: 'overview',
+            mode: 'setup',
             target: null,
         })),
         async waitForTarget() {

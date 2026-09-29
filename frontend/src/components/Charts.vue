@@ -1,9 +1,9 @@
 <template>
     <div class="chart-wrap">
         <n-spin :show="isLoading" size="small">
-            <v-chart v-if="!isLoading && !showNoProfit" class="chart" :option="option" :style="{ height: chartHeight }"
+            <v-chart v-if="!isLoading && !showNoProfit" class="chart" :option="option"
                 autoresize />
-            <div v-else class="chart-placeholder chart-empty" :style="{ height: chartHeight }">
+            <div v-else class="chart-placeholder chart-empty">
                 {{ emptyStateText }}
             </div>
         </n-spin>
@@ -21,7 +21,11 @@ import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import VChart from 'vue-echarts'
 import { formatTradingViewDate } from '../helpers/date'
+import { getEffectiveCss } from '../theme/tokens'
+import { useThemeStore } from '../theme/themeStore'
 const range = defineProps<{ period: string }>()
+const themeStore = useThemeStore()
+const { scheme } = storeToRefs(themeStore)
 const profit_store = useProfitDatastore()
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
@@ -31,7 +35,6 @@ const chart_data = ref({
     datasets: [{}]
 })
 const option = ref({})
-const chartHeight = ref('40vh')
 const isLoading = ref(
     Object.keys(profit_store.get_profit_history_data(range.period)).length === 0
 )
@@ -60,7 +63,6 @@ onMounted(() => {
     if (typeof window !== 'undefined') {
         window.addEventListener('resize', handleResize)
     }
-    void profit_store.load_profit_history_data(range['period'])
 })
 
 onBeforeUnmount(() => {
@@ -70,7 +72,8 @@ onBeforeUnmount(() => {
 })
 
 // Get new statistics data
-watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile], async ([newData]) => {
+watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile, scheme], async ([newData]) => {
+    const colors = getEffectiveCss(scheme.value)
     let labels = []
     let datasets = []
 
@@ -87,9 +90,14 @@ watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile], async ([
 
     if (shouldRefreshHistory) {
         isLoadingHistory = true
-        await profit_store.load_profit_history_data(range['period'])
-        historic_data = true
-        isLoadingHistory = false
+        try {
+            await profit_store.load_profit_history_data(range['period'])
+            historic_data = true
+        } catch {
+            emptyStateText.value = 'Profit history unavailable'
+        } finally {
+            isLoadingHistory = false
+        }
     }
 
     const profit = profit_store.get_profit_history_data(range['period'])
@@ -131,16 +139,6 @@ watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile], async ([
             const maxBarWidth = isMobile.value ? 24 : 48
             const minBarWidth = isMobile.value ? 8 : 12
             const barWidth = Math.max(minBarWidth, Math.min(maxBarWidth, Math.floor(480 / count)))
-            if (count <= 1) {
-                chartHeight.value = isMobile.value ? '26vh' : '24vh'
-            } else if (count <= 3) {
-                chartHeight.value = isMobile.value ? '30vh' : '28vh'
-            } else if (count <= 7) {
-                chartHeight.value = isMobile.value ? '34vh' : '32vh'
-            } else {
-                chartHeight.value = isMobile.value ? '36vh' : '40vh'
-            }
-
             option.value = {
                 grid: {
                     show: false,
@@ -160,7 +158,7 @@ watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile], async ([
                     axisLine: { show: false },
                     axisTick: { show: false },
                     axisLabel: {
-                        color: "#fff",
+                        color: colors['--mw-color-text-muted'],
                         margin: 8,
                         hideOverlap: true,
                         formatter: (value: string) => formatTradingViewDate(value),
@@ -170,7 +168,7 @@ watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile], async ([
                     boundaryGap: true
                 },
                 yAxis: {
-                    axisLabel: { color: "#fff", margin: 8 },
+                    axisLabel: { color: colors['--mw-color-text-muted'], margin: 8 },
                     splitLine: {
                         show: false
                     },
@@ -179,7 +177,7 @@ watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile], async ([
                 series: [
                     {
                         name: 'Profit',
-                        color: '#2E7D5B',
+                        color: colors['--mw-color-primary'],
                         data: chart_data.value.datasets,
                         type: 'bar',
                         barWidth,
@@ -188,12 +186,12 @@ watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile], async ([
                     },
                     {
                         name: 'Running average',
-                        color: '#B7791F',
+                        color: colors['--mw-color-warning'],
                         data: runningAverageProfit,
                         type: 'line',
                         symbol: 'none',
                         lineStyle: {
-                            color: '#B7791F',
+                            color: colors['--mw-color-warning'],
                             type: 'dashed',
                             width: 2
                         },
@@ -207,18 +205,22 @@ watch([statistics_data.data, profit_store_refs.dataByPeriod, isMobile], async ([
             isLoading.value = false
         } else {
             showNoProfit.value = true
-            emptyStateText.value = 'No profit yet'
-            chartHeight.value = isMobile.value ? '26vh' : '24vh'
+            if (!emptyStateText.value) emptyStateText.value = 'No profit yet'
             isLoading.value = false
         }
+    } else {
+        showNoProfit.value = true
+        if (!emptyStateText.value) emptyStateText.value = 'No profit yet'
+        isLoading.value = false
     }
 
 }, { immediate: true })
 
 function chart_classes(data: any) {
-    let column_color = '#2E7D5B'
+    const colors = getEffectiveCss(scheme.value)
+    let column_color = colors['--mw-color-primary']
     if (Math.sign(data) <= 0) {
-        column_color = '#B4443F'
+        column_color = colors['--mw-color-error']
     }
     return {
         value: data,
@@ -234,25 +236,40 @@ function chart_classes(data: any) {
 .chart {
     width: 100%;
     max-width: 100%;
+    flex: 1;
+    min-height: 230px;
 }
 
 .chart-wrap {
     width: 100%;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 230px;
     overflow: hidden;
-    padding: 8px 0 16px;
     border-radius: var(--mw-radius-sm, 6px);
+}
+
+.chart-wrap :deep(.n-spin-container),
+.chart-wrap :deep(.n-spin-content) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .chart-placeholder {
     width: 100%;
+    flex: 1;
+    min-height: 230px;
     border-radius: var(--mw-radius-sm, 6px);
-    background: rgba(255, 255, 255, 0.04);
+    background: var(--mw-surface-card-muted);
 }
 
 .chart-empty {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--mw-color-text-muted);
 }
 </style>

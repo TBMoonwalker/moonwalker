@@ -1,8 +1,14 @@
 # Configuration
 
 1. Start the app with `./run.sh start`.
-2. Open the Control Center at `http://<host>:<port>/control-center`.
+2. Open Configuration at `http://<host>:<port>/control-center`.
 3. Save your settings (they are persisted in the DB).
+
+Configuration opens on Setup. Select a section to edit it, or use Advanced for
+expert tuning. A ready dry-run instance offers a guarded live activation review
+at the end of Setup. Autopilot on/off lives in Advanced → Autopilot. The
+persistent top bar provides Pause/Resume Moonwalker from every page; it blocks
+new entries while existing exits continue.
 
 Runtime configuration is stored in the `AppConfig` table and served to the UI
 through `/config/all`, with persisted credential values replaced by redaction
@@ -19,8 +25,8 @@ Most settings are updated via `PUT /config/single/{key}` or
 through `POST /config/live/activate` so the backend can enforce readiness
 checks.
 
-The Control Center also fans out browser-local invalidation after save, restore,
-and live activation. Clean tabs can refresh quietly, while tabs with unsaved
+Configuration also fans out browser-local invalidation after save, restore,
+live activation, and trading pause changes. Clean tabs can refresh quietly, while tabs with unsaved
 drafts keep the draft and show an explicit stale-config warning instead of
 silently trusting outdated state.
 

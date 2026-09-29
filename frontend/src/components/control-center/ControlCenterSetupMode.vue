@@ -34,6 +34,9 @@ interface SetupTaskStatus {
 }
 
 defineProps<{
+    activeTarget: ControlCenterTarget
+    activationDisabled: boolean
+    activationLoading: boolean
     bindBackupFileInput: (element: Element | null) => void
     bindTargetElement: (
         target: ControlCenterTarget,
@@ -61,10 +64,12 @@ defineProps<{
     hasSelectedBackupPayload: boolean
     isAsapExchangeReady: boolean
     isSetupTaskExpanded: (target: ControlCenterTarget) => boolean
+    liveActivationAvailable: boolean
     market: StringSelectOption[]
     monitoring: MonitoringModel
     monitoringFormRef?: VNodeRef
     monitoringTestLoading: boolean
+    readinessComplete: boolean
     readinessFirstRun: boolean
     restoreLoading: boolean
     restoreReview: RestoreReviewState | null
@@ -88,6 +93,7 @@ defineProps<{
 }>()
 
 const emit = defineEmits<{
+    'activate-live': []
     'backup-file-selected': [event: Event]
     'clear-selected-backup': []
     'open-backup-file-picker': []
@@ -101,12 +107,15 @@ const emit = defineEmits<{
 
 <template>
     <ControlCenterSetupWorkspace
+        :active-target="activeTarget"
         :bind-backup-file-input="bindBackupFileInput"
         :bind-target-element="bindTargetElement"
         :get-setup-task-status="getSetupTaskStatus"
         :get-setup-task-summary="getSetupTaskSummary"
         :has-selected-backup-payload="hasSelectedBackupPayload"
         :is-setup-task-expanded="isSetupTaskExpanded"
+        :live-activation-available="liveActivationAvailable"
+        :readiness-complete="readinessComplete"
         :readiness-first-run="readinessFirstRun"
         :restore-loading="restoreLoading"
         :restore-review="restoreReview"
@@ -174,6 +183,8 @@ const emit = defineEmits<{
             <ConfigCapitalSection
                 :ref="capitalFormRef"
                 :capital="capital"
+                :card-title="null"
+                :show-expert-fields="setupShowsAdvancedFields"
                 :dynamic-dca-enabled="
                     dca.enabled && dca.trade_mode === 'dynamic_dca'
                 "
@@ -192,5 +203,68 @@ const emit = defineEmits<{
                 :test-loading="monitoringTestLoading"
             />
         </template>
+        <template #readiness-review>
+            <section
+                id="control-center-live-activation"
+                :ref="bindTargetElement('live-activation')"
+                class="readiness-review dashboard-panel"
+                aria-labelledby="readiness-review-title"
+            >
+                <div>
+                    <p class="readiness-kicker">Final step</p>
+                    <h2 id="readiness-review-title">Readiness review</h2>
+                    <p>Configuration is saved and Moonwalker is operating in dry run. Activating live trading will submit orders to the configured exchange.</p>
+                    <p v-if="activationDisabled" class="readiness-caution">
+                        Save changes or reload the latest configuration before activating live trading.
+                    </p>
+                </div>
+                <n-button
+                    type="primary"
+                    strong
+                    :loading="activationLoading"
+                    :disabled="activationDisabled"
+                    @click="emit('activate-live')"
+                >
+                    Activate live trading
+                </n-button>
+            </section>
+        </template>
     </ControlCenterSetupWorkspace>
 </template>
+
+<style scoped>
+.readiness-review {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 20px;
+}
+.readiness-review h2 {
+    margin: 0 0 6px;
+    font-family: var(--mw-font-display);
+    font-size: 1.25rem;
+}
+.readiness-review p {
+    max-width: 66ch;
+    margin: 0;
+    color: var(--mw-color-text-secondary);
+    line-height: 1.5;
+}
+.readiness-review .readiness-kicker {
+    margin-bottom: 6px;
+    color: var(--mw-color-primary);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+}
+.readiness-review .readiness-caution {
+    margin-top: 8px;
+    color: var(--mw-color-warning);
+}
+@media (max-width: 767px) {
+    .readiness-review { align-items: stretch; flex-direction: column; }
+    .readiness-review :deep(.n-button) { min-height: 44px; }
+}
+</style>

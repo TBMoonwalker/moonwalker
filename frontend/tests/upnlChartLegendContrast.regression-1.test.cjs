@@ -8,13 +8,11 @@ const upnlChartSource = fs.readFileSync(
     'utf8',
 )
 
-test('profit overall and funds locked legend keep high-contrast text on the dark chart', () => {
-    // Regression: a design cleanup swapped the legend from a light chart token
-    // to a dark light-surface token, making both series labels harder to read
-    // than the rest of the chart on the dark replay surface.
+test('profit overall and funds locked legend follow the active theme text token', () => {
+    // Both light and dark chart surfaces need their matching contrast token.
     assert.ok(
-        upnlChartSource.includes("const chartLegendTextColor = '#ECEFEA'"),
-        'expected the UPnL chart legend to use the light chart legend token',
+        upnlChartSource.includes("const chartLegendTextColor = colors['--mw-color-text-secondary']"),
+        'expected the UPnL chart legend to use the active theme text token',
     )
     assert.ok(
         upnlChartSource.includes('color: chartLegendTextColor'),

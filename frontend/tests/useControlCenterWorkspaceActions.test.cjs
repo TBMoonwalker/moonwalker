@@ -63,19 +63,19 @@ function createWorkspaceActionsHarness(overrides = {}) {
     }
 }
 
-test('workspace actions route successful saves into overview through the shared flow', async () => {
+test('workspace actions route successful saves into setup through the shared flow', async () => {
     const harness = createWorkspaceActionsHarness()
 
     await harness.actions.handleSubmitWorkspace()
 
-    assert.deepEqual(harness.navigations, [['overview', null]])
+    assert.deepEqual(harness.navigations, [['setup', null]])
     assert.deepEqual(harness.transitions, [
         {
             kind: 'save',
             status: 'success',
             message: 'Configuration saved.',
             at: 123,
-            mode: 'overview',
+            mode: 'setup',
         },
     ])
     assert.deepEqual(harness.announcements, ['Configuration saved.'])
@@ -86,14 +86,14 @@ test('workspace actions translate restore success into a restore transition', as
 
     await harness.actions.handleRestoreBackupAction('config')
 
-    assert.deepEqual(harness.navigations, [['overview', null]])
+    assert.deepEqual(harness.navigations, [['setup', null]])
     assert.deepEqual(harness.transitions, [
         {
             kind: 'restore',
             status: 'success',
             message: 'Backup restored successfully.',
             at: 123,
-            mode: 'overview',
+            mode: 'setup',
         },
     ])
     assert.deepEqual(harness.announcements, ['Backup restored successfully.'])
