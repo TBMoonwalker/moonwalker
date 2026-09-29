@@ -417,7 +417,7 @@ test('control center keeps guided setup focused and avoids duplicate advanced he
         'slot :name="section.target"',
     ]
     const requiredUtilitiesWorkspaceSnippets = [
-        'Complete Telegram credentials in Setup first.',
+        'Configure operator alerts ↗',
     ]
 
     for (const snippet of requiredViewSnippets) {
@@ -994,8 +994,9 @@ test('control center delegates advanced and utilities presentation to dedicated 
     const requiredUtilitiesWorkspaceSnippets = [
         "import ConfigBackupDownloadControls from '../config/ConfigBackupDownloadControls.vue'",
         "import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'",
-        'Backup & Restore',
-        'Connectivity test',
+        'Download a backup',
+        'Restore a backup',
+        'Test Telegram delivery',
         '<ConfigBackupDownloadControls',
         '<ConfigBackupRestoreControls',
         "@click=\"emit('monitoring-test')\"",
@@ -1040,7 +1041,7 @@ test('control center delegates advanced and utilities presentation to dedicated 
         false,
     )
     assert.ok(
-        strategyBuilderWorkspaceSource.includes('Strategy Builder'),
+        strategyBuilderWorkspaceSource.includes('Current strategy'),
         'expected dedicated strategy builder workspace to remain available',
     )
     assert.ok(

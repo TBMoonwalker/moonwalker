@@ -8,11 +8,13 @@ withDefaults(
         downloadButtonStrong?: boolean
         infoMessage: string
         infoTitle: string
+        showInfo?: boolean
     }>(),
     {
         actionButtonClass: null,
         downloadButtonSecondary: true,
         downloadButtonStrong: false,
+        showInfo: true,
     },
 )
 
@@ -23,11 +25,11 @@ const emit = defineEmits<{
 </script>
 
 <template>
-    <n-alert type="info" :title="infoTitle">
+    <n-alert v-if="showInfo" type="info" :title="infoTitle">
         {{ infoMessage }}
     </n-alert>
 
-    <n-flex align="center" :wrap="true" :size="[12, 12]">
+    <n-flex class="backup-download-actions" align="center" :wrap="true" :size="[12, 12]">
         <n-checkbox
             :checked="backupIncludeTradeData"
             @update:checked="emit('update:backup-include-trade-data', $event)"

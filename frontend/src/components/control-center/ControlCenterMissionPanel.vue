@@ -40,16 +40,15 @@ defineEmits<{
                 class="mission-header-row"
             >
                 <n-flex vertical :size="6" class="mission-copy">
-                    <n-text depth="3" class="control-center-kicker">Operator settings</n-text>
                     <div class="mission-heading-group">
                         <n-tag class="mission-status-tag" :type="missionSummaryTone">
                             {{ viewState.badge }}
                         </n-tag>
-                        <h1 class="mission-title">
+                        <h2 v-if="viewState.kind !== 'healthy'" class="mission-title">
                             {{ viewState.title }}
-                        </h1>
+                        </h2>
                     </div>
-                    <n-text depth="3" class="mission-summary">
+                    <n-text v-if="viewState.kind !== 'healthy'" depth="3" class="mission-summary">
                         {{ viewState.summary }}
                     </n-text>
                 </n-flex>
@@ -137,15 +136,6 @@ defineEmits<{
 </template>
 
 <style scoped>
-.control-center-kicker {
-    font-size: 0.82rem;
-    letter-spacing: 0.12em;
-    text-transform: uppercase;
-    color: var(--mw-color-text-muted);
-    font-family: var(--mw-font-body);
-    font-weight: 600;
-}
-
 .mission-panel {
     border-color: var(--mw-color-border);
     background: var(--mw-color-surface-panel);

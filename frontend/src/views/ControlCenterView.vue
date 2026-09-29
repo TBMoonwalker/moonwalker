@@ -31,6 +31,24 @@ import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
 const route = useRoute()
 const router = useRouter()
 const message = useMessage()
+const pageHeading = computed(() => {
+    if (routeState.value.mode === 'strategy-builder') {
+        return {
+            title: 'Strategy Builder',
+            description: 'Build and validate trading strategies.',
+        }
+    }
+    if (routeState.value.mode === 'utilities') {
+        return {
+            title: 'Utilities',
+            description: 'Back up Moonwalker and check saved connections.',
+        }
+    }
+    return {
+        title: 'Configuration',
+        description: 'Set up Moonwalker and adjust its trading behavior.',
+    }
+})
 const configSnapshotStore = useSharedConfigSnapshot()
 const loadRescueMessage = ref<string | null>(null)
 
@@ -316,7 +334,26 @@ useControlCenterLifecycle({
             {{ liveRegionMessage }}
         </div>
 
-        <n-flex v-if="showMissionPanel" class="page-section" vertical>
+        <header class="operator-page-heading">
+            <h1>{{ pageHeading.title }}</h1>
+            <p>{{ pageHeading.description }}</p>
+        </header>
+
+        <n-alert
+            v-if="showMissionPanel && viewState.kind === 'rescue'"
+            class="config-recovery-alert"
+            type="warning"
+            title="Configuration unavailable"
+        >
+            <div class="recovery-content">
+                <span>{{ viewState.summary }}</span>
+                <n-button secondary type="warning" @click="refreshWorkspaceFromSnapshot(true)">
+                    Retry config load
+                </n-button>
+            </div>
+        </n-alert>
+
+        <n-flex v-else-if="showMissionPanel" class="page-section" vertical>
             <ControlCenterMissionPanel
                 :activation-loading="activationLoading"
                 :config-trust-state="configTrustState"
@@ -487,6 +524,18 @@ useControlCenterLifecycle({
 
 .workspace-section {
     gap: 12px;
+}
+
+.recovery-content {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.config-recovery-alert :deep(.n-alert-body__content) {
+    width: 100%;
 }
 
 :deep(.utility-action-button:not(.n-button--disabled) .n-button__content) {

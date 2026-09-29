@@ -66,7 +66,7 @@ const {
     <section class="strategy-builder" aria-labelledby="strategy-builder-title">
         <div class="strategy-status-bar">
             <div>
-                <h3 id="strategy-builder-title">Strategy Builder</h3>
+                <h2 id="strategy-builder-title">Current strategy</h2>
                 <p>
                     {{ selectedDetail?.name || 'Select a strategy' }}
                     <span v-if="selectedDetail?.active_version" class="mono">
@@ -213,7 +213,7 @@ const {
     flex-wrap: wrap;
 }
 
-.strategy-status-bar h3 {
+.strategy-status-bar h2 {
     color: var(--mw-color-text-primary);
     font-family: var(--mw-font-display);
     font-size: 1rem;

@@ -33,18 +33,23 @@ export function useControlCenterMissionState(
         options.readiness.value.complete &&
         ['setup', 'advanced'].includes(options.routeState.value.mode),
     )
-    const showMissionPanel = computed(
-        () =>
-            (['setup', 'advanced'].includes(options.routeState.value.mode) ||
-                options.isDirty.value ||
-                options.transitionIntent.value !== null ||
-                isStaleConfigTrustState(options.configTrustState.value.kind)) &&
-            !(
-                options.routeState.value.mode === 'setup' &&
-                (options.showSetupEntryGate.value ||
-                    options.showRestoreSetupFlow.value)
-            ),
-    )
+    const showMissionPanel = computed(() => {
+        if (
+            options.routeState.value.mode === 'setup' &&
+            (options.showSetupEntryGate.value ||
+                options.showRestoreSetupFlow.value)
+        ) {
+            return false
+        }
+        return (
+            (['setup', 'advanced'].includes(options.routeState.value.mode) &&
+                !options.readiness.value.complete) ||
+            options.isDirty.value ||
+            options.transitionIntent.value !== null ||
+            options.configTrustState.value.kind !== 'trusted' ||
+            options.viewState.value.kind === 'rescue'
+        )
+    })
     const advancedSections = computed(() => {
         const expertDomains = getTasksForMode('advanced').filter((task) =>
             ['filter', 'autopilot', 'indicator'].includes(task.target),

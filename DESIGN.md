@@ -98,7 +98,7 @@ Moonwalker is a calm trading workstation. Its visual language now uses a charcoa
 
 The dashboard presents live status and actions in a left navigation rail, a slim status bar, a Moonwalker status card with a separate Autopilot section, side-by-side performance and portfolio exposure cards, and the existing trade tables. Net profit and loss is the portfolio card's main figure; portfolio value and funds in deals appear beneath the budget bar. Figures are derived from current WebSocket and configuration data; missing feeds are shown as unavailable rather than invented. The Control Center keeps its intent-first setup flow and safety gates.
 
-Statistics, Backtest, Monitoring, and Autopilot Memory use the same compact page heading and neutral panel treatment. Control Center's mission panel provides its contextual page heading. Within those views, semantic status tags and warnings retain their meaning; ordinary cards and labels stay neutral. Naive UI remains the control and data-display framework throughout.
+Statistics, Backtest, Monitoring, Autopilot Memory, Configuration, Strategy Builder, and Utilities use the same compact page heading and neutral panel treatment. Configuration's mission panel appears below that heading only for readiness, draft, recovery, and freshness states. Within those views, semantic status tags and warnings retain their meaning; ordinary cards and labels stay neutral. Naive UI remains the control and data-display framework throughout.
 
 ## Colors
 
