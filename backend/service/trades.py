@@ -434,6 +434,14 @@ class Trades:
             [],
         )
 
+    async def is_open_deal(self, deal_id: str) -> bool:
+        """Return whether a deal still has an active open-trade row."""
+        return await self._execute_db(
+            model.OpenTrades.filter(deal_id=deal_id).exists(),
+            f"Error checking whether deal {deal_id} is open.",
+            False,
+        )
+
     async def get_closed_trades_length(self) -> int:
         """Return the total number of closed trades."""
         return await self._execute_db(

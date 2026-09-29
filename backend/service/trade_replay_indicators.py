@@ -120,6 +120,16 @@ class TradeReplayIndicatorService:
             if strategies:
                 source = "legacy_config_backfill"
                 strategy_references = [(strategy, None) for strategy in strategies]
+        if await self.trades.is_open_deal(normalized_deal_id):
+            active_dca_strategy = await self._active_dca_strategy()
+            if active_dca_strategy:
+                active_reference = (active_dca_strategy, None)
+                if active_reference not in strategy_references:
+                    strategy_references.append(active_reference)
+                if active_dca_strategy not in strategies:
+                    strategies.append(active_dca_strategy)
+                if source == "execution_ledger":
+                    source = "execution_ledger_and_active_dca"
         symbol = self._execution_symbol(executions)
         if not symbol or not strategies:
             return self._empty(timerange)
@@ -165,6 +175,15 @@ class TradeReplayIndicatorService:
     async def _load_config_snapshot() -> dict[str, Any]:
         """Return the current runtime config snapshot for legacy backfills."""
         return (await Config.instance()).snapshot()
+
+    async def _active_dca_strategy(self) -> str:
+        """Return the current recovery strategy without hiding ledger overlays."""
+        try:
+            config = await self._config_snapshot_provider()
+        except (RuntimeError, TypeError, ValueError, BaseORMException) as exc:
+            logging.warning("Failed loading active replay strategy: %s", exc)
+            return ""
+        return str(config.get("dca_strategy") or "").strip()
 
     @staticmethod
     def _execution_strategy_references(
