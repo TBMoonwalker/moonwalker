@@ -313,6 +313,13 @@ body {
     padding: 12px;
   }
 
+  .page-shell {
+       /* #app already supplies the 12px phone inset, so .page-shell does
+        * not add its base 18px on top. That double-padding narrows
+        * chart-driven pages and clips edge markers on small screens. */
+    padding: 0;
+  }
+
   .operator-console-page {
     gap: 10px;
   }

@@ -317,29 +317,30 @@ test.beforeEach(async ({ page }) => {
 test('renders the safe dry-run control center mission', async ({ page }) => {
   await page.goto('/control-center')
 
+    // The configuration-first redesign no longer shows a "Safe dry-run setup is
+    // ready" mission banner; a ready dry-run renders the setup-first workspace
+    // with a persistent "Dry run" mode indicator in the top bar.
   await expect(
-    page.getByRole('heading', { name: 'Safe dry-run setup is ready' }),
+    page.getByRole('heading', { name: 'Configuration' }),
   ).toBeVisible()
-  await expect(
-    page.getByText('Moonwalker is configured for safe dry-run operation.'),
-  ).toBeVisible()
+  await expect(page.getByText('Dry run', { exact: true })).toBeVisible()
 })
 
-test('keeps the mission heading inside a 375px viewport', async ({
+test('keeps the control center inside a 375px viewport', async ({
   page,
   isMobile,
 }) => {
   test.skip(!isMobile, 'mobile-only layout assertion')
   await page.goto('/control-center')
 
-  const heading = page.getByRole('heading', {
-    name: 'Safe dry-run setup is ready',
-  })
-  await expect(heading).toBeVisible()
-  const box = await heading.boundingBox()
-
-  expect(box).not.toBeNull()
-  expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(375)
+    // No "Safe dry-run setup is ready" heading exists anymore. Guard the layout
+    // invariant directly: the document must not overflow a 375px phone width
+    // (the regression class the desktop-nav hide guards against).
+  const { clientWidth, scrollWidth } = await page.evaluate(() => ({
+    clientWidth: document.documentElement.clientWidth,
+    scrollWidth: document.documentElement.scrollWidth,
+  }))
+  expect(scrollWidth).toBeLessThanOrEqual(clientWidth)
 })
 
 test('opens and duplicates a strategy through the desktop builder workflow', async ({
