@@ -35,6 +35,11 @@ deal after you switch the configuration to Recovery target.
 
 This snapshot applies to the recovery policy, not every trading setting.
 Account-wide capital controls and the runtime take-profit setting still apply.
+The open trade chart shows indicators for the currently configured DCA strategy
+alongside any strategy recorded for the entry. Changing `dca_strategy` updates
+those open-chart indicators, including before the first safety order. Closed
+trade charts keep the strategies recorded in their execution history. Indicators
+on a chart do not by themselves mean a safety order was placed.
 
 ## Legacy factors
 
