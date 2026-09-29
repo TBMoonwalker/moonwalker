@@ -11,18 +11,24 @@
                     <div v-if="hasStatisticsData" class="stat-detail">Realized {{ formatFixed2(profit_overall - upnl) }} · Unrealized {{ formatFixed2(upnl) }}</div>
                 </div>
                 <template v-if="exposure">
-                    <div class="budget-heading"><span>Budget allocation</span><strong>{{ exposure.percent }}% in active positions</strong></div>
-                    <div class="exposure-track" role="img" :aria-label="`${formatFixed2(exposure.locked)} ${quote_currency} in deals, ${formatFixed2(exposure.tradable)} ${quote_currency} available to trade, ${formatFixed2(exposure.remainingFree)} ${quote_currency} other exchange free`">
-                        <span class="exposure-locked" :style="{ width: `${exposure.lockedPercent}%` }" />
-                        <span class="exposure-tradable" :style="{ width: `${exposure.tradablePercent}%` }" />
-                        <span class="exposure-free" :style="{ width: `${exposure.remainingFreePercent}%` }" />
-                    </div>
-                    <div class="exposure-legend">
-                        <span><i class="legend-key is-locked" aria-hidden="true" />Funds in deals <strong>{{ formatFixed2(exposure.locked) }} {{ quote_currency }}</strong></span>
-                        <span><i class="legend-key is-tradable" aria-hidden="true" />Available to trade <strong>{{ formatFixed2(exposure.tradable) }} {{ quote_currency }}</strong></span>
-                        <span><i class="legend-key is-free" aria-hidden="true" />Other exchange free <strong>{{ formatFixed2(exposure.remainingFree) }} {{ quote_currency }}</strong></span>
-                    </div>
-                    <div class="exposure-totals"><span>Exchange free <strong>{{ formatFixed2(exposure.available) }} {{ quote_currency }}</strong></span><span>Portfolio value <strong>{{ portfolio_value === null ? 'Unavailable' : formatFixed2(portfolio_value) }} {{ quote_currency }}</strong></span></div>
+                    <template v-if="budgetAllocation">
+                        <div class="budget-heading"><span>Budget allocation</span><strong>{{ formatFixed2(budgetAllocation.limit) }} {{ quote_currency }} capital budget</strong></div>
+                        <div class="budget-subheading">{{ budgetAllocation.usedPercent }}% committed to deals and reserves<span v-if="budgetAllocation.exceeded"> · Over budget</span></div>
+                        <div class="exposure-track" role="img" :aria-label="`${formatFixed2(budgetAllocation.limit)} ${quote_currency} capital budget: ${formatFixed2(budgetAllocation.locked)} in deals, ${formatFixed2(budgetAllocation.reserved)} reserved, ${formatFixed2(budgetAllocation.tradable)} available to trade, ${formatFixed2(budgetAllocation.unallocated)} not currently tradable`">
+                            <span class="exposure-locked" :style="{ width: `${budgetAllocation.lockedPercent}%` }" />
+                            <span class="exposure-reserved" :style="{ width: `${budgetAllocation.reservedPercent}%` }" />
+                            <span class="exposure-tradable" :style="{ width: `${budgetAllocation.tradablePercent}%` }" />
+                            <span class="exposure-unallocated" :style="{ width: `${budgetAllocation.unallocatedPercent}%` }" />
+                        </div>
+                        <div class="exposure-legend">
+                            <span><i class="legend-key is-locked" aria-hidden="true" />Funds in deals <strong>{{ formatFixed2(budgetAllocation.locked) }} {{ quote_currency }}</strong></span>
+                            <span><i class="legend-key is-reserved" aria-hidden="true" />Reserved for open and pending orders <strong>{{ formatFixed2(budgetAllocation.reserved) }} {{ quote_currency }}</strong></span>
+                            <span><i class="legend-key is-tradable" aria-hidden="true" />Available to trade <strong>{{ formatFixed2(budgetAllocation.tradable) }} {{ quote_currency }}</strong></span>
+                            <span><i class="legend-key is-unallocated" aria-hidden="true" />Budget awaiting exchange funds <strong>{{ formatFixed2(budgetAllocation.unallocated) }} {{ quote_currency }}</strong></span>
+                        </div>
+                    </template>
+                    <p v-else class="budget-unavailable" role="status">{{ budgetMessage }}</p>
+                    <div class="exposure-totals"><span>Exchange free <strong>{{ formatFixed2(exposure.available) }} {{ quote_currency }}</strong></span><span v-if="budgetAllocation">Outside available to trade <strong>{{ formatFixed2(budgetAllocation.otherExchangeFree) }} {{ quote_currency }}</strong></span><span>Portfolio value <strong>{{ portfolio_value === null ? 'Unavailable' : formatFixed2(portfolio_value) }} {{ quote_currency }}</strong></span></div>
                 </template>
                 <p v-else class="exposure-unavailable" role="status">Waiting for live balances</p>
         </section>
@@ -34,6 +40,7 @@ import { computed, ref, watch } from 'vue'
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
+import { resolveBudgetAllocation } from '../helpers/portfolioExposure'
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
 const configSnapshotStore = useSharedConfigSnapshot()
@@ -44,6 +51,11 @@ const upnl = ref(0)
 const funds_locked = ref(0)
 const funds_available = ref<number | null>(null)
 const funds_tradable = ref<number | null>(null)
+const capital_budget = ref<number | null>(null)
+const capital_locked = ref<number | null>(null)
+const capital_reserve = ref<number | null>(null)
+const capital_pending = ref<number | null>(null)
+const capital_budget_reason = ref<string | null>(null)
 const portfolio_value = computed(() =>
     funds_available.value === null
         ? null
@@ -52,23 +64,21 @@ const portfolio_value = computed(() =>
 const exposure = computed(() => {
     const available = funds_available.value
     if (available === null) return null
-    const locked = Math.max(0, funds_locked.value)
     const free = Math.max(0, available)
-    const total = locked + free
-    const tradable = Math.min(free, Math.max(0, funds_tradable.value ?? free))
-    const remainingFree = free - tradable
-    const lockedPercent = total > 0 ? (locked / total) * 100 : 0
-    return {
-        available: free,
-        locked,
-        tradable,
-        remainingFree,
-        percent: Math.round(lockedPercent),
-        lockedPercent,
-        tradablePercent: total > 0 ? (tradable / total) * 100 : 0,
-        remainingFreePercent: total > 0 ? (remainingFree / total) * 100 : 0,
-    }
+    return { available: free }
 })
+const budgetAllocation = computed(() => exposure.value === null ? null : resolveBudgetAllocation({
+    effectiveBudget: capital_budget.value,
+    fundsLocked: capital_locked.value,
+    openTradeReserve: capital_reserve.value,
+    pendingQuote: capital_pending.value,
+    tradableQuote: funds_tradable.value,
+    exchangeFree: exposure.value.available,
+    reason: capital_budget_reason.value,
+}))
+const budgetMessage = computed(() => capital_budget_reason.value === 'capital_budget_unconfigured'
+    ? 'Capital budget is not configured.'
+    : 'Capital budget allocation is unavailable.')
 const quote_currency = computed(() =>
     String(configSnapshotStore.snapshot.value?.currency ?? '').toUpperCase(),
 )
@@ -82,6 +92,12 @@ watch(statistics_data.data, (newData) => {
         profit_class.value = row_classes(profit_overall.value)
         funds_locked.value = toNumberOrZero(websocket_data.funds_locked)
         funds_available.value = toOptionalNumber(websocket_data.funds_available)
+        capital_budget.value = toOptionalNumber(websocket_data.capital_effective_max_fund)
+        capital_locked.value = toOptionalNumber(websocket_data.capital_funds_locked)
+        capital_reserve.value = toOptionalNumber(websocket_data.capital_open_trade_reserve)
+        capital_pending.value = toOptionalNumber(websocket_data.capital_pending_quote)
+        capital_budget_reason.value = typeof websocket_data.capital_budget_reason === 'string'
+            ? websocket_data.capital_budget_reason : null
         const capitalAvailable = toOptionalNumber(websocket_data.capital_available_quote)
         const reportedTradable = toOptionalNumber(websocket_data.funds_tradable)
         funds_tradable.value = funds_available.value === null
@@ -171,6 +187,8 @@ function formatFixed2(value: number): string {
     font-size: 11px;
 }
 .budget-heading strong { color: var(--mw-color-text-primary); font-weight: 600; }
+.budget-subheading { margin-top: 4px; color: var(--mw-color-text-muted); font-size: 11px; }
+.budget-unavailable { margin: auto 0 0; padding-top: 24px; color: var(--mw-color-text-muted); font-size: 11px; }
 .exposure-track {
     display: flex;
     height: 17px;
@@ -180,10 +198,10 @@ function formatFixed2(value: number): string {
     background: var(--mw-surface-card-muted);
 }
 .exposure-track > span { height: 100%; min-width: 0; }
-.exposure-track > span + span { border-left: 2px solid var(--mw-color-surface-panel); }
 .exposure-locked { background: var(--mw-color-primary); }
+.exposure-reserved { background: var(--mw-color-warning); }
 .exposure-tradable { background: var(--mw-color-info); }
-.exposure-free { background: var(--mw-color-text-muted); }
+.exposure-unallocated { background: var(--mw-color-border); }
 .exposure-legend { display: grid; gap: 8px; margin-top: 16px; }
 .exposure-legend > span {
     display: flex;
@@ -197,8 +215,9 @@ function formatFixed2(value: number): string {
 .exposure-totals strong { margin-left: auto; color: var(--mw-color-text-primary); font-weight: 600; white-space: nowrap; }
 .legend-key { flex: none; width: 8px; height: 8px; border-radius: 2px; }
 .legend-key.is-locked { background: var(--mw-color-primary); }
+.legend-key.is-reserved { background: var(--mw-color-warning); }
 .legend-key.is-tradable { background: var(--mw-color-info); }
-.legend-key.is-free { background: var(--mw-color-text-muted); }
+.legend-key.is-unallocated { background: var(--mw-color-border); }
 .exposure-totals {
     display: grid;
     gap: 7px;

@@ -621,8 +621,8 @@ const admissionToneClass = computed(() =>
   background: var(--mw-color-success);
 }
 
-.ledger-panel :deep(.trade-tpso-cell.is-warning .trade-tpso-fill) {
-  background: var(--mw-color-warning);
+.ledger-panel :deep(.trade-tpso-cell.is-negative .trade-tpso-fill) {
+  background: var(--mw-color-error);
 }
 
 .ledger-panel :deep(.trade-tpso-cell.is-idle .trade-tpso-fill) {
