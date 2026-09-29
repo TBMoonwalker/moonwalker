@@ -10,6 +10,7 @@ import { useWebSocketDataStore } from '@/stores/websocket'
 import { storeToRefs } from 'pinia'
 import { useSharedConfigSnapshot } from '@/control-center/configSnapshotStore'
 import { useTradingPauseStatus } from '@/composables/useTradingPauseStatus'
+import { useClosedTradeCount } from '@/composables/useClosedTradeCount'
 import { RouterLink } from 'vue-router'
 import type { PerformanceRange } from '@/helpers/performanceRange'
 
@@ -54,9 +55,7 @@ const unsellableTradesCount = computed(() =>
 const openTradesCount = computed(() =>
   Array.isArray(openTradesState.data.value) ? openTradesState.data.value.length : 0,
 )
-const closedTradesCount = computed(() =>
-  Array.isArray(closedTradesState.data.value) ? closedTradesState.data.value.length : 0,
-)
+const closedTradesCount = useClosedTradeCount(closedTradesState.data)
 const streamsConnected = computed(
   () => statisticsState.status.value === 'OPEN' && openTradesState.status.value === 'OPEN',
 )
@@ -311,7 +310,7 @@ const admissionToneClass = computed(() =>
       <div class="trade-view-selector" role="group" aria-label="Trade records">
         <button type="button" :aria-pressed="activeTradeView === 'open'" :class="{ 'is-active': activeTradeView === 'open' }" @click="activeTradeView = 'open'">Open trades <span>{{ openTradesCount }}</span></button>
         <span class="trade-view-divider" aria-hidden="true">|</span>
-        <button type="button" :aria-pressed="activeTradeView === 'closed'" :class="{ 'is-active': activeTradeView === 'closed' }" @click="activeTradeView = 'closed'">Closed trades <span>{{ closedTradesCount }}</span></button>
+        <button type="button" :aria-pressed="activeTradeView === 'closed'" :class="{ 'is-active': activeTradeView === 'closed' }" @click="activeTradeView = 'closed'">Closed trades <span>{{ closedTradesCount ?? '—' }}</span></button>
         <span class="trade-view-divider" aria-hidden="true">|</span>
         <button type="button" :aria-pressed="activeTradeView === 'unsellable'" :class="{ 'is-active': activeTradeView === 'unsellable' }" @click="activeTradeView = 'unsellable'">Unsellable trades <span>{{ unsellableTradesCount }}</span></button>
       </div>
