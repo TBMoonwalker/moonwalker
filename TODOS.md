@@ -2,6 +2,28 @@
 
 ## Next up
 
+### Cover the new AI-trust and capital-budget config sections and pin the preview parity
+
+**Status:** Follow-up from the v5.1.0.0 pre-landing review (P3, informational).
+
+**What:** The new `ConfigAiTrustSection.vue` and `ConfigCapitalSection.vue`
+components lack mount/render coverage; they are exercised only through
+source-regex tests and shared parent render tests. Add component-level mount tests
+asserting each section's control surface, and add a numeric snapshot/contract test
+that pins `capitalBudgetPreview.ts` output to the backend buffer and reserve math
+so a future edit to either side is caught.
+
+**Context:** v5.1.0.0 split AI-trust calibration into its own configuration
+section and added a live capital-exposure preview (`capitalBudgetPreview.ts`)
+that mirrors the backend reserve and requirement math on the client. Both are
+correct today and the coverage gate passed at 93 percent; this only tightens the
+guard so a future edit to a section surface or the preview math is caught.
+
+**Effort:** S
+
+**Priority:** P3
+
+
 ### Denylist from open trade: symmetric re-enable + DESIGN.md badge pass
 
 **Status:** Ready to design when picked up

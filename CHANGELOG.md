@@ -2,6 +2,32 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.1.0.0] - 2026-10-07
+
+### Added
+- The capital-settings section now shows a live exposure estimate as you tune
+  it. It adds the draft base order, the safety-order reserve a new deal would
+  hold, and the safety orders still open across your current deals, then
+  applies your buffer, so you can see whether a new deal will fit before
+  saving.
+
+### Changed
+- AI-trust calibration settings now live in their own configuration section
+  instead of being mixed in with the general and advanced settings.
+
+### Fixed
+- Paged trade feeds no longer let a page you navigated to while it was still
+  loading overwrite the rows currently on screen. A stale in-flight response
+  is now discarded instead of clobbering a newer view.
+
+### Removed
+- Pathfinder closed-trade feedback for the WebSocket signal plugin is removed.
+  The outbound feedback posts, the saved delivery receipts, and the "Trade
+  Feedback" entry in Monitoring are gone, and closing a deal no longer runs
+  the old feedback worker or writes feedback rows. Saved signal settings still
+  load unchanged — the retired feedback option is simply ignored. Closed-trade
+  statistics keep using the same execution fees as before.
+
 ## [5.0.2.0] - 2026-09-29
 
 ### Fixed
