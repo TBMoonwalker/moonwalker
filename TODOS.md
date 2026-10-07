@@ -2,22 +2,34 @@
 
 ## Next up
 
-### Cover the new AI-trust and capital-budget config sections and pin the preview parity
+### Mount coverage for the new AI-trust and capital-budget config sections
 
 **Status:** Follow-up from the v5.1.0.0 pre-landing review (P3, informational).
+Two-part P3: the preview-parity pin is **resolved** (see Resolved); the remaining
+open item is the component-level mount coverage below.
+
+**Resolved (v5.1.0.0, review commit `850b66f`):** the "pin the preview parity"
+half is closed by `backend/tests/test_capital_budget_preview_parity.py`, which
+recomputes the same shared numeric vectors that
+`frontend/tests-vitest/capital-budget-preview.test.ts` asserts against the backend
+primitives, so a math drift on either side now fails its own test. The frontend's
+negative-buffer handling was aligned to `normalize_buffer_pct` (clamp `<= 0` to no
+buffer instead of returning null) — behavior-preserving, since the buffer input
+has `min=0`. Documented, intentional boundaries: JS half-up vs Python banker's
+rounding diverge only on exact 8th-decimal ties (no realistic money value), and
+the display reads the live open-trade feed while the gate reads the DB — the
+preview is display-only and shows "unavailable" on disconnect.
 
 **What:** The new `ConfigAiTrustSection.vue` and `ConfigCapitalSection.vue`
-components lack mount/render coverage; they are exercised only through
-source-regex tests and shared parent render tests. Add component-level mount tests
-asserting each section's control surface, and add a numeric snapshot/contract test
-that pins `capitalBudgetPreview.ts` output to the backend buffer and reserve math
-so a future edit to either side is caught.
+components still lack component-level mount/render coverage; they are exercised
+only through source-regex tests and the shared capital-budget preview mount tests.
+Add mount tests asserting each section's control surface.
 
 **Context:** v5.1.0.0 split AI-trust calibration into its own configuration
 section and added a live capital-exposure preview (`capitalBudgetPreview.ts`)
-that mirrors the backend reserve and requirement math on the client. Both are
-correct today and the coverage gate passed at 93 percent; this only tightens the
-guard so a future edit to a section surface or the preview math is caught.
+that mirrors the backend reserve and requirement math on the client. The preview
+math is now pinned (above) and the coverage gate passed at 93 percent; this only
+tightens the mount-level guard for the two new section surfaces.
 
 **Effort:** S
 

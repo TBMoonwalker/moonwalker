@@ -53,6 +53,15 @@ describe('capital budget estimate', () => {
         expect(calculateCapitalBudgetPreview({ ...draft, bufferPercent })?.newDealRequirement).toBe(93.6)
     })
 
+    it('clamps a negative buffer to no buffer, matching the backend', () => {
+        // normalize_buffer_pct clamps <= 0 to 0; a negative buffer is not a
+        // preview error, it is simply no buffer.
+        const noBuffer = calculateCapitalBudgetPreview({ ...draft, bufferPercent: -5 })
+        expect(noBuffer?.newDealRequirement).toBe(72) // base 12 + reserve 60, no buffer
+        expect(noBuffer?.newDealBuffer).toBe(0)
+        expect(noBuffer?.bufferPercent).toBe(0)
+    })
+
     it('does not invent estimates from missing or invalid draft amounts', () => {
         expect(calculateCapitalBudgetPreview({ ...draft, baseOrderSize: null })).toBeNull()
         expect(calculateCapitalBudgetPreview({ ...draft, baseOrderSize: Infinity })).toBeNull()

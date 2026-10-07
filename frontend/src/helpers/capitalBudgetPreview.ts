@@ -7,7 +7,16 @@ export interface CapitalBudgetPreviewInput {
     openTrades: unknown
 }
 
-/** Mirror the backend baseline reserve and incremental base-order check. */
+/**
+ * Mirror the backend baseline reserve and incremental base-order check so the
+ * capital-settings preview stays in lockstep with the admission gate.
+ *
+ * Buffer handling follows `normalize_buffer_pct` in
+ * `backend/service/capital_budget_logic.py`: a negative or zero buffer clamps to
+ * no buffer, a value in (0, 1] is a ratio, and a value above 1 is a whole
+ * percentage. The numeric contract (shared vectors) is pinned by
+ * `backend/tests/test_capital_budget_preview_parity.py`.
+ */
 export function calculateCapitalBudgetPreview(input: CapitalBudgetPreviewInput) {
     const { baseOrderSize, maxSafetyOrders } = input
     if (
@@ -19,9 +28,10 @@ export function calculateCapitalBudgetPreview(input: CapitalBudgetPreviewInput) 
 
     const roundQuote = (value: number) => Math.round(value * 1e8) / 1e8
     const rawBuffer = input.dynamicDcaEnabled ? input.bufferPercent ?? 0 : 0
-    if (!Number.isFinite(rawBuffer) || rawBuffer < 0) return null
-    // The existing API accepts ratios up to 1 and whole percentages above 1.
-    const bufferRatio = rawBuffer > 1 ? rawBuffer / 100 : rawBuffer
+    if (!Number.isFinite(rawBuffer)) return null
+    // Match normalize_buffer_pct: negatives clamp to no buffer; the API accepts
+    // ratios up to 1 and whole percentages above 1.
+    const bufferRatio = rawBuffer > 1 ? rawBuffer / 100 : Math.max(0, rawBuffer)
     const newDealReserve = input.reserveSafetyOrders
         ? roundQuote(baseOrderSize * maxSafetyOrders)
         : 0
