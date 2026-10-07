@@ -78,7 +78,7 @@ export function usePagedTradeFeed<T>(
     const useLiveRows =
       currentPage === 1 &&
       (shouldUseLiveRows ? shouldUseLiveRows(activeSortState) : true)
-    if (useLiveRows) {
+    if (useLiveRows && (liveRows.value.length > 0 || totalCount.value === 0)) {
       pagedRows.value = liveRows.value
       return
     }
@@ -87,6 +87,11 @@ export function usePagedTradeFeed<T>(
     const response = await fetchJson<{ result: unknown[] }>(
       pageEndpoint(offset, activeSortState),
     )
+    if (pagination.page !== currentPage) return
+    if (useLiveRows && liveRows.value.length > 0) {
+      pagedRows.value = liveRows.value
+      return
+    }
     pagedRows.value = normalizeRows(response.result ?? [])
   }
 

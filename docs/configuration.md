@@ -204,6 +204,14 @@ then-current global budget.
 headroom to dynamic safety-order budget checks where future safety-order sizes
 can vary.
 
+The capital settings show a live estimate using the draft base order amount,
+maximum safety-order count, and remaining safety orders in the open-deals feed.
+For example, 30 deals with five remaining safety orders at 12 USDC each reserve
+1,800 USDC. A 30% buffer is not 30% of the global capital limit: for a new deal
+with a 12 USDC base order and 60 USDC safety-order reserve, the admission check
+requires `(12 + 60) × 1.30 = 93.60 USDC`. Pending buys are separate from the
+open-deal reserve estimate, and actual dynamic order sizes may vary.
+
 Autopilot can optionally stretch the effective limit above the global principal
 limit using realized closed profit:
 

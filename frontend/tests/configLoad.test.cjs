@@ -87,15 +87,15 @@ test(
         assert.equal(state.general.ws_healthcheck_interval_ms, 9000)
         assert.equal(state.general.ws_stale_timeout_ms, 8000)
         assert.equal(state.general.ws_reconnect_debounce_ms, 7000)
-        assert.equal(state.general.ai_trust_enabled, true)
-        assert.equal(state.general.ai_trust_enforce_warnings, true)
+        assert.equal(state.aiTrust.ai_trust_enabled, true)
+        assert.equal(state.aiTrust.ai_trust_enforce_warnings, true)
         assert.equal(
-            state.general.ai_trust_ollama_base_url,
+            state.aiTrust.ai_trust_ollama_base_url,
             'http://ollama.local:11434',
         )
-        assert.equal(state.general.ai_trust_ollama_model, 'qwen3:8b')
-        assert.equal(state.general.ai_trust_timeout_ms, 3000)
-        assert.equal(state.general.ai_trust_max_retries, 1)
+        assert.equal(state.aiTrust.ai_trust_ollama_model, 'qwen3:8b')
+        assert.equal(state.aiTrust.ai_trust_timeout_ms, 3000)
+        assert.equal(state.aiTrust.ai_trust_max_retries, 1)
         assert.equal(state.exchange.exchange_hostname, 'api.exchange.test')
         assert.equal(state.signal.csvsignal_mode, 'inline')
         assert.equal(
@@ -348,14 +348,3 @@ test('buildLoadedConfigState ignores removed legacy filter shadow payload', () =
        open_trade_count: 2,
       })
  })
-
-
-test('WebSocket feedback loads as an explicit opt-in', () => {
-    for (const enabled of [true, false]) {
-        const result = buildLoadedConfigState({
-            signal: 'websocket_signal',
-            signal_settings: JSON.stringify({ feedback_enabled: enabled }),
-        }, createLoadDefaults())
-        assert.equal(result.signal.websocket_feedback_enabled, enabled)
-    }
-})

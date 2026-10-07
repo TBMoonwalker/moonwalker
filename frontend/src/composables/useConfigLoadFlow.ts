@@ -9,6 +9,7 @@ import {
 } from '../helpers/configLoad'
 import type { OperationResult } from '../control-center/operationResults'
 import type {
+    AiTrustConfigSection,
     AutopilotConfigSection,
     CapitalConfigSection,
     DcaConfigSection,
@@ -29,6 +30,7 @@ interface UseConfigLoadFlowOptions {
     buildDefaults: () => ConfigLoadDefaults
     loadConfig?: () => Promise<Record<string, unknown> | null>
     general: Ref<GeneralConfigSection>
+    aiTrust: Ref<AiTrustConfigSection>
     signal: Ref<LoadedSignalConfigSection>
     filter: Ref<FilterConfigSection>
     exchange: Ref<ExchangeConfigSection>
@@ -76,6 +78,7 @@ export function useConfigLoadFlow(options: UseConfigLoadFlowOptions) {
             const loadedConfig = buildLoadedConfigState(payload, defaults)
 
             Object.assign(options.general.value, loadedConfig.general)
+            Object.assign(options.aiTrust.value, loadedConfig.aiTrust)
             Object.assign(options.signal.value, loadedConfig.signal)
             Object.assign(options.filter.value, loadedConfig.filter)
             Object.assign(options.exchange.value, loadedConfig.exchange)

@@ -64,6 +64,13 @@ export function useControlCenterMissionState(
                 sectionId: 'control-center-general',
             },
             {
+                target: 'ai-trust',
+                title: 'AI Trust',
+                summary:
+                    'Configure the local Ollama provider and warning enforcement for AI-reviewed entry admission.',
+                sectionId: 'control-center-ai-trust',
+            },
+            {
                 target: 'exchange',
                 title: 'Exchange overrides',
                 summary:

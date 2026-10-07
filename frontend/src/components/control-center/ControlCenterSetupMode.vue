@@ -183,6 +183,9 @@ const emit = defineEmits<{
             <ConfigCapitalSection
                 :ref="capitalFormRef"
                 :capital="capital"
+                :base-order-size="dca.bo"
+                :max-safety-orders="dca.mstc"
+                :quote-currency="exchange.currency"
                 :card-title="null"
                 :show-expert-fields="setupShowsAdvancedFields"
                 :dynamic-dca-enabled="

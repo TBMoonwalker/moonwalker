@@ -7,12 +7,23 @@ import type {
 const TASKS: readonly ControlCenterTaskPresentation[] = [
     {
         target: 'general',
-        title: 'General runtime',
-        summary: 'WebSocket runtime diagnostics and AI trust controls.',
+        title: 'Runtime diagnostics',
+        summary:
+            'WebSocket watchdog and debug logging for experienced operators.',
         defaultMode: 'advanced',
         modes: ['advanced'],
         sectionId: 'control-center-general',
         emphasis: 'primary',
+    },
+    {
+        target: 'ai-trust',
+        title: 'AI Trust',
+        summary:
+            'Ollama provider and warning enforcement for AI-reviewed entry admission.',
+        defaultMode: 'advanced',
+        modes: ['advanced'],
+        sectionId: 'control-center-ai-trust',
+        emphasis: 'secondary',
     },
     {
         target: 'exchange',
@@ -125,6 +136,7 @@ const KEY_TARGET_PREFIXES: ReadonlyArray<[string, ControlCenterTarget]> = [
     ['capital_', 'capital'],
     ['autopilot_', 'autopilot'],
     ['ws_', 'general'],
+    ['ai_trust_', 'ai-trust'],
 ]
 
 const KEY_TARGETS: Record<string, ControlCenterTarget> = {

@@ -38,7 +38,7 @@ _KNOWN_FIELDS = (
     | _SIGNAL_ID_LIST_FIELDS
     | _NUMBER_FIELDS
     | _OPEN_JSON_FIELDS
-    | {"schema_version", "feedback_enabled"}
+    | {"schema_version"}
 )
 
 
@@ -79,6 +79,9 @@ def canonicalize_signal_settings(raw_value: Any) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise SignalSettingsError("signal_settings must be a JSON object.")
 
+    # Ignore retired outbound feedback settings in existing saved configs.
+    payload.pop("feedback_enabled", None)
+    payload.pop("lifecycle_feedback_enabled", None)
     unknown_fields = sorted(set(payload) - _KNOWN_FIELDS)
     if unknown_fields:
         raise SignalSettingsError(
@@ -123,8 +126,6 @@ def canonicalize_signal_settings(raw_value: Any) -> dict[str, Any]:
             or not math.isfinite(float(value))
         ):
             raise SignalSettingsError(f"signal_settings.{key} must be a finite number.")
-    if "feedback_enabled" in payload and type(payload["feedback_enabled"]) is not bool:
-        raise SignalSettingsError("signal_settings.feedback_enabled must be a boolean.")
     headers = payload.get("headers")
     if headers is not None and not isinstance(headers, dict):
         raise SignalSettingsError("signal_settings.headers must be a JSON object.")

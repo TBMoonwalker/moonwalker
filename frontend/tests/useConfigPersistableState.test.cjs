@@ -18,6 +18,8 @@ function createPersistableStateOptions() {
             ws_healthcheck_interval_ms: 30000,
             ws_stale_timeout_ms: 45000,
             ws_reconnect_debounce_ms: 5000,
+        }),
+        aiTrust: ref({
             ai_trust_enabled: false,
             ai_trust_enforce_warnings: false,
             ai_trust_ollama_base_url: 'http://localhost:11434',
@@ -204,4 +206,23 @@ test('useConfigPersistableState tracks persistable section changes by label', ()
 
     assert.deepEqual(tracking.changedSections.value, [])
     assert.deepEqual(tracking.changedSectionLabels.value, [])
+})
+
+test('useConfigPersistableState tracks General and AI Trust as separate sections', () => {
+    const options = createPersistableStateOptions()
+    const tracking = useConfigPersistableState(options)
+
+    tracking.syncBaselineState()
+    options.general.value.ws_watchdog_enabled = false
+
+    assert.equal(tracking.isDirty.value, true)
+    assert.deepEqual(tracking.changedSections.value, ['general'])
+    assert.deepEqual(tracking.changedSectionLabels.value, ['General'])
+
+    tracking.syncBaselineState()
+    options.aiTrust.value.ai_trust_enabled = true
+
+    assert.equal(tracking.isDirty.value, true)
+    assert.deepEqual(tracking.changedSections.value, ['aiTrust'])
+    assert.deepEqual(tracking.changedSectionLabels.value, ['AI Trust'])
 })

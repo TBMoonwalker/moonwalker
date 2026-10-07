@@ -22,6 +22,7 @@ export function useConfigValidationFlow(
     options: UseConfigValidationFlowOptions,
 ) {
     const generalFormRef = ref<ConfigSectionFormExpose | null>(null)
+    const aiTrustFormRef = ref<ConfigSectionFormExpose | null>(null)
     const signalFormRef = ref<ConfigSectionFormExpose | null>(null)
     const filterFormRef = ref<ConfigSectionFormExpose | null>(null)
     const exchangeFormRef = ref<ConfigSectionFormExpose | null>(null)
@@ -40,6 +41,7 @@ export function useConfigValidationFlow(
 
         const sectionForms = [
             ['general', generalFormRef.value],
+            ['ai-trust', aiTrustFormRef.value],
             ['signal', signalFormRef.value],
             ['filter', filterFormRef.value],
             ['exchange', exchangeFormRef.value],
@@ -103,6 +105,7 @@ export function useConfigValidationFlow(
         exchangeFormRef,
         filterFormRef,
         generalFormRef,
+        aiTrustFormRef,
         handleGlobalKeydown,
         handleValidateButtonClick,
         indicatorFormRef,

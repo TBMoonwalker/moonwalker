@@ -27,6 +27,26 @@ def test_parse_signal_settings_accepts_json_and_dict() -> None:
     assert parse_signal_settings('{"api_key":"x"}') == expected
 
 
+@pytest.mark.parametrize(
+    "raw_value",
+    [
+        {
+            "websocket_url": "wss://signals.example/stream",
+            "feedback_enabled": True,
+            "lifecycle_feedback_enabled": True,
+        },
+        '{"websocket_url":"wss://signals.example/stream",'
+        '"feedback_enabled":true,"lifecycle_feedback_enabled":true}',
+    ],
+)
+def test_parse_signal_settings_discards_retired_feedback_options(raw_value) -> None:
+    """Existing saved opt-ins must not affect signal intake or delivery."""
+    assert parse_signal_settings(raw_value) == {
+        "websocket_url": "wss://signals.example/stream",
+        "schema_version": 1,
+    }
+
+
 def test_parse_signal_settings_rejects_removed_python_literal_fallback() -> None:
     with pytest.raises(ValueError):
         parse_signal_settings("{'api_key': 'x'}")

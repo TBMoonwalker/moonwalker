@@ -47,13 +47,15 @@ function createBaseOptions(overrides = {}) {
             ws_healthcheck_interval_ms: null,
             ws_stale_timeout_ms: null,
             ws_reconnect_debounce_ms: null,
+        },
+        aiTrust: {
             ai_trust_enabled: false,
             ai_trust_enforce_warnings: false,
             ai_trust_ollama_base_url: null,
             ai_trust_ollama_model: null,
             ai_trust_timeout_ms: null,
             ai_trust_max_retries: null,
-        },
+          },
         signal: {
             symbol_list: null,
             asap_use_url: false,
@@ -391,6 +393,8 @@ test('buildConfigSubmitPayload persists AI Trust Ollama settings', () => {
                 ws_healthcheck_interval_ms: 9000,
                 ws_stale_timeout_ms: 18000,
                 ws_reconnect_debounce_ms: 3000,
+            },
+            aiTrust: {
                 ai_trust_enabled: true,
                 ai_trust_enforce_warnings: true,
                 ai_trust_ollama_base_url: 'http://ollama.local:11434',
@@ -686,18 +690,3 @@ test('buildConfigSubmitPayload persists only the canonical trade mode field', ()
      assert.equal('trade_lifecycle_mode' in payload, false)
      assert.equal('sidestep_campaign_enabled' in payload, false)
  })
-
-
-test('WebSocket feedback round-trips through submission and can be disabled', () => {
-    for (const enabled of [true, false]) {
-        const payload = buildConfigSubmitPayload(createBaseOptions({
-            signal: {
-                signal: 'websocket_signal',
-                websocket_url: 'wss://pathfinder.example/v1/signals/stream',
-                websocket_feedback_enabled: enabled,
-            },
-        }))
-        const settings = parseField(payload, 'signal_settings').value
-        assert.equal(settings.feedback_enabled === true, enabled)
-    }
-})

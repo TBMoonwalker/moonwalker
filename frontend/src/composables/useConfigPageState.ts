@@ -8,6 +8,7 @@ import type {
 import type { TradeModeSwitchGuardState } from '../helpers/configLoad'
 import { getAllTimeZones } from '../helpers/timezone'
 import type {
+    AiTrustConfigSection,
     AutopilotConfigSection,
     CapitalConfigSection,
     ConfigSubmitPayloadDefaults,
@@ -140,6 +141,9 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         ws_stale_timeout_ms: options.defaults.advancedWsStaleTimeoutMs,
         ws_reconnect_debounce_ms:
             options.defaults.advancedWsReconnectDebounceMs,
+        })
+
+    const aiTrust = ref<AiTrustConfigSection>({
         ai_trust_enabled: false,
         ai_trust_enforce_warnings: false,
         ai_trust_ollama_base_url: options.defaults.defaultAiTrustOllamaBaseUrl,
@@ -169,7 +173,6 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
         csvsignal_source: null,
         csvsignal_inline: null,
         csvsignal_file_name: null,
-        websocket_feedback_enabled: false,
         websocket_url: null,
         websocket_headers: null,
         websocket_subscribe_message: null,
@@ -327,6 +330,7 @@ export function useConfigPageState(options: UseConfigPageStateOptions) {
     }
 
     return {
+        aiTrust,
         autopilot,
         capital,
         currency: CURRENCY_OPTIONS,
