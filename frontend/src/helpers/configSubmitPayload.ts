@@ -17,6 +17,9 @@ export interface GeneralConfigSection {
     ws_healthcheck_interval_ms: number | null
     ws_stale_timeout_ms: number | null
     ws_reconnect_debounce_ms: number | null
+}
+
+export interface AiTrustConfigSection {
     ai_trust_enabled: boolean
     ai_trust_enforce_warnings: boolean
     ai_trust_ollama_base_url: string | null
@@ -39,7 +42,6 @@ export interface SignalConfigSection {
     csvsignal_mode: string | null
     csvsignal_source: string | null
     csvsignal_inline: string | null
-    websocket_feedback_enabled?: boolean
     websocket_url?: string | null
     websocket_headers?: string | null
     websocket_subscribe_message?: string | null
@@ -191,6 +193,7 @@ export interface ConfigSubmitPayloadDefaults {
 
 export interface BuildConfigSubmitPayloadOptions {
     general: GeneralConfigSection
+    aiTrust: AiTrustConfigSection
     signal: SignalConfigSection
     filter: FilterConfigSection
     exchange: ExchangeConfigSection
@@ -210,6 +213,7 @@ export function buildConfigSubmitPayload(
 ): ConfigSubmitPayload {
     const {
         general,
+        aiTrust,
         signal,
         filter,
         exchange,
@@ -262,28 +266,28 @@ export function buildConfigSubmitPayload(
             'int',
         ),
         ai_trust_enabled: serializeConfigValue(
-            general.ai_trust_enabled ?? false,
+            aiTrust.ai_trust_enabled ?? false,
             'bool',
         ),
         ai_trust_enforce_warnings: serializeConfigValue(
-            general.ai_trust_enforce_warnings ?? false,
+            aiTrust.ai_trust_enforce_warnings ?? false,
             'bool',
         ),
         ai_trust_ollama_base_url: serializeConfigValue(
-            toNullableConfigString(general.ai_trust_ollama_base_url) ||
+            toNullableConfigString(aiTrust.ai_trust_ollama_base_url) ||
                 defaults.defaultAiTrustOllamaBaseUrl,
             'str',
         ),
         ai_trust_ollama_model: serializeConfigValue(
-            toNullableConfigString(general.ai_trust_ollama_model),
+            toNullableConfigString(aiTrust.ai_trust_ollama_model),
             'str',
         ),
         ai_trust_timeout_ms: serializeConfigValue(
-            general.ai_trust_timeout_ms ?? defaults.defaultAiTrustTimeoutMs,
+            aiTrust.ai_trust_timeout_ms ?? defaults.defaultAiTrustTimeoutMs,
             'int',
         ),
         ai_trust_max_retries: serializeConfigValue(
-            general.ai_trust_max_retries ?? defaults.defaultAiTrustMaxRetries,
+            aiTrust.ai_trust_max_retries ?? defaults.defaultAiTrustMaxRetries,
             'int',
         ),
         signal: serializeConfigValue(toNullableConfigString(signal.signal), 'str'),
@@ -321,7 +325,6 @@ export function buildConfigSubmitPayload(
                 csvsignal_mode: signal.csvsignal_mode,
                 csvsignal_source: signal.csvsignal_source,
                 csvsignal_inline: signal.csvsignal_inline,
-                websocket_feedback_enabled: signal.websocket_feedback_enabled,
                 websocket_url: signal.websocket_url,
                 websocket_headers: signal.websocket_headers,
                 websocket_subscribe_message: signal.websocket_subscribe_message,

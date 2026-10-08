@@ -117,6 +117,28 @@ items below remain release history, not descriptions of current capabilities.
 
 ## Completed
 
+### AI-trust and capital-budget config section coverage guards
+
+**Completed:** v5.1.0.0 (2026-10-07)
+
+**What shipped:** Closed both pre-landing P3 coverage gaps for the new
+AI-trust and capital-budget config sections. (1) Pinned the
+`capitalBudgetPreview` client mirror to the backend admission math with a
+cross-language contract test,
+`backend/tests/test_capital_budget_preview_parity.py`, that recomputes the same
+shared vectors `frontend/tests-vitest/capital-budget-preview.test.ts` asserts, so
+a math drift on either side fails its own test; aligned the preview's
+negative-buffer handling to `normalize_buffer_pct` (clamp <= 0 to no buffer,
+behavior-preserving since the input has `min=0`). (2) Added dedicated mount tests
+asserting each section's control surface:
+`config-ai-trust-section.test.ts` (field labels, the warn-block switch staying
+inert until the cockpit is enabled, and the exposed `validate()`) and
+`config-capital-section.test.ts` (the title fallback plus the gated
+showBaseFields / showExpertFields / dynamicDcaEnabled fields and `validate()`).
+These components are not in the vitest `coverage.include` ratcheted set, so the
+new mount tests harden regression coverage without moving the ratchet; see the
+separate P3 for ratcheting the Recovery DCA status card into the include guard.
+
 ### Fix mobile Backtest chart marker label clipping (ISSUE-002)
 
 **Completed:** 2026-08-02

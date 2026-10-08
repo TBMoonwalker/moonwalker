@@ -84,6 +84,7 @@ export function useConfigEditorAssembly(
         exchange: pageState.exchange,
         filter: pageState.filter,
         general: pageState.general,
+        aiTrust: pageState.aiTrust,
         indicator: pageState.indicator,
         monitoring: pageState.monitoring,
         signal: pageState.signal as Ref<LoadedSignalConfigSection>,
@@ -105,6 +106,7 @@ export function useConfigEditorAssembly(
         buildPayload: () =>
             buildConfigSubmitPayload({
                 general: pageState.general.value,
+                aiTrust: pageState.aiTrust.value,
                 signal: pageState.signal.value,
                 filter: pageState.filter.value,
                 exchange: pageState.exchange.value,
@@ -186,6 +188,7 @@ export function useConfigEditorAssembly(
         buildDefaults: buildConfigLoadDefaults,
         loadConfig: options.load?.loadConfig,
         general: pageState.general,
+        aiTrust: pageState.aiTrust,
         signal: pageState.signal,
         filter: pageState.filter,
         exchange: pageState.exchange,

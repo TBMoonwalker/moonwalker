@@ -2,6 +2,7 @@ import type { Ref } from 'vue'
 
 import type { LoadedSignalConfigSection } from '../helpers/configLoad'
 import type {
+    AiTrustConfigSection,
     AutopilotConfigSection,
     CapitalConfigSection,
     DcaConfigSection,
@@ -23,12 +24,14 @@ interface UseConfigPersistableStateOptions {
     exchange: Ref<ExchangeConfigSection>
     filter: Ref<FilterConfigSection>
     general: Ref<GeneralConfigSection>
+    aiTrust: Ref<AiTrustConfigSection>
     indicator: Ref<IndicatorConfigSection>
     monitoring: Ref<MonitoringConfigSection>
     signal: Ref<LoadedSignalConfigSection>
 }
 
 const SECTION_LABELS: Record<string, string> = {
+    aiTrust: 'AI Trust',
     general: 'General',
     signal: 'Signal',
     filter: 'Filter',
@@ -44,6 +47,7 @@ function buildPersistableState(
     options: UseConfigPersistableStateOptions,
 ): PersistableState {
     return {
+        aiTrust: { ...options.aiTrust.value },
         general: { ...options.general.value },
         signal: {
             symbol_list: options.signal.value.symbol_list,
@@ -59,7 +63,6 @@ function buildPersistableState(
             csvsignal_mode: options.signal.value.csvsignal_mode,
             csvsignal_source: options.signal.value.csvsignal_source,
             csvsignal_inline: options.signal.value.csvsignal_inline,
-            websocket_feedback_enabled: options.signal.value.websocket_feedback_enabled,
             websocket_url: options.signal.value.websocket_url,
             websocket_headers: options.signal.value.websocket_headers,
             websocket_subscribe_message:

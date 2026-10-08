@@ -9,6 +9,7 @@ export type ControlCenterMode = (typeof CONTROL_CENTER_MODES)[number]
 
 export const CONTROL_CENTER_TARGETS = [
     'general',
+    'ai-trust',
     'exchange',
     'signal',
     'filter',

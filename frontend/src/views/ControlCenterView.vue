@@ -59,6 +59,8 @@ const { bindTargetElement, readTargetElement } =
 
 const {
     autopilot,
+    aiTrust,
+    aiTrustFormRef,
     autopilotFormRef,
     backupDownloadLoading,
     backupIncludeTradeData,
@@ -471,6 +473,8 @@ useControlCenterLifecycle({
                     :filter-form-ref="filterFormRef"
                     :general="general"
                     :general-form-ref="generalFormRef"
+                    :ai-trust="aiTrust"
+                    :ai-trust-form-ref="aiTrustFormRef"
                     :history-lookback-options="historyLookbackOptions"
                     :indicator="indicator"
                     :indicator-form-ref="indicatorFormRef"

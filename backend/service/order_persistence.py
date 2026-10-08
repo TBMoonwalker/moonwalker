@@ -512,7 +512,6 @@ async def persist_closed_trade(
     campaign_context: CampaignPersistenceContext | None = None,
     placement_operation_id: str | None = None,
     placement_operation_ids: Iterable[str] | None = None,
-    feedback_config: dict[str, Any] | None = None,
 ) -> None:
     """Persist a closed trade and remove its open-trade rows."""
 
@@ -572,10 +571,6 @@ async def persist_closed_trade(
                     ),
                     using_db=conn,
                 )
-            if feedback_config is not None:
-                from service.trade_feedback import enqueue_feedback
-
-                await enqueue_feedback(summary_payload, feedback_config, conn)
             await archive_replay_candles_for_deal(
                 deal_id,
                 symbol,
@@ -900,7 +895,6 @@ async def persist_unsellable_remainder(
     partial_proceeds: float = 0.0,
     sell_executions: Iterable[Mapping[str, Any]] | None = None,
     closed_trade_payload: ClosedTradeSummaryRecord | None = None,
-    feedback_config: dict[str, Any] | None = None,
     placement_operation_id: str | None = None,
     placement_operation_ids: Iterable[str] | None = None,
 ) -> None:
@@ -968,10 +962,6 @@ async def persist_unsellable_remainder(
                 )
                 # This path also terminates the managed deal after a sell, even
                 # when precision/minimum-notional dust remains in the archive.
-                if feedback_config is not None:
-                    from service.trade_feedback import enqueue_feedback
-
-                    await enqueue_feedback(summary_payload, feedback_config, conn)
 
             summary_payload = dict(payload)
             summary_payload["deal_id"] = deal_id

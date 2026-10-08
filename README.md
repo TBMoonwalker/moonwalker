@@ -77,8 +77,7 @@ You also need to install the ta-lib library for your OS. Please see: https://ta-
 - [Expert safeguards and safety-order sizing modes](docs/dynamic-so.md)
 - [AI Trust local calibration](docs/ai-trust.md)
 - [Developer documentation and documentation policy](docs/development.md)
-- Signal plugin setup (SymSignals, ASAP, CSV, WebSocket) and optional Pathfinder
-  closed-trade feedback: [Signal plugins](docs/signals.md)
+- Signal plugin setup (SymSignals, ASAP, CSV, WebSocket): [Signal plugins](docs/signals.md)
 - CI, runtime operations, backups, logs, and dashboard streams:
    `docs/operations.md`
 - Dependency updates and supply-chain policy: `docs/dependencies.md`

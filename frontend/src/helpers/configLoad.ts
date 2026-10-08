@@ -11,6 +11,7 @@ import {
     normalizeTradeMode,
 } from './tradeLifecycle'
 import type {
+    AiTrustConfigSection,
     AutopilotConfigSection,
     CapitalConfigSection,
     DcaConfigSection,
@@ -68,6 +69,7 @@ export interface LoadedSignalConfigSection extends SignalConfigSection {
 }
 
 export interface LoadedConfigState {
+    aiTrust: AiTrustConfigSection
     autopilot: AutopilotConfigSection
     capital: CapitalConfigSection
     dca: DcaConfigSection
@@ -242,6 +244,9 @@ export function buildLoadedConfigState(
         ws_reconnect_debounce_ms:
             toNumberOrNull(response.ws_reconnect_debounce_ms) ??
             defaults.advancedWsReconnectDebounceMs,
+    }
+
+    const aiTrust: AiTrustConfigSection = {
         ai_trust_enabled:
             parseBooleanString(response.ai_trust_enabled) ??
             getConfigContractDefault(response, 'ai_trust_enabled', false),
@@ -311,6 +316,7 @@ timezone: toNullableString(response.timezone) || defaults.clientTimezone,
     const tradeModeSwitchGuard = buildTradeModeSwitchGuard(response)
 
     return {
+        aiTrust,
         general,
         signal: {
             symbol_list: symbolList,
@@ -348,7 +354,6 @@ timezone: toNullableString(response.timezone) || defaults.clientTimezone,
             csvsignal_source: csvsignalSource,
             csvsignal_inline: csvsignalInline,
             csvsignal_file_name: null,
-            websocket_feedback_enabled: signalSettings?.feedback_enabled === true,
             websocket_url:
                 toNullableString(signalSettings?.websocket_url) ??
                 toNullableString(signalSettings?.api_url),

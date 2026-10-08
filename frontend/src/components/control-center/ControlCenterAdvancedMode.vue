@@ -3,6 +3,7 @@ import type { FormRules } from 'naive-ui/es/form'
 import type { VNodeRef } from 'vue'
 
 import type {
+    AiTrustAdvancedModel,
     AutopilotModel,
     CapitalModel,
     DcaAdvancedModel,
@@ -15,6 +16,7 @@ import type {
 } from '../../config-editor/types'
 import type { ControlCenterTarget } from '../../control-center/types'
 import ControlCenterAdvancedWorkspace from './ControlCenterAdvancedWorkspace.vue'
+import ConfigAiTrustSection from '../config/ConfigAiTrustSection.vue'
 import ConfigAutopilotSection from '../config/ConfigAutopilotSection.vue'
 import ConfigCapitalSection from '../config/ConfigCapitalSection.vue'
 import ConfigDcaAdvancedSection from '../config/ConfigDcaAdvancedSection.vue'
@@ -33,6 +35,8 @@ interface AdvancedSection {
 defineProps<{
     activeTarget: ControlCenterTarget | null
     advancedSections: AdvancedSection[]
+    aiTrust: AiTrustAdvancedModel
+    aiTrustFormRef?: VNodeRef
     autopilot: AutopilotModel
     autopilotFormRef?: VNodeRef
     capital: CapitalModel
@@ -75,6 +79,14 @@ const emit = defineEmits<{
             />
         </template>
 
+        <template #ai-trust>
+            <ConfigAiTrustSection
+                :ref="aiTrustFormRef"
+                :ai-trust="aiTrust"
+                :rules="rules"
+            />
+        </template>
+
         <template #exchange>
             <ConfigExchangeAdvancedSection
                 :ref="exchangeFormRef"
@@ -95,6 +107,9 @@ const emit = defineEmits<{
             <ConfigCapitalSection
                 :ref="capitalFormRef"
                 :capital="capital"
+                :base-order-size="dca.bo"
+                :max-safety-orders="dca.mstc"
+                :quote-currency="exchange.currency"
                 :card-title="null"
                 :show-base-fields="false"
                 :dynamic-dca-enabled="

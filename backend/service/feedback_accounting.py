@@ -1,4 +1,4 @@
-"""Preserve CCXT fee currencies for final Pathfinder outcome accounting."""
+"""Preserve CCXT execution fee currencies in order metadata."""
 
 import json
 import math
@@ -70,7 +70,7 @@ def execution_accounting(fills: list[dict[str, Any]], symbol: str) -> dict[str, 
 
 
 def merge_accounting_metadata(raw: Any, accounting: dict[str, Any]) -> str:
-    """Attach fee accounting without losing signal provenance or sizing data."""
+    """Attach execution fee accounting without losing other order metadata."""
     try:
         metadata = json.loads(raw) if isinstance(raw, str) else raw
     except (ValueError, TypeError):
