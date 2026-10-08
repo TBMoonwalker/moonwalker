@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from service.exchange_types import ExchangeOrderPayload, SoldCheckStatus
 from service.placement_intents import (
+    BUY_RECOVERY_CONTEXT_KEYS,
     PlacementAction,
     deserialize_placement_payload,
 )
@@ -49,6 +50,12 @@ class PlacementRecoveryHandler:
         action = str(intent.action)
 
         if action == PlacementAction.BUY.value:
+            # Older intents omitted local context from request_json. Their
+            # accepted result can still carry it even when lookup returns raw
+            # exchange evidence with no Moonwalker fields.
+            for key in BUY_RECOVERY_CONTEXT_KEYS:
+                if key not in request and key in stored_result:
+                    request[key] = stored_result[key]
             return await self._resume_buy(
                 operation_id,
                 request,
@@ -87,6 +94,12 @@ class PlacementRecoveryHandler:
         config: dict[str, Any],
     ) -> bool:
         """Normalize and persist a confirmed buy fill."""
+        if request.get("safetyorder") and request.get("so_percentage") is None:
+            raise ValueError(
+                "Legacy safety-order intent is missing so_percentage; "
+                "restore the original value before retrying reconciliation."
+            )
+        request.setdefault("so_percentage", None)
         normalized = (
             {**request, **evidence}
             if evidence.get("fees") is not None
@@ -99,6 +112,9 @@ class PlacementRecoveryHandler:
         )
         if not normalized or not self.validate_buy(normalized):
             return False
+        for key in BUY_RECOVERY_CONTEXT_KEYS:
+            if key not in normalized and key in request:
+                normalized[key] = request[key]
         return bool(
             await self.finalize_buy(
                 cast(ExchangeOrderPayload, normalized),

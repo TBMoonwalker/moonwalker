@@ -122,7 +122,24 @@ _VALID_TRANSITIONS: dict[str, frozenset[str]] = {
     ),
 }
 
-_SAFE_REQUEST_KEYS = frozenset(
+BUY_RECOVERY_CONTEXT_KEYS = frozenset(
+    {
+        "so_percentage",
+        "signal_name",
+        "strategy_name",
+        "strategy_slug",
+        "strategy_version",
+        "timeframe",
+        "metadata_json",
+        "baseline_order_size",
+        "entry_size_applied",
+        "entry_size_reason_code",
+        "entry_size_fallback_applied",
+        "entry_size_fallback_reason",
+    }
+)
+
+_SAFE_REQUEST_KEYS = BUY_RECOVERY_CONTEXT_KEYS | frozenset(
     {
         "symbol",
         "side",
@@ -463,7 +480,20 @@ class PlacementIntentService:
                     intent.exchange_order_id = str(exchange_order_id)
                     update_fields.append("exchange_order_id")
                 if result is not None:
-                    intent.result_json = serialize_placement_payload(result)
+                    persisted_result = result
+                    if str(intent.action) == PlacementAction.BUY.value:
+                        # Lookup evidence replaces fill data, but cannot supply
+                        # the local strategy context saved in an earlier ack.
+                        previous = deserialize_placement_payload(intent.result_json)
+                        persisted_result = {
+                            **{
+                                key: previous[key]
+                                for key in BUY_RECOVERY_CONTEXT_KEYS
+                                if key in previous
+                            },
+                            **result,
+                        }
+                    intent.result_json = serialize_placement_payload(persisted_result)
                     update_fields.append("result_json")
                 if reason_code is not None:
                     intent.reason_code = str(reason_code)

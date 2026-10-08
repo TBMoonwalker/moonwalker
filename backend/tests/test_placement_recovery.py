@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from service.order_payloads import build_buy_trade_payload
 from service.placement_intents import PlacementAction
 from service.placement_recovery import PlacementRecoveryHandler
 
@@ -160,6 +162,124 @@ async def test_recovered_buy_is_normalized_and_persisted() -> None:
     assert result is True
     assert exchange.buy_calls == 1
     assert buys[0]["amount"] == 0.1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("normalized_evidence", "request_percentage", "normalized_percentage"),
+    [
+        (False, None, None),
+        (True, None, None),
+        (False, -8.0, None),
+        (True, -8.0, None),
+        (False, -8.0, -7.0),
+    ],
+)
+# Value: protects=buy recovery preserves context precedence and sizing provenance;
+# fails_when=saved acknowledgement replaces request or fallback replaces normalized;
+# why_new=existing recovery test exercises missing context only;
+# seam=none
+async def test_legacy_buy_recovers_local_metadata_from_saved_ack(
+    normalized_evidence: bool,
+    request_percentage: float | None,
+    normalized_percentage: float | None,
+) -> None:
+    handler, exchange, _trades, _intents, buys, _sells, _partials = _handler()
+    request = {
+        "symbol": "BTC/USDC",
+        "botname": "asap",
+        "ordertype": "limit",
+        "baseorder": False,
+        "safetyorder": True,
+        "order_count": 1,
+        "direction": "long",
+        "side": "buy",
+    }
+    if request_percentage is not None:
+        request["so_percentage"] = request_percentage
+    context = {
+        "so_percentage": -4.5,
+        "strategy_slug": "ema_low",
+        "baseline_order_size": 20.0,
+        "entry_size_applied": True,
+        "entry_size_reason_code": "entry_scaled",
+        "entry_size_fallback_applied": False,
+        "entry_size_fallback_reason": "",
+    }
+    fill = {
+        "id": "buy-1",
+        "orderid": "buy-1",
+        "status": "closed",
+        "timestamp": 1000,
+        "ordersize": 10.0,
+        "fees": 0.001,
+        "precision": 4,
+        "amount_fee": 0.0,
+        "price": 100.0,
+        "amount": 0.1,
+    }
+    exchange.buy_result = {**request, **fill}
+    if normalized_percentage is not None:
+        exchange.buy_result["so_percentage"] = normalized_percentage
+    expected_request_percentage = (
+        request_percentage if request_percentage is not None else -4.5
+    )
+    expected_percentage = (
+        normalized_percentage
+        if normalized_percentage is not None
+        else expected_request_percentage
+    )
+
+    async def persist(payload: dict[str, Any], *_args: Any, **kwargs: Any) -> bool:
+        buys.append(build_buy_trade_payload(payload))
+        assert kwargs["original_order"]["so_percentage"] == expected_request_percentage
+        for key in context.keys() - {"so_percentage"}:
+            assert payload[key] == context[key]
+        return True
+
+    handler = replace(handler, finalize_buy=persist)
+    result = await handler.resume(
+        _intent(
+            PlacementAction.BUY,
+            request=request,
+            result=context,
+        ),
+        fill if normalized_evidence else {"id": "buy-1", "status": "closed"},
+        {},
+    )
+    assert result is True
+    assert buys[0]["so_percentage"] == expected_percentage
+    assert buys[0]["strategy_slug"] == "ema_low"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("percentage", [{}, {"so_percentage": None}])
+async def test_legacy_safety_buy_without_percentage_requires_repair(
+    percentage: dict[str, Any],
+) -> None:
+    handler, exchange, _trades, _intents, buys, _sells, _partials = _handler()
+    with pytest.raises(ValueError, match="restore the original value"):
+        await handler.resume(
+            _intent(
+                PlacementAction.BUY,
+                request={"symbol": "BTC/USDC", "safetyorder": True, **percentage},
+            ),
+            {"id": "buy-1", "status": "closed"},
+            {},
+        )
+    assert exchange.buy_calls == 0
+    assert buys == []
+
+
+@pytest.mark.asyncio
+async def test_legacy_base_buy_without_percentage_keeps_unknown_value() -> None:
+    handler, _exchange, _trades, _intents, buys, _sells, _partials = _handler()
+    assert await handler.resume(
+        _intent(PlacementAction.BUY, request={"baseorder": True}),
+        {"fees": 0.001, "precision": 4, "amount": 0.1, "price": 100.0},
+        {},
+    )
+    assert buys[0]["so_percentage"] is None
 
 
 @pytest.mark.asyncio
