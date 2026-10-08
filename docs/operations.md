@@ -192,6 +192,34 @@ If an intent cannot be resolved safely, startup fails closed and identifies the
 operation requiring manual reconciliation. Capital recorded by an unresolved
 buy remains reserved until the intent reaches a safe terminal state.
 
+An accepted buy acknowledgement can omit fill details, especially for a capped
+IOC safety order. Moonwalker records that acceptance and looks up the existing
+order during startup; it does not submit another buy. Durable buy requests retain
+the original safety-order percentage and strategy context, and later exchange
+evidence retains local context from the earlier acknowledgement.
+
+For a `local_recovery_failed` quarantine, keep the instance stopped and preserve
+a database backup before any repair. Inspect the affected operation without
+changing it:
+
+```sql
+SELECT operation_id, state, reason_code, exchange_order_id,
+       request_json, result_json
+FROM placement_intents
+WHERE operation_id = '<operation-id-from-startup-log>';
+```
+
+Older requests may lack `so_percentage`. Recovery uses the original value from
+the saved result when available. A base order can retain an unknown (`null`)
+percentage, but a safety order with no original percentage remains blocked:
+that value affects subsequent DCA progression and must not be guessed. If an
+earlier failed reconciliation already erased the value, recover it from the
+original order logs or a backup. Verify the exchange order's fills and local
+execution ledger before an operator reopens that exact intent for reconciliation.
+Quarantined rows are terminal and are not retried by restarting alone. Do not
+delete the intent, mark it completed without persistence, or submit a replacement
+buy to bypass the startup gate.
+
 If Moonwalker fails during startup with a message like `SQLite corruption
 detected in ...` or `SQLite index corruption detected in ...`, the local SQLite
 database is damaged and Moonwalker will stop instead of continuing with unsafe

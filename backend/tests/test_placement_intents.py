@@ -28,6 +28,10 @@ async def _init_database(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+# Value: protects=buy request recovery and sizing context survives storage;
+# fails_when=allow-list omits recovery fields or admits secret credentials;
+# why_new=existing assertion covers only symbol and credential omission;
+# seam=none
 async def test_prepare_claim_is_durable_sanitized_and_single_owner(tmp_path) -> None:
     await _init_database(tmp_path)
     try:
@@ -39,6 +43,18 @@ async def test_prepare_claim_is_durable_sanitized_and_single_owner(tmp_path) -> 
             "side": "buy",
             "ordertype": "market",
             "ordersize": 25.0,
+            "so_percentage": -4.5,
+            "signal_name": "asap",
+            "strategy_name": "ema_low",
+            "strategy_slug": "ema_low",
+            "strategy_version": 2,
+            "timeframe": "15m",
+            "metadata_json": '{"source":"recovery"}',
+            "baseline_order_size": 20.0,
+            "entry_size_applied": True,
+            "entry_size_reason_code": "entry_scaled",
+            "entry_size_fallback_applied": False,
+            "entry_size_fallback_reason": "",
             "api_key": "must-not-be-persisted",
             "secret": "must-not-be-persisted",
         }
@@ -72,9 +88,52 @@ async def test_prepare_claim_is_durable_sanitized_and_single_owner(tmp_path) -> 
         persisted = await model.PlacementIntent.get(operation_id="buy-operation-1")
         request_payload = json.loads(persisted.request_json)
         assert request_payload["symbol"] == "BTC/USDC"
+        for key in (
+            "so_percentage",
+            "signal_name",
+            "strategy_name",
+            "strategy_slug",
+            "strategy_version",
+            "timeframe",
+            "metadata_json",
+            "baseline_order_size",
+            "entry_size_applied",
+            "entry_size_reason_code",
+            "entry_size_fallback_applied",
+            "entry_size_fallback_reason",
+        ):
+            assert request_payload[key] == order[key]
         assert "api_key" not in request_payload
         assert "secret" not in request_payload
         assert persisted.state == PlacementIntentState.SUBMITTING.value
+        await service.transition(
+            first.operation_id,
+            PlacementIntentState.ACCEPTED,
+            result={**order, "id": "buy-1", "filled": None},
+        )
+        await service.transition(
+            first.operation_id,
+            PlacementIntentState.FILLED,
+            result={"id": "buy-1", "filled": 0.25, "price": 100.0},
+        )
+        persisted = await model.PlacementIntent.get(operation_id=first.operation_id)
+        result_payload = json.loads(persisted.result_json)
+        assert result_payload["so_percentage"] == -4.5
+        assert result_payload["strategy_slug"] == "ema_low"
+        assert result_payload["filled"] == 0.25
+        assert "secret" not in result_payload
+        await service.transition(
+            first.operation_id,
+            PlacementIntentState.PERSISTED,
+            result={"id": "buy-1", "so_percentage": -5.0, "filled": 0.3},
+        )
+        persisted = await model.PlacementIntent.get(operation_id=first.operation_id)
+        result_payload = json.loads(persisted.result_json)
+        assert result_payload["so_percentage"] == -5.0
+        assert result_payload["strategy_slug"] == "ema_low"
+        assert result_payload["baseline_order_size"] == 20.0
+        assert result_payload["filled"] == 0.3
+        assert "price" not in result_payload
     finally:
         await Tortoise.close_connections()
 

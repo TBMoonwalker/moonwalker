@@ -2,6 +2,15 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.1.1.0] - 2026-10-08
+
+### Fixed
+- Accepted buys can now recover after restart without losing their original
+  safety-order percentage or strategy context when exchange lookup supplies
+  fresh fill data. Recovery never submits a replacement buy. Older safety-order
+  records whose percentage is unavailable remain blocked with a clear repair
+  message; see [startup recovery](docs/operations.md#startup-recovery).
+
 ## [5.1.0.0] - 2026-10-07
 
 ### Added
