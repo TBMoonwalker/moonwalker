@@ -254,11 +254,6 @@ class AutopilotMemoryService:
             return cls._instance
 
     @classmethod
-    def reset_instance(cls) -> None:
-        """Clear the singleton for isolated tests."""
-        cls._instance = None
-
-    @classmethod
     def _build_default_state(cls) -> dict[str, Any]:
         """Return the default service state."""
         return {

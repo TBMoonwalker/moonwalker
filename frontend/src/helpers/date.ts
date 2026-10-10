@@ -84,7 +84,7 @@ function normalizeIsoCandidate(value: string): string {
   return truncatedFraction
 }
 
-export function parseDateValue(value: string | number | Date): Date | null {
+function parseDateValue(value: string | number | Date): Date | null {
   if (value instanceof Date) {
     return Number.isNaN(value.getTime()) ? null : value
   }

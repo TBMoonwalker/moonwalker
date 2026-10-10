@@ -1,4 +1,5 @@
 import { watch, type Ref } from 'vue'
+import { readText, writeText } from '../helpers/safeStorage'
 
 import type { ConfigLoadDefaults } from '../helpers/configLoad'
 import type {
@@ -18,7 +19,7 @@ interface UseConfigAdvancedGeneralOptions {
 }
 
 function getStoredAdvancedGeneralPreference(preferenceKey: string): boolean {
-    const raw = localStorage.getItem(preferenceKey)
+    const raw = readText(preferenceKey)
     return raw === 'true'
 }
 
@@ -80,7 +81,7 @@ export function useConfigAdvancedGeneral(
             if (options.isLoading.value) {
                 return
             }
-            localStorage.setItem(
+            writeText(
                 options.advancedPreferenceKey,
                 enabled ? 'true' : 'false',
             )

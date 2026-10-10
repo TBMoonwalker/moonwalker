@@ -45,6 +45,7 @@ class _DummyTx:
         return object()
 
     async def __aexit__(self, exc_type, exc, tb) -> bool:
+        del exc_type, tb  # Required by the async context-manager contract.
         return False
 
 

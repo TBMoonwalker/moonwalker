@@ -283,6 +283,7 @@ async def test_asap_fetches_symbol_list_with_async_http_client(monkeypatch) -> N
             return self
 
         async def __aexit__(self, exc_type, exc, tb) -> None:
+            del exc_type, tb  # Required by the async context-manager contract.
             return None
 
         async def get(self, url: str) -> DummyResponse:

@@ -25,7 +25,7 @@ export const CONTROL_CENTER_TARGETS = [
 
 export type ControlCenterTarget = (typeof CONTROL_CENTER_TARGETS)[number]
 
-export type ControlCenterViewKind =
+type ControlCenterViewKind =
     | 'first_run'
     | 'healthy'
     | 'attention_needed'

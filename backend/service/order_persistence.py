@@ -871,22 +871,6 @@ async def persist_tp_limit_cancellation(
     )
 
 
-async def persist_closed_trade_summary(
-    payload: ClosedTradeSummaryRecord,
-) -> None:
-    """Persist a detached closed-trade summary row without mutating open state."""
-
-    async def _persist_closed_trade_summary() -> None:
-        async with in_transaction() as conn:
-            await model.ClosedTrades.create(**payload, using_db=conn)
-
-    symbol = str(payload.get("symbol") or "").strip() or "unknown"
-    await run_sqlite_write_with_retry(
-        _persist_closed_trade_summary,
-        f"persisting detached closed trade summary for {symbol}",
-    )
-
-
 async def persist_unsellable_remainder(
     symbol: str,
     payload: UnsellableTradePersistenceRecord,

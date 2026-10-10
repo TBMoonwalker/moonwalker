@@ -243,10 +243,9 @@ async def fetch_ohlcv(
 class BacktestData:
     """In-memory data source for backtest, replacing the DB-backed Data class."""
 
-    def __init__(self, df: pd.DataFrame, timeframe: str) -> None:
+    def __init__(self, df: pd.DataFrame) -> None:
         """Initialize with pre-resampled OHLCV DataFrame."""
         self._df = df
-        self._timeframe = timeframe
 
     async def get_data_for_pair(
         self, pair: str, timerange: str, length: int
@@ -509,8 +508,6 @@ class DcaSimulator:
         return BacktestTradeState(
             symbol=symbol,
             entry_price=entry_price,
-            entry_amount=amount,
-            entry_cost=self.base_order_size,
             entry_timestamp=timestamp,
             fee=self.fee,
             total_amount=amount,
@@ -635,7 +632,6 @@ class DcaSimulator:
         trigger_price = calculate_recovery_trigger_price(reference_price, spacing)
         trade.dca_reference_price = reference_price
         trade.dca_reference_atr_percent = reference_atr
-        trade.dca_next_trigger_price = trigger_price
         if (
             trigger_price <= 0
             or candle.close > trigger_price
@@ -662,7 +658,6 @@ class DcaSimulator:
         trade.safety_orders_count += 1
         trade.dca_reference_price = candle.close
         trade.dca_reference_atr_percent = max(0.0, atr_percent)
-        trade.dca_next_trigger_price = 0.0
         trade.safety_orders.append(
             {
                 "index": trade.safety_orders_count,
@@ -748,7 +743,6 @@ class Backtest:
         )
         self.trade_mode = _trade_mode(trade_mode)
         self._candles: list[OhlcvCandle] | None = None
-        self._indicators: Indicators | None = None
         self._open_trade: BacktestTradeState | None = None
         self._closed_trades: list[BacktestTrade] = []
         self._chart_markers: list[dict[str, Any]] = []
@@ -773,7 +767,7 @@ class Backtest:
             return self._empty_result(replay_candles, len(candles), replay_start_index)
 
         df = candles_to_dataframe(candles)
-        backtest_data = BacktestData(df, self.timeframe)
+        backtest_data = BacktestData(df)
         indicators = Indicators(data=backtest_data)
 
         simulator = DcaSimulator(
@@ -989,19 +983,6 @@ class Backtest:
                 "color": "#356D86",
                 "shape": "circle",
                 "text": f"SO {int(safety_order['index'])}",
-            }
-        )
-
-    def _append_closed_trade_marker(self, closed: BacktestTrade) -> None:
-        """Append a standard sell marker for a closed replay trade."""
-        self._closed_trades.append(closed)
-        self._chart_markers.append(
-            {
-                "time": closed.close_timestamp,
-                "position": "aboveBar",
-                "color": "#B4443F",
-                "shape": "arrow_down",
-                "text": closed.sell_reason or "SELL",
             }
         )
 

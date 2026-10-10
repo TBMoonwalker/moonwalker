@@ -262,10 +262,3 @@ class CSVSignalImportService:
         raise ValueError(
             f"Invalid symbol '{symbol_raw}'. Use BASE/QUOTE or BASE-{quote_currency}."
         )
-
-    # Compatibility aliases for existing call sites/tests.
-    def _parse_date_to_ms(self, value: str) -> int | None:
-        return parse_date_to_ms(value)
-
-    def _count_decimal_places(self, value: str) -> int:
-        return count_decimal_places(value)

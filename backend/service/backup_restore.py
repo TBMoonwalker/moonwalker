@@ -13,7 +13,6 @@ import model
 from service.config import (
     Config,
     build_removed_config_key_message,
-    deserialize_config_value,
     is_removed_config_key,
     resolve_history_lookback_days,
 )
@@ -383,17 +382,6 @@ class BackupService:
                 )
             validated.append(dict(raw_intent))
         return validated
-
-    @staticmethod
-    def _build_config_snapshot(config_rows: list[dict[str, Any]]) -> dict[str, Any]:
-        """Build a typed config snapshot from validated backup rows."""
-        snapshot: dict[str, Any] = {}
-        for row in config_rows:
-            snapshot[row["key"]] = deserialize_config_value(
-                row.get("value"),
-                row["value_type"],
-            )
-        return snapshot
 
     @staticmethod
     def _deserialize_row(model_class: type, row: dict[str, Any]) -> dict[str, Any]:

@@ -51,7 +51,7 @@ test('analytics store exposes AI trust states and calibration rows', () => {
     assert.match(analyticsStoreSource, /bad_entry_review: AiTrustPrediction\[\]/)
     assert.match(analyticsStoreSource, /provider_status_counts: Record<string, number>/)
     assert.match(analyticsStoreSource, /calibration: AiTrustCalibration/)
-    assert.match(analyticsStoreSource, /export interface AiTrustCalibrationBucket/)
+    assert.match(analyticsStoreSource, /interface AiTrustCalibrationBucket/)
     assert.match(analyticsStoreSource, /shadow_effective_warning_threshold: number/)
     assert.match(analyticsStoreSource, /missed_bad_entry_clusters: AiTrustMissedBadEntryCluster\[\]/)
     assert.match(analyticsStoreSource, /shadow_effective_risk_score\?: number \| null/)

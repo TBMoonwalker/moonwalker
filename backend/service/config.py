@@ -10,6 +10,9 @@ from typing import Any, Callable
 
 import helper
 from model import AppConfig
+from redis.exceptions import AuthenticationError
+from redis.exceptions import ConnectionError as RedisConnectionError
+from redis.exceptions import TimeoutError as RedisTimeoutError
 from service.config_contract import config_contract_defaults
 from service.config_migrations import run_config_migrations
 from service.config_persistence import should_persist_config_value
@@ -244,12 +247,14 @@ class Config:
 
     _instance = None
     _lock = asyncio.Lock()
+    LISTENER_RETRY_INITIAL_SECONDS = 1.0
+    LISTENER_RETRY_MAX_SECONDS = 30.0
 
     def __init__(self) -> None:
         """Initialize the Config instance.
 
-        Creates an empty typed runtime store and subscriber set. The listener task
-        is created during instance initialization via the instance() classmethod.
+        Creates an empty typed runtime store and subscriber set. The application
+        lifespan owns the Redis listener rather than singleton initialization.
         """
         self._store = ConfigRuntimeStore()
         self._subscribers: set[Callable[[dict[str, Any]], None]] = set()
@@ -262,7 +267,7 @@ class Config:
         """Get or create the Config singleton instance.
 
         Uses asyncio.Lock to ensure thread-safe creation of the singleton instance.
-        Loads all configuration on first creation and starts the Redis listener task.
+        Loads all configuration on first creation. The lifespan starts the listener.
 
         Returns:
             Config: The singleton Config instance
@@ -271,9 +276,6 @@ class Config:
             if cls._instance is None:
                 cls._instance = cls()
                 await cls._instance.load_all()
-                cls._instance._listener_task = asyncio.create_task(
-                    cls._instance._listen()
-                )
             return cls._instance
 
     async def load_all(self) -> None:
@@ -353,12 +355,6 @@ class Config:
         """Notify local subscribers that cache values changed."""
         for subscriber in self._subscribers:
             subscriber(self.snapshot())
-
-    async def __clear_key(self, key: str) -> bool:
-        """Remove a config key from persistent storage and the in-memory cache."""
-        deleted_count = await AppConfig.filter(key=key).delete()
-        existed_in_cache = self._store.remove_entry(key)
-        return bool(deleted_count or existed_in_cache)
 
     async def __publish_change(self, keys: list[str]) -> None:
         """Publish config changes to Redis if available.
@@ -707,16 +703,52 @@ class Config:
         await self.reload()
 
     async def _listen(self) -> None:
-        """Listen for configuration change notifications via Redis pub/sub.
+        """Reload Redis changes within a lifespan-owned, reconnecting task."""
+        task = asyncio.current_task()
+        if self._listener_task is not None and not self._listener_task.done():
+            raise RuntimeError("Configuration listener is already running")
+        self._listener_task = task
+        delay = self.LISTENER_RETRY_INITIAL_SECONDS
+        try:
+            while True:
+                try:
+                    async with redis_client.pubsub() as pubsub:
+                        await pubsub.subscribe(CONFIG_CHANNEL)
+                        async for message in pubsub.listen():
+                            if message["type"] == "subscribe":
+                                # An acknowledgement also follows client-internal
+                                # reconnects. Resync after registration so changes
+                                # cannot fall between the snapshot and subscription.
+                                await self.reload()
+                            elif message["type"] == "message":
+                                await self._handle_change_message(message.get("data"))
+                                delay = self.LISTENER_RETRY_INITIAL_SECONDS
+                    raise RedisConnectionError("Configuration subscription ended")
+                except AuthenticationError:
+                    raise
+                except (RedisConnectionError, RedisTimeoutError) as exc:
+                    logging.warning(
+                        "Configuration subscription disconnected; retrying in %ss: %s",
+                        delay,
+                        exc,
+                    )
+                    await asyncio.sleep(delay)
+                    delay = min(delay * 2, self.LISTENER_RETRY_MAX_SECONDS)
+        finally:
+            self._listener_task = None
 
-        This internal method runs as a background task and reloads the configuration
-        whenever a message is received on the CONFIG_CHANNEL.
-        """
-        pubsub = redis_client.pubsub()
-        await pubsub.subscribe(CONFIG_CHANNEL)
-        async for message in pubsub.listen():
-            if message["type"] == "message":
-                await self._handle_change_message(message.get("data"))
+    async def stop_listener(self) -> None:
+        """Stop and join the subscription before its database/Redis dependencies."""
+        task = self._listener_task
+        if task is not None and not task.done():
+            if not task.cancelling():
+                task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                caller = asyncio.current_task()
+                if caller is not None and caller.cancelling():
+                    raise
 
     def __get_filenames_in_directory(
         self, directory: str, sort: bool = True

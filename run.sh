@@ -50,6 +50,8 @@ print_node_runtime_help() {
     echo
     echo "macOS with Homebrew:"
     echo "  brew install node@24"
+    # Print the command literally for the user to run in their own shell.
+    # shellcheck disable=SC2016
     echo '  export PATH="$(brew --prefix node@24)/bin:$PATH"'
     echo "  ./run.sh start"
 }

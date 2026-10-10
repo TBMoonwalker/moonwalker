@@ -202,7 +202,6 @@ const KEY_TARGETS: Record<string, ControlCenterTarget> = {
     upnl_housekeeping_interval: 'indicator',
 }
 
-export const CONTROL_CENTER_TASKS = TASKS
 
 export function getTaskPresentation(
     target: ControlCenterTarget,

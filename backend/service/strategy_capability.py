@@ -171,13 +171,6 @@ def get_strategy_support_error(strategy_name: str) -> str | None:
     return None
 
 
-def ensure_strategy_supported(strategy_name: str) -> None:
-    """Raise ValueError when strategy is not currently supported."""
-    error = get_strategy_support_error(strategy_name)
-    if error:
-        raise ValueError(error)
-
-
 def filter_supported_strategies(strategy_names: Iterable[str]) -> list[str]:
     """Filter and return only currently supported strategies."""
     supported: list[str] = []

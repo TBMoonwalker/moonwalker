@@ -91,7 +91,7 @@ export type UnsellableTradeRow = {
   key: number
 }
 
-export type OrderData = {
+type OrderData = {
   id: number
   timestamp: string
   ordersize: number

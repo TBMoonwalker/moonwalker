@@ -12,8 +12,6 @@ class BacktestTradeState:
 
     symbol: str
     entry_price: float
-    entry_amount: float
-    entry_cost: float
     entry_timestamp: int
     fee: float = 0.0
     safety_orders: list[dict] = field(default_factory=list)
@@ -24,11 +22,8 @@ class BacktestTradeState:
     exit_price: float = 0.0
     exit_timestamp: int = 0
     sell_reason: str | None = None
-    tp_limit_order_price: float | None = None
-    sl_limit_order_price: float | None = None
     dca_reference_price: float = 0.0
     dca_reference_atr_percent: float = 0.0
-    dca_next_trigger_price: float = 0.0
 
 
 def calculate_take_profit_price(
@@ -179,55 +174,6 @@ def calculate_trade_profit_pct(
     return ((exit_price - entry_price) / entry_price) * 100
 
 
-def tp_limit_prearm_price(
-    take_profit_price: float,
-    margin_percent: float,
-) -> float:
-    """Calculate the price at which to pre-arm a TP limit order.
-
-    Args:
-        take_profit_price: The TP target price.
-        margin_percent: Buffer percentage below TP (e.g. 0.5 means pre-arm at 0.5% below TP).
-
-    Returns:
-        The pre-arm trigger price.
-    """
-    if take_profit_price <= 0:
-        return 0.0
-    return take_profit_price * (1 - (max(0.0, margin_percent) / 100.0))
-
-
-def calculate_intra_candle_exit(
-    tp_price: float,
-    sl_price: float,
-    candle_high: float,
-    candle_low: float,
-    candle_close: float,
-    max_safety_orders_reached: bool,
-) -> tuple[str, float]:
-    """Determine which exit (if any) triggers during a candle and at what price.
-
-    Checks high for TP hit first, then low for SL hit. Returns no exit
-    if neither triggers.
-
-    Args:
-        tp_price: Take-profit target price.
-        sl_price: Stop-loss trigger price.
-        candle_high: Candle's high price.
-        candle_low: Candle's low price.
-        candle_close: Candle's close price.
-        max_safety_orders_reached: True when no more safety orders remain.
-
-    Returns:
-        (reason, exit_price) or ("", 0.0) if no exit.
-    """
-    if candle_high >= tp_price:
-        return ("take_profit", tp_price)
-    if max_safety_orders_reached and candle_low <= sl_price:
-        return ("stop_loss", sl_price)
-    return ("", 0.0)
-
-
 def should_place_safety_order(
     actual_pnl: float,
     trigger_threshold: float,
@@ -248,21 +194,6 @@ def should_place_safety_order(
     if current_safety_orders >= max_safety_orders:
         return False
     return actual_pnl <= trigger_threshold
-
-
-def calculate_safety_order_trigger_threshold(
-    base_pct: float,
-    step_scale: float,
-    safety_orders_count: int,
-) -> float:
-    """Calculate the cumulative static safety-order PNL trigger threshold."""
-    return -abs(
-        calculate_cumulative_safety_order_deviation(
-            base_pct,
-            step_scale,
-            safety_orders_count,
-        )
-    )
 
 
 def calculate_cumulative_safety_order_deviation(

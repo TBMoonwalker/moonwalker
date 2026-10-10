@@ -1,7 +1,7 @@
 """Trade persistence and retrieval helpers."""
 
 import os
-from collections.abc import Awaitable, Iterable
+from collections.abc import Awaitable
 from datetime import datetime, timezone
 from typing import Any, TypedDict, TypeVar
 from uuid import UUID
@@ -11,11 +11,8 @@ import model
 from service.database import run_sqlite_write_with_retry
 from service.order_payloads import format_trade_datetime, trade_datetime_from_ms
 from service.order_persistence import (
-    persist_closed_trade_summary,
-    persist_partial_sell_execution,
     persist_tp_limit_cancellation,
 )
-from service.persistence_records import ClosedTradeSummaryRecord
 from service.placement_intents import mark_placement_persisted_in_transaction
 from service.spot_campaign_types import TradeExposureState
 from service.trade_math import parse_date_to_ms
@@ -613,21 +610,6 @@ class Trades:
             await self._clear_order_cache()
         return bool(updated)
 
-    async def add_partial_sell_execution(
-        self,
-        symbol: str,
-        sold_amount: float,
-        sold_proceeds: float,
-        sell_executions: Iterable[dict[str, Any]] | None = None,
-    ) -> None:
-        """Delegate partial sell persistence to the shared write layer."""
-        await persist_partial_sell_execution(
-            symbol,
-            sold_amount,
-            sold_proceeds,
-            sell_executions,
-        )
-
     async def get_partial_sell_execution(self, symbol: str) -> tuple[float, float]:
         """Return accumulated partial sell totals (amount, proceeds)."""
         open_trade_rows = await self._execute_db(
@@ -640,47 +622,6 @@ class Trades:
         open_trade = open_trade_rows[0] if open_trade_rows else None
         totals = self._normalize_partial_sell_execution(open_trade)
         return totals["sold_amount"], totals["sold_proceeds"]
-
-    async def delete_open_trades(self, symbol: str) -> None:
-        """Delete open trades for a symbol."""
-
-        async def _delete_open_trade() -> None:
-            async with in_transaction() as conn:
-                open_trade = (
-                    await model.OpenTrades.filter(symbol=symbol).using_db(conn).first()
-                )
-                await model.OpenTrades.filter(symbol=symbol).using_db(conn).delete()
-                if open_trade and open_trade.deal_id:
-                    await (
-                        model.TradeExecutions.filter(
-                            deal_id=open_trade.deal_id,
-                        )
-                        .using_db(conn)
-                        .delete()
-                    )
-
-        try:
-            await run_sqlite_write_with_retry(
-                _delete_open_trade,
-                f"deleting open trades for {symbol}",
-            )
-            logging.debug("Deleted open trade for %s.", symbol)
-        except BaseORMException as exc:
-            self._log_db_error(f"Error deleting open trades for {symbol}.", exc)
-
-    async def create_closed_trades(
-        self,
-        payload: ClosedTradeSummaryRecord,
-    ) -> None:
-        """Delegate detached closed-trade summary persistence to the write layer."""
-        await persist_closed_trade_summary(payload)
-
-    async def create_unsellable_trade(self, payload: dict[str, Any]) -> None:
-        """Create an archived unsellable trade entry."""
-        await self._write_db(
-            model.UnsellableTrades.create(**payload),
-            "Error creating unsellable trade.",
-        )
 
     async def delete_closed_trade(self, trade_id: int) -> bool:
         """Delete a closed trade by its identifier."""

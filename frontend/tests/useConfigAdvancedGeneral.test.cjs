@@ -98,6 +98,23 @@ function createComposableOptions() {
     }
 }
 
+test('advanced preferences keep working when storage reads and writes fail', async () => {
+    const localStorageMock = installLocalStorageMock()
+    global.localStorage.getItem = () => { throw new Error('blocked') }
+    global.localStorage.setItem = () => { throw new Error('blocked') }
+    try {
+        const options = createComposableOptions()
+        const { buildConfigLoadDefaults } = useConfigAdvancedGeneral(options)
+        assert.equal(buildConfigLoadDefaults().showAdvancedGeneral, false)
+        options.showAdvancedGeneral.value = false
+        await nextTick()
+        assert.equal(options.showAdvancedGeneral.value, false)
+        assert.equal(options.general.value.ws_healthcheck_interval_ms, 12000)
+    } finally {
+        localStorageMock.restore()
+    }
+})
+
 test('useConfigAdvancedGeneral builds load defaults from local storage', () => {
     const localStorageMock = installLocalStorageMock({
         'moonwalker:test:advanced-general': 'true',

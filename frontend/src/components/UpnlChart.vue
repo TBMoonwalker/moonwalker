@@ -1,5 +1,5 @@
 <template>
-  <div class="chart-wrap">
+  <div class="chart-wrap performance-chart">
     <n-spin :show="isLoading" size="small">
       <v-chart
         v-if="!isLoading && !showEmptyState && visiblePoints.length > 0"
@@ -237,43 +237,7 @@ watch(
 </script>
 
 <style scoped>
-.chart {
-  width: 100%;
-  max-width: 100%;
-  flex: 1;
-  min-height: 230px;
-}
-
-.chart-wrap {
-  width: 100%;
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 230px;
-  overflow: hidden;
-  border-radius: var(--mw-radius-sm, 6px);
-}
-
-.chart-wrap :deep(.n-spin-container),
-.chart-wrap :deep(.n-spin-content) {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-}
-
 .chart-placeholder {
-  width: 100%;
-  flex: 1;
-  min-height: 230px;
-  border-radius: var(--mw-radius-sm, 6px);
   background: rgba(255, 255, 255, 0.04);
-}
-
-.chart-empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--mw-color-text-muted);
 }
 </style>

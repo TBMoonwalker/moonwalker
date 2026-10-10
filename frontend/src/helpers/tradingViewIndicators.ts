@@ -70,7 +70,7 @@ export function getIndicatorPanes(
         .filter((pane) => pane.series.length > 0)
 }
 
-export function normalizedIndicatorValues(
+function normalizedIndicatorValues(
     series: BacktestIndicatorSeries,
     timeOffsetSeconds = 0,
 ): LineData<UTCTimestamp>[] {

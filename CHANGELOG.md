@@ -2,6 +2,46 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.2.0.0] - 2026-10-10
+
+### Fixed
+- Cap‑priced recovery buys now truncate toward the maximum buy price instead of
+  rounding up, so a recovery fill can no longer land above the limit you set. A
+  cap below the exchange's smallest price tick is rejected with a clear reason
+  instead of being placed as a bad order, and a rejected or fill‑zero capped buy
+  is reported as "not filled" and retried rather than being miscounted as a
+  completed buy.
+
+### Changed
+- Chart and uPNL visuals now share a single framing style, which removes the
+  duplicated per‑component chart layout CSS and keeps the two charts aligned.
+- Frontend startup now relies on Vite's automatic code splitting to keep the
+  router's lazy views lazy — a production‑build regression test blocks any chart
+  module from the startup bundle and holds it under a 250 KB gzip budget, so the
+  old manual split groups that could pull charted code back into startup are no
+  longer used.
+- Browser storage access is centralized in one fault‑tolerant helper. A read or
+  write against a blocked, private‑mode, or full storage now falls back to the
+  in‑memory value instead of throwing, and callers can inject a storage source
+  for testing.
+- Configuration hot‑reload is now owned by the application lifecycle as a
+  reconnecting, supervised listener: it resynchronizes after each reconnect so no
+  change can fall between the snapshot and the subscription, resubscription
+  failures back off, and an unexpected listener fault is reported to supervision
+  instead of failing silently.
+
+### Added
+- Vulture dead‑code scanning is pinned as an on‑demand development check (a
+  conservative `pyproject.toml` scan plus a broader size‑ordered review). It is
+  not yet a CI gate while the remaining candidates are being reviewed.
+
+### Removed
+- Legacy, now‑unused backend helpers and frontend type declarations were
+  removed, including superseded closed‑trade persistence paths, unused
+  indicator lookups and guardrail visitors, and unreferenced TypeScript exports.
+- The `vitest.config.ts` configuration was renamed to `vitest.config.mts`, and
+  end‑to‑end specs are no longer swept into the unit‑test configuration.
+
 ## [5.1.1.0] - 2026-10-08
 
 ### Fixed

@@ -17,7 +17,7 @@
 export type ColorScheme = "light" | "dark"
 
 /** Naive UI `themeOverrides` fragments for one scheme (`common` / `Tabs` / `Button`). */
-export interface NaiveTokenSet {
+interface NaiveTokenSet {
    common: Record<string, string>
    Tabs: Record<string, string>
    Button: Record<string, string>

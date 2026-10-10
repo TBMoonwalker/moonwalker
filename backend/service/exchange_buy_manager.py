@@ -152,6 +152,9 @@ class ExchangeBuyManager:
                     )
                     return None
             return order
+        except (ccxt.InvalidOrder, ccxt.BadRequest):
+            # A rejected submission is distinct from an accepted IOC with no fill.
+            raise
         except ccxt.ExchangeError as exc:
             self._logger.error(
                 "Buying pair %s failed due to an exchange error: %s",

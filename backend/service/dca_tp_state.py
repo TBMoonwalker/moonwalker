@@ -8,9 +8,11 @@ class LoggerLike(Protocol):
 
     def info(self, msg: str, *args: object) -> None:
         """Log informational TP state transitions."""
+        del msg  # Retain the standard logging keyword in this protocol signature.
 
     def debug(self, msg: str, *args: object) -> None:
         """Log verbose TP state transitions."""
+        del msg  # Retain the standard logging keyword in this protocol signature.
 
 
 class TpConfirmationState(TypedDict):

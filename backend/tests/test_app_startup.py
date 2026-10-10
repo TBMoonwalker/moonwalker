@@ -24,6 +24,12 @@ class _FakeConfig:
     def snapshot(self) -> dict[str, object]:
         return {}
 
+    async def _listen(self) -> None:
+        await asyncio.sleep(3600)
+
+    async def stop_listener(self) -> None:
+        return None
+
 
 class _FakeDatabase:
     def __init__(self) -> None:
@@ -288,7 +294,7 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
     async with app_module.runtime_lifespan(None):
         await asyncio.sleep(0)
 
-        assert len(app_module.runtime_state.background_tasks) == 4
+        assert len(app_module.runtime_state.background_tasks) == 5
         assert {
             task.get_name() for task in app_module.runtime_state.background_tasks
         } == {
@@ -296,12 +302,14 @@ async def test_lifespan_supervises_named_critical_and_optional_tasks(
             "moonwalker:ticker-watcher",
             "moonwalker:housekeeping",
             "moonwalker:replay-candle-backfill",
+            "moonwalker:configuration-listener",
         }
         assert fake_database.run_calls[:2] == [
             "instance",
             "reconcile_placement_intents",
         ]
         assert "backfill_trade_replay_candles_if_needed" in fake_database.run_calls
+        assert "_listen" in fake_database.run_calls
         assert not hasattr(app_module.runtime_state, "sidestep_campaign_service")
         assert fake_market_cap_service.start_calls == 1
         assert app_module.runtime_state.controller_services is not None
@@ -419,6 +427,13 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
         async def shutdown(self) -> None:
             events.append("database:shutdown")
 
+    class OrderedConfig:
+        async def _listen(self) -> None:
+            await owned_loop("configuration-listener")
+
+        async def stop_listener(self) -> None:
+            events.append("configuration:stop")
+
     class OrderedWatcher:
         async def watch_incoming_symbols(self, _queue) -> None:
             await owned_loop("symbol-intake")
@@ -468,6 +483,7 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
         state.redis_proc = object()
         state.watcher_queue = asyncio.Queue()
         state.database = OrderedDatabase()
+        state.config_service = OrderedConfig()
         state.watcher = OrderedWatcher()
         state.housekeeper = OrderedHousekeeper()
         state.signal_plugin = OrderedSignal()
@@ -522,6 +538,7 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
         "ticker-watcher",
         "housekeeping",
         "replay",
+        "configuration-listener",
     ):
         assert events.index(f"{task_name}:done") < events.index("trades-fanout:stop")
     ordered_shutdown_events = [
@@ -530,6 +547,7 @@ async def test_lifespan_finishes_owned_work_before_dependency_shutdown(
         "signal:shutdown",
         "watcher:shutdown",
         "housekeeper:shutdown",
+        "configuration:stop",
         "database:shutdown",
         "provider:close",
         "redis:close",

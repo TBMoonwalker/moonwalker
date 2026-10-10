@@ -23,8 +23,3 @@ const resolveApiOrigin = (): string => {
 }
 
 export const MOONWALKER_API_ORIGIN = resolveApiOrigin()
-
-const apiUrl = new URL(MOONWALKER_API_ORIGIN)
-
-export const MOONWALKER_API_HOST = apiUrl.hostname
-export const MOONWALKER_API_PORT = apiUrl.port || ''

@@ -15,6 +15,11 @@ docstring-code-format = false
 profile = "black"
 line_length = 88
 
+[tool.vulture]
+paths = ["backend", "scripts"]
+min_confidence = 100
+sort_by_size = true
+
 [tool.coverage.run]
 branch = true
 source = ["backend"]

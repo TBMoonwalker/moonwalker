@@ -29,7 +29,8 @@ async def strategy_db(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_builtin_strategies_seed_as_versioned_ir(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_builtin_strategies_seed_as_versioned_ir() -> None:
     await seed_builtin_strategies()
 
     detail = await get_strategy_detail("ema_down")
@@ -45,7 +46,8 @@ async def test_builtin_strategies_seed_as_versioned_ir(strategy_db) -> None:
 
 
 @pytest.mark.asyncio
-async def test_unchanged_builtin_reseed_does_not_append_version(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_unchanged_builtin_reseed_does_not_append_version() -> None:
     """Validation timestamps alone must not create immutable versions."""
     await seed_builtin_strategies()
     initial_versions = await model.StrategyVersion.filter(
@@ -67,9 +69,8 @@ async def test_unchanged_builtin_reseed_does_not_append_version(strategy_db) -> 
 
 
 @pytest.mark.asyncio
-async def test_builtin_reseed_appends_version_without_rewriting_history(
-    strategy_db,
-) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_builtin_reseed_appends_version_without_rewriting_history() -> None:
     """Changed built-in content creates a new immutable active version."""
     await seed_builtin_strategies()
     original = await model.StrategyVersion.get(
@@ -96,9 +97,8 @@ async def test_builtin_reseed_appends_version_without_rewriting_history(
 
 
 @pytest.mark.asyncio
-async def test_ema20_swing_builtin_is_decomposed_into_executable_graph(
-    strategy_db,
-) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_ema20_swing_builtin_is_decomposed_into_executable_graph() -> None:
     await seed_builtin_strategies()
 
     detail = await get_strategy_detail("ema20_swing")
@@ -141,9 +141,8 @@ async def test_ema20_swing_builtin_is_decomposed_into_executable_graph(
 
 
 @pytest.mark.asyncio
-async def test_ema_swing_builtin_is_decomposed_into_executable_graph(
-    strategy_db,
-) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_ema_swing_builtin_is_decomposed_into_executable_graph() -> None:
     await seed_builtin_strategies()
 
     detail = await get_strategy_detail("ema_swing")
@@ -178,7 +177,8 @@ async def test_ema_swing_builtin_is_decomposed_into_executable_graph(
 
 
 @pytest.mark.asyncio
-async def test_other_builtins_are_decomposed_into_graph_nodes(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_other_builtins_are_decomposed_into_graph_nodes() -> None:
     await seed_builtin_strategies()
 
     expected_types = {
@@ -208,9 +208,8 @@ async def test_other_builtins_are_decomposed_into_graph_nodes(strategy_db) -> No
 
 
 @pytest.mark.asyncio
-async def test_bollinger_buy_seeds_as_executable_indicator_graph(
-    strategy_db,
-) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_bollinger_buy_seeds_as_executable_indicator_graph() -> None:
     await seed_builtin_strategies()
 
     buy = await get_strategy_detail("bollinger_buy")
@@ -248,7 +247,8 @@ async def test_bollinger_buy_seeds_as_executable_indicator_graph(
 
 
 @pytest.mark.asyncio
-async def test_blank_custom_strategy_starts_empty_and_invalid(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_blank_custom_strategy_starts_empty_and_invalid() -> None:
     detail = await create_blank_strategy("Operator blank")
 
     assert detail["is_builtin"] is False
@@ -259,7 +259,8 @@ async def test_blank_custom_strategy_starts_empty_and_invalid(strategy_db) -> No
 
 
 @pytest.mark.asyncio
-async def test_seed_removes_retired_builtin_strategy_rows(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_seed_removes_retired_builtin_strategy_rows() -> None:
     definition = await model.StrategyDefinition.create(
         slug="retired_builtin",
         name="Retired built-in",
@@ -306,7 +307,8 @@ async def test_seed_removes_retired_builtin_strategy_rows(strategy_db) -> None:
 
 
 @pytest.mark.asyncio
-async def test_seed_preserves_configured_retired_builtin_strategy(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_seed_preserves_configured_retired_builtin_strategy() -> None:
     definition = await model.StrategyDefinition.create(
         slug="retired_configured_builtin",
         name="Retired configured built-in",
@@ -338,7 +340,8 @@ async def test_seed_preserves_configured_retired_builtin_strategy(strategy_db) -
 
 
 @pytest.mark.asyncio
-async def test_seed_leaves_legacy_custom_graphs_unmigrated(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_seed_leaves_legacy_custom_graphs_unmigrated() -> None:
     definition = await model.StrategyDefinition.create(
         slug="custom_legacy_graph",
         name="Legacy graph",
@@ -391,9 +394,8 @@ async def test_seed_leaves_legacy_custom_graphs_unmigrated(strategy_db) -> None:
 
 
 @pytest.mark.asyncio
-async def test_duplicate_then_promote_custom_strategy_uses_optimistic_lock(
-    strategy_db,
-) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_duplicate_then_promote_custom_strategy_uses_optimistic_lock() -> None:
     await seed_builtin_strategies()
     duplicate = await duplicate_strategy("ema_down", "Operator EMA copy")
 
@@ -421,7 +423,8 @@ async def test_duplicate_then_promote_custom_strategy_uses_optimistic_lock(
 
 
 @pytest.mark.asyncio
-async def test_concurrent_strategy_promotions_commit_one_version(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_concurrent_strategy_promotions_commit_one_version() -> None:
     """Concurrent clients with one lock version must produce one promotion."""
     await seed_builtin_strategies()
     duplicate = await duplicate_strategy("ema_down", "Concurrent copy")
@@ -448,8 +451,8 @@ async def test_concurrent_strategy_promotions_commit_one_version(strategy_db) ->
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("strategy_db")
 async def test_strategy_promotion_rolls_back_version_when_pointer_save_fails(
-    strategy_db,
     monkeypatch,
 ) -> None:
     """A failed active-pointer update must not leave an orphan version."""
@@ -487,9 +490,8 @@ async def test_strategy_promotion_rolls_back_version_when_pointer_save_fails(
 
 
 @pytest.mark.asyncio
-async def test_delete_custom_strategy_removes_definition_versions_and_state(
-    strategy_db,
-) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_delete_custom_strategy_removes_definition_versions_and_state() -> None:
     detail = await create_blank_strategy("Delete me")
     await model.StrategyGraphState.create(
         strategy_slug=detail["slug"],
@@ -511,7 +513,8 @@ async def test_delete_custom_strategy_removes_definition_versions_and_state(
 
 
 @pytest.mark.asyncio
-async def test_delete_builtin_strategy_is_rejected(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_delete_builtin_strategy_is_rejected() -> None:
     await seed_builtin_strategies()
 
     with pytest.raises(PermissionError):
@@ -519,7 +522,8 @@ async def test_delete_builtin_strategy_is_rejected(strategy_db) -> None:
 
 
 @pytest.mark.asyncio
-async def test_delete_configured_custom_strategy_is_rejected(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_delete_configured_custom_strategy_is_rejected() -> None:
     detail = await create_blank_strategy("Configured strategy")
     await model.AppConfig.create(
         key="dca_strategy",
@@ -532,9 +536,8 @@ async def test_delete_configured_custom_strategy_is_rejected(strategy_db) -> Non
 
 
 @pytest.mark.asyncio
-async def test_delete_historically_referenced_strategy_is_rejected(
-    strategy_db,
-) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_delete_historically_referenced_strategy_is_rejected() -> None:
     detail = await create_blank_strategy("Historical strategy")
     await model.TradeExecutions.create(
         deal_id="11111111-1111-4111-8111-111111111111",
@@ -554,7 +557,8 @@ async def test_delete_historically_referenced_strategy_is_rejected(
 
 
 @pytest.mark.asyncio
-async def test_runtime_loads_exact_historical_strategy_version(strategy_db) -> None:
+@pytest.mark.usefixtures("strategy_db")
+async def test_runtime_loads_exact_historical_strategy_version() -> None:
     from service.strategy_runtime import (
         _load_strategy_snapshot,
         invalidate_strategy_runtime_cache,
