@@ -158,6 +158,7 @@ async def _run_plugin_once(
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
+            del exc_type, tb  # Required by the async context-manager contract.
             return False
 
         async def recv(self) -> str:
@@ -332,6 +333,7 @@ async def test_websocket_signal_sends_optional_subscription(monkeypatch):
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
+            del exc_type, tb  # Required by the async context-manager contract.
             return False
 
         async def recv(self) -> str:
@@ -375,6 +377,7 @@ async def test_websocket_signal_connects_without_headers_for_url_token(monkeypat
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
+            del exc_type, tb  # Required by the async context-manager contract.
             return False
 
         async def recv(self) -> str:

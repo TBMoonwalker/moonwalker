@@ -20,11 +20,6 @@ class TradingMaintenanceBarrier:
             default=0,
         )
 
-    @property
-    def maintenance_active(self) -> bool:
-        """Return whether destructive maintenance currently owns the barrier."""
-        return self._maintenance_active
-
     @asynccontextmanager
     async def operation(self) -> AsyncIterator[bool]:
         """Admit one order operation unless maintenance has already started."""

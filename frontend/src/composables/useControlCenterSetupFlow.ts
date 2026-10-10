@@ -1,4 +1,10 @@
 import { computed, ref, type ComputedRef } from 'vue'
+import {
+    readText,
+    removeJSON,
+    writeText,
+    type StorageLike,
+} from '../helpers/safeStorage'
 
 import {
     buildSetupEntryChoiceHistoryState,
@@ -26,12 +32,6 @@ type UiTelemetryPayload = Record<
 
 export type SetupStyle = 'guided' | 'full'
 
-interface LocalStorageLike {
-    getItem: (key: string) => string | null
-    removeItem: (key: string) => void
-    setItem: (key: string, value: string) => void
-}
-
 interface HistoryLike {
     state: unknown
     pushState: (data: unknown, unused: string, url?: string | URL | null) => void
@@ -44,7 +44,7 @@ interface LocationLike {
 
 interface WindowLike {
     history: HistoryLike
-    localStorage: LocalStorageLike
+    localStorage: StorageLike
     location: LocationLike
 }
 
@@ -76,10 +76,9 @@ function getStoredSetupEntryChoice(
     windowRef: WindowLike | null,
     preferenceKey: string,
 ): SetupEntryChoice | null {
-    if (!windowRef) {
-        return null
-    }
-    return parseSetupEntryChoice(windowRef.localStorage.getItem(preferenceKey))
+    return parseSetupEntryChoice(
+        readText(preferenceKey, () => windowRef?.localStorage ?? null),
+    )
 }
 
 function storeSetupEntryChoice(
@@ -87,24 +86,18 @@ function storeSetupEntryChoice(
     preferenceKey: string,
     choice: SetupEntryChoice | null,
 ): void {
-    if (!windowRef) {
-        return
-    }
     if (!choice) {
-        windowRef.localStorage.removeItem(preferenceKey)
+        removeJSON(preferenceKey, () => windowRef?.localStorage ?? null)
         return
     }
-    windowRef.localStorage.setItem(preferenceKey, choice)
+    writeText(preferenceKey, choice, () => windowRef?.localStorage ?? null)
 }
 
 function getStoredSetupStyle(
     windowRef: WindowLike | null,
     preferenceKey: string,
 ): SetupStyle {
-    if (!windowRef) {
-        return 'guided'
-    }
-    return windowRef.localStorage.getItem(preferenceKey) === 'full'
+    return readText(preferenceKey, () => windowRef?.localStorage ?? null) === 'full'
         ? 'full'
         : 'guided'
 }
@@ -114,10 +107,7 @@ function storeSetupStyle(
     preferenceKey: string,
     style: SetupStyle,
 ): void {
-    if (!windowRef) {
-        return
-    }
-    windowRef.localStorage.setItem(preferenceKey, style)
+    writeText(preferenceKey, style, () => windowRef?.localStorage ?? null)
 }
 
 function defaultTrackEvent(

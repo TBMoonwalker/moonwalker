@@ -103,6 +103,22 @@ function createSetupFlowHarness(overrides = {}) {
     }
 }
 
+test('setup flow remains usable when its injected storage getter throws', async () => {
+    const harness = createSetupFlowHarness()
+    Object.defineProperty(harness.window, 'localStorage', {
+        get() { throw new Error('blocked') },
+    })
+    harness.flow.initializeSetupFlow()
+    assert.equal(harness.flow.setupStyle.value, 'guided')
+    assert.equal(harness.flow.showSetupEntryGate.value, true)
+    await harness.flow.handleSetupEntryChoice('new')
+    assert.equal(harness.flow.showSetupEntryGate.value, false)
+    assert.equal(harness.window.pushes.length, 1)
+    harness.window.history.state = {}
+    harness.flow.handleSetupEntryChoicePopState()
+    assert.equal(harness.flow.showSetupEntryGate.value, true)
+})
+
 test('setup flow initializes from history state and stored setup style', () => {
     const harness = createSetupFlowHarness()
     harness.window.history.state = {

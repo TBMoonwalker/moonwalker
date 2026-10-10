@@ -1,5 +1,5 @@
 <template>
-    <div class="chart-wrap">
+    <div class="chart-wrap performance-chart">
         <n-spin :show="isLoading" size="small">
             <v-chart v-if="!isLoading && !showNoProfit" class="chart" :option="option"
                 autoresize />
@@ -233,43 +233,7 @@ function chart_classes(data: any) {
 </script>
 
 <style scoped>
-.chart {
-    width: 100%;
-    max-width: 100%;
-    flex: 1;
-    min-height: 230px;
-}
-
-.chart-wrap {
-    width: 100%;
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 230px;
-    overflow: hidden;
-    border-radius: var(--mw-radius-sm, 6px);
-}
-
-.chart-wrap :deep(.n-spin-container),
-.chart-wrap :deep(.n-spin-content) {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-}
-
 .chart-placeholder {
-    width: 100%;
-    flex: 1;
-    min-height: 230px;
-    border-radius: var(--mw-radius-sm, 6px);
-    background: var(--mw-surface-card-muted);
-}
-
-.chart-empty {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--mw-color-text-muted);
+  background: var(--mw-surface-card-muted);
 }
 </style>

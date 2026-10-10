@@ -10,11 +10,7 @@ export const BACKTEST_TIMEFRAME_OPTIONS = [
     { label: '1w', value: '1w' },
 ] as const
 
-export const BACKTEST_TRADE_MODE_OPTIONS = [
-    { label: 'Dynamic DCA', value: 'dynamic_dca' },
-] as const
-
-export type BacktestTradeMode = 'dynamic_dca'
+type BacktestTradeMode = 'dynamic_dca'
 
 export interface BacktestFormState {
     symbol: string
@@ -61,9 +57,9 @@ export interface BacktestMarker {
 }
 
 export type BacktestIndicatorPane = 'price' | 'rsi' | 'bandwidth' | 'macd'
-export type BacktestIndicatorRenderer = 'line' | 'histogram'
+type BacktestIndicatorRenderer = 'line' | 'histogram'
 
-export interface BacktestIndicatorValue {
+interface BacktestIndicatorValue {
     time: number
     value: number
 }
@@ -91,7 +87,7 @@ export interface BacktestTrade {
     sell_reason?: string | null
 }
 
-export interface BacktestStats {
+interface BacktestStats {
     summary?: {
         total_trades?: number
         win_rate?: number
@@ -212,7 +208,7 @@ export function formatBacktestDelta(value: number, suffix = ''): string {
     return `${prefix}${formatBacktestNumber(value)}${suffix}`
 }
 
-export function getBacktestSymbolQuoteCurrency(symbol: string): string {
+function getBacktestSymbolQuoteCurrency(symbol: string): string {
     const [, quote = ''] = String(symbol).split('/')
     return quote.trim().toUpperCase()
 }

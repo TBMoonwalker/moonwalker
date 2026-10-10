@@ -177,8 +177,3 @@ class SoldCheckStatus(TypedDict, total=False):
     ordersize: float
     metadata_json: str | None
     executions: list[TradeExecutionPayload]
-
-
-ExecutionResult = (
-    ExecutionFill | PartialSellStatus | MarketFallbackStatus | SoldCheckStatus
-)

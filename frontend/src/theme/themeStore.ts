@@ -16,6 +16,7 @@
 import { computed, ref } from "vue"
 import { defineStore } from "pinia"
 import { useOsTheme } from "vooks"
+import { readText, writeText } from "../helpers/safeStorage"
 
 import {
   THEME_STORAGE_KEY,
@@ -45,11 +46,7 @@ function applyAttribute(mode: ThemeMode): void {
 
 /** Read the persisted choice, tolerating a missing or blocked localStorage. */
 function readInitialMode(): ThemeMode {
-  try {
-    return parseStoredMode(localStorage.getItem(THEME_STORAGE_KEY))
-   } catch {
-    return "auto"
-   }
+  return parseStoredMode(readText(THEME_STORAGE_KEY))
 }
 
 /**
@@ -58,11 +55,7 @@ function readInitialMode(): ThemeMode {
  * failed write degrades gracefully rather than throwing.
  */
 function persist(mode: ThemeMode): void {
-  try {
-    localStorage.setItem(THEME_STORAGE_KEY, mode)
-   } catch {
-     // No-op: the choice is still applied via applyAttribute() for this session.
-   }
+  writeText(THEME_STORAGE_KEY, mode)
 }
 
 export const useThemeStore = defineStore("theme", () => {

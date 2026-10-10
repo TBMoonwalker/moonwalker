@@ -10,7 +10,7 @@ export type TradeTableSortState = {
     order: TradeTableSortOrder
 }
 
-export type TradeTableSortValueKind = 'number' | 'date' | 'text'
+type TradeTableSortValueKind = 'number' | 'date' | 'text'
 
 export const OPEN_TRADES_MOBILE_COLUMN_KEYS = [
     'symbol',

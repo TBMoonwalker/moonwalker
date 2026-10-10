@@ -62,13 +62,17 @@ async def test_receive_sell_signal_returns_false_when_trade_context_missing(
     monkeypatch,
 ) -> None:
     orders = Orders()
-    deleted_symbols: list[str] = []
+    dispatched: list[dict[str, Any]] = []
 
     async def fake_get_trades_for_orders(_symbol: str) -> None:
         return None
 
-    async def fake_delete_open_trades(symbol: str) -> None:
-        deleted_symbols.append(symbol)
+    async def unexpected_sell_dispatch(
+        order: dict[str, Any], config: dict[str, Any]
+    ) -> bool:
+        del config
+        dispatched.append(order)
+        raise AssertionError("Missing trade must not reach exchange/persistence")
 
     monkeypatch.setattr(
         orders.trades,
@@ -76,15 +80,15 @@ async def test_receive_sell_signal_returns_false_when_trade_context_missing(
         fake_get_trades_for_orders,
     )
     monkeypatch.setattr(
-        orders.trades,
-        "delete_open_trades",
-        fake_delete_open_trades,
+        orders,
+        "receive_sell_order",
+        unexpected_sell_dispatch,
     )
 
     result = await orders.receive_sell_signal("btc-usdt", {})
 
     assert result is False
-    assert deleted_symbols == []
+    assert dispatched == []
 
 
 @pytest.mark.asyncio

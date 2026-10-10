@@ -54,8 +54,6 @@ def _make_state(
     return BacktestTradeState(
         symbol="BTC/USDT",
         entry_price=entry_price,
-        entry_amount=amount,
-        entry_cost=100.0,
         fee=fee,
         entry_timestamp=1_000,
         safety_orders_count=safety_orders_count,

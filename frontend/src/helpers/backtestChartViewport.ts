@@ -1,4 +1,4 @@
-export interface MeasuredBacktestMarker {
+interface MeasuredBacktestMarker {
     time: number
     textWidthPx: number
 }

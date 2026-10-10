@@ -844,6 +844,24 @@ class Exchange:
             force_refresh=force_refresh,
         )
 
+    def __get_capped_buy_price(self, symbol: str, maximum_price: float) -> float:
+        """Return a valid exchange price without exceeding the execution cap."""
+        price = float(self.exchange.price_to_precision(symbol, maximum_price))
+        if price > maximum_price:
+            market = self.exchange.market(symbol)
+            price = float(
+                ccxt.decimal_to_precision(
+                    str(maximum_price),
+                    ccxt.TRUNCATE,
+                    market["precision"]["price"],
+                    self.exchange.precisionMode,
+                    self.exchange.paddingMode,
+                )
+            )
+        if price <= 0:
+            raise ValueError("Execution cap is below the minimum price tick")
+        return price
+
     async def get_minimum_buy_notional(
         self,
         config: dict[str, Any],
@@ -870,11 +888,15 @@ class Exchange:
             return minimum_notional
 
         try:
-            precise_price = float(
-                self.exchange.price_to_precision(
-                    resolved_symbol,
-                    amount_sizing_price,
+            precise_price = (
+                float(
+                    self.exchange.price_to_precision(
+                        resolved_symbol,
+                        amount_sizing_price,
+                    )
                 )
+                if is_market_order
+                else self.__get_capped_buy_price(resolved_symbol, amount_sizing_price)
             )
             raw_amount = minimum_notional / precise_price
             formatted_amount = self.exchange.amount_to_precision(
@@ -1033,6 +1055,20 @@ class Exchange:
             prefer_ask=True,
         )
         maximum_buy_price = float(order.get("maximum_buy_price") or 0.0)
+        if maximum_buy_price > 0:
+            try:
+                maximum_buy_price = self.__get_capped_buy_price(
+                    order["symbol"], maximum_buy_price
+                )
+            except (ccxt.BaseError, TypeError, ValueError):
+                self._last_buy_precheck_result = build_buy_precheck_result(
+                    ok=False,
+                    reason="invalid_price_or_amount",
+                    symbol=str(order.get("symbol") or ""),
+                    maximum_buy_price=maximum_buy_price,
+                )
+                return None
+            order["maximum_buy_price"] = maximum_buy_price
         executable_price = float(order.get("price") or 0.0)
         if maximum_buy_price > 0 and executable_price > maximum_buy_price:
             self._last_buy_precheck_result = build_buy_precheck_result(
@@ -1112,7 +1148,23 @@ class Exchange:
             )
             return None
         submitted_order = order
-        order = await self.__execute_market_buy(submitted_order)
+        try:
+            order = await self.__execute_market_buy(submitted_order)
+        except (ccxt.InvalidOrder, ccxt.BadRequest) as exc:
+            self._last_buy_precheck_result = build_buy_precheck_result(
+                ok=False,
+                reason="exchange_rejected_order",
+                symbol=str(submitted_order.get("symbol") or ""),
+                required_quote=self.__resolve_required_buy_quote(submitted_order),
+                executable_price=executable_price,
+                maximum_buy_price=maximum_buy_price or None,
+            )
+            logging.error(
+                "Buy order for %s rejected by the exchange: %s",
+                submitted_order.get("symbol"),
+                exc,
+            )
+            return None
         if not order:
             if maximum_buy_price > 0:
                 self._last_buy_precheck_result = build_buy_precheck_result(

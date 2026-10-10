@@ -32,8 +32,6 @@ class ResolvedTradingPolicy:
     baseline_take_profit: float
     stop_loss: float
     stop_loss_timeout: int
-    green_phase_active: bool
-    green_phase_extra_deals: int
     adaptive_tp_applied: bool
     adaptive_reason_code: str | None
     adaptive_trust_direction: str | None
@@ -392,8 +390,6 @@ class Autopilot:
             baseline_take_profit=baseline_take_profit,
             stop_loss=stop_loss,
             stop_loss_timeout=stop_loss_timeout,
-            green_phase_active=bool(runtime_state["green_phase_active"]),
-            green_phase_extra_deals=int(runtime_state["green_phase_extra_deals"] or 0),
             adaptive_tp_applied=adaptive_tp_applied,
             adaptive_reason_code=adaptive_reason_code,
             adaptive_trust_direction=adaptive_trust_direction,

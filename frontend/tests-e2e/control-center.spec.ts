@@ -314,6 +314,36 @@ test.beforeEach(async ({ page }) => {
   })
 })
 
+test('lazy routes still render dashboard charts and configuration forms', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', error => errors.push(error.message))
+  await page.route('**/statistic/profit-overall/timeline', route => route.fulfill({
+    json: [
+      { timestamp: '2026-07-24 00:00:00', profit_overall: 35, funds_locked: 100 },
+      { timestamp: '2026-07-25 00:00:00', profit_overall: 42.5, funds_locked: 100 },
+    ],
+  }))
+  await page.route('**/statistic/profit/*/*', route => route.fulfill({
+    json: { '2026-07-24': 5, '2026-07-25': 7 },
+  }))
+  await page.route('**/trades/closed/length', route => route.fulfill({ json: { result: 0 } }))
+
+  await page.goto('/')
+  await expect(page.locator('.performance-chart canvas').first()).toBeVisible()
+  await page.getByRole('button', { name: '1D', exact: true }).click()
+  await expect(page.locator('.performance-chart canvas').first()).toBeVisible()
+
+  await page.goto('/stats')
+  await expect(page.getByRole('heading', { name: 'Statistics', exact: true })).toBeVisible()
+  await expect(page.locator('.heatmap-container .n-heatmap')).toBeVisible()
+
+  await page.goto('/control-center')
+  await expect(page.getByRole('heading', { name: 'Configuration', exact: true })).toBeVisible()
+  await expect(page.getByText('Dry run', { exact: true })).toBeVisible()
+  await expect(page.locator('input').first()).toBeVisible()
+  expect(errors).toEqual([])
+})
+
 test('renders the safe dry-run control center mission', async ({ page }) => {
   await page.goto('/control-center')
 

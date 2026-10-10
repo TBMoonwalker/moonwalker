@@ -35,8 +35,6 @@ def _build_policy() -> ResolvedTradingPolicy:
         baseline_take_profit=10.0,
         stop_loss=5.0,
         stop_loss_timeout=0,
-        green_phase_active=False,
-        green_phase_extra_deals=0,
         adaptive_tp_applied=False,
         adaptive_reason_code=None,
         adaptive_trust_direction=None,

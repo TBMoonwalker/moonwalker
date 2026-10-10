@@ -83,7 +83,7 @@ export interface AnalyticsOverview {
   }
 }
 
-export interface AiTrustCalibrationBucket {
+interface AiTrustCalibrationBucket {
    bucket_type: string
    bucket_key: string
    sample_count: number
@@ -101,13 +101,13 @@ export interface AiTrustCalibrationBucket {
    usable: boolean
 }
 
-export interface AiTrustMissedBadEntryCluster {
+interface AiTrustMissedBadEntryCluster {
    symbol: string
    reason_code: string
    missed_bad_entries: number
 }
 
-export interface AiTrustCalibration {
+interface AiTrustCalibration {
    enabled: boolean
    confidence: 'cold' | 'warming' | 'usable' | 'confident' | string
    confidence_thresholds: {

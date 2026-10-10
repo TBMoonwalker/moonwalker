@@ -582,6 +582,7 @@ class Watcher:
         update_fields: list[str],
     ) -> None:
         """Refresh watched symbols when a new open trade is created."""
+        del sender  # Tortoise supplies the model through the post-save contract.
         if created:
             try:
                 ticker_symbols = (
@@ -601,6 +602,7 @@ class Watcher:
         update_fields: list[str],
     ) -> None:
         """Refresh watched symbols when a trade is moved to closed trades."""
+        del sender  # Tortoise supplies the model through the post-save contract.
         if created:
             try:
                 ticker_symbols = (

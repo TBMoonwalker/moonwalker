@@ -719,10 +719,6 @@ class Database:
             "ON ai_trust_predictions (evaluation_id);"
         )
 
-    async def optimize_sqlite(self) -> None:
-        """Run SQLite planner/index maintenance."""
-        await optimize_sqlite_connection(self.db_url)
-
     async def _run_sqlite_quick_check(self) -> list[str]:
         """Return SQLite quick_check messages for the active database."""
         if not self.db_url.startswith("sqlite://"):

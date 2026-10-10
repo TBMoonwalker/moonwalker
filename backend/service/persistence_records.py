@@ -213,14 +213,8 @@ class CampaignPersistenceContext(TypedDict, total=False):
     last_transition_at: str
     current_deal_id: str | None
     tp_percent: float
-    principal_quote: float
     reserved_quote: float
-    cumulative_realized_quote: float
-    cumulative_realized_percent: float
     metadata_json: str | None
-    cooldown_until: str | None
-    create_campaign: bool
-    last_exit_reason: str | None
     close_reason: str | None
     summary_overrides: dict[str, Any]
 

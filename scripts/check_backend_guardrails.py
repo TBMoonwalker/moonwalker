@@ -3,39 +3,12 @@
 
 from __future__ import annotations
 
-import ast
 import os
 import re
 import sys
 from pathlib import Path
 
 MAX_COMMENT_BLOCK_LINES = int(os.getenv("MAX_COMMENT_BLOCK_LINES", "12"))
-
-
-class IndicatorCallVisitor(ast.NodeVisitor):
-    """Collect `self.indicators.<method>(...)` calls from strategy modules."""
-
-    def __init__(self) -> None:
-        self.methods: set[str] = set()
-
-    def visit_Call(self, node: ast.Call) -> None:
-        func = node.func
-        if (
-            isinstance(func, ast.Attribute)
-            and isinstance(func.value, ast.Attribute)
-            and isinstance(func.value.value, ast.Name)
-            and func.value.value.id == "self"
-            and func.value.attr == "indicators"
-        ):
-            self.methods.add(func.attr)
-        self.generic_visit(node)
-
-
-def parse_strategy_indicator_calls(path: Path) -> set[str]:
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    visitor = IndicatorCallVisitor()
-    visitor.visit(tree)
-    return visitor.methods
 
 
 def find_large_commented_blocks(path: Path, threshold: int) -> list[tuple[int, int]]:

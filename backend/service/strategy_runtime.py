@@ -910,15 +910,6 @@ async def _macd_series(
     return context.memo[key]
 
 
-async def _memo_indicator(
-    context: EvaluationContext, key: tuple[Any, ...], factory: Any
-) -> Any:
-    """Memoize indicator calls within one graph evaluation."""
-    if key not in context.memo:
-        context.memo[key] = await factory()
-    return context.memo[key]
-
-
 async def _ema_values_at_candle(
     context: EvaluationContext, lengths: list[int]
 ) -> dict[str, Any]:

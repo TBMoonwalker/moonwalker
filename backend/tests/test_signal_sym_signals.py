@@ -1,24 +1,11 @@
 import asyncio
 import types
-from typing import Any
 
 import model
 import pytest
 import signals.sym_signals as sym_module
 from service.signal_runtime import SignalAdmissionBatch, SignalAdmissionDecision
 from signals.sym_signals import SignalPlugin
-
-
-class DummyTrades:
-    @classmethod
-    def all(cls):
-        return cls()
-
-    async def values_list(self, *args, **kwargs) -> list:
-        return []
-
-    def distinct(self) -> Any:
-        return self
 
 
 class DummyOpenTrades:
@@ -108,6 +95,7 @@ async def test_sym_signals_run_uses_shared_admission_batch(monkeypatch) -> None:
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
+            del exc_type, tb  # Required by the async context-manager contract.
             return False
 
         async def connect(self, *_args, **_kwargs) -> None:
@@ -248,6 +236,7 @@ async def test_sym_signals_idle_timeout_does_not_force_immediate_reconnect(
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
+            del exc_type, tb  # Required by the async context-manager contract.
             return False
 
         async def connect(self, *_args, **_kwargs) -> None:
@@ -349,6 +338,7 @@ async def test_sym_signals_idle_warning_mentions_no_events(monkeypatch) -> None:
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
+            del exc_type, tb  # Required by the async context-manager contract.
             return False
 
         async def connect(self, *_args, **_kwargs) -> None:
@@ -407,6 +397,7 @@ async def test_sym_signals_error_event_logs_payload_and_uses_backoff(
             return self
 
         async def __aexit__(self, exc_type, exc, tb):
+            del exc_type, tb  # Required by the async context-manager contract.
             return False
 
         async def connect(self, *_args, **_kwargs) -> None:

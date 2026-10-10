@@ -83,8 +83,6 @@ class LoggerFactory:
     rotating log files and environment-based log level configuration.
     """
 
-    _LOG = None
-
     @staticmethod
     def __resolve_loglevel() -> str:
         """Resolve active log level from environment variables."""
@@ -166,7 +164,6 @@ class LoggerFactory:
         # Keep service logs in their dedicated files instead of bubbling
         # into the root/uvicorn stderr handlers captured by run.log.
         logger.propagate = False
-        LoggerFactory._LOG = logger
         return logger
 
     @staticmethod

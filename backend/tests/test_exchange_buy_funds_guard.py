@@ -172,6 +172,9 @@ async def test_create_spot_market_buy_rejects_precision_below_minimum(
     monkeypatch,
 ) -> None:
     exchange = Exchange()
+    monkeypatch.setattr(
+        exchange, "_Exchange__get_capped_buy_price", lambda _symbol, price: price
+    )
     execute_calls = {"count": 0}
 
     async def fake_ensure_exchange(_config) -> None:
@@ -329,6 +332,9 @@ async def test_recovery_buy_rejects_rebounded_executable_price(
     monkeypatch,
 ) -> None:
     exchange = Exchange()
+    monkeypatch.setattr(
+        exchange, "_Exchange__get_capped_buy_price", lambda _symbol, price: price
+    )
     amount_calls = 0
     execute_calls = 0
 
@@ -383,6 +389,9 @@ async def test_unfilled_capped_buy_records_execution_guard_reason(
     monkeypatch,
 ) -> None:
     exchange = Exchange()
+    monkeypatch.setattr(
+        exchange, "_Exchange__get_capped_buy_price", lambda _symbol, price: price
+    )
 
     async def fake_ensure_exchange(_config) -> None:
         return None
@@ -497,3 +506,97 @@ async def test_buy_price_lookup_prefers_executable_ask(monkeypatch) -> None:
     )
 
     assert price == "43.0"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ceiling", [0.0088532, 0.0088582])
+@pytest.mark.parametrize("outcome", ["filled", "rejected", "rebound", "budget_limited"])
+async def test_recovery_buy_sizes_and_checks_at_submitted_price_tick(
+    monkeypatch, ceiling: float, outcome: str
+) -> None:
+    """Use one capped price for minimum sizing, amount sizing and placement."""
+    import ccxt.async_support as ccxt
+
+    exchange = Exchange()
+    client = ccxt.binance()
+    client.set_markets(
+        [
+            {
+                "id": "GMTUSDC",
+                "symbol": "GMT/USDC",
+                "base": "GMT",
+                "quote": "USDC",
+                "spot": True,
+                "precision": {"amount": 0.1, "price": 0.00001},
+                "limits": {"cost": {"min": 5.0}},
+            }
+        ]
+    )
+    submitted: list[tuple[float, float]] = []
+
+    async def fake_ensure_exchange(_config):
+        exchange.exchange = client
+
+    async def fake_ensure_markets_loaded():
+        return None
+
+    async def fake_get_price(_symbol, **_kwargs):
+        return "0.008851" if outcome == "rebound" else "0.00884"
+
+    async def fake_balance(*_args, **_kwargs):
+        return 100.0
+
+    async def fake_create_order(symbol, order_type, side, amount, price, params):
+        amount, price = float(amount), float(price)
+        submitted.append((amount, price))
+        assert price <= ceiling
+        assert amount * price >= 5.0
+        assert params["timeInForce"] == "IOC"
+        if outcome == "rejected":
+            raise ccxt.BadRequest(
+                'binance {"code":-1013,"msg":"Filter failure: NOTIONAL"}'
+            )
+        return {"id": "buy-1", "filled": amount, "status": "closed"}
+
+    async def fake_finalize(*, order, **_kwargs):
+        return order
+
+    monkeypatch.setattr(exchange, "_Exchange__ensure_exchange", fake_ensure_exchange)
+    monkeypatch.setattr(
+        exchange, "_Exchange__ensure_markets_loaded", fake_ensure_markets_loaded
+    )
+    monkeypatch.setattr(exchange, "_Exchange__get_price_for_symbol", fake_get_price)
+    monkeypatch.setattr(exchange, "get_free_quote_balance", fake_balance)
+    monkeypatch.setattr(client, "create_order", fake_create_order)
+    monkeypatch.setattr(exchange._buy_manager, "finalize_market_buy", fake_finalize)
+
+    minimum = await exchange.get_minimum_buy_notional(
+        {}, "GMT/USDC", is_market_order=False, amount_sizing_price=ceiling
+    )
+    result = await exchange.create_spot_market_buy(
+        {
+            "symbol": "GMT/USDC",
+            "side": "buy",
+            "ordertype": "market",
+            "ordersize": 4.99 if outcome == "budget_limited" else minimum,
+            "maximum_buy_price": ceiling,
+        },
+        {},
+    )
+
+    if outcome == "filled":
+        assert result is not None
+    else:
+        assert result is None
+        expected_reason = {
+            "rejected": "exchange_rejected_order",
+            "rebound": "execution_price_above_maximum",
+            "budget_limited": "amount_below_minimum_notional",
+        }[outcome]
+        assert exchange.get_last_buy_precheck_result()["reason"] == expected_reason
+    if outcome in {"filled", "rejected"}:
+        assert submitted == [(565.0, 0.00885)]
+        assert submitted[0][0] * submitted[0][1] <= minimum
+    else:
+        assert submitted == []
+    await client.close()

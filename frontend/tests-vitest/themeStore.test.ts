@@ -1,13 +1,16 @@
 import {
   beforeAll,
   beforeEach,
+  afterEach,
   describe,
   expect,
   it,
+  vi,
 } from "vitest"
 import { createPinia, setActivePinia } from "pinia"
 
 import { useThemeStore } from "../src/theme/themeStore"
+import { THEME_STORAGE_KEY } from "../src/theme/themeMode"
 
 // jsdom does not implement `window.matchMedia`, which the store's `useOsTheme()`
 // reads at creation time, so install a minimal stub before any store is created.
@@ -33,11 +36,14 @@ beforeAll(() => {
  })
 
 beforeEach(() => {
+  localStorage.clear()
   document.documentElement.removeAttribute("data-mw-theme")
    // A fresh Pinia re-instantiates the setup store so `useOsTheme()` re-queries the
    // OS and `readInitialMode()` re-initialises `mode` on each mount.
   setActivePinia(createPinia())
  })
+
+afterEach(() => vi.restoreAllMocks())
 
 describe("themeStore · forced choices", () => {
   it("forces dark regardless of the OS and mirrors the attribute", () => {
@@ -67,6 +73,22 @@ describe("themeStore · forced choices", () => {
  })
 
 describe("themeStore · init", () => {
+  it("restores a literal dark preference", () => {
+    localStorage.setItem(THEME_STORAGE_KEY, "dark")
+    expect(useThemeStore().mode).toBe("dark")
+    expect(document.documentElement.getAttribute("data-mw-theme")).toBe("dark")
+  })
+
+  it("still applies theme changes when the storage getter throws", () => {
+    vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+      throw new Error("blocked")
+    })
+    const store = useThemeStore()
+    expect(store.mode).toBe("auto")
+    store.setMode("dark")
+    expect(store.mode).toBe("dark")
+    expect(document.documentElement.getAttribute("data-mw-theme")).toBe("dark")
+  })
   it("leaves the attribute absent for auto with no stored choice", () => {
     const store = useThemeStore()
     expect(store.mode).toBe("auto")

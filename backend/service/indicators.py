@@ -140,56 +140,6 @@ class Indicators:
         return float(rsi.iloc[-1])
 
     @staticmethod
-    def _calculate_bollinger_bands_sync(
-        df: Any, length: int, standard_deviations: float
-    ) -> dict[str, float] | None:
-        """Compute latest Bollinger Band values from a candle DataFrame."""
-        if df is None or df.empty:
-            return None
-        upper, middle, lower = talib.BBANDS(
-            df["close"],
-            timeperiod=length,
-            nbdevup=standard_deviations,
-            nbdevdn=standard_deviations,
-            matype=0,
-        )
-        if upper.dropna().empty or middle.dropna().empty or lower.dropna().empty:
-            return None
-        middle_value = float(middle.dropna().iloc[-1])
-        upper_value = float(upper.dropna().iloc[-1])
-        lower_value = float(lower.dropna().iloc[-1])
-        bandwidth = (
-            ((upper_value - lower_value) / middle_value) * 100 if middle_value else 0.0
-        )
-        return {
-            "upper": upper_value,
-            "middle": middle_value,
-            "lower": lower_value,
-            "bandwidth": bandwidth,
-        }
-
-    @staticmethod
-    def _calculate_macd_sync(
-        df: Any, fast_period: int, slow_period: int, signal_period: int
-    ) -> dict[str, float] | None:
-        """Compute latest MACD values from a candle DataFrame."""
-        if df is None or df.empty:
-            return None
-        macd, signal, histogram = talib.MACD(
-            df["close"],
-            fastperiod=fast_period,
-            slowperiod=slow_period,
-            signalperiod=signal_period,
-        )
-        if macd.dropna().empty or signal.dropna().empty or histogram.dropna().empty:
-            return None
-        return {
-            "macd": float(macd.dropna().iloc[-1]),
-            "signal": float(signal.dropna().iloc[-1]),
-            "histogram": float(histogram.dropna().iloc[-1]),
-        }
-
-    @staticmethod
     def _calculate_24h_volume_sync(df: Any) -> float | None:
         """Compute 24h quote volume synchronously from hourly candles."""
         if df is None or df.empty:

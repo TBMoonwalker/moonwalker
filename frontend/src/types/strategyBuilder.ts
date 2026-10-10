@@ -1,4 +1,4 @@
-export type StrategyKind = 'builtin' | 'custom'
+type StrategyKind = 'builtin' | 'custom'
 
 export interface StrategySummary {
     slug: string

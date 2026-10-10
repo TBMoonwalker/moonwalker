@@ -63,39 +63,6 @@ class _DummyOpenTradesCount:
         return self.count_value
 
 
-class _DummySidestepCampaignService:
-    """Sidestep campaign guard stub exposing a waiting-campaign count."""
-
-    waiting_count = 0
-
-    @staticmethod
-    async def count_waiting_campaigns() -> int:
-        return _DummySidestepCampaignService.waiting_count
-
-
-class _DummyAppConfigQuery:
-    """AppConfig query stub for freshness endpoint coverage."""
-
-    def __init__(self, latest_row: Any) -> None:
-        self._latest_row = latest_row
-
-    def order_by(self, *_args: Any, **_kwargs: Any) -> "_DummyAppConfigQuery":
-        return self
-
-    async def first(self) -> Any:
-        return self._latest_row
-
-
-class _DummyAppConfigModel:
-    """AppConfig stub exposing latest updated_at metadata."""
-
-    latest_row: Any = None
-
-    @classmethod
-    def all(cls) -> _DummyAppConfigQuery:
-        return _DummyAppConfigQuery(cls.latest_row)
-
-
 def test_frontend_routes_serve_index_and_assets(tmp_path: Path, monkeypatch) -> None:
     """Ensure SPA routes serve compiled assets rather than index fallback."""
     static_dir = tmp_path / "static"

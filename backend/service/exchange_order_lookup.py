@@ -17,6 +17,7 @@ class LoggerLike(Protocol):
 
     def debug(self, msg: str, *args: object) -> None:
         """Log debug exchange lookup details."""
+        del msg  # Retain the standard logging keyword in this protocol signature.
 
 
 async def fetch_matching_order_trades(

@@ -1,5 +1,6 @@
 """Tests for proactive TP limit order lifecycle handling."""
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -61,8 +62,6 @@ class _FakeTrades:
         self.persisted_order: dict[str, Any] | None = None
         self.cleared_symbols: list[str] = []
         self.clear_calls: list[dict[str, Any]] = []
-        self.partial_fills: list[dict[str, Any]] = []
-        self.invalidated = 0
 
     async def set_tp_limit_order(
         self,
@@ -99,24 +98,8 @@ class _FakeTrades:
         self.clear_calls.append({"symbol": symbol, **kwargs})
         return True
 
-    async def add_partial_sell_execution(
-        self,
-        symbol: str,
-        sold_amount: float,
-        sold_proceeds: float,
-        sell_executions: list[dict[str, Any]],
-    ) -> None:
-        self.partial_fills.append(
-            {
-                "symbol": symbol,
-                "sold_amount": sold_amount,
-                "sold_proceeds": sold_proceeds,
-                "sell_executions": sell_executions,
-            }
-        )
-
     async def invalidate_trade_caches(self) -> None:
-        self.invalidated += 1
+        return None
 
 
 @pytest.mark.asyncio
@@ -348,3 +331,71 @@ async def test_reconcile_tp_limit_order_handles_unsellable_partial_fill(
         }
     ]
     assert fake_trades.cleared_symbols == ["TWT/USDC"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("action", ["set", "clear"])
+@pytest.mark.parametrize("outcome", ["success", "missing", "db_error"])
+async def test_tp_metadata_writes_refresh_cached_reads_only_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, action: str, outcome: str
+) -> None:
+    """Public cached reads must reflect committed TP metadata, not failed writes."""
+    import model
+    import service.order_persistence as persistence_module
+    import service.trades as trades_module
+    from service.trades import Trades
+    from tortoise import Tortoise
+    from tortoise.exceptions import OperationalError
+
+    await Tortoise.init(
+        db_url=f"sqlite://{tmp_path / 'tp_cache.sqlite'}",
+        modules={"models": ["model"]},
+    )
+    await Tortoise.generate_schemas()
+    trades = Trades()
+    reads = 0
+    symbol = "CACHE/USDT"
+    if outcome != "missing":
+        await model.OpenTrades.create(symbol=symbol, tp_limit_order_id="old-limit")
+
+    async def read_metadata(requested_symbol: str) -> dict[str, Any] | None:
+        nonlocal reads
+        reads += 1
+        rows = await model.OpenTrades.filter(symbol=requested_symbol).values(
+            "symbol", "tp_limit_order_id"
+        )
+        return rows[0] if rows else None
+
+    monkeypatch.setattr(trades, "get_trades_for_orders_fresh", read_metadata)
+    if outcome == "db_error":
+
+        async def fail_write(operation: Any, description: str) -> None:
+            del operation, description
+            raise OperationalError("injected write failure")
+
+        write_module = trades_module if action == "set" else persistence_module
+        monkeypatch.setattr(write_module, "run_sqlite_write_with_retry", fail_write)
+    try:
+        before = await trades.get_trades_for_orders(symbol)
+        assert await trades.get_trades_for_orders(symbol) == before
+        assert reads == 1
+        if action == "set":
+            applied = await trades.set_tp_limit_order(
+                symbol, order_id="new-limit", price=110.0, amount=1.0
+            )
+        else:
+            applied = await trades.clear_tp_limit_order(symbol)
+        after = await trades.get_trades_for_orders(symbol)
+        assert applied is (outcome == "success")
+        if outcome == "success":
+            assert reads == 2
+            assert after is not None
+            assert after["tp_limit_order_id"] == (
+                "new-limit" if action == "set" else None
+            )
+        else:
+            assert reads == 1
+            assert after == before
+    finally:
+        await trades.invalidate_trade_caches()
+        await Tortoise.close_connections()

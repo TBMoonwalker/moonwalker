@@ -361,3 +361,43 @@ body {
     padding-inline: 6px;
   }
 }
+
+/* Shared frame for historical profit and uPNL charts. */
+.performance-chart .chart {
+  width: 100%;
+  max-width: 100%;
+  flex: 1;
+  min-height: 230px;
+}
+
+.performance-chart {
+  width: 100%;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 230px;
+  overflow: hidden;
+  border-radius: var(--mw-radius-sm, 6px);
+}
+
+.performance-chart .n-spin-container,
+.performance-chart .n-spin-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.performance-chart .chart-placeholder {
+  width: 100%;
+  flex: 1;
+  min-height: 230px;
+  border-radius: var(--mw-radius-sm, 6px);
+}
+
+.performance-chart .chart-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--mw-color-text-muted);
+}

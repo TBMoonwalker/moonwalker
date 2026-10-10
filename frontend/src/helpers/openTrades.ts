@@ -3,11 +3,7 @@ export type TimeframeChoice = {
     seconds: number
 }
 
-export type OpenTradesConfigResponse = {
-    timeframe?: string | null
-}
-
-export type OrderData = {
+type OrderData = {
     id: number
     timestamp: string
     ordersize: number
@@ -265,7 +261,7 @@ function normalizeDenyToken(rawValue: string): string {
     return normalized.split('/')[0].split('-')[0]
 }
 
-export function parseDenylistTokens(rawValue: string | null | undefined): string[] {
+function parseDenylistTokens(rawValue: string | null | undefined): string[] {
     const source =
         typeof rawValue === 'string' ? rawValue : Array.isArray(rawValue)
           ? (rawValue as string[]).join(',')

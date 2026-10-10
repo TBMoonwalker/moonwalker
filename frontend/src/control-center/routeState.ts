@@ -20,7 +20,7 @@ function normalizeQueryValue(value: unknown): string | null {
     return null
 }
 
-export function isKnownControlCenterMode(
+function isKnownControlCenterMode(
     value: unknown,
 ): value is ControlCenterMode {
     return (

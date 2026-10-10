@@ -29,18 +29,6 @@ class TradeCloseReason(StrEnum):
     MANUAL_STOP = "manual_stop"
 
 
-TERMINAL_CLOSE_REASONS = frozenset(
-    {
-        TradeCloseReason.TAKE_PROFIT,
-        TradeCloseReason.TRAILING_TAKE_PROFIT,
-        TradeCloseReason.STOP_LOSS,
-        TradeCloseReason.AUTOPILOT_TIMEOUT,
-        TradeCloseReason.MANUAL_SELL,
-        TradeCloseReason.MANUAL_STOP,
-    }
-)
-
-
 def normalize_close_reason(value: Any) -> str:
     """Return a stable close-reason persistence value.
 

@@ -6,7 +6,7 @@ export type OrderMutationStatus =
     | 'indeterminate'
     | 'quarantined'
 
-export interface OrderMutationResult {
+interface OrderMutationResult {
     operation_id: string
     symbol: string
     action: string

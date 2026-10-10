@@ -1,4 +1,6 @@
 import os
+from collections.abc import AsyncIterator, Sequence
+from typing import Any
 
 import pytest
 import service.config as config_module
@@ -615,3 +617,244 @@ async def test_config_snapshot_keeps_defaults_and_metadata_out_of_persisted_entr
     assert "asap" in config.snapshot()["signal_plugins"]
 
     await Tortoise.close_connections()
+
+
+class _ListenerPubSub:
+    """Controllable subscription for listener lifecycle regressions."""
+
+    def __init__(
+        self, messages: Sequence[str] = (), error: Exception | None = None
+    ) -> None:
+        import asyncio
+
+        self.messages = messages
+        self.error = error
+        self.subscribed = asyncio.Event()
+        self.closed = False
+        self.block = asyncio.Event()
+
+    async def __aenter__(self) -> "_ListenerPubSub":
+        return self
+
+    async def __aexit__(self, exc_type: Any, exc: Any, tb: Any) -> None:
+        del exc_type, exc, tb
+        self.closed = True
+
+    async def subscribe(self, channel: str) -> None:
+        assert channel == config_module.CONFIG_CHANNEL
+        self.subscribed.set()
+        if self.error:
+            raise self.error
+
+    async def listen(self) -> AsyncIterator[dict[str, str]]:
+        yield {"type": "subscribe", "data": "1"}
+        for message in self.messages:
+            yield {"type": "message", "data": message}
+        await self.block.wait()
+
+
+@pytest.mark.asyncio
+async def test_config_instance_does_not_spawn_unowned_listener(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Loading config must not create subscriptions outside its lifespan."""
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    monkeypatch.setattr(Config, "_instance", None)
+    monkeypatch.setattr(Config, "_lock", asyncio.Lock())
+    monkeypatch.setattr(Config, "load_all", AsyncMock())
+    config = await Config.instance()
+    try:
+        assert config._listener_task is None
+    finally:
+        if config._listener_task is not None:
+            config._listener_task.cancel()
+            await asyncio.gather(config._listener_task, return_exceptions=True)
+
+
+@pytest.mark.asyncio
+async def test_config_listener_reconnects_and_reloads_then_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Reconnect and resync before handling new change notifications."""
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+
+    from redis.exceptions import ConnectionError
+
+    first = _ListenerPubSub(error=ConnectionError("injected disconnect"))
+    recovered = _ListenerPubSub(messages=['{"keys":["timezone"]}'])
+    monkeypatch.setattr(
+        config_module.redis_client, "pubsub", Mock(side_effect=[first, recovered])
+    )
+    monkeypatch.setattr(Config, "LISTENER_RETRY_INITIAL_SECONDS", 0.001, raising=False)
+    config = Config()
+    received = asyncio.Event()
+
+    async def reload(keys: list[str] | None = None) -> None:
+        if keys is not None:
+            assert keys == ["timezone"]
+            received.set()
+
+    reload_mock = AsyncMock(side_effect=reload)
+    monkeypatch.setattr(config, "reload", reload_mock)
+    task = asyncio.create_task(config._listen())
+    try:
+        await asyncio.wait_for(received.wait(), timeout=0.5)
+        assert first.closed
+    finally:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert recovered.closed
+    assert config._listener_task is None
+    assert reload_mock.await_args_list[0].args == ()
+
+
+@pytest.mark.asyncio
+async def test_config_listener_closes_on_cancellation_and_can_restart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Each lifetime must release its subscription on cancellation."""
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+
+    subscriptions = [_ListenerPubSub(), _ListenerPubSub()]
+    monkeypatch.setattr(
+        config_module.redis_client, "pubsub", Mock(side_effect=subscriptions)
+    )
+    config = Config()
+    monkeypatch.setattr(config, "reload", AsyncMock())
+    for subscription in subscriptions:
+        task = asyncio.create_task(config._listen())
+        await subscription.subscribed.wait()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        assert subscription.closed
+        assert config._listener_task is None
+
+
+@pytest.mark.asyncio
+async def test_config_listener_unexpected_failure_reaches_task_group(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Unexpected faults must reach the supervising lifespan."""
+    import asyncio
+    from unittest.mock import Mock
+
+    subscription = _ListenerPubSub(error=ValueError("bad subscription"))
+    monkeypatch.setattr(
+        config_module.redis_client, "pubsub", Mock(return_value=subscription)
+    )
+    config = Config()
+    with pytest.raises(ExceptionGroup) as caught:
+        async with asyncio.TaskGroup() as group:
+            group.create_task(config._listen())
+    assert isinstance(caught.value.exceptions[0], ValueError)
+    assert subscription.closed
+
+
+@pytest.mark.asyncio
+async def test_config_stop_listener_closes_subscription_before_returning(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Shutdown joins subscription cleanup and tolerates repeated calls."""
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+
+    subscription = _ListenerPubSub()
+    monkeypatch.setattr(
+        config_module.redis_client, "pubsub", Mock(return_value=subscription)
+    )
+    config = Config()
+    monkeypatch.setattr(config, "reload", AsyncMock())
+    task = asyncio.create_task(config._listen())
+    await subscription.subscribed.wait()
+    await config.stop_listener()
+    assert task.done()
+    assert subscription.closed
+    assert config._listener_task is None
+    await config.stop_listener()
+
+
+@pytest.mark.asyncio
+async def test_config_listener_retry_delay_is_capped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Repeated transport failures must respect the backoff ceiling."""
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+
+    from redis.exceptions import ConnectionError
+
+    failed = [
+        _ListenerPubSub(error=ConnectionError("injected disconnect")) for _ in range(3)
+    ]
+    healthy = _ListenerPubSub()
+    monkeypatch.setattr(
+        config_module.redis_client, "pubsub", Mock(side_effect=[*failed, healthy])
+    )
+    monkeypatch.setattr(Config, "LISTENER_RETRY_INITIAL_SECONDS", 1.0)
+    monkeypatch.setattr(Config, "LISTENER_RETRY_MAX_SECONDS", 2.0)
+    delays = []
+    original_sleep = asyncio.sleep
+
+    async def record_delay(delay: float) -> None:
+        delays.append(delay)
+        await original_sleep(0)
+
+    monkeypatch.setattr(config_module.asyncio, "sleep", record_delay)
+    config = Config()
+    monkeypatch.setattr(config, "reload", AsyncMock())
+    task = asyncio.create_task(config._listen())
+    try:
+        await asyncio.wait_for(healthy.subscribed.wait(), timeout=0.5)
+        assert delays == [1.0, 2.0, 2.0]
+        assert all(subscription.closed for subscription in failed)
+    finally:
+        await config.stop_listener()
+        assert task.done()
+
+
+@pytest.mark.asyncio
+async def test_config_listener_resyncs_after_client_resubscribe(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Client-internal reconnection must refresh changes whose messages were lost."""
+    import asyncio
+    from unittest.mock import AsyncMock, Mock
+
+    reconnect = asyncio.Event()
+    initial_reload = asyncio.Event()
+    resynced = asyncio.Event()
+    persisted = {"timezone": "UTC"}
+    snapshots: list[str] = []
+
+    class ResubscribingPubSub(_ListenerPubSub):
+        async def listen(self) -> AsyncIterator[dict[str, str]]:
+            yield {"type": "subscribe", "data": "1"}
+            await reconnect.wait()
+            yield {"type": "subscribe", "data": "1"}
+            await self.block.wait()
+
+    async def reload(keys: list[str] | None = None) -> None:
+        assert keys is None
+        snapshots.append(persisted["timezone"])
+        (initial_reload if len(snapshots) == 1 else resynced).set()
+
+    subscription = ResubscribingPubSub()
+    monkeypatch.setattr(
+        config_module.redis_client, "pubsub", Mock(return_value=subscription)
+    )
+    config = Config()
+    monkeypatch.setattr(config, "reload", AsyncMock(side_effect=reload))
+    task = asyncio.create_task(config._listen())
+    try:
+        await asyncio.wait_for(initial_reload.wait(), timeout=0.5)
+        persisted["timezone"] = "Europe/Vienna"
+        reconnect.set()
+        await asyncio.wait_for(resynced.wait(), timeout=0.5)
+        assert snapshots == ["UTC", "Europe/Vienna"]
+    finally:
+        await config.stop_listener()
+        assert task.done()

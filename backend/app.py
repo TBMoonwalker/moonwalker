@@ -63,6 +63,7 @@ class RuntimeState:
     redis_proc: subprocess.Popen[bytes] | None = None
     watcher_queue: asyncio.Queue[Any] | None = None
     database: Database | None = None
+    config_service: Config | None = None
     market_cap_rank_service: CoinMarketCapRankService | None = None
     controller_services: RuntimeServices | None = None
     placement_orders: Orders | None = None
@@ -135,6 +136,7 @@ async def startup() -> None:
             "config load",
             lambda: runtime_state.database.run_with_context(Config.instance),
         )
+        runtime_state.config_service = config_service
 
         runtime_state.market_cap_rank_service = coin_market_cap_rank_service
         await _run_startup_step(
@@ -298,6 +300,11 @@ async def shutdown() -> None:
             runtime_state.market_cap_rank_service.shutdown,
         )
         runtime_state.market_cap_rank_service = None
+    if runtime_state.config_service is not None:
+        await attempt(
+            "configuration listener", runtime_state.config_service.stop_listener
+        )
+        runtime_state.config_service = None
     if runtime_state.database is not None:
         await attempt("database", runtime_state.database.shutdown)
         runtime_state.database = None
@@ -384,7 +391,7 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
 
         # Ownership:
         # lifespan
-        # |-- critical: symbol intake, ticker watcher, housekeeping
+        # |-- critical: symbol intake, ticker watcher, housekeeping, config listener
         # `-- optional: replay-candle backfill
         async with asyncio.TaskGroup() as task_group:
             await ai_work_queue.start(task_group)
@@ -431,6 +438,18 @@ async def runtime_lifespan(_app: Litestar) -> AsyncIterator[None]:
                     name="moonwalker:replay-candle-backfill",
                 ),
             ]
+            if runtime_state.config_service is not None:
+                config_service = runtime_state.config_service
+                database = runtime_state.database
+                runtime_state.background_tasks.append(
+                    task_group.create_task(
+                        _run_critical_runtime_task(
+                            "configuration-listener",
+                            lambda: database.run_with_context(config_service._listen),
+                        ),
+                        name="moonwalker:configuration-listener",
+                    )
+                )
             try:
                 yield
             finally:

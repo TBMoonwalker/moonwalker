@@ -44,9 +44,6 @@ class _TradeReader:
     ) -> dict[str, Any]:
         return self.trade
 
-    async def delete_open_trades(self, _symbol: str) -> None:
-        return None
-
 
 class _MissingTradeReader:
     def __init__(self) -> None:
