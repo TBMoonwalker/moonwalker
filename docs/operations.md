@@ -282,3 +282,27 @@ The dashboard statistics panel includes live runtime state beyond raw PnL:
 
 Green Phase can be detected but still blocked if reserve protection or locked
 fund ceilings say there is not enough safe capacity left.
+
+
+## Bybit EU recovery buy price bands
+
+Capped recovery buys on `bybiteu` fetch the current spot price band through
+CCXT's public `/v5/market/price-limit` endpoint before submission. Their IOC limit
+is the lower of the strategy recovery ceiling and the exchange's maximum buy
+price, rounded downward to a valid tick. Quantity, minimum notional and available
+funds are checked using that effective limit. If the executable ask is above it,
+Moonwalker skips the buy rather than exceeding either limit.
+
+A malformed, mismatched or unavailable price band skips submission with
+`exchange_price_band_unavailable`. Responses older than ten seconds or more than
+five seconds ahead of the local clock are rejected; keep the host clock synchronized.
+The price-band read has a ten-second timeout.
+
+If Bybit EU explicitly rejects submission with code `170193` (maximum buy price
+exceeded), Moonwalker refreshes the band and executable ask, repeats all buy
+prechecks and retries at most once. The retry never increases the earlier limit.
+Other errors, accepted unfilled IOC orders, and submissions with uncertain
+acceptance do not trigger this retry; existing placement reconciliation applies.
+This behavior affects capped Bybit EU recovery buys only. Binance and ordinary
+market buys retain their existing paths. Strategy signals and recovery sizing
+thresholds are unchanged.
