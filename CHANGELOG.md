@@ -2,6 +2,14 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.2.2.0] - 2026-10-11
+
+### Fixed
+- Bybit and Bybit EU market refreshes now synchronize request timestamps before
+  authenticated metadata reads and recover from one timestamp rejection without
+  restarting the signal plugin. Repeated failures still propagate; order
+  submissions are never replayed by this recovery.
+
 ## [5.2.1.0] - 2026-10-11
 
 ### Fixed
