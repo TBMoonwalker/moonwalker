@@ -2,6 +2,14 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.2.3.0] - 2026-10-11
+
+### Fixed
+- Bybit and Bybit EU recovery buys now resolve accepted IOC acknowledgements
+  through the existing order, account for canceled partial fills, and recover
+  pending buys without duplicate submissions. Recovery remains available when
+  the capital budget is fully committed or an order lookup is interrupted.
+
 ## [5.2.2.0] - 2026-10-11
 
 ### Fixed
