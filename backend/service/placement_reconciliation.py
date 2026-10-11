@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -88,7 +89,12 @@ class PlacementReconciler:
         intent = await self.intents.get(operation_id)
         if intent is None:
             return PlacementIntentState.QUARANTINED.value
-        if str(intent.state) != PlacementIntentState.ACCEPTED.value:
+        if str(intent.state) not in {
+            PlacementIntentState.ACCEPTED.value,
+            PlacementIntentState.RECONCILING.value,
+            PlacementIntentState.FILLED.value,
+            PlacementIntentState.PERSISTED.value,
+        }:
             return str(intent.state)
         return await self._reconcile_one(intent, config, runtime=True)
 
@@ -151,8 +157,8 @@ class PlacementReconciler:
                 PlacementIntentState.INDETERMINATE,
                 reason_code="startup_found_submitting",
             )
-        await self.intents.mark_reconciling(operation_id)
         try:
+            await self.intents.mark_reconciling(operation_id)
             lookup = await self.exchange.lookup_spot_order(
                 str(intent.symbol),
                 config,
@@ -167,6 +173,16 @@ class PlacementReconciler:
                     else None
                 ),
             )
+        except asyncio.CancelledError:
+            if runtime:
+                await asyncio.shield(
+                    self.intents.transition(
+                        operation_id,
+                        PlacementIntentState.ACCEPTED,
+                        reason_code="runtime_lookup_canceled",
+                    )
+                )
+            raise
         except (ccxt.BaseError, OSError, TimeoutError) as exc:
             if not runtime:
                 raise

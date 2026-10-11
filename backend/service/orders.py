@@ -61,6 +61,7 @@ from service.placement_intents import (
     PlacementIntentState,
     build_derived_operation_id,
     ensure_operation_id,
+    is_live_placement_enabled,
     is_terminal_placement_state,
 )
 from service.placement_reconciliation import (
@@ -1829,6 +1830,36 @@ class Orders:
         config: dict[str, Any],
     ) -> tuple[bool, dict[str, Any] | None]:
         """Run capital-budget preflight, exchange buy, and persistence."""
+        if config.get("exchange") in {"bybit", "bybiteu"} and is_live_placement_enabled(
+            config
+        ):
+            for pending in await self.placement_intents.list_nonterminal():
+                if (
+                    str(pending.exchange_name) == config.get("exchange")
+                    and str(pending.symbol) == str(order.get("symbol") or "")
+                    and str(pending.action) == PlacementAction.BUY.value
+                    and str(pending.state)
+                    in {
+                        PlacementIntentState.ACCEPTED.value,
+                        PlacementIntentState.RECONCILING.value,
+                        PlacementIntentState.FILLED.value,
+                        PlacementIntentState.PERSISTED.value,
+                    }
+                ):
+                    outcome = (
+                        await self._build_placement_reconciler().reconcile_operation(
+                            str(pending.operation_id), config
+                        )
+                    )
+                    return outcome == PlacementIntentState.COMPLETED.value, (
+                        None
+                        if outcome == PlacementIntentState.COMPLETED.value
+                        else {
+                            "ok": False,
+                            "reason": f"placement_{outcome}",
+                            "symbol": str(order.get("symbol") or ""),
+                        }
+                    )
         budget_lease, budget_check = await self.capital_budget.acquire_order_lease(
             order,
             config,

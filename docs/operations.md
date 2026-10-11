@@ -334,8 +334,11 @@ the execution ledger. A confirmed canceled zero-fill order is released.
 
 If the outcome remains unknown, the accepted placement stays blocked. On a later
 buy attempt for that symbol, Moonwalker looks up the pending accepted operation
-and resumes local persistence rather than submitting a duplicate. Unavailable or
-incomplete runtime lookups retain the block for a later attempt; repeated signals
+and resumes local persistence rather than submitting a duplicate. This read-only
+recovery runs before admission for fresh capital, so a fully committed budget
+does not block accounting for an existing order. Unavailable or
+incomplete runtime lookups retain the block for a later attempt. Cancellation
+during a lookup restores the accepted state and propagates cancellation; repeated signals
 do not close the shared exchange client or replay the original buy. This recovery
 is triggered by subsequent buy attempts, rather than a background polling job.
 
