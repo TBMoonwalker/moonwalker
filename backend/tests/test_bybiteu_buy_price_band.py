@@ -1,5 +1,6 @@
 """Bybit EU recovery buys must respect its dynamic spot price band."""
 
+import asyncio
 import logging
 import time
 from unittest.mock import AsyncMock
@@ -171,12 +172,22 @@ async def test_retries_bounded_and_only_known_price_rejections(monkeypatch, fail
         None,
         {"retCode": 1},
         {"retCode": 0, "result": {"symbol": "SEIUSDC", "buyLmt": "NaN"}},
+        {"retCode": 0, "result": {"symbol": "SEIUSDC", "buyLmt": True, "ts": "fresh"}},
+        {"retCode": 0, "result": {"symbol": "SEIUSDC", "buyLmt": 0, "ts": "fresh"}},
         {"retCode": 0, "result": {"symbol": "OTHER", "buyLmt": "0.07"}},
         {"retCode": 0, "result": {"symbol": "SEIUSDC", "buyLmt": "0.07", "ts": "1"}},
     ],
 )
 async def test_invalid_or_stale_band_fails_before_submission(monkeypatch, bad_result):
+    # Value: protects=invalid dynamic band never authorizes a buy;
+    # fails_when=band type or finite-positive validation is removed;
+    # why_new=the old NaN fixture exited at missing timestamp; seam=none;
+    # no_claim=exchange responses are mocked, not live provider acceptance.
     exchange, client, _ = prepare(monkeypatch)
+    if isinstance(bad_result, dict):
+        result = bad_result.get("result", {})
+        if result.get("ts") == "fresh":
+            result["ts"] = str(int(time.time() * 1000))
     client.public_get_v5_market_price_limit.side_effect = None
     client.public_get_v5_market_price_limit.return_value = bad_result
     assert await exchange.create_spot_market_buy(intent(), {}) is None
@@ -185,6 +196,20 @@ async def test_invalid_or_stale_band_fails_before_submission(monkeypatch, bad_re
         exchange.get_last_buy_precheck_result()["reason"]
         == "exchange_price_band_unavailable"
     )
+
+    if (
+        isinstance(bad_result, dict)
+        and bad_result.get("result", {}).get("buyLmt") == "NaN"
+    ):
+        # Retain missing-timestamp coverage, then exercise NaN itself with
+        # otherwise valid provenance so earlier guards cannot hide a regression.
+        bad_result["result"]["ts"] = str(int(time.time() * 1000))
+        assert await exchange.create_spot_market_buy(intent(), {}) is None
+        client.create_order.assert_not_awaited()
+        assert (
+            exchange.get_last_buy_precheck_result()["reason"]
+            == "exchange_price_band_unavailable"
+        )
 
 
 @pytest.mark.asyncio
@@ -248,4 +273,58 @@ async def test_retry_rechecks_ask_and_funds_before_second_submission(
         "execution_price_above_maximum"
         if changed_guard == "ask"
         else "insufficient_quote_balance"
+    )
+
+
+@pytest.mark.asyncio
+async def test_malformed_price_rejection_never_retries(monkeypatch):
+    # Value: protects=unparseable rejections never trigger another submission;
+    # fails_when=JSON parser failures become retryable or escape the boundary;
+    # why_new=existing rejection fixtures contain valid JSON; seam=none;
+    # no_claim=provider error strings are supplied fixtures.
+    for message in ("bybiteu price rejected", 'bybiteu {"retCode":170193'):
+        exchange, client, _ = prepare(monkeypatch)
+        client.create_order.side_effect = ccxt.InvalidOrder(message)
+        assert await exchange.create_spot_market_buy(intent(), {}) is None
+        assert client.create_order.await_count == 1
+        assert client.public_get_v5_market_price_limit.await_count == 1
+        assert (
+            exchange.get_last_buy_precheck_result()["reason"]
+            == "exchange_rejected_order"
+        )
+
+
+@pytest.mark.asyncio
+async def test_local_price_band_deadline_never_submits(monkeypatch):
+    # Value: protects=local price-band deadline cancels a stalled lookup safely;
+    # fails_when=the timeout is removed or deadline cancellation submits a buy;
+    # why_new=existing timeout fixture raises CCXT RequestTimeout directly;
+    # seam=none; no_claim=network transport and provider latency are mocked.
+    exchange, client, balance = prepare(monkeypatch)
+    original_timeout = asyncio.timeout
+    stalled = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    def short_timeout(delay):
+        assert delay == 10
+        return original_timeout(0.001)
+
+    async def stalled_lookup(_params):
+        try:
+            await stalled.wait()
+        finally:
+            cancelled.set()
+
+    monkeypatch.setattr(asyncio, "timeout", short_timeout)
+    client.public_get_v5_market_price_limit.side_effect = stalled_lookup
+    # A separate watchdog prevents hanging even if the product timeout regresses.
+    async with original_timeout(1):
+        assert await exchange.create_spot_market_buy(intent(), {}) is None
+    assert cancelled.is_set()
+    assert client.public_get_v5_market_price_limit.await_count == 1
+    client.create_order.assert_not_awaited()
+    balance.assert_not_awaited()
+    assert (
+        exchange.get_last_buy_precheck_result()["reason"]
+        == "exchange_price_band_unavailable"
     )
