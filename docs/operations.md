@@ -282,3 +282,21 @@ The dashboard statistics panel includes live runtime state beyond raw PnL:
 
 Green Phase can be detected but still blocked if reserve protection or locked
 fund ceilings say there is not enough safe capacity left.
+
+## Bybit authenticated request timestamps
+
+Bybit and Bybit EU validate authenticated request timestamps within CCXT's
+5,000 ms receive window. Moonwalker enables CCXT clock adjustment and explicitly
+synchronizes time before each market metadata refresh. This ordering matters:
+CCXT fetches authenticated currency metadata before the market fetch that would
+normally perform automatic time synchronization.
+
+If a market refresh receives `InvalidNonce`, Moonwalker synchronizes time and
+retries that read once. A second rejection or a failed synchronization propagates
+to the caller; stale metadata is not marked fresh. This retry does not replay
+order submissions or widen the receive window.
+
+Error `10002` can indicate clock drift or a request delayed in transit. Keep the
+host clock synchronized with NTP. If rejections persist, check host clock status
+(for example `timedatectl status` on systemd Linux) and latency to the exchange;
+clock adjustment cannot make a request with excessive transit delay valid.

@@ -74,7 +74,23 @@ class ExchangeClientManager:
                 or not self._markets_loaded
                 or now - self._markets_loaded_ts >= self.MARKETS_REFRESH_TTL_SECONDS
             ):
-                await self.exchange.load_markets(reload=True)
+                is_bybit = self.exchange.id in {"bybit", "bybiteu"}
+                if is_bybit:
+                    # CCXT fetches signed currency metadata before fetch_markets,
+                    # where its automatic clock adjustment normally runs.
+                    await self.exchange.load_time_difference()
+                try:
+                    await self.exchange.load_markets(reload=True)
+                except ccxt.InvalidNonce:
+                    if not is_bybit:
+                        raise
+                    self._logger.warning(
+                        "Exchange '%s' rejected the market refresh timestamp; "
+                        "resynchronizing its clock and retrying metadata once.",
+                        self.exchange.id,
+                    )
+                    await self.exchange.load_time_difference()
+                    await self.exchange.load_markets(reload=True)
                 self._markets_loaded = True
                 self._markets_loaded_ts = now
 
@@ -90,6 +106,7 @@ class ExchangeClientManager:
         if config.get("exchange", None):
             options: dict[str, Any] = {"defaultType": config.get("market", "spot")}
             if config.get("exchange") in {"bybit", "bybiteu"}:
+                options["adjustForTimeDifference"] = True
                 options["fetchOrder"] = {"acknowledged": True}
             hostname = config.get("exchange_hostname")
             if hostname:

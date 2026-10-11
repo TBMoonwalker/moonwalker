@@ -14,6 +14,7 @@ class _DummyLogger:
 
 class _DummyExchange:
     def __init__(self) -> None:
+        self.id = "binance"
         self.close_calls = 0
         self.load_markets_calls = 0
 
@@ -234,4 +235,5 @@ async def test_init_bybit_exchange_acknowledges_fetch_order_contract(
     assert exchange.params["options"] == {
         "defaultType": "spot",
         "fetchOrder": {"acknowledged": True},
+        "adjustForTimeDifference": True,
     }
