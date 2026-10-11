@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import copy
+import hashlib
 import json
 import math
 import re
@@ -26,7 +28,7 @@ from service.ai_trust_calibration import (
     rate,
 )
 from service.ai_work_queue import ai_work_queue
-from service.config import Config
+from service.config import Config, resolve_timeframe
 from tortoise.expressions import Subquery
 
 logging = helper.LoggerFactory.get_logger("logs/ai_trust.log", "ai_trust")
@@ -180,6 +182,7 @@ class AiTrustEntryGate:
     trust_config: AiTrustConfig | None = None
     feature_bundle: dict[str, Any] | None = None
     scored: dict[str, Any] | None = None
+    capture_provenance: dict[str, Any] | None = None
 
 
 class AiTrustResponseError(ValueError):
@@ -630,6 +633,9 @@ def _derive_market_context(
 
 async def enrich_entry_feature_bundle(
     feature_bundle: dict[str, Any],
+    *,
+    closed_before: datetime | None = None,
+    candle_timeframe: str | None = None,
 ) -> dict[str, Any]:
     """Add derived crypto-market context without exposing raw candles."""
     symbol = str(feature_bundle.get("symbol") or "")
@@ -659,6 +665,18 @@ async def enrich_entry_feature_bundle(
     timeframe_minutes = feature_bundle.get("signal_context", {}).get(
         "timeframe_minutes"
     )
+    if closed_before is not None:
+        timeframe_minutes = _timeframe_to_minutes(candle_timeframe)
+        cutoff_ms = closed_before.timestamp() * 1000
+        interval_ms = (timeframe_minutes or 0) * 60_000
+        # Ticker timestamps denote candle opens, not when final values are known.
+        rows = [
+            row
+            for row in rows
+            if interval_ms > 0
+            and str(row.timestamp).isdigit()
+            and int(row.timestamp) + interval_ms <= cutoff_ms
+        ]
     enriched["market_context"] = _derive_market_context(
         rows,
         entry_price=entry_price,
@@ -920,7 +938,7 @@ async def _record_entry_prediction(
     source_event: str,
     outcome_status: str = "open",
     evaluation_id: str | None = None,
-) -> None:
+) -> bool:
     """Persist one AI trust ledger row for an entry observation or gate."""
     status = "scored" if provider_status == PROVIDER_STATUS_SCORED else "unscored"
     values = {
@@ -945,13 +963,16 @@ async def _record_entry_prediction(
         "outcome_status": outcome_status,
     }
     if evaluation_id:
-        await model.AiTrustPrediction.update_or_create(
+        _, created = await model.AiTrustPrediction.get_or_create(
             evaluation_id=evaluation_id,
             defaults=values,
         )
     else:
         await model.AiTrustPrediction.create(**values)
-    await bump_analytics_revision()
+        created = True
+    if created:
+        await bump_analytics_revision()
+    return created
 
 
 async def persist_entry_evaluation(
@@ -960,23 +981,57 @@ async def persist_entry_evaluation(
 ) -> bool:
     """Persist the exact enforced preflight evaluation after a successful fill."""
     if (
-        not evaluation.evaluated
-        or not evaluation.evaluation_id
+        not evaluation.evaluation_id
         or evaluation.trust_config is None
         or evaluation.feature_bundle is None
     ):
         return False
-    await _record_entry_prediction(
+    created = await _record_entry_prediction(
         symbol=str(payload.get("symbol") or ""),
         payload=payload,
         trust_config=evaluation.trust_config,
-        feature_bundle=evaluation.feature_bundle,
+        feature_bundle={
+            **evaluation.feature_bundle,
+            **(
+                {"capture_provenance": evaluation.capture_provenance}
+                if evaluation.capture_provenance
+                else {}
+            ),
+        },
         provider_status=evaluation.provider_status,
         scored=evaluation.scored,
         source_event="entry_preflight",
         evaluation_id=evaluation.evaluation_id,
     )
+    if created and not evaluation.evaluated:
+        await ai_work_queue.submit(
+            f"entry:{payload.get('deal_id') or evaluation.evaluation_id}",
+            lambda: _score_captured_entry(evaluation),
+            backpressure=False,
+        )
     return True
+
+
+async def _score_captured_entry(evaluation: AiTrustEntryGate) -> None:
+    """Score a saved pre-entry snapshot without replacing its later outcome."""
+    if evaluation.trust_config is None or evaluation.feature_bundle is None:
+        return
+    if not evaluation.trust_config.ollama_model:
+        return
+    provider_status, scored = await _score_with_provider(
+        evaluation.trust_config, copy.deepcopy(evaluation.feature_bundle)
+    )
+    await model.AiTrustPrediction.filter(evaluation_id=evaluation.evaluation_id).update(
+        status="scored" if provider_status == PROVIDER_STATUS_SCORED else "unscored",
+        provider_status=provider_status,
+        risk_score=scored.get("risk_score") if scored else None,
+        confidence=scored.get("confidence") if scored else None,
+        would_warn=scored.get("would_warn") if scored else None,
+        warning_severity=scored.get("warning_severity") if scored else "none",
+        reason_codes_json=_json_dumps(scored.get("reason_codes") if scored else []),
+        operator_note=scored.get("operator_note") if scored else None,
+    )
+    await bump_analytics_revision()
 
 
 async def observe_new_deal(symbol: str, payload: dict[str, Any]) -> None:
@@ -1052,11 +1107,7 @@ async def evaluate_entry_enforcement(
 ) -> AiTrustEntryGate:
     """Return whether optional AI warning enforcement allows an entry order."""
     trust_config = _config_from_snapshot(config_snapshot)
-    if (
-        not trust_config.enabled
-        or not trust_config.enforce_warnings
-        or not _is_entry_enforcement_candidate(payload)
-    ):
+    if not trust_config.enabled or not _is_entry_enforcement_candidate(payload):
         return AiTrustEntryGate(
             allowed=True,
             evaluated=False,
@@ -1066,23 +1117,55 @@ async def evaluate_entry_enforcement(
     gate_payload = {
         **payload,
         "symbol": str(symbol or payload.get("symbol") or ""),
-        "timestamp": str(payload.get("timestamp") or "") or _now_ms_text(),
+        "timestamp": _now_ms_text(),
     }
+    evaluation_id = str(uuid.uuid4())
+    capture_started = datetime.now(UTC)
     feature_bundle = await enrich_entry_feature_bundle(
         build_entry_feature_bundle(
             str(symbol or gate_payload.get("symbol") or ""),
             gate_payload,
             source_event="entry_preflight",
-        )
+        ),
+        closed_before=capture_started,
+        candle_timeframe=resolve_timeframe(config_snapshot),
     )
+    captured_at = datetime.now(UTC).isoformat()
+    provenance = {
+        "source": "audited_entry_capture_v1",
+        "feature_sha256": hashlib.sha256(
+            json.dumps(
+                feature_bundle, sort_keys=True, separators=(",", ":"), allow_nan=False
+            ).encode()
+        ).hexdigest(),
+        "captured_at": captured_at,
+        "latest_information_at": captured_at,
+        "decision_at": captured_at,
+        "evidence": f"ai_trust_predictions:evaluation_id={evaluation_id};closed_before={capture_started.isoformat()}",
+    }
+    if not trust_config.enforce_warnings:
+        return AiTrustEntryGate(
+            allowed=True,
+            evaluated=False,
+            provider_status=(
+                "pending"
+                if trust_config.ollama_model
+                else PROVIDER_STATUS_MISSING_MODEL
+            ),
+            evaluation_id=evaluation_id,
+            trust_config=trust_config,
+            feature_bundle=copy.deepcopy(feature_bundle),
+            capture_provenance=provenance,
+        )
     provider_status = PROVIDER_STATUS_MISSING_MODEL
     scored: dict[str, Any] | None = None
-    evaluation_id = str(uuid.uuid4())
     if trust_config.ollama_model:
         provider_status, scored = await _score_with_provider(
             trust_config,
             feature_bundle,
         )
+
+    provenance["decision_at"] = datetime.now(UTC).isoformat()
 
     provider_unavailable = provider_status != PROVIDER_STATUS_SCORED
     warning_block = bool(
@@ -1097,7 +1180,7 @@ async def evaluate_entry_enforcement(
                 symbol=str(symbol or gate_payload.get("symbol") or ""),
                 payload=gate_payload,
                 trust_config=trust_config,
-                feature_bundle=feature_bundle,
+                feature_bundle={**feature_bundle, "capture_provenance": provenance},
                 provider_status=provider_status,
                 scored=scored,
                 source_event="entry_blocked",
@@ -1133,6 +1216,7 @@ async def evaluate_entry_enforcement(
             trust_config=trust_config,
             feature_bundle=feature_bundle,
             scored=scored,
+            capture_provenance=provenance,
         )
 
     return AiTrustEntryGate(
@@ -1149,6 +1233,7 @@ async def evaluate_entry_enforcement(
         trust_config=trust_config,
         feature_bundle=feature_bundle,
         scored=scored,
+        capture_provenance=provenance,
     )
 
 

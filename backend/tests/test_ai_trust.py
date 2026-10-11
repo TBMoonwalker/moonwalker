@@ -1115,3 +1115,149 @@ async def test_calibration_skips_malformed_reason_json(
         )
     finally:
         await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_shadow_capture_freezes_pre_entry_and_preserves_closed_outcome(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Post-fill inference must use only frozen inputs and keep later outcomes."""
+    from service.ai_trust_comparison import database_samples, validate_sample
+
+    queued: list[Any] = []
+    requests: list[dict[str, Any]] = []
+
+    async def enqueue(_key: str, work: Any, **_kwargs: Any) -> bool:
+        queued.append(work)
+        return True
+
+    async def score(_config: Any, features: dict[str, Any]):
+        requests.append(features)
+        return ai_trust.PROVIDER_STATUS_SCORED, {
+            "risk_score": 20,
+            "confidence": 0.8,
+            "would_warn": False,
+            "warning_severity": "none",
+            "reason_codes": [],
+            "operator_note": "Normal entry.",
+        }
+
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        monkeypatch.setattr(ai_trust.ai_work_queue, "submit", enqueue)
+        monkeypatch.setattr(ai_trust, "_score_with_provider", score)
+        now_ms = int(datetime.now(UTC).timestamp() * 1000)
+        for offset, close in ((-120_000, 100.0), (0, 999.0), (120_000, 9999.0)):
+            await model.Tickers.create(
+                symbol="BTC/USDT",
+                timestamp=str(now_ms + offset),
+                open=close,
+                high=close,
+                low=close,
+                close=close,
+                volume=1.0,
+            )
+        payload = {
+            "baseorder": True,
+            "ordersize": 50.0,
+            "price": 100.0,
+            "timestamp": "9999999999999",
+            "api_key": "secret",
+        }
+        gate = await ai_trust.evaluate_entry_enforcement(
+            "BTC/USDT",
+            payload,
+            {
+                "ai_trust_enabled": True,
+                "ai_trust_enforce_warnings": False,
+                "ai_trust_ollama_model": "test-model",
+                "timeframe": "1m",
+            },
+        )
+        assert gate.allowed and not gate.evaluated
+        assert requests == []
+        assert await model.AiTrustPrediction.all().count() == 0
+        assert gate.feature_bundle is not None
+        assert gate.feature_bundle["market_context"]["candle_count"] == 1
+        assert gate.feature_bundle["market_context"]["latest_close"] == 100.0
+        await model.Tickers.all().update(close=456.0)
+        filled = {"symbol": "BTC/USDT", "deal_id": "captured-deal", "price": 222.0}
+        assert await ai_trust.persist_entry_evaluation(gate, filled)
+        samples = await database_samples(tmp_path / "test.sqlite", 10)
+        sample = validate_sample(samples[0])
+        assert sample["features"]["position"]["entry_price"] == 100.0
+        assert "secret" not in json.dumps(sample)
+        await model.AiTrustPrediction.filter(evaluation_id=gate.evaluation_id).update(
+            outcome_status="closed",
+            outcome_profit=2.0,
+            outcome_duration_hours=1.0,
+            outcome_so_count=0,
+        )
+        await queued[0]()
+        assert len(requests) == 1
+        assert requests[0] == gate.feature_bundle
+        assert "capture_provenance" not in requests[0]
+        assert await ai_trust.persist_entry_evaluation(gate, filled)
+        assert len(queued) == 1
+        row = await model.AiTrustPrediction.get(evaluation_id=gate.evaluation_id)
+        assert row.outcome_status == "closed" and row.outcome_profit == 2.0
+        assert row.status == "scored"
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_capture_without_model_survives_full_queue(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A dropped background job must not lose the persisted capture."""
+    from service.ai_trust_comparison import database_samples, validate_sample
+
+    async def full_queue(*_args: Any, **_kwargs: Any) -> bool:
+        return False
+
+    try:
+        await _init_db(tmp_path, monkeypatch)
+        monkeypatch.setattr(ai_trust.ai_work_queue, "submit", full_queue)
+        gate = await ai_trust.evaluate_entry_enforcement(
+            "BTC/USDT",
+            {
+                "baseorder": True,
+                "ordersize": 50.0,
+            },
+            {"ai_trust_enabled": True},
+        )
+        assert await ai_trust.persist_entry_evaluation(
+            gate,
+            {
+                "symbol": "BTC/USDT",
+                "deal_id": "no-model-deal",
+            },
+        )
+        sample = validate_sample(
+            (await database_samples(tmp_path / "test.sqlite", 10))[0]
+        )
+        assert sample["features"]["source_event"] == "entry_preflight"
+        await ai_trust._score_captured_entry(gate)
+        row = await model.AiTrustPrediction.get(deal_id="no-model-deal")
+        assert row.provider_status == "missing_model"
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("enabled,safety", [(False, False), (True, True)])
+async def test_capture_bypasses_disabled_and_safety_orders(
+    enabled: bool, safety: bool
+) -> None:
+    """Disabled trust and safety orders must not query context or collect inputs."""
+    gate = await ai_trust.evaluate_entry_enforcement(
+        "BTC/USDT",
+        {
+            "baseorder": not safety,
+            "safetyorder": safety,
+        },
+        {"ai_trust_enabled": enabled},
+    )
+    assert gate.allowed and gate.feature_bundle is None
+    assert gate.capture_provenance is None

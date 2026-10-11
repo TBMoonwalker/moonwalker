@@ -1,6 +1,11 @@
 """Regression coverage for the repository startup script."""
 
+import os
+import shutil
+import subprocess
 from pathlib import Path
+
+import pytest
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
 RUN_SCRIPT = ROOT_DIR / "run.sh"
@@ -118,3 +123,121 @@ def test_stop_script_allows_graceful_shutdown_before_forcing_exit() -> None:
     assert force_step in stop_script
     assert stop_script.index(term_step) < stop_script.index(wait_step)
     assert stop_script.index(wait_step) < stop_script.index(force_step)
+
+
+def _launcher_fixture(
+    tmp_path: Path, versions: dict[str, str]
+) -> tuple[Path, dict[str, str]]:
+    """Run the real launcher against harmless build/interpreter stubs."""
+    shutil.copy(RUN_SCRIPT, tmp_path / "run.sh")
+    shutil.copy(ROOT_DIR / ".python-version", tmp_path / ".python-version")
+    for directory in (
+        "frontend/dist/assets",
+        "backend/static",
+        "backend/templates",
+        "bin",
+    ):
+        (tmp_path / directory).mkdir(parents=True, exist_ok=True)
+    (tmp_path / "frontend/dist/index.html").write_text("fixture")
+    (tmp_path / "backend/static/preserved.txt").write_text("original")
+    stubs = {
+        "node": '#!/bin/sh\nprintf "24.11.0\\n"\n',
+        "npm": '#!/bin/sh\nif [ "$1" = "--version" ]; then printf "11.0.0\\n"; else printf "npm %s\\n" "$*" >> "$LAUNCH_TRACE"; fi\n',
+    }
+    for name, version in versions.items():
+        stubs[name] = f'''#!/bin/sh
+if [ "$1" = "-c" ]; then
+    printf "{version}\\n"
+else
+    printf "%s %s\\n" "$0" "$*" >> "$LAUNCH_TRACE"
+    exit 42
+fi
+'''
+    for name, contents in stubs.items():
+        executable = tmp_path / "bin" / name
+        executable.write_text(contents)
+        executable.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path / 'bin'}:/usr/bin:/bin",
+        "LAUNCH_TRACE": str(tmp_path / "trace"),
+    }
+    env.pop("MOONWALKER_PYTHON", None)
+    return tmp_path, env
+
+
+@pytest.mark.parametrize(
+    "versions,expected",
+    [
+        ({"python3": "3.9", "python3.14": "3.14"}, "python3.14"),
+        ({"python3": "3.14", "python3.14": "3.14"}, "python3"),
+        ({"python3": "3.15", "python3.14": "3.14"}, "python3.14"),
+    ],
+)
+def test_launcher_uses_verified_python_when_generic_command_is_wrong(
+    tmp_path: Path, versions: dict[str, str], expected: str
+) -> None:
+    root, env = _launcher_fixture(tmp_path, versions)
+    result = subprocess.run(
+        ["/bin/bash", "run.sh", "start"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    # The selected venv stub deliberately stops before dependency installation.
+    assert result.returncode == 42, result.stdout + result.stderr
+    trace = (root / "trace").read_text()
+    assert f"/bin/{expected} -m venv .venvs/slot-a" in trace
+    assert not (root / "moonwalker.lock").exists()
+
+
+def test_missing_python_fails_before_build_or_asset_replacement(tmp_path: Path) -> None:
+    root, env = _launcher_fixture(tmp_path, {"python3": "3.9"})
+    result = subprocess.run(
+        ["/bin/bash", "run.sh", "start"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert "Python 3.14 is required" in result.stdout + result.stderr
+    assert (root / "backend/static/preserved.txt").read_text() == "original"
+    assert not (root / "trace").exists()
+    assert not (root / ".venvs").exists()
+
+
+def test_explicit_python_override_is_verified_and_never_silently_replaced(
+    tmp_path: Path,
+) -> None:
+    root, env = _launcher_fixture(
+        tmp_path, {"python3": "3.14", "python3.14": "3.14", "custom python": "3.9"}
+    )
+    env["MOONWALKER_PYTHON"] = str(root / "bin" / "custom python")
+    result = subprocess.run(
+        ["/bin/bash", "run.sh", "start"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert result.returncode == 1
+    assert not (root / "trace").exists()
+    assert (root / "backend/static/preserved.txt").read_text() == "original"
+    (root / "bin" / "custom python").write_text(
+        (root / "bin" / "python3.14").read_text()
+    )
+    success = subprocess.run(
+        ["/bin/bash", "run.sh", "start"],
+        cwd=root,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=10,
+    )
+    assert success.returncode == 42, success.stdout + success.stderr
+    assert "/bin/custom python -m venv" in (root / "trace").read_text()

@@ -493,7 +493,9 @@ async def persist_buy_trade(
         _persist_buy, f"persisting buy order for {symbol}"
     )
     try:
-        if entry_evaluation is not None and entry_evaluation.evaluated:
+        if entry_evaluation is not None and (
+            entry_evaluation.evaluated or entry_evaluation.capture_provenance
+        ):
             await persist_entry_evaluation(entry_evaluation, payload)
         elif create_open_trade and await is_entry_observation_enabled():
             await schedule_entry_observation(symbol, payload)

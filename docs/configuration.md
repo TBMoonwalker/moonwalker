@@ -162,7 +162,7 @@ are not exposed in the UI and must be set via the API.
 | `autopilot_green_phase_confirm_cycles` | `int` | Number of consecutive evaluation runs that must satisfy the enter condition before Green Phase activates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `2` |
 | `autopilot_green_phase_release_cycles` | `int` | Number of consecutive evaluation runs below the exit condition before Green Phase deactivates. The timing of those runs is controlled by `autopilot_green_phase_eval_interval_sec`. | `4` |
 | `autopilot_green_phase_max_locked_fund_percent` | `float` | Hard ceiling for locked funds, in percent of `capital_max_fund`, above which Green Phase may not add extra deals. | `85` |
-| `ai_trust_enabled` | `bool` | Enable local AI Trust entry observations and the Statistics cockpit. | `false` |
+| `ai_trust_enabled` | `bool` | Enable local AI Trust entry observations, automatic pre-entry capture for new base orders, and the Statistics cockpit. Capture works without a model; see [offline comparison](ai_trust_comparison.md). | `false` |
 | `ai_trust_enforce_warnings` | `bool` | Block new entries when AI Trust returns a warning or its configured provider is unavailable. Requires AI Trust to be enabled. | `false` |
 | `ai_trust_ollama_base_url` | `string` | Base URL for the local Ollama provider used by AI Trust. | `http://localhost:11434` |
 | `ai_trust_ollama_model` | `string` | Ollama model name used for AI Trust entry evaluation. Live warning enforcement requires a configured model. | empty |

@@ -82,6 +82,47 @@ check_frontend_runtime() {
     fi
 }
 
+resolve_python_runtime() {
+    local required_version
+    local candidate
+    local resolved
+    local actual_version
+    local brew_prefix
+    local candidates=()
+
+    if ! required_version="$(cut -d. -f1,2 .python-version 2>/dev/null)" ||
+        ! [[ "$required_version" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        echo "❌ Cannot read the Python runtime pin from .python-version." >&2
+        return 1
+    fi
+
+    if [ -n "${MOONWALKER_PYTHON:-}" ]; then
+        # An explicit operator choice must never silently select another runtime.
+        candidates=("$MOONWALKER_PYTHON")
+    else
+        candidates=(python3 "python${required_version}")
+        if command -v brew >/dev/null 2>&1; then
+            if brew_prefix="$(brew --prefix "python@${required_version}" 2>/dev/null)"; then
+                candidates+=("${brew_prefix}/bin/python${required_version}")
+            fi
+        fi
+    fi
+
+    for candidate in "${candidates[@]}"; do
+        resolved="$(command -v "$candidate" 2>/dev/null)" || continue
+        if actual_version="$("$resolved" -c 'import sys; print("{}.{}".format(sys.version_info.major, sys.version_info.minor))' 2>/dev/null)" &&
+            [ "$actual_version" = "$required_version" ]; then
+            printf '%s\n' "$resolved"
+            return 0
+        fi
+    done
+
+    echo "❌ Python ${required_version} is required. See .python-version." >&2
+    echo "   Install a compatible interpreter or set MOONWALKER_PYTHON to its executable." >&2
+    echo "   macOS Homebrew: brew install python@${required_version}" >&2
+    return 1
+}
+
 service_process_is_running() {
     local pid
 
@@ -172,6 +213,7 @@ start_services() {
     local active_target=""
     local app_pid
     local release_venv
+    local bootstrap_python
     # Check if services are already running
     if [ -f "$LOCK_FILE" ]; then
         if service_process_is_running; then
@@ -184,6 +226,8 @@ start_services() {
     fi
 
     check_frontend_runtime
+    # Resolve before builds or asset replacement, and reuse this verified binary.
+    bootstrap_python="$(resolve_python_runtime)" || return 1
 
     echo "📦 Installing frontend deps & building Vue..."
     cd frontend
@@ -211,10 +255,6 @@ start_services() {
     fi
 
     echo "🐍 Building a verified Python environment..."
-    if [ "$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" != "3.14" ]; then
-        echo "❌ Python 3.14 is required. See .python-version."
-        exit 1
-    fi
     if [ -L .venv ]; then
         active_target="$(readlink .venv)"
     fi
@@ -225,7 +265,7 @@ start_services() {
     fi
     mkdir -p .venvs
     rm -rf "$release_venv" .venv.next
-    python3 -m venv "$release_venv"
+    "$bootstrap_python" -m venv "$release_venv"
     ./scripts/install_python_dependencies.sh \
         "$release_venv/bin/python" \
         backend/requirements.txt

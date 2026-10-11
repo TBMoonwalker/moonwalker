@@ -30,9 +30,18 @@ Moonwalker runs as a single-node, single-instance application.
 - multiple dashboard clients can connect to the same instance concurrently
 - websocket streams are shared fan-out producers, not one producer per client
 
-`./run.sh start` builds the frontend, copies the assets into the backend,
-creates or reuses `.venv`, installs backend requirements, and starts the
-Litestar app in the background.
+`./run.sh start` verifies Node/npm and the Python major/minor version in
+`.python-version` before building or replacing assets. It builds the frontend,
+stages the assets, creates a fresh inactive environment slot, installs and
+validates backend requirements, switches `.venv`, then starts Litestar in the
+background.
+
+The launcher accepts a compatible `python3` on PATH, otherwise tries the
+versioned command (currently `python3.14`) and an installed Homebrew
+`python@3.14` executable. It does not install Python automatically. To choose
+an interpreter explicitly, use
+`MOONWALKER_PYTHON=/absolute/path/to/python3.14 ./run.sh start`. That override
+is verified and never silently replaced by another interpreter.
 
 Production supervisors should invoke `./run.sh start` or perform the same
 requirements installation step before launching `backend/app.py` directly.

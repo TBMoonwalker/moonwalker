@@ -8,6 +8,7 @@ dashboard clients can connect to that instance.
 - [Configuration and settings reference](configuration.md)
 - [Expert safeguards and safety-order sizing modes](dynamic-so.md)
 - [AI Trust local calibration](ai-trust.md)
+- [Offline AI Trust model comparison](ai_trust_comparison.md)
 - [Signal plugins](signals.md)
 - [Strategy Builder](strategies.md)
 - [Telegram monitoring](monitoring.md)
