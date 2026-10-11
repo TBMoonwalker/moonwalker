@@ -338,8 +338,8 @@ and resumes local persistence rather than submitting a duplicate. This read-only
 recovery runs before admission for fresh capital, so a fully committed budget
 does not block accounting for an existing order. Unavailable or
 incomplete runtime lookups retain the block for a later attempt. Cancellation
-during a lookup restores the accepted state and propagates cancellation; repeated signals
-do not close the shared exchange client or replay the original buy. This recovery
+during a lookup restores the accepted state and propagates cancellation. The recovery
+lookup does not close the shared exchange client or replay the original buy. This recovery
 is triggered by subsequent buy attempts, rather than a background polling job.
 
 Existing accepted Bybit operations can recover on a subsequent signal after this
