@@ -282,6 +282,14 @@ class Orders:
         config: dict[str, Any],
     ) -> PlacementReconciliationSummary:
         """Reconcile durable exchange effects before runtime producers start."""
+        reconciler = self._build_placement_reconciler()
+        try:
+            return await reconciler.reconcile(config)
+        finally:
+            await self.exchange.close()
+
+    def _build_placement_reconciler(self) -> PlacementReconciler:
+        """Build recovery callbacks for startup and accepted runtime buys."""
         recovery = PlacementRecoveryHandler(
             exchange=self.exchange,
             trades=self.trades,
@@ -292,15 +300,11 @@ class Orders:
             build_limit_sell_payload=self._build_tp_limit_sell_payload,
             persist_limit_fallback=self._persist_reconciled_limit_fallback,
         )
-        reconciler = PlacementReconciler(
+        return PlacementReconciler(
             self.exchange,
             recovery.resume,
             self.placement_intents,
         )
-        try:
-            return await reconciler.reconcile(config)
-        finally:
-            await self.exchange.close()
 
     async def _persist_reconciled_limit_fallback(
         self,
@@ -1859,6 +1863,23 @@ class Orders:
             if placement.completed:
                 return True, None
             if not placement.claimed:
+                if (
+                    placement.state == PlacementIntentState.ACCEPTED.value
+                    and placement.operation_id
+                    and config.get("exchange") in {"bybit", "bybiteu"}
+                ):
+                    outcome = (
+                        await self._build_placement_reconciler().reconcile_operation(
+                            placement.operation_id, config
+                        )
+                    )
+                    if outcome == PlacementIntentState.COMPLETED.value:
+                        return True, None
+                    return False, {
+                        "ok": False,
+                        "reason": f"placement_{outcome}",
+                        "symbol": str(order.get("symbol") or ""),
+                    }
                 logging.warning(
                     "Skipping duplicate buy submission for %s: operation=%s state=%s.",
                     order.get("symbol"),

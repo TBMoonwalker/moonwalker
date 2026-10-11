@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
+import ccxt.async_support as ccxt
 import helper
 from service.exchange_capabilities import (
     ExchangeOrderLookupStatus,
@@ -79,10 +81,23 @@ class PlacementReconciler:
             action_required=action_required,
         )
 
+    async def reconcile_operation(
+        self, operation_id: str, config: dict[str, Any]
+    ) -> str:
+        """Recover an accepted operation during runtime without resubmitting it."""
+        intent = await self.intents.get(operation_id)
+        if intent is None:
+            return PlacementIntentState.QUARANTINED.value
+        if str(intent.state) != PlacementIntentState.ACCEPTED.value:
+            return str(intent.state)
+        return await self._reconcile_one(intent, config, runtime=True)
+
     async def _reconcile_one(
         self,
         intent: Any,
         config: dict[str, Any],
+        *,
+        runtime: bool = False,
     ) -> str:
         """Resolve one operation without ever resubmitting it."""
         operation_id = str(intent.operation_id)
@@ -137,20 +152,42 @@ class PlacementReconciler:
                 reason_code="startup_found_submitting",
             )
         await self.intents.mark_reconciling(operation_id)
-        lookup = await self.exchange.lookup_spot_order(
-            str(intent.symbol),
-            config,
-            exchange_order_id=(
-                str(intent.exchange_order_id)
-                if intent.exchange_order_id is not None
-                else None
-            ),
-            client_order_id=(
-                str(intent.client_order_id)
-                if intent.client_order_id is not None
-                else None
-            ),
-        )
+        try:
+            lookup = await self.exchange.lookup_spot_order(
+                str(intent.symbol),
+                config,
+                exchange_order_id=(
+                    str(intent.exchange_order_id)
+                    if intent.exchange_order_id is not None
+                    else None
+                ),
+                client_order_id=(
+                    str(intent.client_order_id)
+                    if intent.client_order_id is not None
+                    else None
+                ),
+            )
+        except (ccxt.BaseError, OSError, TimeoutError) as exc:
+            if not runtime:
+                raise
+            logging.warning(
+                "Accepted buy lookup remains pending for %s: %s", operation_id, exc
+            )
+            await self.intents.transition(
+                operation_id,
+                PlacementIntentState.ACCEPTED,
+                reason_code="runtime_lookup_pending",
+            )
+            return PlacementIntentState.ACCEPTED.value
+        if runtime and (
+            lookup.status != ExchangeOrderLookupStatus.FOUND or lookup.order is None
+        ):
+            await self.intents.transition(
+                operation_id,
+                PlacementIntentState.ACCEPTED,
+                reason_code="runtime_lookup_pending",
+            )
+            return PlacementIntentState.ACCEPTED.value
         if lookup.status == ExchangeOrderLookupStatus.NOT_FOUND:
             await self.intents.transition(
                 operation_id,
@@ -170,6 +207,54 @@ class PlacementReconciler:
         order = lookup.order
         exchange_state = str(order.get("status") or "").strip().lower()
         action = str(intent.action)
+        terminal_states = {
+            "closed",
+            "filled",
+            "canceled",
+            "cancelled",
+            "rejected",
+            "expired",
+        }
+        if action == PlacementAction.BUY.value:
+            try:
+                raw_filled = order.get("filled")
+                if raw_filled is None or isinstance(raw_filled, bool):
+                    raise ValueError("Missing buy fill evidence")
+                buy_filled = float(raw_filled)
+                if not math.isfinite(buy_filled) or buy_filled < 0:
+                    raise ValueError("Invalid buy fill evidence")
+            except (TypeError, ValueError):
+                buy_filled = None
+            if (
+                buy_filled is not None
+                and buy_filled > 0
+                and exchange_state in terminal_states
+            ):
+                await self.intents.transition(
+                    operation_id,
+                    PlacementIntentState.FILLED,
+                    exchange_order_id=str(order.get("id") or "") or None,
+                    result=order,
+                )
+                return await self._resume_or_quarantine(intent, order, config)
+            if (
+                buy_filled is None
+                or exchange_state not in terminal_states
+                or (buy_filled == 0 and exchange_state in {"closed", "filled"})
+            ):
+                if runtime:
+                    await self.intents.transition(
+                        operation_id,
+                        PlacementIntentState.ACCEPTED,
+                        reason_code="runtime_fill_pending",
+                    )
+                    return PlacementIntentState.ACCEPTED.value
+                await self._quarantine(
+                    operation_id,
+                    reason_code="buy_fill_unconfirmed",
+                    error_message="Buy order has no definitive terminal fill evidence.",
+                )
+                return PlacementIntentState.QUARANTINED.value
         if exchange_state in {"canceled", "cancelled", "rejected", "expired"}:
             if action == PlacementAction.CANCEL.value:
                 await self.intents.transition(

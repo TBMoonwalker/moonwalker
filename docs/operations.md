@@ -323,3 +323,22 @@ acceptance do not trigger this retry; existing placement reconciliation applies.
 This behavior affects capped Bybit EU recovery buys only. Binance and ordinary
 market buys retain their existing paths. Strategy signals and recovery sizing
 thresholds are unchanged.
+
+## Bybit IOC acknowledgements and pending buys
+
+A Bybit or Bybit EU capped recovery buy can return an acknowledgement before
+its fill information is available. Moonwalker reads that same exchange order
+up to three times, within five seconds, without placing another order. A terminal
+positive fill, including a partially filled canceled IOC, is finalized using
+the execution ledger. A confirmed canceled zero-fill order is released.
+
+If the outcome remains unknown, the accepted placement stays blocked. On a later
+buy attempt for that symbol, Moonwalker looks up the pending accepted operation
+and resumes local persistence rather than submitting a duplicate. Unavailable or
+incomplete runtime lookups retain the block for a later attempt; repeated signals
+do not close the shared exchange client or replay the original buy. This recovery
+is triggered by subsequent buy attempts, rather than a background polling job.
+
+Existing accepted Bybit operations can recover on a subsequent signal after this
+change is deployed. The actual exchange execution must be confirmed; removing an
+accepted placement manually is not a substitute for accounting for its fills.
