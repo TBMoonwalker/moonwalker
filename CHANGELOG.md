@@ -2,6 +2,14 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.2.1.0] - 2026-10-11
+
+### Fixed
+- Bybit EU recovery safety orders now respect the exchange's current maximum buy
+  price, preventing avoidable price-band rejections. A changing price band permits
+  one checked retry; unavailable limits and uncertain submissions never bypass
+  the strategy price ceiling or existing order protections.
+
 ## [5.2.0.0] - 2026-10-10
 
 ### Fixed

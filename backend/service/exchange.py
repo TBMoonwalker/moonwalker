@@ -1,6 +1,9 @@
 """Exchange service for CCXT async operations."""
 
 import asyncio
+import json
+import math
+import time
 from collections.abc import Awaitable, Callable
 from typing import Any, cast
 
@@ -862,6 +865,51 @@ class Exchange:
             raise ValueError("Execution cap is below the minimum price tick")
         return price
 
+    async def __get_bybiteu_buy_ceiling(self, symbol: str, ceiling: float) -> float:
+        """Clamp a recovery ceiling to Bybit EU's fresh dynamic spot price band."""
+        market_id = self.exchange.market(symbol)["id"]
+        async with asyncio.timeout(10):
+            response = await self.exchange.public_get_v5_market_price_limit(
+                {"category": "spot", "symbol": market_id}
+            )
+        if (
+            not isinstance(response, dict)
+            or type(response.get("retCode")) is not int
+            or response["retCode"] != 0
+        ):
+            raise ValueError("Bybit EU returned an invalid price-limit response")
+        result = response.get("result")
+        if not isinstance(result, dict) or result.get("symbol") != market_id:
+            raise ValueError("Bybit EU price limit does not match the requested symbol")
+        timestamp = result.get("ts")
+        if (
+            not isinstance(timestamp, str)
+            or not timestamp.isdigit()
+            or len(timestamp) > 20
+        ):
+            raise ValueError("Bybit EU price limit has no valid timestamp")
+        age_ms = time.time() * 1000 - int(timestamp)
+        if not -5000 <= age_ms <= 10000:
+            raise ValueError("Bybit EU price limit is stale or future-dated")
+        raw_ceiling = result.get("buyLmt")
+        if type(raw_ceiling) not in (str, int, float):
+            raise ValueError("Bybit EU maximum buy price has an invalid type")
+        band_ceiling = float(raw_ceiling)
+        if not math.isfinite(band_ceiling) or band_ceiling <= 0:
+            raise ValueError("Bybit EU maximum buy price is invalid")
+        return min(ceiling, band_ceiling)
+
+    def __is_bybiteu_price_band_rejection(self, error: Exception) -> bool:
+        """Recognize only a definitive Bybit EU maximum-buy-price rejection."""
+        if getattr(self.exchange, "id", None) != "bybiteu":
+            return False
+        message = str(error)
+        try:
+            payload = json.loads(message[message.index("{") :])
+        except (ValueError, TypeError):
+            return False
+        return isinstance(payload, dict) and payload.get("retCode") == 170193
+
     async def get_minimum_buy_notional(
         self,
         config: dict[str, Any],
@@ -1025,9 +1073,13 @@ class Exchange:
         return resolved_symbol, target_amount
 
     async def create_spot_market_buy(
-        self, order: dict[str, Any], config: dict[str, Any]
+        self,
+        order: dict[str, Any],
+        config: dict[str, Any],
+        *,
+        _bybiteu_price_band_retry: bool = False,
     ) -> dict[str, Any] | None:
-        """Create a spot market buy order."""
+        """Create a spot buy, refreshing a rejected Bybit EU price band once."""
         try:
             require_exchange_placement_capabilities(
                 config,
@@ -1056,6 +1108,30 @@ class Exchange:
         )
         maximum_buy_price = float(order.get("maximum_buy_price") or 0.0)
         if maximum_buy_price > 0:
+            if getattr(self.exchange, "id", None) == "bybiteu":
+                try:
+                    maximum_buy_price = await self.__get_bybiteu_buy_ceiling(
+                        order["symbol"], maximum_buy_price
+                    )
+                except (
+                    ccxt.BaseError,
+                    TimeoutError,
+                    TypeError,
+                    ValueError,
+                    KeyError,
+                ) as exc:
+                    self._last_buy_precheck_result = build_buy_precheck_result(
+                        ok=False,
+                        reason="exchange_price_band_unavailable",
+                        symbol=str(order.get("symbol") or ""),
+                        maximum_buy_price=maximum_buy_price,
+                    )
+                    logging.warning(
+                        "Skipping Bybit EU recovery buy for %s: price band unavailable (%s).",
+                        order.get("symbol"),
+                        exc,
+                    )
+                    return None
             try:
                 maximum_buy_price = self.__get_capped_buy_price(
                     order["symbol"], maximum_buy_price
@@ -1151,6 +1227,20 @@ class Exchange:
         try:
             order = await self.__execute_market_buy(submitted_order)
         except (ccxt.InvalidOrder, ccxt.BadRequest) as exc:
+            if (
+                maximum_buy_price > 0
+                and not _bybiteu_price_band_retry
+                and self.__is_bybiteu_price_band_rejection(exc)
+            ):
+                # This response explicitly rejected the order. Accepted/uncertain
+                # submissions remain in the existing reconciliation path.
+                logging.warning(
+                    "Refreshing Bybit EU price band and retrying recovery buy for %s once after rejection.",
+                    submitted_order.get("symbol"),
+                )
+                return await self.create_spot_market_buy(
+                    submitted_order, config, _bybiteu_price_band_retry=True
+                )
             self._last_buy_precheck_result = build_buy_precheck_result(
                 ok=False,
                 reason="exchange_rejected_order",
