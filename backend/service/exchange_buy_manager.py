@@ -1,5 +1,6 @@
 """Market buy execution and finalization helpers."""
 
+import asyncio
 import json
 import math
 from typing import Any, cast
@@ -65,6 +66,30 @@ class ExchangeBuyManager:
                     cause=TypeError("Exchange returned a non-object order result"),
                     operation_id=str(order.get("operation_id") or "") or None,
                 )
+            if (
+                maximum_buy_price > 0
+                and getattr(exchange, "id", None) in {"bybit", "bybiteu"}
+                and trade.get("filled") in (None, "")
+            ):
+                try:
+                    trade = await self._resolve_bybit_ioc(exchange, order, trade)
+                except (
+                    ccxt.BaseError,
+                    TimeoutError,
+                    OSError,
+                    TypeError,
+                    ValueError,
+                    RuntimeError,
+                    KeyError,
+                    AttributeError,
+                ) as exc:
+                    raise ExchangePostSubmissionFailure(
+                        action="buy",
+                        symbol=str(order["symbol"]),
+                        order={**order, **trade},
+                        cause=exc,
+                        operation_id=str(order.get("operation_id") or "") or None,
+                    ) from exc
             try:
                 order.update(cast(ExchangeOrderPayload, trade))
             except (TypeError, ValueError, RuntimeError, KeyError) as exc:
@@ -178,6 +203,42 @@ class ExchangeBuyManager:
         except (TypeError, ValueError, RuntimeError, KeyError) as exc:
             self._logger.error("Buying pair %s failed with: %s", order["symbol"], exc)
             return None
+
+    async def _resolve_bybit_ioc(
+        self,
+        exchange: Any,
+        order: ExchangeOrderPayload,
+        acknowledgement: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Read an acknowledged IOC to terminal status without resubmitting it."""
+        order_id = str(acknowledgement.get("id") or "")
+        if not order_id:
+            raise ValueError("Acknowledged IOC has no exchange order identity")
+        async with asyncio.timeout(5):
+            for attempt in range(3):
+                try:
+                    result = await exchange.fetch_order(order_id, order["symbol"])
+                except ccxt.OrderNotFound:
+                    result = None
+                if isinstance(result, dict):
+                    if str(result.get("id") or "") != order_id or (
+                        result.get("symbol") is not None
+                        and result["symbol"] != order["symbol"]
+                    ):
+                        raise ValueError("IOC lookup returned a different order")
+                    status = str(result.get("status") or "").lower()
+                    if result.get("filled") is not None and status in {
+                        "closed",
+                        "filled",
+                        "canceled",
+                        "cancelled",
+                        "rejected",
+                        "expired",
+                    }:
+                        return {**acknowledgement, **result}
+                if attempt < 2:
+                    await asyncio.sleep(0.2)
+        raise ValueError("Acknowledged IOC still has no terminal fill evidence")
 
     async def finalize_market_buy(
         self,
