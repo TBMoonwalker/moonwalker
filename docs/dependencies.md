@@ -83,10 +83,9 @@ does not expose that stable API yet, and the TypeScript team recommends that
 Vue projects keep using TypeScript 6 during this transition. The Node type
 package also stays on the Node 24 line to match Moonwalker's supported runtime.
 
-Do not update `@vue/test-utils` from `2.2.7` to `2.4.11` until its dependency
-tree is clean. The npm advisory service currently reports six high-severity
-findings through its `js-beautify`, `glob`, `minimatch`, and
-`brace-expansion` chain.
+The reviewed `@vue/test-utils` 2.5 line replaces the older dependency tree
+that introduced vulnerable `js-beautify` and `glob` dependencies. Recheck the
+resolved tree with npm audit when updating it.
 
 Ruff remains on `0.15.22`. Ruff `0.16.0` enables additional rules that surface
 287 findings in the current backend and test suite; adopting that version
@@ -112,9 +111,18 @@ CCXT `4.5.68` pins `setuptools 83.0.0`, which resolves the previously
 allowlisted `PYSEC-2026-3447` finding in setuptools 82.0.1. Moonwalker's Python
 audit no longer ignores that advisory or any other vulnerability.
 
-The current CCXT release still pins aiohttp `3.14.3`, certifi `2026.6.17`, cffi
-`2.0.0`, charset-normalizer `3.4.7`, and yarl `1.24.5`. Moonwalker keeps those
-audit-clean versions until CCXT relaxes its exact transitive constraints.
+CCXT `4.5.87` pins multidict `6.9.1`, which fixes the advisory affecting
+`6.7.1`. It permits compatible aiohttp, certifi, and yarl updates, while
+retaining exact pins for cffi `2.0.0`, charset-normalizer `3.4.7`, idna `3.18`,
+propcache `0.5.2`, pycparser `3.0`, and uvloop `0.22.1`. Respect those pins
+instead of forcing newer transitive versions. Multidict 7 remains blocked by
+CCXT's dependency contract. The development lock pins the reviewed filelock 4
+version used by CacheControl.
+
+VueUse 15 uses a scheduler callback for timers. Recovery status uses
+`useIntervalFn` with a five-second cadence so freshness checks do not run on
+every animation frame. Vitest and its V8 coverage provider are upgraded
+together to version 5; tests run with the new default mock-history clearing.
 
 ## Rollback
 

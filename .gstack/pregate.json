@@ -1,0 +1,14 @@
+{
+  "runner": "cd scripts && PATH=\"/opt/homebrew/opt/node@24/bin:$PATH\" ./ci.sh {files}",
+  "dependencies": {
+    "backend/requirements*.in": ["backend/tests/test_dependency_lock_policy.py"],
+    "backend/requirements*.txt": ["backend/tests/test_dependency_lock_policy.py"],
+    "frontend/package.json": ["backend/tests/test_dependency_lock_policy.py", "frontend/tests-vitest/recovery-dca-status.test.ts"],
+    "frontend/package-lock.json": ["backend/tests/test_dependency_lock_policy.py", "frontend/tests-vitest/recovery-dca-status.test.ts"],
+    "scripts/compile_requirements.sh": ["backend/tests/test_dependency_lock_policy.py"],
+    ".gstack/pregate.json": ["backend/tests/test_dependency_lock_policy.py"],
+    "docs/dependencies.md": [],
+    "VERSION": [],
+    "CHANGELOG.md": []
+  }
+}
