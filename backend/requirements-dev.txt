@@ -727,9 +727,9 @@ faker==40.43.0 \
     --hash=sha256:02fae4327c03a4a6315e1b428a3878f435bfc276c93435ea349b95c0c9372361 \
     --hash=sha256:9dd7c0ddfaf30c842b05502d3cf641c135e0120a3a19047008ba8525b72953ed
     # via polyfactory
-filelock==3.32.0 \
-    --hash=sha256:7be2ad23a14607ccc71808e68fe30848aeace7058ace17852f68e2a68e310402 \
-    --hash=sha256:d396bea984af47333ef05e50eae7eff88c84256de6112aea0ec48a233c064fe3
+filelock==4.1.1 \
+    --hash=sha256:3f4a557945a7b0f95efeb1f432267affe5d45ac8ddde2aed1b97ebb62382c089 \
+    --hash=sha256:7ba0927482c5a814b0a7f391d029ccdb8010f576f0a74c0dcde1811e8bc4c1b6
     # via
     #   -r requirements-dev.in
     #   cachecontrol

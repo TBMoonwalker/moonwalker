@@ -12,5 +12,5 @@ pytest-cov==7.1.0
 ruff==0.15.22  # Ruff 0.16 enables new rules that require a dedicated cleanup.
 vulture==2.16
 
-# Defer the filelock 4 major upgrade to a separate compatibility changeset.
-filelock==3.32.0
+# Explicit pin for CacheControl's reviewed file-cache locking dependency.
+filelock==4.1.1

@@ -35,7 +35,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { useNow } from '@vueuse/core'
+import { useIntervalFn, useNow } from '@vueuse/core'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
 
 type RecoveryTrade = {
@@ -53,7 +53,7 @@ type RecoveryTrade = {
 }
 const props = defineProps<{ trade: RecoveryTrade }>()
 const config = useSharedConfigSnapshot()
-const now = useNow({ interval: 5_000 })
+const now = useNow({ scheduler: (callback) => useIntervalFn(callback, 5_000) })
 const visible = computed(() => ['recovery_target', 'recovery_shadow'].includes(props.trade.dca_sizing_mode ?? ''))
 const shadow = computed(() => props.trade.dca_sizing_mode === 'recovery_shadow')
 const decision = computed(() => parseObject(props.trade.dca_last_decision_json))

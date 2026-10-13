@@ -115,8 +115,14 @@ CCXT `4.5.87` pins multidict `6.9.1`, which fixes the advisory affecting
 `6.7.1`. It permits compatible aiohttp, certifi, and yarl updates, while
 retaining exact pins for cffi `2.0.0`, charset-normalizer `3.4.7`, idna `3.18`,
 propcache `0.5.2`, pycparser `3.0`, and uvloop `0.22.1`. Respect those pins
-instead of forcing newer transitive versions. Multidict 7 and filelock 4
-remain outside the routine patch/minor update scope.
+instead of forcing newer transitive versions. Multidict 7 remains blocked by
+CCXT's dependency contract. The development lock pins the reviewed filelock 4
+version used by CacheControl.
+
+VueUse 15 uses a scheduler callback for timers. Recovery status uses
+`useIntervalFn` with a five-second cadence so freshness checks do not run on
+every animation frame. Vitest and its V8 coverage provider are upgraded
+together to version 5; tests run with the new default mock-history clearing.
 
 ## Rollback
 
