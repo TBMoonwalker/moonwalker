@@ -2,6 +2,17 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.2.5.0] - 2026-10-13
+
+### Fixed
+- Exchange connections use CCXT's patched multidict dependency, resolving the
+  known vulnerability while preserving the exchange library's required versions.
+
+### Changed
+- Updated compatible backend and frontend dependencies, including VueUse 15,
+  Vitest 5 and filelock 4. Recovery status retains its five-second refresh cadence
+  and releases scheduled work when the card closes.
+
 ## [5.2.4.0] - 2026-10-13
 
 ### Fixed
