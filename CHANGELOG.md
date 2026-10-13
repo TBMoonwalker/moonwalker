@@ -2,6 +2,14 @@
 
 All notable changes to Moonwalker are documented in this file.
 
+## [5.2.4.0] - 2026-10-13
+
+### Fixed
+- Recovery safety-order status now explains when TP is already within the
+  configured rebound target, instead of replacing that reason with a missing
+  or unchanged strategy signal. The status updates when a further price drop
+  makes another buy useful; trading rules remain unchanged.
+
 ## [5.2.3.0] - 2026-10-11
 
 ### Fixed
