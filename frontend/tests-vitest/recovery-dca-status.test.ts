@@ -50,6 +50,38 @@ describe('recovery DCA status', () => {
          await vi.advanceTimersByTimeAsync(95_000)
          expect(wrapper.text()).toContain('Updating status')
       })
+    // Value: protects=freshness changes on the five-second scheduler boundary;
+    // fails_when=the scheduler runs earlier or misses the five-second tick;
+    // why_new=the existing 95-second expiry check accepts faster schedulers;
+    // seam=none; no_claim=live websocket behavior (mocked config; component only).
+    // Added by the ship test coverage audit.
+    it('refreshes diagnostics on the five-second boundary after the clock moves', async () => {
+         const wrapper = render()
+         expect(wrapper.text()).toContain('Another 6.51% drop')
+         // Move wall time beyond expiry without running scheduled callbacks.
+         // The displayed status changes only when the component clock ticks.
+         vi.setSystemTime(now + 90_500)
+         await vi.advanceTimersByTimeAsync(4_999)
+         expect(wrapper.text()).toContain('Another 6.51% drop')
+         expect(wrapper.text()).not.toContain('Updating status')
+         await vi.advanceTimersByTimeAsync(1)
+         expect(wrapper.text()).toContain('Updating status')
+         expect(wrapper.text()).not.toContain('Another 6.51% drop')
+      })
+    // Value: protects=unmount releases recovery status scheduler resources;
+    // fails_when=the component leaves a timer active after unmount;
+    // why_new=existing teardown unmounts without asserting resource cleanup;
+    // seam=none; no_claim=live websocket behavior (mocked config; component only).
+    // Added by the ship test coverage audit.
+    it('releases its scheduled work when the recovery card unmounts', async () => {
+         const baseline = vi.getTimerCount()
+         const wrapper = render()
+         expect(vi.getTimerCount()).toBeGreaterThan(baseline)
+         wrapper.unmount()
+         expect(vi.getTimerCount()).toBe(baseline)
+         await vi.advanceTimersByTimeAsync(95_000)
+         expect(vi.getTimerCount()).toBe(baseline)
+      })
     it('stays fresh when the server clock is skewed ahead of the client', () => {
          // A far-future evaluated_at_ms must not read as stale: freshness is
          // anchored to local observation time, so a skewed client still shows live.
