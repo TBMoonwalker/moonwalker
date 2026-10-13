@@ -125,7 +125,7 @@ const status = computed(() => {
     if (number(decision.value.current_price) !== current.value)
         return result('Updating status', 'Price changed; waiting for a new sizing check.')
     if (reason === 'tp_already_reachable')
-        return result('No extra buy needed', `TP needs ${percent(number(decision.value.current_recovery_percent))} rebound; target allows ${percent(number(decision.value.target_recovery_percent))}.`)
+        return result('No extra buy needed', `TP is within the recovery target. Needs ${percent(number(decision.value.current_recovery_percent))} rebound; target allows ${percent(number(decision.value.target_recovery_percent))}.`)
     if (reason === 'deal_budget_exhausted')
         return result('Safety order blocked by budget', `Remaining deal budget: ${number(decision.value.remaining_deal_quote).toFixed(2)} ${quote.value}.`, true)
     if (reason === 'below_exchange_minimum')

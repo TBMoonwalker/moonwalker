@@ -293,3 +293,84 @@ async def test_recovery_diagnostics_refresh_without_writing_every_tick(monkeypat
         trade, {**details, "reason": "recovery_signal_not_matched"}
     )
     assert update.await_count == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("signal_result", [(True, False), (False, True)])
+async def test_reachable_tp_survives_later_signal_wait(monkeypatch, signal_result):
+    """Show the current sizing blocker without replaying a consumed signal."""
+    from unittest.mock import AsyncMock
+
+    dca = Dca()
+    dca.config = _config()
+    trade = {
+        "symbol": "TRUMP/USDC",
+        "bo_price": 2.075,
+        "total_cost": 11.97275,
+        "total_amount": 5.77,
+        "fee": 0.005,
+        "safetyorders_count": 0,
+        "safetyorders": [],
+        "dca_sizing_mode": "recovery_target",
+        "dca_policy_json": _policy_json(),
+        "dca_reference_price": 2.075,
+        "dca_reference_atr_percent": 1.0,
+        "dca_next_trigger_price": 0.0,
+    }
+    updates = []
+
+    async def save(payload, _symbol):
+        updates.append(payload)
+        trade.update(payload)
+
+    monkeypatch.setattr(
+        dca,
+        "_Dca__get_recovery_atr_percent",
+        AsyncMock(return_value=(1.0, {"regime": "mid"})),
+    )
+    strategy = AsyncMock(side_effect=[(True, True), signal_result, signal_result])
+    monkeypatch.setattr(dca, "_Dca__dynamic_dca_strategy", strategy)
+    monkeypatch.setattr(dca.trades, "update_open_trades", save)
+    balance = AsyncMock(return_value=1000)
+    minimum = AsyncMock(return_value=5)
+    monkeypatch.setattr(dca.exchange, "get_free_quote_balance", balance)
+    monkeypatch.setattr(dca.exchange, "get_minimum_buy_notional", minimum)
+    policy = RecoverySizingPolicy.from_dict(json.loads(_policy_json()))
+
+    matched, _, trigger = await dca._Dca__evaluate_recovery_dca_trigger(
+        trade, 1.91, -8.2, policy
+    )
+    assert matched is True
+    _, sized = await dca._Dca__resolve_recovery_safety_order_size(
+        trade, 1.91, policy, trigger
+    )
+    assert sized["reason"] == "tp_already_reachable"
+
+    matched, _, details = await dca._Dca__evaluate_recovery_dca_trigger(
+        trade, 1.91, -8.2, policy
+    )
+    assert matched is False
+    assert details["reason"] == "tp_already_reachable"
+    assert details["current_price"] == 1.91
+    assert details["current_recovery_percent"] <= details["target_recovery_percent"]
+    assert details["final_quote"] == 0
+    saved = json.loads(updates[-1]["dca_last_decision_json"])
+    assert saved["reason"] == "tp_already_reachable"
+    assert saved["current_price"] == 1.91
+    balance.assert_awaited_once()
+    minimum.assert_awaited_once()
+
+    # A further fall makes another buy useful: do not pin the old TP blocker.
+    matched, _, details = await dca._Dca__evaluate_recovery_dca_trigger(
+        trade, 1.70, -18, policy
+    )
+    assert matched is False
+    assert details["reason"] == (
+        "recovery_signal_unchanged"
+        if signal_result[0]
+        else "recovery_signal_not_matched"
+    )
+    assert (
+        json.loads(updates[-1]["dca_last_decision_json"])["reason"] == details["reason"]
+    )
+    assert strategy.await_count == 3

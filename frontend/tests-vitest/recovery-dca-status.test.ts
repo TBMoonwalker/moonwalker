@@ -95,7 +95,9 @@ describe('recovery DCA status', () => {
              current_price: 0.22, current_recovery_percent: 8, target_recovery_percent: 12,
           }), current_price: 0.22 })
          expect(wrapper.text()).toContain('No extra buy needed')
-         expect(wrapper.text()).toContain('TP needs 8.00% rebound; target allows 12.00%')
+         expect(wrapper.text()).toContain('TP is within the recovery target. Needs 8.00% rebound; target allows 12.00%')
+         expect(wrapper.text()).not.toContain('no fresh qualifying buy signal')
+         expect(wrapper.text()).not.toContain('Price condition not met')
       })
     it('rejects a decision from the preceding buy reference', () => {
          expect(render({ ...trade(), dca_reference_price: 0.24 }).text()).toContain('Updating status')

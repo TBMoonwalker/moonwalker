@@ -657,6 +657,19 @@ class Dca:
         )
         details["reason"] = decision.reason_code
         if not decision.should_place:
+            # A consumed signal must not hide a still-current TP sizing blocker.
+            # Recalculate locally rather than retaining a rejection at an old price.
+            sizing = calculate_recovery_sizing(
+                total_cost=float(trades.get("total_cost") or 0.0),
+                total_amount=float(trades.get("total_amount") or 0.0),
+                fill_price=current_price,
+                take_profit_percent=self.__runtime_config().take_profit,
+                fee_ratio=float(trades.get("fee") or 0.0),
+                atr_percent=atr_percent,
+                policy=policy,
+            )
+            if sizing.reason == "tp_already_reachable":
+                details.update(sizing.to_dict())
             await self.__persist_recovery_dca_diagnostics(trades, details)
             return False, round(actual_pnl, 1), details
 
