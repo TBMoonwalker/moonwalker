@@ -3,7 +3,7 @@ import type { AccumulationAction, AccumulationDetail } from '../types/accumulati
 export const accumulationActionLabels: Record<AccumulationAction, string> = {
   pause: 'Pause accumulation', resume: 'Resume accumulation', close: 'Close holding',
   retry_close: 'Retry remaining sale', sell_partial: 'Sell part', reactivate: 'Reactivate',
-  retry_entry: 'Validate entry', correct_import: 'Correct CSV', abandon_entry: 'Abandon entry',
+  retry_entry: 'Retry entry check', correct_import: 'Correct CSV', abandon_entry: 'Abandon entry',
   switch_strategy: 'Switch strategy',
   repair_order: 'Reconcile restored order',
   retire_command: 'Retire interrupted command',
@@ -77,7 +77,7 @@ export function accumulationActionCopy(action: AccumulationAction, symbol: strin
     retry_close: 'Retry selling the remaining managed quantity after the previous sale is reconciled. No coins will be bought to meet a minimum.',
     sell_partial: 'Sell only the entered base-asset quantity. The remaining holding stays managed.',
     reactivate: 'Revalidate this stopped registration and allow new buys with its pinned strategy.',
-    retry_entry: 'Validate the current declaration against fresh wallet evidence and enable accumulation if it passes.',
+    retry_entry: 'Recheck exchange access, inventory ownership, the strategy and market history. If all checks pass, enable strategy-driven buying. This check does not submit an order.',
     correct_import: 'Replace the staged declaration. It stays paused until you explicitly validate it.',
     abandon_entry: 'Leave these wallet coins unmanaged and keep a stopped registration. No coins will be sold. You can explicitly validate this declaration again later, or correct a CSV declaration before validation.',
     switch_strategy: 'Settle outstanding buys, validate the selected strategy version and start its observations from the current market. Previous purchase limits stay in force, and a paused holding stays paused.',

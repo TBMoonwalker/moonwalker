@@ -269,7 +269,7 @@ export function useAccumulationPanel() {
       uncertain.value = null
       notice.value = result.operation.status === 'pending'
         ? command.action === 'correct_import'
-          ? 'Correction recorded. The entry stays paused until you choose Validate entry.'
+          ? 'Correction recorded. The entry stays paused until you choose Retry entry check.'
           : 'Request recorded. Work is pending; check the current status below.'
         : `Recorded outcome: ${result.operation.status}. Current status has been refreshed below.`
     } catch (cause) {

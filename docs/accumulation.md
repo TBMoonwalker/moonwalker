@@ -74,7 +74,10 @@ request**; it never automatically resubmits it under a new ID.
 - **Reactivate** explicitly starts a stopped, previously adopted registration's
   next generation and readiness check. Plugin polling does not reactivate it.
 
-Staged entries have **Validate entry**, **Correct CSV**, and **Abandon entry**.
+The first entry check runs automatically. Staged entries that have not completed
+it have **Retry entry check**, **Correct CSV**, and **Abandon entry**. Retrying
+checks exchange access, ownership, strategy and market history. The check itself
+does not submit an order; passing enables strategy-driven buying.
 Correction stays paused until explicitly validated. Abandonment leaves the coins
 unmanaged and the registration stopped, without selling. A never-adopted abandoned
 entry can later be explicitly validated again or given a corrected CSV declaration.

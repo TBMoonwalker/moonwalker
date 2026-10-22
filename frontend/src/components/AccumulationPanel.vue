@@ -36,7 +36,6 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
     <header class="accumulation-heading">
       <div>
         <h2 id="accumulation-heading">Accumulation</h2>
-        <p>Strategy-driven buying. You decide when to sell.</p>
       </div>
       <n-button :loading="loading" :disabled="busy" @click="panel.loadPage()">Refresh status</n-button>
     </header>
@@ -71,7 +70,7 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
         <div><dt>Disposal proceeds · {{ quote }}</dt><dd>{{ detail.holding.disposal_proceeds ?? 'Unknown' }}</dd></div>
       </dl>
       <p v-else-if="detail.inventory_restore_required">Recorded inventory is missing from its holding link. Restore it from audit evidence before trading.</p>
-      <p v-else-if="detail.holding_integrity !== 'invalid'">{{ detail.observations_initialized ? 'No managed inventory.' : 'Inventory has not been adopted.' }}</p>
+      <p v-else-if="detail.holding_integrity !== 'invalid' && detail.observations_initialized">No managed inventory.</p>
       <p v-if="detail.holding && (!detail.holding.fees || detail.holding.fees.pending_reports > 0 || !detail.holding.execution_history_complete)">
         Fee or execution history is incomplete. These amounts do not represent a fully verified net return.
       </p>

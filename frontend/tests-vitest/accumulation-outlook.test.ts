@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { mount } from '@vue/test-utils'
+import AccumulationOutlook from '../src/components/AccumulationOutlook.vue'
 import { accumulationOutlook } from '../src/helpers/accumulationPresentation'
 import type { AccumulationDetail } from '../src/types/accumulation'
 
@@ -15,10 +17,10 @@ function row(overrides: Partial<AccumulationDetail> = {}): AccumulationDetail {
 describe('accumulation operator outlook', () => {
   it('makes validation a next action without promising an immediate purchase', () => {
     const outlook = accumulationOutlook(row({ state: 'validating', observations_initialized: false, explicitly_paused: true, reason: 'validation_required' }), true)
-    expect(outlook.title).toBe('Entry needs validation')
+    expect(outlook.title).toBe('Entry check incomplete')
     expect(outlook.action).toBe('retry_entry')
     expect(outlook.next).toContain('If it passes')
-    expect(outlook.description).toContain('Buying has not started')
+    expect(outlook.description).toContain('automatic entry check has not completed')
   })
 
   it.each([
@@ -52,5 +54,38 @@ describe('accumulation operator outlook', () => {
     expect(outlook.title).toBe('Trading check pending')
     expect(outlook.description).toContain('not confirmed')
     expect(outlook.action).toBeUndefined()
+  })
+
+  it('limits expandable help to the current operational step', () => {
+    const entry = mount(AccumulationOutlook, { props: { detail: row({ state: 'validating', observations_initialized: false }), fresh: true } })
+    expect(entry.find('summary').text()).toBe('Entry check details')
+    expect(entry.text()).not.toContain('Deeper dips')
+    expect(entry.text()).not.toContain('Sales require')
+    expect(entry.text()).not.toContain('ASAP registers')
+    const watch = mount(AccumulationOutlook, { props: { detail: row({ runtime_wait_reason: 'WAIT_DEPTH' }), fresh: true } })
+    expect(watch.find('summary').text()).toBe('Buying rules')
+    expect(watch.text()).not.toContain('The first check runs automatically')
+    expect(watch.find('details').attributes('open')).toBeUndefined()
+  })
+
+  it('keeps an expanded explanation mounted across status polling', async () => {
+    const wrapper = mount(AccumulationOutlook, { props: { detail: row({ state: 'validating', observations_initialized: false }), fresh: true } })
+    const explanation = wrapper.find('details').element
+    explanation.setAttribute('open', '')
+    await wrapper.setProps({ fresh: false })
+    await wrapper.setProps({ fresh: true })
+    expect(wrapper.find('details').element).toBe(explanation)
+    expect(wrapper.find('details').attributes('open')).toBe('')
+  })
+
+  it.each([
+    { state: 'paused', explicitly_paused: true },
+    { state: 'closing', runtime_wait_reason: 'WAIT_MINIMUM' },
+    { state: 'stopped' },
+    { state: 'enabled', account_matches: false },
+    { state: 'enabled', runtime_wait_reason: 'WAIT_GLOBAL_PAUSE' },
+  ])('hides entry and buying explanations during a different step: %o', overrides => {
+    const wrapper = mount(AccumulationOutlook, { props: { detail: row(overrides), fresh: true } })
+    expect(wrapper.find('details').exists()).toBe(false)
   })
 })
