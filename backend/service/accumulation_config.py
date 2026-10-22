@@ -30,9 +30,20 @@ async def configuration_mode_guard(current: Mapping[str, Any]) -> dict[str, Any]
             and current.get("trading_paused") is not True
         )
         blocked = bool(open_count or active_count or unsettled or live_running)
+        actions = []
+        if open_count:
+            noun = "holding" if open_count == 1 else "holdings"
+            actions.append(f"close {open_count} open {noun}")
+        if active_count:
+            noun = "registration" if active_count == 1 else "registrations"
+            actions.append(f"stop {active_count} active accumulation {noun}")
+        if unsettled:
+            actions.append("reconcile unresolved orders")
+        if live_running:
+            actions.append("pause live trading")
         message = (
-            "Finish holdings, registrations and unresolved orders, and pause live entry before changing mode."
-            if blocked
+            "Before changing trade mode: " + "; ".join(actions) + "."
+            if actions
             else None
         )
     except (ConfigurationError, OperationalError):

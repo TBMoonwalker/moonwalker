@@ -217,3 +217,66 @@ async def test_accumulation_setup_accepts_quote_case_from_exchange_selector(
     await config.batch_set(updates)
     assert config.get("trade_mode") == "accumulation"
     assert config.get("accumulation_strategy_version_id") == version.id
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "dry_run,paused,holdings,registrations,unresolved,expected",
+    [
+        (
+            True,
+            False,
+            0,
+            1,
+            False,
+            "Before changing trade mode: stop 1 active accumulation registration.",
+        ),
+        (True, False, 1, 0, False, "Before changing trade mode: close 1 open holding."),
+        (
+            True,
+            False,
+            0,
+            0,
+            True,
+            "Before changing trade mode: reconcile unresolved orders.",
+        ),
+        (False, False, 0, 0, False, "Before changing trade mode: pause live trading."),
+        (False, True, 0, 0, False, None),
+        (True, False, 0, 0, False, None),
+        (
+            True,
+            False,
+            1,
+            1,
+            True,
+            "Before changing trade mode: close 1 open holding; stop 1 active accumulation registration; reconcile unresolved orders.",
+        ),
+    ],
+)
+async def test_mode_switch_message_lists_only_current_blockers(
+    selection, dry_run, paused, holdings, registrations, unresolved, expected
+):
+    for index in range(holdings):
+        await model.OpenTrades.create(symbol=f"HOLD{index}/USDC")
+    for index in range(registrations):
+        await model.AccumulationActivation.create(
+            symbol=f"REG{index}/USDC", account_scope="demo-fixture", state="validating"
+        )
+    if unresolved:
+        await model.PlacementIntent.create(
+            operation_id="guard-order",
+            exchange_name="binance",
+            symbol="BTC/USDC",
+            action="buy",
+            side="buy",
+            order_type="limit",
+            state="indeterminate",
+        )
+    guard = await accumulation_config.configuration_mode_guard(
+        {"dry_run": dry_run, "trading_paused": paused, "trade_mode": "accumulation"}
+    )
+    assert guard["blocked"] is (expected is not None)
+    assert guard["can_switch"] is (expected is None)
+    assert guard["message"] == expected
+    if dry_run:
+        assert "live" not in (guard["message"] or "")
