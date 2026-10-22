@@ -381,7 +381,7 @@ test('selects accumulation and an exact initial pin in Configuration before entr
   const selector = page.locator('#config-accumulation-strategy')
   await selector.click()
   await page.getByText('Patient dip · v1 · 4h', { exact: true }).click()
-  await expect(page.getByText('Dry run trades against the exchange demo account when supported. It requires demo credentials and available demo funds; it never falls back to live trading.', { exact: false })).toBeVisible()
+  await expect(page.getByText('Dry run trades against the exchange demo account when supported, using demo credentials and funds.', { exact: false })).toBeVisible()
   await page.getByRole('button', { name: 'Save changes', exact: true }).first().click()
   await expect.poll(() => saves.length).toBe(1)
   expect(saves[0].trade_mode).toEqual({ value: 'accumulation', type: 'str' })

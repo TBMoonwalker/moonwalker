@@ -222,16 +222,18 @@ function openTrade(): OpenTradeRow {
     }
 }
 
+const tradeStubs = {
+    NDataTable: DataTableStub,
+    DataTable: DataTableStub,
+    NModal: ModalStub,
+    Modal: ModalStub,
+    OpenTradeExpandedRow: ExpandedRowStub,
+}
+
 function mountOpenTrades() {
     return mount(OpenTrades, {
         global: {
-            stubs: {
-                NDataTable: DataTableStub,
-                DataTable: DataTableStub,
-                NModal: ModalStub,
-                Modal: ModalStub,
-                OpenTradeExpandedRow: ExpandedRowStub,
-            },
+            stubs: tradeStubs,
         },
     })
 }
@@ -244,15 +246,18 @@ describe('OpenTrades mobile replay interaction', () => {
         loadConfiguredMinTimeframeMock.mockResolvedValue(undefined)
     })
 
-    it('routes accumulation holdings away from generic sell and stop controls', () => {
+    it('opens accumulation details from its action without toggling them closed', async () => {
         const row = { ...openTrade(), lifecycle_mode: 'accumulation' }
         testState.rows = [row]
         const wrapper = mountOpenTrades()
         const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<Record<string, unknown>>
         const render = columns.find(column => column.key === 'action')!.render as (row: OpenTradeRow) => VNode
-        const actions = mount(defineComponent({ render: () => render(row) }))
-        expect(actions.text()).toContain('Manage accumulation above')
-        expect(actions.find('button').exists()).toBe(false)
+        const actions = mount(defineComponent({ render: () => render(row) }), { global: { stubs: tradeStubs } })
+        expect(actions.text()).toBe('Details')
+        await actions.get('button').trigger('click')
+        expect(wrapper.get('[data-test="mobile-trade-details"]').exists()).toBe(true)
+        await actions.get('button').trigger('click')
+        expect(wrapper.get('[data-test="mobile-trade-details"]').exists()).toBe(true)
     })
 
     it('omits the expand column and opens replay details in a modal', async () => {

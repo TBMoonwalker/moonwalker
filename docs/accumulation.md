@@ -69,12 +69,16 @@ future timestamps and unrecognized stale evidence still block trading.
 Expand its entry in **Open trades**. Beneath the chart, the accumulation status
 shows the current wait and any available target price/percentage. The same area
 shows the selected strategy and controls for changing it, pausing, resuming or
-selling and closing the holding. Entry registration and blocked entry messages
+selling part or closing the holding. **Sell part** reveals an exact base-asset
+quantity field and a reviewed confirmation; it does not sell on the first click.
+Entry registration and blocked entry messages
 appear in Open trades until there is an owned holding.
 
 **Utilities → Accumulation** contains account and inventory repair, interrupted
 requests, execution evidence, portfolio valuation and historical strategy
 comparison. These tools do not sit in the normal trading dashboard.
+Issue links select the affected symbol in Utilities. If that symbol cannot be
+loaded, the screen reports the error instead of selecting a different holding.
 
 ## Operator actions and retries
 
@@ -263,7 +267,8 @@ bounded routine result sets. Registry/history pages are capped at 100 records.
 
 ## Historical strategy comparison
 
-Expand **Historical strategy comparison** in Trading Overview. Choose a saved
+Open **Utilities → Accumulation → Manage accumulation**, then expand
+**Historical strategy comparison**. Choose a saved
 version, initial quote funding, buy fee and adverse slippage in basis points, and
 a fixed DCA interval in candles. Paste at most 20000 completed candles in ascending
 order, without a header: `close_ms;open;high;low;close`. Timestamps are UTC closing

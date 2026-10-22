@@ -34,7 +34,7 @@ function movement(value: string) {
     <div class="outlook-now">
       <div class="outlook-message" role="status">
         <span class="outlook-label">{{ detail.symbol }} · Current state</span>
-        <h3>{{ heading }}</h3>
+        <h3 tabindex="-1">{{ heading }}</h3>
         <template v-if="condition">
           <ul v-if="condition.levels.length" class="wait-levels" aria-label="Current entry conditions">
             <li v-for="(level, index) in condition.levels" :key="level.kind">

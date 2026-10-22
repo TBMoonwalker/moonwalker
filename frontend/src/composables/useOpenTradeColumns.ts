@@ -46,6 +46,7 @@ interface UseOpenTradeColumnsOptions {
     onDealSell: (rowData: OpenTradeRow) => void
     onDealStop: (rowData: OpenTradeRow) => void
     onDealDeny: (rowData: OpenTradeRow) => void
+    onOpenTradeDetails?: (rowData: OpenTradeRow) => void
     onPauseMission: (rowData: OpenTradeRow) => void | Promise<void>
     onResumeMission: (rowData: OpenTradeRow) => void | Promise<void>
     sortState: Ref<TradeTableSortState | null>
@@ -413,10 +414,15 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 key: 'action',
                 render: (rowData) => {
                     if (rowData.lifecycle_mode === 'accumulation') {
-                        return h('a', {
-                            href: '#accumulation-controls',
-                            onClick: (event: MouseEvent) => event.stopPropagation(),
-                        }, 'Manage accumulation above')
+                        return h(NButton, {
+                            size: 'small',
+                            style: { minHeight: '44px', minWidth: '44px', padding: '0 8px' },
+                            'aria-label': `Manage accumulation for ${rowData.symbol}`,
+                            onClick: (event: MouseEvent) => {
+                                event.stopPropagation()
+                                options.onOpenTradeDetails?.(rowData)
+                            },
+                        }, () => 'Details')
                     }
                     if (isUnsellableRemainder(rowData)) {
                         return [

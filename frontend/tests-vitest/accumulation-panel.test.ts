@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { defineComponent } from 'vue'
+import { defineComponent, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AccumulationPanel from '../src/components/AccumulationPanel.vue'
 import AccumulationTradeStatus from '../src/components/AccumulationTradeStatus.vue'
@@ -9,6 +9,8 @@ import type { AccumulationDetail, AccumulationCommand } from '../src/types/accum
 
 const api = vi.hoisted(() => ({ fetchAccumulationPage: vi.fn(), fetchAccumulationDetail: vi.fn(), fetchAccumulationStrategies: vi.fn(), fetchAccumulationPerformance: vi.fn(), sendAccumulationCommand: vi.fn(), accumulationErrorStatus: vi.fn() }))
 vi.mock('../src/api/accumulation', () => api)
+const routing = vi.hoisted(() => ({ route: null as any }))
+vi.mock('vue-router', async importOriginal => ({ ...await importOriginal<typeof import('vue-router')>(), useRoute: () => routing.route }))
 
 const live = vi.hoisted(() => ({ options: null as any, socket: {} as any }))
 vi.mock('@vueuse/core', async importOriginal => {
@@ -91,6 +93,7 @@ describe('accumulation controls', () => {
   })
 
   beforeEach(() => {
+    routing.route = reactive({ query: {} as Record<string, string> })
     vi.clearAllMocks()
     api.fetchAccumulationPage.mockResolvedValue({ activations: [snapshot()], next_after: null })
     api.fetchAccumulationDetail.mockResolvedValue(snapshot())
@@ -404,6 +407,100 @@ describe('accumulation controls', () => {
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('ETH/USDC')
     expect(wrapper.text()).toContain('Confirm close holding')
+    const confirm = wrapper.findAll('button').find(button => button.text() === 'Confirm close holding')!
+    expect(confirm.attributes('disabled')).toBeUndefined()
+    await confirm.trigger('click')
+    await flushPromises()
+    expect(api.sendAccumulationCommand).toHaveBeenCalledTimes(1)
+    expect(api.sendAccumulationCommand.mock.calls[0][0]).toMatchObject({ symbol: 'ETH/USDC', action: 'close', expected_revision: 12 })
+    wrapper.unmount()
+  })
+
+  it('reveals a partial sale and submits only the exact reviewed quantity', async () => {
+    const wrapper = mount(AccumulationTradeStatus, { props: { symbol: 'BTC/USDC' }, global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    expect(wrapper.find('input[inputmode="decimal"]').exists()).toBe(false)
+    await click(wrapper, 'Sell part')
+    await wrapper.get('input[inputmode="decimal"]').setValue('0.000000000000000001')
+    await click(wrapper, 'Review partial sale')
+    expect(wrapper.text()).toContain('Quantity: 0.000000000000000001 BTC')
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    await click(wrapper, 'Confirm sell part')
+    expect(api.sendAccumulationCommand).toHaveBeenCalledTimes(1)
+    expect(api.sendAccumulationCommand.mock.calls[0][0]).toMatchObject({ symbol: 'BTC/USDC', quantity: '0.000000000000000001', action: 'sell_partial' })
+    wrapper.unmount()
+  })
+
+  it('explains why an inline confirmation is blocked after a pushed revision change', async () => {
+    const wrapper = mount(AccumulationTradeStatus, { props: { symbol: 'BTC/USDC' }, global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    await click(wrapper, 'Sell and close')
+    const changed = snapshot({ revision: 13 })
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [changed], next_after: null }, detail: changed }) })
+    await flushPromises()
+    expect(wrapper.text()).toContain('The holding changed. Cancel and review the action again.')
+    const confirm = wrapper.findAll('button').find(button => button.text() === 'Confirm close holding')!
+    expect(confirm.attributes('disabled')).toBeDefined()
+    await confirm.trigger('click')
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('keeps the route symbol even outside the first page and follows route changes', async () => {
+    routing.route.query.symbol = 'ETH/USDC'
+    api.fetchAccumulationDetail.mockImplementation((symbol: string) => Promise.resolve(snapshot({ symbol })))
+    const wrapper = mount(AccumulationPanel)
+    await flushPromises()
+    expect(api.fetchAccumulationDetail).toHaveBeenCalledWith('ETH/USDC')
+    expect(wrapper.text()).toContain('ETH/USDC')
+    routing.route.query.symbol = 'SOL/USDC'
+    await flushPromises()
+    expect(api.fetchAccumulationDetail).toHaveBeenLastCalledWith('SOL/USDC')
+    expect(wrapper.text()).toContain('SOL/USDC')
+    wrapper.unmount()
+  })
+
+  it('reports a missing route symbol without substituting the first registration', async () => {
+    routing.route.query.symbol = 'ETH/USDC'
+    api.fetchAccumulationDetail.mockRejectedValue(new Error('Not found'))
+    const wrapper = mount(AccumulationPanel)
+    await flushPromises()
+    expect(api.fetchAccumulationDetail.mock.calls.every(([symbol]) => symbol === 'ETH/USDC')).toBe(true)
+    expect(wrapper.text()).toContain('ETH/USDC:')
+    expect(wrapper.text()).not.toContain('Managed quantity')
+    wrapper.unmount()
+  })
+
+  it('preserves a different symbol’s uncertain request while following a recovery route', async () => {
+    const first = harness()
+    await flushPromises()
+    api.sendAccumulationCommand.mockRejectedValueOnce(new Error('Lost response'))
+    first.panel.prepare('close')
+    await first.panel.submit()
+    const original = api.sendAccumulationCommand.mock.calls[0][0]
+    first.wrapper.unmount()
+    routing.route.query.symbol = 'ETH/USDC'
+    api.fetchAccumulationDetail.mockImplementation((symbol: string) => Promise.resolve(snapshot({ symbol })))
+    const wrapper = mount(AccumulationPanel, { global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Resolve the pending request for BTC/USDC')
+    expect(api.sendAccumulationCommand).toHaveBeenCalledTimes(1)
+    routing.route.query.symbol = 'BTC/USDC'
+    await flushPromises()
+    await click(wrapper, 'Retry same request')
+    expect(api.sendAccumulationCommand.mock.calls[1][0]).toEqual(original)
+    wrapper.unmount()
+  })
+
+  it('focuses the review heading and restores the initiating button on cancel', async () => {
+    const wrapper = mount(AccumulationTradeStatus, { props: { symbol: 'BTC/USDC' }, attachTo: document.body, global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    const button = wrapper.findAll('button').find(button => button.text() === 'Sell and close')!
+    await button.trigger('click')
+    await flushPromises()
+    expect(document.activeElement).toBe(wrapper.get('h4').element)
+    await click(wrapper, 'Cancel')
+    expect(document.activeElement).toBe(button.element)
     wrapper.unmount()
   })
 

@@ -186,6 +186,9 @@ const {
     onDealSell: handleDealSell,
     onDealStop: handleDealStop,
     onDealDeny: handleDealDeny,
+    onOpenTradeDetails: (rowData) => {
+        if (!isOpenTradeRowExpanded(rowData)) toggleOpenTradeRow(rowData)
+    },
     onPauseMission: (rowData) => handlePauseMission(rowData.symbol),
     onResumeMission: (rowData) => handleResumeMission(rowData.symbol),
     sortState,

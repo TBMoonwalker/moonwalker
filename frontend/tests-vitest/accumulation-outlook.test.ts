@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import AccumulationOutlook from '../src/components/AccumulationOutlook.vue'
-import { accumulationOutlook } from '../src/helpers/accumulationPresentation'
+import { accumulationOutlook, accumulationPendingStatus } from '../src/helpers/accumulationPresentation'
 import type { AccumulationDetail } from '../src/types/accumulation'
 
 function row(overrides: Partial<AccumulationDetail> = {}): AccumulationDetail {
@@ -15,6 +15,14 @@ function row(overrides: Partial<AccumulationDetail> = {}): AccumulationDetail {
 }
 
 describe('accumulation operator outlook', () => {
+  it('uses each pending summary’s real wait without inventing detail evidence', () => {
+    expect(accumulationPendingStatus(row({ runtime_wait_reason: 'WAIT_BUDGET' }), true)).toBe('Waiting for available budget')
+    expect(accumulationPendingStatus(row({ runtime_wait_reason: 'WAIT_GLOBAL_PAUSE' }), true)).toBe('Moonwalker is paused')
+    expect(accumulationPendingStatus(row({ runtime_wait_reason: 'WAIT_DATA' }), true)).toBe('Waiting for exchange data')
+    expect(accumulationPendingStatus(row(), false)).toBe('Status needs refresh')
+    expect(accumulationPendingStatus(row(), true)).toBe('Waiting for exchange update')
+    expect(accumulationPendingStatus(row({ state: 'paused', explicitly_paused: true, runtime_wait_reason: 'WAIT_DEPTH' }), true)).toBe('Accumulation paused')
+  })
   it('makes validation a next action without promising an immediate purchase', () => {
     const outlook = accumulationOutlook(row({ state: 'validating', observations_initialized: false, explicitly_paused: true, reason: 'validation_required' }), true)
     expect(outlook.title).toBe('Entry check incomplete')

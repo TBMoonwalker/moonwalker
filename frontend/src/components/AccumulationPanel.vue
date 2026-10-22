@@ -1,13 +1,19 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
+import { RouterLink, useRoute } from 'vue-router'
 import AccumulationReplay from './AccumulationReplay.vue'
 import AccumulationOutlook from './AccumulationOutlook.vue'
 import { accumulationOutlook } from '../helpers/accumulationPresentation'
 import { useAccumulationPanel } from '../composables/useAccumulationPanel'
 import { accumulationActionCopy, accumulationActionLabels, accumulationReason } from '../helpers/accumulation'
 
-const panel = useAccumulationPanel()
-const { visible, available, rows, portfolio, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, quantity, csv, actions, disabled } = panel
+const route = useRoute()
+const requestedSymbol = computed(() => typeof route?.query.symbol === 'string' ? route.query.symbol : undefined)
+const panel = useAccumulationPanel(requestedSymbol.value)
+watch(requestedSymbol, symbol => {
+  if (symbol && symbol !== panel.selected.value) void panel.selectSymbol(symbol)
+})
+const { visible, available, rows, portfolio, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, csv, actions, disabled } = panel
 const options = computed(() => rows.value.map(row => ({ label: `${row.symbol} · ${accumulationReason(row.state)}`, value: row.symbol })))
 const quote = computed(() => detail.value?.symbol.split('/')[1] ?? '')
 const base = computed(() => detail.value?.symbol.split('/')[0] ?? '')
@@ -17,11 +23,11 @@ const strategyOptions = computed(() => panel.strategies.value.map(version => ({
 })))
 const pinnedStrategy = computed(() => panel.strategies.value.find(version => version.id === detail.value?.strategy_version_id))
 const primaryAction = computed(() => {
-  // Keep the button mounted during polling so keyboard focus survives refreshes.
+  // Keep the button mounted so keyboard focus survives pushed status updates.
   const action = detail.value ? accumulationOutlook(detail.value, true).action : undefined
   return action && actions.value.includes(action) ? action : undefined
 })
-const secondaryActions = computed(() => actions.value.filter(action => action !== primaryAction.value))
+const secondaryActions = computed(() => actions.value.filter(action => action !== primaryAction.value && action !== 'sell_partial'))
 const reviewedStrategy = computed(() => panel.strategies.value.find(version => version.id === draft.value?.target_version_id))
 const repairOptions = computed(() => (detail.value?.quarantined_orders ?? []).filter(order => order.has_lookup_identity).map((order, index) => ({ value: order.placement_operation_id, label: `${order.side === 'buy' ? 'Buy' : 'Manual sale'} · restored order ${index + 1}` })))
 const reviewedRepair = computed(() => repairOptions.value.find(option => option.value === draft.value?.placement_operation_id))
@@ -42,6 +48,10 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
     </header>
     <n-alert v-if="error" type="warning" role="alert">{{ error }}</n-alert>
     <n-alert v-if="notice" type="info" role="status">{{ notice }}</n-alert>
+    <n-alert v-if="panel.pendingRequest.value && panel.pendingRequest.value.symbol !== selected" type="warning" role="alert">
+      Resolve the pending request for {{ panel.pendingRequest.value.symbol }} before starting another action.
+      <RouterLink :to="{ name: 'controlCenter', query: { mode: 'utilities', symbol: panel.pendingRequest.value.symbol }, hash: '#accumulation-controls' }">Open pending request</RouterLink>
+    </n-alert>
     <n-alert v-if="uncertain" type="warning" role="alert">
       {{ uncertain.action === 'repair_order' ? 'Order evidence required' : uncertain.action === 'rebind_account' ? 'Account evidence required' : 'Unconfirmed request' }}: {{ accumulationActionLabels[uncertain.action] }} — {{ uncertain.symbol }}.
       <n-button :loading="busy" :disabled="busy || !available" @click="panel.submit()">Retry same request</n-button>
@@ -78,7 +88,8 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
         <pre v-if="draft.csv_content" class="accumulation-csv-review">{{ draft.csv_content }}</pre>
         <p v-if="draft.expected_revision !== detail.revision">The holding changed. Cancel this review and choose the action again.</p>
         <div class="accumulation-actions">
-          <n-button type="primary" :loading="busy" :disabled="busy || !available || !fresh || draft.expected_revision !== detail.revision || !actions.includes(draft.action)" @click="panel.submit()">Confirm {{ accumulationActionLabels[draft.action].toLowerCase() }}</n-button>
+          <p v-if="panel.confirmBlockedReason.value" role="status">{{ panel.confirmBlockedReason.value }}</p>
+          <n-button type="primary" :loading="busy" :disabled="!!panel.confirmBlockedReason.value" @click="panel.submit()">Confirm {{ accumulationActionLabels[draft.action].toLowerCase() }}</n-button>
           <n-button :disabled="busy" @click="draft = null">Cancel</n-button>
         </div>
       </n-alert>
@@ -103,10 +114,6 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
         <div><dt>Declared cost · {{ quote }}</dt><dd>{{ detail.entry.declaration.acquisition_cost }}</dd></div>
       </dl>
       <p v-if="!detail.observations_initialized && detail.entry?.source === 'csv'">CSV amounts declare net owned coins. Historical fees remain unknown. Correction does not enable buys.</p>
-      <div v-if="actions.includes('sell_partial')" class="accumulation-input">
-        <label for="accumulation-quantity">Partial sale quantity · {{ base }}</label>
-        <n-input v-model:value="quantity" :disabled="disabled" :input-props="{ id: 'accumulation-quantity', inputmode: 'decimal' }" placeholder="Exact base-asset quantity" />
-      </div>
       <div v-if="actions.includes('switch_strategy') || actions.includes('retry_entry') || actions.includes('correct_import')" class="accumulation-input">
         <label for="accumulation-strategy">Accumulation strategy version</label>
         <n-select filterable v-model:value="panel.targetVersion.value" :options="strategyOptions" :disabled="disabled" :input-props="{ id: 'accumulation-strategy' }" placeholder="Keep the entry pin, or select a compatible saved version" />

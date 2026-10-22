@@ -1,4 +1,4 @@
-import type { AccumulationAction, AccumulationDetail } from '../types/accumulation'
+import type { AccumulationAction, AccumulationDetail, AccumulationStatus } from '../types/accumulation'
 
 interface AccumulationOutlook {
   title: string
@@ -24,6 +24,22 @@ const waits: Record<string, [string, string]> = {
   WAIT_ORDER: ['Waiting for an order', 'The existing order must settle before another buy can proceed.'],
   WAIT_RECONCILIATION: ['Checking an existing order', 'Exchange evidence is being reconciled before new trading can proceed.'],
   WAIT_COMMAND: ['Request is being processed', 'Wait for the recorded request to resolve before choosing another action.'],
+}
+
+/** Present only evidence available in a page summary; do not invent detail fields. */
+export function accumulationPendingStatus(row: AccumulationStatus, fresh: boolean): string {
+  if (!fresh) return 'Status needs refresh'
+  if (row.account_matches === false) return 'Account ownership needs review'
+  if (row.holding_integrity === 'invalid' || row.inventory_restore_required) return 'Inventory needs repair'
+  if (row.state === 'closing') return 'Closing · new buys blocked'
+  if (row.state === 'paused' || (row.explicitly_paused && row.observations_initialized)) return 'Accumulation paused'
+  if (row.runtime_wait_reason) {
+    if (!row.holding && ['WAIT_DATA', 'WAIT_REBASE'].includes(row.runtime_wait_reason)) return 'Waiting for exchange data'
+    return waits[row.runtime_wait_reason]?.[0] ?? 'Trading check pending'
+  }
+  if (row.state === 'validating') return 'Checking exchange access'
+  if (row.state === 'blocked') return 'Buying is blocked'
+  return 'Waiting for exchange update'
 }
 
 /** Describe the observed state without promising an order or inventing market telemetry. */

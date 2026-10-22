@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useAccumulationPanel } from '../composables/useAccumulationPanel'
-import { accumulationOutlook } from '../helpers/accumulationPresentation'
+import { accumulationPendingStatus } from '../helpers/accumulationPresentation'
 
 const panel = useAccumulationPanel()
 const entries = computed(() => panel.rows.value.filter(row => !row.holding && row.state !== 'stopped'))
@@ -13,11 +13,10 @@ const entries = computed(() => panel.rows.value.filter(row => !row.holding && ro
     <p v-if="panel.error.value" role="alert">{{ panel.error.value }}</p>
     <div v-for="entry in entries" :key="entry.activation_id" class="pending-entry" role="status">
       <strong>{{ entry.symbol }}</strong>
-      <span v-if="panel.detail.value?.symbol === entry.symbol">{{ accumulationOutlook(panel.detail.value, panel.fresh.value).title }}</span>
-      <span v-else>{{ entry.state === 'enabled' ? 'Starting initial buy' : 'Entry needs attention' }}</span>
-      <RouterLink v-if="entry.state !== 'enabled'" :to="{ name: 'controlCenter', query: { mode: 'utilities' }, hash: '#accumulation-controls' }">Resolve entry issue</RouterLink>
+      <span>{{ accumulationPendingStatus(entry, panel.fresh.value) }}</span>
+      <RouterLink v-if="entry.state !== 'enabled'" :to="{ name: 'controlCenter', query: { mode: 'utilities', symbol: entry.symbol }, hash: '#accumulation-controls' }">Resolve entry issue</RouterLink>
     </div>
-    <RouterLink v-if="panel.uncertain.value" :to="{ name: 'controlCenter', query: { mode: 'utilities' }, hash: '#accumulation-controls' }">Resolve unconfirmed request for {{ panel.uncertain.value.symbol }}</RouterLink>
+    <RouterLink v-if="panel.uncertain.value" :to="{ name: 'controlCenter', query: { mode: 'utilities', symbol: panel.uncertain.value.symbol }, hash: '#accumulation-controls' }">Resolve unconfirmed request for {{ panel.uncertain.value.symbol }}</RouterLink>
     <n-button v-if="panel.next.value" :disabled="panel.loading.value" @click="panel.loadPage(true)">Load more pending entries</n-button>
   </div>
 </template>

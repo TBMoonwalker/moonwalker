@@ -1,4 +1,4 @@
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useWebSocket } from '@vueuse/core'
 import { accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, fetchAccumulationStrategies, sendAccumulationCommand } from '../api/accumulation'
 import { fetchAccumulationPerformance } from '../api/accumulation'
@@ -13,23 +13,23 @@ import type { AccumulationAction, AccumulationCommand, AccumulationDetail, Accum
 // Retain an uncertain request across route changes; never replay it automatically.
 const pendingKey = `moonwalker.accumulation.pending:${MOONWALKER_API_ORIGIN}`
 const session = () => window.sessionStorage
-let unresolvedRequest: AccumulationCommand | null = null
+const unresolvedRequest = ref<AccumulationCommand | null>(null)
 
 function restoreRequest(): AccumulationCommand | null {
-  if (unresolvedRequest) return unresolvedRequest
+  if (unresolvedRequest.value) return unresolvedRequest.value
   try {
     const value = JSON.parse(readText(pendingKey, session) ?? 'null')
     if (value && typeof value.symbol === 'string' && typeof value.operation_id === 'string' &&
         typeof value.action === 'string' && Number.isSafeInteger(value.expected_revision)) {
-      unresolvedRequest = value as AccumulationCommand
+      unresolvedRequest.value = value as AccumulationCommand
     }
   } catch { /* Storage is optional; requests are never replayed automatically. */ }
-  return unresolvedRequest
+  return unresolvedRequest.value
 }
 
 function rememberRequest(command: AccumulationCommand | null, resolvedId?: string) {
-  if (resolvedId && unresolvedRequest?.operation_id !== resolvedId) return
-  unresolvedRequest = command
+  if (resolvedId && unresolvedRequest.value?.operation_id !== resolvedId) return
+  unresolvedRequest.value = command
   if (command) writeText(pendingKey, JSON.stringify(command), session)
   else removeJSON(pendingKey, session)
 }
@@ -59,7 +59,7 @@ export function useAccumulationPanel(symbol?: string) {
     }
   }
   const next = ref<string | null>(null)
-  const selected = ref<string | null>(symbol ?? unresolvedRequest?.symbol ?? null)
+  const selected = ref<string | null>(symbol ?? unresolvedRequest.value?.symbol ?? null)
   const detail = ref<AccumulationDetail | null>(null)
   const loading = ref(false)
   const fresh = ref(false)
@@ -67,7 +67,10 @@ export function useAccumulationPanel(symbol?: string) {
   const error = ref('')
   const notice = ref('')
   const draft = ref<AccumulationCommand | null>(null)
-  const uncertain = ref<AccumulationCommand | null>(!symbol || unresolvedRequest?.symbol === symbol ? unresolvedRequest : null)
+  const uncertain = ref<AccumulationCommand | null>(!symbol || unresolvedRequest.value?.symbol === symbol ? unresolvedRequest.value : null)
+  watch([selected, unresolvedRequest], ([current, request]) => {
+    uncertain.value = request?.symbol === current ? request : null
+  })
   const quantity = ref('')
   const csv = ref('')
   const adjustmentDirection = ref<'add' | 'remove'>('add')
@@ -154,7 +157,17 @@ export function useAccumulationPanel(symbol?: string) {
     error.value = ''
   }
   const actions = computed(() => detail.value ? accumulationActions(detail.value) : [])
-  const disabled = computed(() => !available.value || !fresh.value || busy.value || !!uncertain.value || !!draft.value)
+  const disabled = computed(() => !available.value || !fresh.value || busy.value || !!uncertain.value || !!draft.value || !!unresolvedRequest.value)
+  const confirmBlockedReason = computed(() => {
+    if (!draft.value) return 'Choose an action to review.'
+    if (busy.value) return 'Sending the recorded request.'
+    if (unresolvedRequest.value && unresolvedRequest.value.operation_id !== draft.value.operation_id) return `Resolve the pending request for ${unresolvedRequest.value.symbol} first.`
+    if (!available.value || !fresh.value) return 'Refresh status before confirming.'
+    if (!detail.value || draft.value.symbol !== detail.value.symbol || draft.value.expected_revision !== detail.value.revision) return 'The holding changed. Cancel and review the action again.'
+    if (!actions.value.includes(draft.value.action)) return 'This action is no longer available. Cancel and review the current status.'
+    return ''
+  })
+  const pendingRequest = computed(() => unresolvedRequest.value)
 
   async function loadStrategies(more = false) {
     if (strategyLoading.value) return
@@ -182,7 +195,7 @@ export function useAccumulationPanel(symbol?: string) {
     } catch (cause) {
       if (request !== sequence || disposed) return
       if (accumulationErrorStatus(cause) === 503) available.value = false
-      error.value = extractApiErrorMessage(cause, 'Could not refresh accumulation status. Actions are disabled until refresh succeeds.')
+      error.value = `${selected.value}: ${extractApiErrorMessage(cause, 'Could not load this holding. Actions are disabled until refresh succeeds.')}`
     } finally {
       if (request === sequence && !disposed) loading.value = false
     }
@@ -190,6 +203,7 @@ export function useAccumulationPanel(symbol?: string) {
 
   async function selectSymbol(symbol: string) {
     ++sequence
+    stream.close()
     selected.value = symbol
     detail.value = null
     fresh.value = false
@@ -233,7 +247,7 @@ export function useAccumulationPanel(symbol?: string) {
   function prepare(action: AccumulationAction) {
     const row = detail.value
     if (disabled.value || !row || !actions.value.includes(action)) return
-    if (unresolvedRequest) { error.value = `Resolve the pending request for ${unresolvedRequest.symbol} before starting another action.`; return }
+    if (unresolvedRequest.value) { error.value = `Resolve the pending request for ${unresolvedRequest.value.symbol} before starting another action.`; return }
     error.value = ''
     if (action === 'sell_partial' && (!/^(?:\d+\.?\d*|\.\d+)$/.test(quantity.value.trim()) || !/[1-9]/.test(quantity.value))) {
       error.value = 'Enter a positive base-asset quantity using decimal digits.'
@@ -308,8 +322,8 @@ export function useAccumulationPanel(symbol?: string) {
 
   async function submit() {
     if (busy.value || (!uncertain.value && !draft.value)) return
-    if (!uncertain.value && (!fresh.value || !available.value || draft.value!.expected_revision !== detail.value?.revision || !actions.value.includes(draft.value!.action))) return
-    if (unresolvedRequest && unresolvedRequest.operation_id !== (uncertain.value ?? draft.value)?.operation_id) { error.value = `Resolve the pending request for ${unresolvedRequest.symbol} first.`; return }
+    if (!uncertain.value && confirmBlockedReason.value) { error.value = confirmBlockedReason.value; return }
+    if (unresolvedRequest.value && unresolvedRequest.value.operation_id !== (uncertain.value ?? draft.value)?.operation_id) { error.value = `Resolve the pending request for ${unresolvedRequest.value.symbol} first.`; return }
     const command = { ...(uncertain.value ?? draft.value!) }
     // Persist in memory before sending, so a route change cannot produce a new ID.
     rememberRequest(command)
@@ -345,8 +359,8 @@ export function useAccumulationPanel(symbol?: string) {
         notice.value = 'The request outcome is unknown. Retry this same request to retrieve its recorded outcome; no new operation will be created.'
       }
     } finally {
-      busy.value = false
       if (!disposed) await refreshDetail()
+      busy.value = false
     }
   }
 
@@ -356,5 +370,5 @@ export function useAccumulationPanel(symbol?: string) {
 
   })
   onBeforeUnmount(() => { disposed = true; ++sequence; stream.close() })
-  return { streamAvailable, streamStatus: stream.status, visible, available, rows, portfolio, performance, performanceLoading, performanceError, loadPerformance, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, quantity, csv, adjustmentDirection, adjustmentQuantity, adjustmentCost, adjustmentNote, ownershipConfirmation, ownershipNote, actions, disabled, loadPage, selectSymbol, refreshDetail, prepare, submit, strategies, strategyCursor, targetVersion, repairTarget, retirementTarget, strategyError, strategyLoading, loadStrategies }
+  return { confirmBlockedReason, pendingRequest, streamAvailable, streamStatus: stream.status, visible, available, rows, portfolio, performance, performanceLoading, performanceError, loadPerformance, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, quantity, csv, adjustmentDirection, adjustmentQuantity, adjustmentCost, adjustmentNote, ownershipConfirmation, ownershipNote, actions, disabled, loadPage, selectSymbol, refreshDetail, prepare, submit, strategies, strategyCursor, targetVersion, repairTarget, retirementTarget, strategyError, strategyLoading, loadStrategies }
 }
