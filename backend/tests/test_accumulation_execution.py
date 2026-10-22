@@ -3593,3 +3593,75 @@ async def test_shutdown_during_pending_asap_validation_does_not_place_bo(
     assert await runtime.startup()
     await runtime.tick()
     assert not client.calls and not await model.PlacementIntent.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("path", ["buy", "wallet", "sale"])
+@pytest.mark.parametrize(
+    "evidence",
+    [
+        "account_update",
+        "unknown_timestamp",
+        "other_venue",
+        "future_update",
+        "slow_request",
+    ],
+)
+async def test_balance_freshness_distinguishes_account_updates_from_observation(
+    env, path, evidence
+):
+    """Binance updateTime can be old even on a freshly authenticated response."""
+    adapter, client, clock, config, *_ = env
+    client.balance["free"]["BTC"] = "1"
+    stamp = clock[0] - 27 * HOUR
+    client.balance["timestamp"] = stamp
+    client.balance["info"] = {"updateTime": stamp}
+    if evidence == "other_venue":
+        client.id = "bybit"
+    elif evidence == "unknown_timestamp":
+        client.balance["info"] = {}
+    elif evidence == "future_update":
+        client.balance["timestamp"] = clock[0] + 1
+        client.balance["info"]["updateTime"] = clock[0] + 1
+    elif evidence == "slow_request":
+        original = client.fetch_balance
+
+        async def delayed():
+            result = await original()
+            clock[0] += 10001
+            return result
+
+        client.fetch_balance = delayed
+
+    async def read():
+        if path == "buy":
+            return (
+                await adapter.read_inputs("BTC/USDC", config)
+            ).funding.observed_at_ms
+        if path == "wallet":
+            return (await adapter.account_inventory("BTC/USDC", config)).observed_at_ms
+        return (await adapter.sale_inputs("BTC/USDC", "0.1", config)).observed_at_ms
+
+    if evidence == "account_update":
+        assert await read() == clock[0]
+        assert client.balance["timestamp"] == stamp
+    else:
+        with pytest.raises(AccumulationStateError, match="stale|future"):
+            await read()
+    assert not client.calls
+
+
+@pytest.mark.asyncio
+async def test_asap_can_open_bo_from_fresh_binance_balance_with_old_account_update(
+    env, monkeypatch
+):
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, clock, *_ = env
+    stamp = clock[0] - 27 * HOUR
+    client.balance.update(timestamp=stamp, info={"updateTime": stamp})
+    assert (await service.asap())[0].reason == "ENABLED"
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    assert len(client.calls) == 1
+    assert (await model.PlacementIntent.get()).state == "completed"

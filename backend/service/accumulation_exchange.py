@@ -46,6 +46,35 @@ from service.exchange_risk import get_min_notional_for_market
 from service.strategy_runtime import load_accumulation_strategy_version
 
 
+def _balance_observed_at(
+    client: Any, balance: dict[str, Any], *, started_ms: int, now_ms: int
+) -> int:
+    """Bound response freshness without treating account activity as observation.
+
+    CCXT's Binance spot parser copies info.updateTime into balance.timestamp.
+    That is the last account update, which may predate a fresh request by days.
+    Recognize that exact provenance; retain timestamp checks for other evidence.
+    """
+    if not 0 <= now_ms - started_ms <= 10000:
+        raise AccumulationStateError("Balance request is stale or future-dated.")
+    stamp = balance.get("timestamp")
+    info = balance.get("info")
+    if (
+        getattr(client, "id", None) == "binance"
+        and isinstance(info, dict)
+        and type(stamp) is int
+        and 0 <= stamp <= now_ms
+        and type(info.get("updateTime")) is int
+        and info["updateTime"] == stamp
+    ):
+        return started_ms
+    if stamp is None:
+        return started_ms
+    if type(stamp) is not int or not 0 <= now_ms - stamp <= 10000:
+        raise AccumulationStateError("Balance evidence is stale or future-dated.")
+    return min(started_ms, stamp)
+
+
 def accumulation_account_scope(config: dict[str, Any]) -> str:
     """Bind the credential and venue without persisting an API key or secret.
 
@@ -321,14 +350,9 @@ class AccumulationExchangeAdapter:
                 balance.get("free"), dict
             ):
                 raise AccumulationStateError("Fresh wallet evidence is unavailable.")
-            observed = balance.get("timestamp")
-            if observed is None:
-                observed = started
-            if (
-                type(observed) is not int
-                or not 0 <= self.clock_ms() - observed <= 10000
-            ):
-                raise AccumulationStateError("Wallet evidence is stale.")
+            observed = _balance_observed_at(
+                client, balance, started_ms=started, now_ms=self.clock_ms()
+            )
             orders = await client.fetch_open_orders(symbol)
             if not isinstance(orders, list) or orders:
                 raise AccumulationStateError("Open orders prevent account rebinding.")
@@ -450,14 +474,9 @@ class AccumulationExchangeAdapter:
             base, quote = symbol.split("/")
             # Missing assets are unknown; a verified zero must be explicitly present.
             free_quote = decimal_evidence(balance["free"].get(quote))
-            balance_timestamp = balance.get("timestamp")
-            if balance_timestamp is not None and (
-                type(balance_timestamp) is not int
-                or not 0 <= self.clock_ms() - balance_timestamp <= 10000
-            ):
-                raise AccumulationStateError(
-                    "Balance evidence is stale or future-dated."
-                )
+            _balance_observed_at(
+                client, balance, started_ms=started, now_ms=self.clock_ms()
+            )
             await self._owned_base(symbol, balance["free"].get(base), imported_quantity)
             holds = await self._reflected_holds(client, symbol, quote, scope)
             if holds:
@@ -511,13 +530,9 @@ class AccumulationExchangeAdapter:
                 balance.get("free"), dict
             ):
                 raise AccumulationStateError("Fresh wallet evidence is unavailable.")
-            balance_time = balance.get("timestamp", started)
-            if balance_time is None:
-                balance_time = started
-            if type(balance_time) is not int or not (
-                0 <= self.clock_ms() - balance_time <= 10000
-            ):
-                raise AccumulationStateError("Wallet evidence is stale.")
+            balance_time = _balance_observed_at(
+                client, balance, started_ms=started, now_ms=self.clock_ms()
+            )
             await self._owned_base(symbol, balance["free"].get(symbol.split("/")[0]))
             orders = await client.fetch_open_orders(symbol)
             if not isinstance(orders, list) or orders:

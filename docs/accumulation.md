@@ -58,6 +58,12 @@ Changing the global entry mode requires no open holdings, non-stopped
 registrations or unresolved orders. Pause an already-live instance first. The
 server drains order work and rechecks these conditions when saving.
 
+Authenticated balance reads must complete within ten seconds. For Binance spot,
+CCXT copies the last account update (`info.updateTime`) into the balance timestamp;
+that timestamp is not the time the response was fetched. When those fields match,
+Moonwalker measures freshness from the balance request instead. Slow requests,
+future timestamps and unrecognized stale evidence still block trading.
+
 ## Monitor a holding
 
 Expand its entry in **Open trades**. Beneath the chart, the accumulation status
