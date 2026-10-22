@@ -21,8 +21,9 @@ block new buys; reconciliation and explicit sales remain available.
    variant is optional. Its experimental starting parameters are not optimized or
    a claim of profitable performance. Strategy Builder can copy them into a new
    immutable variant.
-4. For ASAP, set **Initial buy amount** for the first purchase. Later purchases use
-   dynamic strategy sizing. Save the configuration. An incomplete draft may omit the strategy pin. Demo and live entry
+4. ASAP uses the existing **Base order amount** (`bo`) for the first purchase,
+   just as in Dynamic DCA. Later purchases use dynamic accumulation strategy
+   sizing. Save the configuration. An incomplete draft may omit the strategy pin. Demo and live entry
    requires credentials, an exact compatible pin and successful ownership, market
    and candle validation.
 5. Manage the registration from **Accumulation** in Trading Overview.

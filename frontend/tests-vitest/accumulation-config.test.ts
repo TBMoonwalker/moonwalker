@@ -40,15 +40,17 @@ it('disables accumulation selection when the backend release gate is off', async
   expect(api.fetchAccumulationStrategies).not.toHaveBeenCalled()
 })
 
-it('shows ASAP initial sizing and the saved strategy without automatic exits', async () => {
+it('uses the standard base order setting for ASAP in accumulation mode', async () => {
   const wrapper = render(true, 'accumulation')
   await flushPromises()
   expect(wrapper.text()).toContain('Initial accumulation strategy version')
   expect(wrapper.text()).toContain('Dry run trades against the exchange demo account')
   expect(wrapper.text()).toContain('Max managed symbols')
   expect(wrapper.text()).not.toContain('Take profit percentage')
-  expect(wrapper.text()).not.toContain('Base order amount')
-  expect(wrapper.text()).toContain('Initial buy amount')
+  expect(wrapper.text()).toContain('Base order amount')
+  expect(wrapper.text()).not.toContain('Initial buy amount')
+  expect(wrapper.text()).toContain('ASAP opens each holding with the configured base order')
+  expect(wrapper.text()).not.toContain('base-order sizing do not apply')
   expect(wrapper.text()).not.toContain('Stop loss percentage')
   expect(api.fetchAccumulationStrategies).toHaveBeenCalledOnce()
 })
@@ -65,5 +67,5 @@ it('requires the accumulation pin for readiness without demanding DCA sizing or 
 it('does not ask CSV imports to buy an initial position', async () => {
   const wrapper = render(true, 'accumulation', 'csv_signal')
   await flushPromises()
-  expect(wrapper.text()).not.toContain('Initial buy amount')
+  expect(wrapper.text()).not.toContain('Base order amount')
 })

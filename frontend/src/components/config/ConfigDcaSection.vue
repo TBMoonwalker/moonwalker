@@ -31,7 +31,7 @@
                     </n-radio-group>
                 </n-form-item>
                 <n-alert v-if="isAccumulationMode" type="info" :bordered="false" class="trade-mode-guard-note">
-                    Accumulation uses available budget to build holdings. Sales are manual only; take profit, stop loss and base-order sizing do not apply. Newly available funds may be spent while enabled. Pause a holding or Moonwalker to stop new buys. Dry run trades against the exchange demo account when supported. It requires demo credentials and available demo funds; it never falls back to live trading.
+                    ASAP opens each holding with the configured base order, just as in Dynamic DCA. The accumulation strategy sizes subsequent buys from available budget. CSV imports adopt coins already owned. Sales are manual; take profit and stop loss do not apply. Dry run trades against the exchange demo account when supported, using demo credentials and funds.
                 </n-alert>
                 <n-form-item v-if="isAccumulationMode" label="Initial accumulation strategy version" path="accumulation_strategy_version_id" :label-props="{ for: 'config-accumulation-strategy' }">
                     <n-select filterable v-model:value="dca.accumulation_strategy_version_id" :options="accumulationStrategies" :fallback-option="(value: string | number) => ({ value, label: 'Saved version — load the catalog to inspect' })" :loading="accumulationLoading" :disabled="!dca.accumulation_available" :input-props="{ id: 'config-accumulation-strategy' }" placeholder="Select an exact compatible saved version" />
@@ -75,7 +75,7 @@
             <n-form-item :label="isAccumulationMode ? 'Max managed symbols' : 'Max bots running'" path="max_bots">
                 <n-input-number v-model:value="dca.max_bots" placeholder="Bot count" />
             </n-form-item>
-            <n-form-item v-if="!isAccumulationMode || signalName === 'asap'" :label="isAccumulationMode ? 'Initial buy amount' : 'Base order amount'" path="bo">
+            <n-form-item v-if="!isAccumulationMode || signalName === 'asap'" label="Base order amount" path="bo">
                 <n-input-number v-model:value="dca.bo" placeholder="BO" />
             </n-form-item>
             <n-form-item v-if="!isAccumulationMode" label="Sell order type" path="sell_order_type">

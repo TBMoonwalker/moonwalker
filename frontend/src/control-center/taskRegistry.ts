@@ -46,7 +46,7 @@ const TASKS: readonly ControlCenterTaskPresentation[] = [
     {
         target: 'dca',
         title: 'Trade modes',
-        summary: 'Tune Dynamic DCA runtime behavior.',
+        summary: 'Choose the trade mode and configure how positions are managed.',
         defaultMode: 'setup',
         modes: ['setup', 'advanced'],
         sectionId: 'control-center-dca',

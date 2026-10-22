@@ -185,7 +185,7 @@ async def validate_accumulation_configuration(
                 canonical_decimal(str(amount), positive=True)
             except AccumulationStateError as exc:
                 raise AccumulationStateError(
-                    "Set a positive initial buy amount for ASAP."
+                    "Set a positive base order amount for ASAP."
                 ) from exc
         symbols = proposed.get("symbol_list")
         if (
