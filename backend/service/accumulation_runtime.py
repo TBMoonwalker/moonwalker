@@ -7,6 +7,7 @@ rounds and unresolved-order recovery. A WAIT does not enqueue itself again.
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -33,6 +34,7 @@ from service.accumulation_recovery import AccumulationPlacementRecovery
 from service.accumulation_repair import AccumulationOrderRepair
 from service.accumulation_sales import AccumulationCommandExecutor
 from service.accumulation_state import load_accumulation_context
+from service.accumulation_status_events import AccumulationStatusEvents
 from service.accumulation_strategy import AccumulationParameters
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.order_requests import normalize_order_symbol
@@ -86,6 +88,9 @@ class AccumulationRuntime:
         self._rebased: set[str] = set()
         self._seen_retries: set[tuple[str, int]] = set()
         self.status: dict[str, str] = {}
+        self.wait_conditions: dict[str, dict[str, Any]] = {}
+        self.status_events = AccumulationStatusEvents()
+        self._status_fingerprint: str | None = None
         self.entry = AccumulationEntryService(adapter, self.notify)
 
     @property
@@ -316,6 +321,7 @@ class AccumulationRuntime:
     async def _evaluate(
         self, activation: model.AccumulationActivation, config: dict[str, Any]
     ) -> None:
+        self.wait_conditions.pop(activation.symbol, None)
         if is_global_trading_paused(config):
             self.status[activation.symbol] = "WAIT_GLOBAL_PAUSE"
             return
@@ -361,6 +367,13 @@ class AccumulationRuntime:
                 minimum_quote=inputs.minimum_quote,
             )
             self.status[activation.symbol] = decision.reason
+            if decision.wait_condition is not None:
+                self.wait_conditions[activation.symbol] = {
+                    **decision.wait_condition,
+                    "activation_id": decision.identity.activation_id,
+                    "revision": decision.identity.revision,
+                    "strategy_version_id": decision.identity.strategy_version_id,
+                }
             if decision.reason == "WAIT_REBASE":
                 await self._rebase(activation)
             elif decision.action == "BUY":
@@ -403,7 +416,37 @@ class AccumulationRuntime:
         self._seen_retries.intersection_update(seen)
         return dirty
 
+    async def publish_status(self) -> None:
+        """Push only changed public state, shared across all dashboard clients."""
+        if not self.status_events.connected:
+            self._status_fingerprint = None
+            return
+        rows = (
+            await model.AccumulationActivation.all()
+            .order_by("symbol")
+            .values("id", "symbol", "revision")
+        )
+        fingerprint = json.dumps(
+            [
+                rows,
+                self.status,
+                self.wait_conditions,
+                self.current_account_scope if rows else None,
+            ],
+            sort_keys=True,
+            default=str,
+        )
+        if fingerprint != self._status_fingerprint:
+            self._status_fingerprint = fingerprint
+            self.status_events.publish()
+
     async def tick(self) -> None:
+        """Publish after a completed round; dashboard clients never drive trading."""
+        await self._tick()
+        if self._started and not self._stopping:
+            await self.publish_status()
+
+    async def _tick(self) -> None:
         """Run one serialized bounded round; unexpected failures reach supervision."""
         if not self._started or self._stopping:
             return
@@ -531,6 +574,7 @@ class AccumulationRuntime:
     def request_stop(self) -> None:
         """Stop new admission and wake the loop; never pretend orders were cancelled."""
         self._stopping = True
+        self.status_events.close()
         accumulation_input_notifications.detach(self)
         self._wake.set()
 

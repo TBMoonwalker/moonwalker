@@ -276,3 +276,26 @@ Tests use simulated exchange transports and isolated SQLite databases. No
 actual-money acceptance transactions are required or performed. Repository-wide
 security/dependency release gates remain separate from feature verification; see
 [TODOS](../TODOS.md) for recorded release blockers.
+
+### Live waiting status
+
+The compact overview shows the current unmet entry or next-buy condition. When
+market observations are available, it includes a target price and the required
+percentage move from the latest completed strategy candle. A recovery target
+still requires a subsequent fresh correction. Execution-price waits use the
+fresh ask instead. Levels are snapshots of the current ATR/peak/guard calculation,
+not guaranteed orders, and can change at the next candle. Invalid, expired or
+revision-mismatched observations do not produce a price level.
+
+The dashboard loads an initial REST snapshot and subscribes to
+`/accumulation/stream?symbol=BTC%2FUSDC`. The stream sends an initial snapshot and
+coalesced runtime/lifecycle changes to each connected client. There is no browser
+status-polling interval; reconnecting obtains another snapshot. A disconnected
+stream makes actions stale until a fresh snapshot or explicit refresh succeeds.
+Runtime candle-boundary and execution-recovery timers are separate from dashboard
+updates. Repair-only startup retains explicit HTTP refresh and recovery controls;
+its `stream_available` flag is false because ordinary WebSockets remain disabled.
+
+Inventory, strategies, history and comparison controls are under **Manage
+accumulation**. Action confirmations and critical selected-holding warnings remain
+outside that disclosure.

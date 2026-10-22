@@ -12,6 +12,7 @@ export interface AccumulationOperation {
 }
 
 export interface AccumulationStatus {
+  wait_condition?: AccumulationWaitCondition | null
   account_matches?: boolean | null
   activation_id: string
   symbol: string
@@ -87,6 +88,7 @@ export interface AccumulationCommandResult {
 }
 
 export interface AccumulationPage {
+  stream_available?: boolean
   activations: AccumulationStatus[]
   next_after: string | null
   portfolio?: AccumulationPortfolio
@@ -97,6 +99,21 @@ export interface AccumulationPortfolio {
   unverified_holding_count: number
   valuation_available: false
   by_quote: Array<{ quote: string; holding_count: number; known_remaining_cost: string; remaining_cost: string | null; unknown_cost_count: number }>
+}
+
+export interface AccumulationWaitCondition {
+  reason: string
+  timeframe: string
+  observed_close_ms: number
+  observed_price: string
+  price_basis?: 'ask'
+  next_close_ms: number
+  levels: Array<{
+    kind: string
+    direction: 'below' | 'at_or_below' | 'at_or_above'
+    target_price: string
+    change_percent: string
+  }>
 }
 
 export interface AccumulationPerformance {

@@ -1,12 +1,15 @@
 """Accumulation projections, isolated replay and revisioned operator commands."""
 
+import asyncio
+import json
+from collections.abc import AsyncGenerator
 from dataclasses import asdict
 from typing import Any
 
 from controller.responses import json_response
 from litestar.connection import Request
-from litestar.exceptions import SerializationException
-from litestar.handlers import get, post
+from litestar.exceptions import SerializationException, WebSocketDisconnect
+from litestar.handlers import get, post, websocket_stream
 from litestar.params import FromQuery
 from service import accumulation_runtime
 from service.accumulation_catalog import (
@@ -16,6 +19,7 @@ from service.accumulation_catalog import (
 from service.accumulation_runtime import AccumulationRuntime
 from service.accumulation_state import AccumulationConflictError
 from service.accumulation_status import (
+    accumulation_stream_snapshot,
     get_accumulation_status,
     list_accumulation_status,
 )
@@ -50,12 +54,14 @@ async def list_activations(
     if runtime is None:
         return _unavailable()
     try:
-        return await list_accumulation_status(
+        result = await list_accumulation_status(
             limit=limit,
             after=after,
             wait_reasons=dict(runtime.status),
             configured_account_scope=getattr(runtime, "current_account_scope", None),
+            wait_conditions=getattr(runtime, "wait_conditions", {}),
         )
+        return {**result, "stream_available": runtime.ready}
     except ValueError as exc:
         return json_response({"error": str(exc), "code": "invalid_request"}, 400)
 
@@ -71,6 +77,7 @@ async def get_activation(symbol: FromQuery[str]) -> Any:
             symbol,
             wait_reasons=dict(runtime.status),
             configured_account_scope=getattr(runtime, "current_account_scope", None),
+            wait_conditions=getattr(runtime, "wait_conditions", {}),
         )
     except ValueError as exc:
         return json_response({"error": str(exc), "code": "invalid_request"}, 400)
@@ -119,6 +126,7 @@ async def _submit(
         return json_response({"error": str(exc), "code": "invalid_request"}, 400)
     if runtime.ready:
         runtime.notify()
+    runtime.status_events.publish()
     return json_response(
         {"operation": asdict(result)},
         202 if result.status in {"pending", "quarantined"} else 200,
@@ -179,7 +187,39 @@ async def get_performance() -> Any:
     return await runtime.performance()
 
 
+@websocket_stream(path="/accumulation/stream", warn_on_data_discard=False)
+async def stream_status(
+    symbol: FromQuery[str | None] = None,
+) -> AsyncGenerator[str, None]:
+    """Send an initial snapshot, then only changed runtime/lifecycle snapshots."""
+    runtime = _runtime()
+    if runtime is None:
+        yield json.dumps({"type": "unavailable"})
+        return
+    if symbol is not None:
+        from service.order_requests import normalize_order_symbol
+
+        symbol = normalize_order_symbol(symbol)
+    previous: str | None = None
+    try:
+        async for _ in runtime.status_events.subscribe():
+            snapshot = await accumulation_stream_snapshot(
+                symbol,
+                wait_reasons=dict(runtime.status),
+                wait_conditions=dict(runtime.wait_conditions),
+                configured_account_scope=runtime.current_account_scope,
+            )
+            payload = json.dumps(snapshot)
+            if payload != previous:
+                previous = payload
+                yield payload
+
+    except (asyncio.CancelledError, WebSocketDisconnect):
+        return
+
+
 route_handlers = [
+    stream_status,
     get_performance,
     list_activations,
     get_activation,

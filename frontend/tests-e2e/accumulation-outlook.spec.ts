@@ -1,7 +1,10 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type WebSocketRoute } from '@playwright/test'
 import type { AccumulationDetail } from '../src/types/accumulation'
 
 test('puts entry state and its reviewed next action before secondary information', async ({ page }, testInfo) => {
+  let live: WebSocketRoute | undefined
+  await page.routeWebSocket('**/accumulation/stream**', socket => { live = socket })
+  await page.clock.install()
   await page.route('**/config/all', route => route.fulfill({ json: {
     timezone: 'Europe/Vienna', signal: 'asap', symbol_list: 'BTC/USDC', exchange: 'binance',
     timeframe: '1h', key: 'test-only', secret: 'test-only', currency: 'USDC', max_bots: 2,
@@ -29,9 +32,8 @@ test('puts entry state and its reviewed next action before secondary information
   await expect(panel.getByText('Buy sizing', { exact: true })).toHaveCount(0)
   await expect(panel.getByText('Exit', { exact: true })).toHaveCount(0)
   await expect(panel.getByText('Buying rules', { exact: true })).toHaveCount(0)
-  await panel.getByText('Entry check details', { exact: true }).click()
-  await expect(panel.getByText(/The first check runs automatically/)).toBeVisible()
-  await panel.getByText('Entry check details', { exact: true }).click()
+  await expect(panel.getByText('Entry check details', { exact: true })).toHaveCount(0)
+  await expect(panel.locator('.accumulation-management')).not.toHaveAttribute('open', '')
   const action = panel.getByRole('button', { name: 'Retry entry check', exact: true })
   await expect(action).toBeEnabled()
   await expect(action).toHaveClass(/n-button--primary-type/)
@@ -47,6 +49,19 @@ test('puts entry state and its reviewed next action before secondary information
   await expect(panel.getByRole('button', { name: 'Confirm retry entry check', exact: true })).toBeVisible()
   expect(commands).toBe(0)
   await panel.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect.poll(() => !!live).toBe(true)
+  const waiting: AccumulationDetail = { ...detail, state: 'enabled', explicitly_paused: false, revision: 2, observations_initialized: true, entry: null, operations: [], runtime_wait_reason: 'WAIT_DEPTH', wait_condition: {
+    reason: 'WAIT_DEPTH', timeframe: '1h', observed_close_ms: Date.now(), next_close_ms: Date.now() + 3600000,
+    observed_price: '100', levels: [{ kind: 'depth', direction: 'at_or_below', target_price: '98', change_percent: '-2' }],
+  } }
+  let reads = 0
+  page.on('request', request => { if (new URL(request.url()).pathname === '/accumulation/activation') reads++ })
+  live!.send(JSON.stringify({ type: 'snapshot', page: { activations: [waiting], next_after: null }, detail: waiting }))
+  await expect(panel.getByRole('heading', { name: 'Waiting for entry', exact: true })).toBeVisible()
+  await expect(panel.getByText('≈ 2.00% fall', { exact: true })).toBeVisible()
+  await expect(panel.getByLabel('Accumulation strategy version', { exact: true })).not.toBeVisible()
+  await page.clock.fastForward(15000)
+  expect(reads).toBe(0)
   await page.getByRole('button', { name: 'Dark theme', exact: true }).click()
   await panel.screenshot({ path: `/private/tmp/accumulation-outlook-dark-${testInfo.project.name}.png` })
   await page.getByRole('button', { name: 'Light theme', exact: true }).click()

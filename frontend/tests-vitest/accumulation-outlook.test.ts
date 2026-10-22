@@ -56,26 +56,26 @@ describe('accumulation operator outlook', () => {
     expect(outlook.action).toBeUndefined()
   })
 
-  it('limits expandable help to the current operational step', () => {
-    const entry = mount(AccumulationOutlook, { props: { detail: row({ state: 'validating', observations_initialized: false }), fresh: true } })
-    expect(entry.find('summary').text()).toBe('Entry check details')
-    expect(entry.text()).not.toContain('Deeper dips')
-    expect(entry.text()).not.toContain('Sales require')
-    expect(entry.text()).not.toContain('ASAP registers')
-    const watch = mount(AccumulationOutlook, { props: { detail: row({ runtime_wait_reason: 'WAIT_DEPTH' }), fresh: true } })
-    expect(watch.find('summary').text()).toBe('Buying rules')
-    expect(watch.text()).not.toContain('The first check runs automatically')
-    expect(watch.find('details').attributes('open')).toBeUndefined()
+  it('shows only the unmet entry threshold and its percentage', () => {
+    const wrapper = mount(AccumulationOutlook, { props: { detail: row({ runtime_wait_reason: 'WAIT_DEPTH', wait_condition: {
+      reason: 'WAIT_DEPTH', timeframe: '1h', observed_close_ms: 1000, observed_price: '100', next_close_ms: 3601000,
+      levels: [{ kind: 'depth', direction: 'at_or_below', target_price: '98', change_percent: '-2' }],
+    } }), fresh: true } })
+    expect(wrapper.text()).toContain('Waiting for entry')
+    expect(wrapper.text()).toContain('2.00% fall')
+    expect(wrapper.text()).toContain('98 USDC')
+    expect(wrapper.text()).not.toContain('Buying rules')
+    expect(wrapper.text()).not.toContain('ASAP')
+    expect(wrapper.find('details').exists()).toBe(false)
   })
 
-  it('keeps an expanded explanation mounted across status polling', async () => {
-    const wrapper = mount(AccumulationOutlook, { props: { detail: row({ state: 'validating', observations_initialized: false }), fresh: true } })
-    const explanation = wrapper.find('details').element
-    explanation.setAttribute('open', '')
-    await wrapper.setProps({ fresh: false })
-    await wrapper.setProps({ fresh: true })
-    expect(wrapper.find('details').element).toBe(explanation)
-    expect(wrapper.find('details').attributes('open')).toBe('')
+  it('does not show cached price levels when the snapshot is stale', () => {
+    const wrapper = mount(AccumulationOutlook, { props: { detail: row({ runtime_wait_reason: 'WAIT_DEPTH', wait_condition: {
+      reason: 'WAIT_DEPTH', timeframe: '1h', observed_close_ms: 1000, observed_price: '100', next_close_ms: 3601000,
+      levels: [{ kind: 'depth', direction: 'at_or_below', target_price: '98', change_percent: '-2' }],
+    } }), fresh: false } })
+    expect(wrapper.text()).toContain('Status needs refresh')
+    expect(wrapper.text()).not.toContain('2.00%')
   })
 
   it.each([

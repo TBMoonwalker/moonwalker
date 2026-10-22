@@ -56,6 +56,7 @@ def runtime(monkeypatch):
     owner = SimpleNamespace(
         ready=True,
         notify=Mock(),
+        status_events=SimpleNamespace(publish=Mock()),
         performance=AsyncMock(),
         status={},
         submit_command=AsyncMock(),
@@ -750,3 +751,181 @@ async def test_concurrent_setup_clients_seed_one_immutable_starter(
         ).count()
         == 1
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        None,
+        "revision",
+        "strategy_version_id",
+        "activation_id",
+        "reason",
+        "expired",
+        "account",
+    ],
+)
+async def test_wait_levels_are_only_projected_for_current_matching_evidence(
+    api_client, runtime, status_db, monkeypatch, invalid
+):
+    version = await model.StrategyVersion.create(
+        strategy_slug="accumulation_dip_v1",
+        version=1,
+        ir_json="{}",
+        validation_json="{}",
+        explanation="test",
+    )
+    activation = await model.AccumulationActivation.create(
+        symbol="BTC/USDC",
+        account_scope="account",
+        strategy_version=version,
+        state="enabled",
+        explicitly_paused=False,
+        revision=4,
+        observations_initialized=True,
+    )
+    runtime.current_account_scope = "account"
+    runtime.status = {"BTC/USDC": "WAIT_DEPTH"}
+    evidence = {
+        "activation_id": str(activation.id),
+        "revision": 4,
+        "strategy_version_id": version.id,
+        "reason": "WAIT_DEPTH",
+        "observed_close_ms": 3600000,
+        "next_close_ms": 7200000,
+        "observed_price": "100",
+        "timeframe": "1h",
+        "levels": [
+            {
+                "kind": "depth",
+                "direction": "at_or_below",
+                "target_price": "98",
+                "change_percent": "-2",
+            }
+        ],
+    }
+    monkeypatch.setattr(
+        "service.accumulation_status.time.time_ns", lambda: 3600001000000
+    )
+    if invalid in {"revision", "strategy_version_id"}:
+        evidence[invalid] += 1
+    elif invalid in {"activation_id", "reason"}:
+        evidence[invalid] = "different"
+    elif invalid == "expired":
+        evidence["next_close_ms"] = 3600000
+    elif invalid == "account":
+        runtime.current_account_scope = "another"
+    runtime.wait_conditions = {"BTC/USDC": evidence}
+    response = await api_client.get(
+        "/accumulation/activation", params={"symbol": "BTC/USDC"}
+    )
+    assert response.status_code == 200
+    assert response.json()["wait_condition"] == (evidence if invalid is None else None)
+
+
+@pytest.mark.asyncio
+async def test_runtime_status_notifications_are_deduplicated_and_include_lifecycle_changes(
+    status_db, monkeypatch
+):
+    import asyncio
+
+    from service.accumulation_runtime import AccumulationRuntime
+
+    owner = AccumulationRuntime(
+        SimpleNamespace(
+            exchange=SimpleNamespace(), readiness=AsyncMock(), account_scope=AsyncMock()
+        )
+    )
+    monkeypatch.setattr(
+        AccumulationRuntime, "current_account_scope", property(lambda _: "account")
+    )
+    version = await model.StrategyVersion.create(
+        strategy_slug="accumulation_dip_v1",
+        version=1,
+        ir_json="{}",
+        validation_json="{}",
+        explanation="test",
+    )
+    activation = await model.AccumulationActivation.create(
+        symbol="BTC/USDC", account_scope="account", strategy_version=version
+    )
+    updates = owner.status_events.subscribe()
+    await anext(updates)
+    await owner.publish_status()
+    await anext(updates)
+    pending = asyncio.create_task(anext(updates))
+    await owner.publish_status()
+    await asyncio.sleep(0)
+    assert not pending.done()
+    owner.status["BTC/USDC"] = "WAIT_DEPTH"
+    await owner.publish_status()
+    await asyncio.wait_for(pending, 0.2)
+    pending = asyncio.create_task(anext(updates))
+    activation.revision += 1
+    await activation.save()
+    await owner.publish_status()
+    await asyncio.wait_for(pending, 0.2)
+    await updates.aclose()
+    assert not owner.status_events.connected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("begin_number", [1, 2])
+async def test_disconnecting_stream_snapshot_does_not_strand_sqlite(
+    status_db, monkeypatch, begin_number
+):
+    import asyncio
+
+    from service.accumulation_status import accumulation_stream_snapshot
+    from tortoise.backends.sqlite.client import SqliteTransactionWrapper
+    from tortoise.connection import connections
+
+    version = await model.StrategyVersion.create(
+        strategy_slug="accumulation_dip_v1",
+        version=1,
+        ir_json="{}",
+        validation_json="{}",
+        explanation="test",
+    )
+    await model.AccumulationActivation.create(
+        symbol="BTC/USDC", account_scope="account", strategy_version=version
+    )
+    entered, release = asyncio.Event(), asyncio.Event()
+    original = SqliteTransactionWrapper.begin
+    count = 0
+
+    async def begin(self):
+        nonlocal count
+        count += 1
+        if count == begin_number:
+            entered.set()
+            await release.wait()
+        await original(self)
+
+    monkeypatch.setattr(SqliteTransactionWrapper, "begin", begin)
+    task = asyncio.create_task(
+        accumulation_stream_snapshot(
+            "BTC/USDC",
+            wait_reasons={},
+            wait_conditions={},
+            configured_account_scope="account",
+        )
+    )
+    try:
+        await asyncio.wait_for(entered.wait(), 1)
+        task.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await asyncio.wait_for(task, 1)
+        assert (
+            await asyncio.wait_for(model.AccumulationActivation.all().count(), 0.2) == 1
+        )
+    finally:
+        release.set()
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        connection = connections.get("default")
+        if connection._lock.locked():
+            connection._lock.release()

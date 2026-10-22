@@ -10,6 +10,7 @@ import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
 from decimal import Decimal, localcontext
+from typing import Any
 
 import model
 from service.accumulation_contracts import (
@@ -33,6 +34,7 @@ from service.accumulation_strategy import (
     calculate_accumulation_market,
     canonical_accumulation_priority,
 )
+from service.accumulation_wait import accumulation_wait_condition
 from service.database import run_sqlite_write_with_retry
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.strategy_runtime import load_accumulation_strategy_version
@@ -58,6 +60,7 @@ class AccumulationDecision:
     priority_close_ms: int | None = None
     capability: str = CAPABILITY
     priority_protocol: str = PRIORITY_PROTOCOL
+    wait_condition: dict[str, Any] | None = None
 
 
 def _guard(raw: str | None, revision: int) -> AccumulationGuard | None:
@@ -139,7 +142,29 @@ def _proposal(
     except AccumulationStateError:
         return result
     if Decimal(ask) > Decimal(opportunity.signal_price):
-        return replace(result, reason="WAIT_PRICE")
+        with localcontext() as context:
+            context.prec = 50
+            change = (Decimal(opportunity.signal_price) / Decimal(ask) - 1) * 100
+        return replace(
+            result,
+            reason="WAIT_PRICE",
+            wait_condition={
+                "reason": "WAIT_PRICE",
+                "timeframe": parameters.timeframe,
+                "observed_close_ms": opportunity.signal_close_ms,
+                "observed_price": ask,
+                "price_basis": "ask",
+                "next_close_ms": opportunity.expires_at_ms,
+                "levels": [
+                    {
+                        "kind": "execution_price",
+                        "direction": "at_or_below",
+                        "target_price": opportunity.signal_price,
+                        "change_percent": str(change),
+                    }
+                ],
+            },
+        )
     if Decimal(requested) < Decimal(minimum):
         return replace(result, reason="WAIT_MINIMUM")
     return replace(result, action="BUY", reason="BUY_OPPORTUNITY")
@@ -207,7 +232,14 @@ async def evaluate_accumulation(
                     "Observation candle identity is inconsistent."
                 )
             if market.close_ms <= expected.baseline_close_ms:
-                return AccumulationDecision(expected, "WAIT", "WAIT_BASELINE")
+                return AccumulationDecision(
+                    expected,
+                    "WAIT",
+                    "WAIT_BASELINE",
+                    wait_condition=accumulation_wait_condition(
+                        market, state, guard, parameters, "WAIT_BASELINE"
+                    ),
+                )
             if (
                 market.close_ms < state.last_close_ms
                 or market.close_ms > state.last_close_ms + parameters.interval_ms
@@ -246,9 +278,23 @@ async def evaluate_accumulation(
                     market, updated_state, guard, parameters
                 )
                 if not reason.startswith("BUY_"):
-                    return AccumulationDecision(identity, "WAIT", reason)
+                    return AccumulationDecision(
+                        identity,
+                        "WAIT",
+                        reason,
+                        wait_condition=accumulation_wait_condition(
+                            market, updated_state, guard, parameters, reason
+                        ),
+                    )
                 if market.close_ms == state.last_close_ms:
-                    return AccumulationDecision(identity, "WAIT", "WAIT_NEW_CANDLE")
+                    return AccumulationDecision(
+                        identity,
+                        "WAIT",
+                        "WAIT_NEW_CANDLE",
+                        wait_condition=accumulation_wait_condition(
+                            market, updated_state, guard, parameters, "WAIT_NEW_CANDLE"
+                        ),
+                    )
                 opportunity = await model.AccumulationOpportunity.create(
                     using_db=conn,
                     activation=activation,

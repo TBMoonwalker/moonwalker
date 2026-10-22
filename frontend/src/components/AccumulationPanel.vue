@@ -37,6 +37,7 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
       <div>
         <h2 id="accumulation-heading">Accumulation</h2>
       </div>
+      <span class="accumulation-live" role="status">{{ !panel.streamAvailable.value ? 'Snapshot' : panel.streamStatus.value === 'OPEN' ? 'Live' : 'Reconnecting' }}</span>
       <n-button :loading="loading" :disabled="busy" @click="panel.loadPage()">Refresh status</n-button>
     </header>
     <n-alert v-if="error" type="warning" role="alert">{{ error }}</n-alert>
@@ -46,14 +47,14 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
       <n-button :loading="busy" :disabled="busy || !available" @click="panel.submit()">Retry same request</n-button>
     </n-alert>
     <p v-if="available && rows.length === 0">No accumulation registrations. Add a fixed symbol with ASAP or import an existing holding with CSV.</p>
-    <div v-if="rows.length" class="accumulation-picker">
+    <div v-if="rows.length > 1" class="accumulation-picker">
       <label for="accumulation-symbol">Managed symbol</label>
       <n-select filterable :value="selected" :options="options" :input-props="{ id: 'accumulation-symbol' }" :disabled="busy || !!uncertain" @update:value="panel.selectSymbol" />
       <n-button v-if="next" :disabled="busy" @click="panel.loadPage(true)">Load more symbols</n-button>
     </div>
 
     <template v-if="detail">
-      <AccumulationOutlook :detail="detail" :fresh="fresh" :strategy="pinnedStrategy">
+      <AccumulationOutlook :detail="detail" :fresh="fresh">
         <n-button v-if="primaryAction" type="primary" :disabled="disabled" @click="panel.prepare(primaryAction)">{{ accumulationActionLabels[primaryAction] }}</n-button>
       </AccumulationOutlook>
       <n-alert v-if="detail.holding_integrity === 'invalid'" type="error">Ownership needs repair. Restore the recorded inventory link before trading.</n-alert>
@@ -63,6 +64,29 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
       <n-alert v-if="detail.state === 'closing'" type="warning">
         Closing blocks new buys. Any remaining quantity stays recorded, including dust below the exchange minimum. Retry a remaining sale only after it becomes sellable; unsettled orders must reconcile first.
       </n-alert>
+      <n-alert v-if="draft" type="warning" role="alert" title="Review action">
+        <p>{{ accumulationActionCopy(draft.action, draft.symbol) }}</p>
+        <p v-if="draft.quantity">Quantity: <strong>{{ draft.quantity }}</strong> {{ base }}</p>
+        <template v-if="draft.action === 'adjust_inventory'">
+          <p>Direction: <strong>{{ draft.direction }}</strong>. Acquisition cost: <strong>{{ draft.acquisition_cost ?? 'Unknown / proportional existing basis for a removal' }}</strong> {{ quote }}.</p>
+          <p>Reason: {{ draft.note }}</p>
+        </template>
+        <p v-if="draft.action === 'declare_ownership'">Ownership declared for <strong>{{ draft.confirmation }}</strong>: {{ draft.note }}</p>
+        <p v-if="reviewedStrategy">Selected strategy: {{ reviewedStrategy.name }} · v{{ reviewedStrategy.version }} · {{ reviewedStrategy.parameters.timeframe }}</p>
+        <p v-if="reviewedRepair">Selected order: {{ reviewedRepair.label }}</p>
+        <p v-if="draft.action === 'retire_command' && reviewedRetirement">Selected command: {{ reviewedRetirement.label }}</p>
+        <pre v-if="draft.csv_content" class="accumulation-csv-review">{{ draft.csv_content }}</pre>
+        <p v-if="draft.expected_revision !== detail.revision">The holding changed. Cancel this review and choose the action again.</p>
+        <div class="accumulation-actions">
+          <n-button type="primary" :loading="busy" :disabled="busy || !available || !fresh || draft.expected_revision !== detail.revision || !actions.includes(draft.action)" @click="panel.submit()">Confirm {{ accumulationActionLabels[draft.action].toLowerCase() }}</n-button>
+          <n-button :disabled="busy" @click="draft = null">Cancel</n-button>
+        </div>
+      </n-alert>
+    </template>
+    <details class="accumulation-management">
+      <summary>Manage accumulation</summary>
+      <div class="accumulation-management-content">
+    <template v-if="detail">
       <dl v-if="detail.holding" class="accumulation-values">
         <div><dt>Managed quantity · {{ base }}</dt><dd>{{ detail.holding.net_quantity ?? 'Unknown' }}</dd></div>
         <div><dt>Remaining cost · {{ quote }}</dt><dd>{{ detail.holding.remaining_cost ?? 'Unknown' }}</dd></div>
@@ -132,24 +156,6 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
       <div class="accumulation-actions">
         <n-button v-for="action in secondaryActions" :key="action" :disabled="disabled" @click="panel.prepare(action)">{{ accumulationActionLabels[action] }}</n-button>
       </div>
-      <n-alert v-if="draft" type="warning" role="alert" title="Review action">
-        <p>{{ accumulationActionCopy(draft.action, draft.symbol) }}</p>
-        <p v-if="draft.quantity">Quantity: <strong>{{ draft.quantity }}</strong> {{ base }}</p>
-        <template v-if="draft.action === 'adjust_inventory'">
-          <p>Direction: <strong>{{ draft.direction }}</strong>. Acquisition cost: <strong>{{ draft.acquisition_cost ?? 'Unknown / proportional existing basis for a removal' }}</strong> {{ quote }}.</p>
-          <p>Reason: {{ draft.note }}</p>
-        </template>
-        <p v-if="draft.action === 'declare_ownership'">Ownership declared for <strong>{{ draft.confirmation }}</strong>: {{ draft.note }}</p>
-        <p v-if="reviewedStrategy">Selected strategy: {{ reviewedStrategy.name }} · v{{ reviewedStrategy.version }} · {{ reviewedStrategy.parameters.timeframe }}</p>
-        <p v-if="reviewedRepair">Selected order: {{ reviewedRepair.label }}</p>
-        <p v-if="draft.action === 'retire_command' && reviewedRetirement">Selected command: {{ reviewedRetirement.label }}</p>
-        <pre v-if="draft.csv_content" class="accumulation-csv-review">{{ draft.csv_content }}</pre>
-        <p v-if="draft.expected_revision !== detail.revision">The holding changed. Cancel this review and choose the action again.</p>
-        <div class="accumulation-actions">
-          <n-button type="primary" :loading="busy" :disabled="busy || !available || !fresh || draft.expected_revision !== detail.revision" @click="panel.submit()">Confirm {{ accumulationActionLabels[draft.action].toLowerCase() }}</n-button>
-          <n-button :disabled="busy" @click="draft = null">Cancel</n-button>
-        </div>
-      </n-alert>
       <details v-if="detail.operations.length" class="accumulation-history">
         <summary>Recent requests</summary>
         <p>These are recorded outcomes. Current holding state is shown above.</p>
@@ -231,6 +237,8 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
     </details>
 
     <AccumulationReplay v-if="available" :strategies="panel.strategies.value" />
+      </div>
+    </details>
   </section>
 </template>
 
@@ -240,6 +248,8 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
 .accumulation-heading { justify-content: space-between; align-items: flex-start; }
 h2 { margin: 0; font: 600 20px var(--mw-font-display); color: var(--mw-color-text-primary); }
 p { margin: 8px 0 0; color: var(--mw-color-text-secondary); }
+.accumulation-management-content { display: grid; gap: 16px; padding-top: 16px; }
+.accumulation-live { margin-left: auto; font-size: 14px; color: var(--mw-color-text-secondary); }
 .accumulation-picker, .accumulation-input { display: grid; gap: 8px; }
 .accumulation-picker { max-width: 480px; }
 .accumulation-input { max-width: 720px; }

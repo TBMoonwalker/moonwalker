@@ -486,3 +486,24 @@ results, fee/cash/unit totals, sampled drawdown, gaps, signal counts, at most th
 first 100 accumulation executions, and modeling/survivorship caveats. This endpoint
 uses no account credentials and cannot trade. Normal runtime availability is
 required; recovery-only sessions reject it.
+
+### Accumulation status stream
+
+`WS /accumulation/stream?symbol=BTC%2FUSDC` is a read-only, origin-checked stream.
+It sends `{ "type": "snapshot", "page": ..., "detail": ... }` on connection,
+then when runtime wait state, observations or lifecycle revisions change. Slow
+subscribers retain one pending notification. The page uses the first 25 symbols;
+`detail` always refers to the requested symbol (or the first symbol when omitted).
+A reconnect receives current state rather than replaying commands. An unavailable
+runtime sends `{ "type": "unavailable" }` and ends the stream. Repair-only startup
+keeps its existing WebSocket gate; REST pages advertise `stream_available: false`.
+
+Status projections optionally include `wait_condition`: a reason, timeframe,
+`observed_close_ms`, `observed_price`, `next_close_ms`, and `levels`. Each level
+provides `kind`, `direction`, exact decimal `target_price` and signed
+`change_percent`. Multiple rearm levels are alternatives; a
+`recovery_then_correction` level requires a later correction. Percentages use the
+last completed close, or the fresh ask when `price_basis` is `ask`. Evidence must
+match the activation, current revision, pinned strategy, wait reason and candle
+validity window; otherwise `wait_condition` is null. These fields never authorize
+an order or change the trading strategy.

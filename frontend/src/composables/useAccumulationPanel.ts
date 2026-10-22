@@ -1,4 +1,5 @@
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useWebSocket } from '@vueuse/core'
 import { accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, fetchAccumulationStrategies, sendAccumulationCommand } from '../api/accumulation'
 import { fetchAccumulationPerformance } from '../api/accumulation'
 import type { AccumulationPerformance } from '../types/accumulation'
@@ -85,7 +86,73 @@ export function useAccumulationPanel() {
   let sequence = 0
   let disposed = false
   let pageLoading = false
-  let timer: ReturnType<typeof setInterval> | undefined
+  const streamUrl = ref<string>()
+  const streamAvailable = ref(true)
+  const stream = useWebSocket(streamUrl, {
+    immediate: false,
+    autoConnect: false,
+    autoReconnect: { retries: -1, delay: 1500 },
+    onDisconnected(socket) {
+      if (!disposed && socket === stream.ws.value) fresh.value = false
+    },
+    onError(socket) {
+      if (!disposed && socket === stream.ws.value) fresh.value = false
+    },
+    onMessage(_socket, event) {
+      if (disposed) return
+      try {
+        const snapshot = JSON.parse(String(event.data))
+        if (snapshot.type === 'unavailable') { available.value = false; fresh.value = false; return }
+        if (snapshot.type !== 'snapshot') return
+        if (!Array.isArray(snapshot.page?.activations) ||
+            (snapshot.detail !== null && (!snapshot.detail || typeof snapshot.detail.symbol !== 'string' ||
+              !Number.isSafeInteger(snapshot.detail.revision) || !Array.isArray(snapshot.detail.operations)))) throw new Error('Invalid snapshot')
+        if (selected.value && snapshot.detail?.symbol !== selected.value) return
+        ++sequence
+        loading.value = false
+        const incoming = snapshot.page.activations as AccumulationStatus[]
+        rows.value = [...incoming, ...rows.value.filter(row => !incoming.some(item => item.symbol === row.symbol))]
+        if (rows.value.length <= incoming.length) next.value = snapshot.page.next_after
+        const bindSelection = !selected.value && !!snapshot.detail?.symbol
+        if (!selected.value) selected.value = snapshot.detail?.symbol ?? null
+        applyDetail(snapshot.detail)
+        portfolio.value = snapshot.detail?.portfolio ?? snapshot.page.portfolio ?? null
+        if (bindSelection) connectStream()
+      } catch {
+        fresh.value = false
+        error.value = 'Live accumulation status could not be read. Refresh status before choosing an action.'
+      }
+    },
+  })
+
+  function connectStream() {
+    if (!streamAvailable.value || disposed || !available.value) return
+    const url = new URL('/accumulation/stream', MOONWALKER_API_ORIGIN)
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
+    if (selected.value) url.searchParams.set('symbol', selected.value)
+    if (streamUrl.value === url.toString() && stream.status.value !== 'CLOSED') return
+    streamUrl.value = url.toString()
+    stream.open()
+  }
+
+  function applyDetail(result: AccumulationDetail | null) {
+    if (draft.value && detail.value && result && (
+      detail.value.activation_id !== result.activation_id ||
+      detail.value.account_matches !== result.account_matches ||
+      JSON.stringify(detail.value.holding) !== JSON.stringify(result.holding)
+    )) {
+      draft.value = null
+      notice.value = 'Holding or account changed. Review the action again.'
+    }
+    detail.value = result
+    if (!result) { fresh.value = false; return }
+    if (!result.quarantined_commands?.some(operation => operation.operation_id === retirementTarget.value)) retirementTarget.value = result.quarantined_commands?.[0]?.operation_id ?? null
+    if (!result.quarantined_orders?.some(order => order.placement_operation_id === repairTarget.value && order.has_lookup_identity)) repairTarget.value = result.quarantined_orders?.find(order => order.has_lookup_identity)?.placement_operation_id ?? null
+    portfolio.value = result.portfolio ?? null
+    available.value = true
+    fresh.value = true
+    error.value = ''
+  }
   const actions = computed(() => detail.value ? accumulationActions(detail.value) : [])
   const disabled = computed(() => !available.value || !fresh.value || busy.value || !!uncertain.value || !!draft.value)
 
@@ -111,17 +178,7 @@ export function useAccumulationPanel() {
     try {
       const result = await fetchAccumulationDetail(selected.value)
       if (request !== sequence || disposed) return
-      detail.value = result
-      if (!result.quarantined_commands?.some(operation => operation.operation_id === retirementTarget.value)) {
-        retirementTarget.value = result.quarantined_commands?.[0]?.operation_id ?? null
-      }
-      if (!result.quarantined_orders?.some(order => order.placement_operation_id === repairTarget.value && order.has_lookup_identity)) {
-        repairTarget.value = result.quarantined_orders?.find(order => order.has_lookup_identity)?.placement_operation_id ?? null
-      }
-      portfolio.value = result.portfolio ?? null
-      available.value = true
-      fresh.value = true
-      error.value = ''
+      applyDetail(result)
     } catch (cause) {
       if (request !== sequence || disposed) return
       if (accumulationErrorStatus(cause) === 503) available.value = false
@@ -141,6 +198,7 @@ export function useAccumulationPanel() {
     csv.value = ''
     targetVersion.value = null
     await refreshDetail()
+    connectStream()
   }
 
   async function loadPage(more = false) {
@@ -154,9 +212,12 @@ export function useAccumulationPanel() {
       portfolio.value = result.portfolio ?? null
       visible.value = true
       available.value = true
+      streamAvailable.value = result.stream_available !== false
+      if (!streamAvailable.value) stream.close()
       error.value = ''
       if (!selected.value && rows.value[0]) await selectSymbol(rows.value[0].symbol)
       else if (selected.value) await refreshDetail()
+      connectStream()
     } catch (cause) {
       if (disposed) return
       available.value = false
@@ -246,7 +307,7 @@ export function useAccumulationPanel() {
 
   async function submit() {
     if (busy.value || (!uncertain.value && !draft.value)) return
-    if (!uncertain.value && (!fresh.value || !available.value || draft.value!.expected_revision !== detail.value?.revision)) return
+    if (!uncertain.value && (!fresh.value || !available.value || draft.value!.expected_revision !== detail.value?.revision || !actions.value.includes(draft.value!.action))) return
     const command = { ...(uncertain.value ?? draft.value!) }
     // Persist in memory before sending, so a route change cannot produce a new ID.
     rememberRequest(command)
@@ -290,10 +351,8 @@ export function useAccumulationPanel() {
   onMounted(() => {
     void loadPage()
     void loadStrategies()
-    timer = setInterval(() => {
-      if (!loading.value && !busy.value && available.value && !draft.value) void refreshDetail()
-    }, 5000)
+
   })
-  onBeforeUnmount(() => { disposed = true; ++sequence; if (timer) clearInterval(timer) })
-  return { visible, available, rows, portfolio, performance, performanceLoading, performanceError, loadPerformance, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, quantity, csv, adjustmentDirection, adjustmentQuantity, adjustmentCost, adjustmentNote, ownershipConfirmation, ownershipNote, actions, disabled, loadPage, selectSymbol, refreshDetail, prepare, submit, strategies, strategyCursor, targetVersion, repairTarget, retirementTarget, strategyError, strategyLoading, loadStrategies }
+  onBeforeUnmount(() => { disposed = true; ++sequence; stream.close() })
+  return { streamAvailable, streamStatus: stream.status, visible, available, rows, portfolio, performance, performanceLoading, performanceError, loadPerformance, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, quantity, csv, adjustmentDirection, adjustmentQuantity, adjustmentCost, adjustmentNote, ownershipConfirmation, ownershipNote, actions, disabled, loadPage, selectSymbol, refreshDetail, prepare, submit, strategies, strategyCursor, targetVersion, repairTarget, retirementTarget, strategyError, strategyLoading, loadStrategies }
 }

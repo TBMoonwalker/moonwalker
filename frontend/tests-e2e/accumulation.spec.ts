@@ -1,6 +1,10 @@
 import { expect, test } from '@playwright/test'
 import type { AccumulationDetail } from '../src/types/accumulation'
 
+test.beforeEach(async ({ page }) => {
+  await page.routeWebSocket('**/accumulation/stream**', () => {})
+})
+
 test('reviews an exact inventory declaration and displays its audit receipt while paused', async ({ page }, testInfo) => {
   await page.route('**/config/all', route => route.fulfill({ json: {
     timezone: 'Europe/Vienna', signal: 'csv_signal', signal_settings: JSON.stringify({ csv_source: 'signals.csv' }), exchange: 'binance',
@@ -35,6 +39,7 @@ test('reviews an exact inventory declaration and displays its audit receipt whil
   })
   await page.goto('/')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByText('Accumulation value and returns', { exact: true }).click()
   await panel.getByRole('button', { name: 'Refresh valuation', exact: true }).click()
   await expect(panel.getByText('15.000000000000000009', { exact: true })).toBeVisible()
@@ -87,12 +92,14 @@ test('reviews rotated credentials and keeps the holding paused after proof retry
   })
   await page.goto('/')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByRole('button', { name: 'Revalidate rotated API key', exact: true }).click()
   expect(requests).toHaveLength(0)
   await expect(panel.getByText(/This does not transfer coins/)).toBeVisible()
   await panel.getByRole('button', { name: 'Confirm revalidate rotated api key', exact: true }).click()
   await expect(panel.getByText(/Account ownership evidence is incomplete/)).toBeVisible()
   await page.reload()
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByRole('button', { name: 'Retry same request', exact: true }).click()
   await expect(panel.getByText(/Recorded outcome: applied/)).toBeVisible()
   expect(requests).toHaveLength(2)
@@ -134,6 +141,7 @@ test('retires an unsent close while preserving Closing and requiring a separate 
   })
   await page.goto('/')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByRole('button', { name: 'Retire interrupted command', exact: true }).click()
   expect(requests).toHaveLength(0)
   await expect(panel.getByText(/Coins, cost basis, strategy binding and purchase guards stay unchanged/)).toBeVisible()
@@ -180,6 +188,7 @@ test('reviews a restored order and retries the same evidence lookup after reload
   })
   await page.goto('/')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await expect(panel.getByRole('button', { name: 'Resume accumulation', exact: true })).toHaveCount(0)
   await panel.getByRole('button', { name: 'Reconcile restored order', exact: true }).click()
   expect(requests).toHaveLength(0)
@@ -187,6 +196,7 @@ test('reviews a restored order and retries the same evidence lookup after reload
   await panel.getByRole('button', { name: 'Confirm reconcile restored order', exact: true }).click()
   await expect(panel.getByText(/Terminal order evidence is not available/)).toBeVisible()
   await page.reload()
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByRole('button', { name: 'Retry same request', exact: true }).click()
   await expect.poll(() => requests.length).toBe(2)
   expect(requests[1]).toEqual(requests[0])
@@ -218,6 +228,7 @@ test('shows exact portfolio cost and retained order evidence for a stopped holdi
   })
   await page.goto('/')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await expect(panel.getByText(/Known subtotal: 0.300000000000000003 USDC/)).toBeVisible()
   await expect(panel.getByText('No managed inventory.', { exact: true })).toBeVisible()
   await panel.getByText('Recent executed orders', { exact: true }).click()
@@ -263,6 +274,7 @@ test('reviews manual sales and retains an uncertain request across reload', asyn
   })
   await page.goto('/')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await expect(panel).toBeVisible()
   await expect(panel.getByText('0.100000000000000001', { exact: true })).toBeVisible()
   await panel.scrollIntoViewIfNeeded()
@@ -271,6 +283,7 @@ test('reviews manual sales and retains an uncertain request across reload', asyn
   await panel.getByRole('button', { name: 'Confirm close holding', exact: true }).click()
   await expect(panel.getByRole('button', { name: 'Retry same request' })).toBeVisible()
   await page.reload()
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await expect(panel.getByRole('button', { name: 'Retry same request' })).toBeEnabled()
   await panel.getByRole('button', { name: 'Retry same request' }).click()
   await expect(panel.getByText(/Request recorded. Work is pending/)).toBeVisible()
@@ -332,6 +345,7 @@ test('creates an accumulation variant and explicitly switches a holding to its e
   expect(await editor.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
   await page.goto('/')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await expect(panel).toBeVisible()
   await panel.getByLabel('Accumulation strategy version', { exact: true }).click()
   await page.getByText('Accumulation dip · v1 · 1h', { exact: true }).click()
@@ -415,6 +429,7 @@ for (const action of ['declare_ownership', 'restore_inventory', 'acknowledge_set
     })
     await page.goto('/')
     const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await panel.getByText('Manage accumulation', { exact: true }).click()
     if (action === 'declare_ownership') {
       await panel.getByText('Explicit ownership declaration', { exact: true }).click()
       await panel.getByLabel('Type BTC/USDC exactly').fill('BTC/USDC')
@@ -453,6 +468,7 @@ test('runs an isolated historical comparison with a saved version and displays m
   })
   await page.goto('/')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByText('Historical strategy comparison', { exact: true }).click()
   await panel.getByLabel('Saved accumulation strategy', { exact: true }).click()
   await page.getByText('Patient dip · v1 · 1h', { exact: true }).click()

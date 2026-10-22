@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import model
+from helper.async_completion import finish_before_cancellation
 from service.accumulation_commands import (
     CLOSE_ACTIONS,
     ENTRY_ACTIONS,
@@ -23,6 +25,54 @@ from service.accumulation_reporting import (
 from service.order_requests import normalize_order_symbol
 from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.transactions import in_transaction
+
+
+async def accumulation_stream_snapshot(
+    symbol: str | None,
+    *,
+    wait_reasons: dict[str, str],
+    wait_conditions: dict[str, dict[str, Any]],
+    configured_account_scope: str | None,
+) -> dict[str, Any]:
+    """Build a bounded read-only dashboard payload without exchange calls."""
+    return await finish_before_cancellation(
+        _read_stream_snapshot(
+            symbol,
+            wait_reasons=wait_reasons,
+            wait_conditions=wait_conditions,
+            configured_account_scope=configured_account_scope,
+        ),
+        name="accumulation:dashboard-snapshot",
+    )
+
+
+async def _read_stream_snapshot(
+    symbol: str | None,
+    *,
+    wait_reasons: dict[str, str],
+    wait_conditions: dict[str, dict[str, Any]],
+    configured_account_scope: str | None,
+) -> dict[str, Any]:
+    page = await list_accumulation_status(
+        limit=25,
+        wait_reasons=wait_reasons,
+        wait_conditions=wait_conditions,
+        configured_account_scope=configured_account_scope,
+    )
+    selected = symbol or (
+        page["activations"][0]["symbol"] if page["activations"] else None
+    )
+    detail = (
+        await get_accumulation_status(
+            selected,
+            wait_reasons=wait_reasons,
+            wait_conditions=wait_conditions,
+            configured_account_scope=configured_account_scope,
+        )
+        if selected is not None
+        else None
+    )
+    return {"type": "snapshot", "page": page, "detail": detail}
 
 
 def _holding(row: model.OpenTrades | None) -> dict[str, Any] | None:
@@ -66,6 +116,7 @@ async def _summaries(
     connection: BaseDBAsyncClient,
     wait_reasons: dict[str, str],
     configured_account_scope: str | None = None,
+    wait_conditions: dict[str, dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     holdings = {
         row.id: row
@@ -86,6 +137,22 @@ async def _summaries(
             holding.symbol == row.symbol and holding.lifecycle_mode == "accumulation"
         )
         version = versions.get(row.strategy_version_id)
+        runtime_reason = wait_reasons.get("*") or wait_reasons.get(row.symbol)
+        condition = (wait_conditions or {}).get(row.symbol)
+        if condition is not None and (
+            row.state != "enabled"
+            or row.explicitly_paused
+            or condition.get("activation_id") != str(row.id)
+            or condition.get("revision") != row.revision
+            or condition.get("strategy_version_id") != row.strategy_version_id
+            or condition.get("reason") != runtime_reason
+            or configured_account_scope is not None
+            and row.account_scope != configured_account_scope
+            or not condition["observed_close_ms"]
+            <= time.time_ns() // 1_000_000
+            < condition["next_close_ms"]
+        ):
+            condition = None
         result.append(
             {
                 "activation_id": str(row.id),
@@ -97,7 +164,8 @@ async def _summaries(
                 "explicitly_paused": row.explicitly_paused,
                 "revision": row.revision,
                 "reason": row.reason,
-                "runtime_wait_reason": wait_reasons.get(row.symbol),
+                "runtime_wait_reason": runtime_reason,
+                "wait_condition": condition,
                 "observations_initialized": row.observations_initialized,
                 "strategy_version_id": row.strategy_version_id,
                 "strategy_slug": version.strategy_slug if version else None,
@@ -124,6 +192,7 @@ async def list_accumulation_status(
     after: str | None = None,
     wait_reasons: dict[str, str],
     configured_account_scope: str | None = None,
+    wait_conditions: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Read one keyset page with a consistent inventory/version snapshot."""
     if type(limit) is not int or not 1 <= limit <= 100:
@@ -135,7 +204,11 @@ async def list_accumulation_status(
         rows = await query.limit(limit + 1).using_db(connection)
         return {
             "activations": await _summaries(
-                rows[:limit], connection, wait_reasons, configured_account_scope
+                rows[:limit],
+                connection,
+                wait_reasons,
+                configured_account_scope,
+                wait_conditions,
             ),
             "next_after": rows[limit - 1].symbol if len(rows) > limit else None,
             "portfolio": await accumulation_portfolio(connection),
@@ -222,6 +295,7 @@ async def get_accumulation_status(
     *,
     wait_reasons: dict[str, str],
     configured_account_scope: str | None = None,
+    wait_conditions: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Read a current activation and bounded journal without exposing raw requests."""
     symbol = normalize_order_symbol(symbol)
@@ -233,7 +307,11 @@ async def get_accumulation_status(
             return None
         result = (
             await _summaries(
-                [activation], connection, wait_reasons, configured_account_scope
+                [activation],
+                connection,
+                wait_reasons,
+                configured_account_scope,
+                wait_conditions,
             )
         )[0]
         operations = (

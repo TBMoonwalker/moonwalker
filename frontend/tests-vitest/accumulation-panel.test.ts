@@ -9,6 +9,17 @@ import type { AccumulationDetail, AccumulationCommand } from '../src/types/accum
 const api = vi.hoisted(() => ({ fetchAccumulationPage: vi.fn(), fetchAccumulationDetail: vi.fn(), fetchAccumulationStrategies: vi.fn(), fetchAccumulationPerformance: vi.fn(), sendAccumulationCommand: vi.fn(), accumulationErrorStatus: vi.fn() }))
 vi.mock('../src/api/accumulation', () => api)
 
+const live = vi.hoisted(() => ({ options: null as any, socket: {} as any }))
+vi.mock('@vueuse/core', async importOriginal => {
+  const original = await importOriginal<typeof import('@vueuse/core')>()
+  const { ref, shallowRef } = await import('vue')
+  return { ...original, useWebSocket: (_url: unknown, options: unknown) => {
+    live.options = options
+    live.socket = {}
+    return { status: ref('OPEN'), ws: shallowRef(live.socket), open: vi.fn(), close: vi.fn() }
+  } }
+})
+
 function snapshot(overrides: Partial<AccumulationDetail> = {}): AccumulationDetail {
   return {
     activation_id: 'activation-1', symbol: 'BTC/USDC', state: 'enabled', explicitly_paused: false,
@@ -326,6 +337,56 @@ describe('accumulation controls', () => {
   it('offers exact inventory restoration before acknowledgement when ownership is missing', () => {
     expect(accumulationActions(snapshot({ state: 'closing', explicitly_paused: true, holding_integrity: 'unlinked', holding: null, inventory_restore_required: true }))).toEqual(['restore_inventory'])
     expect(accumulationActions(snapshot({ state: 'closing', explicitly_paused: true, settled_commands: [{ operation_id: 'settled-close', action: 'close', status: 'quarantined', result_state: 'closing', result_revision: 12, reason: null }] }))).toEqual(['acknowledge_settlement'])
+  })
+
+  it('applies a pushed snapshot and invalidates an older reviewed revision without an HTTP refresh', async () => {
+    const { panel } = harness()
+    await flushPromises()
+    panel.prepare('close')
+    const reads = api.fetchAccumulationDetail.mock.calls.length
+    const next = snapshot({ revision: 13, state: 'paused', explicitly_paused: true })
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [next], next_after: null }, detail: next }) })
+    expect(panel.detail.value?.revision).toBe(13)
+    expect(panel.draft.value?.expected_revision).toBe(12)
+    await panel.submit()
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    expect(api.fetchAccumulationDetail).toHaveBeenCalledTimes(reads)
+    live.options.onDisconnected(live.socket)
+    expect(panel.fresh.value).toBe(false)
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [next], next_after: null }, detail: next }) })
+    expect(panel.fresh.value).toBe(true)
+  })
+
+  it('does not schedule HTTP status polling', async () => {
+    const timer = vi.spyOn(globalThis, 'setInterval')
+    const { wrapper } = harness()
+    await flushPromises()
+    expect(timer).not.toHaveBeenCalled()
+    wrapper.unmount()
+    timer.mockRestore()
+  })
+
+  it('accepts an authoritative restored snapshot and cancels a review when ownership changes', async () => {
+    const { panel } = harness()
+    await flushPromises()
+    panel.prepare('close')
+    const restored = snapshot({ revision: 2, state: 'paused', explicitly_paused: true, holding: null })
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [restored], next_after: null }, detail: restored }) })
+    expect(panel.detail.value?.revision).toBe(2)
+    expect(panel.draft.value).toBeNull()
+    expect(panel.notice.value).toContain('changed')
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+  })
+
+  it('will not confirm a command that is no longer offered by the latest state', async () => {
+    const { panel } = harness()
+    await flushPromises()
+    panel.prepare('close')
+    const changed = snapshot({ account_matches: false })
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [changed], next_after: null }, detail: changed }) })
+    await panel.submit()
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    expect(panel.draft.value).toBeNull()
   })
 
 })

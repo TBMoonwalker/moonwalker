@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import hashlib
 import json
 from collections.abc import Callable, Coroutine
@@ -11,6 +10,7 @@ from typing import Any
 
 import ccxt.async_support as ccxt
 import model
+from helper.async_completion import finish_before_cancellation
 from service import signal_runtime
 from service.accumulation_commands import AccumulationCommandResult
 from service.accumulation_contracts import AccumulationStateError
@@ -122,23 +122,9 @@ class AccumulationEntryService:
         entry/exit in one task. Readiness network reads have their own timeouts;
         this boundary never places an exchange order.
         """
-        task = asyncio.create_task(operation, name="accumulation:entry-validation")
-        cancelled = False
-        while True:
-            try:
-                result = await asyncio.shield(task)
-                break
-            except asyncio.CancelledError:
-                if task.cancelled():
-                    raise
-                cancelled = True
-            except Exception:
-                if cancelled:
-                    raise asyncio.CancelledError from None
-                raise
-        if cancelled:
-            raise asyncio.CancelledError
-        return result
+        return await finish_before_cancellation(
+            operation, name="accumulation:entry-validation"
+        )
 
     async def _stage_activation(self, **kwargs: Any) -> AccumulationCommandResult:
         return await self._finish_before_cancellation(
