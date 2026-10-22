@@ -181,3 +181,14 @@ def filter_supported_strategies(strategy_names: Iterable[str]) -> list[str]:
             continue
         supported.append(name)
     return supported
+
+
+def get_accumulation_strategy_support_error(document: dict[str, Any]) -> str | None:
+    """Validate the dedicated immutable accumulation contract independently of DCA."""
+    from service.accumulation_strategy import parse_accumulation_strategy_document
+
+    try:
+        parse_accumulation_strategy_document(document)
+    except (TypeError, ValueError) as exc:
+        return str(exc)
+    return None

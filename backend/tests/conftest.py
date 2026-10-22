@@ -53,3 +53,19 @@ def _clean_up_temp_log_dir():
     yield
     _close_temp_log_handlers(_LOG_TMP)
     shutil.rmtree(_LOG_TMP, ignore_errors=True)
+
+
+@pytest.fixture
+def classic_lifecycle_route(monkeypatch):
+    """Supply DCA ownership for unit tests that already fake trade persistence.
+
+    Opt in explicitly; real-database order and routing tests must use the actual
+    ownership query, including its fail-closed behavior.
+    """
+    from service.lifecycle_routing import LifecycleRoute, LifecycleRoutingDecision
+
+    async def load_classic_route(_symbol):
+        return LifecycleRoutingDecision(LifecycleRoute.CLASSIC_DCA, "classic_dca")
+
+    monkeypatch.setattr("service.orders.load_lifecycle_route", load_classic_route)
+    monkeypatch.setattr("service.dca.load_lifecycle_route", load_classic_route)

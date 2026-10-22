@@ -90,4 +90,14 @@ describe('resolveControlCenterNavigation', () => {
       }),
     ).toBe(true)
   })
+
+  it('allows Strategy Builder as an explicit escape when only the accumulation pin is missing', () => {
+    const readiness: ControlCenterReadiness = {
+      ...completeReadiness, complete: false, attentionNeeded: true, nextTarget: 'dca',
+      blockers: [{ key: 'accumulation_strategy_version_id', title: 'Missing strategy', description: 'Select a version', mode: 'setup', target: 'dca' }],
+    }
+    expect(resolveControlCenterNavigation(route('controlCenter', { mode: 'strategy-builder', target: 'strategy-builder' }), { loadError: null, readiness })).toBe(true)
+    const blocked = { ...readiness, blockers: [...readiness.blockers, { key: 'exchange', title: 'Missing exchange', description: 'Select exchange', mode: 'setup' as const, target: 'exchange' as const }] }
+    expect(resolveControlCenterNavigation(route('controlCenter', { mode: 'strategy-builder' }), { loadError: null, readiness: blocked })).not.toBe(true)
+  })
 })

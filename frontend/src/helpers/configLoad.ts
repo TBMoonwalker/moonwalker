@@ -389,6 +389,8 @@ timezone: toNullableString(response.timezone) || defaults.clientTimezone,
         dca: {
             enabled: dcaEnabled,
             trade_mode: tradeMode,
+            accumulation_strategy_version_id: toNumberOrNull(response.accumulation_strategy_version_id),
+            accumulation_available: response.accumulation_available === true,
             strategy: toNullableString(response.dca_strategy),
             timeframe,
             trailing_tp: toNumberOrNull(response.trailing_tp),

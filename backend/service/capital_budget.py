@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import dataclass
+from decimal import Decimal
 from uuid import uuid4
 
 import helper
 import model
+from service.accumulation_contracts import AccumulationStateError, canonical_decimal
 from service.capital_budget_logic import (
     CapitalBudgetCheck,
     build_capital_budget_settings,
@@ -17,9 +20,9 @@ from service.capital_budget_logic import (
     has_capital_budget_config,
     resolve_capital_max_fund,
 )
-from service.placement_intents import PlacementIntentState
 from tortoise.exceptions import BaseORMException
 from tortoise.functions import Sum
+from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/capital_budget.log", "capital_budget")
 
@@ -33,6 +36,41 @@ class CapitalBudgetUsage:
     closed_profit: float
     durable_pending_quote: float
     unavailable_reason: str | None = None
+    funds_locked_exact: str | None = None
+
+
+async def load_pending_capital() -> dict[str, Decimal]:
+    """Count unresolved buys, less accumulation costs already in inventory.
+
+    Quarantine and unknown acceptance retain commitments. Persisted fills already
+    belong to holdings, and therefore are not a second pending commitment.
+    """
+    rows = (
+        await model.PlacementIntent.filter(side="buy")
+        .exclude(state__in=["completed", "rejected", "persisted"])
+        .values("id", "operation_id", "symbol", "reserved_quote")
+    )
+    checkpoints = {
+        row["placement_id"]: row
+        for row in await model.AccumulationFillCheckpoint.filter(
+            placement_id__in=[row["id"] for row in rows]
+        ).values("placement_id", "quote_cost", "fees_json")
+    }
+    result = {}
+    for row in rows:
+        remaining = Decimal(canonical_decimal(str(row["reserved_quote"])))
+        checkpoint = checkpoints.get(row["id"])
+        if checkpoint is not None:
+            fees = json.loads(checkpoint["fees_json"])
+            if not isinstance(fees, dict):
+                raise AccumulationStateError("Invalid checkpoint fee totals.")
+            quote = row["symbol"].split("/")[-1]
+            spent = Decimal(canonical_decimal(checkpoint["quote_cost"])) + Decimal(
+                canonical_decimal(fees.get(quote, "0"))
+            )
+            remaining = max(Decimal(0), remaining - spent)
+        result[row["operation_id"]] = remaining
+    return result
 
 
 class CapitalBudgetLease:
@@ -259,6 +297,11 @@ class CapitalBudgetService:
 
     async def _load_usage(self, config: dict) -> CapitalBudgetUsage:
         """Load a fresh DB-backed capital usage snapshot."""
+        async with in_transaction():
+            return await self._load_usage_in_transaction(config)
+
+    async def _load_usage_in_transaction(self, config: dict) -> CapitalBudgetUsage:
+        """Keep inventory and pending fill costs on the same committed snapshot."""
         try:
             open_trades = await model.OpenTrades.all().values(
                 "symbol",
@@ -266,6 +309,8 @@ class CapitalBudgetService:
                 "cost",
                 "unsellable_amount",
                 "unsellable_reason",
+                "lifecycle_mode",
+                "accumulation_remaining_cost",
             )
             symbols = [
                 str(row.get("symbol") or "")
@@ -284,12 +329,27 @@ class CapitalBudgetService:
                         float(row.get("ordersize") or 0.0)
                     )
 
-            funds_locked = 0.0
+            funds_locked_exact = Decimal(0)
             for row in open_trades:
                 symbol = str(row.get("symbol") or "")
                 open_cost = float(row.get("cost") or 0.0)
                 trade_cost = trades_by_symbol.get(symbol, 0.0)
-                funds_locked += open_cost if open_cost > 0 else trade_cost
+                if row.get("lifecycle_mode") == "accumulation":
+                    if (
+                        config.get("currency")
+                        and symbol.split("/")[-1]
+                        != str(config["currency"]).strip().upper()
+                    ):
+                        raise AccumulationStateError(
+                            "Managed accumulation inventory uses another quote; capital cannot be converted implicitly."
+                        )
+                    funds_locked_exact += Decimal(
+                        canonical_decimal(row.get("accumulation_remaining_cost"))
+                    )
+                else:
+                    funds_locked_exact += Decimal(
+                        str(open_cost if open_cost > 0 else trade_cost)
+                    )
 
             closed_profit_rows = (
                 await model.ClosedTrades.all()
@@ -299,38 +359,20 @@ class CapitalBudgetService:
             closed_profit = float(
                 (closed_profit_rows[0] if closed_profit_rows else 0.0) or 0.0
             )
-            durable_query = model.PlacementIntent.filter(
-                state__in=[
-                    PlacementIntentState.PREPARED.value,
-                    PlacementIntentState.SUBMITTING.value,
-                    PlacementIntentState.INDETERMINATE.value,
-                    PlacementIntentState.RECONCILING.value,
-                    PlacementIntentState.ACCEPTED.value,
-                    PlacementIntentState.FILLED.value,
-                    PlacementIntentState.QUARANTINED.value,
-                    PlacementIntentState.RESTORED_QUARANTINED.value,
-                ],
-                reserved_quote__gt=0,
-            )
             active_operation_ids = self._active_operation_ids()
-            if active_operation_ids:
-                durable_query = durable_query.exclude(
-                    operation_id__in=active_operation_ids
-                )
-            durable_rows = await durable_query.values_list(
-                "reserved_quote",
-                flat=True,
+            durable_pending_quote = sum(
+                value
+                for operation_id, value in (await load_pending_capital()).items()
+                if operation_id not in active_operation_ids
             )
-            durable_pending_quote = 0.0
-            for value in durable_rows:
-                durable_pending_quote += max(0.0, float(value or 0.0))
             return CapitalBudgetUsage(
-                funds_locked=round(funds_locked, 8),
+                funds_locked=round(float(funds_locked_exact), 8),
+                funds_locked_exact=str(funds_locked_exact),
                 open_trade_reserve=estimate_open_trade_reserve(config, open_trades),
                 closed_profit=round(closed_profit, 8),
-                durable_pending_quote=round(durable_pending_quote, 8),
+                durable_pending_quote=round(float(durable_pending_quote), 8),
             )
-        except BaseORMException as exc:
+        except (BaseORMException, AccumulationStateError, ValueError) as exc:
             logging.error(
                 "Capital budget usage snapshot unavailable: %s",
                 exc,

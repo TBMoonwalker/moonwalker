@@ -11,6 +11,7 @@ from typing import Any
 
 import helper
 import model
+from service.accumulation_strategy import BUILTIN_ACCUMULATION_SLUG, CATALOG_PREFIX
 from service.strategy_catalog import (
     BUILTIN_STRATEGIES,
     BUILTIN_STRATEGY_BY_SLUG,
@@ -710,6 +711,9 @@ def validate_strategy_ir(ir: dict[str, Any]) -> dict[str, Any]:
 
 async def seed_builtin_strategies() -> None:
     """Ensure built-ins exist without rewriting immutable version rows."""
+    from service.accumulation_catalog import seed_builtin_accumulation_strategy
+
+    await seed_builtin_accumulation_strategy()
     await _delete_retired_builtin_strategies()
     for spec in BUILTIN_STRATEGIES:
         ir = build_builtin_ir(spec)
@@ -805,7 +809,10 @@ async def _delete_retired_builtin_strategies() -> None:
     """Remove built-ins that no longer exist in the source catalog."""
     rows = await model.StrategyDefinition.filter(is_builtin=True)
     retired_rows = [
-        row for row in rows if str(row.slug) not in BUILTIN_STRATEGY_BY_SLUG
+        row
+        for row in rows
+        if str(row.slug) not in BUILTIN_STRATEGY_BY_SLUG
+        and str(row.slug) != BUILTIN_ACCUMULATION_SLUG
     ]
     if not retired_rows:
         return
@@ -849,6 +856,8 @@ async def list_strategy_summaries(include_hidden: bool = False) -> list[dict[str
     rows = await model.StrategyDefinition.all().order_by("is_builtin", "name")
     summaries: list[dict[str, Any]] = []
     for row in rows:
+        if row.slug.startswith(CATALOG_PREFIX):
+            continue
         if not include_hidden and row.slug in _hidden_builtin_slugs():
             continue
         summaries.append(await _definition_summary(row))
@@ -864,6 +873,8 @@ async def list_strategy_options() -> list[str]:
 async def get_strategy_detail(slug: str) -> dict[str, Any] | None:
     """Return one strategy definition with its active IR."""
     await seed_builtin_strategies()
+    if slug.startswith(CATALOG_PREFIX):
+        return None
     definition = await model.StrategyDefinition.get_or_none(slug=slug)
     if definition is None:
         return None
@@ -963,6 +974,10 @@ async def create_blank_strategy(name: str) -> dict[str, Any]:
 
 async def delete_custom_strategy(slug: str) -> None:
     """Delete a custom strategy definition and all stored graph state."""
+    if slug.startswith(CATALOG_PREFIX):
+        raise PermissionError(
+            "Accumulation variants retain their immutable save identity."
+        )
     definition = await model.StrategyDefinition.get_or_none(slug=slug)
     if definition is None:
         raise ValueError(f"Strategy '{slug}' was not found.")
@@ -995,6 +1010,21 @@ async def _strategy_usage_reasons(slug: str) -> list[str]:
     if configured_keys:
         reasons.append(f"configured by {', '.join(configured_keys)}")
     if (
+        await model.AccumulationActivation.filter(
+            strategy_version__strategy_slug=slug
+        ).exists()
+        or await model.AccumulationStrategyState.filter(
+            strategy_version__strategy_slug=slug
+        ).exists()
+        or await model.AccumulationOpportunity.filter(
+            strategy_version__strategy_slug=slug
+        ).exists()
+        or await model.AccumulationLifecycleOperation.filter(
+            target_version__strategy_slug=slug
+        ).exists()
+    ):
+        reasons.append("referenced by accumulation state or history")
+    if (
         await model.TradeExecutions.filter(strategy_slug=slug).exists()
         or await model.TradeExecutions.filter(strategy_name=slug).exists()
     ):
@@ -1008,6 +1038,10 @@ async def promote_strategy_version(
     base_lock_version: int,
 ) -> tuple[dict[str, Any], int]:
     """Validate and atomically promote a custom strategy version."""
+    if slug.startswith(CATALOG_PREFIX):
+        raise PermissionError(
+            "Accumulation variants are immutable; save a new variant."
+        )
     async with _STRATEGY_PROMOTION_LOCK:
         definition = await model.StrategyDefinition.get_or_none(slug=slug)
         if definition is None:

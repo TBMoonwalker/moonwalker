@@ -28,6 +28,10 @@ const reteHostRenderGraph = vi.hoisted(() =>
 )
 
 vi.mock('../src/api/strategyBuilder', () => apiMocks)
+vi.mock('../src/api/accumulation', () => ({
+    fetchAccumulationStrategies: () => Promise.reject({ status: 503 }),
+    accumulationErrorStatus: (error: { status: number }) => error.status,
+}))
 
 vi.mock('../src/composables/useStrategyRete', async () => {
     const { ref } = await import('vue')

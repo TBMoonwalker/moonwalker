@@ -164,6 +164,8 @@ const KEY_TARGETS: Record<string, ControlCenterTarget> = {
     btc_pulse: 'filter',
     dca: 'dca',
     trade_mode: 'dca',
+    accumulation_strategy_version_id: 'dca',
+    accumulation_available: 'dca',
     dca_strategy: 'dca',
     max_bots: 'dca',
     bo: 'dca',

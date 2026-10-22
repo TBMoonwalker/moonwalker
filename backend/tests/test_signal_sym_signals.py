@@ -16,6 +16,17 @@ class DummyOpenTrades:
     async def values(self, *args, **kwargs) -> list:
         return []
 
+    def exclude(self, **_kwargs):
+        return self
+
+    async def values_list(self, *_args, **_kwargs):
+        return []
+
+
+@pytest.fixture(autouse=True)
+def _empty_accumulation_registry(monkeypatch):
+    monkeypatch.setattr(model, "AccumulationActivation", DummyOpenTrades)
+
 
 def _admission_batch(symbol: str = "BTC/USDT") -> SignalAdmissionBatch:
     return SignalAdmissionBatch(

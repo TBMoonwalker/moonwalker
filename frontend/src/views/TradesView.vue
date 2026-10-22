@@ -19,6 +19,7 @@ const ClosedTrades = defineAsyncComponent(() => import('../components/ClosedTrad
 const UnsellableTrades = defineAsyncComponent(() => import('../components/UnsellableTrades.vue'))
 const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'))
 const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
+const AccumulationPanel = defineAsyncComponent(() => import('@/components/AccumulationPanel.vue'))
 
 const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
 const unsellableTradesState = storeToRefs(unsellableTradesStore)
@@ -305,6 +306,8 @@ const admissionToneClass = computed(() =>
       <Statistics />
     </section>
     </div>
+
+    <AccumulationPanel />
 
     <section class="overview-trades" aria-label="Trade records">
       <div class="trade-view-selector" role="group" aria-label="Trade records">

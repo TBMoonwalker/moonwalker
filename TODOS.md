@@ -2,6 +2,45 @@
 
 ## Next up
 
+### Resolve dependency security audit failures in a dedicated changeset
+
+**Status:** Confirmed by full CI on 2026-10-21; feature tests and builds pass.
+
+- `certifi` 2026.7.22 is affected by PYSEC-2026-4320
+  ([upstream advisory](https://github.com/certifi/python-certifi/security/advisories/GHSA-6q48-6c7w-9gw2)).
+  The advisory identifies 2026.10.19 as fixed. Classify the calendar-version update
+  as a patch/minor safe candidate for a dedicated dependency change; verify the
+  refreshed lock hashes and audit the complete resolved environment before merge.
+- `follow-redirects` 1.16.0 is affected by
+  [GHSA-q3jh-wrc6-jgq8](https://github.com/advisories/GHSA-q3jh-wrc6-jgq8) and
+  [GHSA-8r9p-f939-6h3c](https://github.com/advisories/GHSA-8r9p-f939-6h3c).
+  Upstream identifies 1.16.1 as fixed: a patch safe candidate for the same dedicated
+  dependency change, with registry signature and vulnerability checks required.
+
+The installed affected versions are unsafe, not update targets. No dependency
+versions were changed as part of accumulation reporting. Both security audit gates
+must pass before release.
+
+**Priority:** P1
+
+### Make frontend CI check the referenced TypeScript projects
+
+**Status:** Confirmed during accumulation dashboard verification (2026-10-20).
+
+`npm run type-check` runs `vue-tsc --noEmit` against a solution config with an
+empty `files` list. It reports success without checking the app project. A direct
+`vue-tsc -p tsconfig.app.json --noEmit --ignoreDeprecations 6.0` found 61 diagnostics
+in both the pre-change frontend and the accumulation dashboard working tree.
+The app/test configs also use TypeScript 6's deprecated `baseUrl` setting.
+
+Repair the existing diagnostics, migrate the deprecated config and make CI check
+the app and test projects explicitly without generating files beside source.
+Keep this tooling repair separate from the accumulation feature; passing the
+current CI step does not establish full frontend type safety.
+
+**Priority:** P2
+
+
 ### Denylist from open trade: symmetric re-enable + DESIGN.md badge pass
 
 **Status:** Ready to design when picked up

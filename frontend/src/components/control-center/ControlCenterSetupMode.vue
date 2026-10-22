@@ -163,6 +163,7 @@ const emit = defineEmits<{
                 :on-signal-settings-select="handleSignalSettingsSelect"
                 :rules="rules"
                 :signal="signal"
+                :trade-mode="dca.trade_mode"
                 :symsignals="symsignals"
             />
         </template>

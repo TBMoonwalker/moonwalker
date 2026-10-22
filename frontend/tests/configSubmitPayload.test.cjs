@@ -38,6 +38,20 @@ function parseField(payload, key) {
     return payload[key]
 }
 
+test('serializes an exact accumulation pin and preserves the explicit shared budget buffer', () => {
+    const options = createBaseOptions()
+    options.dca.trade_mode = 'accumulation'
+    options.dca.enabled = true
+    options.dca.accumulation_strategy_version_id = 17
+    options.dca.accumulation_available = true
+    options.capital.budget_buffer_pct = 3
+    const payload = buildConfigSubmitPayload(options)
+    assert.deepEqual(payload.trade_mode, { value: 'accumulation', type: 'str' })
+    assert.deepEqual(payload.accumulation_strategy_version_id, { value: 17, type: 'int' })
+    assert.equal(payload.capital_budget_buffer_pct.value, 3)
+    assert.equal(payload.accumulation_available, undefined)
+})
+
 function createBaseOptions(overrides = {}) {
     const base = {
         general: {

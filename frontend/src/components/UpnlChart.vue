@@ -2,7 +2,7 @@
   <div class="chart-wrap performance-chart">
     <n-spin :show="isLoading" size="small">
       <v-chart
-        v-if="!isLoading && !showEmptyState && visiblePoints.length > 0"
+        v-if="performanceComplete && !isLoading && !showEmptyState && visiblePoints.length > 0"
         class="chart"
         :option="option"
         autoresize
@@ -41,10 +41,13 @@ const { scheme } = storeToRefs(themeStore)
 
 const isLoading = ref(data.value.length === 0)
 const showEmptyState = ref(false)
+const performanceComplete = ref(true)
 const emptyStateText = ref('No profit history yet')
 const visiblePoints = computed(() => filterPerformancePoints(data.value, props.range))
 const placeholderText = computed(() =>
-  visiblePoints.value.length === 0 && data.value.length > 0
+  !performanceComplete.value
+    ? 'Complete performance is unavailable while accumulation returns are not integrated.'
+    : visiblePoints.value.length === 0 && data.value.length > 0
     ? 'No performance data in this range'
     : emptyStateText.value,
 )
@@ -216,8 +219,11 @@ watch(
       profit_overall?: number
       funds_locked?: number
       profit_overall_timestamp?: string
+      performance_complete?: boolean
     }
+    performanceComplete.value = websocketData.performance_complete !== false
     if (
+      !performanceComplete.value ||
       websocketData.profit_overall === undefined ||
       websocketData.funds_locked === undefined ||
       !websocketData.profit_overall_timestamp

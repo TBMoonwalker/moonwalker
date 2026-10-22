@@ -199,6 +199,15 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             "SELECT symbol, amount, cost, deal_id, execution_history_complete "
             "FROM opentrades WHERE symbol = 'BTC/USDC'"
         ).fetchone()
+        accumulation_defaults = connection.execute(
+            "SELECT lifecycle_mode, accumulation_net_quantity, "
+            "accumulation_remaining_cost, accumulation_contributed_quote "
+            "FROM opentrades WHERE symbol = 'BTC/USDC'"
+        ).fetchone()
+        accumulation_tables = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name LIKE 'accumulation_%'"
+        ).fetchall()
         trade = connection.execute(
             "SELECT symbol, orderid, deal_id FROM trades WHERE symbol = 'BTC/USDC'"
         ).fetchone()
@@ -240,8 +249,13 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             ).fetchall()
         }
 
-    assert len(ledger_rows) == 7
+    assert len(ledger_rows) == 12
+    assert "2026-10-21-013-accumulation-return-totals" in {
+        version for version, _ in ledger_rows
+    }
     assert {status for _, status in ledger_rows} == {MIGRATION_STATUS_APPLIED}
+    assert accumulation_defaults == ("classic_dca", None, None, None)
+    assert len(accumulation_tables) == 8
     assert open_trade is not None
     assert open_trade[:3] == ("BTC/USDC", 1.0, 100.0)
     assert open_trade[3]

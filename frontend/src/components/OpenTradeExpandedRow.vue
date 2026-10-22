@@ -12,7 +12,7 @@
                     :time="formatTimestamp(item.timestamp)"
                 />
             </n-timeline>
-            <div class="manual-order-actions">
+            <div v-if="rowData.lifecycle_mode !== 'accumulation'" class="manual-order-actions">
                 <n-button
                     class="manual-order-button"
                     secondary
@@ -61,6 +61,7 @@ type OrderData = {
 
  type RowData = {
     symbol: string
+    lifecycle_mode?: string | null
      deal_id?: string | null
      campaign_started_at?: string | null
      tp_price: number

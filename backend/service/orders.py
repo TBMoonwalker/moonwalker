@@ -22,6 +22,7 @@ from service.exchange_types import (
     SoldCheckStatus,
 )
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
+from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.lifecycle_snapshot import (
     LifecycleSnapshotIdentity,
     snapshots_match,
@@ -67,6 +68,7 @@ from service.placement_intents import (
 from service.placement_reconciliation import (
     PlacementReconciler,
     PlacementReconciliationSummary,
+    RecoverAccumulation,
 )
 from service.placement_recovery import PlacementRecoveryHandler
 from service.placement_workflow import PlacementWorkflow
@@ -76,7 +78,7 @@ from service.trade_math import calculate_order_size, calculate_so_percentage
 from service.trades import Trades, TradeStateUnavailableError
 from service.trading_contracts import BuyIntent, SellIntent
 from service.trading_controls import evaluate_buy_like_gate
-from tortoise.exceptions import ConfigurationError
+from tortoise.exceptions import BaseORMException, ConfigurationError
 
 logging = helper.LoggerFactory.get_logger("logs/orders.log", "orders")
 
@@ -100,10 +102,51 @@ class Orders:
         self.placement_workflow = PlacementWorkflow()
         self.placement_intents = self.placement_workflow.intents
         self.trades = Trades()
+        self.accumulation_recovery: RecoverAccumulation | None = None
 
     async def close(self) -> None:
         """Close exchange resources owned by this order service."""
         await self.exchange.close()
+
+    async def _legacy_lifecycle_rejection(
+        self,
+        symbol: str,
+        action: str,
+        operation_id: str | None = None,
+    ) -> OrderMutationResult | None:
+        """Reject non-DCA ownership without trusting order payload mode/reason.
+
+        Accumulation uses dedicated lifecycle-authorized execution. Legacy manual endpoints are not a bypass.
+        Reconciliation and cancellation of existing orders remain available.
+        """
+        try:
+            decision = await load_lifecycle_route(symbol)
+        except (BaseORMException, RuntimeError, sqlite3.Error, ValueError):
+            logging.error(
+                "Cannot resolve lifecycle ownership for %s.", symbol, exc_info=True
+            )
+            return self._trade_state_unavailable_result(
+                operation_id=operation_id, symbol=symbol, action=action
+            )
+        if decision.route == LifecycleRoute.CLASSIC_DCA:
+            return None
+        accumulation = decision.route == LifecycleRoute.ACCUMULATION
+        reason = "accumulation_lifecycle_required" if accumulation else decision.reason
+        message = (
+            "This symbol belongs to accumulation. Use its strategy and explicit "
+            "lifecycle actions in Trading Overview."
+            if accumulation
+            else "Lifecycle ownership is invalid. No mutation was performed; repair the state first."
+        )
+        logging.warning("Rejecting legacy %s for %s: %s.", action, symbol, reason)
+        return OrderMutationResult(
+            operation_id=str(operation_id or ""),
+            symbol=symbol,
+            action=action,
+            status=OrderMutationStatus.REJECTED,
+            reason_code=reason,
+            user_message=message,
+        )
 
     @staticmethod
     def _expected_lifecycle_snapshot(
@@ -305,6 +348,7 @@ class Orders:
             self.exchange,
             recovery.resume,
             self.placement_intents,
+            accumulation_recovery=self.accumulation_recovery,
         )
 
     async def _persist_reconciled_limit_fallback(
@@ -914,6 +958,8 @@ class Orders:
         """Arm one proactive TP order with the symbol prelocked."""
         symbol = str(order["symbol"])
         async with lifecycle_mutation_coordinator.prelocked(symbol):
+            if await self._legacy_lifecycle_rejection(symbol, "take_profit_prearm"):
+                return False
             if not await self._order_snapshot_is_current(order, config):
                 return False
             placement = await self.placement_workflow.begin(
@@ -1214,6 +1260,8 @@ class Orders:
         logging.info("Incoming sell order for %s", order["symbol"])
         async with lifecycle_mutation_coordinator.prelocked(order["symbol"]):
             try:
+                if await self._legacy_lifecycle_rejection(order["symbol"], "sell"):
+                    return False
                 if not await self._order_snapshot_is_current(order, config):
                     return False
                 if not bool(order.get("skip_tp_limit_cancel", False)):
@@ -1709,6 +1757,8 @@ class Orders:
         logging.info("Incoming buy order for %s", order["symbol"])
         if not await self._order_snapshot_is_current(order, config):
             return False
+        if await self._legacy_lifecycle_rejection(order["symbol"], "buy"):
+            return False
         if str(order.get("campaign_id") or "").strip():
             logging.info(
                 "Incoming campaign buy order for %s: campaign=%s strategy=%s signal=%s.",
@@ -2071,6 +2121,12 @@ class Orders:
         normalized_symbol = request.symbol
         lifecycle_mutation_coordinator.assert_prelocked(normalized_symbol)
 
+        rejection = await self._legacy_lifecycle_rejection(
+            normalized_symbol, "manual_buy_add"
+        )
+        if rejection is not None:
+            raise ValueError(rejection.user_message)
+
         open_trade_rows = await self.trades.get_open_trades_by_symbol(normalized_symbol)
         if not open_trade_rows:
             raise ValueError(f"No open trade found for {normalized_symbol}.")
@@ -2241,6 +2297,11 @@ class Orders:
                 reason_code="invalid_symbol",
                 user_message="The symbol is invalid.",
             )
+        rejection = await self._legacy_lifecycle_rejection(
+            normalized_symbol, "manual_stop", operation_id
+        )
+        if rejection is not None:
+            return rejection
         try:
             trade = await self._load_authoritative_trade(normalized_symbol)
         except TradeStateUnavailableError:
@@ -2310,6 +2371,8 @@ class Orders:
         logging.info("Incoming stop order")
         symbol = normalize_order_symbol(symbol)
         lifecycle_mutation_coordinator.assert_prelocked(symbol)
+        if await self._legacy_lifecycle_rejection(symbol, "manual_stop"):
+            return False
         try:
             canceled = await self._cancel_tp_limit_order_locked(
                 symbol,
@@ -2338,6 +2401,8 @@ class Orders:
     async def receive_sell_signal(self, symbol: str, config: dict[str, Any]) -> bool:
         """Handle a manual sell signal."""
         symbol = normalize_order_symbol(symbol)
+        if await self._legacy_lifecycle_rejection(symbol, "manual_sell"):
+            return False
         trades = await self.trades.get_trades_for_orders(symbol)
         if not trades:
             logging.error("No running trade found for manual sell of %s.", symbol)
@@ -2435,6 +2500,11 @@ class Orders:
     ) -> OrderMutationResult:
         """Handle a manual sell and report its durable execution outcome."""
         symbol = normalize_order_symbol(symbol)
+        rejection = await self._legacy_lifecycle_rejection(
+            symbol, "manual_sell", operation_id
+        )
+        if rejection is not None:
+            return rejection
         try:
             trades = await self._load_authoritative_trade(symbol)
         except TradeStateUnavailableError:
@@ -2506,6 +2576,8 @@ class Orders:
     ) -> bool:
         """Handle a manual buy signal."""
         symbol = normalize_order_symbol(symbol)
+        if await self._legacy_lifecycle_rejection(symbol, "manual_buy"):
+            return False
         trades = await self.trades.get_trades_for_orders(symbol)
 
         if not trades:
@@ -2525,6 +2597,11 @@ class Orders:
     ) -> OrderMutationResult:
         """Handle a manual safety buy and report its durable outcome."""
         symbol = normalize_order_symbol(symbol)
+        rejection = await self._legacy_lifecycle_rejection(
+            symbol, "manual_buy", operation_id
+        )
+        if rejection is not None:
+            return rejection
         if operation_id:
             existing = await self._get_placement_intent(str(operation_id))
             if existing is not None:

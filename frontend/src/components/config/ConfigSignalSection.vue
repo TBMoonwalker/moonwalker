@@ -14,7 +14,7 @@
                 <n-select
                     v-model:value="signal.signal"
                     placeholder="Select"
-                    :options="signal.plugins"
+                    :options="tradeMode === 'accumulation' ? signal.plugins.filter(option => ['asap', 'csv_signal'].includes(String(option.value))) : signal.plugins"
                     @update:value="onSignalSettingsSelect"
                     @blur="onSignalSettingsSelect"
                 />
@@ -51,7 +51,7 @@
 
             <template v-if="signal.signal === 'asap'">
                 <n-form-item label="Use URL input" path="asap_use_url" label-placement="left">
-                    <n-switch v-model:value="signal.asap_use_url" />
+                    <n-switch v-model:value="signal.asap_use_url" :disabled="tradeMode === 'accumulation' && !signal.asap_use_url" />
                 </n-form-item>
                 <n-form-item
                     v-if="signal.asap_use_url"
@@ -209,7 +209,8 @@
                 </n-form-item>
             </template>
 
-            <template v-if="signal.signal !== 'csv_signal'">
+            <n-alert v-if="tradeMode === 'accumulation'" type="info" :bordered="false">Accumulation uses fixed ASAP symbols or CSV inventory. Its pinned strategy controls buys; signal graph strategies do not apply.</n-alert>
+            <template v-if="tradeMode !== 'accumulation' && signal.signal !== 'csv_signal'">
                 <n-form-item
                     label="Signal initial buy strategy"
                     path="selectValue"
@@ -240,6 +241,7 @@ import type {
 } from '../../config-editor/types'
 
 defineProps<{
+    tradeMode?: string | null
     asapMissingFieldsLabel: string
     isAsapExchangeReady: boolean
     onAsapUrlInput: (value: string) => void

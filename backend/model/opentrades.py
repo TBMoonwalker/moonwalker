@@ -56,3 +56,10 @@ class OpenTrades(Model):
     virtual_waiting_profit = fields.FloatField(default=0.0)
     virtual_waiting_profit_percent = fields.FloatField(default=0.0)
     last_transition_at = fields.TextField(null=True)
+    # Exact decimal strings. NULL means unknown/not initialized, never zero.
+    accumulation_net_quantity = fields.TextField(null=True)
+    accumulation_remaining_cost = fields.TextField(null=True)
+    accumulation_contributed_quote = fields.TextField(null=True)
+    accumulation_disposal_proceeds = fields.TextField(null=True)
+    accumulation_fees_json = fields.TextField(null=True)
+    accumulation_basis_provenance = fields.CharField(max_length=32, null=True)

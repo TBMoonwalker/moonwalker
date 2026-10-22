@@ -14,6 +14,7 @@ from service.exchange_capabilities import (
     ExchangeOrderLookupStatus,
     require_exchange_placement_capabilities,
 )
+from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.placement_intents import (
     PlacementAction,
     PlacementIntentService,
@@ -26,6 +27,7 @@ logging = helper.LoggerFactory.get_logger(
     "placement_reconciliation",
 )
 ResumePlacement = Callable[[Any, dict[str, Any], dict[str, Any]], Awaitable[bool]]
+RecoverAccumulation = Callable[[Any, dict[str, Any]], Awaitable[str]]
 
 
 @dataclass(frozen=True)
@@ -48,10 +50,12 @@ class PlacementReconciler:
         exchange: Any,
         resume_placement: ResumePlacement,
         intents: PlacementIntentService | None = None,
+        accumulation_recovery: RecoverAccumulation | None = None,
     ) -> None:
         self.exchange = exchange
         self.resume_placement = resume_placement
         self.intents = intents or PlacementIntentService()
+        self.accumulation_recovery = accumulation_recovery
 
     async def reconcile(
         self,
@@ -73,12 +77,13 @@ class PlacementReconciler:
         action_required = tuple(
             str(intent.operation_id) for intent in action_required_rows
         )
+        remaining = await self.intents.list_nonterminal()
         return PlacementReconciliationSummary(
             inspected=len(pending),
             completed=completed,
             rejected=rejected,
             quarantined=len(action_required_rows),
-            ready=not action_required,
+            ready=not action_required and not remaining,
             action_required=action_required,
         )
 
@@ -108,6 +113,29 @@ class PlacementReconciler:
         """Resolve one operation without ever resubmitting it."""
         operation_id = str(intent.operation_id)
         state = str(intent.state)
+        route = await load_lifecycle_route(str(intent.symbol))
+        if route.route != LifecycleRoute.CLASSIC_DCA:
+            if (
+                route.route == LifecycleRoute.ACCUMULATION
+                and self.accumulation_recovery is not None
+            ):
+                try:
+                    return await self.accumulation_recovery(intent, config)
+                except (ValueError, OSError, ccxt.BaseError) as exc:
+                    logging.error(
+                        "Accumulation recovery failed for %s",
+                        operation_id,
+                        exc_info=True,
+                    )
+                    reason = str(exc)
+            else:
+                reason = "Accumulation account validation and recovery must be connected before execution."
+            await self._quarantine(
+                operation_id,
+                reason_code="accumulation_recovery_required",
+                error_message=reason,
+            )
+            return PlacementIntentState.QUARANTINED.value
         if state == PlacementIntentState.PREPARED.value:
             await self.intents.transition(
                 operation_id,

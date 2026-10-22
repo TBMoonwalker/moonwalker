@@ -5,6 +5,7 @@ import { useStrategyBuilderWorkspace } from '../../composables/useStrategyBuilde
 import StrategyCanvasPanel from './StrategyCanvasPanel.vue'
 import StrategyInspectorPanel from './StrategyInspectorPanel.vue'
 import StrategyLibraryPanel from './StrategyLibraryPanel.vue'
+import AccumulationStrategyWorkspace from './AccumulationStrategyWorkspace.vue'
 
 const dialog = useDialog()
 
@@ -64,6 +65,7 @@ const {
 
 <template>
     <section class="strategy-builder" aria-labelledby="strategy-builder-title">
+        <AccumulationStrategyWorkspace />
         <div class="strategy-status-bar">
             <div>
                 <h2 id="strategy-builder-title">Current strategy</h2>

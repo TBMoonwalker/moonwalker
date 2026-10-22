@@ -6,6 +6,7 @@ import {
 
 interface DcaRulesState {
     enabled: boolean
+    accumulation_strategy_version_id?: number | null
     trade_mode?: string | null
     dynamic_so_sizing_mode?: string | null
     dynamic_so_recovery_min_pct?: number | null
@@ -15,6 +16,7 @@ interface DcaRulesState {
 
 interface ExchangeRulesState {
     market: string | null
+    dry_run?: boolean
 }
 
 interface SignalRulesState {
@@ -145,6 +147,13 @@ export function buildConfigRules(options: BuildConfigRulesOptions): FormRules {
     ) => createDcaFieldValidator(options.dca, fieldLabel, requiredWhen)
 
     return {
+        accumulation_strategy_version_id: {
+            validator: (_rule: FormItemRule, value: unknown) => {
+                if (options.dca.value.trade_mode !== 'accumulation' || options.exchange.value.dry_run !== false) return true
+                return Number.isSafeInteger(value) && Number(value) > 0 ? true : new Error('Select a compatible accumulation strategy version before live entry')
+            },
+            trigger: ['submit', 'change'],
+        },
         timezone: {
             validator: requiredAfterSubmit('Please select timezone'),
             trigger: ['submit', 'change'],

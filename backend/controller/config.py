@@ -12,6 +12,7 @@ from litestar.exceptions import SerializationException
 from litestar.handlers import get, post, put
 from litestar.params import FromPath, FromQuery
 from model import AppConfig, OpenTrades
+from service.accumulation_config import accumulation_available, configuration_mode_guard
 from service.config import (
     Config,
     build_removed_config_key_message,
@@ -169,6 +170,26 @@ def _find_live_activation_blockers(
         ("tp", "Set the take profit."),
         ("history_lookback_time", "Set the history lookback window."),
     ]
+    accumulation = config_snapshot.get("trade_mode") == "accumulation"
+    if accumulation:
+        always_required_keys = [
+            (key, message)
+            for key, message in always_required_keys
+            if key not in {"bo", "tp"}
+        ]
+        always_required_keys.append(
+            (
+                "accumulation_strategy_version_id",
+                "Select an exact compatible accumulation strategy version.",
+            )
+        )
+        if not accumulation_available():
+            blockers.append(
+                {
+                    "key": "trade_mode",
+                    "message": "Accumulation is unavailable in this release.",
+                }
+            )
 
     for key, message in always_required_keys:
         if not _has_required_value(config_snapshot.get(key)):
@@ -184,7 +205,7 @@ def _find_live_activation_blockers(
         )
 
     dca_enabled = bool(config_snapshot.get("dca"))
-    if dca_enabled:
+    if dca_enabled and not accumulation:
         recovery_mode = (
             str(config_snapshot.get("dynamic_so_sizing_mode") or "legacy_factors")
             .strip()
@@ -514,6 +535,8 @@ async def get_config() -> Any:
         )
     snapshot["config_updated_at"] = await _get_latest_config_updated_at()
     snapshot["config_contract"] = public_config_contract()
+    snapshot["accumulation_available"] = accumulation_available()
+    snapshot["trade_mode_switch_guard"] = await configuration_mode_guard(snapshot)
     return snapshot
 
 
@@ -674,10 +697,13 @@ async def activate_live_trading(data: ConfirmMutationRequest) -> Any:
             "already_live": True,
         }
 
-    success = await config.set(
-        LIVE_ACTIVATION_KEY,
-        {"value": False, "type": "bool"},
-    )
+    try:
+        success = await config.set(
+            LIVE_ACTIVATION_KEY,
+            {"value": False, "type": "bool"},
+        )
+    except ValueError as exc:
+        return _config_update_conflict(str(exc))
     if not success:
         logging.error("Live activation failed during config persistence.")
         return json_response(

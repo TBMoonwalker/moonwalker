@@ -381,6 +381,7 @@ async def test_receive_buy_order_blocks_live_buy_over_global_cap(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_manual_ledger_buy_add_warns_but_persists_when_over_budget(
     monkeypatch,
 ) -> None:

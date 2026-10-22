@@ -6,6 +6,7 @@ from service.orders import Orders
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_buy_order_retries_baseline_after_entry_sizing_failure(
     monkeypatch,
 ) -> None:

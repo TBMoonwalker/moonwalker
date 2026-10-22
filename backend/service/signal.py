@@ -6,6 +6,7 @@ import inspect
 from typing import Any, Protocol, cast
 
 import helper
+from service.accumulation_entry import AccumulationEntryService
 from service.config import Config
 from service.config_views import SignalPluginConfigView
 
@@ -38,6 +39,7 @@ class Signal:
     def __init__(self, watcher_queue: asyncio.Queue[Any]):
         self.watcher_queue = watcher_queue
         self.signal_name: str | None = None
+        self._active_plugin_config: dict[str, Any] | None = None
         self.signal_plugin: SignalPluginProtocol | None = None
         self._task: asyncio.Task[Any] | None = None
         self._reload_lock = asyncio.Lock()
@@ -45,6 +47,7 @@ class Signal:
         self._restart_task: asyncio.Task[Any] | None = None
         self._pending_reload_config: dict[str, Any] | None = None
         self._shutting_down = False
+        self.accumulation_entry: AccumulationEntryService | None = None
 
     async def init(self) -> None:
         """Initialize signal plugin based on current configuration."""
@@ -84,6 +87,8 @@ class Signal:
 
         try:
             plugin = plugin_factory(self.watcher_queue)
+            if signal_name in {"asap", "csv_signal"}:
+                plugin.accumulation_entry = self.accumulation_entry
         except (RuntimeError, TypeError, ValueError, OSError) as exc:
             raise SignalPluginLoadError(
                 f"Failed to initialize signal plugin '{signal_name}': {exc}"
@@ -211,6 +216,7 @@ class Signal:
         self.signal_plugin = None
         self._task = None
         self.signal_name = None
+        self._active_plugin_config = None
 
         if plugin is not None:
             await self._shutdown_plugin(plugin)
@@ -223,6 +229,12 @@ class Signal:
         """Reload signal plugin in a serialized critical section."""
         async with self._reload_lock:
             self._shutting_down = False
+            if (
+                self._task is not None
+                and not self._task.done()
+                and self._active_plugin_config == config
+            ):
+                return
             await self._stop_current_plugin()
 
             signal_config = SignalPluginConfigView.from_config(config)
@@ -234,6 +246,22 @@ class Signal:
                 return
 
             try:
+                if config.get("trade_mode", "dynamic_dca") not in {
+                    None,
+                    "",
+                    "dynamic_dca",
+                    "accumulation",
+                }:
+                    raise SignalPluginLoadError(
+                        "Unknown trade mode; signal entry is blocked."
+                    )
+                if config.get("trade_mode") == "accumulation" and (
+                    signal_name not in {"asap", "csv_signal"}
+                    or self.accumulation_entry is None
+                ):
+                    raise SignalPluginLoadError(
+                        "Accumulation requires the enabled runtime and an ASAP/CSV plugin."
+                    )
                 plugin = self._load_plugin_instance(signal_name)
                 task = self._start_plugin_task(signal_name, plugin, config)
             except SignalPluginLoadError as exc:
@@ -251,6 +279,7 @@ class Signal:
             self.signal_plugin = plugin
             self._task = task
             self.signal_name = signal_name
+            self._active_plugin_config = dict(config)
 
     async def _drain_plugin_reloads(self) -> None:
         """Serialize plugin reloads and coalesce rapid config bursts."""

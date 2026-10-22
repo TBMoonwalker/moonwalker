@@ -369,3 +369,37 @@ async def test_asap_run_does_not_log_stale_config_ini_message(monkeypatch) -> No
     await plugin.run({"bo": 10})
 
     assert captured == []
+
+
+@pytest.mark.asyncio
+async def test_accumulation_asap_uses_entry_adapter_without_classic_order(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from service.accumulation_entry import AccumulationEntryResult
+
+    queue = asyncio.Queue()
+    plugin = SignalPlugin(queue)
+    classic = AsyncMock(side_effect=AssertionError("Must not enter classic DCA"))
+    monkeypatch.setattr(plugin, "_SignalPlugin__prepare_runtime_settings", classic)
+    entry = AsyncMock(
+        return_value=(AccumulationEntryResult("BTC/USDC", "entry-1", "ENABLED"),)
+    )
+    plugin.accumulation_entry = types.SimpleNamespace(asap=entry)
+
+    async def stop(_seconds):
+        plugin.status = False
+
+    monkeypatch.setattr(asap_module.asyncio, "sleep", stop)
+    await plugin.run({"trade_mode": "accumulation"})
+    assert await queue.get() == ["BTC/USDC"]
+    entry.assert_awaited_once()
+    classic.assert_not_awaited()
+    await plugin.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_accumulation_asap_rejects_disabled_runtime():
+    plugin = SignalPlugin(asyncio.Queue())
+    with pytest.raises(ValueError, match="not enabled"):
+        await plugin.run({"trade_mode": "accumulation"})
+    await plugin.shutdown()

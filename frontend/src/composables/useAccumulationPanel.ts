@@ -1,0 +1,299 @@
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, fetchAccumulationStrategies, sendAccumulationCommand } from '../api/accumulation'
+import { fetchAccumulationPerformance } from '../api/accumulation'
+import type { AccumulationPerformance } from '../types/accumulation'
+import { extractApiErrorMessage } from '../helpers/apiErrors'
+import { accumulationActions, accumulationClosePredecessor } from '../helpers/accumulation'
+import { createOrderOperationId } from '../helpers/orderMutations'
+import { MOONWALKER_API_ORIGIN } from '../config'
+import { readText, writeText, removeJSON } from '../helpers/safeStorage'
+import type { AccumulationAction, AccumulationCommand, AccumulationDetail, AccumulationStatus, AccumulationStrategy, AccumulationPortfolio } from '../types/accumulation'
+
+// Retain an uncertain request across route changes; never replay it automatically.
+const pendingKey = `moonwalker.accumulation.pending:${MOONWALKER_API_ORIGIN}`
+const session = () => window.sessionStorage
+let unresolvedRequest: AccumulationCommand | null = null
+
+function restoreRequest(): AccumulationCommand | null {
+  if (unresolvedRequest) return unresolvedRequest
+  try {
+    const value = JSON.parse(readText(pendingKey, session) ?? 'null')
+    if (value && typeof value.symbol === 'string' && typeof value.operation_id === 'string' &&
+        typeof value.action === 'string' && Number.isSafeInteger(value.expected_revision)) {
+      unresolvedRequest = value as AccumulationCommand
+    }
+  } catch { /* Storage is optional; requests are never replayed automatically. */ }
+  return unresolvedRequest
+}
+
+function rememberRequest(command: AccumulationCommand | null, resolvedId?: string) {
+  if (resolvedId && unresolvedRequest?.operation_id !== resolvedId) return
+  unresolvedRequest = command
+  if (command) writeText(pendingKey, JSON.stringify(command), session)
+  else removeJSON(pendingKey, session)
+}
+
+export function useAccumulationPanel() {
+  restoreRequest()
+  const visible = ref(false)
+  const available = ref(false)
+  const rows = ref<AccumulationStatus[]>([])
+  const portfolio = ref<AccumulationPortfolio | null>(null)
+  const performance = ref<AccumulationPerformance | null>(null)
+  const performanceLoading = ref(false)
+  const performanceError = ref('')
+
+  async function loadPerformance() {
+    if (performanceLoading.value) return
+    performanceLoading.value = true
+    performanceError.value = ''
+    try {
+      const result = await fetchAccumulationPerformance()
+      if (!Array.isArray(result.by_quote)) throw new Error('Invalid valuation response')
+      if (!disposed) performance.value = result
+    } catch (cause) {
+      if (!disposed) performanceError.value = extractApiErrorMessage(cause, 'Valuation is unavailable; no price or return has been guessed.')
+    } finally {
+      if (!disposed) performanceLoading.value = false
+    }
+  }
+  const next = ref<string | null>(null)
+  const selected = ref<string | null>(unresolvedRequest?.symbol ?? null)
+  const detail = ref<AccumulationDetail | null>(null)
+  const loading = ref(false)
+  const fresh = ref(false)
+  const busy = ref(false)
+  const error = ref('')
+  const notice = ref('')
+  const draft = ref<AccumulationCommand | null>(null)
+  const uncertain = ref<AccumulationCommand | null>(unresolvedRequest)
+  const quantity = ref('')
+  const csv = ref('')
+  const adjustmentDirection = ref<'add' | 'remove'>('add')
+  const adjustmentQuantity = ref('')
+  const adjustmentCost = ref('')
+  const adjustmentNote = ref('')
+  const ownershipConfirmation = ref('')
+  const ownershipNote = ref('')
+  const strategies = ref<AccumulationStrategy[]>([])
+  const strategyCursor = ref<number | null>(null)
+  const targetVersion = ref<number | null>(null)
+  const repairTarget = ref<string | null>(null)
+  const retirementTarget = ref<string | null>(null)
+  const strategyError = ref('')
+  const strategyLoading = ref(false)
+  let sequence = 0
+  let disposed = false
+  let pageLoading = false
+  let timer: ReturnType<typeof setInterval> | undefined
+  const actions = computed(() => detail.value ? accumulationActions(detail.value) : [])
+  const disabled = computed(() => !available.value || !fresh.value || busy.value || !!uncertain.value || !!draft.value)
+
+  async function loadStrategies(more = false) {
+    if (strategyLoading.value) return
+    strategyLoading.value = true
+    try {
+      const page = await fetchAccumulationStrategies(more ? strategyCursor.value ?? 0 : 0)
+      if (disposed) return
+      strategies.value = more ? [...strategies.value, ...page.versions.filter(row => !strategies.value.some(old => old.id === row.id))] : page.versions
+      strategyCursor.value = page.next_after_id
+      strategyError.value = ''
+    } catch {
+      if (!disposed) strategyError.value = 'Compatible strategies could not be loaded. Refresh the strategy list before switching.'
+    } finally { strategyLoading.value = false }
+  }
+
+  async function refreshDetail() {
+    if (!selected.value || disposed) return
+    const request = ++sequence
+    loading.value = true
+    fresh.value = false
+    try {
+      const result = await fetchAccumulationDetail(selected.value)
+      if (request !== sequence || disposed) return
+      detail.value = result
+      if (!result.quarantined_commands?.some(operation => operation.operation_id === retirementTarget.value)) {
+        retirementTarget.value = result.quarantined_commands?.[0]?.operation_id ?? null
+      }
+      if (!result.quarantined_orders?.some(order => order.placement_operation_id === repairTarget.value && order.has_lookup_identity)) {
+        repairTarget.value = result.quarantined_orders?.find(order => order.has_lookup_identity)?.placement_operation_id ?? null
+      }
+      portfolio.value = result.portfolio ?? null
+      available.value = true
+      fresh.value = true
+      error.value = ''
+    } catch (cause) {
+      if (request !== sequence || disposed) return
+      if (accumulationErrorStatus(cause) === 503) available.value = false
+      error.value = extractApiErrorMessage(cause, 'Could not refresh accumulation status. Actions are disabled until refresh succeeds.')
+    } finally {
+      if (request === sequence && !disposed) loading.value = false
+    }
+  }
+
+  async function selectSymbol(symbol: string) {
+    ++sequence
+    selected.value = symbol
+    detail.value = null
+    fresh.value = false
+    draft.value = null
+    quantity.value = ''
+    csv.value = ''
+    targetVersion.value = null
+    await refreshDetail()
+  }
+
+  async function loadPage(more = false) {
+    if (pageLoading || disposed) return
+    pageLoading = true
+    try {
+      const result = await fetchAccumulationPage(more ? next.value ?? undefined : undefined)
+      if (disposed) return
+      rows.value = more ? [...rows.value, ...result.activations.filter(row => !rows.value.some(old => old.symbol === row.symbol))] : result.activations
+      next.value = result.next_after
+      portfolio.value = result.portfolio ?? null
+      visible.value = true
+      available.value = true
+      error.value = ''
+      if (!selected.value && rows.value[0]) await selectSymbol(rows.value[0].symbol)
+      else if (selected.value) await refreshDetail()
+    } catch (cause) {
+      if (disposed) return
+      available.value = false
+      fresh.value = false
+      if (accumulationErrorStatus(cause) === 503 && !visible.value && !uncertain.value) return
+      visible.value = true
+      error.value = extractApiErrorMessage(cause, 'Accumulation status is unavailable.')
+    } finally {
+      pageLoading = false
+    }
+  }
+
+  function prepare(action: AccumulationAction) {
+    const row = detail.value
+    if (disabled.value || !row || !actions.value.includes(action)) return
+    error.value = ''
+    if (action === 'sell_partial' && (!/^(?:\d+\.?\d*|\.\d+)$/.test(quantity.value.trim()) || !/[1-9]/.test(quantity.value))) {
+      error.value = 'Enter a positive base-asset quantity using decimal digits.'
+      return
+    }
+    if (action === 'correct_import' && (!csv.value.trim() || csv.value.length > 1_000_000)) {
+      error.value = 'Enter the corrected CSV declaration (up to 1 MB).'
+      return
+    }
+    if (action === 'switch_strategy' && (!targetVersion.value || targetVersion.value === row.strategy_version_id ||
+        !strategies.value.some(version => version.id === targetVersion.value))) {
+      error.value = 'Select a different compatible strategy version.'
+      return
+    }
+    if (action === 'repair_order' && !row.quarantined_orders?.some(order => order.has_lookup_identity && order.placement_operation_id === repairTarget.value)) {
+      error.value = 'Select a quarantined order with a durable exchange identity.'
+      return
+    }
+    if (action === 'acknowledge_settlement' && row.settled_commands?.length !== 1) {
+      error.value = 'Refresh and resolve ambiguous interrupted settlements before acknowledgement.'
+      return
+    }
+    if (action === 'retire_command' && !row.quarantined_commands?.some(operation => operation.operation_id === retirementTarget.value)) {
+      error.value = 'Select the interrupted command to retire.'
+      return
+    }
+    const command: AccumulationCommand = {
+      symbol: row.symbol, action, operation_id: createOrderOperationId(`acc-${action}`), expected_revision: row.revision,
+    }
+    if (action === 'declare_ownership') {
+      const note = ownershipNote.value.trim()
+      if (ownershipConfirmation.value !== row.symbol || !note || note.length > 500 || /[\u0000-\u001f]/.test(note)) {
+        error.value = 'Type the full symbol exactly and enter an ownership declaration reason (up to 500 characters).'
+        return
+      }
+      command.confirmation = ownershipConfirmation.value
+      command.note = note
+    }
+    if (action === 'adjust_inventory') {
+      const amount = adjustmentQuantity.value.trim()
+      const cost = adjustmentCost.value.trim()
+      const note = adjustmentNote.value.trim()
+      if (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(amount) || !/[1-9]/.test(amount) || amount.length > 128 ||
+          (adjustmentDirection.value === 'add' && cost !== '' && (!/^(?:0|[1-9]\d*)(?:\.\d+)?$/.test(cost) || cost.length > 128)) ||
+          !note || note.length > 500 || /[\u0000-\u001f]/.test(note)) {
+        error.value = 'Enter a positive decimal correction quantity, a valid acquisition cost or leave it unknown, and a reason (up to 500 characters).'
+        return
+      }
+      command.direction = adjustmentDirection.value
+      command.quantity = amount
+      command.acquisition_cost = adjustmentDirection.value === 'add' && cost !== '' ? cost : null
+      command.note = note
+    }
+    if (action === 'sell_partial') command.quantity = quantity.value.trim()
+    if (action === 'correct_import') command.csv_content = csv.value
+    if (action === 'repair_order') command.placement_operation_id = repairTarget.value!
+    if (action === 'acknowledge_settlement') command.previous_operation_id = row.settled_commands![0]!.operation_id
+    if (action === 'retire_command') command.previous_operation_id = retirementTarget.value!
+    if (action === 'switch_strategy') command.target_version_id = targetVersion.value!
+    if (['retry_entry', 'correct_import'].includes(action) && targetVersion.value !== null) {
+      if (!strategies.value.some(version => version.id === targetVersion.value)) { error.value = 'Select a compatible saved version.'; return }
+      command.target_version_id = targetVersion.value
+    }
+    if (['retry_entry', 'correct_import', 'abandon_entry'].includes(action)) command.previous_operation_id = row.entry!.operation_id
+    if (action === 'retry_close') {
+      const previous = accumulationClosePredecessor(row)
+      if (!previous) { error.value = 'Refresh the current close before retrying.'; return }
+      command.previous_operation_id = previous.operation_id
+    }
+    draft.value = command
+  }
+
+  async function submit() {
+    if (busy.value || (!uncertain.value && !draft.value)) return
+    if (!uncertain.value && (!fresh.value || !available.value || draft.value!.expected_revision !== detail.value?.revision)) return
+    const command = { ...(uncertain.value ?? draft.value!) }
+    // Persist in memory before sending, so a route change cannot produce a new ID.
+    rememberRequest(command)
+    uncertain.value = command
+    draft.value = null
+    busy.value = true
+    notice.value = ''
+    error.value = ''
+    try {
+      const result = await sendAccumulationCommand(command)
+      if (result.operation.operation_id !== command.operation_id) throw new Error('The response did not identify this request.')
+      if (['repair_order', 'rebind_account', 'declare_ownership'].includes(command.action) && result.operation.status === 'quarantined') {
+        notice.value = ['rebind_account', 'declare_ownership'].includes(command.action)
+          ? 'Account ownership evidence is incomplete. The holding stays paused under its original binding. Retry this same request for fresh verification.'
+          : 'Terminal order evidence is not available. The order stays quarantined and buying stays paused. Retry this same request for a fresh lookup.'
+        return
+      }
+      rememberRequest(null, command.operation_id)
+      performance.value = null
+      uncertain.value = null
+      notice.value = result.operation.status === 'pending'
+        ? command.action === 'correct_import'
+          ? 'Correction recorded. The entry stays paused until you choose Validate entry.'
+          : 'Request recorded. Work is pending; check the current status below.'
+        : `Recorded outcome: ${result.operation.status}. Current status has been refreshed below.`
+    } catch (cause) {
+      const status = accumulationErrorStatus(cause)
+      if (status === 400 || status === 409) {
+        rememberRequest(null, command.operation_id)
+        uncertain.value = null
+        notice.value = extractApiErrorMessage(cause, 'Request rejected. Review the refreshed state before choosing another action.')
+      } else {
+        notice.value = 'The request outcome is unknown. Retry this same request to retrieve its recorded outcome; no new operation will be created.'
+      }
+    } finally {
+      busy.value = false
+      if (!disposed) await refreshDetail()
+    }
+  }
+
+  onMounted(() => {
+    void loadPage()
+    void loadStrategies()
+    timer = setInterval(() => {
+      if (!loading.value && !busy.value && available.value && !draft.value) void refreshDetail()
+    }, 5000)
+  })
+  onBeforeUnmount(() => { disposed = true; ++sequence; if (timer) clearInterval(timer) })
+  return { visible, available, rows, portfolio, performance, performanceLoading, performanceError, loadPerformance, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, quantity, csv, adjustmentDirection, adjustmentQuantity, adjustmentCost, adjustmentNote, ownershipConfirmation, ownershipNote, actions, disabled, loadPage, selectSymbol, refreshDetail, prepare, submit, strategies, strategyCursor, targetVersion, repairTarget, retirementTarget, strategyError, strategyLoading, loadStrategies }
+}

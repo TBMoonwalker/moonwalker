@@ -5,6 +5,7 @@ from service.orders import Orders
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_buy_order_rejects_global_pause(monkeypatch) -> None:
     orders = Orders()
     executed = 0
@@ -43,6 +44,7 @@ async def test_receive_buy_order_rejects_global_pause(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_buy_order_rejects_ai_warning_enforced_entry(
     monkeypatch,
 ) -> None:
@@ -95,6 +97,7 @@ async def test_receive_buy_order_rejects_ai_warning_enforced_entry(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_buy_order_rejects_ai_unscored_enforced_entry(
     monkeypatch,
 ) -> None:
@@ -148,6 +151,7 @@ async def test_receive_buy_order_rejects_ai_unscored_enforced_entry(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_buy_order_rejects_paused_mission(monkeypatch) -> None:
     orders = Orders()
     executed = 0

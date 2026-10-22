@@ -103,6 +103,7 @@ class _FakeTrades:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_arm_tp_limit_order_places_and_persists_order() -> None:
     orders = Orders()
     fake_exchange = _FakeExchange()
@@ -131,6 +132,7 @@ async def test_arm_tp_limit_order_places_and_persists_order() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_arm_tp_limit_order_marks_minimum_notional_remainder_unsellable(
     monkeypatch,
 ) -> None:

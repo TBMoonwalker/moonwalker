@@ -138,6 +138,18 @@ class CSVSignalImportService:
 
         async def _persist_import() -> None:
             async with in_transaction() as conn:
+                # A stopped accumulation activation still owns its symbol. Check
+                # inside the write transaction so concurrent staging cannot be
+                # bypassed by this legacy importer after its initial read.
+                for table in (
+                    model.AccumulationActivation,
+                    model.OpenTrades,
+                    model.Trades,
+                ):
+                    if await table.filter(symbol__in=symbols).using_db(conn).exists():
+                        raise ValueError(
+                            "CSV signal import blocked: symbols are already managed or reserved."
+                        )
                 if trade_rows:
                     await model.Trades.bulk_create(trade_rows, using_db=conn)
                 for payload in open_trade_payloads:

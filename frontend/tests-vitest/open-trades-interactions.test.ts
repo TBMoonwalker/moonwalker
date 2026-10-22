@@ -244,6 +244,17 @@ describe('OpenTrades mobile replay interaction', () => {
         loadConfiguredMinTimeframeMock.mockResolvedValue(undefined)
     })
 
+    it('routes accumulation holdings away from generic sell and stop controls', () => {
+        const row = { ...openTrade(), lifecycle_mode: 'accumulation' }
+        testState.rows = [row]
+        const wrapper = mountOpenTrades()
+        const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<Record<string, unknown>>
+        const render = columns.find(column => column.key === 'action')!.render as (row: OpenTradeRow) => VNode
+        const actions = mount(defineComponent({ render: () => render(row) }))
+        expect(actions.text()).toContain('Manage accumulation above')
+        expect(actions.find('button').exists()).toBe(false)
+    })
+
     it('omits the expand column and opens replay details in a modal', async () => {
         const wrapper = mountOpenTrades()
         const row = wrapper.get('[data-test="trade-row"]')

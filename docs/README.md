@@ -18,6 +18,7 @@ dashboard clients can connect to that instance.
 
 - [API and WebSocket reference](api.md)
 - [Developer documentation, architecture ownership, and documentation policy](development.md)
+- [Accumulation mode: setup, strategy, manual exits, recovery and replay](accumulation.md)
 - [Dashboard history loading](designs/delta-loading.md)
 - [Dependency management and supply-chain policy](dependencies.md)
 - [Product record](../PRODUCT.md)

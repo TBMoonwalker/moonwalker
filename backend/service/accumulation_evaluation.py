@@ -1,0 +1,296 @@
+"""Revision-checked strategy evaluation and frozen accumulation candidates.
+
+Callers provide bounded completed candles and fresh budget/quote snapshots.
+BUY is a proposal, never permission to submit without fresh capital admission.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Sequence
+from dataclasses import asdict, dataclass, replace
+from decimal import Decimal, localcontext
+
+import model
+from service.accumulation_contracts import (
+    AccumulationIdentity,
+    AccumulationStateError,
+    canonical_decimal,
+    encode_observations,
+)
+from service.accumulation_lifecycle import _has_unsettled_execution
+from service.accumulation_state import AccumulationConflictError, _load_context
+from service.accumulation_strategy import (
+    CAPABILITY,
+    PRIORITY_PROTOCOL,
+    AccumulationCandle,
+    AccumulationGuard,
+    AccumulationObservations,
+    AccumulationParameters,
+    accumulation_requested_quote,
+    accumulation_signal_reason,
+    advance_accumulation_observations,
+    calculate_accumulation_market,
+    canonical_accumulation_priority,
+)
+from service.database import run_sqlite_write_with_retry
+from service.lifecycle_mutation import lifecycle_mutation_coordinator
+from service.strategy_runtime import load_accumulation_strategy_version
+from tortoise.transactions import in_transaction
+
+
+@dataclass(frozen=True)
+class AccumulationDecision:
+    """Typed WAIT/BUY proposal with its persisted lifecycle and strategy identity."""
+
+    identity: AccumulationIdentity
+    action: str
+    reason: str
+    opportunity_id: str | None = None
+    signal_close_ms: int | None = None
+    expires_at_ms: int | None = None
+    signal_price: str | None = None
+    signal_atr: str | None = None
+    severity: str | None = None
+    fraction: str | None = None
+    requested_quote: str | None = None
+    priority_score: str | None = None
+    priority_close_ms: int | None = None
+    capability: str = CAPABILITY
+    priority_protocol: str = PRIORITY_PROTOCOL
+
+
+def _guard(raw: str | None, revision: int) -> AccumulationGuard | None:
+    if raw is None:
+        if revision != 0:
+            raise AccumulationStateError("Execution guard is missing.")
+        return None
+    result = AccumulationGuard.from_dict(json.loads(raw))
+    if result.consumption_revision != revision:
+        raise AccumulationStateError("Execution guard consumption revision changed.")
+    return result
+
+
+def _proposal(
+    identity: AccumulationIdentity,
+    opportunity: model.AccumulationOpportunity,
+    parameters: AccumulationParameters,
+    *,
+    now_ms: int,
+    usable_quote: str | None,
+    ask_price: str | None,
+    quote_timestamp_ms: int | None,
+    minimum_quote: str | None,
+    priority: str | None,
+    priority_close_ms: int,
+) -> AccumulationDecision:
+    with localcontext() as context:
+        context.prec = 50
+        severity = str(
+            max(
+                Decimal(0),
+                (Decimal(opportunity.signal_peak) - Decimal(opportunity.signal_price))
+                / Decimal(opportunity.signal_atr),
+            )
+        )
+    result = AccumulationDecision(
+        identity,
+        "WAIT",
+        "WAIT_DATA",
+        str(opportunity.id),
+        opportunity.signal_close_ms,
+        opportunity.expires_at_ms,
+        opportunity.signal_price,
+        opportunity.signal_atr,
+        severity,
+        priority_score=priority,
+        priority_close_ms=priority_close_ms,
+    )
+    if now_ms >= opportunity.expires_at_ms:
+        return replace(result, reason="WAIT_EXPIRED")
+    if opportunity.consumed_at is not None:
+        return replace(result, reason="WAIT_CONSUMED")
+    if opportunity.status not in {"candidate", "retryable"}:
+        return replace(result, reason="WAIT_STATE")
+    if opportunity.next_retry_at is not None and now_ms < int(
+        opportunity.next_retry_at.timestamp() * 1000
+    ):
+        return replace(result, reason="WAIT_RETRY")
+    if priority is None:
+        return result
+    if usable_quote is None:
+        return replace(result, reason="WAIT_BUDGET")
+    try:
+        usable = canonical_decimal(usable_quote)
+    except AccumulationStateError:
+        return replace(result, reason="WAIT_BUDGET")
+    fraction, requested = accumulation_requested_quote(severity, usable, parameters)
+    result = replace(result, fraction=fraction, requested_quote=requested)
+    if Decimal(requested) == 0:
+        return replace(result, reason="WAIT_BUDGET")
+    if (
+        type(quote_timestamp_ms) is not int
+        or not 0 <= now_ms - quote_timestamp_ms <= 10000
+    ):
+        return result
+    try:
+        ask = canonical_decimal(ask_price, positive=True)
+        minimum = canonical_decimal(minimum_quote)
+    except AccumulationStateError:
+        return result
+    if Decimal(ask) > Decimal(opportunity.signal_price):
+        return replace(result, reason="WAIT_PRICE")
+    if Decimal(requested) < Decimal(minimum):
+        return replace(result, reason="WAIT_MINIMUM")
+    return replace(result, action="BUY", reason="BUY_OPPORTUNITY")
+
+
+async def evaluate_accumulation(
+    expected: AccumulationIdentity,
+    candles: Sequence[AccumulationCandle],
+    *,
+    priority_candles: Sequence[AccumulationCandle],
+    now_ms: int,
+    usable_quote: str | None,
+    ask_price: str | None,
+    quote_timestamp_ms: int | None,
+    minimum_quote: str | None,
+) -> AccumulationDecision:
+    """Advance one current candle and freeze its opportunity atomically.
+
+    Warmup supplies observations at the baseline. A missed observation interval
+    requires bounded rebase; it never backfills buys. Missing data does not
+    advance the stored candle or manufacture a fresh state.
+    """
+    version = await load_accumulation_strategy_version(expected.strategy_version_id)
+    if (
+        version.slug != expected.strategy_slug
+        or version.version != expected.strategy_version
+    ):
+        raise AccumulationStateError("Pinned strategy identity does not match.")
+    parameters = version.parameters
+    close_ms = parameters.latest_close(now_ms)
+    try:
+        market = calculate_accumulation_market(candles, parameters, close_ms=close_ms)
+    except AccumulationStateError:
+        return AccumulationDecision(expected, "WAIT", "WAIT_DATA")
+    priority_close = AccumulationParameters().latest_close(now_ms)
+    try:
+        priority = canonical_accumulation_priority(
+            priority_candles, close_ms=priority_close
+        )
+    except AccumulationStateError:
+        priority = None
+
+    async def persist() -> AccumulationDecision:
+        async with in_transaction() as conn:
+            current = await _load_context(
+                expected.activation_id, expected.account_scope, conn
+            )
+            if current.identity != expected:
+                raise AccumulationConflictError(
+                    "Accumulation decision identity changed; reload."
+                )
+            activation = await model.AccumulationActivation.get(
+                id=expected.activation_id
+            ).using_db(conn)
+            if expected.state != "enabled" or expected.explicitly_paused:
+                return AccumulationDecision(expected, "WAIT", "WAIT_LIFECYCLE")
+            guard = _guard(
+                activation.execution_guard_json, expected.consumption_revision
+            )
+            if current.observations is None:
+                return AccumulationDecision(expected, "WAIT", "WAIT_REBASE")
+            state = AccumulationObservations.from_dict(current.observations)
+            if state.last_close_ms != current.last_processed_close_ms:
+                raise AccumulationStateError(
+                    "Observation candle identity is inconsistent."
+                )
+            if market.close_ms <= expected.baseline_close_ms:
+                return AccumulationDecision(expected, "WAIT", "WAIT_BASELINE")
+            if (
+                market.close_ms < state.last_close_ms
+                or market.close_ms > state.last_close_ms + parameters.interval_ms
+            ):
+                return AccumulationDecision(expected, "WAIT", "WAIT_REBASE")
+            updated_state = advance_accumulation_observations(
+                state, market, guard, parameters
+            )
+            identity = expected
+            if updated_state != state:
+                activation.revision += 1
+                await activation.save(using_db=conn)
+                await (
+                    model.AccumulationStrategyState.filter(
+                        activation=activation,
+                        strategy_version_id=version.id,
+                        observation_epoch=expected.observation_epoch,
+                    )
+                    .using_db(conn)
+                    .update(
+                        value_json=encode_observations(asdict(updated_state)),
+                        last_processed_close_ms=market.close_ms,
+                        revision=activation.revision,
+                    )
+                )
+                identity = replace(expected, revision=activation.revision)
+            if await _has_unsettled_execution(activation, conn):
+                return AccumulationDecision(identity, "WAIT", "WAIT_ORDER")
+            opportunity = await model.AccumulationOpportunity.get_or_none(
+                activation=activation,
+                observation_epoch=expected.observation_epoch,
+                signal_close_ms=market.close_ms,
+            ).using_db(conn)
+            if opportunity is None:
+                reason = accumulation_signal_reason(
+                    market, updated_state, guard, parameters
+                )
+                if not reason.startswith("BUY_"):
+                    return AccumulationDecision(identity, "WAIT", reason)
+                if market.close_ms == state.last_close_ms:
+                    return AccumulationDecision(identity, "WAIT", "WAIT_NEW_CANDLE")
+                opportunity = await model.AccumulationOpportunity.create(
+                    using_db=conn,
+                    activation=activation,
+                    generation=activation.generation,
+                    strategy_version_id=version.id,
+                    observation_epoch=expected.observation_epoch,
+                    signal_close_ms=market.close_ms,
+                    expires_at_ms=market.close_ms + parameters.interval_ms,
+                    signal_price=market.close,
+                    signal_atr=market.atr,
+                    signal_peak=market.peak,
+                )
+            if (
+                opportunity.generation != activation.generation
+                or opportunity.strategy_version_id != version.id
+            ):
+                raise AccumulationStateError(
+                    "Frozen opportunity identity is inconsistent."
+                )
+            if opportunity.signal_peak is None or (
+                Decimal(opportunity.signal_price) != Decimal(market.close)
+                or Decimal(opportunity.signal_atr) != Decimal(market.atr)
+                or Decimal(opportunity.signal_peak) != Decimal(market.peak)
+            ):
+                return AccumulationDecision(identity, "WAIT", "WAIT_DATA")
+            return _proposal(
+                identity,
+                opportunity,
+                parameters,
+                now_ms=now_ms,
+                usable_quote=usable_quote,
+                ask_price=ask_price,
+                quote_timestamp_ms=quote_timestamp_ms,
+                minimum_quote=minimum_quote,
+                priority=priority,
+                priority_close_ms=priority_close,
+            )
+
+    activation = await model.AccumulationActivation.get(id=expected.activation_id)
+    async with lifecycle_mutation_coordinator.mutation(activation.symbol) as admitted:
+        if not admitted:
+            return AccumulationDecision(expected, "WAIT", "WAIT_MAINTENANCE")
+        return await run_sqlite_write_with_retry(
+            persist, "evaluating accumulation candle"
+        )

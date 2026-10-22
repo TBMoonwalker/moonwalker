@@ -243,7 +243,7 @@ async def mission_pause(symbol: FromPath[str]) -> Any:
     result = await trading_controls.pause_mission(normalized_symbol, config.snapshot())
     if result.status == "not_found":
         return json_response({"result": "", "error": result.message}, 404)
-    if result.status == "tp_cancel_failed":
+    if result.status in {"tp_cancel_failed", "lifecycle_required"}:
         return json_response(
             {
                 "result": "",
@@ -276,6 +276,8 @@ async def mission_resume(symbol: FromPath[str]) -> Any:
     result = await trading_controls.resume_mission(normalized_symbol)
     if result.status == "not_found":
         return json_response({"result": "", "error": result.message}, 404)
+    if result.status == "lifecycle_required":
+        return json_response({"result": "", "error": result.message}, 409)
     return {
         "result": result.status,
         "message": result.message,

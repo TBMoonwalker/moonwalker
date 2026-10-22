@@ -7,9 +7,17 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
+from uuid import UUID
 
 import helper
 import model
+from service.accumulation_backup import (
+    ACCUMULATION_TABLE_MODELS,
+    export_strategy_dependencies,
+    restore_strategy_dependencies,
+    safe_accumulation_row,
+    validate_accumulation_backup,
+)
 from service.config import (
     Config,
     build_removed_config_key_message,
@@ -30,11 +38,12 @@ from service.placement_intents import (
 )
 from service.trade_lifecycle_config import build_invalid_backup_shape_error
 from tortoise import fields
+from tortoise.backends.base.client import BaseDBAsyncClient
 from tortoise.transactions import in_transaction
 
 logging = helper.LoggerFactory.get_logger("logs/config.log", "backup_restore")
 
-BACKUP_SCHEMA_VERSION = 2
+BACKUP_SCHEMA_VERSION = 3
 RECOVERY_MANIFEST_SCHEMA_VERSION = 1
 RECOVERY_MANIFEST_DISPOSITION = "quarantine_only"
 
@@ -48,6 +57,7 @@ TRADE_TABLE_MODELS: dict[str, type] = {
     "autopilot_history": model.Autopilot,
     "upnl_history": model.UpnlHistory,
     "placement_intents": model.PlacementIntent,
+    **ACCUMULATION_TABLE_MODELS,
 }
 
 
@@ -57,6 +67,8 @@ def _serialize_value(value: Any) -> Any:
         return value.isoformat()
     if isinstance(value, Decimal):
         return float(value)
+    if isinstance(value, UUID):
+        return str(value)
     return value
 
 
@@ -65,9 +77,19 @@ class BackupService:
 
     async def export_backup(self, include_trade_data: bool) -> dict[str, Any]:
         """Build a JSON-safe backup payload."""
+        async with in_transaction() as connection:
+            return await self._export_snapshot(include_trade_data, connection)
+
+    async def _export_snapshot(
+        self, include_trade_data: bool, connection: BaseDBAsyncClient
+    ) -> dict[str, Any]:
+        """Read ownership, checkpoints and journals from one database snapshot."""
         config_rows = [
             row
-            for row in await model.AppConfig.all().order_by("id").values()
+            for row in await model.AppConfig.all()
+            .using_db(connection)
+            .order_by("id")
+            .values()
             if not is_removed_config_key(str(row.get("key") or ""))
         ]
         payload: dict[str, Any] = {
@@ -77,8 +99,16 @@ class BackupService:
             "config": self._serialize_rows(config_rows),
         }
         if include_trade_data:
-            payload["trade_data"] = await self._export_trade_data()
-            payload["sealed_recovery_manifest"] = await self._export_recovery_manifest()
+            payload["trade_data"] = await self._export_trade_data(connection)
+            payload["sealed_recovery_manifest"] = await self._export_recovery_manifest(
+                connection
+            )
+            dependencies = await export_strategy_dependencies(
+                payload["trade_data"], connection, config_rows
+            )
+            payload["accumulation_strategies"] = {
+                key: self._serialize_rows(rows) for key, rows in dependencies.items()
+            }
         return payload
 
     async def restore_backup(
@@ -88,6 +118,8 @@ class BackupService:
         restore_trade_data: bool,
     ) -> dict[str, Any]:
         """Restore config-only or full backup payloads."""
+        if backup_payload.get("schema_version", 1) not in {1, 2, 3}:
+            raise ValueError("Unsupported backup schema version.")
         config_rows = self._force_safe_restore_config(
             canonicalize_trade_mode_rows(
                 self._validate_config_rows(backup_payload.get("config"))
@@ -102,12 +134,29 @@ class BackupService:
                     safe_fields={"restore_trade_data": restore_trade_data},
                 )
             validated_trade_data = self._validate_trade_data(trade_data)
+            if any(validated_trade_data[name] for name in ACCUMULATION_TABLE_MODELS):
+                if not ACCUMULATION_TABLE_MODELS.keys() <= trade_data.keys():
+                    raise ValueError("Accumulation backup is missing ownership tables.")
             quarantined_intents = self._validate_recovery_manifest(
                 backup_payload.get("sealed_recovery_manifest")
             )
+            dependencies = validate_accumulation_backup(
+                validated_trade_data,
+                quarantined_intents,
+                backup_payload.get("accumulation_strategies"),
+                config_rows,
+            )
         else:
+            # A local numeric version ID is not portable without its immutable
+            # document. Config-only restore requires an explicit new selection.
+            config_rows = [
+                row
+                for row in config_rows
+                if row["key"] != "accumulation_strategy_version_id"
+            ]
             validated_trade_data = None
             quarantined_intents = []
+            dependencies = {"definitions": [], "versions": []}
 
         restore_summary = {
             "config_keys": len(config_rows),
@@ -129,6 +178,9 @@ class BackupService:
                 if not validated_trade_data:
                     return
 
+                await restore_strategy_dependencies(dependencies, conn)
+                for model_class in reversed(ACCUMULATION_TABLE_MODELS.values()):
+                    await model_class.all().using_db(conn).delete()
                 await model.Tickers.all().using_db(conn).delete()
                 await model.UpnlHistory.all().using_db(conn).delete()
                 await model.Autopilot.all().using_db(conn).delete()
@@ -141,20 +193,46 @@ class BackupService:
                 await model.PlacementIntent.all().using_db(conn).delete()
 
                 for table_name, rows in validated_trade_data.items():
+                    if table_name in ACCUMULATION_TABLE_MODELS:
+                        continue
                     model_class = TRADE_TABLE_MODELS[table_name]
                     for row in rows:
-                        await model_class.create(
-                            using_db=conn,
-                            **self._deserialize_row(model_class, row),
+                        await self._create_restored_row(
+                            model_class,
+                            self._deserialize_row(
+                                model_class, safe_accumulation_row(table_name, row)
+                            ),
+                            conn,
                         )
+                accumulation_symbols = {
+                    row["symbol"]
+                    for row in validated_trade_data["accumulation_activations"]
+                }
                 for row in quarantined_intents:
-                    await model.PlacementIntent.create(
-                        using_db=conn,
-                        **self._deserialize_row(
-                            model.PlacementIntent,
-                            quarantine_restored_intent(row),
-                        ),
+                    restored = quarantine_restored_intent(row)
+                    restored["id"] = row.get("id")
+                    if row["symbol"] in accumulation_symbols:
+                        # Embedded identities and cumulative evidence are audit data;
+                        # quarantine blocks all lookup/accounting until explicit repair.
+                        restored = {
+                            **row,
+                            "state": "restored_quarantined",
+                            "reason_code": "portable_restore_quarantine",
+                        }
+                    await self._create_restored_row(
+                        model.PlacementIntent,
+                        self._deserialize_row(model.PlacementIntent, restored),
+                        conn,
                     )
+                for table_name, model_class in ACCUMULATION_TABLE_MODELS.items():
+                    for row in validated_trade_data[table_name]:
+                        await self._create_restored_row(
+                            model_class,
+                            self._deserialize_row(
+                                model_class, safe_accumulation_row(table_name, row)
+                            ),
+                            conn,
+                        )
 
         await run_sqlite_write_with_retry(_restore, "restoring backup")
 
@@ -190,21 +268,47 @@ class BackupService:
             row["value_type"] = "bool"
         return safe_rows
 
-    async def _export_trade_data(self) -> dict[str, list[dict[str, Any]]]:
+    @staticmethod
+    async def _create_restored_row(
+        model_class: Any, payload: dict[str, Any], connection: BaseDBAsyncClient
+    ) -> None:
+        """Preserve source chronology after ORM auto-now insert hooks run."""
+        restored = await model_class.create(using_db=connection, **payload)
+        timestamps = {
+            name: payload[name]
+            for name, field in model_class._meta.fields_map.items()
+            if isinstance(field, fields.DatetimeField)
+            and field.auto_now
+            and name in payload
+            and payload[name] is not None
+        }
+        if timestamps:
+            await (
+                model_class.filter(pk=restored.pk)
+                .using_db(connection)
+                .update(**timestamps)
+            )
+
+    async def _export_trade_data(
+        self, connection: BaseDBAsyncClient
+    ) -> dict[str, list[dict[str, Any]]]:
         """Export trade-related tables, excluding ticker OHLCV data."""
         payload: dict[str, list[dict[str, Any]]] = {}
         for table_name, model_class in TRADE_TABLE_MODELS.items():
-            query = model_class.all()
+            query = model_class.all().using_db(connection)
             if model_class is model.PlacementIntent:
                 query = query.filter(state__in=TERMINAL_PLACEMENT_STATES)
             rows = await query.order_by("id").values()
             payload[table_name] = self._serialize_rows(rows)
         return payload
 
-    async def _export_recovery_manifest(self) -> dict[str, Any]:
+    async def _export_recovery_manifest(
+        self, connection: BaseDBAsyncClient
+    ) -> dict[str, Any]:
         """Checksum nonterminal intents for audit-only quarantine on restore."""
         rows = (
             await model.PlacementIntent.filter(state__in=NONTERMINAL_PLACEMENT_STATES)
+            .using_db(connection)
             .order_by("id")
             .values()
         )
@@ -388,8 +492,6 @@ class BackupService:
         """Convert serialized backup values into ORM-create payloads."""
         payload: dict[str, Any] = {}
         for key, value in row.items():
-            if key == "id":
-                continue
             field = model_class._meta.fields_map.get(key)
             if field is None:
                 continue

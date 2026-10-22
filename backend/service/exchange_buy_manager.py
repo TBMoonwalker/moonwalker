@@ -22,6 +22,27 @@ class ExchangeBuyManager:
         self._logger = logger
         self._get_exchange = get_exchange
 
+    async def submit_buy_once(
+        self,
+        *,
+        symbol: str,
+        order_type: str,
+        amount: float | str,
+        price: float | str,
+        params: dict[str, Any],
+    ) -> Any:
+        """Submit once, retaining raw evidence for the owning lifecycle.
+
+        No retry, cancellation or accounting is performed here. Callers journal
+        uncertainty if transport fails after they claim submission.
+        """
+        exchange = self._get_exchange()
+        if exchange is None:
+            raise RuntimeError("Exchange client is unavailable.")
+        return await exchange.create_order(
+            symbol, order_type, "buy", amount, price, params
+        )
+
     async def execute_market_buy(
         self, order: ExchangeOrderPayload
     ) -> ExchangeOrderPayload | None:
@@ -50,13 +71,12 @@ class ExchangeBuyManager:
                     order["symbol"],
                     order_price,
                 )
-            trade = await exchange.create_order(
-                order["symbol"],
-                order_type,
-                order["side"],
-                order["amount"],
-                order_price,
-                params,
+            trade = await self.submit_buy_once(
+                symbol=order["symbol"],
+                order_type=order_type,
+                amount=order["amount"],
+                price=order_price,
+                params=params,
             )
             if not isinstance(trade, dict):
                 raise ExchangePostSubmissionFailure(

@@ -215,6 +215,8 @@ def estimate_open_trade_reserve(
     settings = build_capital_budget_settings(config)
     total = 0.0
     for open_trade in open_trades:
+        if open_trade.get("lifecycle_mode") == "accumulation":
+            continue
         if float(open_trade.get("unsellable_amount") or 0.0) > 0 and open_trade.get(
             "unsellable_reason"
         ):

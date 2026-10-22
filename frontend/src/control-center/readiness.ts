@@ -68,7 +68,7 @@ function collectAlwaysRequiredBlockers(
         ],
     ]
 
-    return requiredKeys.flatMap(([key, title, description]) =>
+    return requiredKeys.filter(([key]) => config.trade_mode !== 'accumulation' || !['bo', 'tp'].includes(key)).flatMap(([key, title, description]) =>
         (key === 'capital_max_fund'
             ? hasPositiveNumber(config[key])
             : hasRequiredValue(config[key]))
@@ -78,6 +78,18 @@ function collectAlwaysRequiredBlockers(
 }
 
 function collectDcaBlockers(config: SharedConfigPayload): ControlCenterBlocker[] {
+    if (normalizeTradeMode(config.trade_mode) === 'unsupported') return [resolveControlCenterBlocker('trade_mode', 'Select a supported entry mode before trading.', 'Unknown trade mode')]
+    if (config.trade_mode === 'accumulation') {
+        const blockers: ControlCenterBlocker[] = []
+        if (config.accumulation_available !== true) blockers.push(resolveControlCenterBlocker('trade_mode', 'Accumulation is unavailable in this release.', 'Accumulation unavailable'))
+        if (!config.dca) blockers.push(resolveControlCenterBlocker('dca', 'Enable trade mode management.', 'Trade mode management disabled'))
+        if (!Number.isSafeInteger(config.accumulation_strategy_version_id) || Number(config.accumulation_strategy_version_id) <= 0) blockers.push(resolveControlCenterBlocker('accumulation_strategy_version_id', 'Select an exact compatible accumulation strategy version.', 'Accumulation strategy missing'))
+        if (!['asap', 'csv_signal'].includes(String(config.signal))) blockers.push(resolveControlCenterBlocker('signal', 'Use ASAP fixed symbols or CSV inventory for accumulation.', 'Unsupported accumulation signal'))
+        if (config.signal === 'asap' && /^https?:\/\//i.test(String(config.symbol_list ?? ''))) blockers.push(resolveControlCenterBlocker('symbol_list', 'Use fixed symbols for accumulation.', 'Fixed symbols required'))
+        if (config.market !== 'spot') blockers.push(resolveControlCenterBlocker('market', 'Accumulation requires spot markets.', 'Spot market required'))
+        if (config.autopilot === true) blockers.push(resolveControlCenterBlocker('autopilot', 'Disable Autopilot for accumulation.', 'Autopilot must be disabled'))
+        return blockers
+    }
     if (!Boolean(config.dca)) {
         return []
         }

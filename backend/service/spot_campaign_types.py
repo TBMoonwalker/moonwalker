@@ -10,6 +10,14 @@ class TradeLifecycleMode(StrEnum):
     """Stable persistence values for mutually exclusive trade lifecycles."""
 
     CLASSIC_DCA = "classic_dca"
+    ACCUMULATION = "accumulation"
+
+
+def parse_lifecycle_mode(value: Any) -> TradeLifecycleMode:
+    """Preserve legacy DCA defaults and reject unknown explicit modes."""
+    if value is None or value == "":
+        return TradeLifecycleMode.CLASSIC_DCA
+    return TradeLifecycleMode(value)
 
 
 class TradeExposureState(StrEnum):

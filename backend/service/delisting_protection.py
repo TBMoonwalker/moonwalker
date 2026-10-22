@@ -715,6 +715,31 @@ class DelistingProtectionService:
             return DelistingDecision(allowed=True)
 
         await self.ensure_fresh(config)
+        return self.evaluate_cached_buy(symbol, config)
+
+    def evaluate_cached_buy(
+        self, symbol: str, config: dict[str, Any]
+    ) -> DelistingDecision:
+        """Recheck refreshed evidence without I/O at a final submission claim."""
+        if not bool(config.get("delisting_protection_enabled", False)):
+            return DelistingDecision(allowed=True)
+        now = time.monotonic()
+        provider = _provider_for(config)
+        if (
+            not self._snapshot_matches(config)
+            or now - self._market_checked_at > MARKET_MAX_STALE_SECONDS
+            or (
+                provider is not None
+                and _is_fail_closed(provider)
+                and now - self._schedule_checked_at > SCHEDULE_MAX_STALE_SECONDS
+            )
+        ):
+            return DelistingDecision(
+                allowed=False,
+                reason_code="blocked_delisting_check_unavailable",
+                message=f"Moonwalker has no current delisting evidence for {symbol}.",
+                degraded=True,
+            )
         event = self._event_for_symbol(symbol)
         if event is not None:
             return DelistingDecision(

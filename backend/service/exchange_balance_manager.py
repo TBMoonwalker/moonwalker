@@ -2,9 +2,11 @@
 
 import asyncio
 from collections.abc import Callable
+from copy import deepcopy
 from typing import Any
 
 import ccxt.async_support as ccxt
+from service.accumulation_notifications import accumulation_input_notifications
 from service.exchange_helpers import extract_free_amount
 
 
@@ -29,11 +31,13 @@ class ExchangeBalanceManager:
         self._balance_lock = asyncio.Lock()
         self._balance_cache: dict[str, Any] | None = None
         self._balance_cache_ts = 0.0
+        self._last_funding: dict[str, Any] | None = None
 
     def reset(self) -> None:
         """Clear any cached balance snapshot."""
         self._balance_cache = None
         self._balance_cache_ts = 0.0
+        self._last_funding = None
 
     async def _fetch_balance_with_retry(self, exchange: Any) -> dict[str, Any]:
         """Fetch exchange balance with a short retry window for transient failures."""
@@ -92,8 +96,15 @@ class ExchangeBalanceManager:
                 return self._balance_cache
 
             balance = await self._fetch_balance_with_retry(exchange)
+            changed = False
+            if accumulation_input_notifications.connected:
+                funding = {key: deepcopy(balance.get(key)) for key in ("free", "used")}
+                changed = funding != self._last_funding
+                self._last_funding = funding
             self._balance_cache = balance
             self._balance_cache_ts = now
+            if changed:
+                accumulation_input_notifications.publish()
             return balance
 
     async def get_available_base_amount(

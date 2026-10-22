@@ -27,6 +27,15 @@ class ExchangeSellManager:
         self._logger = logger
         self._get_exchange = get_exchange
 
+    async def submit_market_sell_once(
+        self, *, symbol: str, amount: str | float, params: dict[str, Any]
+    ) -> Any:
+        """Submit a journaled market sale once, preserving raw exchange evidence."""
+        exchange = self._get_exchange()
+        if exchange is None:
+            raise RuntimeError("Exchange client is unavailable.")
+        return await exchange.create_market_sell_order(symbol, amount, params)
+
     async def create_spot_sell(
         self,
         *,
@@ -328,10 +337,10 @@ class ExchangeSellManager:
                         unsellable_estimated_notional=float(estimated_notional),
                     )
 
-            trade = await exchange.create_market_sell_order(
-                resolved_symbol,
-                order["total_amount"],
-                build_client_order_params(order.get("client_order_id")),
+            trade = await self.submit_market_sell_once(
+                symbol=resolved_symbol,
+                amount=order["total_amount"],
+                params=build_client_order_params(order.get("client_order_id")),
             )
             submission_accepted = True
             accepted_order = {

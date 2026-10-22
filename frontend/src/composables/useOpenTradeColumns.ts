@@ -380,6 +380,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 title: 'PNL',
                 key: 'display_profit_percent',
                 render: (rowData) => {
+                    if (rowData.lifecycle_mode === 'accumulation') return 'See accumulation'
                     const [, currency] = splitTradeSymbol(rowData.symbol)
                     const profitPercent =
                         `${formatFixed(getDisplayedProfitPercent(rowData))}%`
@@ -399,7 +400,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
             {
                 title: 'TP/SO',
                 key: 'so_count',
-                render: (rowData) => renderTpSoCell(rowData),
+                render: (rowData) => rowData.lifecycle_mode === 'accumulation' ? 'Manual exit' : renderTpSoCell(rowData),
                 align: 'center',
                 sorter: true,
                 sortOrder: resolveTradeTableColumnOrder(
@@ -411,6 +412,12 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                 title: 'Action',
                 key: 'action',
                 render: (rowData) => {
+                    if (rowData.lifecycle_mode === 'accumulation') {
+                        return h('a', {
+                            href: '#accumulation-controls',
+                            onClick: (event: MouseEvent) => event.stopPropagation(),
+                        }, 'Manage accumulation above')
+                    }
                     if (isUnsellableRemainder(rowData)) {
                         return [
                             h(NTooltip, {}, {

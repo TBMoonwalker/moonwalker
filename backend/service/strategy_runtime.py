@@ -11,6 +11,11 @@ import helper
 import model
 import service.strategy_builder as strategy_builder
 import talib
+from service.accumulation_contracts import AccumulationStateError
+from service.accumulation_strategy import (
+    AccumulationParameters,
+    parse_accumulation_strategy_document,
+)
 from service.database import run_sqlite_write_with_retry
 from service.indicators import Indicators
 from tortoise.exceptions import BaseORMException, ConfigurationError
@@ -163,6 +168,37 @@ class StrategyHealthCheckSummary:
 _SNAPSHOT_CACHE: dict[tuple[str, int | None], StrategySnapshot] = {}
 
 
+@dataclass(frozen=True)
+class AccumulationStrategyVersion:
+    """An exact existing StrategyVersion row, never a mutable active-version lookup."""
+
+    id: int
+    slug: str
+    version: int
+    parameters: AccumulationParameters
+
+
+async def load_accumulation_strategy_version(
+    version_id: int,
+) -> AccumulationStrategyVersion:
+    """Load and validate a pinned accumulation implementation without graph state."""
+    if type(version_id) is not int or version_id < 1:
+        raise AccumulationStateError("An exact strategy version ID is required.")
+    row = await model.StrategyVersion.get_or_none(id=version_id)
+    if row is None:
+        raise AccumulationStateError("Pinned accumulation strategy version is missing.")
+    try:
+        document = json.loads(row.ir_json)
+    except (ValueError, TypeError) as exc:
+        raise AccumulationStateError("Corrupt accumulation strategy document.") from exc
+    return AccumulationStrategyVersion(
+        row.id,
+        row.strategy_slug,
+        row.version,
+        parse_accumulation_strategy_document(document),
+    )
+
+
 def invalidate_strategy_runtime_cache(slug: str | None = None) -> None:
     """Invalidate active graph snapshots after a version promotion."""
     if slug:
@@ -176,6 +212,8 @@ def invalidate_strategy_runtime_cache(slug: str | None = None) -> None:
 async def get_strategy_adapter(slug: str, timeframe: str) -> GraphStrategyAdapter:
     """Return a runtime adapter for DCA, TP, and signal paths."""
     snapshot = await _load_strategy_snapshot(slug)
+    if snapshot.ir.get("capability") == "accumulation/v1":
+        raise AccumulationStateError("Accumulation requires its dedicated runtime.")
     missing_hooks = _missing_indicator_methods(snapshot.validation)
     if missing_hooks:
         raise ValueError(
@@ -269,6 +307,10 @@ async def evaluate_strategy_graph(
 ) -> StrategyEvaluationResult:
     """Evaluate a strategy graph against current candle data."""
     snapshot = await _load_strategy_snapshot(slug)
+    if snapshot.ir.get("capability") == "accumulation/v1":
+        return StrategyEvaluationResult(
+            False, snapshot.version, "accumulation_requires_dedicated_runtime"
+        )
     validation = strategy_builder.validate_strategy_ir(snapshot.ir)
     if validation["status"] != "valid":
         return StrategyEvaluationResult(False, snapshot.version, "invalid_graph")

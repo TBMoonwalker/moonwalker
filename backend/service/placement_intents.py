@@ -164,6 +164,8 @@ _SAFE_REQUEST_KEYS = BUY_RECOVERY_CONTEXT_KEYS | frozenset(
         "botname",
         "metadata_json",
         "source_operation_id",
+        "accumulation_operation_id",
+        "accumulation_action",
     }
 )
 
@@ -187,6 +189,8 @@ _PLACEMENT_IDENTITY_KEYS = frozenset(
         "type_sell",
         "direction",
         "source_operation_id",
+        "accumulation_operation_id",
+        "accumulation_action",
     }
 )
 

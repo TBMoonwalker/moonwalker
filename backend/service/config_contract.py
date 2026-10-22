@@ -46,6 +46,17 @@ class ConfigFieldContract:
 
 
 CONFIG_FIELDS: dict[str, ConfigFieldContract] = {
+    "trade_mode": ConfigFieldContract(
+        "str",
+        "dca",
+        "dynamic_dca",
+        enum=("dynamic_dca", "accumulation"),
+        readiness_relevant=True,
+    ),
+    "accumulation_strategy_version_id": ConfigFieldContract(
+        "int", "dca", None, minimum=1, readiness_relevant=True
+    ),
+    "accumulation_available": ConfigFieldContract("bool", "dca", read_only=True),
     "ss": ConfigFieldContract("float", "recovery_dca", 1.6, minimum=0),
     "dynamic_so_sizing_mode": ConfigFieldContract(
         "str",

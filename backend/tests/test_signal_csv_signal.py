@@ -260,3 +260,46 @@ async def test_csv_signal_blocks_import_when_history_prefill_fails(
         assert watcher_queue.empty()
     finally:
         await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_accumulation_csv_bypasses_classic_import_with_existing_holdings(
+    monkeypatch,
+):
+    from unittest.mock import AsyncMock
+
+    from service.accumulation_entry import AccumulationEntryResult
+
+    queue = asyncio.Queue()
+    plugin = SignalPlugin(queue)
+    plugin.config = {
+        "trade_mode": "accumulation",
+        "signal_settings": {"csv_source": "source"},
+    }
+    monkeypatch.setattr(csv_signal_module.model, "OpenTrades", _DummyOpenTradesOne)
+    monkeypatch.setattr(
+        plugin, "_load_csv_content", AsyncMock(return_value="exact CSV")
+    )
+    classic = AsyncMock(side_effect=AssertionError("No classic CSV writes"))
+    monkeypatch.setattr(plugin.import_service, "import_from_csv", classic)
+    entry = AsyncMock(
+        return_value=(
+            AccumulationEntryResult("BTC/USDC", "entry-1", "WAIT_VALIDATION"),
+        )
+    )
+    plugin.accumulation_entry = types.SimpleNamespace(csv=entry)
+    assert await plugin._import_once()
+    entry.assert_awaited_once_with("exact CSV")
+    classic.assert_not_awaited()
+    assert await queue.get() == ["BTC/USDC"]
+    await plugin.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_accumulation_csv_rejects_disabled_runtime(monkeypatch):
+    plugin = SignalPlugin(asyncio.Queue())
+    plugin.config = {"trade_mode": "accumulation"}
+    monkeypatch.setattr(csv_signal_module.model, "OpenTrades", _DummyOpenTradesZero)
+    with pytest.raises(ValueError, match="not enabled"):
+        await plugin._import_once()
+    await plugin.shutdown()

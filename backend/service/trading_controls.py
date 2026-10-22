@@ -10,6 +10,7 @@ import helper
 import model
 from service.database import run_sqlite_write_with_retry
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
+from service.lifecycle_routing import LifecycleRoute, load_lifecycle_route
 from service.order_requests import normalize_order_symbol
 from tortoise.transactions import in_transaction
 
@@ -118,6 +119,19 @@ class TradingControlsService:
 
             self._orders = Orders()
         return self._orders
+
+    async def _legacy_pause_rejection(self, symbol: str) -> MissionPauseResult | None:
+        """Require revisioned accumulation commands instead of mutating DCA flags."""
+        route = await load_lifecycle_route(symbol)
+        if route.route == LifecycleRoute.CLASSIC_DCA:
+            return None
+        return MissionPauseResult(
+            status="lifecycle_required",
+            message="Use the accumulation lifecycle controls with a revision and operation ID; legacy pause/resume cannot change this symbol.",
+            symbol=symbol,
+            campaign_id=None,
+            automation_paused=True,
+        )
 
     async def _get_trades(self) -> Any:
         """Return the lazily constructed Trades service."""
@@ -246,6 +260,9 @@ class TradingControlsService:
     ) -> MissionPauseResult:
         """Pause one mission while the symbol lifecycle lock is held."""
         lifecycle_mutation_coordinator.assert_prelocked(symbol)
+        rejection = await self._legacy_pause_rejection(symbol)
+        if rejection is not None:
+            return rejection
         mission = await self._resolve_symbol_mission(symbol)
         if mission is None:
             return MissionPauseResult(
@@ -340,6 +357,9 @@ class TradingControlsService:
     async def _resume_mission_prelocked(self, symbol: str) -> MissionPauseResult:
         """Resume one mission while the symbol lifecycle lock is held."""
         lifecycle_mutation_coordinator.assert_prelocked(symbol)
+        rejection = await self._legacy_pause_rejection(symbol)
+        if rejection is not None:
+            return rejection
         mission = await self._resolve_symbol_mission(symbol)
         if mission is None:
             return MissionPauseResult(

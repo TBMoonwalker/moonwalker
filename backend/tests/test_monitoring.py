@@ -139,6 +139,7 @@ def test_resolve_telegram_entity_username() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_orders_buy_triggers_monitoring_notification(monkeypatch) -> None:
     try:
         orders = Orders()
@@ -215,6 +216,7 @@ async def test_orders_buy_triggers_monitoring_notification(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_orders_sell_triggers_monitoring_notification(monkeypatch) -> None:
     try:
         orders = Orders()

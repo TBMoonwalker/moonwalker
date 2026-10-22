@@ -7,6 +7,13 @@ const { buildLoadedConfigState } = loadFrontendModule(
     'src/helpers/configLoad.ts',
 )
 
+test('loads an accumulation initial pin and server-owned availability without changing mode', () => {
+    const state = buildLoadedConfigState({ trade_mode: 'accumulation', accumulation_strategy_version_id: 17, accumulation_available: true }, createLoadDefaults())
+    assert.equal(state.dca.trade_mode, 'accumulation')
+    assert.equal(state.dca.accumulation_strategy_version_id, 17)
+    assert.equal(state.dca.accumulation_available, true)
+})
+
 function createLoadDefaults(overrides = {}) {
     return {
         clientTimezone: 'Europe/Vienna',

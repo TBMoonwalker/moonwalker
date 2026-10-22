@@ -92,6 +92,7 @@ async def test_receive_sell_signal_returns_false_when_trade_context_missing(
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("classic_lifecycle_route")
 async def test_receive_buy_signal_builds_and_dispatches_manual_buy_order(
     monkeypatch,
 ) -> None:
