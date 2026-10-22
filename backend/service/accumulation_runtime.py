@@ -327,6 +327,8 @@ class AccumulationRuntime:
     async def _evaluate(
         self, activation: model.AccumulationActivation, config: dict[str, Any]
     ) -> None:
+        if self._stopping:
+            return
         self.wait_conditions.pop(activation.symbol, None)
         if is_global_trading_paused(config):
             self.status[activation.symbol] = "WAIT_GLOBAL_PAUSE"
@@ -545,8 +547,21 @@ class AccumulationRuntime:
                     activation=activation, status="pending"
                 ).order_by("id"):
                     try:
-                        result = await self.commands.execute(operation.operation_id)
-                        self.status[activation.symbol] = result.reason
+                        if config.get("signal") == "asap" and operation.action in {
+                            "activate",
+                            "retry_entry",
+                        }:
+                            completed = await self.entry.resume_pending_asap(
+                                operation.operation_id
+                            )
+                            self.status[activation.symbol] = (
+                                "ENTRY_READY"
+                                if completed.status == "applied"
+                                else "WAIT_ENTRY_VALIDATION"
+                            )
+                        else:
+                            result = await self.commands.execute(operation.operation_id)
+                            self.status[activation.symbol] = result.reason
                     except _EXPECTED_FAILURES:
                         self.status[activation.symbol] = "WAIT_COMMAND"
                 await activation.refresh_from_db()

@@ -48,7 +48,11 @@ and controls subsequent purchases. Unrelated wallet coins remain unmanaged. CSV 
 `date;symbol;price;amount`, with each row representing already-owned inventory.
 The entire declaration is staged before adoption and must fit fresh free wallet
 balance. Historical CSV fees are unknown, even when acquisition cost is declared.
-Plugin polling never retries failed ownership validation automatically.
+The runtime continues pending, unadopted ASAP entries when it starts or receives
+updated inputs, using the same operation ID. A recovered entry then opens its BO;
+it does not wait for a strategy signal. Explicitly stopped, quarantined or
+account-mismatched entries do not resume automatically. CSV ownership validation
+still requires an explicit retry after a failed check.
 
 Changing the global entry mode requires no open holdings, non-stopped
 registrations or unresolved orders. Pause an already-live instance first. The

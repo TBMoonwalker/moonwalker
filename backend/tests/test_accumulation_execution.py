@@ -3486,3 +3486,110 @@ async def test_initial_fill_then_strategy_rebase_and_dip_uses_normal_guard(
     assert (
         await model.AccumulationOpportunity.filter(is_initial_entry=True).count() == 1
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("retry_requested", [False, True])
+async def test_runtime_resumes_pending_asap_entry_with_same_request_and_buys_bo(
+    env, monkeypatch, retry_requested
+):
+    """A pre-upgrade validation failure must not permanently park an ASAP signal."""
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, _, config, *_ = env
+    original = adapter.readiness
+    monkeypatch.setattr(
+        adapter,
+        "readiness",
+        AsyncMock(side_effect=AccumulationStateError("old warmup failed")),
+    )
+    entry = (await service.asap())[0]
+    if retry_requested:
+        await service.submit_staged(await _staged_payload(entry))
+    latest = await model.AccumulationLifecycleOperation.all().order_by("-id").first()
+    operation_id = latest.operation_id
+    before = await model.AccumulationLifecycleOperation.all().count()
+    monkeypatch.setattr(adapter, "readiness", original)
+    config["bo"] = 100
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    assert len(client.calls) == 1
+    assert (await model.PlacementIntent.get()).requested_quote == 100
+    assert (
+        await model.AccumulationLifecycleOperation.get(operation_id=operation_id)
+    ).status == "applied"
+    assert await model.AccumulationLifecycleOperation.all().count() == before
+    await runtime.tick()
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_runtime_does_not_automatically_adopt_pending_csv_inventory(
+    env, monkeypatch
+):
+    service, _ = await _entry_service(env, monkeypatch)
+    adapter, client, *_ = env
+    entry = (await service.csv(ENTRY_CSV))[0]
+    client.balance["free"]["BTC"] = "2"
+    adapter.readiness = AsyncMock(wraps=adapter.readiness)
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    adapter.readiness.assert_not_awaited()
+    assert (
+        await model.AccumulationLifecycleOperation.get(operation_id=entry.operation_id)
+    ).status == "pending"
+    assert not client.calls and not await model.OpenTrades.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocker", ["pause", "abandon", "quarantine", "account"])
+async def test_pending_asap_recovery_preserves_operator_and_account_blocks(
+    env, monkeypatch, blocker
+):
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, _, config, *_ = env
+    original = adapter.readiness
+    monkeypatch.setattr(
+        adapter, "readiness", AsyncMock(side_effect=AccumulationStateError("not ready"))
+    )
+    entry = (await service.asap())[0]
+    monkeypatch.setattr(adapter, "readiness", original)
+    if blocker == "pause":
+        config["trading_paused"] = True
+    elif blocker == "abandon":
+        await service.submit_staged(await _staged_payload(entry, "abandon_entry"))
+    elif blocker == "quarantine":
+        await model.AccumulationLifecycleOperation.filter(
+            operation_id=entry.operation_id
+        ).update(status="quarantined")
+    else:
+        config["key"] = "different-account"
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    assert not client.calls and not await model.OpenTrades.exists()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_during_pending_asap_validation_does_not_place_bo(
+    env, monkeypatch
+):
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, *_ = env
+    original = adapter.readiness
+    monkeypatch.setattr(
+        adapter, "readiness", AsyncMock(side_effect=AccumulationStateError("not ready"))
+    )
+    await service.asap()
+    runtime = AccumulationRuntime(adapter)
+
+    async def stop_after_validation(request):
+        ready = await original(request)
+        runtime.request_stop()
+        return ready
+
+    monkeypatch.setattr(adapter, "readiness", stop_after_validation)
+    assert await runtime.startup()
+    await runtime.tick()
+    assert not client.calls and not await model.PlacementIntent.exists()

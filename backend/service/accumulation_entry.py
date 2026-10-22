@@ -231,6 +231,41 @@ class AccumulationEntryService:
             operation_id, account_scope=scope
         )
 
+    async def resume_pending_asap(self, operation_id: str) -> AccumulationCommandResult:
+        """Continue an unadopted ASAP request; never retry CSV or a placed order.
+
+        Reuse the pending journal identity after restart or repaired inputs. The
+        lifecycle completion rechecks revision, account and settled execution
+        under its mutation lock; the producer never creates a replacement order.
+        """
+        config = self._config("asap")
+        canonical_decimal(str(config.get("bo") or 0), positive=True)
+        scope = accumulation_account_scope(config)
+        operation = await model.AccumulationLifecycleOperation.get(
+            operation_id=operation_id
+        )
+        activation = await model.AccumulationActivation.get(id=operation.activation_id)
+        request = json.loads(operation.request_json)
+        if (
+            operation.action not in {"activate", "retry_entry"}
+            or operation.status != "pending"
+            or operation.result_revision != activation.revision
+            or request.get("source") != "asap"
+            or request.get("imported_inventory") is not None
+            or activation.account_scope != scope
+            or activation.state != "validating"
+            or activation.holding_id is not None
+            or activation.observations_initialized
+            or activation.consumption_revision != 0
+            or await model.AccumulationOpportunity.filter(
+                activation=activation, consumed_at__isnull=False
+            ).exists()
+        ):
+            raise AccumulationStateError("ASAP entry is not eligible for continuation.")
+        result = await self._complete(operation_id, scope, config)
+        self.notify(activation.symbol)
+        return result
+
     async def submit_staged(self, payload: dict[str, Any]) -> AccumulationCommandResult:
         """Correct, abandon or explicitly validate the entry shown to the operator."""
         command = StagedEntryCommand.from_dict(payload, now_ms=self.adapter.clock_ms())
