@@ -34,7 +34,7 @@ function rememberRequest(command: AccumulationCommand | null, resolvedId?: strin
   else removeJSON(pendingKey, session)
 }
 
-export function useAccumulationPanel() {
+export function useAccumulationPanel(symbol?: string) {
   restoreRequest()
   const visible = ref(false)
   const available = ref(false)
@@ -59,7 +59,7 @@ export function useAccumulationPanel() {
     }
   }
   const next = ref<string | null>(null)
-  const selected = ref<string | null>(unresolvedRequest?.symbol ?? null)
+  const selected = ref<string | null>(symbol ?? unresolvedRequest?.symbol ?? null)
   const detail = ref<AccumulationDetail | null>(null)
   const loading = ref(false)
   const fresh = ref(false)
@@ -67,7 +67,7 @@ export function useAccumulationPanel() {
   const error = ref('')
   const notice = ref('')
   const draft = ref<AccumulationCommand | null>(null)
-  const uncertain = ref<AccumulationCommand | null>(unresolvedRequest)
+  const uncertain = ref<AccumulationCommand | null>(!symbol || unresolvedRequest?.symbol === symbol ? unresolvedRequest : null)
   const quantity = ref('')
   const csv = ref('')
   const adjustmentDirection = ref<'add' | 'remove'>('add')
@@ -233,6 +233,7 @@ export function useAccumulationPanel() {
   function prepare(action: AccumulationAction) {
     const row = detail.value
     if (disabled.value || !row || !actions.value.includes(action)) return
+    if (unresolvedRequest) { error.value = `Resolve the pending request for ${unresolvedRequest.symbol} before starting another action.`; return }
     error.value = ''
     if (action === 'sell_partial' && (!/^(?:\d+\.?\d*|\.\d+)$/.test(quantity.value.trim()) || !/[1-9]/.test(quantity.value))) {
       error.value = 'Enter a positive base-asset quantity using decimal digits.'
@@ -308,6 +309,7 @@ export function useAccumulationPanel() {
   async function submit() {
     if (busy.value || (!uncertain.value && !draft.value)) return
     if (!uncertain.value && (!fresh.value || !available.value || draft.value!.expected_revision !== detail.value?.revision || !actions.value.includes(draft.value!.action))) return
+    if (unresolvedRequest && unresolvedRequest.operation_id !== (uncertain.value ?? draft.value)?.operation_id) { error.value = `Resolve the pending request for ${unresolvedRequest.symbol} first.`; return }
     const command = { ...(uncertain.value ?? draft.value!) }
     // Persist in memory before sending, so a route change cannot produce a new ID.
     rememberRequest(command)

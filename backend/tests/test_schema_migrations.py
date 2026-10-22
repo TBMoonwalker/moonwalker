@@ -249,7 +249,7 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
             ).fetchall()
         }
 
-    assert len(ledger_rows) == 12
+    assert len(ledger_rows) == 13
     assert "2026-10-21-013-accumulation-return-totals" in {
         version for version, _ in ledger_rows
     }
@@ -273,3 +273,21 @@ async def test_prior_release_fixture_resumes_and_migrates_idempotently(
     assert "funds_locked" in upnl_columns
     assert {"strategy_slug", "strategy_version"} <= execution_columns
     assert ("strategy_slug", "strategy_version") in execution_index_columns
+
+
+@pytest.mark.asyncio
+async def test_initial_entry_column_is_added_idempotently(_migration_database):
+    """An existing accumulation installation gets a false default without data loss."""
+    connection = Tortoise.get_connection("default")
+    await connection.execute_script(
+        "ALTER TABLE accumulation_opportunities DROP COLUMN is_initial_entry;"
+    )
+    database = Database()
+    database.db_url = f"sqlite://{_migration_database}"
+    await database._ensure_accumulation_initial_entry_schema()
+    await database._ensure_accumulation_initial_entry_schema()
+    _, columns = await connection.execute_query(
+        "PRAGMA table_info('accumulation_opportunities')"
+    )
+    column = next(row for row in columns if row["name"] == "is_initial_entry")
+    assert column["notnull"] == 1 and column["dflt_value"] == "0"

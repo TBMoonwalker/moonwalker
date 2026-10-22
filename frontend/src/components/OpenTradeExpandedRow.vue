@@ -1,4 +1,5 @@
 <template>
+  <div class="expanded-trade-container">
     <n-flex class="expanded-trade-layout">
         <n-card class="expanded-order-card">
             <RecoveryDcaStatus :trade="rowData" />
@@ -36,6 +37,8 @@
             :price-lines="chartPriceLines"
         />
     </n-flex>
+    <AccumulationTradeStatus v-if="rowData.lifecycle_mode === 'accumulation'" :key="rowData.symbol" :symbol="rowData.symbol" />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -45,6 +48,7 @@ import { NButton } from 'naive-ui/es/button'
 import { fetchJson } from '../api/client'
 import TradeReplayChart from './TradeReplayChart.vue'
 import RecoveryDcaStatus from './RecoveryDcaStatus.vue'
+import AccumulationTradeStatus from './AccumulationTradeStatus.vue'
 import { formatTradingViewDate } from '../helpers/date'
 import type { TimeframeChoice } from '../helpers/openTrades'
 import type { TradeExecutionRow } from '../stores/trades'
@@ -263,6 +267,8 @@ const chartPriceLines = computed(() => {
         },
     ]
 
+    if (props.rowData.lifecycle_mode === 'accumulation') lines.length = 0
+
     if (!useExecutionHistory.value) {
         lines.push({
             price: Number(props.rowData.baseorder.price),
@@ -347,6 +353,9 @@ function getBuyTitle(
     buyIndex: number,
     baseOrderIndex: number,
 ): string {
+    if (execution.role === 'accumulation_buy') {
+        return buyIndex === 1 ? 'Initial buy' : `Accumulation buy ${buyIndex - 1}`
+    }
     if (execution.role === 'manual_buy') {
         return 'Manual buy'
     }
@@ -374,6 +383,9 @@ function getBuyLineTitle(
     buyIndex: number,
     baseOrderIndex: number,
 ): string {
+    if (execution.role === 'accumulation_buy') {
+        return buyIndex === 1 ? 'INITIAL' : `ACC${buyIndex - 1}`
+    }
     if (execution.role === 'manual_buy') {
         return 'MANUAL'
     }
@@ -466,6 +478,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
+.expanded-trade-container { display: grid; gap: 16px; min-width: 0; width: 100%; }
 .expanded-trade-layout {
     align-items: stretch;
     flex-wrap: nowrap;

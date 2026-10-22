@@ -75,7 +75,7 @@
             <n-form-item :label="isAccumulationMode ? 'Max managed symbols' : 'Max bots running'" path="max_bots">
                 <n-input-number v-model:value="dca.max_bots" placeholder="Bot count" />
             </n-form-item>
-            <n-form-item v-if="!isAccumulationMode" label="Base order amount" path="bo">
+            <n-form-item v-if="!isAccumulationMode || signalName === 'asap'" :label="isAccumulationMode ? 'Initial buy amount' : 'Base order amount'" path="bo">
                 <n-input-number v-model:value="dca.bo" placeholder="BO" />
             </n-form-item>
             <n-form-item v-if="!isAccumulationMode" label="Sell order type" path="sell_order_type">
@@ -213,6 +213,7 @@ import {
 
 const props = defineProps<{
      dca: DcaModel
+     signalName?: string | null
      rules: FormRules
     sellOrderTypeOptions: StringSelectOption[]
     showAdvancedGeneral: boolean

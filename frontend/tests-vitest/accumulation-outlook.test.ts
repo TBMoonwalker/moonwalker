@@ -19,7 +19,7 @@ describe('accumulation operator outlook', () => {
     const outlook = accumulationOutlook(row({ state: 'validating', observations_initialized: false, explicitly_paused: true, reason: 'validation_required' }), true)
     expect(outlook.title).toBe('Entry check incomplete')
     expect(outlook.action).toBe('retry_entry')
-    expect(outlook.next).toContain('If it passes')
+    expect(outlook.next).toContain('Retry the failed exchange check')
     expect(outlook.description).toContain('automatic entry check has not completed')
   })
 

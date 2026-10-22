@@ -26,6 +26,7 @@ from service.accumulation_budget import (
 )
 from service.accumulation_contracts import AccumulationStateError, canonical_decimal
 from service.accumulation_evaluation import AccumulationDecision, _guard, _proposal
+from service.accumulation_initial import is_initial_asap_entry
 from service.accumulation_lifecycle import _has_unsettled_execution
 from service.accumulation_state import _load_context
 from service.accumulation_strategy import (
@@ -98,20 +99,23 @@ async def prepare_accumulation_buy(
         return wait("WAIT_GLOBAL_PAUSE")
     if config.get("trade_mode") != "accumulation":
         return wait("WAIT_STATE")
+    initial = decision.reason == "BUY_INITIAL_ASAP"
     priority_close = AccumulationParameters().latest_close(cutoff_ms)
-    if (
-        decision.capability != CAPABILITY
-        or decision.priority_protocol != PRIORITY_PROTOCOL
-        or decision.priority_close_ms != priority_close
-    ):
-        return wait("WAIT_DATA")
-    priority = canonical_accumulation_priority(
-        offer.priority_candles, close_ms=priority_close
-    )
-    if decision.priority_score is None or Decimal(
-        canonical_decimal(decision.priority_score)
-    ) != Decimal(priority):
-        return wait("WAIT_DATA")
+    priority = "0"
+    if not initial:
+        if (
+            decision.capability != CAPABILITY
+            or decision.priority_protocol != PRIORITY_PROTOCOL
+            or decision.priority_close_ms != priority_close
+        ):
+            return wait("WAIT_DATA")
+        priority = canonical_accumulation_priority(
+            offer.priority_candles, close_ms=priority_close
+        )
+        if decision.priority_score is None or Decimal(
+            canonical_decimal(decision.priority_score)
+        ) != Decimal(priority):
+            return wait("WAIT_DATA")
     activation = await model.AccumulationActivation.get(
         id=decision.identity.activation_id
     )
@@ -128,9 +132,13 @@ async def prepare_accumulation_buy(
 
     async def persist() -> AccumulationAdmission:
         async with in_transaction() as conn:
+            opportunity_id = decision.opportunity_id or ""
             # Lock contention and DB retries must not freeze quote freshness.
             now_ms = clock_ms()
-            if AccumulationParameters().latest_close(now_ms) != priority_close:
+            if (
+                not initial
+                and AccumulationParameters().latest_close(now_ms) != priority_close
+            ):
                 return wait("WAIT_DATA")
             current = await _load_context(
                 decision.identity.activation_id, funding.account_scope, conn
@@ -141,43 +149,88 @@ async def prepare_accumulation_buy(
             if activation.state != "enabled" or activation.explicitly_paused:
                 return wait("WAIT_LIFECYCLE")
             _guard(activation.execution_guard_json, activation.consumption_revision)
-            if current.observations is None:
+            if not initial and current.observations is None:
                 return wait("WAIT_REBASE")
-            state = AccumulationObservations.from_dict(current.observations)
-            if state.last_close_ms != current.last_processed_close_ms:
+            state = (
+                AccumulationObservations.from_dict(current.observations)
+                if current.observations is not None
+                else None
+            )
+            if (
+                state is not None
+                and state.last_close_ms != current.last_processed_close_ms
+            ):
                 return wait("WAIT_REBASE")
             if await _has_unsettled_execution(activation, conn):
                 return wait("WAIT_ORDER")
-            opportunity = await model.AccumulationOpportunity.get_or_none(
-                id=opportunity_id
-            ).using_db(conn)
-            if (
-                opportunity is None
-                or opportunity.activation_id != activation.id
-                or opportunity.generation != activation.generation
-                or opportunity.strategy_version_id != version.id
-                or opportunity.observation_epoch != activation.observation_epoch
-                or opportunity.signal_close_ms != state.last_close_ms
-                or opportunity.signal_close_ms
-                != version.parameters.latest_close(now_ms)
-                or opportunity.signal_peak is None
-            ):
-                return wait("WAIT_STATE")
             usable = await usable_accumulation_quote(config, funding, now_ms=now_ms)
-            proposal = _proposal(
-                current.identity,
-                opportunity,
-                version.parameters,
-                now_ms=now_ms,
-                usable_quote=usable,
-                ask_price=inputs.ask_price,
-                quote_timestamp_ms=inputs.quote_timestamp_ms,
-                minimum_quote=inputs.minimum_quote,
-                priority=priority,
-                priority_close_ms=priority_close,
-            )
-            if proposal.action != "BUY" or proposal.requested_quote is None:
-                return wait(proposal.reason)
+            if initial:
+                if config.get("signal") != "asap" or not await is_initial_asap_entry(
+                    activation, conn
+                ):
+                    return wait("WAIT_STATE")
+                if not 0 <= now_ms - inputs.quote_timestamp_ms <= 10000:
+                    return wait("WAIT_DATA")
+                requested = canonical_decimal(str(config.get("bo") or 0), positive=True)
+                if usable is None or Decimal(usable) < Decimal(requested):
+                    return wait("WAIT_BUDGET")
+                if Decimal(requested) < Decimal(inputs.minimum_quote):
+                    return wait("WAIT_MINIMUM")
+                # No strategy candle or ranking window is involved in an ASAP entry.
+                # A separate event kind keeps it out of ATR consumption/rearm guards.
+                opportunity = await model.AccumulationOpportunity.create(
+                    using_db=conn,
+                    activation=activation,
+                    generation=activation.generation,
+                    strategy_version_id=version.id,
+                    observation_epoch=activation.observation_epoch,
+                    is_initial_entry=True,
+                    signal_close_ms=now_ms,
+                    expires_at_ms=now_ms + 10000,
+                    signal_price=inputs.ask_price,
+                    signal_atr="0",
+                    signal_peak=None,
+                )
+                opportunity_id = str(opportunity.id)
+                proposal = AccumulationDecision(
+                    current.identity,
+                    "BUY",
+                    "BUY_INITIAL_ASAP",
+                    opportunity_id=opportunity_id,
+                    requested_quote=requested,
+                )
+            else:
+                opportunity = await model.AccumulationOpportunity.get_or_none(
+                    id=opportunity_id
+                ).using_db(conn)
+                if (
+                    opportunity is None
+                    or opportunity.activation_id != activation.id
+                    or opportunity.generation != activation.generation
+                    or opportunity.strategy_version_id != version.id
+                    or opportunity.observation_epoch != activation.observation_epoch
+                    or opportunity.signal_close_ms
+                    != (state.last_close_ms if state else None)
+                    or opportunity.signal_close_ms
+                    != version.parameters.latest_close(now_ms)
+                    or opportunity.signal_peak is None
+                ):
+                    return wait("WAIT_STATE")
+                usable = await usable_accumulation_quote(config, funding, now_ms=now_ms)
+                proposal = _proposal(
+                    current.identity,
+                    opportunity,
+                    version.parameters,
+                    now_ms=now_ms,
+                    usable_quote=usable,
+                    ask_price=inputs.ask_price,
+                    quote_timestamp_ms=inputs.quote_timestamp_ms,
+                    minimum_quote=inputs.minimum_quote,
+                    priority=priority,
+                    priority_close_ms=priority_close,
+                )
+                if proposal.action != "BUY" or proposal.requested_quote is None:
+                    return wait(proposal.reason)
             required = required_accumulation_quote(proposal.requested_quote, config)
             mirror = float(required)
             if not math.isfinite(mirror):
@@ -197,6 +250,7 @@ async def prepare_accumulation_buy(
                     {
                         "accumulation": {
                             "opportunity_id": opportunity_id,
+                            "initial_entry": initial,
                             "account_scope": funding.account_scope,
                             "strategy_version_id": version.id,
                             "generation": str(activation.generation),

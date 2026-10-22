@@ -39,6 +39,7 @@ async def selection(tmp_path, monkeypatch):
     updates = {
         "trade_mode": {"value": "accumulation", "type": "str"},
         "dca": {"value": True, "type": "bool"},
+        "bo": {"value": 10, "type": "float"},
         "signal": {"value": "asap", "type": "str"},
         "symbol_list": {"value": "BTC/USDC", "type": "str"},
         "currency": {"value": "USDC", "type": "str"},

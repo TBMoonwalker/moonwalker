@@ -797,7 +797,7 @@ async def test_lifecycle_uses_adapter_readiness_and_persists_baseline_without_bu
     activation = await model.AccumulationActivation.get(symbol="BTC/USDC")
     assert (
         activation.baseline_close_ms == 600 * HOUR
-        and activation.observations_initialized
+        and not activation.observations_initialized
     )
     assert not client.calls and await model.OpenTrades.all().count() == 0
 
@@ -2089,6 +2089,7 @@ async def _entry_service(env, monkeypatch, *, signal="csv_signal"):
     config.update(
         trade_mode="accumulation",
         signal=signal,
+        bo=25,
         max_bots=3,
         accumulation_strategy_version_id=version.id,
         symbol_list="BTC/USDC",
@@ -3317,7 +3318,7 @@ async def test_demo_signal_loader_runs_asap_registration_and_strategy_buy(
 
     adapter, client, clock, config, *_ = env
     await _entry_service(env, monkeypatch, signal="asap")
-    config["dry_run"] = True
+    config.update(dry_run=True, bo=25)
     runtime = AccumulationRuntime(adapter)
     assert await runtime.startup()
     queue = asyncio.Queue()
@@ -3330,11 +3331,7 @@ async def test_demo_signal_loader_runs_asap_registration_and_strategy_buy(
         activation = await model.AccumulationActivation.get(symbol="BTC/USDC")
         assert activation.state == "enabled" and not client.calls
         assert await get_active_open_symbols() == ["BTC/USDC"]
-        await runtime.tick()  # Establish the current baseline; never backfill.
-        clock[0] += HOUR
-        await runtime.tick()
-        clock[0] += 5000
-        await runtime.tick()
+        await runtime.tick()  # ASAP opens immediately; no strategy candle is required.
         assert len(client.calls) == 1
         assert (await model.PlacementIntent.get()).state == "completed"
     finally:
@@ -3392,3 +3389,100 @@ async def test_asap_reload_cancellation_during_sqlite_begin_keeps_database_avail
             connection._lock.release()
         await signal.shutdown()
         await runtime.shutdown()
+
+
+@pytest.mark.asyncio
+async def test_asap_initial_buy_does_not_wait_for_strategy_history_and_survives_restart(
+    env, monkeypatch
+):
+    """ASAP buys at a rising ask without a candle; strategy warmup follows the fill."""
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, clock, config, *_ = env
+    config["bo"] = 25
+    client.ask = "110"  # Above every historical close; no dip signal exists.
+    history = AsyncMock(side_effect=AccumulationStateError("history unavailable"))
+    monkeypatch.setattr(adapter, "candles", history)
+    assert (await service.asap())[0].reason == "ENABLED"
+    assert not (await model.AccumulationActivation.get()).observations_initialized
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    assert len(client.calls) == 1
+    history.assert_not_awaited()
+    holding = await model.OpenTrades.get(symbol="BTC/USDC")
+    assert holding.lifecycle_mode == "accumulation" and holding.amount > 0
+    opportunity = await model.AccumulationOpportunity.get(is_initial_entry=True)
+    assert opportunity.consumed_at is not None
+    activation = await model.AccumulationActivation.get()
+    assert activation.consumption_revision == 0
+    assert activation.execution_guard_json is None  # No invented ATR for ASAP.
+    await runtime.tick()
+    assert history.await_count == 1  # Only subsequent buys require strategy history.
+    assert len(client.calls) == 1
+    restarted = AccumulationRuntime(adapter)
+    assert await restarted.startup()
+    await restarted.tick()
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("blocker", ["budget", "paused", "unknown_response"])
+async def test_asap_base_order_keeps_capital_pause_and_single_submission_guards(
+    env, monkeypatch, blocker
+):
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, clock, config, *_ = env
+    config["bo"] = 25
+    assert (await service.asap())[0].reason == "ENABLED"
+    if blocker == "budget":
+        client.balance["free"]["USDC"] = "1"
+    elif blocker == "paused":
+        config["trading_paused"] = True
+    else:
+        client.failure = TimeoutError("response lost")
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    await runtime.tick()
+    assert len(client.calls) == (1 if blocker == "unknown_response" else 0)
+    assert not await model.OpenTrades.exists()
+    if blocker == "unknown_response":
+        assert (await model.PlacementIntent.get()).state == "indeterminate"
+        assert await model.AccumulationOpportunity.filter(
+            unresolved_slot=(await model.AccumulationActivation.get()).id
+        ).exists()
+
+
+@pytest.mark.asyncio
+async def test_initial_fill_then_strategy_rebase_and_dip_uses_normal_guard(
+    env, monkeypatch
+):
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, clock, config, *_ = env
+    config["bo"] = 25
+    await service.asap()
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    assert len(client.calls) == 1
+    client.balance["free"]["BTC"] = (
+        await model.OpenTrades.get()
+    ).accumulation_net_quantity
+    await runtime.tick()  # Strategy observations are initialized after the base order.
+    activation = await model.AccumulationActivation.get()
+    assert activation.observations_initialized
+    assert (
+        await model.AccumulationStrategyState.get()
+    ).last_processed_close_ms == 600 * HOUR
+    clock[0] += HOUR
+    await runtime.tick()
+    clock[0] += 5000
+    await runtime.tick()
+    # A fresh declining candle now belongs to the accumulation strategy.
+    assert len(client.calls) == 2
+    activation = await model.AccumulationActivation.get()
+    assert activation.consumption_revision == 1
+    assert Decimal(json.loads(activation.execution_guard_json)["signal_atr"]) > 0
+    assert (
+        await model.AccumulationOpportunity.filter(is_initial_entry=True).count() == 1
+    )

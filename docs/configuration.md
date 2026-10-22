@@ -110,7 +110,7 @@ are not exposed in the UI and must be set via the API.
 | `tp_strategy` | `string` | Strategy for take-profit checks (advanced). | `ema_down` |
 | `trailing_tp` | `float` | Trailing TP deviation (percent). | `0.5` |
 | `max_bots` | `int` | Max concurrent bots. | `3` |
-| `bo` | `float` | Base order size. | `10` |
+| `bo` | `float` | Base order size; the immediate initial buy amount for ASAP accumulation. Subsequent accumulation buys use strategy sizing. | `10` |
 | `sell_order_type` | `string` | Sell execution type for TP/exit orders. Supported values are `market` and `limit`. | `market` |
 | `limit_sell_timeout_sec` | `int` | Timeout in seconds before an unfilled limit sell is treated as timed out. | `60` |
 | `limit_sell_fallback_to_market` | `bool` | Allow a timed-out limit sell to fall back to a market sell when guards still permit it. | `true` |

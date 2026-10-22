@@ -647,7 +647,12 @@ class AccumulationExchangeAdapter:
         if request.account_scope != scope:
             raise AccumulationStateError("Activation account requires revalidation.")
         version = await load_accumulation_strategy_version(request.target_version_id)
-        rows = await self.candles(request.symbol, version.parameters, rebase=True)
+        rows = (
+            []
+            if request.initial_asap
+            else await self.candles(request.symbol, version.parameters, rebase=True)
+        )
+        baseline = version.parameters.latest_close(self.clock_ms())
         if request.imported_inventory is not None:
             inputs = await self.read_inputs(
                 request.symbol,
@@ -662,12 +667,16 @@ class AccumulationExchangeAdapter:
             or activation.consumption_revision != request.consumption_revision
             or activation.symbol != request.symbol
             or activation.account_scope != scope
-            or rows[-1].close_ms != version.parameters.latest_close(self.clock_ms())
+            or (rows and rows[-1].close_ms != baseline)
         ):
             raise AccumulationStateError("Lifecycle changed during readiness.")
         guard = _guard(activation.execution_guard_json, activation.consumption_revision)
-        observations = rebuild_accumulation_observations(
-            rows, version.parameters, guard, baseline_close_ms=rows[-1].close_ms
+        observations = (
+            rebuild_accumulation_observations(
+                rows, version.parameters, guard, baseline_close_ms=baseline
+            )
+            if rows
+            else None
         )
         await self.account_scope(config)
 
@@ -687,5 +696,9 @@ class AccumulationExchangeAdapter:
                 )
 
         return AccumulationReadiness(
-            scope, version.id, rows[-1].close_ms, asdict(observations), validate_commit
+            scope,
+            version.id,
+            baseline,
+            asdict(observations) if observations is not None else None,
+            validate_commit,
         )

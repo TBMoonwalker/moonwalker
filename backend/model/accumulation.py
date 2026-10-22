@@ -89,6 +89,7 @@ class AccumulationOpportunity(Model):
         on_delete=fields.RESTRICT,
     )
     observation_epoch = fields.IntField()
+    is_initial_entry = fields.BooleanField(default=False)
     signal_close_ms = fields.BigIntField()
     expires_at_ms = fields.BigIntField()
     signal_price = fields.TextField()

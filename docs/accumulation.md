@@ -21,7 +21,8 @@ block new buys; reconciliation and explicit sales remain available.
    variant is optional. Its experimental starting parameters are not optimized or
    a claim of profitable performance. Strategy Builder can copy them into a new
    immutable variant.
-4. Save the configuration. An incomplete draft may omit the strategy pin. Demo and live entry
+4. For ASAP, set **Initial buy amount** for the first purchase. Later purchases use
+   dynamic strategy sizing. Save the configuration. An incomplete draft may omit the strategy pin. Demo and live entry
    requires credentials, an exact compatible pin and successful ownership, market
    and candle validation.
 5. Manage the registration from **Accumulation** in Trading Overview.
@@ -29,15 +30,20 @@ block new buys; reconciliation and explicit sales remain available.
 The dry-run switch routes accumulation to the exchange demo trading environment,
 using CCXT demo support, demo credentials and demo wallet funds. Unsupported demo
 venues fail closed; there is no fallback to a live account. A fully configured
-ASAP registration can buy on its strategy signal in demo mode. An incomplete draft
+ASAP registration opens with its configured base order in demo mode. An incomplete draft
 without credentials or a strategy cannot trade. Demo and live ownership are
 separate: changing modes cannot reuse or rebind the other environment's holdings
 or orders. Use separate installations/databases when keeping demo history alongside live trading.
 Use **Historical strategy comparison** for an isolated local simulation without
 an exchange account. Creating a strategy does not itself submit a purchase.
 
-ASAP creates an empty managed registration. Its strategy decides the first buy;
-unrelated wallet coins remain unmanaged. CSV declarations use
+ASAP immediately opens a managed holding with the configured base-order amount.
+The first order does not wait for a dip, candle close, strategy history or portfolio
+ranking window. Account ownership, available budget, global pause, exchange
+minimums and order precision still apply. The durable order journal prevents
+repeat submissions after restarts or uncertain exchange responses. Once the first
+fill is recorded, the selected accumulation strategy initializes its observations
+and controls subsequent purchases. Unrelated wallet coins remain unmanaged. CSV declarations use
 `date;symbol;price;amount`, with each row representing already-owned inventory.
 The entire declaration is staged before adoption and must fit fresh free wallet
 balance. Historical CSV fees are unknown, even when acquisition cost is declared.
@@ -46,6 +52,18 @@ Plugin polling never retries failed ownership validation automatically.
 Changing the global entry mode requires no open holdings, non-stopped
 registrations or unresolved orders. Pause an already-live instance first. The
 server drains order work and rechecks these conditions when saving.
+
+## Monitor a holding
+
+Expand its entry in **Open trades**. Beneath the chart, the accumulation status
+shows the current wait and any available target price/percentage. The same area
+shows the selected strategy and controls for changing it, pausing, resuming or
+selling and closing the holding. Entry registration and blocked entry messages
+appear in Open trades until there is an owned holding.
+
+**Utilities → Accumulation** contains account and inventory repair, interrupted
+requests, execution evidence, portfolio valuation and historical strategy
+comparison. These tools do not sit in the normal trading dashboard.
 
 ## Operator actions and retries
 

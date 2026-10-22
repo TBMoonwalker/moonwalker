@@ -13,7 +13,7 @@ import model
 from helper.async_completion import finish_before_cancellation
 from service import signal_runtime
 from service.accumulation_commands import AccumulationCommandResult
-from service.accumulation_contracts import AccumulationStateError
+from service.accumulation_contracts import AccumulationStateError, canonical_decimal
 from service.accumulation_exchange import (
     AccumulationExchangeAdapter,
     accumulation_account_scope,
@@ -69,8 +69,9 @@ class AccumulationEntryService:
         return config
 
     async def asap(self) -> tuple[AccumulationEntryResult, ...]:
-        """Register explicit fixed symbols; the strategy decides the first purchase."""
+        """Register fixed symbols for an immediate base order, then strategy buys."""
         config = self._config("asap")
+        canonical_decimal(str(config.get("bo") or 0), positive=True)
         raw = config.get("symbol_list")
         if not isinstance(raw, str) or not raw.strip() or "http" in raw.lower():
             raise AccumulationStateError(

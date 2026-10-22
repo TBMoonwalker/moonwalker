@@ -37,7 +37,7 @@ test('reviews an exact inventory declaration and displays its audit receipt whil
     }
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [], next_after_id: null } : path.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
   })
-  await page.goto('/')
+  await page.goto('/control-center?mode=utilities#accumulation-controls')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByText('Accumulation value and returns', { exact: true }).click()
@@ -90,7 +90,7 @@ test('reviews rotated credentials and keeps the holding paused after proof retry
     }
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [], next_after_id: null } : path.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
   })
-  await page.goto('/')
+  await page.goto('/control-center?mode=utilities#accumulation-controls')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByRole('button', { name: 'Revalidate rotated API key', exact: true }).click()
@@ -139,7 +139,7 @@ test('retires an unsent close while preserving Closing and requiring a separate 
     }
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [], next_after_id: null } : path.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
   })
-  await page.goto('/')
+  await page.goto('/control-center?mode=utilities#accumulation-controls')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByRole('button', { name: 'Retire interrupted command', exact: true }).click()
@@ -186,7 +186,7 @@ test('reviews a restored order and retries the same evidence lookup after reload
     }
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [], next_after_id: null } : path.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
   })
-  await page.goto('/')
+  await page.goto('/control-center?mode=utilities#accumulation-controls')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await panel.getByText('Manage accumulation', { exact: true }).click()
   await expect(panel.getByRole('button', { name: 'Resume accumulation', exact: true })).toHaveCount(0)
@@ -226,7 +226,7 @@ test('shows exact portfolio cost and retained order evidence for a stopped holdi
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [], next_after_id: null }
       : path.endsWith('/activations') ? { activations: [detail], next_after: null, portfolio: detail.portfolio } : detail })
   })
-  await page.goto('/')
+  await page.goto('/control-center?mode=utilities#accumulation-controls')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await panel.getByText('Manage accumulation', { exact: true }).click()
   await expect(panel.getByText(/Known subtotal: 0.300000000000000003 USDC/)).toBeVisible()
@@ -272,7 +272,7 @@ test('reviews manual sales and retains an uncertain request across reload', asyn
     }
     return route.fulfill({ json: url.pathname.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
   })
-  await page.goto('/')
+  await page.goto('/control-center?mode=utilities#accumulation-controls')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await panel.getByText('Manage accumulation', { exact: true }).click()
   await expect(panel).toBeVisible()
@@ -343,7 +343,7 @@ test('creates an accumulation variant and explicitly switches a holding to its e
   expect(pin).toBe(5)
   await editor.screenshot({ path: `/private/tmp/moonwalker-accumulation-builder-${testInfo.project.name}.png` })
   expect(await editor.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
-  await page.goto('/')
+  await page.goto('/control-center?mode=utilities#accumulation-controls')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await panel.getByText('Manage accumulation', { exact: true }).click()
   await expect(panel).toBeVisible()
@@ -427,7 +427,7 @@ for (const action of ['declare_ownership', 'restore_inventory', 'acknowledge_set
       }
       return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [], next_after_id: null } : path.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
     })
-    await page.goto('/')
+    await page.goto('/control-center?mode=utilities#accumulation-controls')
     const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await panel.getByText('Manage accumulation', { exact: true }).click()
     if (action === 'declare_ownership') {
@@ -466,7 +466,7 @@ test('runs an isolated historical comparison with a saved version and displays m
     }
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [{ id: 17, name: 'Patient dip', version: 1, parameters: { timeframe: '1h' } }], next_after_id: null } : { activations: [], next_after: null } })
   })
-  await page.goto('/')
+  await page.goto('/control-center?mode=utilities#accumulation-controls')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await panel.getByText('Manage accumulation', { exact: true }).click()
   await panel.getByText('Historical strategy comparison', { exact: true }).click()

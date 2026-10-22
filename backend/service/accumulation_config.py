@@ -7,7 +7,7 @@ from contextlib import AsyncExitStack, asynccontextmanager
 from typing import Any
 
 import model
-from service.accumulation_contracts import AccumulationStateError
+from service.accumulation_contracts import AccumulationStateError, canonical_decimal
 from service.config_runtime_store import ConfigUpdateAction
 from service.order_requests import normalize_order_symbol
 from service.strategy_runtime import load_accumulation_strategy_version
@@ -53,6 +53,7 @@ ENTRY_KEYS = frozenset(
         "trade_mode",
         "accumulation_strategy_version_id",
         "dca",
+        "bo",
         "signal",
         "signal_settings",
         "symbol_list",
@@ -167,6 +168,14 @@ async def validate_accumulation_configuration(
         raise AccumulationStateError("Disable Autopilot before selecting accumulation.")
     currency = str(proposed.get("currency") or "").strip().upper()
     if proposed.get("signal") == "asap":
+        amount = proposed.get("bo")
+        if amount is not None or proposed.get("dry_run", True) is not True:
+            try:
+                canonical_decimal(str(amount), positive=True)
+            except AccumulationStateError as exc:
+                raise AccumulationStateError(
+                    "Set a positive initial buy amount for ASAP."
+                ) from exc
         symbols = proposed.get("symbol_list")
         if (
             not isinstance(symbols, str)

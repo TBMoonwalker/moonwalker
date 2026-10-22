@@ -890,8 +890,30 @@ class Database:
                     description="Add rebuildable exact return totals and indexed evidence coverage.",
                     apply=self._ensure_accumulation_return_schema,
                 ),
+                MigrationDefinition(
+                    version="2026-10-22-014-accumulation-initial-entry",
+                    phase="schema",
+                    description="Identify ASAP base orders independently of strategy signals.",
+                    apply=self._ensure_accumulation_initial_entry_schema,
+                ),
             )
         )
+
+    async def _ensure_accumulation_initial_entry_schema(self) -> None:
+        """Mark only newly prepared ASAP entries; historical buys stay unchanged."""
+        if not self.db_url.startswith("sqlite://"):
+            return
+        connection = Tortoise.get_connection("default")
+        _, columns = await connection.execute_query(
+            "PRAGMA table_info('accumulation_opportunities')"
+        )
+        statements = _plan_additive_column_statements(
+            "accumulation_opportunities",
+            {row["name"] for row in columns},
+            (("is_initial_entry", "INT NOT NULL DEFAULT 0"),),
+        )
+        if statements:
+            await connection.execute_script("\n".join(statements))
 
     async def _ensure_accumulation_return_schema(self) -> None:
         """Verify derived tables and index bounded routine coverage checks."""

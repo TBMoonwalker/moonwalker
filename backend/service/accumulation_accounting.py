@@ -312,22 +312,23 @@ async def persist_accumulation_order(
                 and opportunity.consumed_at is None
             )
             if consumed_now:
-                activation.consumption_revision += 1
-                activation.execution_guard_json = json.dumps(
-                    {
-                        "opportunity_id": str(opportunity.id),
-                        "signal_close_ms": opportunity.signal_close_ms,
-                        "signal_price": canonical_decimal(
-                            opportunity.signal_price, positive=True
-                        ),
-                        "signal_atr": canonical_decimal(
-                            opportunity.signal_atr, positive=True
-                        ),
-                        "strategy_version_id": opportunity.strategy_version_id,
-                        "consumption_revision": activation.consumption_revision,
-                    },
-                    sort_keys=True,
-                )
+                if not opportunity.is_initial_entry:
+                    activation.consumption_revision += 1
+                    activation.execution_guard_json = json.dumps(
+                        {
+                            "opportunity_id": str(opportunity.id),
+                            "signal_close_ms": opportunity.signal_close_ms,
+                            "signal_price": canonical_decimal(
+                                opportunity.signal_price, positive=True
+                            ),
+                            "signal_atr": canonical_decimal(
+                                opportunity.signal_atr, positive=True
+                            ),
+                            "strategy_version_id": opportunity.strategy_version_id,
+                            "consumption_revision": activation.consumption_revision,
+                        },
+                        sort_keys=True,
+                    )
                 opportunity.consumed_at = now
                 opportunity.consumption_revision = activation.consumption_revision
             changed = (

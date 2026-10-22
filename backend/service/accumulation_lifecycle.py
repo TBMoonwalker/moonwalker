@@ -63,6 +63,7 @@ class AccumulationValidationRequest:
     consumption_revision: int
     prior_baseline_close_ms: int | None
     imported_inventory: AccumulationImport | None = None
+    initial_asap: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,7 +77,7 @@ class AccumulationReadiness:
     account_scope: str
     strategy_version_id: int
     baseline_close_ms: int
-    observations: dict[str, Any]
+    observations: dict[str, Any] | None
     # Trusted adapter callback: database/config checks only, never network I/O.
     validate_commit: Callable[[], Awaitable[None]] | None = None
 
@@ -710,6 +711,13 @@ class AccumulationLifecycleService:
                 AccumulationImport.from_dict(imported_payload)
                 if imported_payload is not None
                 else None,
+                initial_asap=(
+                    operation.action in ENTRY_ACTIONS
+                    and activation_request.get("source") == "asap"
+                    and activation.holding_id is None
+                    and activation.consumption_revision == 0
+                    and activation.baseline_close_ms is None
+                ),
             )
         ready = await self._validator(request)
         if (
@@ -723,7 +731,13 @@ class AccumulationLifecycleService:
             request.prior_baseline_close_ms or 0
         ):
             raise AccumulationStateError("Readiness baseline cannot move backward.")
-        observations = encode_observations(ready.observations)
+        if ready.observations is None and not request.initial_asap:
+            raise AccumulationStateError("Strategy observations are required.")
+        observations = (
+            encode_observations(ready.observations)
+            if ready.observations is not None
+            else None
+        )
 
         async def persist() -> AccumulationCommandResult:
             async with in_transaction() as connection:
@@ -799,7 +813,7 @@ class AccumulationLifecycleService:
                 activation.strategy_version_id = ready.strategy_version_id
                 activation.observation_epoch += 1
                 activation.baseline_close_ms = ready.baseline_close_ms
-                activation.observations_initialized = True
+                activation.observations_initialized = observations is not None
                 activation.explicitly_paused = (
                     operation.previous_paused
                     if operation.action == "switch_strategy"
@@ -811,15 +825,16 @@ class AccumulationLifecycleService:
                 activation.reason = None
                 activation.revision += 1
                 await activation.save(using_db=connection)
-                await model.AccumulationStrategyState.create(
-                    using_db=connection,
-                    activation=activation,
-                    strategy_version_id=ready.strategy_version_id,
-                    observation_epoch=activation.observation_epoch,
-                    value_json=observations,
-                    last_processed_close_ms=ready.baseline_close_ms,
-                    revision=activation.revision,
-                )
+                if observations is not None:
+                    await model.AccumulationStrategyState.create(
+                        using_db=connection,
+                        activation=activation,
+                        strategy_version_id=ready.strategy_version_id,
+                        observation_epoch=activation.observation_epoch,
+                        value_json=observations,
+                        last_processed_close_ms=ready.baseline_close_ms,
+                        revision=activation.revision,
+                    )
                 return await self._finish(operation, activation, connection)
 
         async def commit() -> AccumulationCommandResult:

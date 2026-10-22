@@ -172,6 +172,7 @@ const emit = defineEmits<{
             <ConfigDcaSection
                  ref="dcaFormRef"
                  :dca="dca"
+                 :signal-name="signal.signal"
                  :rules="rules"
                  :sell-order-type-options="sellOrderTypeOptions"
                  :show-advanced-general="setupShowsAdvancedFields"

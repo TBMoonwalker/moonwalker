@@ -21,7 +21,10 @@ Select `asap` in the signal field and provide `symbol_list` as:
 - A URL returning `{"pairs":[...]}`
 
 Notes:
-- `ASAP` can optionally use `signal_strategy` as an extra entry filter.
+- In Dynamic DCA, `ASAP` can optionally use `signal_strategy` as an extra entry filter.
+- In accumulation mode, ASAP requires fixed symbols and opens with `bo` immediately,
+  without a strategy signal or history warmup. The accumulation strategy controls
+  subsequent buys. Account, budget and exchange execution checks still apply.
 - When the strategy or dynamic DCA needs history warmup, Moonwalker will prefill
   missing history before watching a symbol.
 - The symbol-list URL is fetched through async HTTP and should return a plain

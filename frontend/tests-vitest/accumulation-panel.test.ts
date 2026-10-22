@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AccumulationPanel from '../src/components/AccumulationPanel.vue'
+import AccumulationTradeStatus from '../src/components/AccumulationTradeStatus.vue'
 import { useAccumulationPanel } from '../src/composables/useAccumulationPanel'
 import { accumulationActions } from '../src/helpers/accumulation'
 import type { AccumulationDetail, AccumulationCommand } from '../src/types/accumulation'
@@ -387,6 +388,23 @@ describe('accumulation controls', () => {
     await panel.submit()
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
     expect(panel.draft.value).toBeNull()
+  })
+
+  it('binds inline controls to their trade symbol without showing the management dashboard', async () => {
+    api.fetchAccumulationDetail.mockImplementation((symbol: string) => Promise.resolve(snapshot({ symbol })))
+    const wrapper = mount(AccumulationTradeStatus, { props: { symbol: 'ETH/USDC' }, global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    expect(api.fetchAccumulationDetail).toHaveBeenCalledWith('ETH/USDC')
+    expect(wrapper.text()).toContain('ETH/USDC')
+    expect(wrapper.text()).not.toContain('Manage accumulation')
+    expect(wrapper.text()).not.toContain('Historical strategy comparison')
+    expect(wrapper.text()).not.toContain('All accumulation holdings')
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    await click(wrapper, 'Sell and close')
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('ETH/USDC')
+    expect(wrapper.text()).toContain('Confirm close holding')
+    wrapper.unmount()
   })
 
 })

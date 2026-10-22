@@ -24,7 +24,7 @@ test('puts entry state and its reviewed next action before secondary information
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [{ id: 7, name: 'Accumulation dip (ATR)', version: 1, parameters: { timeframe: '1h' } }], next_after_id: null }
       : path.endsWith('/activations') ? { activations: [detail], next_after: null, portfolio: { holding_count: 0, unverified_holding_count: 0, by_quote: [] } } : detail })
   })
-  await page.goto('/')
+  await page.goto('/control-center?mode=utilities#accumulation-controls')
   const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
   await expect(panel.getByRole('heading', { name: 'Entry check incomplete' })).toBeVisible()
   await expect(panel.getByRole('list', { name: 'How accumulation works' })).toHaveCount(0)

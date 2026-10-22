@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { defineAsyncComponent } from 'vue'
 import { RouterLink } from 'vue-router'
+const AccumulationPanel = defineAsyncComponent(() => import('../AccumulationPanel.vue'))
 import type { RestoreReviewState } from '../../composables/useConfigBackupRestore'
 import ConfigBackupDownloadControls from '../config/ConfigBackupDownloadControls.vue'
 import ConfigBackupRestoreControls from '../config/ConfigBackupRestoreControls.vue'
@@ -116,6 +118,7 @@ const emit = defineEmits<{
             </RouterLink>
         </div>
     </section>
+    <AccumulationPanel />
 </template>
 
 <style scoped>

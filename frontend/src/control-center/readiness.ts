@@ -68,8 +68,8 @@ function collectAlwaysRequiredBlockers(
         ],
     ]
 
-    return requiredKeys.filter(([key]) => config.trade_mode !== 'accumulation' || !['bo', 'tp'].includes(key)).flatMap(([key, title, description]) =>
-        (key === 'capital_max_fund'
+    return requiredKeys.filter(([key]) => config.trade_mode !== 'accumulation' || (key !== 'tp' && (key !== 'bo' || config.signal === 'asap'))).flatMap(([key, title, description]) =>
+        (key === 'capital_max_fund' || key === 'bo'
             ? hasPositiveNumber(config[key])
             : hasRequiredValue(config[key]))
             ? []

@@ -21,15 +21,20 @@ from service.accumulation_commands import (
 )
 from service.accumulation_contracts import AccumulationStateError
 from service.accumulation_entry import AccumulationEntryService
-from service.accumulation_evaluation import evaluate_accumulation
+from service.accumulation_evaluation import AccumulationDecision, evaluate_accumulation
 from service.accumulation_exchange import (
     AccumulationExchangeAdapter,
     accumulation_account_scope,
 )
 from service.accumulation_execution import AccumulationBuyExecutor
+from service.accumulation_initial import is_initial_asap_entry
 from service.accumulation_lifecycle import AccumulationLifecycleService
 from service.accumulation_notifications import accumulation_input_notifications
-from service.accumulation_portfolio import AccumulationPortfolioCoordinator
+from service.accumulation_portfolio import (
+    AccumulationOffer,
+    AccumulationPortfolioCoordinator,
+    prepare_accumulation_buy,
+)
 from service.accumulation_recovery import AccumulationPlacementRecovery
 from service.accumulation_repair import AccumulationOrderRepair
 from service.accumulation_sales import AccumulationCommandExecutor
@@ -231,7 +236,8 @@ class AccumulationRuntime:
                 and activation.state == "enabled"
                 and not activation.explicitly_paused
             ):
-                await self._rebase(activation)
+                if not await is_initial_asap_entry(activation):
+                    await self._rebase(activation)
         self.notify()
         return True
 
@@ -333,6 +339,32 @@ class AccumulationRuntime:
             return
         if activation.account_scope != await self.adapter.account_scope(config):
             self.status[activation.symbol] = "WAIT_ACCOUNT"
+            return
+        if config.get("signal") == "asap" and await is_initial_asap_entry(activation):
+            try:
+                context = await load_accumulation_context(
+                    str(activation.id), activation.account_scope
+                )
+                decision = AccumulationDecision(
+                    context.identity, "BUY", "BUY_INITIAL_ASAP"
+                )
+                inputs = await self.adapter.admission_inputs(
+                    AccumulationOffer(decision, ())
+                )
+                admission = await prepare_accumulation_buy(
+                    AccumulationOffer(decision, ()),
+                    inputs,
+                    config,
+                    cutoff_ms=self.adapter.clock_ms(),
+                    clock_ms=self.adapter.clock_ms,
+                )
+                self.status[activation.symbol] = admission.reason
+                if admission.operation_id:
+                    result = await self.buys.execute(admission.operation_id)
+                    self.status[activation.symbol] = result.reason
+                    self.notify(activation.symbol)
+            except _EXPECTED_FAILURES:
+                self.status[activation.symbol] = "WAIT_DATA"
             return
         if str(activation.id) not in self._rebased:
             await self._rebase(activation)
