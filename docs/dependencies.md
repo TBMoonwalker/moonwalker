@@ -111,7 +111,7 @@ CCXT `4.5.68` pins `setuptools 83.0.0`, which resolves the previously
 allowlisted `PYSEC-2026-3447` finding in setuptools 82.0.1. Moonwalker's Python
 audit no longer ignores that advisory or any other vulnerability.
 
-CCXT `4.5.87` pins multidict `6.9.1`, which fixes the advisory affecting
+CCXT `4.5.90` pins multidict `6.9.1`, which fixes the advisory affecting
 `6.7.1`. It permits compatible aiohttp, certifi, and yarl updates, while
 retaining exact pins for cffi `2.0.0`, charset-normalizer `3.4.7`, idna `3.18`,
 propcache `0.5.2`, pycparser `3.0`, and uvloop `0.22.1`. Respect those pins
@@ -172,44 +172,83 @@ per [Microsoft's embedded-language guidance](https://devblogs.microsoft.com/type
 
 | Package | At review | Latest | Classification / action |
 | --- | --- | --- | --- |
-| `ast_serialize` | 0.13.0 | 0.13.1 | Patch/minor safe candidate for a separate tested update. |
-| `cachetools` | 7.2.1 | 7.2.4 | Patch/minor safe candidate for a separate tested update. |
-| `ccxt` | 4.5.87 | 4.5.90 | Patch/minor candidate; review exchange behavior and its exact transitive pins together. |
+| `ast_serialize` | 0.13.0 | 0.13.1 | Applied 0.13.1 (patch/minor); exact pin and generated lock updated. |
+| `cachetools` | 7.2.1 | 7.2.4 | Applied 7.2.4 (patch/minor); exact pin and generated lock updated. |
+| `ccxt` | 4.5.87 | 4.5.90 | Applied 4.5.90 (patch/minor); exact pin and generated lock updated. |
 | `certifi` | 2026.7.22 | 2026.10.23 | Patch/minor security fix applied; calendar versioning. |
-| `cffi` | 2.0.0 | 2.1.1 | Patch/minor candidate, blocked; do not force past CCXT 4.5.87’s exact pin; review with a CCXT update. |
-| `charset-normalizer` | 3.4.7 | 3.5.2 | Patch/minor candidate, blocked; do not force past CCXT 4.5.87’s exact pin; review with a CCXT update. |
-| `coverage` | 7.16.2 | 7.17.0 | Patch/minor safe candidate for a separate tested update. |
-| `filelock` | 4.1.1 | 4.2.4 | Patch/minor safe candidate for a separate tested update. |
-| `idna` | 3.18 | 3.20 | Patch/minor candidate, blocked; do not force past CCXT 4.5.87’s exact pin; review with a CCXT update. |
-| `litestar` | 2.24.0 | 2.25.0 | Patch/minor safe candidate; verify startup, dependency injection and WebSockets. |
-| `multidict` | 6.9.1 | 7.1.0 | Major; do not force past CCXT 4.5.87’s exact pin; review with a CCXT update. |
-| `pandas` | 3.0.6 | 3.1.0 | Patch/minor safe candidate; verify indicator calculations and replay results. |
-| `pip` | 26.2.1 | 26.2.2 | Patch/minor safe candidate for a separate tested update. |
-| `platformdirs` | 4.13.0 | 4.13.5 | Patch/minor safe candidate for a separate tested update. |
-| `pluggy` | 1.6.0 | 1.7.0 | Patch/minor safe candidate for a separate tested update. |
-| `polyfactory` | 3.3.0 | 3.5.0 | Patch/minor safe candidate for a separate tested update. |
-| `propcache` | 0.5.2 | 0.5.4 | Patch/minor candidate, blocked; do not force past CCXT 4.5.87’s exact pin; review with a CCXT update. |
-| `pycparser` | 3.0 | 3.12 | Patch/minor candidate, blocked; do not force past CCXT 4.5.87’s exact pin; review with a CCXT update. |
+| `cffi` | 2.0.0 | 2.1.1 | Patch/minor candidate, blocked; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
+| `charset-normalizer` | 3.4.7 | 3.5.2 | Patch/minor candidate, blocked; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
+| `coverage` | 7.16.2 | 7.17.0 | Applied 7.17.0 (patch/minor); exact pin and generated lock updated. |
+| `filelock` | 4.1.1 | 4.2.4 | Applied 4.2.4 (patch/minor); exact pin and generated lock updated. |
+| `idna` | 3.18 | 3.20 | Patch/minor candidate, blocked; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
+| `litestar` | 2.24.0 | 2.25.0 | Applied 2.25.0 (patch/minor); exact pin and generated lock updated. |
+| `multidict` | 6.9.1 | 7.1.0 | Major; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
+| `pandas` | 3.0.6 | 3.1.0 | Applied 3.1.0 (patch/minor); exact pin and generated lock updated. |
+| `pip` | 26.2.1 | 26.2.2 | Applied 26.2.2 (patch/minor); exact pin and generated lock updated. |
+| `platformdirs` | 4.13.0 | 4.13.5 | Applied 4.13.5 (patch/minor); exact pin and generated lock updated. |
+| `pluggy` | 1.6.0 | 1.7.0 | Applied 1.7.0 (patch/minor); exact pin and generated lock updated. |
+| `polyfactory` | 3.3.0 | 3.5.0 | Applied 3.5.0 (patch/minor); exact pin and generated lock updated. |
+| `propcache` | 0.5.2 | 0.5.4 | Patch/minor candidate, blocked; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
+| `pycparser` | 3.0 | 3.12 | Patch/minor candidate, blocked; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
 | `python-dateutil` | 2.9.0.post0 | 3.0.0 | Major; review datetime parsing and timezone behavior before adoption. |
 | `ruff` | 0.15.22 | 0.17.2 | Pre-1.0 breaking/tooling review; retain 0.15.22 until the dedicated lint cleanup. |
-| `setuptools` | 84.0.0 | 84.2.1 | Patch/minor candidate; coordinate with the reviewed CCXT/build-tool inputs. |
-| `tortoise-orm` | 1.1.8 | 1.1.9 | Patch/minor safe candidate; verify ORM context and background tasks. |
-| `uvloop` | 0.22.1 | 0.23.0 | Patch/minor candidate, blocked; do not force past CCXT 4.5.87’s exact pin; review with a CCXT update. |
-| `websockets` | 17.2 | 17.3 | Patch/minor safe candidate for a separate tested update. |
+| `setuptools` | 84.0.0 | 84.2.1 | Applied 84.2.1 (patch/minor); exact pin and generated lock updated. |
+| `tortoise-orm` | 1.1.8 | 1.1.9 | Applied 1.1.9 (patch/minor); exact pin and generated lock updated. |
+| `uvloop` | 0.22.1 | 0.23.0 | Patch/minor candidate, blocked; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
+| `websockets` | 17.2 | 17.3 | Applied 17.3 (patch/minor); exact pin and generated lock updated. |
 
 #### Frontend
 
 | Package | At review | Latest | Classification / action |
 | --- | --- | --- | --- |
-| `@playwright/test` | 1.64.0 | 1.64.1 | Patch/minor safe candidate for a separate tested update. |
-| `@types/node` | 24.13.3 | 26.6.5 (24.x: 24.19.2) | 26.x is a major; retain the Node 24 line. 24.19.2 is a patch/minor safe candidate. |
-| `@vitest/coverage-v8` | 5.0.4 | 5.0.5 | Patch/minor safe candidate; upgrade together with vitest. |
-| `jsdom` | 30.1.2 | 30.1.3 | Patch/minor safe candidate for a separate tested update. |
-| `knip` | 6.41.0 | 6.42.1 | Patch/minor safe candidate for a separate tested update. |
-| `pinia` | 4.0.3 | 4.1.0 | Patch/minor safe candidate for a separate tested update. |
+| `@playwright/test` | 1.64.0 | 1.64.1 | Applied 1.64.1 (patch/minor); exact pin and generated lock updated. |
+| `@types/node` | 24.13.3 | 26.6.5 (24.x: 24.19.2) | Applied 24.19.2 (patch/minor); exact pin and generated lock updated. |
+| `@vitest/coverage-v8` | 5.0.4 | 5.0.5 | Applied 5.0.5 (patch/minor); exact pin and generated lock updated. |
+| `jsdom` | 30.1.2 | 30.1.3 | Held: 30.1.3 requires `@asamuzakjp/dom-selector` 10, a transitive major; review separately. |
+| `knip` | 6.41.0 | 6.42.1 | Held: 6.42.x requires `unbash` 6, a transitive major; review separately. |
+| `pinia` | 4.0.3 | 4.1.0 | Applied 4.1.0 (patch/minor); exact pin and generated lock updated. |
 | `typescript` | 6.0.3 | 7.0.2 | Major; do not adopt while Vue tooling requires the TypeScript 6 API. |
-| `vite` | 8.3.4 | 8.3.5 | Patch/minor safe candidate for a separate tested update. |
-| `vitest` | 5.0.4 | 5.0.5 | Patch/minor safe candidate; upgrade together with @vitest/coverage-v8. |
+| `vite` | 8.3.4 | 8.3.5 | Applied 8.3.5 (patch/minor); exact pin and generated lock updated. |
+| `vitest` | 5.0.4 | 5.0.5 | Applied 5.0.5 (patch/minor); exact pin and generated lock updated. |
+
+### Patch/minor follow-up
+
+The follow-up applies 14 Python package updates and six frontend direct-package
+updates listed above. It keeps all existing major versions, including Node types
+on 24.x, and upgrades Vitest with its matching coverage provider. Both Python
+locks were regenerated with selected upgrade targets; npm resolution introduced
+no major version changes. Security pins for certifi and follow-redirects remain.
+
+CCXT 4.5.90 retains the exact pins blocking cffi, charset-normalizer, idna,
+multidict, propcache, pycparser and uvloop updates. Ruff remains held for the
+separate lint cleanup, and TypeScript 7 remains incompatible with the Vue tooling.
+The Python-dateutil and Node-type major updates remain outside this changeset.
+
+The [jsdom 30.1.3 metadata](https://registry.npmjs.org/jsdom/30.1.3) requires
+`@asamuzakjp/dom-selector ^10.0.3` rather than the existing 9.x line. The
+[Knip 6.42.1 metadata](https://registry.npmjs.org/knip/6.42.1) requires `unbash ^6.0.0`
+rather than 5.x; Knip 6.42.0 has the same requirement. These candidates had no
+known OSV advisory, but are held because their transitive major changes need
+compatibility review. Do not override their requirements to force older engines.
+
+Release review included [CCXT 4.5.90](https://github.com/ccxt/ccxt/releases/tag/v4.5.90),
+[Litestar 2.25.0](https://docs.litestar.dev/2/release-notes/changelog.html#2.25.0),
+[pandas 3.1.0](https://pandas.pydata.org/docs/whatsnew/v3.1.0.html),
+[Tortoise 1.1.9](https://github.com/tortoise/tortoise-orm/releases/tag/1.1.9) and
+[websockets 17.3](https://websockets.readthedocs.io/en/stable/project/changelog.html#id1).
+Pandas changes datetime resolution inference for numeric input; candle
+serialization uses timestamp conversion rather than assuming a fixed integer
+resolution. The backend timestamp/resampling, indicator, replay and statistics
+tests pass with the updated versions. CI also reports future-major deprecations for
+Litestar request-body markers and pandas `inplace=True` operations; the separate
+migration work is tracked in TODOS.md.
+
+Validation on 2026-10-23: full CI passes, including 1,855 backend tests, 266
+frontend unit tests, the legacy frontend suite, coverage gates, lint/type/build
+checks, both vulnerability audits and npm registry signatures. The complete
+browser suite passes 72 checks with 12 intentional viewport skips across desktop,
+mobile and tablet. Existing frontend project-type-check debt remains tracked in
+TODOS.md. Post-install registry checks show only the held updates described here.
 
 ## Rollback
 

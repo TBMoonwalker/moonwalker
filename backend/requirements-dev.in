@@ -5,7 +5,7 @@ mypy==2.4.0
 pip-audit==2.10.1
 pip-tools==7.6.2
 # PYSEC-2026-3721: CI audit requires pip 26.2 or newer.
-pip==26.2.1
+pip==26.2.2
 pytest==9.1.1
 pytest-asyncio==1.4.0
 pytest-cov==7.1.0
@@ -13,4 +13,4 @@ ruff==0.15.22  # Ruff 0.16 enables new rules that require a dedicated cleanup.
 vulture==2.16
 
 # Explicit pin for CacheControl's reviewed file-cache locking dependency.
-filelock==4.1.1
+filelock==4.2.4
