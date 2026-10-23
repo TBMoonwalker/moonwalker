@@ -241,9 +241,9 @@ describe('accumulation controls', () => {
     expect(api.sendAccumulationCommand.mock.calls[0][0]).toMatchObject({ action: 'switch_strategy', target_version_id: 17, expected_revision: 12 })
   })
 
-  it('keeps closed order history without portfolio summaries or invented returns', async () => {
+  it('keeps previous holding orders out of an empty new cycle', async () => {
     api.fetchAccumulationDetail.mockResolvedValue(snapshot({
-      state: 'stopped', holding: null, holding_integrity: 'unlinked',
+      state: 'enabled', holding: null, holding_integrity: 'unlinked',
       portfolio: { holding_count: 2, unverified_holding_count: 1, valuation_available: false, by_quote: [{ quote: 'USDC', holding_count: 2, known_remaining_cost: '0.300000000000000003', remaining_cost: null, unknown_cost_count: 1 }] },
       orders: [{ checkpoint_id: 5, deal_id: 'closed', side: 'sell', filled_quantity: '0.100000000000000001', quote_cost: '12.000000000000000001', fees: { BNB: '0.000000000000000001' }, fees_complete: true, terminal: true, updated_at: '2026-10-21T10:00:00Z', inventory_at_update: { net_quantity: '0', remaining_cost: null, contributed_quote: null, disposal_proceeds: '12.000000000000000001', fees: {}, pending_fee_reports: 0, basis_provenance: 'unknown' } }],
       operations: [{ operation_id: 'old-entry', action: 'activate', status: 'applied', result_state: 'enabled', result_revision: 1, reason: 'retry_entry' }],
@@ -253,15 +253,15 @@ describe('accumulation controls', () => {
     const { panel } = harness()
     await flushPromises()
     const history = mount(AccumulationOrderTimeline, { props: { detail: panel.detail.value } })
-    expect(history.text()).toContain('Earlier holding / unlinked manual sale')
-    expect(history.text()).toContain('0.100000000000000001')
+    expect(history.text()).not.toContain('Earlier holding')
+    expect(history.text()).not.toContain('0.100000000000000001')
     expect(history.text()).not.toContain('Recorded fees')
     expect(history.text()).not.toContain('activate')
     expect(history.text()).not.toContain('retry entry')
     expect(history.findAll('details')).toHaveLength(0)
-    expect(history.text()).toContain('Order size: 12.000000000000000001 | Amount: 0.100000000000000001 | Price: Unknown')
-    expect(history.text()).toContain('Unknown')
-    expect(history.text()).toContain('Older executed orders remain recorded')
+    expect(history.text()).not.toContain('Order size:')
+    expect(history.text()).not.toContain('Unknown')
+    expect(history.text()).not.toContain('Older executed orders remain recorded')
   })
 
   it('reviews one restored order and explicitly retries the identical lookup request', async () => {

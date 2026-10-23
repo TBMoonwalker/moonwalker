@@ -22,14 +22,26 @@ describe('accumulation order evidence', () => {
   })
   it('does not join another generation or guess a match from equal amounts', () => {
     const orders = accumulationOrders([checkpoint({ deal_id: 'earlier' })], [execution(1)], 'current')
-    expect(orders).toHaveLength(2)
+    expect(orders).toHaveLength(1)
     expect(orders[0].checkpoint).toBeUndefined()
-    expect(orders[1].title).toContain('Earlier holding')
-    expect(orders[1].timestamp).toBeUndefined()
+    expect(orders[0].title).toBe('Base order')
   })
   it('keeps separate accumulation orders and preserves a base home while awaiting entry', () => {
     const orders = accumulationOrders([checkpoint(), checkpoint({ checkpoint_id: 8, placement_operation_id: 'buy-2' })], [execution(1), execution(2, 'buy-2')], 'current')
     expect(orders.map(order => order.title)).toEqual(['Base order', 'Accumulation order 1'])
     expect(accumulationOrders([], [], null)).toEqual([{ key: 'registration', title: 'Entry registration', base: true }])
   })
+})
+
+
+it('shows no previous-cycle evidence while a fresh accumulation awaits its base order', () => {
+  expect(accumulationOrders([checkpoint({ deal_id: 'sold' })], [execution(1, 'sold-buy', 'sold')], null))
+    .toEqual([{ key: 'registration', title: 'Entry registration', base: true }])
+})
+
+it('numbers the new base order independently of all previous-cycle buys and sales', () => {
+  const old = checkpoint({ checkpoint_id: 1, deal_id: 'sold', side: 'sell' })
+  const orders = accumulationOrders([old, checkpoint()], [execution(0, 'old-buy', 'sold'), execution(1)], 'current')
+  expect(orders).toHaveLength(1)
+  expect(orders[0]).toMatchObject({ title: 'Base order', base: true, checkpoint: { deal_id: 'current' } })
 })

@@ -199,14 +199,14 @@ test('reviews a restored order and retries the same evidence lookup after reload
   await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-repair-${testInfo.project.name}.png` })
 })
 
-test('keeps retained order history without duplicate accumulation portfolio sections', async ({ page }, testInfo) => {
+test('keeps sold-cycle orders out of an empty new accumulation trade', async ({ page }, testInfo) => {
   await page.route('**/config/all', route => route.fulfill({ json: {
     timezone: 'Europe/Vienna', signal: 'csv_signal', signal_settings: JSON.stringify({ csv_source: 'signals.csv' }), exchange: 'binance',
     timeframe: '1h', key: 'test-only', secret: 'test-only', currency: 'USDC', max_bots: 2,
     bo: 10, tp: 1, capital_max_fund: 100, history_lookback_time: '180d', dca: false, dry_run: true, mstc: 4,
   } }))
   const detail: AccumulationDetail = {
-    activation_id: 'closed', symbol: 'BTC/USDC', state: 'stopped', explicitly_paused: true,
+    activation_id: 'closed', symbol: 'BTC/USDC', state: 'enabled', explicitly_paused: false,
     revision: 20, reason: null, runtime_wait_reason: null, observations_initialized: true,
     strategy_version_id: 5, strategy_slug: 'Patient dip', strategy_version: 1,
     holding_integrity: 'unlinked', holding: null, entry: null, operations: [], older_operations_available: false,
@@ -228,7 +228,8 @@ test('keeps retained order history without duplicate accumulation portfolio sect
   await expect(page.getByText('Accumulation value and returns', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('button', { name: 'Refresh valuation', exact: true })).toHaveCount(0)
   await expect(panel.getByText('No managed inventory.', { exact: true })).toBeVisible()
-  await expect(page.getByText('Order size: 12.000000000000000001 | Amount: 0.100000000000000001 | Price: Unknown', { exact: true })).toBeVisible()
+  await expect(panel.locator('.accumulation-order-timeline')).toHaveCount(0)
+  await expect(panel.getByText('Earlier holding', { exact: false })).toHaveCount(0)
   expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
   await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-history-${testInfo.project.name}.png` })
 })

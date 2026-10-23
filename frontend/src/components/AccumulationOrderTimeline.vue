@@ -11,7 +11,7 @@ const props = defineProps<{
   dealId?: string | null
   fallback?: Array<{ key: string; title: string; content: string; timestamp: string | number }>
 }>()
-const items = computed(() => accumulationOrders(props.detail?.orders ?? [], props.executions ?? [], props.dealId, props.fallback))
+const items = computed(() => accumulationOrders(props.detail?.orders ?? [], props.executions ?? [], props.dealId ?? props.detail?.holding?.deal_id, props.fallback))
 function date(value?: string | number) {
   if (!value) return undefined
   const timestamp = typeof value === 'string' && !/^\d+$/.test(value) ? Date.parse(value) : Number(value)
@@ -33,6 +33,5 @@ function content(item: ReturnType<typeof accumulationOrders>[number]) {
       :type="item.base ? 'info' : item.checkpoint?.side === 'sell' ? 'warning' : 'success'"
     />
   </n-timeline>
-  <p v-if="detail?.older_orders_available">Older executed orders remain recorded outside this recent timeline.</p>
   <slot name="base-order" />
 </template>

@@ -18,11 +18,13 @@ function operationId(execution: TradeExecutionRow): string | undefined {
   } catch { return undefined }
 }
 
-/** Join cumulative order evidence by durable identity, never by amount or position. */
+/** Show only the active deal; retain previous cycles in their execution ledger. */
 export function accumulationOrders(
   checkpoints: AccumulationOrderCheckpoint[], executions: TradeExecutionRow[], dealId?: string | null,
   fallback: Array<{ key: string; title: string; content: string; timestamp: string | number }> = [],
 ): AccumulationOrderItem[] {
+  checkpoints = checkpoints.filter(order => Boolean(dealId) && order.deal_id === dealId)
+  executions = executions.filter(execution => Boolean(dealId) && execution.deal_id === dealId)
   const matched = new Set<number>()
   const seen = new Set<string>()
   let buys = 0
@@ -44,9 +46,8 @@ export function accumulationOrders(
   if (!items.length && fallback.length && !checkpoints.some(order => dealId && order.deal_id === dealId)) items.push(...fallback.map((item, index) => ({ ...item, title: index === 0 ? 'Base order' : `Accumulation order ${index}`, base: index === 0 })))
   for (const checkpoint of [...checkpoints].reverse()) {
     if (matched.has(checkpoint.checkpoint_id)) continue
-    const current = Boolean(dealId && checkpoint.deal_id === dealId)
-    const base = current && checkpoint.side === 'buy' && !items.some(item => item.base)
-    items.push({ key: `checkpoint-${checkpoint.checkpoint_id}`, base, checkpoint, title: base ? 'Base order' : `${current ? 'Accumulation' : 'Earlier holding / unlinked'} ${checkpoint.side === 'buy' ? 'order' : 'manual sale'}` })
+    const base = checkpoint.side === 'buy' && !items.some(item => item.base)
+    items.push({ key: `checkpoint-${checkpoint.checkpoint_id}`, base, checkpoint, title: base ? 'Base order' : `Accumulation ${checkpoint.side === 'buy' ? 'order' : 'manual sale'}` })
   }
   if (!items.some(item => item.base)) items.unshift({ key: 'registration', title: 'Entry registration', base: true })
   return items
