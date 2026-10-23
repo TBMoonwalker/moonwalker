@@ -49,7 +49,8 @@ For interpreting the Statistics calibration diagnostics, see
 Accumulation uses an exact positive integer
 `accumulation_strategy_version_id`, selected from compatible saved versions.
 Create variants in Strategy Builder. This initial pin applies to new registrations;
-existing holdings require an explicit Switch strategy command in Trading Overview.
+existing registrations require an explicit reviewed change under
+**Configuration → Trade modes → Change strategy for an existing registration**.
 A draft may omit the pin, but demo and live execution require it. Accumulation
 dry run uses the exchange's CCXT demo trading environment and demo credentials;
 unsupported venues fail closed without falling back to live trading. Demo and

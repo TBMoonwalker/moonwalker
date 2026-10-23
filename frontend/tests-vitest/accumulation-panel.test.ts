@@ -3,6 +3,8 @@ import { defineComponent, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import AccumulationPanel from '../src/components/AccumulationPanel.vue'
 import AccumulationTradeStatus from '../src/components/AccumulationTradeStatus.vue'
+import AccumulationStrategyAssignment from '../src/components/config/AccumulationStrategyAssignment.vue'
+import { NSelect } from 'naive-ui/es/select'
 import { useAccumulationPanel } from '../src/composables/useAccumulationPanel'
 import { accumulationActions } from '../src/helpers/accumulation'
 import type { AccumulationDetail, AccumulationCommand } from '../src/types/accumulation'
@@ -402,6 +404,8 @@ describe('accumulation controls', () => {
     expect(wrapper.text()).not.toContain('Manage accumulation')
     expect(wrapper.text()).not.toContain('Historical strategy comparison')
     expect(wrapper.text()).not.toContain('All accumulation holdings')
+    expect(wrapper.text()).not.toContain('Change strategy')
+    expect(wrapper.text()).not.toContain('Use strategy')
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
     await click(wrapper, 'Sell and close')
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
@@ -429,6 +433,51 @@ describe('accumulation controls', () => {
     expect(api.sendAccumulationCommand).toHaveBeenCalledTimes(1)
     expect(api.sendAccumulationCommand.mock.calls[0][0]).toMatchObject({ symbol: 'BTC/USDC', quantity: '0.000000000000000001', action: 'sell_partial' })
     wrapper.unmount()
+  })
+
+  it('changes a registration strategy only through the configuration control', async () => {
+    const utilities = mount(AccumulationPanel)
+    await flushPromises()
+    expect(utilities.find('#accumulation-strategy').exists()).toBe(false)
+    expect(utilities.findAll('button').some(button => button.text() === 'Switch strategy')).toBe(false)
+    utilities.unmount()
+    const wrapper = mount(AccumulationStrategyAssignment)
+    await flushPromises()
+    const selector = wrapper.findAllComponents(NSelect).find(select => select.props('options')?.some(option => option.value === 17))!
+    expect(selector).toBeDefined()
+    selector.vm.$emit('update:value', 17)
+    await flushPromises()
+    await click(wrapper, 'Review strategy change')
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Selected strategy: Patient dip · v1 · 4h')
+    await click(wrapper, 'Confirm strategy change')
+    expect(api.sendAccumulationCommand.mock.calls[0][0]).toMatchObject({ action: 'switch_strategy', symbol: 'BTC/USDC', target_version_id: 17, expected_revision: 12 })
+    wrapper.unmount()
+  })
+
+  it('retries an uncertain strategy change only in trade-mode configuration', async () => {
+    const stubs = { RouterLink: { template: '<a><slot /></a>' } }
+    const first = harness()
+    await flushPromises()
+    first.panel.targetVersion.value = 17
+    first.panel.prepare('switch_strategy')
+    api.sendAccumulationCommand.mockRejectedValueOnce(new Error('Lost response'))
+    await first.panel.submit()
+    const original = api.sendAccumulationCommand.mock.calls[0][0]
+    first.wrapper.unmount()
+    const utilities = mount(AccumulationPanel, { global: { stubs } })
+    const trade = mount(AccumulationTradeStatus, { props: { symbol: 'BTC/USDC' }, global: { stubs } })
+    await flushPromises()
+    for (const wrapper of [utilities, trade]) {
+      expect(wrapper.findAll('button').some(button => button.text() === 'Retry same request')).toBe(false)
+      expect(wrapper.text()).toContain('Review strategy request in Configuration')
+      wrapper.unmount()
+    }
+    const settings = mount(AccumulationStrategyAssignment, { global: { stubs } })
+    await flushPromises()
+    await click(settings, 'Retry same strategy request')
+    expect(api.sendAccumulationCommand.mock.calls[1][0]).toEqual(original)
+    settings.unmount()
   })
 
   it('explains why an inline confirmation is blocked after a pushed revision change', async () => {

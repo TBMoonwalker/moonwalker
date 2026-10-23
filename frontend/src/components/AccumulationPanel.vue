@@ -5,7 +5,7 @@ import AccumulationReplay from './AccumulationReplay.vue'
 import AccumulationOutlook from './AccumulationOutlook.vue'
 import { accumulationOutlook } from '../helpers/accumulationPresentation'
 import { useAccumulationPanel } from '../composables/useAccumulationPanel'
-import { accumulationActionCopy, accumulationActionLabels, accumulationReason } from '../helpers/accumulation'
+import { accumulationActionCopy, accumulationActionLabels, accumulationReason, isAccumulationStrategyChange } from '../helpers/accumulation'
 
 const route = useRoute()
 const requestedSymbol = computed(() => typeof route?.query.symbol === 'string' ? route.query.symbol : undefined)
@@ -17,18 +17,13 @@ const { visible, available, rows, portfolio, next, selected, detail, loading, fr
 const options = computed(() => rows.value.map(row => ({ label: `${row.symbol} · ${accumulationReason(row.state)}`, value: row.symbol })))
 const quote = computed(() => detail.value?.symbol.split('/')[1] ?? '')
 const base = computed(() => detail.value?.symbol.split('/')[0] ?? '')
-const strategyOptions = computed(() => panel.strategies.value.map(version => ({
-  label: `${version.name} · v${version.version} · ${version.parameters.timeframe}`,
-  value: version.id,
-})))
 const pinnedStrategy = computed(() => panel.strategies.value.find(version => version.id === detail.value?.strategy_version_id))
 const primaryAction = computed(() => {
   // Keep the button mounted so keyboard focus survives pushed status updates.
   const action = detail.value ? accumulationOutlook(detail.value, true).action : undefined
   return action && actions.value.includes(action) ? action : undefined
 })
-const secondaryActions = computed(() => actions.value.filter(action => action !== primaryAction.value && action !== 'sell_partial'))
-const reviewedStrategy = computed(() => panel.strategies.value.find(version => version.id === draft.value?.target_version_id))
+const secondaryActions = computed(() => actions.value.filter(action => action !== primaryAction.value && action !== 'sell_partial' && action !== 'switch_strategy'))
 const repairOptions = computed(() => (detail.value?.quarantined_orders ?? []).filter(order => order.has_lookup_identity).map((order, index) => ({ value: order.placement_operation_id, label: `${order.side === 'buy' ? 'Buy' : 'Manual sale'} · restored order ${index + 1}` })))
 const reviewedRepair = computed(() => repairOptions.value.find(option => option.value === draft.value?.placement_operation_id))
 const retirementOptions = computed(() => (detail.value?.quarantined_commands ?? []).map((operation, index) => ({
@@ -54,7 +49,8 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
     </n-alert>
     <n-alert v-if="uncertain" type="warning" role="alert">
       {{ uncertain.action === 'repair_order' ? 'Order evidence required' : uncertain.action === 'rebind_account' ? 'Account evidence required' : 'Unconfirmed request' }}: {{ accumulationActionLabels[uncertain.action] }} — {{ uncertain.symbol }}.
-      <n-button :loading="busy" :disabled="busy || !available" @click="panel.submit()">Retry same request</n-button>
+      <RouterLink v-if="isAccumulationStrategyChange(uncertain)" :to="{ name: 'controlCenter', query: { mode: 'setup', target: 'dca', symbol: uncertain.symbol }, hash: '#accumulation-strategy-assignments' }">Review strategy request in Configuration</RouterLink>
+      <n-button v-else :loading="busy" :disabled="busy || !available" @click="panel.submit()">Retry same request</n-button>
     </n-alert>
     <p v-if="available && rows.length === 0">No accumulation registrations. Add a fixed symbol with ASAP or import an existing holding with CSV.</p>
     <div v-if="rows.length > 1" class="accumulation-picker">
@@ -82,7 +78,6 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
           <p>Reason: {{ draft.note }}</p>
         </template>
         <p v-if="draft.action === 'declare_ownership'">Ownership declared for <strong>{{ draft.confirmation }}</strong>: {{ draft.note }}</p>
-        <p v-if="reviewedStrategy">Selected strategy: {{ reviewedStrategy.name }} · v{{ reviewedStrategy.version }} · {{ reviewedStrategy.parameters.timeframe }}</p>
         <p v-if="reviewedRepair">Selected order: {{ reviewedRepair.label }}</p>
         <p v-if="draft.action === 'retire_command' && reviewedRetirement">Selected command: {{ reviewedRetirement.label }}</p>
         <pre v-if="draft.csv_content" class="accumulation-csv-review">{{ draft.csv_content }}</pre>
@@ -114,15 +109,6 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
         <div><dt>Declared cost · {{ quote }}</dt><dd>{{ detail.entry.declaration.acquisition_cost }}</dd></div>
       </dl>
       <p v-if="!detail.observations_initialized && detail.entry?.source === 'csv'">CSV amounts declare net owned coins. Historical fees remain unknown. Correction does not enable buys.</p>
-      <div v-if="actions.includes('switch_strategy') || actions.includes('retry_entry') || actions.includes('correct_import')" class="accumulation-input">
-        <label for="accumulation-strategy">Accumulation strategy version</label>
-        <n-select filterable v-model:value="panel.targetVersion.value" :options="strategyOptions" :disabled="disabled" :input-props="{ id: 'accumulation-strategy' }" placeholder="Keep the entry pin, or select a compatible saved version" />
-        <p v-if="panel.strategyError.value" role="alert">{{ panel.strategyError.value }}</p>
-        <div class="accumulation-actions">
-          <n-button :loading="panel.strategyLoading.value" :disabled="busy" @click="panel.loadStrategies()">Refresh strategies</n-button>
-          <n-button v-if="panel.strategyCursor.value !== null" :disabled="busy || panel.strategyLoading.value" @click="panel.loadStrategies(true)">Load more strategies</n-button>
-        </div>
-      </div>
       <div v-if="actions.includes('correct_import')" class="accumulation-input">
         <label for="accumulation-csv">Corrected CSV for {{ detail.symbol }}</label>
         <n-input v-model:value="csv" type="textarea" :disabled="disabled" :input-props="{ id: 'accumulation-csv' }" placeholder="date;symbol;price;amount" :autosize="{ minRows: 3, maxRows: 8 }" />

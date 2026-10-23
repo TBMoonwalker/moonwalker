@@ -64,7 +64,7 @@ async function save() {
   try {
     const result = await saveAccumulationStrategy(request.value)
     request.value = null
-    notice.value = `Saved ${result.name} · v${result.version}. Existing holdings keep their current strategy. Choose Switch strategy in Trading Overview to apply it.`
+    notice.value = `Saved ${result.name} · v${result.version}. Existing holdings keep their current strategy. Apply it in Configuration → Trade modes.`
     await load()
   } catch (cause) {
     if ([400, 409].includes(accumulationErrorStatus(cause) ?? 0)) request.value = null

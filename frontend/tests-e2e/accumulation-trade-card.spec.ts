@@ -71,8 +71,8 @@ test(`shows accumulation beneath its chart with pushed waits and reviewed action
   detail.wait_condition!.levels[0]!.change_percent = '-3'
   sockets.at(-1)!.send(JSON.stringify({ type: 'snapshot', page: { activations: [detail], next_after: null }, detail }))
   await expect(card.getByText('≈ 3.00% fall', { exact: true })).toBeVisible()
-  await card.getByText('Change strategy', { exact: true }).click()
-  await expect(card.getByLabel('Accumulation strategy', { exact: true })).toBeVisible()
+  await expect(card.getByText('Change strategy', { exact: true })).toHaveCount(0)
+  await expect(card.getByLabel('Accumulation strategy', { exact: true })).toHaveCount(0)
   expect(commands).toBe(0)
   await card.screenshot({ path: `/private/tmp/accumulation-inline-${theme}-${testInfo.project.name}.png` })
   await card.getByRole('button', { name: 'Sell part', exact: true }).click()

@@ -43,7 +43,7 @@
                         <n-button v-if="accumulationCursor !== null" :disabled="accumulationLoading" @click="loadAccumulationStrategies(true)">Load more strategies</n-button>
                         <RouterLink class="accumulation-builder-link" :to="{ name: 'controlCenter', query: { mode: 'strategy-builder', target: 'strategy-builder' } }">Create in Strategy Builder</RouterLink>
                     </n-space>
-                    <p>The initial version applies to new registrations. Existing holdings keep their pin; switch them from Trading Overview. You can save an incomplete dry-run draft before creating a strategy.</p>
+                    <p>The initial version applies to new registrations. Existing registrations keep their saved version; change it below. You can save an incomplete dry-run draft before creating a strategy.</p>
                 </template>
                 <n-alert
                     v-if="tradeModeSwitchNotice"
@@ -195,12 +195,17 @@
                 />
             </n-form-item>
         </n-form>
+        <details v-if="dca.enabled && isAccumulationMode && dca.accumulation_available" id="accumulation-strategy-assignments" :open="showAssignments" @toggle="toggleAssignments">
+            <summary>Change strategy for an existing registration</summary>
+            <AccumulationStrategyAssignment v-if="showAssignments" />
+        </details>
     </n-card>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRoute } from 'vue-router'
+import AccumulationStrategyAssignment from './AccumulationStrategyAssignment.vue'
 import { fetchAccumulationStrategies } from '../../api/accumulation'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
 import type { DcaModel, StringSelectOption } from '../../config-editor/types'
@@ -222,6 +227,10 @@ const props = defineProps<{
 }>()
 
 const formRef = ref<FormInst | null>(null)
+const route = useRoute()
+const showAssignments = ref(typeof route?.query.symbol === 'string')
+watch(() => route?.query.symbol, symbol => { if (typeof symbol === 'string') showAssignments.value = true })
+function toggleAssignments(event: Event) { showAssignments.value = (event.target as HTMLDetailsElement).open }
 const tradeModeOptions: StringSelectOption[] = [
     { label: 'Dynamic DCA', value: TRADE_MODE_DYNAMIC_DCA },
     { label: 'Accumulation', value: TRADE_MODE_ACCUMULATION },
@@ -331,4 +340,5 @@ defineExpose({
     margin-bottom: 18px;
 }
 .accumulation-builder-link { display: inline-flex; align-items: center; min-height: 44px; }
+summary { cursor: pointer; padding-block: 12px; min-height: 44px; color: var(--mw-color-text-primary); }
 </style>

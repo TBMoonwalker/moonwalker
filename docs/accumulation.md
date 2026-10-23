@@ -68,7 +68,7 @@ future timestamps and unrecognized stale evidence still block trading.
 
 Expand its entry in **Open trades**. Beneath the chart, the accumulation status
 shows the current wait and any available target price/percentage. The same area
-shows the selected strategy and controls for changing it, pausing, resuming or
+shows the selected strategy as read-only information and controls for pausing, resuming or
 selling part or closing the holding. **Sell part** reveals an exact base-asset
 quantity field and a reviewed confirmation; it does not sell on the first click.
 Entry registration and blocked entry messages
@@ -77,6 +77,11 @@ appear in Open trades until there is an owned holding.
 **Utilities → Accumulation** contains account and inventory repair, interrupted
 requests, execution evidence, portfolio valuation and historical strategy
 comparison. These tools do not sit in the normal trading dashboard.
+Strategy selection and changes live only in **Configuration → Trade modes**.
+The initial version is the default for new registrations. Expand **Change strategy
+for an existing registration** there to review and apply a different saved version
+to one existing registration; the same control can retry a staged entry with a
+replacement version. Utilities and trade cards do not change strategies.
 Issue links select the affected symbol in Utilities. If that symbol cannot be
 loaded, the screen reports the error instead of selecting a different holding.
 
@@ -114,7 +119,7 @@ does not submit an order; passing enables strategy-driven buying.
 Correction stays paused until explicitly validated. Abandonment leaves the coins
 unmanaged and the registration stopped, without selling. A never-adopted abandoned
 entry can later be explicitly validated again or given a corrected CSV declaration.
-A compatible replacement strategy can be reviewed on these staged requests;
+A compatible replacement strategy can be reviewed in Trade modes configuration;
 changing the global initial pin never changes existing registrations.
 
 ## Buying strategy and capital

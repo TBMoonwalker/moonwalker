@@ -308,7 +308,8 @@ test('creates an accumulation variant and explicitly switches a holding to its e
   await page.route('**/config/all', route => route.fulfill({ json: {
     timezone: 'Europe/Vienna', signal: 'csv_signal', signal_settings: JSON.stringify({ csv_source: 'signals.csv' }), exchange: 'binance',
     timeframe: '1h', key: 'test-only', secret: 'test-only', currency: 'USDC', max_bots: 2,
-    bo: 10, tp: 1, capital_max_fund: 100, history_lookback_time: '180d', dca: false, dry_run: true, mstc: 4, trading_paused: false,
+    bo: 10, tp: 1, capital_max_fund: 100, history_lookback_time: '180d', dca: true, dry_run: true, mstc: 4, trading_paused: false,
+    trade_mode: 'accumulation', accumulation_available: true, accumulation_strategy_version_id: 5, market: 'spot',
   } }))
   await page.route('**/strategies', route => route.fulfill({ json: { strategies: [], palette: [] } }))
   await page.route('**/accumulation/**', async route => {
@@ -344,14 +345,18 @@ test('creates an accumulation variant and explicitly switches a holding to its e
   await editor.screenshot({ path: `/private/tmp/moonwalker-accumulation-builder-${testInfo.project.name}.png` })
   expect(await editor.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
   await page.goto('/control-center?mode=utilities#accumulation-controls')
-  const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
-  await panel.getByText('Manage accumulation', { exact: true }).click()
-  await expect(panel).toBeVisible()
-  await panel.getByLabel('Accumulation strategy version', { exact: true }).click()
+  const utilities = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await utilities.getByText('Manage accumulation', { exact: true }).click()
+  await expect(utilities.getByLabel('Accumulation strategy version', { exact: true })).toHaveCount(0)
+  await expect(utilities.getByRole('button', { name: 'Switch strategy', exact: true })).toHaveCount(0)
+  await page.goto('/control-center?mode=setup&target=dca')
+  await page.getByText('Change strategy for an existing registration', { exact: true }).click()
+  const panel = page.getByRole('region', { name: 'Existing accumulation strategy', exact: true })
+  await panel.getByLabel('Strategy for this registration', { exact: true }).click()
   await page.getByText('Accumulation dip · v1 · 1h', { exact: true }).click()
-  await panel.getByRole('button', { name: 'Switch strategy', exact: true }).click()
+  await panel.getByRole('button', { name: 'Review strategy change', exact: true }).click()
   expect(switches).toHaveLength(0)
-  await panel.getByRole('button', { name: 'Confirm switch strategy', exact: true }).click()
+  await panel.getByRole('button', { name: 'Confirm strategy change', exact: true }).click()
   await expect.poll(() => switches.length).toBe(1)
   expect(switches[0]).toMatchObject({ action: 'switch_strategy', target_version_id: 17, expected_revision: 12 })
   expect(pin).toBe(17)

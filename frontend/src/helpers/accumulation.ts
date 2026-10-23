@@ -1,5 +1,10 @@
 import type { AccumulationAction, AccumulationDetail } from '../types/accumulation'
 
+/** Keep reviewed strategy assignments and their retries in trade-mode configuration. */
+export function isAccumulationStrategyChange(command: { action: string; target_version_id?: number }): boolean {
+  return command.action === 'switch_strategy' || command.target_version_id !== undefined
+}
+
 export const accumulationActionLabels: Record<AccumulationAction, string> = {
   pause: 'Pause accumulation', resume: 'Resume accumulation', close: 'Close holding',
   retry_close: 'Retry remaining sale', sell_partial: 'Sell part', reactivate: 'Reactivate',
