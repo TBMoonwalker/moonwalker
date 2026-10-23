@@ -32,17 +32,23 @@ class WebSocketFanout:
         self._latest_payload: str | None = None
         self._has_subscribers = asyncio.Event()
         self._lock = asyncio.Lock()
+        self._stopped = False
 
     async def start(self) -> None:
         """Start the internal producer task if it is not already running."""
-        running_loop = asyncio.get_running_loop()
         async with self._lock:
-            if self._task is not None and self._task.get_loop() is not running_loop:
-                self._task = None
-            if self._task is None or self._task.done():
-                self._task = asyncio.create_task(
-                    self._run(), name=f"ws-fanout:{self._name}"
-                )
+            self._stopped = False
+            self._ensure_task()
+
+    def _ensure_task(self) -> None:
+        """Start a producer under the lock after subscription admission."""
+        running_loop = asyncio.get_running_loop()
+        if self._task is not None and self._task.get_loop() is not running_loop:
+            self._task = None
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(
+                self._run(), name=f"ws-fanout:{self._name}"
+            )
 
     async def stop(self) -> None:
         """Stop the internal producer task and notify subscribers to exit."""
@@ -50,6 +56,7 @@ class WebSocketFanout:
         subscribers: tuple[asyncio.Queue[str | object], ...] = ()
 
         async with self._lock:
+            self._stopped = True
             task = self._task
             self._task = None
             subscribers = tuple(self._subscribers)
@@ -66,11 +73,15 @@ class WebSocketFanout:
 
     async def subscribe(self) -> AsyncGenerator[str, None]:
         """Subscribe to fan-out updates as an async generator."""
-        await self.start()
         queue: asyncio.Queue[str | object] = asyncio.Queue(maxsize=1)
         latest_payload: str | None
 
         async with self._lock:
+            # A late socket must not resurrect producers after lifespan cleanup
+            # has closed the database. Only an explicit start opens a new lifespan.
+            if self._stopped:
+                return
+            self._ensure_task()
             self._subscribers.add(queue)
             self._has_subscribers.set()
             latest_payload = self._latest_payload

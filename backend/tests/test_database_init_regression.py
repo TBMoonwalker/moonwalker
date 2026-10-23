@@ -513,6 +513,7 @@ async def test_database_init_runs_schema_steps_before_trade_ledger_backfill(
         "ensure_accumulation_strategy_schema",
         "ensure_accumulation_return_schema",
         "ensure_accumulation_initial_entry_schema",
+        "ensure_trade_ledger_columns",
         "repair_index_only_corruption_if_needed",
         "backfill_trade_ledger_rows",
     ]

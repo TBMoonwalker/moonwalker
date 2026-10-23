@@ -897,6 +897,12 @@ class Database:
                     description="Identify ASAP base orders independently of strategy signals.",
                     apply=self._ensure_accumulation_initial_entry_schema,
                 ),
+                MigrationDefinition(
+                    version="2026-10-23-015-accumulation-dust-archive",
+                    phase="schema",
+                    description="Add exact inventory evidence to unsellable accumulation dust.",
+                    apply=self._ensure_trade_ledger_columns,
+                ),
             )
         )
 
