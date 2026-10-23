@@ -69,7 +69,7 @@ future timestamps and unrecognized stale evidence still block trading.
 The **Order status** column shows the current buy wait and any available target
 price/percentage. Use the usual **Sell** and **More** row actions, or expand the
 trade. The order card beside the chart shows the detailed next-buy condition.
-The expanded details show the read-only strategy, inventory and history.
+The expanded details show executed orders and any required action controls.
 The row actions are the single home for pausing, resuming, partial sales and closing. **Sell part** reveals an exact base-asset
 quantity field and a reviewed confirmation; it does not sell on the first click.
 Entry registration and blocked entry messages
@@ -80,8 +80,9 @@ history layout as Dynamic DCA: order size, amount, price and execution time.
 Manual sales appear as executed orders too. Holding summaries, inventory snapshots
 and activation/retry requests are excluded from this history; their accounting
 and audit records remain stored. Unknown execution values stay explicitly unknown.
-Strategy information and reviewed action controls sit outside the timeline in the
-same order card.
+Reviewed action controls sit outside the timeline in the same order card.
+Strategy information belongs in Configuration, without a repeated label below
+the order history.
 
 The dashboard uses the existing **Portfolio exposure** card without separate
 accumulation holdings or valuation sections. Registrations without an open

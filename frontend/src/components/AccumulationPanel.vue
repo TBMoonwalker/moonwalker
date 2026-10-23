@@ -17,7 +17,6 @@ const { visible, available, rows, selected, detail, loading, fresh, busy, error,
 const fieldId = (name: string) => `${selected.value ?? 'accumulation'}-${name}`
 const quote = computed(() => detail.value?.symbol.split('/')[1] ?? '')
 const base = computed(() => detail.value?.symbol.split('/')[0] ?? '')
-const pinnedStrategy = computed(() => panel.strategies.value.find(version => version.id === detail.value?.strategy_version_id))
 const routineActions = computed(() => actions.value.filter(action => ['pause', 'resume', 'close', 'retry_close', 'reactivate', 'abandon_entry', 'retry_entry'].includes(action)))
 const secondaryActions = computed(() => actions.value.filter(action => !routineActions.value.includes(action) && action !== 'sell_partial' && action !== 'switch_strategy'))
 const repairOptions = computed(() => (detail.value?.quarantined_orders ?? []).filter(order => order.has_lookup_identity).map((order, index) => ({ value: order.placement_operation_id, label: `${order.side === 'buy' ? 'Buy' : 'Manual sale'} · restored order ${index + 1}` })))
@@ -80,7 +79,6 @@ watch([() => props.intent?.id, fresh], async () => {
     <p v-if="available && rows.length === 0">No accumulation registrations. Add a fixed symbol with ASAP or import an existing holding with CSV.</p>
     <template v-if="detail">
       <AccumulationOutlook v-if="!hideOutlook" :detail="detail" :fresh="fresh" compact />
-      <p class="assigned-strategy">{{ pinnedStrategy ? `${pinnedStrategy.name} · v${pinnedStrategy.version} · ${pinnedStrategy.parameters.timeframe}` : detail.strategy_slug ?? 'Strategy unavailable' }}</p>
       <div v-if="!hideOutlook" class="accumulation-actions">
         <n-button v-for="action in routineActions" :key="action" :disabled="disabled" @click="prepare(action, $event)">{{ action === 'close' && detail.holding ? 'Sell and close' : accumulationActionLabels[action] }}</n-button>
         <n-button v-if="actions.includes('sell_partial')" :disabled="disabled" :aria-expanded="partialSaleOpen" @click="openPartialSale">Sell part</n-button>
@@ -175,7 +173,6 @@ watch([() => props.intent?.id, fresh], async () => {
 
 <style scoped>
 .accumulation-panel { display: grid; gap: 16px; min-width: 0; }
-.assigned-strategy { margin-right: auto; font-size: 14px; color: var(--mw-color-text-secondary); }
 h4 { margin: 0 0 8px; font-size: 16px; }
 h4:focus-visible { outline: var(--mw-focus-ring); outline-offset: var(--mw-focus-offset); }
 .accumulation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
