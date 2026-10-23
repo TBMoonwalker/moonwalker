@@ -55,6 +55,24 @@ async function click(wrapper: ReturnType<typeof mount>, text: string) {
 }
 
 describe('accumulation controls', () => {
+  it('reviews dust quantity and cost before archiving with the current close identity', async () => {
+    const row = snapshot({ state: 'closing', runtime_wait_reason: 'WAIT_REMAINDER',
+      holding: { ...snapshot().holding!, net_quantity: '0.0000048', remaining_cost: '0.390128303007857464591', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } },
+      operations: [{ operation_id: 'close-1', action: 'close', status: 'pending', result_state: 'closing', result_revision: 12, reason: null }] })
+    api.fetchAccumulationDetail.mockResolvedValue(row)
+    const wrapper = mount(AccumulationPanel)
+    await flushPromises()
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    await click(wrapper, 'Archive remaining dust')
+    expect(wrapper.text()).toContain('0.0000048')
+    expect(wrapper.text()).toContain('0.390128303007857464591')
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    await click(wrapper, 'Confirm archive remaining dust')
+    expect(api.sendAccumulationCommand.mock.calls[0][0]).toMatchObject({
+      action: 'archive_dust', previous_operation_id: 'close-1', expected_revision: 12,
+    })
+  })
+
 
   it('reviews exact inventory corrections and retains the same declaration after a lost response', async () => {
     api.fetchAccumulationDetail.mockResolvedValue(snapshot({ state: 'paused', explicitly_paused: true }))

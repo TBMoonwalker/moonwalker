@@ -292,7 +292,7 @@ export function useAccumulationPanel(symbol?: string) {
       command.target_version_id = targetVersion.value
     }
     if (['retry_entry', 'correct_import', 'abandon_entry'].includes(action)) command.previous_operation_id = row.entry!.operation_id
-    if (action === 'retry_close') {
+    if (['retry_close', 'archive_dust'].includes(action)) {
       const previous = accumulationClosePredecessor(row)
       if (!previous) { error.value = 'Refresh the current close before retrying.'; return }
       command.previous_operation_id = previous.operation_id

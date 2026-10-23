@@ -1,4 +1,4 @@
-export type AccumulationAction = 'pause' | 'resume' | 'close' | 'retry_close' | 'sell_partial' | 'reactivate' | 'retry_entry' | 'correct_import' | 'abandon_entry' | 'switch_strategy' | 'repair_order' | 'retire_command' | 'rebind_account' | 'adjust_inventory' | 'declare_ownership' | 'acknowledge_settlement' | 'restore_inventory'
+export type AccumulationAction = 'pause' | 'resume' | 'close' | 'retry_close' | 'archive_dust' | 'sell_partial' | 'reactivate' | 'retry_entry' | 'correct_import' | 'abandon_entry' | 'switch_strategy' | 'repair_order' | 'retire_command' | 'rebind_account' | 'adjust_inventory' | 'declare_ownership' | 'acknowledge_settlement' | 'restore_inventory'
 
 export interface AccumulationOperation {
   operation_id: string

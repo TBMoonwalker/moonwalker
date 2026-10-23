@@ -483,6 +483,7 @@ class Database:
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
             ),
             "unsellabletrades": (
+                ("accumulation_inventory_json", "TEXT NULL"),
                 ("deal_id", "TEXT NULL"),
                 ("execution_history_complete", "INTEGER NOT NULL DEFAULT 0"),
             ),

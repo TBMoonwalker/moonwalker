@@ -17,7 +17,7 @@ const { visible, available, rows, selected, detail, loading, fresh, busy, error,
 const fieldId = (name: string) => `${selected.value ?? 'accumulation'}-${name}`
 const quote = computed(() => detail.value?.symbol.split('/')[1] ?? '')
 const base = computed(() => detail.value?.symbol.split('/')[0] ?? '')
-const routineActions = computed(() => actions.value.filter(action => ['pause', 'resume', 'close', 'retry_close', 'reactivate', 'abandon_entry', 'retry_entry'].includes(action)))
+const routineActions = computed(() => actions.value.filter(action => ['pause', 'resume', 'close', 'retry_close', 'archive_dust', 'reactivate', 'abandon_entry', 'retry_entry'].includes(action)))
 const secondaryActions = computed(() => actions.value.filter(action => !routineActions.value.includes(action) && action !== 'sell_partial' && action !== 'switch_strategy'))
 const repairOptions = computed(() => (detail.value?.quarantined_orders ?? []).filter(order => order.has_lookup_identity).map((order, index) => ({ value: order.placement_operation_id, label: `${order.side === 'buy' ? 'Buy' : 'Manual sale'} · restored order ${index + 1}` })))
 const reviewedRepair = computed(() => repairOptions.value.find(option => option.value === draft.value?.placement_operation_id))
@@ -93,11 +93,12 @@ watch([() => props.intent?.id, fresh], async () => {
       <n-alert v-if="detail.quarantined_orders?.length" type="warning">Restored orders remain quarantined. Reconcile them before changing this holding. A missing or inconclusive exchange report cannot release the recorded commitment.</n-alert>
       <n-alert v-if="detail.quarantined_commands?.length" type="warning">Interrupted commands remain quarantined. Retire the old intents before choosing new actions. Commands with attached orders require order reconciliation first.</n-alert>
       <n-alert v-if="detail.state === 'closing'" type="warning">
-        Closing blocks new buys. Any remaining quantity stays recorded, including dust below the exchange minimum. Retry a remaining sale only after it becomes sellable; unsettled orders must reconcile first.
+        Closing blocks new buys. Any remaining quantity stays recorded, including dust below the exchange minimum. Retry a sellable remainder, or explicitly archive unsellable dust. Unsettled orders must reconcile first.
       </n-alert>
       <n-alert v-if="draft" type="warning" role="region" aria-label="Review trade action">
         <h4 ref="reviewHeading" tabindex="-1">Review {{ accumulationActionLabels[draft.action].toLowerCase() }} · {{ draft.symbol }}</h4>
         <p>{{ accumulationActionCopy(draft.action, draft.symbol) }}</p>
+        <p v-if="draft.action === 'archive_dust' && detail.holding">Archive <strong>{{ detail.holding.net_quantity }}</strong> {{ base }} with remaining cost <strong>{{ detail.holding.remaining_cost ?? 'Unknown' }}</strong> {{ quote }}. Exchange limits will be checked before archival.</p>
         <p v-if="draft.quantity">Quantity: <strong>{{ draft.quantity }}</strong> {{ base }}</p>
         <template v-if="draft.action === 'adjust_inventory'">
           <p>Direction: <strong>{{ draft.direction }}</strong>. Acquisition cost: <strong>{{ draft.acquisition_cost ?? 'Unknown / proportional existing basis for a removal' }}</strong> {{ quote }}.</p>

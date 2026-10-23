@@ -127,7 +127,12 @@ class AccumulationRuntime:
             assert command.target_version_id is not None
             await load_accumulation_strategy_version(command.target_version_id)
         scope = await self.adapter.account_scope(self.adapter.config())
-        result = await self.lifecycle.submit(payload, account_scope=scope)
+        if command.action == AccumulationAction.ARCHIVE_DUST:
+            from service.accumulation_dust import archive_accumulation_dust
+
+            result = await archive_accumulation_dust(payload, self.adapter)
+        else:
+            result = await self.lifecycle.submit(payload, account_scope=scope)
         self.notify(normalize_order_symbol(payload["symbol"]))
         return result
 

@@ -7,6 +7,7 @@ export function isAccumulationStrategyChange(command: { action: string; target_v
 
 export const accumulationActionLabels: Record<AccumulationAction, string> = {
   pause: 'Pause accumulation', resume: 'Resume accumulation', close: 'Close holding',
+  archive_dust: 'Archive remaining dust',
   retry_close: 'Retry remaining sale', sell_partial: 'Sell part', reactivate: 'Reactivate',
   retry_entry: 'Retry entry check', correct_import: 'Correct CSV', abandon_entry: 'Abandon entry',
   switch_strategy: 'Switch strategy',
@@ -58,7 +59,12 @@ function regularActions(row: AccumulationDetail): AccumulationAction[] {
     ]
   }
   if (row.state === 'closing') {
-    return accumulationClosePredecessor(row) ? ['retry_close'] : []
+    const previous = accumulationClosePredecessor(row)
+    if (!previous) return []
+    return row.holding && row.holding_integrity === 'owned' &&
+      row.holding.execution_history_complete && row.holding.fees?.pending_reports === 0 &&
+      ['pending', 'reconciled'].includes(previous.status)
+      ? ['retry_close', 'archive_dust'] : ['retry_close']
   }
   if (pending) return []
   if (row.state === 'stopped' && !row.holding) return ['reactivate']
@@ -79,6 +85,7 @@ export function accumulationActionCopy(action: AccumulationAction, symbol: strin
     pause: 'Block new buys and settle any outstanding purchase.',
     resume: 'Revalidate the current strategy and allow new accumulation buys.',
     close: 'Block new buys and sell the managed quantity. Any unsellable remainder stays recorded in Closing.',
+    archive_dust: 'Move only the unsellable remainder to Unsellable trades, preserving its exact quantity, cost and history. No coins are sold and no proceeds or loss are invented. The registration stops; you can explicitly reactivate it afterward. Sellable inventory and unsettled orders cannot be archived.',
     retry_close: 'Retry selling the remaining managed quantity after the previous sale is reconciled. No coins will be bought to meet a minimum.',
     sell_partial: 'Sell only the entered base-asset quantity. The remaining holding stays managed.',
     reactivate: 'Revalidate this stopped registration and allow new buys with its pinned strategy.',

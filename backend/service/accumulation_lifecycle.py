@@ -394,6 +394,10 @@ class AccumulationLifecycleService:
     ) -> AccumulationCommandResult:
         """Persist an idempotent revision-checked command, without exchange effects."""
         command = AccumulationCommand.from_dict(payload)
+        if command.action == AccumulationAction.ARCHIVE_DUST:
+            raise AccumulationStateError(
+                "Dust archival requires fresh exchange evidence."
+            )
         _validate_scope(account_scope)
         request_json = command.request_json(account_scope)
 

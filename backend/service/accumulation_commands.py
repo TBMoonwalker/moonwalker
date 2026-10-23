@@ -21,6 +21,7 @@ class AccumulationAction(StrEnum):
     RESUME = "resume"
     CLOSE = "close"
     RETRY_CLOSE = "retry_close"
+    ARCHIVE_DUST = "archive_dust"
     SELL_PARTIAL = "sell_partial"
     SWITCH_STRATEGY = "switch_strategy"
     REACTIVATE = "reactivate"
@@ -70,7 +71,8 @@ class AccumulationCommand:
             {"quantity"}
             if action == AccumulationAction.SELL_PARTIAL
             else {"previous_operation_id"}
-            if action == AccumulationAction.RETRY_CLOSE
+            if action
+            in {AccumulationAction.RETRY_CLOSE, AccumulationAction.ARCHIVE_DUST}
             else {"target_version_id"}
             if action == AccumulationAction.SWITCH_STRATEGY
             else set()
@@ -104,7 +106,8 @@ class AccumulationCommand:
             target,
             quantity,
             validate_operation_id(payload["previous_operation_id"])
-            if action == AccumulationAction.RETRY_CLOSE
+            if action
+            in {AccumulationAction.RETRY_CLOSE, AccumulationAction.ARCHIVE_DUST}
             else None,
         )
 

@@ -434,6 +434,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                                 trigger: 'click',
                                 options: [
                                     { key: 'details', label: 'Trade details' },
+                                    ...(registration?.state === 'closing' ? [{ key: 'archive_dust', label: 'Archive remaining dust' }] : []),
                                     { key: paused ? 'resume' : 'pause', label: paused ? 'Resume automation' : 'Pause automation' },
                                     { key: 'sell_partial', label: 'Sell part' },
                                     { key: 'adjust_inventory', label: 'Inventory correction' },

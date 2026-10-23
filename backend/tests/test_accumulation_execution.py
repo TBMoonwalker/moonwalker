@@ -164,6 +164,7 @@ async def env(tmp_path, monkeypatch):
         "accumulation_runtime",
         "accumulation_account_rebind",
         "accumulation_repair",
+        "accumulation_dust",
     ):
         monkeypatch.setattr(
             f"service.{name}.lifecycle_mutation_coordinator", coordinator
@@ -3665,3 +3666,341 @@ async def test_asap_can_open_bo_from_fresh_binance_balance_with_old_account_upda
     await runtime.tick()
     assert len(client.calls) == 1
     assert (await model.PlacementIntent.get()).state == "completed"
+
+
+async def archive_dust(env, activation, operation_id="archive-dust"):
+    from service.accumulation_dust import archive_accumulation_dust
+
+    return await archive_accumulation_dust(
+        {
+            "symbol": activation.symbol,
+            "action": "archive_dust",
+            "operation_id": operation_id,
+            "expected_revision": activation.revision,
+            "previous_operation_id": "operator-sale",
+        },
+        env[0],
+    )
+
+
+@pytest.mark.asyncio
+async def test_archive_dust_preserves_exact_inventory_history_and_idempotency(env):
+    from service.accumulation_dust import archive_accumulation_dust
+    from service.accumulation_status import get_accumulation_status
+
+    activation, holding = await close_with_remainder(env, "0.00048")
+    before = holding.accumulation_remaining_cost
+    orders = await model.TradeExecutions.all().count()
+    checkpoints = await model.AccumulationFillCheckpoint.all().count()
+    revision = activation.revision
+    result = await archive_dust(env, activation)
+    assert result.status == "applied" and result.state == "stopped"
+    await activation.refresh_from_db()
+    assert activation.holding_id is None and activation.explicitly_paused
+    assert activation.revision == revision + 1
+    assert not await model.OpenTrades.exists()
+    archived = await model.UnsellableTrades.get(deal_id=holding.deal_id)
+    evidence = json.loads(archived.accumulation_inventory_json)
+    assert evidence["inventory"]["quantity"] == "0.00048"
+    assert evidence["inventory"]["remaining_cost"] == before
+    assert (
+        evidence["inventory"]["disposal_proceeds"]
+        == holding.accumulation_disposal_proceeds
+    )
+    assert evidence["account_scope"] == activation.account_scope
+    assert await model.TradeExecutions.all().count() == orders
+    assert await model.AccumulationFillCheckpoint.all().count() == checkpoints
+    assert not await model.ClosedTrades.exists()
+    assert len(env[1].calls) == 2  # Original buy and sale only.
+    snapshot = await get_accumulation_status(activation.symbol, wait_reasons={})
+    assert not snapshot["inventory_restore_required"]
+    original = {
+        "symbol": activation.symbol,
+        "action": "archive_dust",
+        "operation_id": "archive-dust",
+        "expected_revision": revision,
+        "previous_operation_id": "operator-sale",
+    }
+    assert await archive_accumulation_dust(original, env[0]) == result
+    assert await model.UnsellableTrades.all().count() == 1
+    # Reactivation is an explicit independent command; archived coins remain unmanaged.
+    await AccumulationLifecycleService().submit(
+        {
+            "symbol": activation.symbol,
+            "action": "reactivate",
+            "operation_id": "start-after-dust",
+            "expected_revision": activation.revision,
+        },
+        account_scope=activation.account_scope,
+    )
+    assert await model.UnsellableTrades.all().count() == 1
+
+
+@pytest.mark.asyncio
+async def test_archive_rejects_sellable_or_unsettled_inventory_without_changes(env):
+    from service.accumulation_state import AccumulationConflictError
+
+    activation, holding = await close_with_remainder(env, "1")
+    with pytest.raises(AccumulationConflictError, match="sellable"):
+        await archive_dust(env, activation)
+    assert not await model.UnsellableTrades.exists()
+    placement = await model.PlacementIntent.get(
+        id=(
+            await model.AccumulationLifecycleOperation.get(operation_id="operator-sale")
+        ).placement_id
+    )
+    placement.state = "indeterminate"
+    await placement.save()
+    with pytest.raises(AccumulationConflictError, match="reconciliation"):
+        await archive_dust(env, activation)
+    assert await model.OpenTrades.exists()
+
+
+@pytest.mark.asyncio
+async def test_archive_rejects_inventory_race_and_retries_after_atomic_rollback(
+    env, monkeypatch
+):
+    from service.accumulation_state import AccumulationConflictError
+
+    activation, holding = await close_with_remainder(env, "0.00048")
+    actual = env[0].sale_inputs
+
+    async def changed(*args, **kwargs):
+        await model.OpenTrades.filter(id=holding.id).update(
+            accumulation_remaining_cost="999"
+        )
+        return await actual(*args, **kwargs)
+
+    monkeypatch.setattr(env[0], "sale_inputs", changed)
+    with pytest.raises(AccumulationConflictError, match="changed"):
+        await archive_dust(env, activation)
+    assert not await model.UnsellableTrades.exists()
+    await model.OpenTrades.filter(id=holding.id).update(
+        accumulation_remaining_cost=holding.accumulation_remaining_cost
+    )
+    monkeypatch.setattr(env[0], "sale_inputs", actual)
+    original = model.AccumulationLifecycleOperation.create
+    monkeypatch.setattr(
+        model.AccumulationLifecycleOperation,
+        "create",
+        AsyncMock(side_effect=RuntimeError("disk failure")),
+    )
+    with pytest.raises(RuntimeError, match="disk failure"):
+        await archive_dust(env, activation)
+    assert not await model.UnsellableTrades.exists()
+    assert await model.OpenTrades.exists()
+    await activation.refresh_from_db()
+    assert activation.state == "closing"
+    monkeypatch.setattr(model.AccumulationLifecycleOperation, "create", original)
+    assert (await archive_dust(env, activation)).status == "applied"
+
+
+@pytest.mark.asyncio
+async def test_archive_dust_minimum_check_freshness_and_scope(env, monkeypatch):
+    from service.accumulation_dust import archive_accumulation_dust
+    from service.accumulation_state import AccumulationConflictError
+
+    activation, _ = await close_with_remainder(
+        env, "0.05"
+    )  # Precision allows it, notional does not.
+    original = env[0].sale_inputs
+
+    async def stale(*args, **kwargs):
+        try:
+            return await original(*args, **kwargs)
+        finally:
+            env[2][0] += 10001
+
+    monkeypatch.setattr(env[0], "sale_inputs", stale)
+    with pytest.raises(AccumulationConflictError, match="evidence changed"):
+        await archive_dust(env, activation)
+    assert not await model.UnsellableTrades.exists()
+    monkeypatch.setattr(env[0], "sale_inputs", original)
+    assert (await archive_dust(env, activation)).status == "applied"
+    row = await model.UnsellableTrades.get()
+    assert json.loads(row.accumulation_inventory_json)["restriction"] == "WAIT_MINIMUM"
+    # Reusing an ID for another command is rejected even after archive success.
+    with pytest.raises(AccumulationConflictError, match="another request"):
+        await archive_accumulation_dust(
+            {
+                "symbol": activation.symbol,
+                "action": "archive_dust",
+                "operation_id": "archive-dust",
+                "expected_revision": activation.revision + 1,
+                "previous_operation_id": "operator-sale",
+            },
+            env[0],
+        )
+
+
+@pytest.mark.asyncio
+async def test_archive_is_reachable_through_runtime_without_placing_an_order(env):
+    activation, _ = await close_with_remainder(env, "0.00048")
+    runtime = AccumulationRuntime(env[0])
+    runtime._started = True
+    result = await runtime.submit_command(
+        {
+            "symbol": activation.symbol,
+            "action": "archive_dust",
+            "operation_id": "archive-via-runtime",
+            "expected_revision": activation.revision,
+            "previous_operation_id": "operator-sale",
+        }
+    )
+    assert result.status == "applied"
+    assert len(env[1].calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_archive_backup_round_trip_retains_exact_record_and_empty_registration(
+    env, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from service.accumulation_status import get_accumulation_status
+    from service.backup_restore import BackupService
+
+    activation, holding = await close_with_remainder(env, "0.00048")
+    await archive_dust(env, activation)
+    await model.StrategyDefinition.create(
+        slug="accumulation_dip_v1", name="Accumulate", active_version=1
+    )
+    await model.AppConfig.create(key="timezone", value="UTC", value_type="str")
+    snapshot = await BackupService().export_backup(True)
+    exact = snapshot["trade_data"]["unsellable_trades"][0][
+        "accumulation_inventory_json"
+    ]
+    monkeypatch.setattr(
+        "service.backup_restore.Config.instance",
+        AsyncMock(
+            return_value=SimpleNamespace(reload=AsyncMock(), snapshot=lambda: {})
+        ),
+    )
+    monkeypatch.setattr(
+        BackupService, "_refresh_required_history", AsyncMock(return_value=([], []))
+    )
+    await BackupService().restore_backup(snapshot, restore_trade_data=True)
+    archived = await model.UnsellableTrades.get(deal_id=holding.deal_id)
+    assert archived.accumulation_inventory_json == exact
+    result = await get_accumulation_status(activation.symbol, wait_reasons={})
+    assert result["state"] == "stopped" and not result["inventory_restore_required"]
+    assert not await model.OpenTrades.exists()
+
+
+@pytest.mark.asyncio
+async def test_concurrent_dust_archives_have_one_atomic_winner(env, monkeypatch):
+    from service.accumulation_state import AccumulationConflictError
+
+    activation, _ = await close_with_remainder(env, "0.00048")
+    original = env[0].sale_inputs
+    ready = asyncio.Event()
+    arrivals = 0
+
+    async def simultaneous(*args, **kwargs):
+        nonlocal arrivals
+        arrivals += 1
+        if arrivals == 8:
+            ready.set()
+        await ready.wait()
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(env[0], "sale_inputs", simultaneous)
+    results = await asyncio.gather(
+        *(archive_dust(env, activation, f"archive-{i}") for i in range(8)),
+        return_exceptions=True,
+    )
+    assert sum(not isinstance(row, BaseException) for row in results) == 1
+    assert sum(isinstance(row, AccumulationConflictError) for row in results) == 7
+    assert await model.UnsellableTrades.all().count() == 1
+    assert (
+        await model.AccumulationLifecycleOperation.filter(action="archive_dust").count()
+        == 1
+    )
+    assert not await model.OpenTrades.exists()
+    assert len(env[1].calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_existing_database_adds_archive_column_without_losing_unsellable_rows(
+    env,
+):
+    from service.database import Database
+
+    connection = Tortoise.get_connection("default")
+    await model.UnsellableTrades.create(symbol="BTC/USDC", amount=0.01, cost=1)
+    await connection.execute_script(
+        "ALTER TABLE unsellabletrades DROP COLUMN accumulation_inventory_json;"
+    )
+    database = Database()
+    database.db_url = env[4]
+    await database._ensure_trade_ledger_columns()
+    await database._ensure_trade_ledger_columns()
+    row = await model.UnsellableTrades.get(symbol="BTC/USDC")
+    assert row.amount == 0.01 and row.cost == 1
+    assert row.accumulation_inventory_json is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "incomplete_fees",
+        "unlinked_holding",
+        "wrong_close",
+        "stale_revision",
+        "wrong_account",
+    ],
+)
+async def test_archive_rejects_invalid_ownership_and_settlement_evidence(env, failure):
+    from service.accumulation_dust import archive_accumulation_dust
+    from service.accumulation_state import AccumulationConflictError
+
+    activation, holding = await close_with_remainder(env, "0.00048")
+    payload = {
+        "symbol": activation.symbol,
+        "action": "archive_dust",
+        "operation_id": "archive-invalid",
+        "expected_revision": activation.revision,
+        "previous_operation_id": "operator-sale",
+    }
+    if failure == "incomplete_fees":
+        checkpoint = await model.AccumulationFillCheckpoint.get(
+            deal_id=holding.deal_id, placement__side="sell"
+        )
+        checkpoint.fees_complete = False
+        await checkpoint.save()
+    elif failure == "unlinked_holding":
+        activation.holding_id = None
+        await activation.save()
+    elif failure == "wrong_close":
+        payload["previous_operation_id"] = "another-close"
+    elif failure == "stale_revision":
+        payload["expected_revision"] -= 1
+    else:
+        env[3]["key"] = "different-account"
+    with pytest.raises(AccumulationConflictError):
+        await archive_accumulation_dust(payload, env[0])
+    assert not await model.UnsellableTrades.exists()
+    assert await model.OpenTrades.exists()
+    assert len(env[1].calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_archived_zero_fees_match_equivalent_checkpoint_decimal_spellings(env):
+    from service.accumulation_status import get_accumulation_status
+
+    activation, holding = await close_with_remainder(env, "0.00048")
+    checkpoint = await model.AccumulationFillCheckpoint.get(
+        deal_id=holding.deal_id, placement__side="sell"
+    )
+    inventory = json.loads(checkpoint.inventory_json)
+    inventory["fees"]["USDC"] = "0.00000000"
+    checkpoint.inventory_json = json.dumps(inventory)
+    await checkpoint.save()
+    holding.accumulation_fees_json = json.dumps(
+        {"totals": inventory["fees"], "pending_reports": 0}
+    )
+    await holding.save()
+    await archive_dust(env, activation)
+    status = await get_accumulation_status(activation.symbol, wait_reasons={})
+    assert status["inventory_restore_required"] is False

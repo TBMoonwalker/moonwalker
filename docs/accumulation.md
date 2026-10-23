@@ -369,3 +369,25 @@ as Dynamic DCA. The inspector contains accumulation execution settings alongside
 the shared graph. Existing versions and holding pins are preserved. The optional
 experimental downtrend/sideways preset filters subsequent buys; it does not delay
 the initial ASAP base order. Strategy assignment remains in Configuration.
+
+### Archive an unsellable closing remainder
+
+After a reconciled full-close sale, choose **More trade actions → Archive remaining
+dust** in the Open trades entry. Review the exact remaining quantity and cost,
+then confirm. Moonwalker checks fresh wallet, order-book and market precision
+information. A sellable remainder, unresolved order, incomplete sale fees, changed
+account or stale revision prevents archival.
+
+The archive atomically moves the remainder to the existing **Unsellable trades**
+view and stops the registration. Its exact decimal quantity, remaining cost
+(including unknown basis), contributed funds, actual disposal proceeds, fees and
+execution history remain recorded. No order is placed and no sale proceeds or
+realized loss are created. The archive and its audit snapshot survive full backup
+and restore. Old installations add the archive column without replacing records.
+
+Choose **Reactivate** separately to resume accumulation with the pinned strategy.
+Archived coins remain unmanaged wallet surplus; a new trade does not adopt or sell
+them. Clean them up on the exchange before using the existing **Resolve** action
+in Unsellable trades. The immutable archive command retains its audit snapshot.
+Return reporting stays conservative and unavailable for the affected registration
+rather than treating the unsold remainder as zero value.

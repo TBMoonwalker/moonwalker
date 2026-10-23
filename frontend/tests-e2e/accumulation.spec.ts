@@ -443,3 +443,58 @@ for (const action of ['declare_ownership', 'restore_inventory', 'acknowledge_set
     await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-${action}-${testInfo.project.name}.png` })
   })
 }
+
+test('reviews and archives exact dust without a sale, then shows the preserved Unsellable record', async ({ page }, testInfo) => {
+  await page.route('**/config/all', route => route.fulfill({ json: {
+    timezone: 'Europe/Vienna', signal: 'asap', symbol_list: 'BTC/USDC', exchange: 'binance',
+    timeframe: '1h', key: 'test-only', secret: 'test-only', currency: 'USDC', max_bots: 2,
+    bo: 10, tp: 1, capital_max_fund: 100, history_lookback_time: '180d', dca: true, dry_run: true, mstc: 4,
+    trade_mode: 'accumulation', accumulation_available: true, accumulation_strategy_version_id: 5, market: 'spot',
+  } }))
+  const detail: AccumulationDetail = {
+    activation_id: 'dust', symbol: 'BTC/USDC', state: 'closing', explicitly_paused: false, account_matches: true,
+    revision: 34, reason: null, runtime_wait_reason: 'WAIT_REMAINDER', observations_initialized: true,
+    strategy_version_id: 5, strategy_slug: 'Patient dip', strategy_version: 1,
+    holding_integrity: 'owned', holding: { net_quantity: '0.0000048', remaining_cost: '0.390128303007857464591', contributed_quote: '1299', disposal_proceeds: '1298', basis_provenance: 'exchange_fills', execution_history_complete: true, fees: { totals: {}, pending_reports: 0 } },
+    entry: null, operations: [{ operation_id: 'close-1', action: 'close', status: 'pending', result_state: 'closing', result_revision: 34, reason: null }], older_operations_available: false,
+  }
+  const requests: Record<string, unknown>[] = []
+  const archived = { id: 10, symbol: detail.symbol, deal_id: 'dust-deal', amount: 4.8e-6, cost: 0.39,
+    profit: 0, profit_percent: 0, so_count: 1, current_price: 81358, avg_price: 81250,
+    unsellable_reason: 'Accumulation dust archived (unsold)', open_date: '2026-10-22',
+    accumulation_inventory_json: JSON.stringify({ schema_version: 1, inventory: { quantity: detail.holding!.net_quantity, remaining_cost: detail.holding!.remaining_cost } }),
+  }
+  await page.routeWebSocket('**/trades/unsellable', socket => socket.send(JSON.stringify([archived])))
+  await page.route('**/accumulation/**', async route => {
+    const path = new URL(route.request().url()).pathname
+    if (route.request().method() === 'POST') {
+      expect(path).toBe('/accumulation/commands')
+      const command = route.request().postDataJSON()
+      requests.push(command)
+      if (requests.length === 1) return route.abort('failed')
+      detail.state = 'stopped'; detail.explicitly_paused = true; detail.revision = 35
+      detail.holding = null; detail.holding_integrity = 'unlinked'; detail.reason = 'dust_archived'
+      detail.runtime_wait_reason = null; detail.operations = []
+      return route.fulfill({ json: { operation: { operation_id: command.operation_id, activation_id: detail.activation_id, status: 'applied', state: 'stopped', revision: 35, reason: 'dust_archived' } } })
+    }
+    return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [], next_after_id: null } : path.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
+  })
+  await page.goto('/?symbol=BTC%2FUSDC')
+  const panel = page.getByRole('region', { name: 'BTC/USDC trade information', exact: true })
+  await panel.getByRole('button', { name: 'Archive remaining dust', exact: true }).click()
+  await expect(panel.getByText(/0.0000048/)).toBeVisible()
+  await expect(panel.getByText(/0.390128303007857464591/)).toBeVisible()
+  expect(requests).toHaveLength(0)
+  await panel.getByRole('button', { name: 'Confirm archive remaining dust', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Retry same request', exact: true })).toBeVisible()
+  await panel.getByRole('button', { name: 'Retry same request', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Reactivate', exact: true })).toBeVisible()
+  expect(requests).toHaveLength(2)
+  expect(requests[0]).toEqual(requests[1])
+  expect(requests[0]).toMatchObject({ action: 'archive_dust', previous_operation_id: 'close-1', expected_revision: 34 })
+  await page.getByRole('button', { name: /^Unsellable trades/ }).click()
+  await expect(page.getByText('0.0000048 BTC', { exact: true })).toBeVisible()
+  await expect(page.getByText('Accumulation dust archived (unsold)', { exact: true })).toBeVisible()
+  if (testInfo.project.name !== 'mobile-chromium') await expect(page.getByText('Unsold', { exact: true })).toBeVisible()
+  await page.screenshot({ path: `/private/tmp/moonwalker-dust-archive-${testInfo.project.name}.png`, fullPage: true })
+})
