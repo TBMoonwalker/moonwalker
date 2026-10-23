@@ -555,6 +555,19 @@ describe('accumulation controls', () => {
     wrapper.unmount()
   })
 
+  it('does not duplicate row actions or strategy testing in expanded trade information', async () => {
+    const wrapper = mount(AccumulationTradeStatus, { props: { symbol: 'BTC/USDC', hideOutlook: true, intent: { action: 'pause', id: 1 } }, global: { stubs: { RouterLink: true } } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Confirm pause accumulation')
+    await click(wrapper, 'Cancel')
+    for (const label of ['Sell and close', 'Pause accumulation', 'Sell part']) {
+      expect(wrapper.findAll('button').some(button => button.text() === label)).toBe(false)
+    }
+    expect(wrapper.text()).not.toContain('Historical strategy comparison')
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
   it('focuses the review heading and restores the initiating button on cancel', async () => {
     const wrapper = mount(AccumulationTradeStatus, { props: { symbol: 'BTC/USDC' }, attachTo: document.body, global: { stubs: { RouterLink: true } } })
     await flushPromises()

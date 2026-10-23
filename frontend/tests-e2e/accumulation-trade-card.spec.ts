@@ -37,6 +37,7 @@ test(`integrates accumulation with order status and trade details with pushed wa
       requests.push(command)
       detail.revision++
       if (command.action === 'pause') { detail.state = 'paused'; detail.explicitly_paused = true }
+      for (const socket of sockets) { try { socket.send(JSON.stringify({ type: 'snapshot', page: { activations: [detail], next_after: null }, detail })) } catch {} }
       return route.fulfill({ json: { operation: { operation_id: command.operation_id, activation_id: detail.activation_id, status: 'applied', state: detail.state, revision: detail.revision, reason: null } } })
     }
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [{ id: 7, name: 'Patient dip', version: 1, parameters: { timeframe: '1h' } }, { id: 8, name: 'Deeper dip', version: 2, parameters: { timeframe: '4h' } }], next_after_id: null }
@@ -65,8 +66,8 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await expect(page.locator('.expanded-order-card').getByRole('heading', { name: 'Waiting for next buy' })).toBeVisible()
   await expect(page.locator('.expanded-order-card').getByText('≈ 2.00% fall', { exact: true })).toBeVisible()
   await expect(card.getByText('Patient dip · v1 · 1h', { exact: true })).toBeVisible()
-  await expect(card.getByRole('button', { name: 'Pause accumulation', exact: true })).toBeEnabled()
-  await expect(card.getByRole('button', { name: 'Sell and close', exact: true })).toBeEnabled()
+  await expect(card.getByRole('button', { name: 'Pause accumulation', exact: true })).toHaveCount(0)
+  await expect(card.getByRole('button', { name: 'Sell and close', exact: true })).toHaveCount(0)
   expect(await card.evaluate(element => {
     const chart = element.parentElement!.querySelector('.expanded-replay-chart')!
     return !!(chart.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)
@@ -82,7 +83,15 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await expect(card.getByLabel('Accumulation strategy', { exact: true })).toHaveCount(0)
   expect(commands).toBe(0)
   await page.locator('.expanded-trade-container').screenshot({ path: `/private/tmp/accumulation-inline-${theme}-${testInfo.project.name}.png` })
-  await card.getByRole('button', { name: 'Sell part', exact: true }).click()
+  async function rowAction(label: string) {
+    if (testInfo.project.name === 'mobile-chromium') {
+      await page.locator('.open-trade-mobile-details .n-card-header__close').click()
+      await expect(card).not.toBeVisible()
+    }
+    await page.getByRole('button', { name: 'More trade actions', exact: true }).click()
+    await page.getByText(label, { exact: true }).click()
+  }
+  await rowAction('Sell part')
   const quantity = card.getByLabel('Partial sale quantity · BTC', { exact: true })
   await expect(quantity).toBeFocused()
   await quantity.fill('0.000000000000000001')
@@ -98,17 +107,18 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await confirm.click()
   await expect.poll(() => commands).toBe(1)
   expect(requests[0]).toMatchObject({ symbol: 'BTC/USDC', action: 'sell_partial', quantity: '0.000000000000000001' })
-  await card.getByRole('button', { name: 'Pause accumulation', exact: true }).click()
+  await rowAction('Pause automation')
+  await expect(card.getByRole('button', { name: 'Confirm pause accumulation', exact: true })).toBeEnabled()
   detail.revision++
-  sockets.at(-1)!.send(JSON.stringify({ type: 'snapshot', page: { activations: [detail], next_after: null }, detail }))
+  for (const socket of sockets) { try { socket.send(JSON.stringify({ type: 'snapshot', page: { activations: [detail], next_after: null }, detail })) } catch {} }
   await expect(card.getByRole('button', { name: 'Confirm pause accumulation', exact: true })).toBeDisabled()
   await expect(card.getByText('The holding changed. Cancel and review the action again.', { exact: true })).toBeVisible()
   expect(commands).toBe(1)
   await card.getByRole('button', { name: 'Cancel', exact: true }).click()
-  await card.getByRole('button', { name: 'Pause accumulation', exact: true }).click()
+  await rowAction('Pause automation')
   await card.getByRole('button', { name: 'Confirm pause accumulation', exact: true }).click()
   await expect.poll(() => commands).toBe(2)
-  await expect(card.getByRole('button', { name: 'Resume accumulation', exact: true })).toBeEnabled()
+  await expect(card.getByRole('button', { name: 'Resume accumulation', exact: true })).toHaveCount(0)
   expect(await card.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
 })
 }

@@ -69,15 +69,14 @@ future timestamps and unrecognized stale evidence still block trading.
 The **Order status** column shows the current buy wait and any available target
 price/percentage. Use the usual **Sell** and **More** row actions, or expand the
 trade. The order card beside the chart shows the detailed next-buy condition.
-Beneath it are the read-only strategy and controls for pausing, resuming,
-selling part or closing the holding. **Sell part** reveals an exact base-asset
+The expanded details show the read-only strategy, inventory and history.
+The row actions are the single home for pausing, resuming, partial sales and closing. **Sell part** reveals an exact base-asset
 quantity field and a reviewed confirmation; it does not sell on the first click.
 Entry registration and blocked entry messages
 appear in Open trades until there is an owned holding.
 
 **Inventory and history** in the expanded trade contains account and inventory
-repair, interrupted requests, execution evidence, portfolio valuation and
-historical strategy comparison. Portfolio sections explicitly cover all holdings;
+repair, interrupted requests, execution evidence and portfolio valuation. Portfolio sections explicitly cover all holdings;
 individual inventory and requests belong to the selected symbol. Registrations
 without an open trade, including stopped records, are expandable in the same
 Open trades area. Utilities contains no accumulation management.
@@ -276,13 +275,22 @@ bounded routine result sets. Registry/history pages are capped at 100 records.
 
 ## Historical strategy comparison
 
-Expand the symbol in **Open trades → Inventory and history**, then expand
-**Historical strategy comparison**. Choose a saved
-version, initial quote funding, buy fee and adverse slippage in basis points, and
-a fixed DCA interval in candles. Paste at most 20000 completed candles in ascending
-order, without a header: `close_ms;open;high;low;close`. Timestamps are UTC closing
-milliseconds aligned to the selected timeframe. Include the strategy's displayed
-warmup requirement plus at least two evaluation candles.
+Open **Backtest**, select **Accumulation** as the trade mode and choose an exact
+saved strategy version. The existing symbol picker, date range, Run action,
+market chart and result tabs are shared with Dynamic DCA. The timeframe comes
+from the saved version. Set initial funding, fee, adverse buy slippage in basis
+points and the fixed DCA comparison interval. Market history, including warmup,
+is fetched automatically from the exchange; no candle paste is needed.
+The 20000-candle limit includes warmup. Only completed bars are evaluated.
+
+The summary shows buys, coins accumulated, spending including fees, remaining
+cash, ending value and drawdown. **Trades** shows buy executions without fabricated
+exits or realized profits. **Comparison** shows accumulation, buy-and-hold and
+fixed-interval DCA with equal funding. Run metadata and modeling caveats remain
+in the same result workspace. Chart markers and execution rows show at most 100
+buys; totals include every buy. This tests the strategy after warmup, independently
+of an ASAP initial base-order signal. The isolated `/accumulation/replay` API
+remains available for supplied candle data.
 
 The isolated simulation uses the same pure market, observation, signal and sizing
 functions as live accumulation. Signals execute at the next supplied candle open;

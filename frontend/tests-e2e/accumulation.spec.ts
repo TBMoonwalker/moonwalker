@@ -460,36 +460,3 @@ for (const action of ['declare_ownership', 'restore_inventory', 'acknowledge_set
     await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-${action}-${testInfo.project.name}.png` })
   })
 }
-
-test('runs an isolated historical comparison with a saved version and displays modeling limits', async ({ page }, testInfo) => {
-  await page.route('**/config/all', route => route.fulfill({ json: {
-    timezone: 'Europe/Vienna', signal: 'csv_signal', signal_settings: JSON.stringify({ csv_source: 'signals.csv' }), exchange: 'binance',
-    timeframe: '1h', key: 'test-only', secret: 'test-only', currency: 'USDC', max_bots: 2,
-    bo: 10, tp: 1, capital_max_fund: 100, history_lookback_time: '180d', dca: false, dry_run: true, mstc: 4,
-  } }))
-  const detail: AccumulationDetail = { activation_id: 'comparison', symbol: 'BTC/USDC', state: 'stopped', explicitly_paused: true, revision: 1, reason: null, runtime_wait_reason: null, observations_initialized: true, strategy_version_id: 17, strategy_slug: 'patient', strategy_version: 1, holding_integrity: 'unlinked', holding: null, entry: null, operations: [], older_operations_available: false }
-  const requests: Record<string, unknown>[] = []
-  await page.route('**/accumulation/**', route => {
-    const path = new URL(route.request().url()).pathname
-    if (route.request().method() === 'POST') {
-      expect(path).toBe('/accumulation/replay')
-      requests.push(route.request().postDataJSON())
-      return route.fulfill({ json: { gap_count: 0, warmup_candles: 253, evaluation_candles: 50, results: ['accumulation', 'buy_and_hold', 'fixed_interval_dca'].map(strategy => ({ strategy, contributed_quote: '1000', units: '1.234567890123456789', spent_quote_including_fees: '100', fees_quote: '0.1', cash_quote: '900', ending_value_quote: '1020', maximum_drawdown_fraction: '0.05', buy_count: 2 })), caveats: ['Historical symbol selection can introduce survivorship bias. This simulation does not predict returns.'] } })
-    }
-    return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [{ id: 17, name: 'Patient dip', version: 1, parameters: { timeframe: '1h' } }], next_after_id: null } : path.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
-  })
-  await page.goto('/?symbol=BTC%2FUSDC')
-  const panel = page.getByRole('region', { name: 'BTC/USDC trade information', exact: true })
-  await panel.getByText('Inventory and history', { exact: true }).click()
-  await panel.getByText('Historical strategy comparison', { exact: true }).click()
-  await panel.getByLabel('Saved accumulation strategy', { exact: true }).click()
-  await page.locator('.n-base-select-option').filter({ hasText: 'Patient dip · v1 · 1h' }).click()
-  await panel.getByLabel('Completed OHLC candles · close_ms;open;high;low;close', { exact: true }).fill('3600000;100;101;99;100\n7200000;100;101;98;99')
-  await panel.getByRole('button', { name: 'Run historical comparison', exact: true }).click()
-  await expect(panel.getByText(/Historical symbol selection can introduce survivorship bias/)).toBeVisible()
-  await expect(panel.getByRole('table')).toBeVisible()
-  expect(requests).toHaveLength(1)
-  expect(requests[0]).toMatchObject({ strategy_version_id: 17, funding: '1000', fee_bps: '10', slippage_bps: '20', fixed_interval_candles: 24 })
-  expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
-  await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-replay-${testInfo.project.name}.png` })
-})

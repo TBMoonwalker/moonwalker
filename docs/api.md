@@ -507,3 +507,25 @@ last completed close, or the fresh ask when `price_basis` is `ask`. Evidence mus
 match the activation, current revision, pinned strategy, wait reason and candle
 validity window; otherwise `wait_condition` is null. These fields never authorize
 an order or change the trading strategy.
+
+
+## Backtest
+
+`POST /backtest/run` is the shared simulation endpoint. Dynamic DCA accepts its
+existing `strategy_slug`, timeframe and DCA sizing/exit fields. Accumulation uses
+`trade_mode: "accumulation"`, `symbol`, exact `strategy_version_id`, `start_date`
+and `end_date`; its timeframe must match that saved version. Optional modeling
+inputs are `funding` (positive quote amount, default `"1000"`), `fee` (fraction,
+default `0.001`), `slippage_bps` (0–1000, default `"20"`) and
+`fixed_interval_candles` (integer 1–20000, default `24`). No live configuration,
+wallet inventory or strategy assignment is changed.
+
+Accumulation fetches spot history including the saved strategy's warmup and
+excludes incomplete candles. The 20000-bar limit includes warmup. The response
+uses the usual `stats` and `chart` envelope, with buy markers; `trades` is empty
+because no closed Dynamic DCA deals are fabricated. The `accumulation` report
+contains exact modeled buy executions and equal-funding comparison results,
+including unsold coins and cash. Execution rows and chart markers are capped at
+100 buys with `trades_truncated` disclosure; totals include every modeled buy.
+A bad input or insufficient warmup returns 400; an occupied replay worker returns
+409. The supplied-candle `/accumulation/replay` API remains supported.

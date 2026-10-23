@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, h, onMounted, reactive, ref, type Directive } from 'vue'
+import { computed, h, onMounted, reactive, ref, watch, type Directive } from 'vue'
 import type { DataTableColumns, SelectOption } from 'naive-ui'
 import {
     CalendarOutline,
@@ -9,6 +9,8 @@ import {
 } from '@vicons/ionicons5'
 
 import { fetchJson } from '../api/client'
+import { fetchAccumulationStrategies } from '../api/accumulation'
+import type { AccumulationStrategy } from '../types/accumulation'
 import BacktestResultChart from '../components/BacktestResultChart.vue'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import {
@@ -22,6 +24,7 @@ import {
     getBacktestSummary,
     normalizeBacktestSymbolsForCurrency,
     type BacktestFormState,
+    type AccumulationBacktestFill,
     type BacktestResult,
     type BacktestTrade,
 } from '../helpers/backtest'
@@ -53,6 +56,15 @@ const symbolLoadError = ref('')
 const configuredCurrency = ref('')
 const strategyOptions = ref<SelectOption[]>([])
 const symbolOptions = ref<SelectOption[]>([])
+const accumulationStrategies = ref<AccumulationStrategy[]>([])
+const accumulationCursor = ref<number | null>(null)
+const accumulationLoadError = ref('')
+const isAccumulation = computed(() => form.tradeMode === 'accumulation')
+const selectedAccumulation = computed(() => accumulationStrategies.value.find(version => version.id === form.accumulationVersionId))
+const accumulationOptions = computed(() => accumulationStrategies.value.map(version => ({ value: version.id, label: `${version.name} · v${version.version} · ${version.parameters.timeframe}` })))
+watch([isAccumulation, selectedAccumulation], () => {
+    if (isAccumulation.value && selectedAccumulation.value) form.timeframe = selectedAccumulation.value.parameters.timeframe
+})
 const lastRunAt = ref<number | null>(null)
 
 function labelStepperButtons(element: HTMLElement, fieldLabel: string): void {
@@ -84,7 +96,7 @@ const canRun = computed(() => {
     if (!dateRange.value) {
         return false
        }
-    const hasStrategy = form.strategySlug.trim().length > 0
+    const hasStrategy = isAccumulation.value ? !!selectedAccumulation.value : form.strategySlug.trim().length > 0
     return (
         form.symbol.trim().length > 0 &&
         hasStrategy &&
@@ -109,7 +121,15 @@ const comparisonTone = computed(() => {
     return 'neutral'
 })
 
-const statTiles = computed(() => [
+const accumulationOutcome = computed(() => result.value?.accumulation?.results.find(row => row.strategy === 'accumulation'))
+const statTiles = computed(() => accumulationOutcome.value ? [
+    { label: 'Buys', value: String(accumulationOutcome.value.buy_count) },
+    { label: 'Coins accumulated', value: formatBacktestNumber(Number(accumulationOutcome.value.units), 8) },
+    { label: 'Spent incl. fees', value: formatBacktestNumber(Number(accumulationOutcome.value.spent_quote_including_fees), 2) },
+    { label: 'Cash remaining', value: formatBacktestNumber(Number(accumulationOutcome.value.cash_quote), 2) },
+    { label: 'Ending value', value: formatBacktestNumber(Number(accumulationOutcome.value.ending_value_quote), 2) },
+    { label: 'Max drawdown', value: `${formatBacktestNumber(Number(accumulationOutcome.value.maximum_drawdown_fraction) * 100)}%` },
+] : [
     {
         label: 'Trades',
         value: String(summary.value.total_trades ?? 0),
@@ -216,6 +236,30 @@ const tradeColumns: DataTableColumns<BacktestTrade> = [
         width: 140,
     },
 ]
+
+const accumulationTradeColumns: DataTableColumns<AccumulationBacktestFill> = [
+    { title: 'Bought', key: 'execution_open_ms', render: row => formatBacktestTimestamp(row.execution_open_ms) },
+    { title: 'Signal close', key: 'signal_close_ms', render: row => formatBacktestTimestamp(row.signal_close_ms) },
+    { title: 'Quantity', key: 'quantity' }, { title: 'Price', key: 'execution_price' },
+    { title: 'Spent incl. fees', key: 'spent' }, { title: 'Fee', key: 'fee' },
+]
+const accumulationComparisonColumns = [
+    { title: 'Strategy', key: 'strategy', render: (row: { strategy: string }) => row.strategy.replaceAll('_', ' ') },
+    { title: 'Coins', key: 'units' }, { title: 'Spent incl. fees', key: 'spent_quote_including_fees' },
+    { title: 'Fees', key: 'fees_quote' }, { title: 'Cash', key: 'cash_quote' }, { title: 'Ending value', key: 'ending_value_quote' },
+    { title: 'Max drawdown', key: 'maximum_drawdown_fraction', render: (row: { maximum_drawdown_fraction: string }) => `${formatBacktestNumber(Number(row.maximum_drawdown_fraction) * 100)}%` },
+    { title: 'Buys', key: 'buy_count' },
+]
+async function loadAccumulationStrategies(more = false) {
+    accumulationLoadError.value = ''
+    try {
+        const page = await fetchAccumulationStrategies(more ? accumulationCursor.value ?? 0 : 0)
+        accumulationStrategies.value = more ? [...accumulationStrategies.value, ...page.versions.filter(version => !accumulationStrategies.value.some(old => old.id === version.id))] : page.versions
+        accumulationCursor.value = page.next_after_id
+        if (!form.accumulationVersionId) form.accumulationVersionId = page.versions[0]?.id ?? null
+    } catch (error) { accumulationLoadError.value = extractApiErrorMessage(error, 'Saved accumulation strategies could not be loaded.') }
+}
+watch(isAccumulation, enabled => { resetResult(); if (enabled && !accumulationStrategies.value.length) void loadAccumulationStrategies() })
 
 const hasResult = computed(() => result.value !== null)
 const statusText = computed(() => {
@@ -408,6 +452,9 @@ onMounted(() => {
                     label-placement="top"
                     :show-feedback="false"
                 >
+                    <n-form-item label="Trade mode">
+                        <n-select filterable v-model:value="form.tradeMode" :disabled="isRunning" :input-props="{ 'aria-label': 'Backtest trade mode' }" :options="[{ label: 'Dynamic DCA', value: 'dynamic_dca' }, { label: 'Accumulation', value: 'accumulation' }]" />
+                    </n-form-item>
                     <n-form-item label="Symbol">
                         <n-flex vertical class="symbol-picker">
                             <n-alert
@@ -448,8 +495,13 @@ onMounted(() => {
                     </n-form-item>
 
                      <n-form-item label="Strategy">
+                         <template v-if="isAccumulation">
+                             <n-select filterable v-model:value="form.accumulationVersionId" :input-props="{ 'aria-label': 'Backtest accumulation strategy' }" :options="accumulationOptions" placeholder="Select a saved version" />
+                             <p v-if="accumulationLoadError" role="alert">{{ accumulationLoadError }}</p>
+                             <n-button v-if="accumulationCursor !== null || accumulationLoadError" @click="loadAccumulationStrategies(accumulationCursor !== null)">Load strategies</n-button>
+                         </template>
                          <n-select
-                             v-if="strategyOptions.length > 0"
+                             v-else-if="strategyOptions.length > 0"
                              v-model:value="form.strategySlug"
                              filterable
                               :loading="isLoadingStrategies"
@@ -468,6 +520,7 @@ onMounted(() => {
                             <n-select
                                 v-model:value="form.timeframe"
                                 :options="timeframeOptions"
+                                :disabled="isAccumulation"
                             />
                         </n-form-item>
                         <n-form-item label="Date range" class="date-range-item">
@@ -483,7 +536,7 @@ onMounted(() => {
                         </n-form-item>
                     </div>
 
-                    <div class="control-grid two">
+                    <div v-if="!isAccumulation" class="control-grid two">
                         <n-form-item label="Base order">
                             <n-input-number
                                 v-accessible-stepper="'Base order'"
@@ -512,7 +565,7 @@ onMounted(() => {
                         </n-form-item>
                     </div>
 
-                     <div class="control-grid two">
+                     <div v-if="!isAccumulation" class="control-grid two">
                           <n-form-item label="Max safety orders">
                             <n-input-number
                                 v-accessible-stepper="'Max safety orders'"
@@ -531,6 +584,11 @@ onMounted(() => {
                         </n-form-item>
                     </div>
 
+                    <template v-if="isAccumulation">
+                        <n-form-item label="Initial funding"><n-input-number v-accessible-stepper="'Initial funding'" v-model:value="form.funding" :min="1" :input-props="{ 'aria-label': 'Initial funding' }" /></n-form-item>
+                        <n-form-item label="Adverse buy slippage · basis points"><n-input-number v-accessible-stepper="'Adverse buy slippage'" v-model:value="form.slippageBps" :min="0" :max="1000" :input-props="{ 'aria-label': 'Adverse buy slippage' }" /></n-form-item>
+                        <n-form-item label="Fixed DCA comparison interval · candles"><n-input-number v-accessible-stepper="'Fixed DCA comparison interval'" v-model:value="form.fixedIntervalCandles" :min="1" :max="20000" :precision="0" :input-props="{ 'aria-label': 'Fixed DCA comparison interval' }" /></n-form-item>
+                    </template>
                     <n-form-item label="Fee">
                         <n-input-number
                             v-accessible-stepper="'Fee'"
@@ -579,7 +637,7 @@ onMounted(() => {
                 </div>
 
                 <template v-else-if="result">
-                    <div class="stats-grid" aria-label="Backtest stats">
+                    <div class="stats-grid" :class="{ 'accumulation-stats': result.accumulation }" aria-label="Backtest stats">
                         <div
                             v-for="tile in statTiles"
                             :key="tile.label"
@@ -602,6 +660,8 @@ onMounted(() => {
                         <span>{{ formatBacktestDelta(comparison.tradesDelta, '') }} trades</span>
                     </div>
 
+                    <n-alert v-if="result.accumulation?.trades_truncated" type="info">Chart markers and the trade list show the first 100 buys. Summary and comparison include every modeled buy.</n-alert>
+                    <p v-if="result.accumulation">{{ result.accumulation.gap_count }} gaps · Strategy simulation; no live orders or automatic sale at the end.</p>
                     <BacktestResultChart
                         :candles="result.chart.candles"
                         :markers="result.chart.markers"
@@ -616,11 +676,16 @@ onMounted(() => {
                     >
                         <n-tab-pane name="trades" tab="Trades">
                             <n-data-table
-                                :columns="tradeColumns"
-                                :data="result.trades"
+                                :columns="result.accumulation ? accumulationTradeColumns : tradeColumns"
+                                :data="result.accumulation ? result.accumulation.accumulation_trades : result.trades"
+                                :scroll-x="result.accumulation ? 780 : undefined"
                                 :bordered="false"
                                 size="small"
                             />
+                        </n-tab-pane>
+                        <n-tab-pane v-if="result.accumulation" name="comparison" tab="Comparison">
+                            <p>Equal initial funding · quote amounts include modeled buy fees. Ending value includes cash and unsold coins before future sale fees.</p>
+                            <n-data-table :columns="accumulationComparisonColumns" :data="result.accumulation.results" :scroll-x="950" :bordered="false" size="small" />
                         </n-tab-pane>
                         <n-tab-pane name="metadata" tab="Run">
                             <dl class="metadata-grid">
@@ -634,7 +699,7 @@ onMounted(() => {
                                 </div>
                                  <div>
                                      <dt>Trade mode</dt>
-                                     <dd>Dynamic DCA</dd>
+                                     <dd>{{ result.stats.trade_mode === 'accumulation' ? 'Accumulation' : 'Dynamic DCA' }}</dd>
                                  </div>
                                  <div>
                                      <dt>Timeframe</dt>
@@ -651,6 +716,9 @@ onMounted(() => {
                             </dl>
                         </n-tab-pane>
                     </n-tabs>
+                    <template v-if="result.accumulation">
+                        <p v-for="caveat in result.accumulation.caveats" :key="caveat" class="run-caveat">{{ caveat }}</p>
+                    </template>
                 </template>
             </div>
         </section>
@@ -763,6 +831,8 @@ onMounted(() => {
     margin-bottom: 12px;
 }
 
+.stats-grid.accumulation-stats { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
 .stat-tile {
     min-width: 0;
     padding: 10px 12px;
@@ -866,6 +936,7 @@ onMounted(() => {
 
 @media (max-width: 640px) {
     .control-grid.two,
+    .stats-grid.accumulation-stats,
     .stats-grid,
     .metadata-grid {
         grid-template-columns: 1fr;

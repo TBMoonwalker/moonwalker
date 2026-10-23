@@ -428,7 +428,7 @@ export function useOpenTradeColumns(options: UseOpenTradeColumnsOptions) {
                             h(NButton, {
                                 class: 'trade-action-button trade-action-sell', size: 'medium', ghost: true, type: 'primary',
                                 style: tradeActionButtonStyle, 'aria-label': `Sell ${rowData.symbol}`,
-                                onClick: (event: MouseEvent) => { event.stopPropagation(); act('close') },
+                                onClick: (event: MouseEvent) => { event.stopPropagation(); act(registration?.state === 'closing' ? 'retry_close' : 'close') },
                             }, { icon: () => h(NIcon, { size: 18 }, () => h(CashOutline)), default: () => h('span', { class: 'trade-action-label' }, 'Sell') }),
                             h(NDropdown, {
                                 trigger: 'click',

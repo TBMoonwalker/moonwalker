@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
-import AccumulationReplay from './AccumulationReplay.vue'
 import AccumulationOutlook from './AccumulationOutlook.vue'
 import { useAccumulationPanel } from '../composables/useAccumulationPanel'
 import { accumulationActionCopy, accumulationActionLabels, accumulationReason, isAccumulationStrategyChange } from '../helpers/accumulation'
@@ -83,8 +82,8 @@ watch([() => props.intent?.id, fresh], async () => {
     <p v-if="available && rows.length === 0">No accumulation registrations. Add a fixed symbol with ASAP or import an existing holding with CSV.</p>
     <template v-if="detail">
       <AccumulationOutlook v-if="!hideOutlook" :detail="detail" :fresh="fresh" compact />
-      <div class="accumulation-actions">
-        <span class="assigned-strategy">{{ pinnedStrategy ? `${pinnedStrategy.name} · v${pinnedStrategy.version} · ${pinnedStrategy.parameters.timeframe}` : detail.strategy_slug ?? 'Strategy unavailable' }}</span>
+      <p class="assigned-strategy">{{ pinnedStrategy ? `${pinnedStrategy.name} · v${pinnedStrategy.version} · ${pinnedStrategy.parameters.timeframe}` : detail.strategy_slug ?? 'Strategy unavailable' }}</p>
+      <div v-if="!hideOutlook" class="accumulation-actions">
         <n-button v-for="action in routineActions" :key="action" :disabled="disabled" @click="prepare(action, $event)">{{ action === 'close' && detail.holding ? 'Sell and close' : accumulationActionLabels[action] }}</n-button>
         <n-button v-if="actions.includes('sell_partial')" :disabled="disabled" :aria-expanded="partialSaleOpen" @click="openPartialSale">Sell part</n-button>
       </div>
@@ -259,7 +258,6 @@ watch([() => props.intent?.id, fresh], async () => {
       </template>
     </details>
 
-    <AccumulationReplay v-if="available" :strategies="panel.strategies.value" />
       </div>
     </details>
   </section>
@@ -279,12 +277,11 @@ label, dt { font-size: 14px; color: var(--mw-color-text-secondary); }
 .accumulation-values { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; margin: 0; }
 dd { margin: 4px 0 0; font-family: var(--mw-font-mono); overflow-wrap: anywhere; }
 .accumulation-csv-review { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; }
-.accumulation-history, .accumulation-panel :deep(.accumulation-replay) { border-top: 1px solid var(--mw-color-border); margin: 0; }
-summary, .accumulation-panel :deep(.accumulation-replay > summary) { cursor: pointer; padding: 12px 0; margin: 0; min-height: 44px; font-size: 14px; color: var(--mw-color-text-primary); font-weight: 500; }
+.accumulation-history { border-top: 1px solid var(--mw-color-border); margin: 0; }
+summary { cursor: pointer; padding: 12px 0; margin: 0; min-height: 44px; font-size: 14px; color: var(--mw-color-text-primary); font-weight: 500; }
 .accumulation-values dd { font-size: 20px; color: var(--mw-color-text-primary); }
 .accumulation-history .accumulation-values dd { font-size: 16px; }
 .accumulation-history > div, .accumulation-history > p, .accumulation-history > .accumulation-values { margin-bottom: 16px; }
-.accumulation-panel :deep(.accumulation-replay > summary) { display: list-item; }
 .accumulation-order-list { display: grid; gap: 16px; padding-left: 20px; }
 .accumulation-order-list li { min-width: 0; overflow-wrap: anywhere; }
 summary:focus-visible { outline: 2px solid var(--mw-color-primary); outline-offset: 3px; }

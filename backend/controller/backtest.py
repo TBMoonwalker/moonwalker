@@ -6,6 +6,9 @@ from typing import Any
 import helper
 from controller.responses import json_response
 from litestar.handlers import post
+from service.accumulation_backtest import run_accumulation_backtest
+from service.accumulation_contracts import AccumulationStateError
+from service.accumulation_state import AccumulationConflictError
 from service.backtest import Backtest, BacktestValidationError
 from service.config import Config
 
@@ -27,11 +30,14 @@ async def _run_backtest(data: dict[str, Any]) -> Any:
     start_date = data.get("start_date")
     end_date = data.get("end_date")
 
-    if not all([symbol, strategy_slug, timeframe, start_date]):
+    required_fields = (
+        ("symbol", "strategy_version_id", "start_date")
+        if trade_mode == "accumulation"
+        else ("symbol", "strategy_slug", "timeframe", "start_date")
+    )
+    if not all(data.get(field) for field in required_fields):
         return json_response(
-            {
-                "error": "Missing required fields: symbol, strategy_slug, timeframe, start_date"
-            },
+            {"error": f"Missing required fields: {', '.join(required_fields)}"},
             status_code=400,
         )
 
@@ -58,6 +64,10 @@ async def _run_backtest(data: dict[str, Any]) -> Any:
     try:
         config_service = await Config.instance()
         config = config_service.snapshot()
+        if trade_mode == "accumulation":
+            return json_response(
+                await run_accumulation_backtest(config, data, start_dt, end_dt)
+            )
         engine = Backtest(
             config=config,
             symbol=symbol,
@@ -75,7 +85,9 @@ async def _run_backtest(data: dict[str, Any]) -> Any:
         )
         result = await engine.run()
         return json_response(result)
-    except BacktestValidationError as exc:
+    except AccumulationConflictError as exc:
+        return json_response({"error": str(exc), "code": "conflict"}, status_code=409)
+    except (BacktestValidationError, AccumulationStateError) as exc:
         return json_response(
             {"error": str(exc), "code": "invalid_backtest_request"},
             status_code=400,
