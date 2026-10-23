@@ -312,6 +312,15 @@ async def persist_accumulation_order(
                 and opportunity.consumed_at is None
             )
             if consumed_now:
+                if opportunity.is_initial_entry and activation.consumption_revision:
+                    # Repair already-reactivated cycles created before generation
+                    # guards reset. The first owned fill proves this cycle started;
+                    # invalidate observations derived from the preceding holding.
+                    activation.consumption_revision = 0
+                    activation.execution_guard_json = None
+                    activation.observation_epoch += 1
+                    activation.observations_initialized = False
+                    activation.baseline_close_ms = None
                 if not opportunity.is_initial_entry:
                     activation.consumption_revision += 1
                     activation.execution_guard_json = json.dumps(

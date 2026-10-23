@@ -4143,3 +4143,85 @@ async def test_partial_sale_never_archives_unsellable_remainder(env):
     assert activation.state == "enabled"
     assert Decimal(holding.accumulation_net_quantity) == Decimal("0.0000048")
     assert not await model.UnsellableTrades.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_reactivation", [False, True])
+async def test_new_asap_cycle_buys_fresh_base_order_without_old_consumption_or_candle_wait(
+    env, monkeypatch, legacy_reactivation
+):
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, clock, config, *_ = env
+    await service.asap()
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    client.balance["free"]["BTC"] = (
+        await model.OpenTrades.get()
+    ).accumulation_net_quantity
+    await runtime.tick()
+    clock[0] += HOUR
+    await runtime.tick()
+    clock[0] += 5000
+    await runtime.tick()
+    assert len(client.calls) == 2
+    activation = await model.AccumulationActivation.get()
+    old_generation = activation.generation
+    old_guard = activation.execution_guard_json
+    old_consumption = activation.consumption_revision
+    holding = await model.OpenTrades.get(id=activation.holding_id)
+    old_deal = holding.deal_id
+    client.balance["free"]["BTC"] = holding.accumulation_net_quantity
+    await runtime.submit_command(
+        dict(
+            symbol=activation.symbol,
+            action="close",
+            operation_id="cycle-close",
+            expected_revision=activation.revision,
+        )
+    )
+    await runtime.tick()
+    await activation.refresh_from_db()
+    assert activation.state == "stopped"
+    await runtime.submit_command(
+        dict(
+            symbol=activation.symbol,
+            action="reactivate",
+            operation_id="cycle-reactivate",
+            expected_revision=activation.revision,
+        )
+    )
+    await runtime.commands.execute("cycle-reactivate")
+    await activation.refresh_from_db()
+    assert activation.generation != old_generation
+    if legacy_reactivation:
+        # Reproduce the already-reactivated empty cycle on port 8140.
+        activation.consumption_revision = old_consumption
+        activation.execution_guard_json = old_guard
+        await activation.save()
+    before = len(client.calls)
+    history = AsyncMock(side_effect=AccumulationStateError("no fresh candles"))
+    monkeypatch.setattr(adapter, "candles", history)
+    restarted = AccumulationRuntime(adapter)
+    assert await restarted.startup()
+    await restarted.tick()
+    assert len(client.calls) == before + 1
+    assert client.calls[-1][2] == "buy"
+    history.assert_not_awaited()
+    await activation.refresh_from_db()
+    fresh = await model.OpenTrades.get(id=activation.holding_id)
+    assert fresh.deal_id != old_deal
+    assert (
+        activation.consumption_revision == 0 and activation.execution_guard_json is None
+    )
+    assert (
+        await model.AccumulationOpportunity.filter(
+            generation=activation.generation,
+            is_initial_entry=True,
+            consumed_at__isnull=False,
+        ).count()
+        == 1
+    )
+    assert await model.AccumulationFillCheckpoint.filter(deal_id=old_deal).count() == 3
+    await restarted.tick()
+    assert len(client.calls) == before + 1

@@ -491,7 +491,8 @@ async def test_full_close_stays_closing_until_accounted_empty_then_requires_reac
     await activation.refresh_from_db()
     assert activation.generation != generation
     assert activation.state == "enabled"
-    assert activation.consumption_revision == 5
+    assert activation.consumption_revision == 0
+    assert activation.execution_guard_json is None
 
 
 @pytest.mark.asyncio

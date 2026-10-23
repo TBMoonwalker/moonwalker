@@ -545,6 +545,10 @@ class AccumulationLifecycleService:
                 )
             await _require_settled(activation, connection)
             activation.generation = uuid4()
+            # A completed holding starts a new purchase cycle. Historical orders
+            # retain their generation; only the new cycle's execution guards reset.
+            activation.consumption_revision = 0
+            activation.execution_guard_json = None
             activation.state, activation.explicitly_paused = "validating", True
             return "pending", "validation_required"
         if action == AccumulationAction.RESUME:
