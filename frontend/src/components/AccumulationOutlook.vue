@@ -45,6 +45,7 @@ function movement(value: string) {
               <span :title="level.target_price">{{ level.direction === 'below' ? 'below' : level.direction === 'at_or_below' ? 'to ≤' : 'to ≥' }} ≈ {{ price(level.target_price) }} {{ quote }}</span>
             </li>
           </ul>
+          <p v-if="condition.reason === 'WAIT_BASELINE'">{{ outlook.description }}</p>
           <p v-if="!condition.levels.length">Next close: {{ new Date(condition.next_close_ms).toISOString().replace('T', ' ').slice(0, 16) }} UTC</p>
           <div v-if="recoveryLevels.length" class="recovery-condition">
             <h4>Recovery needed before another dip buy</h4>

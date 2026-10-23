@@ -68,6 +68,14 @@ test('puts entry state and its reviewed next action before secondary information
   await expect(panel.getByRole('heading', { name: 'Recovery needed before another dip buy' })).toBeVisible()
   await expect(panel.getByRole('list', { name: 'Current buy conditions' })).not.toContainText('rise')
   await expect(panel.getByText('No buy on this rise. A fresh correction must follow.', { exact: true })).toBeVisible()
+  waiting.runtime_wait_reason = 'WAIT_BASELINE'
+  waiting.wait_condition!.reason = 'WAIT_BASELINE'
+  waiting.wait_condition!.levels = []
+  live!.send(JSON.stringify({ type: 'snapshot', page: { activations: [waiting], next_after: null }, detail: waiting }))
+  await expect(panel.getByRole('heading', { name: 'Waiting for the next 1h close', exact: true })).toBeVisible()
+  await expect(panel.getByText('The strategy is ready. Waiting for the next completed candle to evaluate a new buy signal.', { exact: true })).toBeVisible()
+  await expect(panel.getByText(/^Next close:.*UTC$/)).toBeVisible()
+  await expect(panel.getByRole('list', { name: 'Current buy conditions' })).toHaveCount(0)
   await page.clock.fastForward(15000)
   expect(reads).toBe(0)
   await page.getByRole('button', { name: 'Dark theme', exact: true }).click()

@@ -100,6 +100,25 @@ describe('accumulation operator outlook', () => {
     expect(table.text()).toContain('no buy; correction required')
   })
 
+  it('explains the live baseline wait and next close without inventing price targets', () => {
+    const detail = row({ runtime_wait_reason: 'WAIT_BASELINE', wait_condition: {
+      reason: 'WAIT_BASELINE', timeframe: '1h', observed_close_ms: 1792753200000,
+      observed_price: '81596.7', next_close_ms: 1792756800000, levels: [],
+    } })
+    const table = mount(AccumulationOrderStatus, { props: { status: detail, fresh: true } })
+    expect(table.text()).toContain('Waiting for a fresh candle close')
+    expect(table.text()).toContain('Next close: 2026-10-23 12:00 UTC')
+    expect(table.text()).not.toContain('Trading check pending')
+    const card = mount(AccumulationOutlook, { props: { detail, fresh: true } })
+    expect(card.text()).toContain('Waiting for the next 1h close')
+    expect(card.text()).toContain('Waiting for the next completed candle to evaluate a new buy signal.')
+    expect(card.text()).toContain('Next close: 2026-10-23 12:00 UTC')
+    expect(card.find('.wait-levels').exists()).toBe(false)
+    const stale = mount(AccumulationOrderStatus, { props: { status: detail, fresh: false } })
+    expect(stale.text()).not.toContain('Next close:')
+    expect(stale.text()).toContain('Status needs refresh')
+  })
+
   it('does not show cached price levels when the snapshot is stale', () => {
     const wrapper = mount(AccumulationOutlook, { props: { detail: row({ runtime_wait_reason: 'WAIT_DEPTH', wait_condition: {
       reason: 'WAIT_DEPTH', timeframe: '1h', observed_close_ms: 1000, observed_price: '100', next_close_ms: 3601000,
