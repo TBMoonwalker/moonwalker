@@ -1,8 +1,7 @@
-"""Execute persisted manual accumulation commands; never originate a sale.
+"""Execute journaled accumulation commands and archive verified full-close dust.
 
-The worker is deliberately not connected to the application runtime. One sale
-command owns one placement. A terminal partial full-close or precision dust
-stays CLOSING; a new retry_close command authorizes a further sale attempt.
+One sale command owns one placement. A sellable terminal remainder requires an
+explicit retry; unsellable dust is preserved in the existing archive automatically.
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ import json
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import ccxt.async_support as ccxt
 import model
@@ -244,12 +243,42 @@ class AccumulationCommandExecutor:
             persist, "claiming manual accumulation sale"
         )
 
+    async def _archive_remainder(
+        self, operation_id: str
+    ) -> AccumulationExecutionResult | None:
+        """Try the shared archive path only for a current full-close command."""
+        from service.accumulation_dust import archive_accumulation_dust
+
+        scope = await self.adapter.account_scope(self.adapter.config())
+        operation, activation = await self._command(operation_id, scope)
+        if operation.status != "pending" or operation.action not in CLOSE_ACTIONS:
+            return None
+        try:
+            result = await archive_accumulation_dust(
+                {
+                    "symbol": activation.symbol,
+                    "action": "archive_dust",
+                    "operation_id": f"dust-{uuid5(NAMESPACE_URL, operation_id).hex}",
+                    "expected_revision": activation.revision,
+                    "previous_operation_id": operation_id,
+                },
+                self.adapter,
+            )
+        except AccumulationStateError:
+            # Sellable inventory, incomplete evidence or a concurrent revision
+            # must retain the close latch, never weaken archive validation.
+            return None
+        return AccumulationExecutionResult(operation_id, result.status, "DUST_ARCHIVED")
+
     async def _finish(
         self, operation_id: str, scope: str, row: model.PlacementIntent
     ) -> AccumulationExecutionResult:
         try:
             await self.lifecycle.complete_settlement(operation_id, account_scope=scope)
         except AccumulationConflictError:
+            archived = await self._archive_remainder(operation_id)
+            if archived is not None:
+                return archived
             return AccumulationExecutionResult(
                 row.operation_id, str(row.state), "WAIT_REMAINDER"
             )
@@ -334,7 +363,14 @@ class AccumulationCommandExecutor:
                 else holding.accumulation_net_quantity,
                 positive=True,
             )
-        inputs = await self.adapter.sale_inputs(activation.symbol, quantity, config)
+        try:
+            inputs = await self.adapter.sale_inputs(activation.symbol, quantity, config)
+        except AccumulationSaleSizeError as exc:
+            if exc.reason in {"WAIT_PRECISION", "WAIT_MINIMUM"}:
+                archived = await self._archive_remainder(operation_id)
+                if archived is not None:
+                    return archived
+            raise
         async with lifecycle_mutation_coordinator.mutation(
             activation.symbol
         ) as admitted:

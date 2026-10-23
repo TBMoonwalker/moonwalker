@@ -115,13 +115,15 @@ request**; it never automatically resubmits it under a new ID.
   consumption and purchase guards. A paused registration stays paused.
 - **Sell part** authorizes an exact base-asset quantity and must retain positive
   inventory. After settlement it restores the previous explicit pause state.
-- **Close holding** blocks buys and sells managed inventory. Precision or minimum
-  limits leave the remainder recorded in **Closing**. No coins are bought to meet
-  a sale minimum, and dust is never silently written off.
+- **Close holding** blocks buys and sells managed inventory. Once orders and fees
+  are settled, fresh exchange checks automatically move a remainder below precision
+  or the sale minimum to **Unsellable trades**, preserving its exact accounting.
+  The registration becomes **Stopped**. Uncertain orders or missing evidence keep
+  it in **Closing**. No coins are bought to meet a sale minimum.
 - **Retry remaining sale** is a new explicit authorization after the previous sale
-  has complete terminal accounting. A full close becomes **Stopped** only at exact
-  zero. An adopted registration with no recorded inventory or unsettled execution
-  can be closed without submitting an order.
+  has complete terminal accounting. Sellable remainders require this explicit retry;
+  unsellable dust is archived automatically. An adopted registration with no
+  recorded inventory or unsettled execution can be closed without submitting an order.
 - **Reactivate** explicitly starts a stopped, previously adopted registration's
   next generation and readiness check. Plugin polling does not reactivate it.
 
@@ -372,11 +374,17 @@ the initial ASAP base order. Strategy assignment remains in Configuration.
 
 ### Archive an unsellable closing remainder
 
-After a reconciled full-close sale, choose **More trade actions → Archive remaining
-dust** in the Open trades entry. Review the exact remaining quantity and cost,
-then confirm. Moonwalker checks fresh wallet, order-book and market precision
-information. A sellable remainder, unresolved order, incomplete sale fees, changed
-account or stale revision prevents archival.
+After a full close, Moonwalker automatically archives a remainder that fresh
+wallet, order-book and market precision information proves unsellable. This also
+runs when the worker resumes a previously stuck Closing trade, including a retry
+that never placed an order because the remainder was already below the minimum.
+Earlier sale accounting is verified through the recorded retry chain. A close
+that could not place any sale can archive its verified unsellable inventory too.
+Sellable remainders, unresolved orders, incomplete fees, changed accounts or stale
+evidence prevent archival. Partial sales never trigger automatic archival.
+
+**More trade actions → Archive remaining dust** remains available as an explicit
+fallback using the same checks. Review the remaining quantity and cost, then confirm.
 
 The archive atomically moves the remainder to the existing **Unsellable trades**
 view and stops the registration. Its exact decimal quantity, remaining cost

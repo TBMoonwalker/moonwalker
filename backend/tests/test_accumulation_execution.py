@@ -5,7 +5,7 @@ import copy
 import json
 from dataclasses import asdict
 from decimal import Decimal
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import ccxt.async_support as ccxt
 import model
@@ -964,7 +964,8 @@ async def test_manual_sale_preflight_blocks_without_a_wire_effect(
     elif fault == "minimum":
         assert (
             await AccumulationCommandExecutor(adapter).execute("operator-sale")
-        ).reason == "WAIT_MINIMUM"
+        ).reason == "DUST_ARCHIVED"
+        assert await model.UnsellableTrades.exists()
     else:
         with pytest.raises(AccumulationStateError):
             await AccumulationCommandExecutor(adapter).execute("operator-sale")
@@ -1001,7 +1002,7 @@ async def test_terminal_partial_manual_sale_never_resubmits_remainder(
 
 
 @pytest.mark.asyncio
-async def test_precision_dust_keeps_close_latched(env):
+async def test_precision_dust_automatically_archives_after_close(env):
     adapter, client, *_ = env
     activation, holding = await manual_sale(env)
     holding.accumulation_net_quantity = str(
@@ -1010,12 +1011,14 @@ async def test_precision_dust_keeps_close_latched(env):
     await holding.save()
     client.balance["free"]["BTC"] = holding.accumulation_net_quantity
     result = await AccumulationCommandExecutor(adapter).execute("operator-sale")
-    assert result.reason == "WAIT_REMAINDER"
+    assert result.reason == "DUST_ARCHIVED"
     await activation.refresh_from_db()
-    await holding.refresh_from_db()
-    assert activation.state == "closing" and Decimal(
-        holding.accumulation_net_quantity
+    assert activation.state == "stopped" and activation.holding_id is None
+    archived = await model.UnsellableTrades.get(deal_id=holding.deal_id)
+    assert Decimal(
+        json.loads(archived.accumulation_inventory_json)["inventory"]["quantity"]
     ) == Decimal("0.0005")
+    assert len(client.calls) == 2
 
 
 @pytest.mark.asyncio
@@ -1296,7 +1299,11 @@ async def close_with_remainder(env, remainder="1"):
         "fees": [{"currency": "USDC", "cost": "0"}],
         "timestamp": clock[0],
     }
-    result = await AccumulationCommandExecutor(adapter).execute("operator-sale")
+    # Model a pre-upgrade close, or a worker interrupted before fresh dust checks.
+    with patch.object(
+        AccumulationCommandExecutor, "_archive_remainder", AsyncMock(return_value=None)
+    ):
+        result = await AccumulationCommandExecutor(adapter).execute("operator-sale")
     assert result.reason == "WAIT_REMAINDER"
     await activation.refresh_from_db()
     await holding.refresh_from_db()
@@ -1365,33 +1372,10 @@ async def test_explicit_close_retry_sells_only_remainder_and_preserves_history_a
 
 
 @pytest.mark.asyncio
-async def test_dust_wait_retains_exact_basis_and_close_until_explicit_retry_is_sellable(
-    env,
-):
+async def test_legacy_dust_close_can_sell_when_retry_becomes_sellable(env):
     adapter, client, *_ = env
     activation, holding = await close_with_remainder(env, "0.05")
-    before = (
-        holding.accumulation_net_quantity,
-        holding.accumulation_remaining_cost,
-        holding.accumulation_contributed_quote,
-        holding.accumulation_disposal_proceeds,
-    )
     await retry_remainder(activation)
-    result = await AccumulationCommandExecutor(adapter).execute("retry-sale")
-    assert result.reason == "WAIT_MINIMUM"
-    assert len(client.calls) == 2
-    assert (
-        await model.AccumulationLifecycleOperation.get(operation_id="retry-sale")
-    ).placement_id is None
-    await holding.refresh_from_db()
-    assert before == (
-        holding.accumulation_net_quantity,
-        holding.accumulation_remaining_cost,
-        holding.accumulation_contributed_quote,
-        holding.accumulation_disposal_proceeds,
-    )
-    await activation.refresh_from_db()
-    assert activation.state == "closing"
     client.ask = "100"
     assert (
         await AccumulationCommandExecutor(adapter).execute("retry-sale")
@@ -1402,17 +1386,24 @@ async def test_dust_wait_retains_exact_basis_and_close_until_explicit_retry_is_s
 
 
 @pytest.mark.asyncio
-async def test_subprecision_dust_is_never_rounded_up_or_written_off(env):
+async def test_legacy_subprecision_retry_automatically_archives_without_order(env):
     adapter, client, *_ = env
-    activation, holding = await close_with_remainder(env, "0.0005")
+    activation, holding = await close_with_remainder(env, "0.0000048")
+    before = holding.accumulation_remaining_cost
     await retry_remainder(activation)
     assert (
         await AccumulationCommandExecutor(adapter).execute("retry-sale")
-    ).reason == "WAIT_PRECISION"
-    await holding.refresh_from_db()
+    ).reason == "DUST_ARCHIVED"
     await activation.refresh_from_db()
-    assert Decimal(holding.accumulation_net_quantity) == Decimal("0.0005")
-    assert activation.state == "closing" and len(client.calls) == 2
+    assert activation.state == "stopped" and len(client.calls) == 2
+    archived = await model.UnsellableTrades.get(deal_id=holding.deal_id)
+    inventory = json.loads(archived.accumulation_inventory_json)["inventory"]
+    assert inventory["quantity"] == "0.0000048"
+    assert inventory["remaining_cost"] == before
+    assert (
+        await AccumulationCommandExecutor(adapter).execute("retry-sale")
+    ).reason == "ALREADY_APPLIED"
+    assert await model.UnsellableTrades.all().count() == 1
 
 
 @pytest.mark.asyncio
@@ -4004,3 +3995,151 @@ async def test_archived_zero_fees_match_equivalent_checkpoint_decimal_spellings(
     await archive_dust(env, activation)
     status = await get_accumulation_status(activation.symbol, wait_reasons={})
     assert status["inventory_restore_required"] is False
+
+
+@pytest.mark.asyncio
+async def test_archive_dust_accepts_unplaced_retry_after_settled_sale(env):
+    from service.accumulation_dust import archive_accumulation_dust
+
+    activation, holding = await close_with_remainder(env, "0.0000048")
+    await retry_remainder(activation)
+    await activation.refresh_from_db()
+    result = await archive_accumulation_dust(
+        {
+            "symbol": activation.symbol,
+            "action": "archive_dust",
+            "operation_id": "archive-after-retry",
+            "expected_revision": activation.revision,
+            "previous_operation_id": "retry-sale",
+        },
+        env[0],
+    )
+    assert result.state == "stopped"
+    archived = await model.UnsellableTrades.get(deal_id=holding.deal_id)
+    assert (
+        json.loads(archived.accumulation_inventory_json)["inventory"]["quantity"]
+        == "0.0000048"
+    )
+    assert len(env[1].calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remainder", ["0.05", "0.0000048"])
+async def test_runtime_archives_legacy_closing_dust_on_startup(env, remainder):
+    from service.accumulation_status import get_accumulation_status
+
+    activation, holding = await close_with_remainder(env, remainder)
+    before = holding.accumulation_remaining_cost
+    original_quantity = holding.accumulation_net_quantity
+    runtime = AccumulationRuntime(env[0])
+    assert await runtime.startup()
+    await runtime.tick()
+    await activation.refresh_from_db()
+    assert activation.state == "stopped" and activation.holding_id is None
+    archive = await model.UnsellableTrades.get(deal_id=holding.deal_id)
+    inventory = json.loads(archive.accumulation_inventory_json)["inventory"]
+    assert inventory["quantity"] == original_quantity
+    assert Decimal(inventory["quantity"]) == Decimal(remainder)
+    assert inventory["remaining_cost"] == before
+    assert len(env[1].calls) == 2
+    status = await get_accumulation_status(activation.symbol, wait_reasons={})
+    assert not status["inventory_restore_required"]
+    await runtime.tick()
+    assert await model.UnsellableTrades.all().count() == 1
+    assert len(env[1].calls) == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault", ["fees", "unsettled", "external_order", "stale", "wallet"]
+)
+async def test_automatic_archive_retains_close_when_evidence_is_incomplete(env, fault):
+    activation, holding = await close_with_remainder(env, "0.0000048")
+    adapter, client, clock, *_ = env
+    placement = await model.PlacementIntent.get(side="sell")
+    if fault == "fees":
+        checkpoint = await model.AccumulationFillCheckpoint.get(placement=placement)
+        checkpoint.fees_complete = False
+        await checkpoint.save()
+    elif fault == "unsettled":
+        placement.state = "indeterminate"
+        await placement.save()
+    elif fault == "external_order":
+        client.open_orders = [{"symbol": activation.symbol, "id": "unmanaged"}]
+    elif fault == "stale":
+        client.book_timestamp = clock[0] - 10001
+    elif fault == "wallet":
+        client.balance["free"]["BTC"] = "0"
+    assert (
+        await AccumulationCommandExecutor(adapter)._archive_remainder("operator-sale")
+        is None
+    )
+    await activation.refresh_from_db()
+    assert activation.state == "closing" and activation.holding_id == holding.id
+    assert not await model.UnsellableTrades.exists()
+    assert len(client.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_concurrent_automatic_dust_archival_preserves_one_exact_archive(env):
+    activation, holding = await close_with_remainder(env, "0.0000048")
+    outcomes = await asyncio.gather(
+        *(
+            AccumulationCommandExecutor(env[0]).execute("operator-sale")
+            for _ in range(8)
+        ),
+        return_exceptions=True,
+    )
+    assert any(
+        getattr(result, "reason", None) == "DUST_ARCHIVED" for result in outcomes
+    )
+    await activation.refresh_from_db()
+    assert activation.state == "stopped" and activation.holding_id is None
+    assert await model.UnsellableTrades.filter(deal_id=holding.deal_id).count() == 1
+    assert (
+        await model.AccumulationLifecycleOperation.filter(action="archive_dust").count()
+        == 1
+    )
+    assert len(env[1].calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_unplaced_retry_cannot_archive_predecessor_with_incomplete_fees(env):
+    from service.accumulation_dust import archive_accumulation_dust
+    from service.accumulation_state import AccumulationConflictError
+
+    activation, _ = await close_with_remainder(env, "0.0000048")
+    await retry_remainder(activation)
+    checkpoint = await model.AccumulationFillCheckpoint.get(placement__side="sell")
+    checkpoint.fees_complete = False
+    await checkpoint.save()
+    await activation.refresh_from_db()
+    with pytest.raises(AccumulationConflictError, match="checkpoint"):
+        await archive_accumulation_dust(
+            dict(
+                symbol=activation.symbol,
+                action="archive_dust",
+                operation_id="invalid-chain-archive",
+                expected_revision=activation.revision,
+                previous_operation_id="retry-sale",
+            ),
+            env[0],
+        )
+    assert not await model.UnsellableTrades.exists()
+
+
+@pytest.mark.asyncio
+async def test_partial_sale_never_archives_unsellable_remainder(env):
+    adapter, client, *_ = env
+    activation, holding = await manual_sale(env, "sell_partial")
+    holding.accumulation_net_quantity = "1.0000048"
+    await holding.save()
+    client.balance["free"]["BTC"] = holding.accumulation_net_quantity
+    assert (
+        await AccumulationCommandExecutor(adapter).execute("operator-sale")
+    ).reason == "SETTLED"
+    await activation.refresh_from_db()
+    await holding.refresh_from_db()
+    assert activation.state == "enabled"
+    assert Decimal(holding.accumulation_net_quantity) == Decimal("0.0000048")
+    assert not await model.UnsellableTrades.exists()

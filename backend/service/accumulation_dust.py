@@ -1,4 +1,4 @@
-"""Explicit, atomic transfer of an unsellable remainder out of active management."""
+"""Verified, atomic transfer of an unsellable remainder out of active management."""
 
 from __future__ import annotations
 
@@ -56,6 +56,36 @@ async def _retry(command: AccumulationCommand, request: str, connection: Any) ->
     return _result(prior)
 
 
+async def _require_close_accounting(
+    close: Any, activation: Any, connection: Any
+) -> None:
+    """Follow unplaced retries to their settled sale without inventing an order."""
+    seen = set()
+    while close.placement_id is None:
+        if close.operation_id in seen or len(seen) >= 1000:
+            raise AccumulationConflictError("Invalid close retry chain.")
+        seen.add(close.operation_id)
+        if close.action == "close":
+            # Placement creation and attachment are atomic. This initial close
+            # never sent an order; _require_settled still checks all obligations.
+            return
+        try:
+            predecessor = json.loads(close.request_json)["previous_operation_id"]
+        except (ValueError, TypeError, KeyError) as exc:
+            raise AccumulationConflictError("Invalid close retry chain.") from exc
+        close = await model.AccumulationLifecycleOperation.get_or_none(
+            operation_id=predecessor, activation_id=activation.id
+        ).using_db(connection)
+        if (
+            close is None
+            or close.action not in CLOSE_ACTIONS
+            or close.status != "continued"
+            or close.reason != "explicit_close_retry"
+        ):
+            raise AccumulationConflictError("A settled close predecessor is required.")
+    await _require_sale_checkpoint(close, activation, connection)
+
+
 async def _snapshot(
     command: AccumulationCommand, scope: str, connection: Any
 ) -> tuple[Any, Any, Any, str]:
@@ -89,7 +119,7 @@ async def _snapshot(
         )
     close = pending[0]
     await _require_settled(activation, connection)
-    await _require_sale_checkpoint(close, activation, connection)
+    await _require_close_accounting(close, activation, connection)
     holding = await model.OpenTrades.get_or_none(id=activation.holding_id).using_db(
         connection
     )
