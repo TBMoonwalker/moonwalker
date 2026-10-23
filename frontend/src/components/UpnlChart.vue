@@ -46,7 +46,7 @@ const emptyStateText = ref('No profit history yet')
 const visiblePoints = computed(() => filterPerformancePoints(data.value, props.range))
 const placeholderText = computed(() =>
   !performanceComplete.value
-    ? 'Complete performance is unavailable while accumulation returns are not integrated.'
+    ? 'Complete performance is unavailable while some returns are unverified.'
     : visiblePoints.value.length === 0 && data.value.length > 0
     ? 'No performance data in this range'
     : emptyStateText.value,
@@ -166,7 +166,8 @@ const option = computed(() => {
         data: profitValues,
         type: 'line',
         smooth: 0.35,
-        symbol: 'none',
+        symbol: profitValues.length === 1 ? 'circle' : 'none',
+        symbolSize: 6,
         lineStyle: {
           width: 2,
           color: profitLineColor,
@@ -183,7 +184,8 @@ const option = computed(() => {
         data: lockedValues,
         type: 'line',
         smooth: 0.35,
-        symbol: 'none',
+        symbol: profitValues.length === 1 ? 'circle' : 'none',
+        symbolSize: 6,
         lineStyle: {
           width: 2,
           type: 'dotted',
