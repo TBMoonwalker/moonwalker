@@ -227,15 +227,14 @@ async def archive_accumulation_dust(
             activation.reason = "dust_archived"
             await activation.save(using_db=connection)
             await holding.delete(using_db=connection)
-            # A transfer to unmanaged inventory is not a sale or realized loss.
-            # Preserve realized totals, but never report returns as if dust vanished.
+            # Transfer managed basis without a sale or realized loss. Reporting
+            # verifies the retained archive before accepting the empty holding.
             await (
                 model.AccumulationReturnTotals.filter(activation=activation)
                 .using_db(connection)
                 .update(
                     last_quantity="0",
                     last_cost="0",
-                    provenance_complete=False,
                 )
             )
             close.status, close.reason = "applied", "remainder_archived"

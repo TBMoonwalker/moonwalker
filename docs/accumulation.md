@@ -397,5 +397,11 @@ Choose **Reactivate** separately to resume accumulation with the pinned strategy
 Archived coins remain unmanaged wallet surplus; a new trade does not adopt or sell
 them. Clean them up on the exchange before using the existing **Resolve** action
 in Unsellable trades. The immutable archive command retains its audit snapshot.
-Return reporting stays conservative and unavailable for the affected registration
-rather than treating the unsold remainder as zero value.
+Managed-trade returns retain the actual realized profit from the sold quantity.
+The archived remainder leaves managed inventory at its recorded cost basis: it is
+neither a sale nor a realized loss. Its wallet value and subsequent manual disposal
+are outside managed performance. Reporting verifies the retained archive against
+its immutable command and native fill checkpoint before accepting this transfer.
+Missing records, unknown basis or fees keep returns unavailable. A new accumulation
+holding contributes its own unrealized return normally. Older caches disabled by
+verified dust archival rebuild automatically once; history remains preserved.

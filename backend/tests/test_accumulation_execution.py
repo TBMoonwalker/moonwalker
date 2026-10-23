@@ -4225,3 +4225,142 @@ async def test_new_asap_cycle_buys_fresh_base_order_without_old_consumption_or_c
     assert await model.AccumulationFillCheckpoint.filter(deal_id=old_deal).count() == 3
     await restarted.tick()
     assert len(client.calls) == before + 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("new_holding", [False, True])
+async def test_verified_dust_transfer_keeps_realized_returns_and_new_holding_performance(
+    env, new_holding
+):
+    from service.accumulation_performance import accumulation_performance
+
+    adapter, client, clock, *_ = env
+    activation, holding = await close_with_remainder(env, "0.0000048")
+    old_deal = holding.deal_id
+    await archive_dust(env, activation)
+    totals = await model.AccumulationReturnTotals.get(activation=activation)
+    realized = Decimal(totals.realized_quote)
+    # Reproduce the pre-fix cache already present on port 8140.
+    totals.provenance_complete = False
+    await totals.save()
+    if new_holding:
+        await activation.refresh_from_db()
+        lifecycle = AccumulationLifecycleService(adapter.readiness)
+        await lifecycle.submit(
+            dict(
+                symbol=activation.symbol,
+                action="reactivate",
+                operation_id="returns-reactivate",
+                expected_revision=activation.revision,
+            ),
+            account_scope=activation.account_scope,
+        )
+        await lifecycle.complete_rebase(
+            "returns-reactivate", account_scope=activation.account_scope
+        )
+        runtime = AccumulationRuntime(adapter)
+        assert await runtime.startup()
+        clock[0] += HOUR
+        await runtime.tick()
+        clock[0] += 5000
+        await runtime.tick()
+        await activation.refresh_from_db()
+        assert activation.holding_id is not None
+        fresh = await model.OpenTrades.get(id=activation.holding_id)
+        assert fresh.deal_id != old_deal
+    report = await accumulation_performance(adapter)
+    assert report["complete"] and report["history_complete"]
+    group = report["by_quote"][0]
+    assert Decimal(group["realized"]) == realized
+    expected = Decimal(0)
+    if new_holding:
+        expected = Decimal(fresh.accumulation_net_quantity) * Decimal(
+            client.ask
+        ) - Decimal(fresh.accumulation_remaining_cost)
+    assert Decimal(group["unrealized"]) == expected
+    assert Decimal(group["total_return"]) == realized + expected
+    assert sum(Decimal(day["profit"]) for day in report["realized_by_date"]) == realized
+    assert await model.UnsellableTrades.filter(deal_id=old_deal).exists()
+    assert await model.AccumulationFillCheckpoint.filter(deal_id=old_deal).count() == 2
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "missing_record",
+        "changed_snapshot",
+        "unknown_basis",
+        "missing_fees",
+        "changed_checkpoint",
+    ],
+)
+async def test_dust_transfer_never_restores_profit_from_unverified_evidence(env, fault):
+    from service.accumulation_performance import accumulation_performance
+
+    activation, holding = await close_with_remainder(env, "0.0000048")
+    await archive_dust(env, activation)
+    assert (await accumulation_performance(env[0]))["complete"]
+    archive = await model.UnsellableTrades.get(deal_id=holding.deal_id)
+    if fault == "missing_record":
+        await archive.delete()
+    elif fault in {"changed_snapshot", "unknown_basis"}:
+        evidence = json.loads(archive.accumulation_inventory_json)
+        if fault == "changed_snapshot":
+            evidence["inventory"]["remaining_cost"] = "0"
+        else:
+            evidence["inventory"]["basis_provenance"] = "unknown"
+        archive.accumulation_inventory_json = json.dumps(evidence)
+        await archive.save()
+    else:
+        checkpoint = await model.AccumulationFillCheckpoint.get(
+            deal_id=holding.deal_id, placement__side="sell"
+        )
+        if fault == "missing_fees":
+            checkpoint.fees_complete = False
+        else:
+            inventory = json.loads(checkpoint.inventory_json)
+            inventory["remaining_cost"] = "0"
+            checkpoint.inventory_json = json.dumps(inventory)
+        await checkpoint.save()
+    report = await accumulation_performance(env[0])
+    assert not report["complete"] and not report["history_complete"]
+    assert report["by_quote"][0]["total_return"] is None
+    assert report["realized_by_date"] == []
+
+
+@pytest.mark.asyncio
+async def test_verified_dust_transfer_restores_dashboard_profit_and_chart_snapshot(
+    env, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from service import accumulation_performance as performance
+    from service.statistic import Statistic
+
+    activation, _ = await close_with_remainder(env, "0.0000048")
+    await archive_dust(env, activation)
+    totals = await model.AccumulationReturnTotals.get(activation=activation)
+    totals.provenance_complete = False
+    await totals.save()
+    rebuild = AsyncMock(wraps=performance._historical_state)
+    monkeypatch.setattr(performance, "_historical_state", rebuild)
+    report = await performance.accumulation_performance(env[0])
+    assert (await performance.accumulation_performance(env[0])) == report
+    rebuild.assert_awaited_once()
+    runtime = SimpleNamespace(
+        ready=True, adapter=env[0], performance=AsyncMock(return_value=report)
+    )
+    monkeypatch.setattr(
+        "service.runtime_services.get_active_accumulation_runtime", lambda: runtime
+    )
+    statistic = Statistic()
+    monkeypatch.setattr(statistic, "_get_sum_value", AsyncMock(return_value=0))
+    monkeypatch.setattr(statistic, "_get_profit_rows_since", AsyncMock(return_value=[]))
+    await statistic.invalidate_profit_caches()
+    result = await statistic._get_profit_base_cached()
+    assert result["performance_complete"]
+    assert result["performance_scope"] == "all_trades"
+    assert result["profit_history_scope"] == "all_verified_executions"
+    points = await statistic.get_profit_overall_timeline()
+    assert points and points[-1]["profit_overall"] == result["profit_overall"]

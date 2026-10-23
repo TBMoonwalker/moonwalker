@@ -26,6 +26,99 @@ def _money(value: Decimal) -> str:
     return text.rstrip("0").rstrip(".") if "." in text else text
 
 
+def _same_inventory(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+    """Compare exact values while allowing equivalent decimal spellings."""
+    if left is None or right is None:
+        return False
+    try:
+        return (
+            all(
+                Decimal(left[key]) == Decimal(right[key])
+                for key in (
+                    "net_quantity",
+                    "remaining_cost",
+                    "contributed_quote",
+                    "disposal_proceeds",
+                )
+            )
+            and {key: Decimal(value) for key, value in left["fees"].items()}
+            == {key: Decimal(value) for key, value in right["fees"].items()}
+            and left["pending_fee_reports"] == right["pending_fee_reports"] == 0
+            and left["basis_provenance"]
+            == right["basis_provenance"]
+            == "exchange_fills"
+        )
+    except (ValueError, TypeError, KeyError, AttributeError):
+        return False
+
+
+async def _archived_transfers(
+    conn: Any,
+) -> tuple[dict[tuple[str, str], dict[str, Any]], set[str]]:
+    """Verify unsold transfers at basis, without valuing unmanaged wallet coins."""
+    records = (
+        await model.UnsellableTrades.filter(accumulation_inventory_json__isnull=False)
+        .using_db(conn)
+        .values(
+            "deal_id",
+            "symbol",
+            "execution_history_complete",
+            "accumulation_inventory_json",
+        )
+    )
+    by_deal: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        by_deal.setdefault(record["deal_id"], []).append(record)
+    transfers: dict[tuple[str, str], dict[str, Any]] = {}
+    invalid: set[str] = set()
+    for operation in (
+        await model.AccumulationLifecycleOperation.filter(
+            action="archive_dust", status="applied"
+        )
+        .using_db(conn)
+        .select_related("activation")
+    ):
+        owner = str(operation.activation_id)
+        try:
+            evidence = json.loads(operation.request_json)["_archive"]
+            deal_id = evidence["deal_id"]
+            candidates = by_deal.get(deal_id, [])
+            if len(candidates) != 1:
+                raise ValueError("Archived inventory is missing or ambiguous")
+            record = candidates[0]
+            inventory = _inventory(json.dumps(evidence["inventory"]))
+            latest = (
+                await model.AccumulationFillCheckpoint.filter(
+                    activation_id=operation.activation_id, deal_id=deal_id
+                )
+                .using_db(conn)
+                .order_by("-updated_at", "-id")
+                .first()
+            )
+            if (
+                evidence["schema_version"] != 1
+                or evidence["activation_id"] != owner
+                or evidence["account_scope"] != operation.activation.account_scope
+                or evidence["symbol"] != operation.activation.symbol
+                or evidence["symbol"] != record["symbol"]
+                or evidence["operation_id"] != operation.operation_id
+                or evidence != json.loads(record["accumulation_inventory_json"])
+                or not record["execution_history_complete"]
+                or inventory is None
+                or latest is None
+                or not latest.terminal
+                or not latest.fees_complete
+                or not _same_inventory(_inventory(latest.inventory_json), inventory)
+                or Decimal(inventory["net_quantity"]) <= 0
+                or (owner, deal_id) in transfers
+            ):
+                raise ValueError("Unverified archived inventory")
+            transfers[(owner, deal_id)] = inventory
+        except (ValueError, TypeError, KeyError, AttributeError):
+            invalid.add(owner)
+    return transfers, invalid
+
+
 async def _token(conn: Any) -> str:
     holdings = (
         await model.OpenTrades.filter(lifecycle_mode="accumulation")
@@ -39,8 +132,14 @@ async def _token(conn: Any) -> str:
         .order_by("id")
         .values("id", "holding_id", "revision", "account_scope", "state")
     )
+    archives = (
+        await model.UnsellableTrades.filter(accumulation_inventory_json__isnull=False)
+        .using_db(conn)
+        .order_by("id")
+        .values("id", "accumulation_inventory_json")
+    )
     return hashlib.sha256(
-        json.dumps([holdings, owners], sort_keys=True, default=str).encode()
+        json.dumps([holdings, owners, archives], sort_keys=True, default=str).encode()
     ).hexdigest()
 
 
@@ -55,6 +154,7 @@ async def _historical_state(conn: Any) -> tuple[list[dict[str, Any]], str]:
             lifecycle_mode="accumulation"
         ).using_db(conn)
     }
+    transfers, invalid_transfers = await _archived_transfers(conn)
     deals: dict[tuple[str, str], dict[str, Any]] = {}
     cursor = 0
     with localcontext() as context:
@@ -145,6 +245,10 @@ async def _historical_state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                 and inv["pending_fee_reports"] == 0
                 and inv["basis_provenance"] == "exchange_fills"
             )
+            owner = owners.get(symbol)
+            transferred_cost = Decimal(0)
+            transfer = transfers.get((str(owner.id), deal_id)) if owner else None
+            complete &= owner is None or str(owner.id) not in invalid_transfers
             if holding is not None:
                 owner = owners.get(symbol)
                 owned = owner is not None and owner.holding_id == holding.id
@@ -163,6 +267,10 @@ async def _historical_state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                     and inv["remaining_cost"] == cost
                 )
                 scope = owner.account_scope if owned else None
+            elif transfer is not None and _same_inventory(inv, transfer):
+                # A transfer removes managed basis, not sale proceeds or a loss.
+                quantity, cost, scope, owned = "0", "0", None, True
+                transferred_cost = Decimal(transfer["remaining_cost"])
             else:
                 quantity, cost, scope = "0", "0", None
                 complete &= (
@@ -189,6 +297,7 @@ async def _historical_state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                 realized = (
                     Decimal(inv["disposal_proceeds"])
                     + Decimal(cost or "0")
+                    + transferred_cost
                     - deal["acquired"]
                     if complete
                     else None
@@ -322,24 +431,38 @@ _REBUILD_LOCK = asyncio.Lock()
 
 
 async def ensure_return_totals() -> None:
-    """Rebuild absent derived caches once, under drained trading maintenance."""
+    """Rebuild missing caches or the legacy dust invalidation once in maintenance."""
     owners = await model.AccumulationActivation.all().values_list("id", flat=True)
-    cached = set(
-        await model.AccumulationReturnTotals.all().values_list(
-            "activation_id", flat=True
-        )
-    )
-    if set(owners) <= cached:
+    cached_rows = await model.AccumulationReturnTotals.all()
+    cached = {row.activation_id for row in cached_rows}
+    transfers, invalid = await _archived_transfers(None)
+    repair = {
+        row.activation_id
+        for row in cached_rows
+        if not row.provenance_complete
+        and row.history_complete
+        and str(row.activation_id) not in invalid
+        and any(owner == str(row.activation_id) for owner, _ in transfers)
+    }
+    if set(owners) <= cached and not repair:
         return
     async with _REBUILD_LOCK:
         async with trading_maintenance_barrier.maintenance(), in_transaction() as conn:
             owners = await model.AccumulationActivation.all().using_db(conn)
-            cached = set(
-                await model.AccumulationReturnTotals.all()
-                .using_db(conn)
-                .values_list("activation_id", flat=True)
-            )
-            missing = [row for row in owners if row.id not in cached]
+            cached_rows = await model.AccumulationReturnTotals.all().using_db(conn)
+            cached = {row.activation_id for row in cached_rows}
+            transfers, invalid = await _archived_transfers(conn)
+            repair = {
+                row.activation_id
+                for row in cached_rows
+                if not row.provenance_complete
+                and row.history_complete
+                and str(row.activation_id) not in invalid
+                and any(owner == str(row.activation_id) for owner, _ in transfers)
+            }
+            missing = [
+                row for row in owners if row.id not in cached or row.id in repair
+            ]
             if not missing:
                 return
             rows, _ = await _historical_state(conn)
@@ -373,13 +496,15 @@ async def ensure_return_totals() -> None:
                     last_cost = (
                         live[0]["cost"] if len(live) == 1 else "0" if not live else None
                     )
-                    await model.AccumulationReturnTotals.create(
+                    await model.AccumulationReturnTotals.update_or_create(
                         activation=owner,
-                        realized_quote=format(realized, "f"),
-                        provenance_complete=complete,
-                        history_complete=history_complete,
-                        last_quantity=last_quantity,
-                        last_cost=last_cost,
+                        defaults={
+                            "realized_quote": format(realized, "f"),
+                            "provenance_complete": complete,
+                            "history_complete": history_complete,
+                            "last_quantity": last_quantity,
+                            "last_cost": last_cost,
+                        },
                         using_db=conn,
                     )
                     for day in daily:
@@ -405,11 +530,13 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
         row.activation_id: row
         for row in await model.AccumulationReturnTotals.all().using_db(conn)
     }
+    transfers, invalid_transfers = await _archived_transfers(conn)
     result = []
     for owner in owners:
         holding = holdings.pop(owner.symbol, None)
         cached = totals.get(owner.id)
         complete = cached is not None and cached.provenance_complete
+        complete &= str(owner.id) not in invalid_transfers
         complete &= (
             not await model.AccumulationFillCheckpoint.filter(
                 activation=owner, fees_complete=False
@@ -451,6 +578,12 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                 )
             except (ValueError, TypeError):
                 quantity, cost, complete, owned = None, None, False, False
+        elif (
+            owner.holding_id is None
+            and latest is not None
+            and _same_inventory(inv, transfers.get((str(owner.id), latest.deal_id), {}))
+        ):
+            pass  # Settled unsold transfer: managed inventory is empty at basis.
         elif (
             owner.holding_id is not None
             or cached is not None
