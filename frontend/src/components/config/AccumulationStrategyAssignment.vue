@@ -44,7 +44,7 @@ function prepare() { if (action.value) panel.prepare(action.value) }
     <template v-if="uncertain">
       <p role="status">Unconfirmed request for {{ uncertain.symbol }}.</p>
       <n-button v-if="isAccumulationStrategyChange(uncertain)" :disabled="busy || !panel.available.value" :loading="busy" @click="panel.submit()">Retry same strategy request</n-button>
-      <RouterLink v-else :to="{ name: 'controlCenter', query: { mode: 'utilities', symbol: uncertain.symbol }, hash: '#accumulation-controls' }">Resolve recorded request in Utilities</RouterLink>
+      <RouterLink v-else :to="{ name: 'trades', query: { symbol: uncertain.symbol } }">Resolve recorded request in Open trades</RouterLink>
     </template>
     <p v-else-if="panel.pendingRequest.value" role="status">Resolve the pending request for {{ panel.pendingRequest.value.symbol }} before changing a strategy.</p>
     <template v-if="detail && action">

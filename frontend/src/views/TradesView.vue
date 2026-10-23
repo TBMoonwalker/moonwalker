@@ -19,7 +19,6 @@ const ClosedTrades = defineAsyncComponent(() => import('../components/ClosedTrad
 const UnsellableTrades = defineAsyncComponent(() => import('../components/UnsellableTrades.vue'))
 const UpnlChart = defineAsyncComponent(() => import('@/components/UpnlChart.vue'))
 const Charts = defineAsyncComponent(() => import('@/components/Charts.vue'))
-const AccumulationPendingEntries = defineAsyncComponent(() => import('@/components/AccumulationPendingEntries.vue'))
 
 const unsellableTradesStore = useWebSocketDataStore('unsellableTrades')
 const unsellableTradesState = storeToRefs(unsellableTradesStore)
@@ -316,7 +315,6 @@ const admissionToneClass = computed(() =>
         <button type="button" :aria-pressed="activeTradeView === 'unsellable'" :class="{ 'is-active': activeTradeView === 'unsellable' }" @click="activeTradeView = 'unsellable'">Unsellable trades <span>{{ unsellableTradesCount }}</span></button>
       </div>
       <div class="dashboard-panel ledger-panel trade-table-panel">
-        <AccumulationPendingEntries v-if="activeTradeView === 'open'" />
         <OpenTrades v-if="activeTradeView === 'open'" :global-trading-paused="tradingPaused" />
         <ClosedTrades v-else-if="activeTradeView === 'closed'" />
         <UnsellableTrades v-else />

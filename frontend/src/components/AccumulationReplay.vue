@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { useId, computed, ref } from 'vue'
 import axios from 'axios'
 import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
@@ -46,6 +46,8 @@ async function run() {
     error.value = extractApiErrorMessage(cause, cause instanceof Error ? cause.message : 'Historical comparison failed.')
   } finally { busy.value = false }
 }
+const fieldId = (name: string) => `${formId}-${name}`
+const formId = useId()
 </script>
 
 <template>
@@ -53,18 +55,18 @@ async function run() {
     <summary>Historical strategy comparison</summary>
     <p>Simulation only. Compare equal initial funding after warmup with buy-and-hold and fixed-interval DCA. This does not use your wallet or submit orders.</p>
     <form @submit.prevent="run">
-      <label for="replay-strategy">Saved accumulation strategy</label>
-      <n-select filterable :input-props="{ id: 'replay-strategy' }" v-model:value="versionId" :options="options" :disabled="busy" />
-      <label for="replay-funding">Initial funding · symbol quote currency</label>
-      <n-input :input-props="{ id: 'replay-funding' }" v-model:value="funding" :disabled="busy" />
-      <label for="replay-fee">Buy fee · basis points (10 = 0.1%)</label>
-      <n-input :input-props="{ id: 'replay-fee' }" v-model:value="feeBps" :disabled="busy" />
-      <label for="replay-slippage">Adverse buy slippage · basis points</label>
-      <n-input :input-props="{ id: 'replay-slippage' }" v-model:value="slippageBps" :disabled="busy" />
-      <label for="replay-interval">Fixed DCA interval · candles</label>
-      <n-input :input-props="{ id: 'replay-interval' }" v-model:value="interval" :disabled="busy" />
-      <label for="replay-candles">Completed OHLC candles · close_ms;open;high;low;close</label>
-      <n-input :input-props="{ id: 'replay-candles' }" v-model:value="candles" type="textarea" :autosize="{ minRows: 4, maxRows: 12 }" :disabled="busy" placeholder="UTC closing timestamp in milliseconds;open;high;low;close" />
+      <label :for="fieldId('replay-strategy')">Saved accumulation strategy</label>
+      <n-select filterable :input-props="{ id: fieldId('replay-strategy') }" v-model:value="versionId" :options="options" :disabled="busy" />
+      <label :for="fieldId('replay-funding')">Initial funding · symbol quote currency</label>
+      <n-input :input-props="{ id: fieldId('replay-funding') }" v-model:value="funding" :disabled="busy" />
+      <label :for="fieldId('replay-fee')">Buy fee · basis points (10 = 0.1%)</label>
+      <n-input :input-props="{ id: fieldId('replay-fee') }" v-model:value="feeBps" :disabled="busy" />
+      <label :for="fieldId('replay-slippage')">Adverse buy slippage · basis points</label>
+      <n-input :input-props="{ id: fieldId('replay-slippage') }" v-model:value="slippageBps" :disabled="busy" />
+      <label :for="fieldId('replay-interval')">Fixed DCA interval · candles</label>
+      <n-input :input-props="{ id: fieldId('replay-interval') }" v-model:value="interval" :disabled="busy" />
+      <label :for="fieldId('replay-candles')">Completed OHLC candles · close_ms;open;high;low;close</label>
+      <n-input :input-props="{ id: fieldId('replay-candles') }" v-model:value="candles" type="textarea" :autosize="{ minRows: 4, maxRows: 12 }" :disabled="busy" placeholder="UTC closing timestamp in milliseconds;open;high;low;close" />
       <p>Supply the selected strategy's warmup plus at least two evaluation candles, in ascending order, without a header. Maximum 20000 candles. Missing intervals are reported and block new signals until warmup is contiguous.</p>
       <n-button attr-type="submit" :loading="busy" :disabled="busy">Run historical comparison</n-button>
     </form>

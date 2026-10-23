@@ -1,51 +1,79 @@
 <script setup lang="ts">
-import { computed, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { RouterLink, useRoute } from 'vue-router'
 import AccumulationReplay from './AccumulationReplay.vue'
 import AccumulationOutlook from './AccumulationOutlook.vue'
-import { accumulationOutlook } from '../helpers/accumulationPresentation'
 import { useAccumulationPanel } from '../composables/useAccumulationPanel'
 import { accumulationActionCopy, accumulationActionLabels, accumulationReason, isAccumulationStrategyChange } from '../helpers/accumulation'
 
+const props = defineProps<{ symbol?: string; context?: ReturnType<typeof useAccumulationPanel>; hideOutlook?: boolean; intent?: { action: string; id: number } | null }>()
 const route = useRoute()
-const requestedSymbol = computed(() => typeof route?.query.symbol === 'string' ? route.query.symbol : undefined)
-const panel = useAccumulationPanel(requestedSymbol.value)
+const requestedSymbol = computed(() => props.symbol ?? (typeof route?.query.symbol === 'string' ? route.query.symbol : undefined))
+const panel = props.context ?? useAccumulationPanel(requestedSymbol.value)
 watch(requestedSymbol, symbol => {
   if (symbol && symbol !== panel.selected.value) void panel.selectSymbol(symbol)
 })
-const { visible, available, rows, portfolio, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, csv, actions, disabled } = panel
-const options = computed(() => rows.value.map(row => ({ label: `${row.symbol} · ${accumulationReason(row.state)}`, value: row.symbol })))
+const { visible, available, rows, portfolio, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, csv, actions, disabled } = panel
+
+const fieldId = (name: string) => `${selected.value ?? 'accumulation'}-${name}`
 const quote = computed(() => detail.value?.symbol.split('/')[1] ?? '')
 const base = computed(() => detail.value?.symbol.split('/')[0] ?? '')
 const pinnedStrategy = computed(() => panel.strategies.value.find(version => version.id === detail.value?.strategy_version_id))
-const primaryAction = computed(() => {
-  // Keep the button mounted so keyboard focus survives pushed status updates.
-  const action = detail.value ? accumulationOutlook(detail.value, true).action : undefined
-  return action && actions.value.includes(action) ? action : undefined
-})
-const secondaryActions = computed(() => actions.value.filter(action => action !== primaryAction.value && action !== 'sell_partial' && action !== 'switch_strategy'))
+const routineActions = computed(() => actions.value.filter(action => ['pause', 'resume', 'close', 'retry_close', 'reactivate', 'abandon_entry', 'retry_entry'].includes(action)))
+const secondaryActions = computed(() => actions.value.filter(action => !routineActions.value.includes(action) && action !== 'sell_partial' && action !== 'switch_strategy'))
 const repairOptions = computed(() => (detail.value?.quarantined_orders ?? []).filter(order => order.has_lookup_identity).map((order, index) => ({ value: order.placement_operation_id, label: `${order.side === 'buy' ? 'Buy' : 'Manual sale'} · restored order ${index + 1}` })))
 const reviewedRepair = computed(() => repairOptions.value.find(option => option.value === draft.value?.placement_operation_id))
 const retirementOptions = computed(() => (detail.value?.quarantined_commands ?? []).map((operation, index) => ({
   value: operation.operation_id, label: `${accumulationReason(operation.action)} · interrupted request ${index + 1}`,
 })))
 const reviewedRetirement = computed(() => retirementOptions.value.find(option => option.value === draft.value?.previous_operation_id))
+
+const handledIntent = ref<number | null>(null)
+const partialSaleOpen = ref(false)
+const reviewHeading = ref<HTMLElement | null>(null)
+const partialQuantity = ref<{ focus: () => void } | null>(null)
+const initiatingButton = ref<HTMLElement | null>(null)
+const controls = ref<HTMLElement | null>(null)
+function prepare(action: Parameters<typeof panel.prepare>[0], event?: Event) {
+  initiatingButton.value = event?.currentTarget instanceof HTMLElement ? event.currentTarget : null
+  panel.prepare(action)
+}
+async function openPartialSale() {
+  partialSaleOpen.value = true
+  await nextTick()
+  partialQuantity.value?.focus()
+}
+watch(() => draft.value?.operation_id, async id => {
+  await nextTick()
+  if (id) reviewHeading.value?.focus()
+  else if (initiatingButton.value?.isConnected) initiatingButton.value.focus()
+  else controls.value?.focus()
+})
+watch([() => props.intent?.id, fresh], async () => {
+  if (!props.intent || handledIntent.value === props.intent.id || !fresh.value || draft.value || uncertain.value) return
+  handledIntent.value = props.intent.id
+  const action = props.intent.action
+  if (action === 'sell_partial' && actions.value.includes('sell_partial')) await openPartialSale()
+  else if (action === 'adjust_inventory') {
+    await nextTick()
+    const management = controls.value?.querySelector<HTMLDetailsElement>('.accumulation-management')
+    if (management) management.open = true
+    const correction = controls.value?.querySelector<HTMLDetailsElement>('.inventory-correction')
+    if (correction) { correction.open = true; correction.querySelector<HTMLElement>('summary')?.focus() }
+    else notice.value = 'Inventory corrections require a paused trade with settled orders and verified ownership.'
+  } else if (routineActions.value.includes(action as typeof routineActions.value[number])) panel.prepare(action as typeof routineActions.value[number])
+  else notice.value = 'This action is unavailable in the current trade state. Review the status and available controls.'
+}, { immediate: true })
 </script>
 
 <template>
-  <section v-if="visible" id="accumulation-controls" class="dashboard-panel accumulation-panel" aria-labelledby="accumulation-heading">
-    <header class="accumulation-heading">
-      <div>
-        <h2 id="accumulation-heading">Accumulation</h2>
-      </div>
-      <span class="accumulation-live" role="status">{{ !panel.streamAvailable.value ? 'Snapshot' : panel.streamStatus.value === 'OPEN' ? 'Live' : 'Reconnecting' }}</span>
-      <n-button :loading="loading" :disabled="busy" @click="panel.loadPage()">Refresh status</n-button>
-    </header>
+  <section v-if="visible" ref="controls" tabindex="-1" class="accumulation-panel" :aria-label="`${detail?.symbol ?? symbol ?? 'Accumulation'} trade information`">
+    <n-button v-if="!fresh" :loading="loading" :disabled="busy" @click="panel.loadPage()">Refresh status</n-button>
     <n-alert v-if="error" type="warning" role="alert">{{ error }}</n-alert>
     <n-alert v-if="notice" type="info" role="status">{{ notice }}</n-alert>
     <n-alert v-if="panel.pendingRequest.value && panel.pendingRequest.value.symbol !== selected" type="warning" role="alert">
       Resolve the pending request for {{ panel.pendingRequest.value.symbol }} before starting another action.
-      <RouterLink :to="{ name: 'controlCenter', query: { mode: 'utilities', symbol: panel.pendingRequest.value.symbol }, hash: '#accumulation-controls' }">Open pending request</RouterLink>
+      <RouterLink :to="{ name: 'trades', query: { symbol: panel.pendingRequest.value.symbol } }">Open pending request</RouterLink>
     </n-alert>
     <n-alert v-if="uncertain" type="warning" role="alert">
       {{ uncertain.action === 'repair_order' ? 'Order evidence required' : uncertain.action === 'rebind_account' ? 'Account evidence required' : 'Unconfirmed request' }}: {{ accumulationActionLabels[uncertain.action] }} — {{ uncertain.symbol }}.
@@ -53,16 +81,18 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
       <n-button v-else :loading="busy" :disabled="busy || !available" @click="panel.submit()">Retry same request</n-button>
     </n-alert>
     <p v-if="available && rows.length === 0">No accumulation registrations. Add a fixed symbol with ASAP or import an existing holding with CSV.</p>
-    <div v-if="rows.length > 1" class="accumulation-picker">
-      <label for="accumulation-symbol">Managed symbol</label>
-      <n-select filterable :value="selected" :options="options" :input-props="{ id: 'accumulation-symbol' }" :disabled="busy || !!uncertain" @update:value="panel.selectSymbol" />
-      <n-button v-if="next" :disabled="busy" @click="panel.loadPage(true)">Load more symbols</n-button>
-    </div>
-
     <template v-if="detail">
-      <AccumulationOutlook :detail="detail" :fresh="fresh">
-        <n-button v-if="primaryAction" type="primary" :disabled="disabled" @click="panel.prepare(primaryAction)">{{ accumulationActionLabels[primaryAction] }}</n-button>
-      </AccumulationOutlook>
+      <AccumulationOutlook v-if="!hideOutlook" :detail="detail" :fresh="fresh" compact />
+      <div class="accumulation-actions">
+        <span class="assigned-strategy">{{ pinnedStrategy ? `${pinnedStrategy.name} · v${pinnedStrategy.version} · ${pinnedStrategy.parameters.timeframe}` : detail.strategy_slug ?? 'Strategy unavailable' }}</span>
+        <n-button v-for="action in routineActions" :key="action" :disabled="disabled" @click="prepare(action, $event)">{{ action === 'close' && detail.holding ? 'Sell and close' : accumulationActionLabels[action] }}</n-button>
+        <n-button v-if="actions.includes('sell_partial')" :disabled="disabled" :aria-expanded="partialSaleOpen" @click="openPartialSale">Sell part</n-button>
+      </div>
+      <div v-if="partialSaleOpen && actions.includes('sell_partial')" class="accumulation-input">
+        <label :for="`partial-sale-${detail.symbol}`">Partial sale quantity · {{ base }}</label>
+        <n-input ref="partialQuantity" v-model:value="panel.quantity.value" :disabled="disabled" :input-props="{ id: `partial-sale-${detail.symbol}`, inputmode: 'decimal' }" />
+        <n-button :disabled="disabled || !panel.quantity.value" @click="prepare('sell_partial', $event)">Review partial sale</n-button>
+      </div>
       <n-alert v-if="detail.holding_integrity === 'invalid'" type="error">Ownership needs repair. Restore the recorded inventory link before trading.</n-alert>
       <n-alert v-if="detail.account_matches === false" type="warning">The configured credentials differ from this holding's recorded account binding. Wallet balance alone is not proof. Credential revalidation requires matching native order history, complete fees, settled original-account work and enough free inventory. Buying will stay paused.</n-alert>
       <n-alert v-if="detail.quarantined_orders?.length" type="warning">Restored orders remain quarantined. Reconcile them before changing this holding. A missing or inconclusive exchange report cannot release the recorded commitment.</n-alert>
@@ -70,7 +100,8 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
       <n-alert v-if="detail.state === 'closing'" type="warning">
         Closing blocks new buys. Any remaining quantity stays recorded, including dust below the exchange minimum. Retry a remaining sale only after it becomes sellable; unsettled orders must reconcile first.
       </n-alert>
-      <n-alert v-if="draft" type="warning" role="alert" title="Review action">
+      <n-alert v-if="draft" type="warning" role="region" aria-label="Review trade action">
+        <h4 ref="reviewHeading" tabindex="-1">Review {{ accumulationActionLabels[draft.action].toLowerCase() }} · {{ draft.symbol }}</h4>
         <p>{{ accumulationActionCopy(draft.action, draft.symbol) }}</p>
         <p v-if="draft.quantity">Quantity: <strong>{{ draft.quantity }}</strong> {{ base }}</p>
         <template v-if="draft.action === 'adjust_inventory'">
@@ -90,7 +121,7 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
       </n-alert>
     </template>
     <details class="accumulation-management">
-      <summary>Manage accumulation</summary>
+      <summary>Inventory and history</summary>
       <div class="accumulation-management-content">
     <template v-if="detail">
       <dl v-if="detail.holding" class="accumulation-values">
@@ -110,44 +141,44 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
       </dl>
       <p v-if="!detail.observations_initialized && detail.entry?.source === 'csv'">CSV amounts declare net owned coins. Historical fees remain unknown. Correction does not enable buys.</p>
       <div v-if="actions.includes('correct_import')" class="accumulation-input">
-        <label for="accumulation-csv">Corrected CSV for {{ detail.symbol }}</label>
-        <n-input v-model:value="csv" type="textarea" :disabled="disabled" :input-props="{ id: 'accumulation-csv' }" placeholder="date;symbol;price;amount" :autosize="{ minRows: 3, maxRows: 8 }" />
+        <label :for="fieldId('accumulation-csv')">Corrected CSV for {{ detail.symbol }}</label>
+        <n-input v-model:value="csv" type="textarea" :disabled="disabled" :input-props="{ id: fieldId('accumulation-csv') }" placeholder="date;symbol;price;amount" :autosize="{ minRows: 3, maxRows: 8 }" />
       </div>
       <details v-if="actions.includes('declare_ownership')" class="accumulation-input">
         <summary>Explicit ownership declaration</summary>
         <p>Use only after verifying that the recorded coins belong to you in the newly configured account. Return history becomes unverified and buying stays paused.</p>
-        <label for="accumulation-ownership-confirmation">Type {{ detail.symbol }} exactly</label>
-        <n-input v-model:value="panel.ownershipConfirmation.value" :disabled="disabled" :input-props="{ id: 'accumulation-ownership-confirmation' }" />
-        <label for="accumulation-ownership-note">Ownership declaration reason</label>
-        <n-input v-model:value="panel.ownershipNote.value" :disabled="disabled" :input-props="{ id: 'accumulation-ownership-note', maxlength: 500 }" />
+        <label :for="fieldId('accumulation-ownership-confirmation')">Type {{ detail.symbol }} exactly</label>
+        <n-input v-model:value="panel.ownershipConfirmation.value" :disabled="disabled" :input-props="{ id: fieldId('accumulation-ownership-confirmation') }" />
+        <label :for="fieldId('accumulation-ownership-note')">Ownership declaration reason</label>
+        <n-input v-model:value="panel.ownershipNote.value" :disabled="disabled" :input-props="{ id: fieldId('accumulation-ownership-note'), maxlength: 500 }" />
       </details>
-      <details v-if="actions.includes('adjust_inventory')" class="accumulation-input">
+      <details v-if="actions.includes('adjust_inventory')" class="accumulation-input inventory-correction">
         <summary>Inventory correction</summary>
         <p>Use this for a deliberate correction to managed coins. Pause and settle all orders first. A correction cannot clear a holding or remove closing dust.</p>
-        <label for="accumulation-adjustment-direction">Correction direction</label>
-        <n-select v-model:value="panel.adjustmentDirection.value" :options="[{ label: 'Add declared inventory', value: 'add' }, { label: 'Remove part of managed inventory', value: 'remove' }]" :disabled="disabled" :input-props="{ id: 'accumulation-adjustment-direction' }" />
-        <label for="accumulation-adjustment-quantity">Correction quantity · {{ base }}</label>
-        <n-input v-model:value="panel.adjustmentQuantity.value" :disabled="disabled" :input-props="{ id: 'accumulation-adjustment-quantity', inputmode: 'decimal' }" placeholder="Exact quantity to add or remove" />
+        <label :for="fieldId('accumulation-adjustment-direction')">Correction direction</label>
+        <n-select v-model:value="panel.adjustmentDirection.value" :options="[{ label: 'Add declared inventory', value: 'add' }, { label: 'Remove part of managed inventory', value: 'remove' }]" :disabled="disabled" :input-props="{ id: fieldId('accumulation-adjustment-direction') }" />
+        <label :for="fieldId('accumulation-adjustment-quantity')">Correction quantity · {{ base }}</label>
+        <n-input v-model:value="panel.adjustmentQuantity.value" :disabled="disabled" :input-props="{ id: fieldId('accumulation-adjustment-quantity'), inputmode: 'decimal' }" placeholder="Exact quantity to add or remove" />
         <template v-if="panel.adjustmentDirection.value === 'add'">
-          <label for="accumulation-adjustment-cost">Acquisition cost of added coins · {{ quote }}</label>
-          <n-input v-model:value="panel.adjustmentCost.value" :disabled="disabled" :input-props="{ id: 'accumulation-adjustment-cost', inputmode: 'decimal' }" placeholder="Leave blank when unknown" />
+          <label :for="fieldId('accumulation-adjustment-cost')">Acquisition cost of added coins · {{ quote }}</label>
+          <n-input v-model:value="panel.adjustmentCost.value" :disabled="disabled" :input-props="{ id: fieldId('accumulation-adjustment-cost'), inputmode: 'decimal' }" placeholder="Leave blank when unknown" />
           <p>Unknown cost makes remaining cost and contributed quote unknown. Historical fees remain unverified.</p>
         </template>
-        <label for="accumulation-adjustment-note">Correction reason</label>
-        <n-input v-model:value="panel.adjustmentNote.value" :disabled="disabled" :input-props="{ id: 'accumulation-adjustment-note', maxlength: 500 }" placeholder="Why this inventory declaration needs correction" />
+        <label :for="fieldId('accumulation-adjustment-note')">Correction reason</label>
+        <n-input v-model:value="panel.adjustmentNote.value" :disabled="disabled" :input-props="{ id: fieldId('accumulation-adjustment-note'), maxlength: 500 }" placeholder="Why this inventory declaration needs correction" />
       </details>
       <div v-if="actions.includes('repair_order')" class="accumulation-input">
-        <label for="accumulation-repair-order">Quarantined order</label>
-        <n-select v-model:value="panel.repairTarget.value" :options="repairOptions" :disabled="disabled" :input-props="{ id: 'accumulation-repair-order' }" />
+        <label :for="fieldId('accumulation-repair-order')">Quarantined order</label>
+        <n-select v-model:value="panel.repairTarget.value" :options="repairOptions" :disabled="disabled" :input-props="{ id: fieldId('accumulation-repair-order') }" />
         <p>Reconciliation needs terminal exchange evidence with complete fees. Orders without a stored lookup identity require manual investigation.</p>
       </div>
       <div v-if="actions.includes('retire_command')" class="accumulation-input">
-        <label for="accumulation-retirement">Interrupted command</label>
-        <n-select v-model:value="panel.retirementTarget.value" :options="retirementOptions" :disabled="disabled" :input-props="{ id: 'accumulation-retirement' }" />
+        <label :for="fieldId('accumulation-retirement')">Interrupted command</label>
+        <n-select v-model:value="panel.retirementTarget.value" :options="retirementOptions" :disabled="disabled" :input-props="{ id: fieldId('accumulation-retirement') }" />
         <p>Retirement keeps the holding paused. Entry declarations stay recorded and a close remains in Closing.</p>
       </div>
       <div class="accumulation-actions">
-        <n-button v-for="action in secondaryActions" :key="action" :disabled="disabled" @click="panel.prepare(action)">{{ accumulationActionLabels[action] }}</n-button>
+        <n-button v-for="action in secondaryActions" :key="action" :disabled="disabled" @click="prepare(action, $event)">{{ accumulationActionLabels[action] }}</n-button>
       </div>
       <details v-if="detail.operations.length" class="accumulation-history">
         <summary>Recent requests</summary>
@@ -183,7 +214,6 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
     </template>
     <details v-if="detail" class="accumulation-history">
       <summary>Strategy and status details</summary>
-      <p v-if="pinnedStrategy">{{ pinnedStrategy.name }} · v{{ pinnedStrategy.version }} · {{ pinnedStrategy.parameters.timeframe }}</p>
       <div class="accumulation-state">
         <n-tag :type="detail.state === 'closing' || detail.state === 'blocked' ? 'warning' : 'default'">{{ accumulationReason(detail.state) }}</n-tag>
         <span>{{ detail.strategy_slug ?? 'Strategy unavailable' }}<template v-if="detail.strategy_version !== null"> · version {{ detail.strategy_version }}</template></span>
@@ -236,15 +266,14 @@ const reviewedRetirement = computed(() => retirementOptions.value.find(option =>
 </template>
 
 <style scoped>
-.accumulation-panel { padding: 24px; display: grid; gap: 16px; min-width: 0; }
-.accumulation-heading, .accumulation-state, .accumulation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
-.accumulation-heading { justify-content: space-between; align-items: flex-start; }
-h2 { margin: 0; font: 600 20px var(--mw-font-display); color: var(--mw-color-text-primary); }
+.accumulation-panel { display: grid; gap: 16px; min-width: 0; }
+.assigned-strategy { margin-right: auto; font-size: 14px; color: var(--mw-color-text-secondary); }
+h4 { margin: 0 0 8px; font-size: 16px; }
+h4:focus-visible { outline: var(--mw-focus-ring); outline-offset: var(--mw-focus-offset); }
+.accumulation-state, .accumulation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 p { margin: 8px 0 0; color: var(--mw-color-text-secondary); }
 .accumulation-management-content { display: grid; gap: 16px; padding-top: 16px; }
-.accumulation-live { margin-left: auto; font-size: 14px; color: var(--mw-color-text-secondary); }
-.accumulation-picker, .accumulation-input { display: grid; gap: 8px; }
-.accumulation-picker { max-width: 480px; }
+.accumulation-input { display: grid; gap: 8px; }
 .accumulation-input { max-width: 720px; }
 label, dt { font-size: 14px; color: var(--mw-color-text-secondary); }
 .accumulation-values { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; margin: 0; }
@@ -260,7 +289,7 @@ summary, .accumulation-panel :deep(.accumulation-replay > summary) { cursor: poi
 .accumulation-order-list li { min-width: 0; overflow-wrap: anywhere; }
 summary:focus-visible { outline: 2px solid var(--mw-color-primary); outline-offset: 3px; }
 @media (max-width: 767px) {
-  .accumulation-panel { padding: 16px; }
+
   .accumulation-panel :deep(.n-button), .accumulation-panel :deep(.n-base-selection), .accumulation-panel :deep(.n-input) { min-height: 44px; }
   .accumulation-actions { align-items: stretch; }
 }

@@ -1,4 +1,5 @@
 <template>
+    <AccumulationPendingEntries :context="accumulation" :open-symbols="open_trades.map(row => row.symbol)" />
     <n-data-table
         size="small"
         remote
@@ -31,12 +32,16 @@
             :row-data="mobileTradeDetailsRow"
             :min-timeframe="configuredMinTimeframe"
             :on-add-order-manually="handleMobileAddOrderManually"
+            :accumulation-intent="accumulationIntent?.symbol === mobileTradeDetailsRow.symbol ? accumulationIntent : null"
         />
     </n-modal>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, type CSSProperties } from 'vue'
+import { computed, onMounted, ref, watch, type CSSProperties } from 'vue'
+import { useRoute } from 'vue-router'
+import { useAccumulationPanel } from '../composables/useAccumulationPanel'
+import AccumulationPendingEntries from './AccumulationPendingEntries.vue'
 import {
     NDataTable,
     type DataTableRowKey,
@@ -87,6 +92,10 @@ const { isMobile, isTablet } = useViewport()
 const configSnapshotStore = useSharedConfigSnapshot()
 const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
     useConfiguredMinTimeframe()
+const accumulation = useAccumulationPanel()
+const accumulationIntent = ref<{ symbol: string; action: string; id: number } | null>(null)
+let nextAccumulationIntent = 0
+const route = useRoute()
 const sortState = ref<TradeTableSortState | null>(null)
 const expandedTradeRowKeys = ref<DataTableRowKey[]>([])
 const mobileTradeDetailsOpen = ref(false)
@@ -182,6 +191,13 @@ const {
     isMissionActionLoading,
     isTablet,
     missionActionErrors,
+    accumulationRows: accumulation.rows,
+    accumulationFresh: accumulation.fresh,
+    accumulationIntent,
+    onAccumulationAction: (rowData, action) => {
+        accumulationIntent.value = { symbol: rowData.symbol, action, id: ++nextAccumulationIntent }
+        if (!isOpenTradeRowExpanded(rowData)) toggleOpenTradeRow(rowData, true)
+    },
     onAddManualBuy: handleAddManualBuy,
     onDealSell: handleDealSell,
     onDealStop: handleDealStop,
@@ -196,6 +212,18 @@ const {
     denylistValue,
     isDenied: isSymbolDenied,
 })
+
+let requestedSymbol: unknown
+let requestedSymbolOpened = false
+watch([() => route?.query.symbol, open_trades], ([symbol, rows]) => {
+    if (symbol !== requestedSymbol) { requestedSymbol = symbol; requestedSymbolOpened = false }
+    if (typeof symbol !== 'string' || requestedSymbolOpened) return
+    const row = rows.find(row => row.symbol === symbol)
+    if (row) {
+        requestedSymbolOpened = true
+        if (!isOpenTradeRowExpanded(row)) toggleOpenTradeRow(row)
+    }
+}, { immediate: true })
 
 function handleSorterChange(sorter: unknown): void {
     sortState.value = resolveTradeTableSortState(sorter)
@@ -231,7 +259,8 @@ function isInteractiveRowTarget(target: EventTarget | null): boolean {
     )
 }
 
-function toggleOpenTradeRow(rowData: OpenTradeRow): void {
+function toggleOpenTradeRow(rowData: OpenTradeRow, preserveIntent = false): void {
+    if (!preserveIntent && accumulationIntent.value?.symbol === rowData.symbol) accumulationIntent.value = null
     if (!rowData.symbol) {
         return
     }
@@ -260,6 +289,7 @@ function isOpenTradeRowExpanded(rowData: OpenTradeRow): boolean {
 
 function clearMobileTradeDetails(): void {
     mobileTradeDetailsRow.value = null
+    accumulationIntent.value = null
 }
 
 function handleMobileAddOrderManually(): void {

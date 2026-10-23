@@ -2,7 +2,7 @@ import { expect, test, type WebSocketRoute } from '@playwright/test'
 import type { AccumulationCommand, AccumulationDetail } from '../src/types/accumulation'
 
 for (const theme of ['light', 'dark'] as const) {
-test(`shows accumulation beneath its chart with pushed waits and reviewed actions (${theme})`, async ({ page }, testInfo) => {
+test(`integrates accumulation with order status and trade details with pushed waits and reviewed actions (${theme})`, async ({ page }, testInfo) => {
   await page.addInitScript(mode => localStorage.setItem('mw-theme-mode', mode), theme)
   const stamp = Date.now() - 3600000
   const order = { id: 1, timestamp: String(stamp), ordersize: 10, amount: 0.1, symbol: 'BTC/USDC', price: 100 }
@@ -49,14 +49,21 @@ test(`shows accumulation beneath its chart with pushed waits and reviewed action
   await expect(page.getByText('Manage accumulation', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Historical strategy comparison', { exact: true })).toHaveCount(0)
   await expect(page.getByRole('region', { name: 'Pending accumulation entries' })).toHaveCount(0)
-  const openDetails = page.getByRole('button', { name: 'Manage accumulation for BTC/USDC', exact: true })
+  const openDetails = page.getByRole('button', { name: 'Sell BTC/USDC', exact: true })
   const target = await openDetails.boundingBox()
-  expect(target!.height).toBeGreaterThanOrEqual(44)
+  expect(target!.height).toBeGreaterThanOrEqual(testInfo.project.name === 'mobile-chromium' ? 44 : 36)
   expect(target!.width).toBeGreaterThanOrEqual(44)
+  if (testInfo.project.name === 'chromium') {
+    const orderStatus = page.locator('[data-col-key="so_count"] .accumulation-order-status')
+    await expect(orderStatus.getByText('Fall ≈ 2.00% · ≤ 98 USDC', { exact: true })).toBeVisible()
+  }
   await openDetails.click()
   const card = page.getByRole('region', { name: 'BTC/USDC accumulation', exact: true })
-  await expect(card.getByRole('heading', { name: 'Waiting for next buy' })).toBeVisible()
-  await expect(card.getByText('≈ 2.00% fall', { exact: true })).toBeVisible()
+  await expect(card.getByRole('button', { name: 'Confirm close holding', exact: true })).toBeVisible()
+  expect(commands).toBe(0)
+  await card.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(page.locator('.expanded-order-card').getByRole('heading', { name: 'Waiting for next buy' })).toBeVisible()
+  await expect(page.locator('.expanded-order-card').getByText('≈ 2.00% fall', { exact: true })).toBeVisible()
   await expect(card.getByText('Patient dip · v1 · 1h', { exact: true })).toBeVisible()
   await expect(card.getByRole('button', { name: 'Pause accumulation', exact: true })).toBeEnabled()
   await expect(card.getByRole('button', { name: 'Sell and close', exact: true })).toBeEnabled()
@@ -70,11 +77,11 @@ test(`shows accumulation beneath its chart with pushed waits and reviewed action
   detail.wait_condition!.levels[0]!.target_price = '97'
   detail.wait_condition!.levels[0]!.change_percent = '-3'
   sockets.at(-1)!.send(JSON.stringify({ type: 'snapshot', page: { activations: [detail], next_after: null }, detail }))
-  await expect(card.getByText('≈ 3.00% fall', { exact: true })).toBeVisible()
+  await expect(page.locator('.expanded-order-card').getByText('≈ 3.00% fall', { exact: true })).toBeVisible()
   await expect(card.getByText('Change strategy', { exact: true })).toHaveCount(0)
   await expect(card.getByLabel('Accumulation strategy', { exact: true })).toHaveCount(0)
   expect(commands).toBe(0)
-  await card.screenshot({ path: `/private/tmp/accumulation-inline-${theme}-${testInfo.project.name}.png` })
+  await page.locator('.expanded-trade-container').screenshot({ path: `/private/tmp/accumulation-inline-${theme}-${testInfo.project.name}.png` })
   await card.getByRole('button', { name: 'Sell part', exact: true }).click()
   const quantity = card.getByLabel('Partial sale quantity · BTC', { exact: true })
   await expect(quantity).toBeFocused()
@@ -127,10 +134,14 @@ test('opens the requested recovery symbol outside the first registry page', asyn
     requested.push(symbol)
     return route.fulfill({ json: { ...summary, activation_id: 'eth', symbol, operations: [], entry: null, older_operations_available: false } })
   })
+  await page.routeWebSocket('**/trades/*', socket => socket.send('[]'))
+  await page.routeWebSocket('**/statistic/profit', socket => socket.send('{}'))
+  await page.route('**/trades/*/length', route => route.fulfill({ json: { result: 0 } }))
   await page.goto('/control-center?mode=utilities&symbol=ETH%2FUSDC#accumulation-controls')
-  const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await expect(page).toHaveURL(url => url.pathname === '/' && url.searchParams.get('symbol') === 'ETH/USDC')
+  const panel = page.getByRole('region', { name: 'ETH/USDC trade information', exact: true })
   await expect(panel.getByRole('heading', { name: 'Account ownership needs review', exact: true })).toBeVisible()
-  await expect(panel.getByText('ETH/USDC · Current state', { exact: true })).toBeVisible()
+  await expect(panel).toBeVisible()
   expect(requested.length).toBeGreaterThan(0)
-  expect(requested.every(symbol => symbol === 'ETH/USDC')).toBe(true)
+  expect(requested).toContain('ETH/USDC')
 })

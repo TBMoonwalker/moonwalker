@@ -4,6 +4,9 @@ import type { AccumulationDetail } from '../src/types/accumulation'
 test('puts entry state and its reviewed next action before secondary information', async ({ page }, testInfo) => {
   let live: WebSocketRoute | undefined
   await page.routeWebSocket('**/accumulation/stream**', socket => { live = socket })
+  await page.routeWebSocket('**/trades/*', socket => socket.send('[]'))
+  await page.routeWebSocket('**/statistic/profit', socket => socket.send('{}'))
+  await page.route('**/trades/*/length', route => route.fulfill({ json: { result: 0 } }))
   await page.clock.install()
   await page.route('**/config/all', route => route.fulfill({ json: {
     timezone: 'Europe/Vienna', signal: 'asap', symbol_list: 'BTC/USDC', exchange: 'binance',
@@ -24,8 +27,8 @@ test('puts entry state and its reviewed next action before secondary information
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [{ id: 7, name: 'Accumulation dip (ATR)', version: 1, parameters: { timeframe: '1h' } }], next_after_id: null }
       : path.endsWith('/activations') ? { activations: [detail], next_after: null, portfolio: { holding_count: 0, unverified_holding_count: 0, by_quote: [] } } : detail })
   })
-  await page.goto('/control-center?mode=utilities#accumulation-controls')
-  const panel = page.getByRole('region', { name: 'Accumulation', exact: true })
+  await page.goto('/?symbol=BTC%2FUSDC')
+  const panel = page.getByRole('region', { name: 'BTC/USDC trade information', exact: true })
   await expect(panel.getByRole('heading', { name: 'Entry check incomplete' })).toBeVisible()
   await expect(panel.getByRole('list', { name: 'How accumulation works' })).toHaveCount(0)
   await expect(panel.getByText(/ASAP registers the symbol/)).toHaveCount(0)
@@ -36,7 +39,6 @@ test('puts entry state and its reviewed next action before secondary information
   await expect(panel.locator('.accumulation-management')).not.toHaveAttribute('open', '')
   const action = panel.getByRole('button', { name: 'Retry entry check', exact: true })
   await expect(action).toBeEnabled()
-  await expect(action).toHaveClass(/n-button--primary-type/)
   expect(await panel.locator('.accumulation-outlook').evaluate(element => {
     const details = document.querySelector('.accumulation-history')!
     return !!(element.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING)

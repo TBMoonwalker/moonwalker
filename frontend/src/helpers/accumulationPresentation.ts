@@ -29,6 +29,7 @@ const waits: Record<string, [string, string]> = {
 /** Present only evidence available in a page summary; do not invent detail fields. */
 export function accumulationPendingStatus(row: AccumulationStatus, fresh: boolean): string {
   if (!fresh) return 'Status needs refresh'
+  if (row.state === 'stopped') return 'Accumulation stopped'
   if (row.account_matches === false) return 'Account ownership needs review'
   if (row.holding_integrity === 'invalid' || row.inventory_restore_required) return 'Inventory needs repair'
   if (row.state === 'closing') return 'Closing · new buys blocked'

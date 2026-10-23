@@ -43,13 +43,20 @@ vi.mock('../src/control-center/configSnapshotStore', () => ({
     }),
 }))
 
-vi.mock('../src/composables/useTradeTableFeed', () => ({
+vi.mock('../src/composables/useAccumulationPanel', async () => {
+    const { ref } = await import('vue')
+    return { useAccumulationPanel: () => ({ rows: ref([]), fresh: ref(false), visible: ref(false), pendingRequest: ref(null) }) }
+})
+
+vi.mock('../src/composables/useTradeTableFeed', async () => {
+    const { ref } = await import('vue')
+    return ({
     useTradeTableFeed: () => ({
-        rows: { value: testState.rows },
+        rows: ref(testState.rows),
         isTableLoading: { value: false },
         tableEmptyText: { value: 'No open trades' },
     }),
-}))
+}) })
 
 vi.mock('../src/composables/useViewport', () => ({
     useViewport: () => ({
@@ -253,10 +260,10 @@ describe('OpenTrades mobile replay interaction', () => {
         const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<Record<string, unknown>>
         const render = columns.find(column => column.key === 'action')!.render as (row: OpenTradeRow) => VNode
         const actions = mount(defineComponent({ render: () => render(row) }), { global: { stubs: tradeStubs } })
-        expect(actions.text()).toBe('Details')
-        await actions.get('button').trigger('click')
+        expect(actions.text()).toBe('SellMore')
+        await actions.get('button[aria-label="Sell SEI/USDC"]').trigger('click')
         expect(wrapper.get('[data-test="mobile-trade-details"]').exists()).toBe(true)
-        await actions.get('button').trigger('click')
+        await actions.get('button[aria-label="Sell SEI/USDC"]').trigger('click')
         expect(wrapper.get('[data-test="mobile-trade-details"]').exists()).toBe(true)
     })
 

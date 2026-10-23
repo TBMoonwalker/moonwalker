@@ -2,7 +2,8 @@
   <div class="expanded-trade-container">
     <n-flex class="expanded-trade-layout">
         <n-card class="expanded-order-card">
-            <RecoveryDcaStatus :trade="rowData" />
+            <AccumulationOutlook v-if="accumulation?.detail.value" :detail="accumulation.detail.value" :fresh="accumulation.fresh.value" compact />
+            <RecoveryDcaStatus :trade="rowData" v-else-if="!accumulation" />
             <n-timeline :horizontal="false">
                 <n-timeline-item
                     v-for="item in timelineItems"
@@ -37,7 +38,7 @@
             :price-lines="chartPriceLines"
         />
     </n-flex>
-    <AccumulationTradeStatus v-if="rowData.lifecycle_mode === 'accumulation'" :key="rowData.symbol" :symbol="rowData.symbol" />
+    <AccumulationTradeStatus v-if="rowData.lifecycle_mode === 'accumulation'" :key="rowData.symbol" :symbol="rowData.symbol" :context="accumulation!" hide-outlook :intent="accumulationIntent" />
   </div>
 </template>
 
@@ -49,6 +50,8 @@ import { fetchJson } from '../api/client'
 import TradeReplayChart from './TradeReplayChart.vue'
 import RecoveryDcaStatus from './RecoveryDcaStatus.vue'
 import AccumulationTradeStatus from './AccumulationTradeStatus.vue'
+import AccumulationOutlook from './AccumulationOutlook.vue'
+import { useAccumulationPanel } from '../composables/useAccumulationPanel'
 import { formatTradingViewDate } from '../helpers/date'
 import type { TimeframeChoice } from '../helpers/openTrades'
 import type { TradeExecutionRow } from '../stores/trades'
@@ -86,8 +89,11 @@ type OrderData = {
 const props = defineProps<{
     rowData: RowData
     minTimeframe: TimeframeChoice
+    accumulationIntent?: { action: string; id: number } | null
     onAddOrderManually?: (rowData: RowData) => void
 }>()
+
+const accumulation = props.rowData.lifecycle_mode === 'accumulation' ? useAccumulationPanel(props.rowData.symbol) : null
 
 const BUY_MARKER_COLOR = '#2E7D5B'
 const BUY_LINE_COLOR = '#1D5C49'

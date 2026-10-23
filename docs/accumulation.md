@@ -26,7 +26,7 @@ block new buys; reconciliation and explicit sales remain available.
    sizing. Save the configuration. An incomplete draft may omit the strategy pin. Demo and live entry
    requires credentials, an exact compatible pin and successful ownership, market
    and candle validation.
-5. Manage the registration from **Accumulation** in Trading Overview.
+5. Manage the registration from **Open trades** in Trading Overview.
 
 The dry-run switch routes accumulation to the exchange demo trading environment,
 using CCXT demo support, demo credentials and demo wallet funds. Unsupported demo
@@ -66,23 +66,27 @@ future timestamps and unrecognized stale evidence still block trading.
 
 ## Monitor a holding
 
-Expand its entry in **Open trades**. Beneath the chart, the accumulation status
-shows the current wait and any available target price/percentage. The same area
-shows the selected strategy as read-only information and controls for pausing, resuming or
+The **Order status** column shows the current buy wait and any available target
+price/percentage. Use the usual **Sell** and **More** row actions, or expand the
+trade. The order card beside the chart shows the detailed next-buy condition.
+Beneath it are the read-only strategy and controls for pausing, resuming,
 selling part or closing the holding. **Sell part** reveals an exact base-asset
 quantity field and a reviewed confirmation; it does not sell on the first click.
 Entry registration and blocked entry messages
 appear in Open trades until there is an owned holding.
 
-**Utilities → Accumulation** contains account and inventory repair, interrupted
-requests, execution evidence, portfolio valuation and historical strategy
-comparison. These tools do not sit in the normal trading dashboard.
+**Inventory and history** in the expanded trade contains account and inventory
+repair, interrupted requests, execution evidence, portfolio valuation and
+historical strategy comparison. Portfolio sections explicitly cover all holdings;
+individual inventory and requests belong to the selected symbol. Registrations
+without an open trade, including stopped records, are expandable in the same
+Open trades area. Utilities contains no accumulation management.
 Strategy selection and changes live only in **Configuration → Trade modes**.
 The initial version is the default for new registrations. Expand **Change strategy
 for an existing registration** there to review and apply a different saved version
 to one existing registration; the same control can retry a staged entry with a
 replacement version. Utilities and trade cards do not change strategies.
-Issue links select the affected symbol in Utilities. If that symbol cannot be
+Issue links open the affected symbol in Open trades. If that symbol cannot be
 loaded, the screen reports the error instead of selecting a different holding.
 
 ## Operator actions and retries
@@ -272,7 +276,7 @@ bounded routine result sets. Registry/history pages are capped at 100 records.
 
 ## Historical strategy comparison
 
-Open **Utilities → Accumulation → Manage accumulation**, then expand
+Expand the symbol in **Open trades → Inventory and history**, then expand
 **Historical strategy comparison**. Choose a saved
 version, initial quote funding, buy fee and adverse slippage in basis points, and
 a fixed DCA interval in candles. Paste at most 20000 completed candles in ascending

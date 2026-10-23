@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import type { AccumulationDetail } from '../types/accumulation'
 import { accumulationOutlook } from '../helpers/accumulationPresentation'
 
-const props = defineProps<{ detail: AccumulationDetail; fresh: boolean }>()
+const props = defineProps<{ detail: AccumulationDetail; fresh: boolean; compact?: boolean }>()
 const outlook = computed(() => accumulationOutlook(props.detail, props.fresh))
 const hasAction = computed(() => accumulationOutlook(props.detail, true).action)
 const condition = computed(() => {
@@ -30,10 +30,10 @@ function movement(value: string) {
 </script>
 
 <template>
-  <div class="accumulation-outlook" :data-tone="outlook.tone">
+  <div class="accumulation-outlook" :class="{ compact }" :data-tone="outlook.tone">
     <div class="outlook-now">
       <div class="outlook-message" role="status">
-        <span class="outlook-label">{{ detail.symbol }} · Current state</span>
+        <span v-if="!compact" class="outlook-label">{{ detail.symbol }} · Current state</span>
         <h3 tabindex="-1">{{ heading }}</h3>
         <template v-if="condition">
           <ul v-if="condition.levels.length" class="wait-levels" aria-label="Current entry conditions">
@@ -59,7 +59,7 @@ function movement(value: string) {
 <style scoped>
 .accumulation-outlook { min-width: 0; border-block: 1px solid var(--mw-color-border); }
 .outlook-now { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding-block: 16px; }
-.outlook-message { border-left: 3px solid var(--mw-color-info); padding-left: 16px; }
+.outlook-message { min-width: 0; }
 [data-tone="warning"] .outlook-message { border-color: var(--mw-color-warning); }
 [data-tone="default"] .outlook-message { border-color: var(--mw-color-border-strong); }
 .outlook-label { font-size: 14px; color: var(--mw-color-text-secondary); }
@@ -72,6 +72,12 @@ p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--mw-color-text-sec
 .wait-levels li > span { font-size: 16px; color: var(--mw-color-text-secondary); }
 .wait-levels .wait-or { font-size: 14px; }
 .wait-note, .wait-levels .wait-note { margin-top: 8px; font-size: 14px; color: var(--mw-color-text-secondary); }
+.compact { border-top: 0; margin-bottom: 16px; }
+.compact .outlook-now { padding-top: 0; gap: 12px; }
+.compact h3 { margin-top: 0; font-size: 16px; }
+.compact p, .compact .wait-levels li > span { font-size: 14px; }
+.compact .wait-levels { gap: 12px; }
+.compact .wait-levels strong { font-size: 16px; }
 @media (max-width: 767px) {
   .outlook-now { flex-direction: column; align-items: stretch; gap: 16px; }
   .outlook-next { padding-left: 16px; }
