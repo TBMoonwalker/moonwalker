@@ -38,11 +38,7 @@
                 </n-form-item>
                 <template v-if="isAccumulationMode">
                     <p v-if="accumulationError" role="alert">{{ accumulationError }}</p>
-                    <n-space>
-                        <n-button :disabled="!dca.accumulation_available || accumulationLoading" @click="loadAccumulationStrategies()">Refresh strategies</n-button>
-                        <n-button v-if="accumulationCursor !== null" :disabled="accumulationLoading" @click="loadAccumulationStrategies(true)">Load more strategies</n-button>
-                        <RouterLink class="accumulation-builder-link" :to="{ name: 'controlCenter', query: { mode: 'strategy-builder', target: 'strategy-builder' } }">Create in Strategy Builder</RouterLink>
-                    </n-space>
+                    <n-button v-if="accumulationCursor !== null" :disabled="accumulationLoading" @click="loadAccumulationStrategies(true)">Load more strategies</n-button>
                     <p>The initial version applies to new registrations. Existing registrations keep their saved version; change it below. You can save an incomplete dry-run draft before creating a strategy.</p>
                 </template>
                 <n-alert
@@ -204,7 +200,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { RouterLink, useRoute } from 'vue-router'
+import { useRoute } from 'vue-router'
 import AccumulationStrategyAssignment from './AccumulationStrategyAssignment.vue'
 import { fetchAccumulationStrategies } from '../../api/accumulation'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
@@ -339,6 +335,5 @@ defineExpose({
 .trade-mode-guard-note {
     margin-bottom: 18px;
 }
-.accumulation-builder-link { display: inline-flex; align-items: center; min-height: 44px; }
 summary { cursor: pointer; padding-block: 12px; min-height: 44px; color: var(--mw-color-text-primary); }
 </style>
