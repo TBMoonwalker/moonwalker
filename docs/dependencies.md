@@ -87,9 +87,11 @@ The reviewed `@vue/test-utils` 2.5 line replaces the older dependency tree
 that introduced vulnerable `js-beautify` and `glob` dependencies. Recheck the
 resolved tree with npm audit when updating it.
 
-Ruff remains on `0.15.22`. Ruff `0.16.0` enables additional rules that surface
-287 findings in the current backend and test suite; adopting that version
-requires a dedicated lint-cleanup change instead of a dependency-only rewrite.
+Ruff is pinned to `0.17.2`. Its lint configuration explicitly selects the
+pre-0.16 rule families (`E4`, `E7`, `E9`, `F`), preserving the existing checks
+through the tool upgrade. This follows the [upstream compatibility migration](https://astral.sh/blog/ruff-v0.16.0).
+Adopting Ruff's expanded default rules is a separate lint-policy change; do not
+silently disable existing rules or bundle broad code cleanup into lock updates.
 
 ## Security verification
 
@@ -190,8 +192,8 @@ per [Microsoft's embedded-language guidance](https://devblogs.microsoft.com/type
 | `polyfactory` | 3.3.0 | 3.5.0 | Applied 3.5.0 (patch/minor); exact pin and generated lock updated. |
 | `propcache` | 0.5.2 | 0.5.4 | Patch/minor candidate, blocked; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
 | `pycparser` | 3.0 | 3.12 | Patch/minor candidate, blocked; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
-| `python-dateutil` | 2.9.0.post0 | 3.0.0 | Major; review datetime parsing and timezone behavior before adoption. |
-| `ruff` | 0.15.22 | 0.17.2 | Pre-1.0 breaking/tooling review; retain 0.15.22 until the dedicated lint cleanup. |
+| `python-dateutil` | 2.9.0.post0 | 3.0.0 | Applied 3.0.0 with hashed tzdata 2026.5 and timezone regressions. |
+| `ruff` | 0.15.22 | 0.17.2 | Applied 0.17.2; preserve existing lint rule families explicitly. |
 | `setuptools` | 84.0.0 | 84.2.1 | Applied 84.2.1 (patch/minor); exact pin and generated lock updated. |
 | `tortoise-orm` | 1.1.8 | 1.1.9 | Applied 1.1.9 (patch/minor); exact pin and generated lock updated. |
 | `uvloop` | 0.22.1 | 0.23.0 | Patch/minor candidate, blocked; do not force past CCXT 4.5.90’s exact pin; review with a CCXT update. |
@@ -204,8 +206,8 @@ per [Microsoft's embedded-language guidance](https://devblogs.microsoft.com/type
 | `@playwright/test` | 1.64.0 | 1.64.1 | Applied 1.64.1 (patch/minor); exact pin and generated lock updated. |
 | `@types/node` | 24.13.3 | 26.6.5 (24.x: 24.19.2) | Applied 24.19.2 (patch/minor); exact pin and generated lock updated. |
 | `@vitest/coverage-v8` | 5.0.4 | 5.0.5 | Applied 5.0.5 (patch/minor); exact pin and generated lock updated. |
-| `jsdom` | 30.1.2 | 30.1.3 | Held: 30.1.3 requires `@asamuzakjp/dom-selector` 10, a transitive major; review separately. |
-| `knip` | 6.41.0 | 6.42.1 | Held: 6.42.x requires `unbash` 6, a transitive major; review separately. |
+| `jsdom` | 30.1.2 | 30.1.3 | Applied with reviewed selector-engine major 10.0.5. |
+| `knip` | 6.41.0 | 6.42.1 | Applied with reviewed shell-parser major unbash 6.0.1. |
 | `pinia` | 4.0.3 | 4.1.0 | Applied 4.1.0 (patch/minor); exact pin and generated lock updated. |
 | `typescript` | 6.0.3 | 7.0.2 | Major; do not adopt while Vue tooling requires the TypeScript 6 API. |
 | `vite` | 8.3.4 | 8.3.5 | Applied 8.3.5 (patch/minor); exact pin and generated lock updated. |
@@ -220,16 +222,16 @@ locks were regenerated with selected upgrade targets; npm resolution introduced
 no major version changes. Security pins for certifi and follow-redirects remain.
 
 CCXT 4.5.90 retains the exact pins blocking cffi, charset-normalizer, idna,
-multidict, propcache, pycparser and uvloop updates. Ruff remains held for the
-separate lint cleanup, and TypeScript 7 remains incompatible with the Vue tooling.
-The Python-dateutil and Node-type major updates remain outside this changeset.
+multidict, propcache, pycparser and uvloop updates. The minor-only changeset
+held Ruff and dateutil for the major/breaking review below. TypeScript 7 and
+Node 26 types remain outside the supported toolchain.
 
 The [jsdom 30.1.3 metadata](https://registry.npmjs.org/jsdom/30.1.3) requires
 `@asamuzakjp/dom-selector ^10.0.3` rather than the existing 9.x line. The
 [Knip 6.42.1 metadata](https://registry.npmjs.org/knip/6.42.1) requires `unbash ^6.0.0`
 rather than 5.x; Knip 6.42.0 has the same requirement. These candidates had no
-known OSV advisory, but are held because their transitive major changes need
-compatibility review. Do not override their requirements to force older engines.
+known OSV advisory, and were held during the minor-only update pending the
+major review below. Do not override their requirements to force older engines.
 
 Release review included [CCXT 4.5.90](https://github.com/ccxt/ccxt/releases/tag/v4.5.90),
 [Litestar 2.25.0](https://docs.litestar.dev/2/release-notes/changelog.html#2.25.0),
@@ -248,7 +250,62 @@ frontend unit tests, the legacy frontend suite, coverage gates, lint/type/build
 checks, both vulnerability audits and npm registry signatures. The complete
 browser suite passes 72 checks with 12 intentional viewport skips across desktop,
 mobile and tablet. Existing frontend project-type-check debt remains tracked in
-TODOS.md. Post-install registry checks show only the held updates described here.
+TODOS.md. The post-install registry check for that changeset matched its
+documented holds; the subsequent major review below updates those decisions.
+
+### Major and breaking-version follow-up
+
+Security screening preceded installation: registry metadata and relevant upstream
+release guidance were reviewed for dateutil 3, multidict 7, TypeScript 7, Node 26 types,
+Ruff 0.17, jsdom 30.1.3 and Knip 6.42.1, including the new selector/parser major
+versions. OSV returned no known advisories for the nine reviewed candidates,
+and again for every changed resolved version (29 package/version pairs,
+including optional platform bindings and the new tzdata dependency). Advisory
+screening is not a guarantee against an undisclosed compromise; installation
+still requires hash/integrity checks and the CI audits.
+
+Applied migrations:
+
+- `python-dateutil 3.0.0`, explicitly pinned in production inputs, with generated
+  locks for `tzdata 2026.5`. The [release rewrites timezone-file handling](https://github.com/dateutil/dateutil/releases/tag/3.0.0)
+  and uses system/IANA timezone data instead of a bundled database. Candle
+  serialization regression tests cover the two distinct instants in Vienna's
+  repeated autumn hour and a summer date after 2038. No direct use of removed
+  `dateutil.zoneinfo` rebuilding or mutable `TZPATHS` APIs was found in Moonwalker.
+- `jsdom 30.1.3`, including `@asamuzakjp/dom-selector 10.0.5`. Its [release notes](https://github.com/jsdom/jsdom/releases/tag/v30.1.3)
+  include CSS/selector behavior fixes and cross-origin XHR credential handling.
+  The rendered component suite passes against this engine.
+- `knip 6.42.1`, including `unbash 6.0.1`. The existing TypeScript-based legacy
+  loader compiler remains unchanged. Knip executes and emits its normal JSON
+  report; three unused exported types are reported, with no compiler/tool error.
+  Knip remains an on-demand report, not a newly enforced CI gate.
+- `ruff 0.17.2` using the documented compatibility rule selection above. The
+  formatter and existing lint checks remain enforced; expanding default lint
+  coverage requires a separate review rather than hundreds of incidental edits.
+
+Incompatible targets retained after review:
+
+- `multidict 7.1.0`: CCXT 4.5.90 requires exactly `multidict==6.9.1`. A forced
+  override would violate its declared dependency contract. Revisit when a
+  reviewed CCXT release permits multidict 7; no repackaged exchange library or
+  resolver bypass is introduced.
+- `typescript 7.0.2`: [Microsoft's Vue guidance](https://devblogs.microsoft.com/typescript/announcing-typescript-7-0/#typescript-and-embedded-languages)
+  still requires TypeScript 6's programmatic API. In addition to Vue tooling,
+  `frontend/knip.ts` and the legacy test loader use that API directly. Retain 6.0.3;
+  do not use a prerelease compiler or silently remove Vue/type-analysis checks.
+- `@types/node 26.6.5`: the application supports Node 24, as declared by its npm
+  engines, `.nvmrc` and `@tsconfig/node24`. Retain the updated 24.19.2 types until
+  a separately reviewed Node runtime migration, so type checking cannot accept
+  Node 26 APIs that are absent in the supported runtime.
+
+Validation on 2026-10-23: full CI passes with 1,857 backend tests (including the
+two timezone regression cases), 266 frontend unit tests, the legacy frontend
+suite, coverage gates, lint/type/build checks, both vulnerability audits and npm
+registry signatures. The browser suite passes 72 checks with 12 intentional
+viewport skips across desktop, mobile and tablet. Existing frontend project
+checking debt and future-major deprecations remain documented in TODOS.md.
+Post-install outdated checks leave only CCXT-pinned Python dependencies,
+TypeScript 7 and Node 26 types; no other reviewed update is pending.
 
 ## Rollback
 

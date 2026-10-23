@@ -1,8 +1,10 @@
 import json
+from datetime import UTC, datetime
 
 import pandas as pd
 import pytest
 import service.data as data_module
+from dateutil import tz
 from service.data import Data
 from service.data_ohlcv import (
     build_live_candle_payload,
@@ -256,4 +258,44 @@ async def test_get_ohlcv_for_pair_skips_live_candle_for_bounded_request(
     assert [record["time"] for record in records] == [
         pytest.approx(1_700_000_000.0),
         pytest.approx(1_700_000_060.0),
+    ]
+
+
+@pytest.mark.parametrize(
+    ("local_times", "utc_times"),
+    [
+        (
+            [(2026, 10, 25, 2, 30, 0), (2026, 10, 25, 2, 30, 1)],
+            [(2026, 10, 25, 0, 30), (2026, 10, 25, 1, 30)],
+        ),
+        (
+            [(2040, 7, 1, 12, 0, 0)],
+            [(2040, 7, 1, 10, 0)],
+        ),
+    ],
+    ids=["repeated-autumn-hour", "summer-after-2038"],
+)
+def test_candle_serialization_preserves_timezone_instants(
+    local_times: list[tuple[int, int, int, int, int, int]],
+    utc_times: list[tuple[int, int, int, int, int]],
+) -> None:
+    """Keep distinct exchange instants through dateutil's timezone conversion."""
+    timezone = tz.gettz("Europe/Vienna")
+    assert timezone is not None
+    timestamps = [
+        datetime(*parts[:5], fold=parts[5], tzinfo=timezone) for parts in local_times
+    ]
+    frame = pd.DataFrame(
+        {
+            "timestamp": timestamps,
+            "open": 1.0,
+            "high": 1.2,
+            "low": 0.8,
+            "close": 1.1,
+            "volume": 10.0,
+        }
+    )
+    records = json.loads(serialize_ohlcv_dataframe(frame, offset=0))
+    assert [row["time"] for row in records] == [
+        datetime(*parts, tzinfo=UTC).timestamp() for parts in utc_times
     ]
