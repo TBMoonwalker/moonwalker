@@ -12,7 +12,7 @@ const panel = props.context ?? useAccumulationPanel(requestedSymbol.value)
 watch(requestedSymbol, symbol => {
   if (symbol && symbol !== panel.selected.value) void panel.selectSymbol(symbol)
 })
-const { visible, available, rows, portfolio, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, csv, actions, disabled } = panel
+const { visible, available, rows, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, csv, actions, disabled } = panel
 
 const fieldId = (name: string) => `${selected.value ?? 'accumulation'}-${name}`
 const quote = computed(() => detail.value?.symbol.split('/')[1] ?? '')
@@ -55,8 +55,6 @@ watch([() => props.intent?.id, fresh], async () => {
   if (action === 'sell_partial' && actions.value.includes('sell_partial')) await openPartialSale()
   else if (action === 'adjust_inventory') {
     await nextTick()
-    const management = controls.value?.querySelector<HTMLDetailsElement>('.accumulation-management')
-    if (management) management.open = true
     const correction = controls.value?.querySelector<HTMLDetailsElement>('.inventory-correction')
     if (correction) { correction.open = true; correction.querySelector<HTMLElement>('summary')?.focus() }
     else notice.value = 'Inventory corrections require a paused trade with settled orders and verified ownership.'
@@ -119,16 +117,18 @@ watch([() => props.intent?.id, fresh], async () => {
         </div>
       </n-alert>
     </template>
-    <details class="accumulation-management">
-      <summary>Inventory and history</summary>
-      <div class="accumulation-management-content">
     <template v-if="detail">
-      <dl v-if="detail.holding" class="accumulation-values">
+      <details v-if="detail.holding" class="holding-evidence">
+        <summary>Current holding</summary>
+        <dl class="accumulation-values">
         <div><dt>Managed quantity · {{ base }}</dt><dd>{{ detail.holding.net_quantity ?? 'Unknown' }}</dd></div>
         <div><dt>Remaining cost · {{ quote }}</dt><dd>{{ detail.holding.remaining_cost ?? 'Unknown' }}</dd></div>
         <div><dt>Contributed · {{ quote }}</dt><dd>{{ detail.holding.contributed_quote ?? 'Unknown' }}</dd></div>
         <div><dt>Disposal proceeds · {{ quote }}</dt><dd>{{ detail.holding.disposal_proceeds ?? 'Unknown' }}</dd></div>
+        <div><dt>Cost basis</dt><dd>{{ detail.holding.basis_provenance ? accumulationReason(detail.holding.basis_provenance) : 'Unknown' }}</dd></div>
+        <div><dt>Recorded fees</dt><dd>{{ detail.holding.fees ? Object.entries(detail.holding.fees.totals).map(([currency, amount]) => `${amount} ${currency}`).join(' · ') || '0' : 'Unknown' }}</dd></div>
       </dl>
+      </details>
       <p v-else-if="detail.inventory_restore_required">Recorded inventory is missing from its holding link. Restore it from audit evidence before trading.</p>
       <p v-else-if="detail.holding_integrity !== 'invalid' && detail.observations_initialized">No managed inventory.</p>
       <p v-if="detail.holding && (!detail.holding.fees || detail.holding.fees.pending_reports > 0 || !detail.holding.execution_history_complete)">
@@ -176,90 +176,11 @@ watch([() => props.intent?.id, fresh], async () => {
         <n-select v-model:value="panel.retirementTarget.value" :options="retirementOptions" :disabled="disabled" :input-props="{ id: fieldId('accumulation-retirement') }" />
         <p>Retirement keeps the holding paused. Entry declarations stay recorded and a close remains in Closing.</p>
       </div>
-      <div class="accumulation-actions">
+      <div v-if="secondaryActions.length" class="accumulation-actions">
         <n-button v-for="action in secondaryActions" :key="action" :disabled="disabled" @click="prepare(action, $event)">{{ accumulationActionLabels[action] }}</n-button>
       </div>
-      <details v-if="detail.operations.length" class="accumulation-history">
-        <summary>Recent requests</summary>
-        <p>These are recorded outcomes. Current holding state is shown above.</p>
-        <ul><li v-for="operation in detail.operations" :key="operation.operation_id">
-          {{ accumulationReason(operation.action) }} · {{ operation.status }} · {{ operation.result_state }}
-          <template v-if="operation.adjustment">
-            <p>{{ operation.adjustment.direction }} {{ operation.adjustment.quantity }} {{ base }} · {{ operation.adjustment.note }}</p>
-            <p>Managed quantity: {{ operation.adjustment.before_quantity }} → {{ operation.adjustment.after_quantity }} {{ base }}. Remaining cost: {{ operation.adjustment.before_cost ?? 'Unknown' }} → {{ operation.adjustment.after_cost ?? 'Unknown' }} {{ quote }}.</p>
-          </template>
-        </li></ul>
-        <p v-if="detail.older_operations_available">Showing the 20 most recent requests.</p>
-      </details>
-      <details v-if="detail.orders?.length" class="accumulation-history">
-        <summary>Recent executed orders</summary>
-        <p>One cumulative record per order. Later fills and fee corrections update that record. These amounts remain available after a full close and can include previous holdings of this symbol.</p>
-        <ul class="accumulation-order-list">
-          <li v-for="order in detail.orders" :key="order.checkpoint_id">
-            <strong>{{ order.side === 'buy' ? 'Buy' : 'Manual sale' }}</strong> · {{ order.terminal ? 'Terminal order' : 'Order still open' }}
-            <dl class="accumulation-values">
-              <div><dt>Filled · {{ base }}</dt><dd>{{ order.filled_quantity ?? 'Unknown' }}</dd></div>
-              <div><dt>Gross quote amount · {{ quote }}</dt><dd>{{ order.quote_cost ?? 'Unknown' }}</dd></div>
-              <div><dt>Fees</dt><dd v-if="order.fees === null">Unknown</dd><dd v-for="(amount, currency) in order.fees" :key="currency">{{ amount }} {{ currency }}</dd></div>
-              <div><dt>Remaining quantity at update · {{ base }}</dt><dd>{{ order.inventory_at_update?.net_quantity ?? 'Unknown' }}</dd></div>
-              <div><dt>Remaining cost at update · {{ quote }}</dt><dd>{{ order.inventory_at_update?.remaining_cost ?? 'Unknown' }}</dd></div>
-            </dl>
-            <p v-if="!order.fees_complete || !order.inventory_at_update || order.inventory_at_update.pending_fee_reports || order.inventory_at_update.basis_provenance !== 'exchange_fills'">Basis or fee history is incomplete. This is not a verified net return.</p>
-            <p>Last evidence update: {{ order.updated_at }}</p>
-          </li>
-        </ul>
-        <p v-if="detail.older_orders_available">Showing the 20 most recent filled orders. Earlier records remain stored.</p>
-      </details>
     </template>
-    <details v-if="detail" class="accumulation-history">
-      <summary>Strategy and status details</summary>
-      <div class="accumulation-state">
-        <n-tag :type="detail.state === 'closing' || detail.state === 'blocked' ? 'warning' : 'default'">{{ accumulationReason(detail.state) }}</n-tag>
-        <span>{{ detail.strategy_slug ?? 'Strategy unavailable' }}<template v-if="detail.strategy_version !== null"> · version {{ detail.strategy_version }}</template></span>
-        <span v-if="!fresh">Status needs refresh</span>
-      </div>
-      <p v-if="detail.reason || detail.runtime_wait_reason">{{ accumulationReason(detail.reason || detail.runtime_wait_reason) }}</p>
-      <p v-if="detail.reason && detail.runtime_wait_reason">Runtime: {{ accumulationReason(detail.runtime_wait_reason) }}</p>
-    </details>
-    <details v-if="portfolio" class="accumulation-history" :open="portfolio.unverified_holding_count > 0 || portfolio.by_quote.some(group => group.unknown_cost_count > 0)">
-      <summary>All accumulation holdings · {{ portfolio.holding_count }}</summary>
-    <div v-if="portfolio" aria-label="Accumulation inventory summary">
-      <p>{{ portfolio.holding_count }} managed holdings. Amounts cover all accumulation holdings, including symbols outside the current page.</p>
-      <dl class="accumulation-values">
-        <div v-for="group in portfolio.by_quote" :key="group.quote">
-          <dt>Remaining cost · {{ group.quote }}</dt>
-          <dd>{{ group.remaining_cost ?? 'Unknown' }}</dd>
-          <p v-if="group.unknown_cost_count">Known subtotal: {{ group.known_remaining_cost }} {{ group.quote }}; {{ group.unknown_cost_count }} holdings have unknown cost.</p>
-        </div>
-      </dl>
-      <p>Cost is not market value or net profit. Refresh valuation below for market value and verified returns.</p>
-      <n-alert v-if="portfolio.unverified_holding_count" type="warning">{{ portfolio.unverified_holding_count }} holdings need ownership repair. Their recorded costs remain included.</n-alert>
-    </div>
-    </details>
-    <details class="accumulation-history">
-      <summary>Accumulation value and returns</summary>
-      <p>Market value uses fresh bids before any future sale fee. Returns include recorded execution fees; unknown historical fees, ownership or basis keep returns unavailable. Quote currencies stay separate.</p>
-      <n-button :loading="panel.performanceLoading.value" :disabled="busy || panel.performanceLoading.value" @click="panel.loadPerformance()">Refresh valuation</n-button>
-      <p v-if="panel.performanceError.value" role="alert">{{ panel.performanceError.value }}</p>
-      <template v-if="panel.performance.value">
-        <p>Observed: {{ new Date(panel.performance.value.observed_at_ms).toISOString() }}. This is a snapshot; refresh for a current valuation.</p>
-        <p v-if="panel.performance.value.reason">{{ accumulationReason(panel.performance.value.reason) }}</p>
-        <p v-if="!panel.performance.value.by_quote.length">No managed capital or executed accumulation history.</p>
-        <div v-for="group in panel.performance.value.by_quote" :key="group.quote">
-          <strong>{{ group.quote }}</strong>
-          <dl class="accumulation-values">
-            <div><dt>Market value</dt><dd>{{ group.market_value ?? 'Unavailable' }}</dd></div>
-            <div><dt>Realized return</dt><dd>{{ group.realized ?? 'Unknown' }}</dd></div>
-            <div><dt>Unrealized return</dt><dd>{{ group.unrealized ?? 'Unknown' }}</dd></div>
-            <div><dt>Total return</dt><dd>{{ group.total_return ?? 'Unknown' }}</dd></div>
-          </dl>
-          <p v-if="!group.complete">{{ group.unknown_deal_count }} holding histories lack complete evidence. These returns cannot be verified.</p>
-        </div>
-      </template>
-    </details>
 
-      </div>
-    </details>
   </section>
 </template>
 
@@ -268,22 +189,16 @@ watch([() => props.intent?.id, fresh], async () => {
 .assigned-strategy { margin-right: auto; font-size: 14px; color: var(--mw-color-text-secondary); }
 h4 { margin: 0 0 8px; font-size: 16px; }
 h4:focus-visible { outline: var(--mw-focus-ring); outline-offset: var(--mw-focus-offset); }
-.accumulation-state, .accumulation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.accumulation-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
 p { margin: 8px 0 0; color: var(--mw-color-text-secondary); }
-.accumulation-management-content { display: grid; gap: 16px; padding-top: 16px; }
 .accumulation-input { display: grid; gap: 8px; }
 .accumulation-input { max-width: 720px; }
 label, dt { font-size: 14px; color: var(--mw-color-text-secondary); }
-.accumulation-values { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 16px; margin: 0; }
+.accumulation-values { display: grid; grid-template-columns: 1fr; gap: 16px; margin: 0; }
 dd { margin: 4px 0 0; font-family: var(--mw-font-mono); overflow-wrap: anywhere; }
 .accumulation-csv-review { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 240px; overflow-y: auto; }
-.accumulation-history { border-top: 1px solid var(--mw-color-border); margin: 0; }
 summary { cursor: pointer; padding: 12px 0; margin: 0; min-height: 44px; font-size: 14px; color: var(--mw-color-text-primary); font-weight: 500; }
-.accumulation-values dd { font-size: 20px; color: var(--mw-color-text-primary); }
-.accumulation-history .accumulation-values dd { font-size: 16px; }
-.accumulation-history > div, .accumulation-history > p, .accumulation-history > .accumulation-values { margin-bottom: 16px; }
-.accumulation-order-list { display: grid; gap: 16px; padding-left: 20px; }
-.accumulation-order-list li { min-width: 0; overflow-wrap: anywhere; }
+.accumulation-values dd { font-size: 14px; color: var(--mw-color-text-primary); }
 summary:focus-visible { outline: 2px solid var(--mw-color-primary); outline-offset: 3px; }
 @media (max-width: 767px) {
 

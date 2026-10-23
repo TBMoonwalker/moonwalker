@@ -74,6 +74,7 @@ import OpenTradeExpandedRow from './OpenTradeExpandedRow.vue'
 
 const props = withDefaults(
     defineProps<{
+        accumulationContext?: ReturnType<typeof useAccumulationPanel>
         globalTradingPaused?: boolean
     }>(),
     {
@@ -92,7 +93,7 @@ const { isMobile, isTablet } = useViewport()
 const configSnapshotStore = useSharedConfigSnapshot()
 const { configuredMinTimeframe, loadConfiguredMinTimeframe } =
     useConfiguredMinTimeframe()
-const accumulation = useAccumulationPanel()
+const accumulation = props.accumulationContext ?? useAccumulationPanel()
 const accumulationIntent = ref<{ symbol: string; action: string; id: number } | null>(null)
 let nextAccumulationIntent = 0
 const route = useRoute()

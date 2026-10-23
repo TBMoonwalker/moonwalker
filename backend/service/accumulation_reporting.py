@@ -143,6 +143,7 @@ async def accumulation_order_history(
         result.append(
             {
                 "checkpoint_id": row.id,
+                "placement_operation_id": placement.operation_id,
                 "deal_id": row.deal_id,
                 "side": placement.side,
                 "filled_quantity": _amount(row.filled),

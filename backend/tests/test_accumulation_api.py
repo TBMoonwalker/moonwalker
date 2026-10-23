@@ -538,6 +538,7 @@ async def test_stopped_order_history_retains_exact_cumulative_evidence_without_s
     assert len(data["orders"]) == 20 and data["older_orders_available"]
     assert data["orders"][0]["checkpoint_id"] > data["orders"][-1]["checkpoint_id"]
     latest = data["orders"][0]
+    assert latest["placement_operation_id"] == "order-21"
     assert latest["filled_quantity"] == "0.100000000000000001"
     assert latest["quote_cost"] == "12.000000000000000001"
     assert latest["inventory_at_update"]["remaining_cost"] is None

@@ -75,11 +75,18 @@ quantity field and a reviewed confirmation; it does not sell on the first click.
 Entry registration and blocked entry messages
 appear in Open trades until there is an owned holding.
 
-**Inventory and history** in the expanded trade contains account and inventory
-repair, interrupted requests, execution evidence and portfolio valuation. Portfolio sections explicitly cover all holdings;
-individual inventory and requests belong to the selected symbol. Registrations
-without an open trade, including stopped records, are expandable in the same
-Open trades area. Utilities contains no accumulation management.
+The **Base order** and **Accumulation order** entries in the existing order card
+contain fill quantities, order costs and fees. **Inventory after this order** shows
+the cumulative inventory evidence at that order's last update. Current managed
+inventory, the read-only strategy and any repair controls appear under Base order.
+Operator requests and their outcomes appear in the same timeline. Retained orders
+from earlier holdings are explicitly identified; incomplete evidence stays unknown.
+There is no separate Inventory and history section.
+
+Portfolio-wide costs and valuation live in the existing **Portfolio exposure**
+card and explicitly cover all accumulation holdings. Registrations without an open
+trade, including stopped records, remain expandable in Open trades with the same
+order timeline. Utilities contains no accumulation management.
 Strategy selection and changes live only in **Configuration → Trade modes**.
 The initial version is the default for new registrations. Expand **Change strategy
 for an existing registration** there to review and apply a different saved version

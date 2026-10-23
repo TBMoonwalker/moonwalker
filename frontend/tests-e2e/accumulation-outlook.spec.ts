@@ -36,13 +36,9 @@ test('puts entry state and its reviewed next action before secondary information
   await expect(panel.getByText('Exit', { exact: true })).toHaveCount(0)
   await expect(panel.getByText('Buying rules', { exact: true })).toHaveCount(0)
   await expect(panel.getByText('Entry check details', { exact: true })).toHaveCount(0)
-  await expect(panel.locator('.accumulation-management')).not.toHaveAttribute('open', '')
+  await expect(panel.locator('.accumulation-management')).toHaveCount(0)
   const action = panel.getByRole('button', { name: 'Retry entry check', exact: true })
   await expect(action).toBeEnabled()
-  expect(await panel.locator('.accumulation-outlook').evaluate(element => {
-    const details = document.querySelector('.accumulation-history')!
-    return !!(element.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING)
-  })).toBe(true)
   expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
   if (testInfo.project.name === 'mobile-chromium') expect((await action.boundingBox())!.height).toBeGreaterThanOrEqual(44)
   await panel.screenshot({ path: `/private/tmp/accumulation-outlook-${testInfo.project.name}.png` })

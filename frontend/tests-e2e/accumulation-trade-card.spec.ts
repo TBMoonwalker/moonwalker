@@ -16,6 +16,12 @@ test(`integrates accumulation with order status and trade details with pushed wa
     entry: null, operations: [], older_operations_available: false,
     wait_condition: { reason: 'WAIT_DEPTH', timeframe: '1h', observed_close_ms: stamp, observed_price: '100', next_close_ms: stamp + 3600000,
       levels: [{ kind: 'depth', direction: 'at_or_below', target_price: '98', change_percent: '-2' }] } }
+  detail.orders = [1, 2].map(index => ({
+    checkpoint_id: index, placement_operation_id: `buy-${index}`, deal_id: 'fixture-holding', side: 'buy',
+    filled_quantity: index === 1 ? '0.100000000000000001' : '0.050000000000000001', quote_cost: index === 1 ? '10' : '4.9',
+    fees: { BNB: '0.000000000000000001' }, fees_complete: true, terminal: true, updated_at: new Date(stamp + index * 1000).toISOString(),
+    inventory_at_update: { net_quantity: index === 1 ? '0.100000000000000001' : '0.150000000000000002', remaining_cost: index === 1 ? '10' : '14.9', contributed_quote: index === 1 ? '10' : '14.9', disposal_proceeds: '0', fees: { BNB: '0.000000000000000001' }, pending_fee_reports: 0, basis_provenance: 'exchange_fills' },
+  }))
   const sockets: WebSocketRoute[] = []
   await page.routeWebSocket('**/accumulation/stream**', socket => { sockets.push(socket) })
   await page.routeWebSocket('**/trades/open', socket => socket.send(JSON.stringify([trade])))
@@ -43,7 +49,7 @@ test(`integrates accumulation with order status and trade details with pushed wa
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [{ id: 7, name: 'Patient dip', version: 1, parameters: { timeframe: '1h' } }, { id: 8, name: 'Deeper dip', version: 2, parameters: { timeframe: '4h' } }], next_after_id: null }
       : path.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
   })
-  await page.route('**/trades/executions/**', route => route.fulfill({ json: { result: [{ ...order, deal_id: 'fixture-holding', side: 'buy', role: 'accumulation_buy' }] } }))
+  await page.route('**/trades/executions/**', route => route.fulfill({ json: { result: [1, 2].map(index => ({ ...order, id: index, timestamp: String(stamp + index * 1000), deal_id: 'fixture-holding', side: 'buy', role: 'accumulation_buy', metadata_json: JSON.stringify({ accumulation: { operation_id: `buy-${index}` } }) })) } }))
   await page.route('**/data/ohlcv/**', route => route.fulfill({ json: [] }))
   await page.route('**/trades/*/length', route => route.fulfill({ json: { result: 1 } }))
   await page.goto('/')
@@ -61,6 +67,9 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await openDetails.click()
   const card = page.getByRole('region', { name: 'BTC/USDC accumulation', exact: true })
   await expect(card.getByRole('button', { name: 'Confirm close holding', exact: true })).toBeVisible()
+  await expect(page.locator('.expanded-order-card').getByText('Base order', { exact: true })).toBeVisible()
+  await expect(page.locator('.expanded-order-card').getByText('Accumulation order 1', { exact: true })).toBeVisible()
+  await expect(page.locator('.expanded-order-card').getByText('0.050000000000000001', { exact: true })).toBeVisible()
   expect(commands).toBe(0)
   await card.getByRole('button', { name: 'Cancel', exact: true }).click()
   await expect(page.locator('.expanded-order-card').getByRole('heading', { name: 'Waiting for next buy' })).toBeVisible()
@@ -68,10 +77,8 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await expect(card.getByText('Patient dip · v1 · 1h', { exact: true })).toBeVisible()
   await expect(card.getByRole('button', { name: 'Pause accumulation', exact: true })).toHaveCount(0)
   await expect(card.getByRole('button', { name: 'Sell and close', exact: true })).toHaveCount(0)
-  expect(await card.evaluate(element => {
-    const chart = element.parentElement!.querySelector('.expanded-replay-chart')!
-    return !!(chart.compareDocumentPosition(element) & Node.DOCUMENT_POSITION_FOLLOWING)
-  })).toBe(true)
+  expect(await card.evaluate(element => !!element.closest('.expanded-order-card'))).toBe(true)
+  await expect(page.getByText('Inventory and history', { exact: true })).toHaveCount(0)
   expect(await card.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
   await expect.poll(() => sockets.length).toBeGreaterThan(1)
   detail.revision++

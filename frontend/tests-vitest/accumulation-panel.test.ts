@@ -1,6 +1,8 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import AccumulationPortfolioSummary from '../src/components/AccumulationPortfolioSummary.vue'
+import AccumulationOrderTimeline from '../src/components/AccumulationOrderTimeline.vue'
 import AccumulationPanel from '../src/components/AccumulationPanel.vue'
 import AccumulationTradeStatus from '../src/components/AccumulationTradeStatus.vue'
 import AccumulationStrategyAssignment from '../src/components/config/AccumulationStrategyAssignment.vue'
@@ -240,18 +242,17 @@ describe('accumulation controls', () => {
       orders: [{ checkpoint_id: 5, deal_id: 'closed', side: 'sell', filled_quantity: '0.100000000000000001', quote_cost: '12.000000000000000001', fees: { BNB: '0.000000000000000001' }, fees_complete: true, terminal: true, updated_at: '2026-10-21T10:00:00Z', inventory_at_update: { net_quantity: '0', remaining_cost: null, contributed_quote: null, disposal_proceeds: '12.000000000000000001', fees: {}, pending_fee_reports: 0, basis_provenance: 'unknown' } }],
       older_orders_available: true,
     }))
-    const wrapper = mount(AccumulationPanel)
+    const { panel } = harness()
     await flushPromises()
-    expect(wrapper.text()).toContain('Known subtotal: 0.300000000000000003 USDC')
-    expect(wrapper.text()).toContain('1 holdings need ownership repair')
-    const history = wrapper.findAll('details').find(item => item.text().includes('Recent executed orders'))!
-    await history.find('summary').trigger('click')
-    expect(history.text()).toContain('Manual sale')
+    const portfolio = mount(AccumulationPortfolioSummary, { props: { context: panel } })
+    expect(portfolio.text()).toContain('Known subtotal: 0.300000000000000003 USDC')
+    expect(portfolio.text()).toContain('1 holdings need ownership repair')
+    const history = mount(AccumulationOrderTimeline, { props: { detail: panel.detail.value } })
+    expect(history.text()).toContain('Earlier holding / unlinked manual sale')
     expect(history.text()).toContain('0.100000000000000001')
     expect(history.text()).toContain('0.000000000000000001 BNB')
     expect(history.text()).toContain('Unknown')
-    expect(history.text()).toContain('not a verified net return')
-    expect(history.text()).toContain('Earlier records remain stored')
+    expect(history.text()).toContain('Older executed orders remain recorded')
   })
 
   it('reviews one restored order and explicitly retries the identical lookup request', async () => {
@@ -402,8 +403,8 @@ describe('accumulation controls', () => {
     expect(api.fetchAccumulationDetail).toHaveBeenCalledWith('ETH/USDC')
     expect(wrapper.html()).toContain('ETH/USDC')
     expect(wrapper.text()).not.toContain('Manage accumulation')
-    expect(wrapper.text()).toContain('Inventory and history')
-    expect(wrapper.find('.accumulation-management').attributes('open')).toBeUndefined()
+    expect(wrapper.text()).not.toContain('Inventory and history')
+    expect(wrapper.text()).toContain('Holding information')
     expect(wrapper.text()).not.toContain('Change strategy')
     expect(wrapper.text()).not.toContain('Use strategy')
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()

@@ -126,6 +126,7 @@ export interface AccumulationPerformance {
 
 export interface AccumulationOrderCheckpoint {
   checkpoint_id: number
+  placement_operation_id?: string
   deal_id: string | null
   side: 'buy' | 'sell'
   filled_quantity: string | null

@@ -4,7 +4,12 @@
         <n-card class="expanded-order-card">
             <AccumulationOutlook v-if="accumulation?.detail.value" :detail="accumulation.detail.value" :fresh="accumulation.fresh.value" compact />
             <RecoveryDcaStatus :trade="rowData" v-else-if="!accumulation" />
-            <n-timeline :horizontal="false">
+            <AccumulationOrderTimeline v-if="accumulation" :detail="accumulation.detail.value" :executions="executions" :deal-id="rowData.deal_id" :fallback="timelineItems">
+              <template #base-order>
+                <AccumulationTradeStatus :key="rowData.symbol" :symbol="rowData.symbol" :context="accumulation" hide-outlook :intent="accumulationIntent" />
+              </template>
+            </AccumulationOrderTimeline>
+            <n-timeline v-else :horizontal="false">
                 <n-timeline-item
                     v-for="item in timelineItems"
                     :key="item.key"
@@ -38,7 +43,6 @@
             :price-lines="chartPriceLines"
         />
     </n-flex>
-    <AccumulationTradeStatus v-if="rowData.lifecycle_mode === 'accumulation'" :key="rowData.symbol" :symbol="rowData.symbol" :context="accumulation!" hide-outlook :intent="accumulationIntent" />
   </div>
 </template>
 
@@ -50,6 +54,7 @@ import { fetchJson } from '../api/client'
 import TradeReplayChart from './TradeReplayChart.vue'
 import RecoveryDcaStatus from './RecoveryDcaStatus.vue'
 import AccumulationTradeStatus from './AccumulationTradeStatus.vue'
+import AccumulationOrderTimeline from './AccumulationOrderTimeline.vue'
 import AccumulationOutlook from './AccumulationOutlook.vue'
 import { useAccumulationPanel } from '../composables/useAccumulationPanel'
 import { formatTradingViewDate } from '../helpers/date'

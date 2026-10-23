@@ -9,7 +9,7 @@
                     <div class="profit-label">Net profit &amp; loss</div>
                     <n-statistic :class="hasStatisticsData && performanceComplete ? profit_class : undefined" :value="hasStatisticsData && performanceComplete ? formatFixed2(profit_overall) : 'Unavailable'" />
                     <div v-if="hasStatisticsData && performanceComplete" class="stat-detail">Realized {{ formatFixed2(profit_overall - upnl) }} · Unrealized {{ formatFixed2(upnl) }}</div>
-                    <div v-if="!performanceComplete" class="stat-detail">Accumulation returns are not included in the legacy performance totals. See accumulation inventory and order history below.</div>
+                    <div v-if="!performanceComplete" class="stat-detail">Accumulation returns are not included in the legacy performance totals. Accumulation accounting is shown in this portfolio card.</div>
                 </div>
                 <template v-if="exposure">
                     <template v-if="budgetAllocation">
@@ -30,12 +30,16 @@
                     <div class="exposure-totals"><span>Exchange free <strong>{{ formatFixed2(exposure.available) }} {{ quote_currency }}</strong></span><span v-if="budgetAllocation">Outside available to trade <strong>{{ formatFixed2(budgetAllocation.otherExchangeFree) }} {{ quote_currency }}</strong></span><span>Portfolio value <strong>{{ portfolio_value === null ? 'Unavailable' : formatFixed2(portfolio_value) }} {{ quote_currency }}</strong></span></div>
                 </template>
                 <p v-else class="exposure-unavailable" role="status">Waiting for live balances</p>
+                <AccumulationPortfolioSummary v-if="accumulationContext" :context="accumulationContext" />
         </section>
     </div>
 </template>
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import AccumulationPortfolioSummary from './AccumulationPortfolioSummary.vue'
+import type { useAccumulationPanel } from '../composables/useAccumulationPanel'
+defineProps<{ accumulationContext?: ReturnType<typeof useAccumulationPanel> }>()
 import { useWebSocketDataStore } from '../stores/websocket'
 import { storeToRefs } from 'pinia'
 import { useSharedConfigSnapshot } from '../control-center/configSnapshotStore'
