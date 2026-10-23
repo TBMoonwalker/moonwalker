@@ -4,6 +4,8 @@
         <n-card class="expanded-order-card">
             <AccumulationOutlook v-if="accumulation?.detail.value" :detail="accumulation.detail.value" :fresh="accumulation.fresh.value" compact />
             <RecoveryDcaStatus :trade="rowData" v-else-if="!accumulation" />
+            <p v-if="!executionHistoryResolved" role="status">Loading order history…</p>
+            <p v-else-if="executionHistoryFailed" role="status">Execution history could not be loaded.</p>
             <AccumulationOrderTimeline v-if="accumulation" :detail="accumulation.detail.value" :executions="executions" :deal-id="rowData.deal_id" :fallback="timelineItems">
               <template #base-order>
                 <AccumulationTradeStatus :key="rowData.symbol" :symbol="rowData.symbol" :context="accumulation" hide-outlook :intent="accumulationIntent" />
@@ -87,7 +89,7 @@ type OrderData = {
     dca_reference_atr_percent?: number
     dca_next_trigger_price?: number
     dca_last_decision_json?: string | null
-    baseorder: OrderData
+    baseorder?: OrderData
     safetyorder?: OrderData[]
 }
 
@@ -120,22 +122,22 @@ const safetyOrders = computed(() =>
 )
 const requiresExecutionHistory = computed(() => Boolean(props.rowData.deal_id))
 const executionHistoryResolved = ref(!requiresExecutionHistory.value)
+const executionHistoryFailed = ref(false)
 const sortedExecutions = computed(() =>
       [...executions.value].sort(
           (left, right) => Number(left.timestamp) - Number(right.timestamp),
        ),
 )
 const useExecutionHistory = computed(() => sortedExecutions.value.length > 0)
-const chartReady = computed(
-    () => !requiresExecutionHistory.value || executionHistoryResolved.value,
-)
 const replayStartTimestamp = computed(() =>
-     useExecutionHistory.value
-          ? sortedExecutions.value[0]?.timestamp ?? props.rowData.baseorder.timestamp
-          : props.rowData.baseorder.timestamp,
+    sortedExecutions.value[0]?.timestamp ?? props.rowData.baseorder?.timestamp ?? props.rowData.campaign_started_at ?? '',
+)
+const chartReady = computed(
+    () => (!requiresExecutionHistory.value || executionHistoryResolved.value) && Boolean(replayStartTimestamp.value),
 )
 const timelineItems = computed<TimelineItem[]>(() => {
     if (!useExecutionHistory.value) {
+        if (!props.rowData.baseorder) return []
         return [
             {
                  key: `base-${props.rowData.baseorder.id ?? 0}`,
@@ -208,6 +210,7 @@ const timelineItems = computed<TimelineItem[]>(() => {
 
 const chartMarkers = computed(() => {
     if (!useExecutionHistory.value) {
+        if (!props.rowData.baseorder) return []
         return [
             {
                 timestamp: props.rowData.baseorder.timestamp,
@@ -281,6 +284,7 @@ const chartPriceLines = computed(() => {
     if (props.rowData.lifecycle_mode === 'accumulation') lines.length = 0
 
     if (!useExecutionHistory.value) {
+        if (!props.rowData.baseorder) return lines
         lines.push({
             price: Number(props.rowData.baseorder.price),
             color: BUY_LINE_COLOR,
@@ -476,6 +480,7 @@ async function loadExecutions(): Promise<void> {
         )
         executions.value = Array.isArray(response.result) ? response.result : []
     } catch (_error) {
+        executionHistoryFailed.value = true
         executions.value = []
     } finally {
         executionHistoryResolved.value = true

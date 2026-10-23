@@ -4,11 +4,14 @@ import type { AccumulationCommand, AccumulationDetail } from '../src/types/accum
 for (const theme of ['light', 'dark'] as const) {
 test(`integrates accumulation with order status and trade details with pushed waits and reviewed actions (${theme})`, async ({ page }, testInfo) => {
   await page.addInitScript(mode => localStorage.setItem('mw-theme-mode', mode), theme)
+  const pageErrors: string[] = []
+  page.on('pageerror', error => pageErrors.push(error.message))
+  page.on('console', message => { if (message.type() === 'error' && /TypeError|Cannot read properties/.test(message.text())) pageErrors.push(message.text()) })
   const stamp = Date.now() - 3600000
   const order = { id: 1, timestamp: String(stamp), ordersize: 10, amount: 0.1, symbol: 'BTC/USDC', price: 100 }
   const trade = { id: 1, key: 1, symbol: 'BTC/USDC', lifecycle_mode: 'accumulation', deal_id: 'fixture-holding',
     amount: 0.1, cost: 10, current_price: 100, avg_price: 100, profit: 0, profit_percent: 0, tp_price: 0, precision: 2,
-    so_count: 0, open_date: new Date(stamp).toISOString(), baseorder: order, safetyorder: [] }
+    so_count: 0, open_date: new Date(stamp).toISOString(), safetyorder: [] }
   const detail: AccumulationDetail = { activation_id: 'fixture', symbol: 'BTC/USDC', state: 'enabled', explicitly_paused: false,
     account_matches: true, revision: 4, reason: null, runtime_wait_reason: 'WAIT_DEPTH', observations_initialized: true,
     strategy_version_id: 7, strategy_slug: 'dip', strategy_version: 1, holding_integrity: 'owned',
@@ -69,6 +72,7 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await expect(card.getByRole('button', { name: 'Confirm close holding', exact: true })).toBeVisible()
   await expect(page.locator('.expanded-order-card').getByText('Base order', { exact: true })).toBeVisible()
   await expect(page.locator('.expanded-order-card').getByText('Accumulation order 1', { exact: true })).toBeVisible()
+  expect(pageErrors).toEqual([])
   await expect(page.locator('.expanded-order-card').getByText('Order size: 4.9 | Amount: 0.050000000000000001 | Price: 100', { exact: true })).toBeVisible()
   await expect(page.locator('.accumulation-order-timeline details')).toHaveCount(0)
   await expect(card.getByText('Current holding', { exact: true })).toHaveCount(0)
@@ -130,6 +134,13 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await expect.poll(() => commands).toBe(2)
   await expect(card.getByRole('button', { name: 'Resume accumulation', exact: true })).toHaveCount(0)
   expect(await card.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
+  await page.route('**/trades/executions/**', route => route.fulfill({ status: 503, json: { message: 'Execution history unavailable' } }))
+  await page.reload()
+  await openDetails.click()
+  await expect(page.locator('.expanded-order-card').getByText('Execution history could not be loaded.', { exact: true })).toBeVisible()
+  await expect(card).toBeVisible()
+  expect(pageErrors).toEqual([])
+  expect(commands).toBe(2)
 })
 }
 
