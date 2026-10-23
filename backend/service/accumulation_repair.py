@@ -30,17 +30,6 @@ from service.order_requests import normalize_order_symbol
 from tortoise.transactions import in_transaction
 
 
-def _result(row: model.AccumulationLifecycleOperation) -> AccumulationCommandResult:
-    return AccumulationCommandResult(
-        row.operation_id,
-        str(row.activation_id),
-        row.status,
-        row.result_state,
-        row.result_revision,
-        row.reason,
-    )
-
-
 class AccumulationOrderRepair:
     """Journal intent before signed lookup; never submit, cancel, or unlock an order."""
 
@@ -200,7 +189,7 @@ class AccumulationOrderRepair:
                 journal, "journaling accumulation repair"
             )
         if row.status == "applied":
-            return _result(row)
+            return AccumulationCommandResult.from_operation(row)
         if row.status != "quarantined":
             raise AccumulationConflictError("This repair is no longer active.")
         # No symbol lock or database transaction is held over exchange I/O.
@@ -212,13 +201,13 @@ class AccumulationOrderRepair:
                 client_order_id=recoverable_client_order_id(placement),
             )
         if lookup.status != ExchangeOrderLookupStatus.FOUND or lookup.order is None:
-            return _result(row)
+            return AccumulationCommandResult.from_operation(row)
         lookup_order = await hydrate_accumulation_order(
             self.adapter.exchange, lookup.order, config
         )
         report = AccumulationFill.from_order(lookup_order)
         if not report.terminal or not report.fees_complete:
-            return _result(row)
+            return AccumulationCommandResult.from_operation(row)
         if (
             self.adapter.config() != config
             or await self.adapter.account_scope(config) != scope
@@ -234,7 +223,7 @@ class AccumulationOrderRepair:
             repair_operation_id=operation_id,
         )
         await row.refresh_from_db()
-        return _result(row)
+        return AccumulationCommandResult.from_operation(row)
 
 
 class AccumulationCommandRetirement:
@@ -282,7 +271,7 @@ class AccumulationCommandRetirement:
                         raise AccumulationConflictError(
                             "Operation ID belongs to a different retirement request."
                         )
-                    return _result(prior)
+                    return AccumulationCommandResult.from_operation(prior)
                 activation = await model.AccumulationActivation.get_or_none(
                     symbol=symbol
                 ).using_db(conn)
@@ -374,7 +363,7 @@ class AccumulationCommandRetirement:
                     result_revision=activation.revision,
                     reason="unplaced_intent_retired",
                 )
-                return _result(receipt)
+                return AccumulationCommandResult.from_operation(receipt)
 
         async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
             if not admitted:

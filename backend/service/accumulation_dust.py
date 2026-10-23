@@ -28,17 +28,6 @@ from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from tortoise.transactions import in_transaction
 
 
-def _result(operation: Any) -> AccumulationCommandResult:
-    return AccumulationCommandResult(
-        operation.operation_id,
-        str(operation.activation_id),
-        operation.status,
-        operation.result_state,
-        operation.result_revision,
-        operation.reason,
-    )
-
-
 async def _retry(command: AccumulationCommand, request: str, connection: Any) -> Any:
     prior = await model.AccumulationLifecycleOperation.get_or_none(
         operation_id=command.operation_id
@@ -53,7 +42,7 @@ async def _retry(command: AccumulationCommand, request: str, connection: Any) ->
         raise AccumulationConflictError(
             "Operation ID was already used for another request."
         )
-    return _result(prior)
+    return AccumulationCommandResult.from_operation(prior)
 
 
 async def _require_close_accounting(
@@ -255,7 +244,7 @@ async def archive_accumulation_dust(
                 result_revision=activation.revision,
                 reason="dust_archived",
             )
-            return _result(operation)
+            return AccumulationCommandResult.from_operation(operation)
 
     async with lifecycle_mutation_coordinator.mutation(command.symbol) as admitted:
         if not admitted:

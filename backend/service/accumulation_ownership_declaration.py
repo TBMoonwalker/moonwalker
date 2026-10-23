@@ -15,10 +15,11 @@ from service.accumulation_accounting import _inventory
 from service.accumulation_commands import (
     ENTRY_ACTIONS,
     RETIRABLE_ACTIONS,
+    AccumulationCommandResult,
     validate_operation_id,
 )
 from service.accumulation_contracts import AccumulationStateError, canonical_decimal
-from service.accumulation_lifecycle import _require_settled, _result
+from service.accumulation_lifecycle import _require_settled
 from service.accumulation_ownership_evidence import declared_unknown_fee_count
 from service.accumulation_state import AccumulationConflictError
 from service.database import run_sqlite_write_with_retry
@@ -304,7 +305,7 @@ class AccumulationOwnershipDeclaration:
                 stage, "staging explicit ownership declaration"
             )
         if receipt.status == "applied":
-            return _result(receipt)
+            return AccumulationCommandResult.from_operation(receipt)
         if receipt.status != "quarantined":
             raise AccumulationConflictError(
                 "Ownership declaration is no longer current."
@@ -315,7 +316,7 @@ class AccumulationOwnershipDeclaration:
         if wallet.account_scope != scope or Decimal(
             canonical_decimal(wallet.free_base)
         ) < Decimal(request["plan"]["quantity"]):
-            return _result(
+            return AccumulationCommandResult.from_operation(
                 await model.AccumulationLifecycleOperation.get(
                     operation_id=operation_id
                 )
@@ -327,7 +328,7 @@ class AccumulationOwnershipDeclaration:
                     operation_id=operation_id
                 ).using_db(conn)
                 if current.status == "applied":
-                    return _result(current)
+                    return AccumulationCommandResult.from_operation(current)
                 activation = await model.AccumulationActivation.get(
                     id=current.activation_id
                 ).using_db(conn)
@@ -394,7 +395,7 @@ class AccumulationOwnershipDeclaration:
                     activation.revision,
                 )
                 await current.save(using_db=conn)
-                return _result(current)
+                return AccumulationCommandResult.from_operation(current)
 
         async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
             if not admitted:

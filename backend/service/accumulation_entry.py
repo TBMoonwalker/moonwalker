@@ -23,7 +23,6 @@ from service.accumulation_lifecycle import (
     AccumulationLifecycleService,
     AccumulationReadiness,
     AccumulationValidationRequest,
-    _result,
 )
 from service.accumulation_staged_entry import StagedEntryCommand, stage_entry_command
 from service.order_requests import normalize_order_symbol
@@ -285,6 +284,6 @@ class AccumulationEntryService:
             # A lost response, competing correction or failed readiness check must
             # report the journal's outcome, never a stale optimistic result.
             await operation.refresh_from_db()
-            return _result(operation)
+            return AccumulationCommandResult.from_operation(operation)
         self.notify(command.symbol)
         return result

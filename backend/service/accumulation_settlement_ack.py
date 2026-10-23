@@ -8,10 +8,11 @@ from service.accumulation_accounting import _inventory
 from service.accumulation_commands import (
     CLOSE_ACTIONS,
     SALE_ACTIONS,
+    AccumulationCommandResult,
     validate_operation_id,
 )
 from service.accumulation_contracts import AccumulationStateError, canonical_decimal
-from service.accumulation_lifecycle import _require_settled, _result
+from service.accumulation_lifecycle import _require_settled
 from service.accumulation_state import AccumulationConflictError
 from service.database import run_sqlite_write_with_retry
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
@@ -53,7 +54,7 @@ async def acknowledge_settlement(payload: dict[str, Any]) -> Any:
                     raise AccumulationConflictError(
                         "Operation ID belongs to another request."
                     )
-                return _result(prior)
+                return AccumulationCommandResult.from_operation(prior)
             activation = await model.AccumulationActivation.get_or_none(
                 symbol=symbol
             ).using_db(conn)
@@ -168,7 +169,7 @@ async def acknowledge_settlement(payload: dict[str, Any]) -> Any:
                 result_revision=activation.revision,
                 reason="settlement_acknowledged",
             )
-            return _result(receipt)
+            return AccumulationCommandResult.from_operation(receipt)
 
     async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
         if not admitted:

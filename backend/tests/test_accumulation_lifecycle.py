@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock
 import model
 import pytest
 import pytest_asyncio
-from service.accumulation_commands import AccumulationCommand
+from service.accumulation_commands import AccumulationCommand, AccumulationCommandResult
 from service.accumulation_contracts import AccumulationStateError
 from service.accumulation_lifecycle import (
     AccumulationLifecycleService,
@@ -746,3 +746,30 @@ def test_legacy_command_retry_serialization_remains_unchanged():
         AccumulationCommand.from_dict(_command("close")).request_json("account")
     )
     assert "previous_operation_id" not in encoded
+
+
+@pytest.mark.parametrize("reason", [None, "already_paused"])
+@pytest.mark.asyncio
+async def test_result_factory_preserves_persisted_receipt(lifecycle_db, reason):
+    activation = await _activation()
+    operation = await model.AccumulationLifecycleOperation.create(
+        operation_id="factory-receipt",
+        activation=activation,
+        action="pause",
+        request_json="{}",
+        status="applied",
+        previous_state="enabled",
+        previous_paused=False,
+        result_state="paused",
+        result_revision=2,
+        reason=reason,
+    )
+    activation.state = "closing"
+    activation.revision = 9
+    await activation.save()
+    persisted = await model.AccumulationLifecycleOperation.get(id=operation.id)
+    assert AccumulationCommandResult.from_operation(persisted) == (
+        AccumulationCommandResult(
+            "factory-receipt", str(activation.id), "applied", "paused", 2, reason
+        )
+    )

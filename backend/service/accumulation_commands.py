@@ -6,10 +6,13 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from enum import StrEnum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from service.accumulation_contracts import AccumulationStateError, canonical_decimal
 from service.order_requests import normalize_order_symbol
+
+if TYPE_CHECKING:
+    from model import AccumulationLifecycleOperation
 
 _OPERATION_ID = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 
@@ -134,3 +137,17 @@ class AccumulationCommandResult:
     state: str
     revision: int
     reason: str | None
+
+    @classmethod
+    def from_operation(
+        cls, operation: AccumulationLifecycleOperation
+    ) -> AccumulationCommandResult:
+        """Read the persisted receipt without consulting current activation state."""
+        return cls(
+            operation.operation_id,
+            str(operation.activation_id),
+            operation.status,
+            operation.result_state,
+            operation.result_revision,
+            operation.reason,
+        )

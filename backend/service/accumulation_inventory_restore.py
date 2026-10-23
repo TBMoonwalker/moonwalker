@@ -9,11 +9,15 @@ from typing import Any
 import model
 from service.accumulation_account_rebind import AccumulationAccountRebind
 from service.accumulation_accounting import _inventory
-from service.accumulation_commands import ENTRY_ACTIONS, validate_operation_id
+from service.accumulation_commands import (
+    ENTRY_ACTIONS,
+    AccumulationCommandResult,
+    validate_operation_id,
+)
 from service.accumulation_contracts import AccumulationStateError, canonical_decimal
 from service.accumulation_fill import AccumulationInventory
 from service.accumulation_import import AccumulationImport
-from service.accumulation_lifecycle import _require_settled, _result
+from service.accumulation_lifecycle import _require_settled
 from service.accumulation_state import AccumulationConflictError
 from service.database import run_sqlite_write_with_retry
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
@@ -225,7 +229,7 @@ class AccumulationInventoryRestore:
         async with in_transaction() as conn:
             recorded = await prior(conn)
             if recorded is not None:
-                return _result(recorded)
+                return AccumulationCommandResult.from_operation(recorded)
             _, _, evidence = await snapshot(conn)
         async with asyncio.timeout(10):
             wallet = await self.adapter.account_inventory(symbol, config)
@@ -240,7 +244,7 @@ class AccumulationInventoryRestore:
             async with in_transaction() as conn:
                 recorded = await prior(conn)
                 if recorded is not None:
-                    return _result(recorded)
+                    return AccumulationCommandResult.from_operation(recorded)
                 activation, holding, current = await snapshot(conn)
                 if (
                     current != evidence
@@ -293,7 +297,7 @@ class AccumulationInventoryRestore:
                     result_revision=activation.revision,
                     reason="inventory_restored_paused",
                 )
-                return _result(row)
+                return AccumulationCommandResult.from_operation(row)
 
         async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
             if not admitted:

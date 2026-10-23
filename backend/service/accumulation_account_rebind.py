@@ -16,11 +16,12 @@ from service.accumulation_accounting import _inventory as validate_inventory
 from service.accumulation_commands import (
     CLOSE_ACTIONS,
     RETIRABLE_ACTIONS,
+    AccumulationCommandResult,
     validate_operation_id,
 )
 from service.accumulation_contracts import AccumulationStateError, canonical_decimal
 from service.accumulation_fill import AccumulationFill
-from service.accumulation_lifecycle import _require_settled, _result
+from service.accumulation_lifecycle import _require_settled
 from service.accumulation_order_fees import hydrate_accumulation_order
 from service.accumulation_ownership_evidence import (
     native_client_identity,
@@ -299,7 +300,7 @@ class AccumulationAccountRebind:
                 stage, "staging account rebinding"
             )
         if journal.status == "applied":
-            return _result(journal)
+            return AccumulationCommandResult.from_operation(journal)
         if journal.status != "quarantined":
             raise AccumulationConflictError(
                 "Account-rebinding request is no longer active."
@@ -317,7 +318,7 @@ class AccumulationAccountRebind:
                     lookup.status != ExchangeOrderLookupStatus.FOUND
                     or lookup.order is None
                 ):
-                    return _result(journal)
+                    return AccumulationCommandResult.from_operation(journal)
                 hydrated = await hydrate_accumulation_order(
                     self.adapter.exchange, lookup.order, config
                 )
@@ -339,7 +340,7 @@ class AccumulationAccountRebind:
                     operation_id=operation_id
                 ).using_db(conn)
                 if current.status == "applied":
-                    return _result(current)
+                    return AccumulationCommandResult.from_operation(current)
                 activation = await model.AccumulationActivation.get(
                     id=current.activation_id
                 ).using_db(conn)
@@ -366,7 +367,7 @@ class AccumulationAccountRebind:
                     activation.revision,
                 )
                 await current.save(using_db=conn)
-                return _result(current)
+                return AccumulationCommandResult.from_operation(current)
 
         async with lifecycle_mutation_coordinator.mutation(symbol) as admitted:
             if not admitted:

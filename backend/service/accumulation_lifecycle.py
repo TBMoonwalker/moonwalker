@@ -87,19 +87,6 @@ ReadinessValidator = Callable[
 ]
 
 
-def _result(
-    operation: model.AccumulationLifecycleOperation,
-) -> AccumulationCommandResult:
-    return AccumulationCommandResult(
-        operation.operation_id,
-        str(operation.activation_id),
-        operation.status,
-        operation.result_state,
-        operation.result_revision,
-        operation.reason,
-    )
-
-
 def _validate_scope(account_scope: str) -> None:
     if (
         not isinstance(account_scope, str)
@@ -385,7 +372,7 @@ class AccumulationLifecycleService:
                     target_version_id=version.id,
                     reason="validation_required",
                 )
-                return _result(operation)
+                return AccumulationCommandResult.from_operation(operation)
 
         return await self._mutate(symbol, persist)
 
@@ -506,7 +493,7 @@ class AccumulationLifecycleService:
                     requested_quantity=command.quantity,
                     reason=reason,
                 )
-                return _result(operation)
+                return AccumulationCommandResult.from_operation(operation)
 
         return await self._mutate(command.symbol, persist)
 
@@ -637,7 +624,7 @@ class AccumulationLifecycleService:
             raise AccumulationConflictError(
                 "operation_id was already used for a different request."
             )
-        return _result(prior)
+        return AccumulationCommandResult.from_operation(prior)
 
     @staticmethod
     async def _mutate(
@@ -688,7 +675,7 @@ class AccumulationLifecycleService:
                     "This operation does not rebase a strategy."
                 )
             if operation.status == "applied":
-                return _result(operation)
+                return AccumulationCommandResult.from_operation(operation)
             if self._validator is None:
                 raise AccumulationStateError(
                     "Readiness validation is not connected yet."
@@ -753,7 +740,7 @@ class AccumulationLifecycleService:
                     operation_id, account_scope, connection
                 )
                 if operation.status == "applied":
-                    return _result(operation)
+                    return AccumulationCommandResult.from_operation(operation)
                 if (
                     activation.revision != request.revision
                     or activation.consumption_revision != request.consumption_revision
@@ -872,7 +859,7 @@ class AccumulationLifecycleService:
                         "This operation requires readiness validation."
                     )
                 if operation.status == "applied":
-                    return _result(operation)
+                    return AccumulationCommandResult.from_operation(operation)
                 await _require_settled(activation, connection)
                 if operation.action in SALE_ACTIONS:
                     await _require_sale_checkpoint(operation, activation, connection)
@@ -915,4 +902,4 @@ class AccumulationLifecycleService:
         )
         operation.updated_at = datetime.now(timezone.utc)
         await operation.save(using_db=connection)
-        return _result(operation)
+        return AccumulationCommandResult.from_operation(operation)

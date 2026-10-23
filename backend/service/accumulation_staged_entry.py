@@ -18,7 +18,6 @@ from service.accumulation_import import AccumulationImport, parse_accumulation_c
 from service.accumulation_lifecycle import (
     AccumulationLifecycleService,
     _require_settled,
-    _result,
     _validate_scope,
 )
 from service.accumulation_state import AccumulationConflictError
@@ -121,7 +120,7 @@ async def stage_entry_command(
                     raise AccumulationConflictError(
                         "operation_id was already used for a different request."
                     )
-                return _result(existing)
+                return AccumulationCommandResult.from_operation(existing)
             activation = await model.AccumulationActivation.get_or_none(
                 symbol=command.symbol
             ).using_db(connection)
@@ -316,6 +315,6 @@ async def stage_entry_command(
                 target_version_id=activation.strategy_version_id,
                 reason=reason,
             )
-            return _result(operation)
+            return AccumulationCommandResult.from_operation(operation)
 
     return await AccumulationLifecycleService._mutate(command.symbol, persist)
