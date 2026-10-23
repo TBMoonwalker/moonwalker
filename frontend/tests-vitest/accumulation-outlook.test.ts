@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
+import AccumulationOrderStatus from '../src/components/AccumulationOrderStatus.vue'
 import AccumulationOutlook from '../src/components/AccumulationOutlook.vue'
 import { accumulationOutlook, accumulationPendingStatus } from '../src/helpers/accumulationPresentation'
 import type { AccumulationDetail } from '../src/types/accumulation'
@@ -75,6 +76,28 @@ describe('accumulation operator outlook', () => {
     expect(wrapper.text()).not.toContain('Buying rules')
     expect(wrapper.text()).not.toContain('ASAP')
     expect(wrapper.find('details').exists()).toBe(false)
+  })
+
+  it('separates recovery readiness from the next buy target in the card and table', () => {
+    const detail = row({ runtime_wait_reason: 'WAIT_REARM', wait_condition: {
+      reason: 'WAIT_REARM', timeframe: '1h', observed_close_ms: 1000, observed_price: '81580', next_close_ms: 3601000,
+      levels: [
+        { kind: 'further_decline', direction: 'at_or_below', target_price: '81089.84863', change_percent: '-0.60' },
+        { kind: 'recovery_then_correction', direction: 'at_or_above', target_price: '81872.21137', change_percent: '0.36' },
+      ],
+    } })
+    const wrapper = mount(AccumulationOutlook, { props: { detail, fresh: true } })
+    const buys = wrapper.find('[aria-label="Current buy conditions"]')
+    expect(buys.text()).toContain('0.60% fall')
+    expect(buys.text()).not.toContain('rise')
+    const recovery = wrapper.find('.recovery-condition')
+    expect(recovery.text()).toContain('Recovery needed before another dip buy')
+    expect(recovery.text()).toContain('0.36% rise')
+    expect(recovery.text()).toContain('No buy on this rise. A fresh correction must follow.')
+    expect(wrapper.find('.wait-or').exists()).toBe(false)
+    const table = mount(AccumulationOrderStatus, { props: { status: detail, fresh: true } })
+    expect(table.text()).toContain('Recovery reset: Rise ≈ 0.36%')
+    expect(table.text()).toContain('no buy; correction required')
   })
 
   it('does not show cached price levels when the snapshot is stale', () => {

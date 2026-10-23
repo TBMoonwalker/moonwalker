@@ -67,7 +67,9 @@ future timestamps and unrecognized stale evidence still block trading.
 ## Monitor a holding
 
 The **Order status** column shows the current buy wait and any available target
-price/percentage. Use the usual **Sell** and **More** row actions, or expand the
+price/percentage. A recovery rise is shown separately as a readiness reset,
+never as a buy target: a fresh correction must follow before another buy can
+qualify. Use the usual **Sell** and **More** row actions, or expand the
 trade. The order card beside the chart shows the detailed next-buy condition.
 The expanded details show executed orders and any required action controls.
 The row actions are the single home for pausing, resuming, partial sales and closing. **Sell part** reveals an exact base-asset

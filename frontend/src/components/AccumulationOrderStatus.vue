@@ -19,7 +19,7 @@ function movement(value: string) {
 <template>
   <div class="accumulation-order-status" role="status">
     <span>{{ title }}</span>
-    <span v-for="level in condition?.levels" :key="level.kind" class="trade-cell-sub">{{ movement(level.change_percent) }} · {{ level.direction === 'at_or_above' ? '≥' : '≤' }} {{ Number(level.target_price).toLocaleString(undefined, { maximumSignificantDigits: 10 }) }} {{ status?.symbol.split('/')[1] }}<template v-if="level.kind === 'recovery_then_correction'">, then a fresh correction</template></span>
+    <span v-for="level in condition?.levels" :key="level.kind" class="trade-cell-sub"><template v-if="level.kind === 'recovery_then_correction'">Recovery reset: </template>{{ movement(level.change_percent) }} · {{ level.direction === 'at_or_above' ? '≥' : '≤' }} {{ Number(level.target_price).toLocaleString(undefined, { maximumSignificantDigits: 10 }) }} {{ status?.symbol.split('/')[1] }}<template v-if="level.kind === 'recovery_then_correction'"> · no buy; correction required</template></span>
   </div>
 </template>
 

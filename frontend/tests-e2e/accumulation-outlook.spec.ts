@@ -58,6 +58,16 @@ test('puts entry state and its reviewed next action before secondary information
   await expect(panel.getByRole('heading', { name: 'Waiting for entry', exact: true })).toBeVisible()
   await expect(panel.getByText('≈ 2.00% fall', { exact: true })).toBeVisible()
   await expect(panel.getByLabel('Accumulation strategy version', { exact: true })).not.toBeVisible()
+  waiting.runtime_wait_reason = 'WAIT_REARM'
+  waiting.wait_condition!.reason = 'WAIT_REARM'
+  waiting.wait_condition!.levels = [
+    { kind: 'further_decline', direction: 'at_or_below', target_price: '99', change_percent: '-1' },
+    { kind: 'recovery_then_correction', direction: 'at_or_above', target_price: '101', change_percent: '1' },
+  ]
+  live!.send(JSON.stringify({ type: 'snapshot', page: { activations: [waiting], next_after: null }, detail: waiting }))
+  await expect(panel.getByRole('heading', { name: 'Recovery needed before another dip buy' })).toBeVisible()
+  await expect(panel.getByRole('list', { name: 'Current buy conditions' })).not.toContainText('rise')
+  await expect(panel.getByText('No buy on this rise. A fresh correction must follow.', { exact: true })).toBeVisible()
   await page.clock.fastForward(15000)
   expect(reads).toBe(0)
   await page.getByRole('button', { name: 'Dark theme', exact: true }).click()

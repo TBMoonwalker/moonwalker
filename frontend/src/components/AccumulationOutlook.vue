@@ -16,8 +16,10 @@ const condition = computed(() => {
       !value.levels.every(level => Number.isFinite(Number(level.target_price)) && Number(level.target_price) > 0 && Number.isFinite(Number(level.change_percent)))) return null
   return value
 })
+const buyLevels = computed(() => condition.value?.levels.filter(level => level.kind !== 'recovery_then_correction') ?? [])
+const recoveryLevels = computed(() => condition.value?.levels.filter(level => level.kind === 'recovery_then_correction') ?? [])
 const quote = computed(() => props.detail.symbol.split('/')[1] ?? '')
-const heading = computed(() => condition.value ? condition.value.price_basis === 'ask' ? 'Waiting for buy price' : condition.value.levels.length ? props.detail.holding ? 'Waiting for next buy' : 'Waiting for entry' : `Waiting for the next ${condition.value.timeframe} close` : outlook.value.title)
+const heading = computed(() => condition.value ? condition.value.price_basis === 'ask' ? 'Waiting for buy price' : recoveryLevels.value.length && !buyLevels.value.length ? 'Waiting for a fresh dip' : condition.value.levels.length ? props.detail.holding ? 'Waiting for next buy' : 'Waiting for entry' : `Waiting for the next ${condition.value.timeframe} close` : outlook.value.title)
 function price(value: string) {
   return Number(value).toLocaleString(undefined, { maximumSignificantDigits: 10 })
 }
@@ -36,15 +38,19 @@ function movement(value: string) {
         <span v-if="!compact" class="outlook-label">{{ detail.symbol }} · Current state</span>
         <h3 tabindex="-1">{{ heading }}</h3>
         <template v-if="condition">
-          <ul v-if="condition.levels.length" class="wait-levels" aria-label="Current entry conditions">
-            <li v-for="(level, index) in condition.levels" :key="level.kind">
+          <ul v-if="buyLevels.length" class="wait-levels" aria-label="Current buy conditions">
+            <li v-for="(level, index) in buyLevels" :key="level.kind">
               <span v-if="index" class="wait-or">or</span>
               <strong>{{ movement(level.change_percent) }}</strong>
               <span :title="level.target_price">{{ level.direction === 'below' ? 'below' : level.direction === 'at_or_below' ? 'to ≤' : 'to ≥' }} ≈ {{ price(level.target_price) }} {{ quote }}</span>
-              <span v-if="level.kind === 'recovery_then_correction'" class="wait-note">then a fresh correction</span>
             </li>
           </ul>
-          <p v-else>Next close: {{ new Date(condition.next_close_ms).toISOString().replace('T', ' ').slice(0, 16) }} UTC</p>
+          <p v-if="!condition.levels.length">Next close: {{ new Date(condition.next_close_ms).toISOString().replace('T', ' ').slice(0, 16) }} UTC</p>
+          <div v-if="recoveryLevels.length" class="recovery-condition">
+            <h4>Recovery needed before another dip buy</h4>
+            <p v-for="level in recoveryLevels" :key="level.kind" :title="level.target_price">{{ movement(level.change_percent) }} to ≥ ≈ {{ price(level.target_price) }} {{ quote }}</p>
+            <p class="wait-note">No buy on this rise. A fresh correction must follow.</p>
+          </div>
           <p v-if="condition.levels.length" class="wait-note">{{ condition.price_basis === 'ask' ? 'From the latest ask' : `From the latest completed ${condition.timeframe} close` }} · levels update with market data</p>
         </template>
         <p v-else>{{ outlook.description }}</p>
@@ -71,6 +77,8 @@ p { margin: 0; font-size: 16px; line-height: 1.5; color: var(--mw-color-text-sec
 .wait-levels strong { color: var(--mw-color-text-primary); font: 500 20px var(--mw-font-mono); }
 .wait-levels li > span { font-size: 16px; color: var(--mw-color-text-secondary); }
 .wait-levels .wait-or { font-size: 14px; }
+.recovery-condition { margin-top: 16px; padding-top: 12px; border-top: 1px solid var(--mw-color-border); }
+.recovery-condition h4 { margin: 0 0 4px; font-size: 14px; font-weight: 600; color: var(--mw-color-text-secondary); }
 .wait-note, .wait-levels .wait-note { margin-top: 8px; font-size: 14px; color: var(--mw-color-text-secondary); }
 .compact { border-top: 0; margin-bottom: 16px; }
 .compact .outlook-now { padding-top: 0; gap: 12px; }
