@@ -75,13 +75,13 @@ quantity field and a reviewed confirmation; it does not sell on the first click.
 Entry registration and blocked entry messages
 appear in Open trades until there is an owned holding.
 
-The **Base order** and **Accumulation order** entries in the existing order card
-contain fill quantities, order costs and fees. **Inventory after this order** shows
-the cumulative inventory evidence at that order's last update. Current managed
-inventory, the read-only strategy and any repair controls appear under Base order.
-Operator requests and their outcomes appear in the same timeline. Retained orders
-from earlier holdings are explicitly identified; incomplete evidence stays unknown.
-There is no separate Inventory and history section.
+The **Base order** and **Accumulation order** entries use the same compact
+history layout as Dynamic DCA: order size, amount, price and execution time.
+Manual sales appear as executed orders too. Holding summaries, inventory snapshots
+and activation/retry requests are excluded from this history; their accounting
+and audit records remain stored. Unknown execution values stay explicitly unknown.
+Strategy information and reviewed action controls sit outside the timeline in the
+same order card.
 
 Portfolio-wide costs and valuation live in the existing **Portfolio exposure**
 card and explicitly cover all accumulation holdings. Registrations without an open

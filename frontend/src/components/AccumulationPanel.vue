@@ -118,19 +118,8 @@ watch([() => props.intent?.id, fresh], async () => {
       </n-alert>
     </template>
     <template v-if="detail">
-      <details v-if="detail.holding" class="holding-evidence">
-        <summary>Current holding</summary>
-        <dl class="accumulation-values">
-        <div><dt>Managed quantity · {{ base }}</dt><dd>{{ detail.holding.net_quantity ?? 'Unknown' }}</dd></div>
-        <div><dt>Remaining cost · {{ quote }}</dt><dd>{{ detail.holding.remaining_cost ?? 'Unknown' }}</dd></div>
-        <div><dt>Contributed · {{ quote }}</dt><dd>{{ detail.holding.contributed_quote ?? 'Unknown' }}</dd></div>
-        <div><dt>Disposal proceeds · {{ quote }}</dt><dd>{{ detail.holding.disposal_proceeds ?? 'Unknown' }}</dd></div>
-        <div><dt>Cost basis</dt><dd>{{ detail.holding.basis_provenance ? accumulationReason(detail.holding.basis_provenance) : 'Unknown' }}</dd></div>
-        <div><dt>Recorded fees</dt><dd>{{ detail.holding.fees ? Object.entries(detail.holding.fees.totals).map(([currency, amount]) => `${amount} ${currency}`).join(' · ') || '0' : 'Unknown' }}</dd></div>
-      </dl>
-      </details>
-      <p v-else-if="detail.inventory_restore_required">Recorded inventory is missing from its holding link. Restore it from audit evidence before trading.</p>
-      <p v-else-if="detail.holding_integrity !== 'invalid' && detail.observations_initialized">No managed inventory.</p>
+      <p v-if="detail.inventory_restore_required">Recorded inventory is missing from its holding link. Restore it from audit evidence before trading.</p>
+      <p v-else-if="!detail.holding && detail.holding_integrity !== 'invalid' && detail.observations_initialized">No managed inventory.</p>
       <p v-if="detail.holding && (!detail.holding.fees || detail.holding.fees.pending_reports > 0 || !detail.holding.execution_history_complete)">
         Fee or execution history is incomplete. These amounts do not represent a fully verified net return.
       </p>

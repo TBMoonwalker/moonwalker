@@ -115,11 +115,11 @@ describe('accumulation controls', () => {
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
   })
 
-  it('renders exact quantity, unknown cost and reviews a close before journaling', async () => {
+  it('keeps holding summaries out of history and reviews a close before journaling', async () => {
     const wrapper = mount(AccumulationPanel)
     await flushPromises()
-    expect(wrapper.text()).toContain('0.100000000000000001')
-    expect(wrapper.text()).toContain('Unknown')
+    expect(wrapper.text()).not.toContain('Current holding')
+    expect(wrapper.text()).not.toContain('Managed quantity')
     expect(wrapper.text()).toContain('Fee or execution history is incomplete')
     await click(wrapper, 'Sell and close')
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
@@ -240,6 +240,8 @@ describe('accumulation controls', () => {
       state: 'stopped', holding: null, holding_integrity: 'unlinked',
       portfolio: { holding_count: 2, unverified_holding_count: 1, valuation_available: false, by_quote: [{ quote: 'USDC', holding_count: 2, known_remaining_cost: '0.300000000000000003', remaining_cost: null, unknown_cost_count: 1 }] },
       orders: [{ checkpoint_id: 5, deal_id: 'closed', side: 'sell', filled_quantity: '0.100000000000000001', quote_cost: '12.000000000000000001', fees: { BNB: '0.000000000000000001' }, fees_complete: true, terminal: true, updated_at: '2026-10-21T10:00:00Z', inventory_at_update: { net_quantity: '0', remaining_cost: null, contributed_quote: null, disposal_proceeds: '12.000000000000000001', fees: {}, pending_fee_reports: 0, basis_provenance: 'unknown' } }],
+      operations: [{ operation_id: 'old-entry', action: 'activate', status: 'applied', result_state: 'enabled', result_revision: 1, reason: 'retry_entry' }],
+      older_operations_available: true,
       older_orders_available: true,
     }))
     const { panel } = harness()
@@ -250,7 +252,11 @@ describe('accumulation controls', () => {
     const history = mount(AccumulationOrderTimeline, { props: { detail: panel.detail.value } })
     expect(history.text()).toContain('Earlier holding / unlinked manual sale')
     expect(history.text()).toContain('0.100000000000000001')
-    expect(history.text()).toContain('0.000000000000000001 BNB')
+    expect(history.text()).not.toContain('Recorded fees')
+    expect(history.text()).not.toContain('activate')
+    expect(history.text()).not.toContain('retry entry')
+    expect(history.findAll('details')).toHaveLength(0)
+    expect(history.text()).toContain('Order size: 12.000000000000000001 | Amount: 0.100000000000000001 | Price: Unknown')
     expect(history.text()).toContain('Unknown')
     expect(history.text()).toContain('Older executed orders remain recorded')
   })
@@ -404,7 +410,8 @@ describe('accumulation controls', () => {
     expect(wrapper.html()).toContain('ETH/USDC')
     expect(wrapper.text()).not.toContain('Manage accumulation')
     expect(wrapper.text()).not.toContain('Inventory and history')
-    expect(wrapper.text()).toContain('Holding information')
+    expect(wrapper.text()).not.toContain('Holding information')
+    expect(wrapper.text()).not.toContain('Current holding')
     expect(wrapper.text()).not.toContain('Change strategy')
     expect(wrapper.text()).not.toContain('Use strategy')
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()

@@ -18,9 +18,7 @@ describe('accumulation order evidence', () => {
     const orders = accumulationOrders([], [execution(1), { ...execution(2), amount: 0, ordersize: 0 }, execution(3, 'buy-2')], 'current')
     expect(orders).toHaveLength(2)
     expect(orders.map(order => order.title)).toEqual(['Base order', 'Accumulation order 1'])
-    expect(orders[0].content).toContain('Cumulative order and fee evidence unavailable')
-    expect(orders[0].content).toContain('Amount: 0.1')
-    expect(orders[0].content).toContain('Amount: 0 ·')
+    expect(orders[0].content).toBe('Order size: Unknown | Amount: Unknown | Price: 120')
   })
   it('does not join another generation or guess a match from equal amounts', () => {
     const orders = accumulationOrders([checkpoint({ deal_id: 'earlier' })], [execution(1)], 'current')

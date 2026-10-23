@@ -38,7 +38,7 @@ export function accumulationOrders(
     const updates = operation ? executions.filter(candidate => candidate.deal_id === execution.deal_id && candidate.side === execution.side && operationId(candidate) === operation) : [execution]
     const base = execution.side === 'buy' && ++buys === 1
     items.push({ key, base, title: execution.side === 'buy' ? base ? 'Base order' : `Accumulation order ${buys - 1}` : `Manual sale ${++sales}`, timestamp: execution.timestamp, checkpoint, price: updates.at(-1)?.price,
-      content: checkpoint ? undefined : `Cumulative order and fee evidence unavailable. Recorded execution updates: ${updates.map(update => `Quote: ${update.ordersize} · Amount: ${update.amount} · Price: ${update.price}`).join(' | ')}`,
+      content: checkpoint ? undefined : `Order size: ${updates.length === 1 ? execution.ordersize : 'Unknown'} | Amount: ${updates.length === 1 ? execution.amount : 'Unknown'} | Price: ${updates.at(-1)?.price ?? 'Unknown'}`,
     })
   }
   if (!items.length && fallback.length && !checkpoints.some(order => dealId && order.deal_id === dealId)) items.push(...fallback.map((item, index) => ({ ...item, title: index === 0 ? 'Base order' : `Accumulation order ${index}`, base: index === 0 })))
