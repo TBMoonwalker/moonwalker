@@ -202,7 +202,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import AccumulationStrategyAssignment from './AccumulationStrategyAssignment.vue'
-import { fetchAccumulationStrategies } from '../../api/accumulation'
+import { useAccumulationStrategies } from '../../composables/useAccumulationStrategies'
 import type { FormInst, FormRules } from 'naive-ui/es/form'
 import type { DcaModel, StringSelectOption } from '../../config-editor/types'
 import type { TradeModeSwitchGuardState } from '../../helpers/configLoad'
@@ -232,21 +232,17 @@ const tradeModeOptions: StringSelectOption[] = [
     { label: 'Accumulation', value: TRADE_MODE_ACCUMULATION },
 ]
 const isAccumulationMode = computed(() => props.dca.trade_mode === TRADE_MODE_ACCUMULATION)
-const accumulationStrategies = ref<{ label: string; value: number }[]>([])
-const accumulationCursor = ref<number | null>(null)
-const accumulationLoading = ref(false)
-const accumulationError = ref('')
+const { versions: accumulationVersions, cursor: accumulationCursor,
+    loading: accumulationLoading, error: accumulationError,
+    load: loadStrategyPage } = useAccumulationStrategies(
+        () => 'Could not load compatible accumulation strategies.',
+    )
+const accumulationStrategies = computed(() => accumulationVersions.value.map(version => ({
+    label: `${version.name} · v${version.version} · ${version.parameters.timeframe}`,
+    value: version.id,
+})))
 async function loadAccumulationStrategies(more = false) {
-    if (!props.dca.accumulation_available || accumulationLoading.value) return
-    accumulationLoading.value = true
-    try {
-        const page = await fetchAccumulationStrategies(more ? accumulationCursor.value ?? 0 : 0)
-        const options = page.versions.map(version => ({ label: `${version.name} · v${version.version} · ${version.parameters.timeframe}`, value: version.id }))
-        accumulationStrategies.value = more ? [...accumulationStrategies.value, ...options.filter(option => !accumulationStrategies.value.some(old => old.value === option.value))] : options
-        accumulationCursor.value = page.next_after_id
-        accumulationError.value = ''
-    } catch { accumulationError.value = 'Could not load compatible accumulation strategies.' }
-    finally { accumulationLoading.value = false }
+    if (props.dca.accumulation_available) await loadStrategyPage(more)
 }
 watch(() => props.dca.accumulation_available, available => { if (available) void loadAccumulationStrategies() }, { immediate: true })
 const isDynamicDcaMode = computed(

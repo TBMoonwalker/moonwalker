@@ -9,8 +9,7 @@ import {
 } from '@vicons/ionicons5'
 
 import { fetchJson } from '../api/client'
-import { fetchAccumulationStrategies } from '../api/accumulation'
-import type { AccumulationStrategy } from '../types/accumulation'
+import { useAccumulationStrategies } from '../composables/useAccumulationStrategies'
 import BacktestResultChart from '../components/BacktestResultChart.vue'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import {
@@ -56,9 +55,10 @@ const symbolLoadError = ref('')
 const configuredCurrency = ref('')
 const strategyOptions = ref<SelectOption[]>([])
 const symbolOptions = ref<SelectOption[]>([])
-const accumulationStrategies = ref<AccumulationStrategy[]>([])
-const accumulationCursor = ref<number | null>(null)
-const accumulationLoadError = ref('')
+const { versions: accumulationStrategies, cursor: accumulationCursor,
+    error: accumulationLoadError, load: loadStrategyPage } = useAccumulationStrategies(
+        cause => extractApiErrorMessage(cause, 'Saved accumulation strategies could not be loaded.'),
+    )
 const isAccumulation = computed(() => form.tradeMode === 'accumulation')
 const selectedAccumulation = computed(() => accumulationStrategies.value.find(version => version.id === form.accumulationVersionId))
 const accumulationOptions = computed(() => accumulationStrategies.value.map(version => ({ value: version.id, label: `${version.name} · v${version.version} · ${version.parameters.timeframe}` })))
@@ -251,13 +251,8 @@ const accumulationComparisonColumns = [
     { title: 'Buys', key: 'buy_count' },
 ]
 async function loadAccumulationStrategies(more = false) {
-    accumulationLoadError.value = ''
-    try {
-        const page = await fetchAccumulationStrategies(more ? accumulationCursor.value ?? 0 : 0)
-        accumulationStrategies.value = more ? [...accumulationStrategies.value, ...page.versions.filter(version => !accumulationStrategies.value.some(old => old.id === version.id))] : page.versions
-        accumulationCursor.value = page.next_after_id
-        if (!form.accumulationVersionId) form.accumulationVersionId = page.versions[0]?.id ?? null
-    } catch (error) { accumulationLoadError.value = extractApiErrorMessage(error, 'Saved accumulation strategies could not be loaded.') }
+    const page = await loadStrategyPage(more)
+    if (page && !form.accumulationVersionId) form.accumulationVersionId = page.versions[0]?.id ?? null
 }
 watch(isAccumulation, enabled => { resetResult(); if (enabled && !accumulationStrategies.value.length) void loadAccumulationStrategies() })
 

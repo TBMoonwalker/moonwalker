@@ -1,12 +1,13 @@
+import { useAccumulationStrategies } from './useAccumulationStrategies'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useWebSocket } from '@vueuse/core'
-import { accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, fetchAccumulationStrategies, sendAccumulationCommand } from '../api/accumulation'
+import { accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, sendAccumulationCommand } from '../api/accumulation'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { accumulationActions, accumulationClosePredecessor } from '../helpers/accumulation'
 import { createOrderOperationId } from '../helpers/orderMutations'
 import { MOONWALKER_API_ORIGIN } from '../config'
 import { readText, writeText, removeJSON } from '../helpers/safeStorage'
-import type { AccumulationAction, AccumulationCommand, AccumulationDetail, AccumulationStatus, AccumulationStrategy, AccumulationPortfolio } from '../types/accumulation'
+import type { AccumulationAction, AccumulationCommand, AccumulationDetail, AccumulationStatus, AccumulationPortfolio } from '../types/accumulation'
 
 // Retain an uncertain request across route changes; never replay it automatically.
 const pendingKey = `moonwalker.accumulation.pending:${MOONWALKER_API_ORIGIN}`
@@ -59,13 +60,13 @@ export function useAccumulationPanel(symbol?: string) {
   const adjustmentNote = ref('')
   const ownershipConfirmation = ref('')
   const ownershipNote = ref('')
-  const strategies = ref<AccumulationStrategy[]>([])
-  const strategyCursor = ref<number | null>(null)
+  const { versions: strategies, cursor: strategyCursor, loading: strategyLoading,
+    error: strategyError, load: loadStrategies } = useAccumulationStrategies(
+      () => 'Compatible strategies could not be loaded. Refresh the strategy list before switching.',
+    )
   const targetVersion = ref<number | null>(null)
   const repairTarget = ref<string | null>(null)
   const retirementTarget = ref<string | null>(null)
-  const strategyError = ref('')
-  const strategyLoading = ref(false)
   let sequence = 0
   let disposed = false
   let pageLoading = false
@@ -148,20 +149,6 @@ export function useAccumulationPanel(symbol?: string) {
     return ''
   })
   const pendingRequest = computed(() => unresolvedRequest.value)
-
-  async function loadStrategies(more = false) {
-    if (strategyLoading.value) return
-    strategyLoading.value = true
-    try {
-      const page = await fetchAccumulationStrategies(more ? strategyCursor.value ?? 0 : 0)
-      if (disposed) return
-      strategies.value = more ? [...strategies.value, ...page.versions.filter(row => !strategies.value.some(old => old.id === row.id))] : page.versions
-      strategyCursor.value = page.next_after_id
-      strategyError.value = ''
-    } catch {
-      if (!disposed) strategyError.value = 'Compatible strategies could not be loaded. Refresh the strategy list before switching.'
-    } finally { strategyLoading.value = false }
-  }
 
   async function refreshDetail() {
     if (!selected.value || disposed) return
