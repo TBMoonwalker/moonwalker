@@ -5,9 +5,22 @@ from __future__ import annotations
 import math
 from typing import Any, Protocol
 
+from service.data_timeframes import timeframe_to_milliseconds
 from service.indicators import Indicators
+from service.strategy_conditions import (
+    SHARED_INDICATORS,
+    aggregate_frame,
+    indicator_history,
+    indicator_series,
+)
 
 CHART_INDICATOR_STYLES: dict[str, tuple[str, str, str]] = {
+    "atr": ("atr", "line", "#356D86"),
+    "adx": ("dmi", "line", "#B7791F"),
+    "plus_di": ("dmi", "line", "#2E7D5B"),
+    "minus_di": ("dmi", "line", "#B4443F"),
+    "ema_slope": ("atr_units", "line", "#356D86"),
+    "ema_distance_atr": ("atr_units", "line", "#B7791F"),
     "ema": ("price", "line", "#B7791F"),
     "bollinger_upper": ("price", "line", "#356D86"),
     "bollinger_middle": ("price", "line", "#8A948D"),
@@ -120,7 +133,14 @@ class StrategyChartIndicatorBuilder:
         warmup = 0
         for requirement in self._requirements.values():
             indicator = str(requirement["indicator"])
-            if indicator == "ema":
+            if indicator in SHARED_INDICATORS or requirement.get("timeframe"):
+                ratio = timeframe_to_milliseconds(
+                    requirement.get("timeframe") or self.timeframe
+                ) // timeframe_to_milliseconds(self.timeframe)
+                warmup = max(
+                    warmup, (indicator_history(requirement) + 1) * max(1, ratio)
+                )
+            elif indicator == "ema":
                 length = int(requirement["length"])
                 warmup = max(warmup, max(length * 2, 200))
             elif indicator == "rsi":
@@ -153,6 +173,16 @@ class StrategyChartIndicatorBuilder:
         if indicator not in CHART_INDICATOR_STYLES:
             return
         requirement = {"indicator": indicator}
+        if indicator in SHARED_INDICATORS:
+            requirement.update(
+                {
+                    key: params[key]
+                    for key in ("length", "atr_length", "slope_period")
+                    if key in params
+                }
+            )
+        if params.get("timeframe"):
+            requirement["timeframe"] = params["timeframe"]
         if indicator == "ema":
             requirement["length"] = int(params.get("length") or 20)
         elif indicator == "rsi":
@@ -174,6 +204,29 @@ class StrategyChartIndicatorBuilder:
     ) -> Any:
         """Load one indicator component for chart output."""
         indicator = str(requirement["indicator"])
+        if indicator in SHARED_INDICATORS or requirement.get("timeframe"):
+            base = self.timeframe
+            target = requirement.get("timeframe") or base
+            ratio = timeframe_to_milliseconds(target) // timeframe_to_milliseconds(base)
+            frame = await indicators.condition_frame(
+                self.symbol, base, (indicator_history(requirement) + 1) * max(1, ratio)
+            )
+            if frame.empty:
+                return None
+            frame = frame.copy()
+            original = frame.index
+            frame.index = frame.index.as_unit("ms").astype(
+                "int64"
+            ) + timeframe_to_milliseconds(base)
+            selected = aggregate_frame(frame, base, target)
+            series = (
+                indicator_series(selected, requirement) if not selected.empty else None
+            )
+            if series is None:
+                return None
+            aligned = series.reindex(frame.index, method="ffill")
+            aligned.index = original
+            return aligned
         if indicator == "ema":
             return await indicators.calculate_ema_series(
                 self.symbol, self.timeframe, int(requirement["length"])
@@ -229,6 +282,12 @@ class StrategyChartIndicatorBuilder:
     def _label(requirement: dict[str, Any]) -> str:
         """Return a compact legend label for one indicator series."""
         indicator = str(requirement["indicator"])
+        if indicator in SHARED_INDICATORS:
+            label = {
+                "ema_slope": "EMA slope / ATR",
+                "ema_distance_atr": "EMA discount / ATR",
+            }.get(indicator, indicator.upper())
+            return f"{label} {requirement.get('length', 14)} {requirement.get('timeframe', '')}".strip()
         if indicator == "ema":
             return f"EMA {requirement['length']}"
         if indicator == "rsi":

@@ -6,6 +6,7 @@ BUY is a proposal, never permission to submit without fresh capital admission.
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
@@ -196,7 +197,9 @@ async def evaluate_accumulation(
     parameters = version.parameters
     close_ms = parameters.latest_close(now_ms)
     try:
-        market = calculate_accumulation_market(candles, parameters, close_ms=close_ms)
+        market = await asyncio.to_thread(
+            calculate_accumulation_market, candles, parameters, close_ms=close_ms
+        )
     except AccumulationStateError:
         return AccumulationDecision(expected, "WAIT", "WAIT_DATA")
     priority_close = AccumulationParameters().latest_close(now_ms)

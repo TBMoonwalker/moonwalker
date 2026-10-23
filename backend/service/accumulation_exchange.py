@@ -647,8 +647,11 @@ class AccumulationExchangeAdapter:
                         end, *(decimal_evidence(value) for value in row[1:5])
                     )
                 )
-            calculate_accumulation_market(
-                result[-parameters.history_length :], parameters, close_ms=close
+            await asyncio.to_thread(
+                calculate_accumulation_market,
+                result[-parameters.history_length :],
+                parameters,
+                close_ms=close,
             )
             await self.account_scope(config)
             return tuple(result)
@@ -687,8 +690,12 @@ class AccumulationExchangeAdapter:
             raise AccumulationStateError("Lifecycle changed during readiness.")
         guard = _guard(activation.execution_guard_json, activation.consumption_revision)
         observations = (
-            rebuild_accumulation_observations(
-                rows, version.parameters, guard, baseline_close_ms=baseline
+            await asyncio.to_thread(
+                rebuild_accumulation_observations,
+                rows,
+                version.parameters,
+                guard,
+                baseline_close_ms=baseline,
             )
             if rows
             else None

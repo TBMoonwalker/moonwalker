@@ -59,6 +59,10 @@ def _json_loads(value: str | None, fallback: Any) -> Any:
 
 def build_builtin_ir(spec: BuiltinStrategySpec) -> dict[str, Any]:
     """Return the Moonwalker IR for a built-in strategy."""
+    if spec.slug == "regime_accumulation":
+        from service.shared_accumulation import regime_accumulation_graph
+
+        return regime_accumulation_graph()
     if spec.slug in {"ema20_swing", "ema20_swing_reverse"}:
         return _build_ema20_swing_ir(spec)
     if spec.slug == "ema_down":
@@ -700,7 +704,7 @@ def normalize_strategy_slug(name: str) -> str:
 
 def validate_strategy_ir(ir: dict[str, Any]) -> dict[str, Any]:
     """Validate the persisted Moonwalker strategy IR."""
-    return validate_strategy_ir_document(
+    result = validate_strategy_ir_document(
         ir,
         schema_version=STRATEGY_IR_SCHEMA_VERSION,
         palette_types={node["type"] for node in NODE_PALETTE},
@@ -708,8 +712,57 @@ def validate_strategy_ir(ir: dict[str, Any]) -> dict[str, Any]:
         checked_at_factory=_utc_now_iso,
     )
 
+    if isinstance(ir, dict) and "accumulation" in ir:
+        try:
+            from service.accumulation_strategy import (
+                parse_accumulation_strategy_document,
+            )
+
+            parameters = parse_accumulation_strategy_document(ir)
+            result["required_history"] = {
+                "candles": parameters.history_length,
+                "label": f"{parameters.history_length} closed candles",
+            }
+        except (TypeError, ValueError, KeyError) as exc:
+            result["blocking_errors"].append(
+                {"group": "Accumulation compatibility", "message": str(exc)}
+            )
+            result["status"] = "invalid"
+    if isinstance(ir, dict) and "accumulation" not in ir:
+        timeframes = [
+            node.get("params", {}).get("timeframe")
+            for node in ir.get("nodes", [])
+            if isinstance(node, dict) and isinstance(node.get("params"), dict)
+        ]
+        if any(timeframes):
+            from service.data_timeframes import timeframe_to_milliseconds
+            from service.strategy_conditions import TIMEFRAMES, graph_history
+
+            try:
+                base = min(
+                    (value for value in timeframes if value in TIMEFRAMES),
+                    key=timeframe_to_milliseconds,
+                    default="1h",
+                )
+                graph_history(ir, base)
+            except (ValueError, TypeError, KeyError) as exc:
+                result["blocking_errors"].append(
+                    {"group": "Timeframe compatibility", "message": str(exc)}
+                )
+                result["status"] = "invalid"
+    return result
+
+
+_STRATEGY_SEED_LOCK = asyncio.Lock()
+
 
 async def seed_builtin_strategies() -> None:
+    """Serialize catalog initialization for concurrent dashboard clients."""
+    async with _STRATEGY_SEED_LOCK:
+        await _seed_builtin_strategies()
+
+
+async def _seed_builtin_strategies() -> None:
     """Ensure built-ins exist without rewriting immutable version rows."""
     from service.accumulation_catalog import seed_builtin_accumulation_strategy
 
@@ -856,8 +909,6 @@ async def list_strategy_summaries(include_hidden: bool = False) -> list[dict[str
     rows = await model.StrategyDefinition.all().order_by("is_builtin", "name")
     summaries: list[dict[str, Any]] = []
     for row in rows:
-        if row.slug.startswith(CATALOG_PREFIX):
-            continue
         if not include_hidden and row.slug in _hidden_builtin_slugs():
             continue
         summaries.append(await _definition_summary(row))
@@ -867,14 +918,16 @@ async def list_strategy_summaries(include_hidden: bool = False) -> list[dict[str
 async def list_strategy_options() -> list[str]:
     """Return public strategy slugs for selectors."""
     summaries = await list_strategy_summaries(include_hidden=False)
-    return [str(summary["slug"]) for summary in summaries if summary["available"]]
+    return [
+        str(summary["slug"])
+        for summary in summaries
+        if summary["available"] and "dca" in summary.get("capabilities", ["dca"])
+    ]
 
 
 async def get_strategy_detail(slug: str) -> dict[str, Any] | None:
     """Return one strategy definition with its active IR."""
     await seed_builtin_strategies()
-    if slug.startswith(CATALOG_PREFIX):
-        return None
     definition = await model.StrategyDefinition.get_or_none(slug=slug)
     if definition is None:
         return None
@@ -885,6 +938,12 @@ async def get_strategy_detail(slug: str) -> dict[str, Any] | None:
         active_version.validation_json if active_version else None,
         validate_strategy_ir(ir) if isinstance(ir, dict) else {},
     )
+    if isinstance(ir, dict) and ir.get("capability") == "accumulation/v1":
+        from service.shared_accumulation import legacy_accumulation_graph
+
+        ir = legacy_accumulation_graph(ir, slug, definition.name, definition.is_builtin)
+        ir["metadata"] = {"legacy_accumulation_view": True}
+        validation = validate_strategy_ir(ir)
     return {
         **summary,
         "ir": ir,
@@ -903,6 +962,7 @@ async def duplicate_strategy(
         raise ValueError(f"Strategy '{source_slug}' was not found.")
 
     source_ir = copy.deepcopy(source["ir"])
+    source_ir.get("metadata", {}).pop("legacy_accumulation_view", None)
     display_name = str(name or f"{source['name']} copy").strip()
     base_slug = normalize_strategy_slug(display_name)
     slug = await _unique_strategy_slug(base_slug)
@@ -1038,10 +1098,6 @@ async def promote_strategy_version(
     base_lock_version: int,
 ) -> tuple[dict[str, Any], int]:
     """Validate and atomically promote a custom strategy version."""
-    if slug.startswith(CATALOG_PREFIX):
-        raise PermissionError(
-            "Accumulation variants are immutable; save a new variant."
-        )
     async with _STRATEGY_PROMOTION_LOCK:
         definition = await model.StrategyDefinition.get_or_none(slug=slug)
         if definition is None:
@@ -1052,6 +1108,7 @@ async def promote_strategy_version(
             return await get_strategy_detail(slug) or {}, 409
 
         next_ir = copy.deepcopy(ir)
+        next_ir.get("metadata", {}).pop("legacy_accumulation_view", None)
         next_ir["schema_version"] = STRATEGY_IR_SCHEMA_VERSION
         next_ir["slug"] = slug
         next_ir["kind"] = STRATEGY_KIND_CUSTOM
@@ -1119,6 +1176,14 @@ async def _definition_summary(row: model.StrategyDefinition) -> dict[str, Any]:
         {"status": row.validation_status},
     )
     unavailable = _missing_indicator_methods(validation)
+    document = _json_loads(active_version.ir_json if active_version else None, {})
+    if not isinstance(document, dict):
+        document = {}
+    capabilities = (
+        ["accumulation"] if document.get("capability") == "accumulation/v1" else ["dca"]
+    )
+    if "accumulation" in document:
+        capabilities.append("accumulation")
     return {
         "slug": row.slug,
         "name": row.name,
@@ -1132,6 +1197,7 @@ async def _definition_summary(row: model.StrategyDefinition) -> dict[str, Any]:
         "validation_status": validation.get("status", row.validation_status),
         "required_history": validation.get("required_history", {}),
         "hook_readiness": validation.get("hook_readiness", []),
+        "capabilities": capabilities,
         "available": not unavailable and validation.get("status") == "valid",
         "missing_hooks": unavailable,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,

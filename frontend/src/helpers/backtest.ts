@@ -65,7 +65,7 @@ export interface BacktestMarker {
     text: string
 }
 
-export type BacktestIndicatorPane = 'price' | 'rsi' | 'bandwidth' | 'macd'
+export type BacktestIndicatorPane = 'price' | 'rsi' | 'bandwidth' | 'macd' | 'atr' | 'dmi' | 'atr_units'
 type BacktestIndicatorRenderer = 'line' | 'histogram'
 
 interface BacktestIndicatorValue {

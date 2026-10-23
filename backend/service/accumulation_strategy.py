@@ -103,6 +103,19 @@ class AccumulationParameters:
         )
 
 
+@dataclass(frozen=True)
+class GraphAccumulationParameters(AccumulationParameters):
+    """A pinned shared condition graph plus mode-specific accumulation settings."""
+
+    condition_graph: dict[str, Any] | None = None
+    condition_history_candles: int = 0
+
+    @property
+    def history_length(self) -> int:
+        """Include complete higher-timeframe indicator warmup in the base window."""
+        return max(super().history_length, self.condition_history_candles)
+
+
 def build_accumulation_strategy_document(
     parameters: AccumulationParameters | None = None,
 ) -> dict[str, Any]:
@@ -120,6 +133,26 @@ def parse_accumulation_strategy_document(
     value: dict[str, Any],
 ) -> AccumulationParameters:
     """Reject ordinary DCA graphs and unrecognized accumulation implementations."""
+    if isinstance(value, dict) and "nodes" in value and "accumulation" in value:
+        from service.strategy_catalog import NODE_PALETTE, SUPPORTED_INDICATORS
+        from service.strategy_conditions import graph_history
+        from service.strategy_ir import validate_strategy_ir_document
+
+        base = AccumulationParameters.from_dict(value["accumulation"])
+        validation = validate_strategy_ir_document(
+            value,
+            schema_version=1,
+            palette_types={node["type"] for node in NODE_PALETTE},
+            supported_indicators=SUPPORTED_INDICATORS,
+            checked_at_factory=lambda: "",
+        )
+        if validation["status"] != "valid":
+            raise AccumulationStateError("Invalid shared accumulation condition graph.")
+        return GraphAccumulationParameters(
+            **asdict(base),
+            condition_graph=value,
+            condition_history_candles=graph_history(value, base.timeframe),
+        )
     if not isinstance(value, dict) or set(value) != {
         "schema_version",
         "capability",
@@ -170,6 +203,7 @@ class AccumulationMarket:
     peak: str
     atr: str
     severity: str
+    conditions_match: bool = True
 
 
 def calculate_accumulation_market(
@@ -212,8 +246,23 @@ def calculate_accumulation_market(
         )
         close = _decimal(candles[-1].close)
         severity = max(Decimal(0), (peak - close) / atr)
+        conditions_match = True
+        if isinstance(parameters, GraphAccumulationParameters):
+            from service.strategy_conditions import candle_frame, evaluate_conditions
+
+            conditions_match = evaluate_conditions(
+                parameters.condition_graph or {},
+                candle_frame(candles),
+                parameters.timeframe,
+            )
         return AccumulationMarket(
-            close_ms, str(close), candles[-2].close, str(peak), str(atr), str(severity)
+            close_ms,
+            str(close),
+            candles[-2].close,
+            str(peak),
+            str(atr),
+            str(severity),
+            conditions_match,
         )
 
 
@@ -322,6 +371,8 @@ def accumulation_signal_reason(
     parameters: AccumulationParameters,
 ) -> str:
     """Require a fresh decline and either first entry or a genuine market rearm."""
+    if not market.conditions_match:
+        return "WAIT_CONDITIONS"
     if _decimal(market.close) >= _decimal(market.previous_close):
         return "WAIT_DECLINE"
     if _decimal(market.severity, positive=False) < _decimal(parameters.entry_atr):
@@ -385,9 +436,22 @@ def rebuild_accumulation_observations(
         candles[length - 1].close_ms - parameters.interval_ms,
         guard.consumption_revision if guard else 0,
     )
+    # Rebuilding ownership/spacing observations never needs historical graph signals.
+    market_parameters = (
+        AccumulationParameters(
+            **{
+                key: getattr(parameters, key)
+                for key in AccumulationParameters.__dataclass_fields__
+            }
+        )
+        if isinstance(parameters, GraphAccumulationParameters)
+        else parameters
+    )
     for end in range(length, len(candles) + 1):
         market = calculate_accumulation_market(
-            candles[end - length : end], parameters, close_ms=candles[end - 1].close_ms
+            candles[end - market_parameters.history_length : end],
+            market_parameters,
+            close_ms=candles[end - 1].close_ms,
         )
         state = advance_accumulation_observations(state, market, guard, parameters)
     return state

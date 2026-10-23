@@ -63,7 +63,7 @@ def accumulation_wait_condition(
                     levels.append(
                         level("recovery_then_correction", "at_or_above", recovery)
                     )
-        elif reason not in {"WAIT_BASELINE", "WAIT_NEW_CANDLE"}:
+        elif reason not in {"WAIT_BASELINE", "WAIT_NEW_CANDLE", "WAIT_CONDITIONS"}:
             return None
         return {
             "reason": reason,

@@ -8,7 +8,9 @@ from typing import Any
 from service.accumulation_contracts import canonical_decimal
 from service.accumulation_replay import run_accumulation_replay
 from service.backtest import (
+    BacktestData,
     BacktestValidationError,
+    candles_to_dataframe,
     fetch_ohlcv,
     validate_backtest_range,
 )
@@ -114,6 +116,19 @@ async def run_accumulation_backtest(
     accumulation = next(
         row for row in report["results"] if row["strategy"] == "accumulation"
     )
+    chart_indicators = []
+    graph = getattr(parameters, "condition_graph", None)
+    if graph:
+        from service.indicators import Indicators
+        from service.strategy_chart_indicators import StrategyChartIndicatorBuilder
+
+        builder = StrategyChartIndicatorBuilder(symbol, parameters.timeframe)
+        builder.collect_ir_requirements(graph)
+        chart_indicators = await builder.build(
+            Indicators(data=BacktestData(candles_to_dataframe(candles))),
+            candles,
+            len(candles) - len(evaluation),
+        )
     return {
         "trades": [],
         "chart": {
@@ -138,7 +153,7 @@ async def run_accumulation_backtest(
                 }
                 for fill in report["accumulation_trades"]
             ],
-            "indicators": [],
+            "indicators": chart_indicators,
         },
         "stats": {
             "symbol": symbol,

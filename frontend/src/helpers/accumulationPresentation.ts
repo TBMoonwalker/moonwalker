@@ -10,6 +10,7 @@ interface AccumulationOutlook {
 
 const waits: Record<string, [string, string]> = {
   WAIT_BASELINE: ['Waiting for a fresh candle close', 'The strategy is ready. Waiting for the next completed candle to evaluate a new buy signal.'],
+  WAIT_CONDITIONS: ['Waiting for strategy conditions', 'The saved strategy’s buy conditions have not matched. No accumulation order is eligible.'],
   WAIT_REBASE: ['Initializing accumulation strategy', 'Loading completed candles for subsequent accumulation buys.'],
   WAIT_DATA: ['Waiting for market history', 'A complete, continuous candle history is needed before the strategy can evaluate a buy.'],
   WAIT_NEW_CANDLE: ['Waiting for a candle close', 'The current candle is still open. The strategy evaluates completed candles.'],

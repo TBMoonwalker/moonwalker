@@ -121,3 +121,35 @@ async def test_normal_backtest_endpoint_dispatches_accumulation(monkeypatch):
     )
     assert response.status_code == 200
     run.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_backtest_applies_shared_graph_to_subsequent_buys(history):
+    from dataclasses import replace
+
+    from service.accumulation_strategy import (
+        build_accumulation_strategy_document,
+        parse_accumulation_strategy_document,
+    )
+    from service.shared_accumulation import legacy_accumulation_graph
+
+    start, end, fetch, load = history
+    graph = legacy_accumulation_graph(
+        build_accumulation_strategy_document(), "shared", "Shared", False
+    )
+    graph["nodes"][0]["params"]["value"] = 0
+    load.return_value = replace(
+        load.return_value, parameters=parse_accumulation_strategy_document(graph)
+    )
+    blocked = await adapter.run_accumulation_backtest(
+        {}, {"symbol": "BTC/USDC", "strategy_version_id": 7}, start, end
+    )
+    assert blocked["accumulation"]["accumulation_trades"] == []
+    graph["nodes"][0]["params"]["value"] = 1
+    load.return_value = replace(
+        load.return_value, parameters=parse_accumulation_strategy_document(graph)
+    )
+    allowed = await adapter.run_accumulation_backtest(
+        {}, {"symbol": "BTC/USDC", "strategy_version_id": 7}, start, end
+    )
+    assert allowed["accumulation"]["accumulation_trades"]

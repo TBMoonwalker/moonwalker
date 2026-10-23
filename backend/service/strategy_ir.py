@@ -73,7 +73,16 @@ def validate_strategy_ir_document(
                     "message": f"Node '{node_id}' uses unsupported type '{node_type}'.",
                 }
             )
-        node_methods, node_history = node_runtime_requirements(raw_node)
+        try:
+            node_methods, node_history = node_runtime_requirements(raw_node)
+        except (ValueError, TypeError, OverflowError):
+            blocking.append(
+                {
+                    "group": "Indicators",
+                    "message": f"Invalid indicator parameters for '{node_id}'.",
+                }
+            )
+            node_methods, node_history = (), 0
         required_methods.update(node_methods)
         min_history_candles = max(min_history_candles, node_history)
 
@@ -222,6 +231,23 @@ def _validate_indicator_node(
     """Validate generic indicator nodes only reference supported indicators."""
     params = node.get("params") if isinstance(node.get("params"), dict) else {}
     indicator = str(params.get("indicator") or "").strip()
+    from service.strategy_conditions import (
+        TIMEFRAMES,
+        indicator_history,
+    )
+
+    if params.get("timeframe") and (
+        not isinstance(params["timeframe"], str)
+        or params["timeframe"] not in TIMEFRAMES
+    ):
+        blocking.append(
+            {"group": "Indicators", "message": "Unsupported indicator timeframe."}
+        )
+    if indicator in supported_indicators:
+        try:
+            indicator_history(params)
+        except (ValueError, TypeError) as exc:
+            blocking.append({"group": "Indicators", "message": str(exc)})
     if indicator not in supported_indicators:
         blocking.append(
             {
@@ -283,6 +309,14 @@ def node_runtime_requirements(
     params = node.get("params") if isinstance(node.get("params"), dict) else {}
     if node_type == "indicator":
         indicator = str(params.get("indicator") or "")
+        from service.strategy_conditions import SHARED_INDICATORS, indicator_history
+
+        if indicator in SHARED_INDICATORS:
+            try:
+                history = indicator_history(params)
+            except (TypeError, ValueError):
+                history = 0
+            return (("calculate_condition_series",), history)
         if indicator == "ema":
             length = int(params.get("length") or 20)
             return (("calculate_ema", "get_close_price"), max(length + 2, 200))

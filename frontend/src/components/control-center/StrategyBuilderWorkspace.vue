@@ -5,7 +5,6 @@ import { useStrategyBuilderWorkspace } from '../../composables/useStrategyBuilde
 import StrategyCanvasPanel from './StrategyCanvasPanel.vue'
 import StrategyInspectorPanel from './StrategyInspectorPanel.vue'
 import StrategyLibraryPanel from './StrategyLibraryPanel.vue'
-import AccumulationStrategyWorkspace from './AccumulationStrategyWorkspace.vue'
 
 const dialog = useDialog()
 
@@ -54,6 +53,7 @@ const {
     selectStrategy,
     setDecisionNode,
     strategies,
+    updateAccumulationSettings,
     updateIndicatorSelection,
     updateNodeParam,
     updateNodeParamValue,
@@ -65,7 +65,6 @@ const {
 
 <template>
     <section class="strategy-builder" aria-labelledby="strategy-builder-title">
-        <AccumulationStrategyWorkspace />
         <div class="strategy-status-bar">
             <div>
                 <h2 id="strategy-builder-title">Current strategy</h2>
@@ -181,6 +180,7 @@ const {
                         @validate="validateDraft"
                         @set-decision="setDecisionNode"
                         @connect-decision="connectSelectedToDecision"
+                        @update-accumulation="updateAccumulationSettings"
                         @update-indicator="updateIndicatorSelection"
                         @update-param="updateNodeParam"
                         @update-param-value="updateNodeParamValue"
@@ -284,16 +284,16 @@ const {
 }
 
 @media (max-width: 900px) {
-    .mobile-review-note {
-        display: block;
-    }
-
     .strategy-layout {
         grid-template-areas:
             "library"
             "workbench";
         grid-template-columns: 1fr;
     }
+}
+
+@media (max-width: 600px) {
+    .mobile-review-note { display: block; }
 }
 
 @media (max-width: 560px) {

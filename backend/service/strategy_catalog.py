@@ -12,6 +12,12 @@ CUSTOM_SLUG_PREFIX = "custom_"
 SUPPORTED_INDICATORS = frozenset(
     {
         "ema",
+        "atr",
+        "adx",
+        "plus_di",
+        "minus_di",
+        "ema_slope",
+        "ema_distance_atr",
         "rsi",
         "bollinger_upper",
         "bollinger_middle",
@@ -39,6 +45,15 @@ class BuiltinStrategySpec:
 
 
 BUILTIN_STRATEGIES: tuple[BuiltinStrategySpec, ...] = (
+    BuiltinStrategySpec(
+        slug="regime_accumulation",
+        name="Downtrend / sideways accumulation",
+        description="Experimental 4h market filter and 1h ATR discount; usable in either trading mode.",
+        node_type="all",
+        params={},
+        min_history_candles=1240,
+        required_methods=("calculate_condition_series",),
+    ),
     BuiltinStrategySpec(
         slug="ema_down",
         name="EMA down",

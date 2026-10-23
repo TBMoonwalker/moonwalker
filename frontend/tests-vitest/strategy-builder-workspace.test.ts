@@ -188,6 +188,31 @@ describe('StrategyBuilderWorkspace', () => {
         apiMocks.isStrategyConflict.mockReturnValue(false)
     })
 
+    it('stores accumulation settings in the common graph draft and exposes shared indicators', async () => {
+        const mounted = mountWorkspaceState()
+        await flushPromises()
+        mounted.state.updateAccumulationSettings('enabled', true)
+        expect(mounted.state.selectedDetail.value?.ir.accumulation).toBeUndefined()
+        await mounted.state.selectStrategy(custom.slug)
+        mounted.state.updateAccumulationSettings('enabled', true)
+        mounted.state.updateAccumulationSettings('spacing_atr', '2')
+        mounted.state.updateAccumulationSettings('peak_length', '200')
+        expect(mounted.state.selectedDetail.value?.ir.accumulation).toMatchObject({
+            spacing_atr: '2', peak_length: 200, timeframe: '1h',
+        })
+        mounted.state.selectedNodeId.value = 'ema'
+        mounted.state.updateIndicatorSelection('ema_slope')
+        expect(mounted.state.selectedNode.value?.params).toMatchObject({
+            indicator: 'ema_slope', atr_length: 14, slope_period: 6,
+        })
+        mounted.state.updateIndicatorSelection('ema_distance_atr')
+        mounted.state.updateIndicatorSelection('adx')
+        expect(mounted.state.selectedNode.value?.params?.atr_length).toBeUndefined()
+        mounted.state.updateAccumulationSettings('enabled', false)
+        expect(mounted.state.selectedDetail.value?.ir.accumulation).toBeUndefined()
+        mounted.state.updateAccumulationSettings('spacing_atr', '3')
+    })
+
     it('renders the split library, canvas, and inspector surfaces', async () => {
         const wrapper = mountWorkspace()
         await flushPromises()

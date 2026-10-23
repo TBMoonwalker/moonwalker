@@ -36,6 +36,9 @@ async def api_client():
 async def status_db(tmp_path, monkeypatch):
     import asyncio
 
+    monkeypatch.setattr(
+        "service.strategy_persistence._STRATEGY_SEED_LOCK", asyncio.Lock()
+    )
     promotion_lock = asyncio.Lock()
     monkeypatch.setattr(
         "service.accumulation_catalog._STRATEGY_PROMOTION_LOCK", promotion_lock
@@ -328,10 +331,14 @@ async def test_strategy_variant_save_is_immutable_idempotent_and_isolated(
     assert (
         await api_client.post("/accumulation/strategies", json=changed)
     ).status_code == 409
-    assert await get_strategy_detail(saved["slug"]) is None
-    assert saved["slug"] not in {row["slug"] for row in await list_strategy_summaries()}
-    with pytest.raises(PermissionError, match="immutable"):
-        await promote_strategy_version(saved["slug"], {}, 1)
+    detail = await get_strategy_detail(saved["slug"])
+    assert detail["capabilities"] == ["accumulation"]
+    assert detail["ir"]["accumulation"] == payload["parameters"]
+    assert saved["slug"] in {row["slug"] for row in await list_strategy_summaries()}
+    _, status = await promote_strategy_version(
+        saved["slug"], detail["ir"], detail["lock_version"]
+    )
+    assert status == 200
     with pytest.raises(PermissionError, match="immutable"):
         await delete_custom_strategy(saved["slug"])
     version = await model.StrategyVersion.get(id=saved["id"])
@@ -373,10 +380,13 @@ async def test_strategy_catalog_scan_pages_only_compatible_documents(
         "strategy-1",
         "strategy-3",
         "accumulation_variant_dip_atr",
+        "regime_accumulation",
     ]
     assert seen[0]["required_history_candles"] == 253
     assert page["defaults"]["max_fraction"] == "0.20"
-    assert await model.StrategyDefinition.all().count() == 1
+    from service.strategy_catalog import BUILTIN_STRATEGIES
+
+    assert await model.StrategyDefinition.all().count() == len(BUILTIN_STRATEGIES) + 1
 
 
 @pytest.mark.asyncio
@@ -701,7 +711,7 @@ async def test_fresh_setup_has_builtin_accumulation_without_configuration_or_bui
     await seed_builtin_strategies()
     assert starter["slug"] not in await list_strategy_options()
     second = (await api_client.get("/accumulation/strategies")).json()
-    assert [row["id"] for row in second["versions"]] == [starter["id"]]
+    assert starter["id"] in [row["id"] for row in second["versions"]]
     assert (await model.StrategyVersion.get(id=starter["id"])).ir_json == original
     assert (
         await model.StrategyVersion.filter(strategy_slug=starter["slug"]).count() == 1
@@ -724,7 +734,8 @@ async def test_global_builtin_seed_exposes_starter_before_accumulation_setup(
     response = await api_client.get("/accumulation/strategies")
     assert response.status_code == 200
     assert [row["slug"] for row in response.json()["versions"]] == [
-        BUILTIN_ACCUMULATION_SLUG
+        BUILTIN_ACCUMULATION_SLUG,
+        "regime_accumulation",
     ]
     assert not await model.AppConfig.exists()
 

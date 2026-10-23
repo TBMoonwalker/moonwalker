@@ -301,7 +301,7 @@ onUnmounted(() => {
     background: var(--mw-surface-active);
 }
 
-@media (max-width: 900px) {
+@media (max-width: 600px) {
     .rete-host,
     .node-strip,
     .canvas-toolbar {

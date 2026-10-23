@@ -361,3 +361,11 @@ its `stream_available` flag is false because ordinary WebSockets remain disabled
 Inventory, strategies, history and comparison controls are under **Manage
 accumulation**. Action confirmations and critical selected-holding warnings remain
 outside that disclosure.
+
+### Shared Strategy Builder
+
+Accumulation strategies now use the same [Strategy Builder](strategies.md#shared-strategies-for-dca-and-accumulation)
+as Dynamic DCA. The inspector contains accumulation execution settings alongside
+the shared graph. Existing versions and holding pins are preserved. The optional
+experimental downtrend/sideways preset filters subsequent buys; it does not delay
+the initial ASAP base order. Strategy assignment remains in Configuration.

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import time
 from dataclasses import dataclass, field
@@ -212,8 +213,17 @@ def invalidate_strategy_runtime_cache(slug: str | None = None) -> None:
 async def get_strategy_adapter(slug: str, timeframe: str) -> GraphStrategyAdapter:
     """Return a runtime adapter for DCA, TP, and signal paths."""
     snapshot = await _load_strategy_snapshot(slug)
-    if snapshot.ir.get("capability") == "accumulation/v1":
+    if snapshot.ir.get("capability") == "accumulation/v1" or snapshot.ir.get(
+        "metadata", {}
+    ).get("legacy_accumulation_view"):
         raise AccumulationStateError("Accumulation requires its dedicated runtime.")
+    if "accumulation" in snapshot.ir or any(
+        (node.get("params") or {}).get("timeframe")
+        for node in snapshot.ir.get("nodes", [])
+    ):
+        from service.strategy_conditions import graph_history
+
+        graph_history(snapshot.ir, timeframe)
     missing_hooks = _missing_indicator_methods(snapshot.validation)
     if missing_hooks:
         raise ValueError(
@@ -307,7 +317,9 @@ async def evaluate_strategy_graph(
 ) -> StrategyEvaluationResult:
     """Evaluate a strategy graph against current candle data."""
     snapshot = await _load_strategy_snapshot(slug)
-    if snapshot.ir.get("capability") == "accumulation/v1":
+    if snapshot.ir.get("capability") == "accumulation/v1" or snapshot.ir.get(
+        "metadata", {}
+    ).get("legacy_accumulation_view"):
         return StrategyEvaluationResult(
             False, snapshot.version, "accumulation_requires_dedicated_runtime"
         )
@@ -409,6 +421,15 @@ async def _load_strategy_snapshot(
 
 async def _evaluate_root(ir: dict[str, Any], context: EvaluationContext) -> bool:
     """Evaluate the configured root node."""
+    if "accumulation" in ir or any(
+        (node.get("params") or {}).get("timeframe") for node in ir.get("nodes", [])
+    ):
+        from service.strategy_conditions import evaluate_conditions, graph_history
+
+        frame = await _condition_frame(context, graph_history(ir, context.timeframe))
+        return await asyncio.to_thread(
+            evaluate_conditions, ir, frame, context.timeframe
+        )
     root_id = str(ir.get("root") or "")
     nodes = [node for node in ir.get("nodes", []) if isinstance(node, dict)]
     node_by_id = {str(node.get("id")): node for node in nodes}
@@ -560,6 +581,19 @@ async def _resolve_value_node(
         return params.get("value")
     if node_type == "indicator":
         indicator = str(params.get("indicator") or "")
+        from service.strategy_conditions import (
+            SHARED_INDICATORS,
+            indicator_history,
+            indicator_series,
+        )
+
+        if indicator in SHARED_INDICATORS:
+            frame = await _condition_frame(context, indicator_history(params))
+            return (
+                _sample_series_value(indicator_series(frame, params), index)
+                if not frame.empty
+                else None
+            )
         if indicator == "ema":
             return await _resolve_ema_value(params, context, index)
         if indicator == "rsi":
@@ -594,6 +628,30 @@ async def _resolve_value_node(
             return None
         return None if _is_missing_number(value) else value
     return None
+
+
+async def _condition_frame(context: EvaluationContext, length: int) -> Any:
+    """Align both replay and live graph evaluation to closed base candles only."""
+    import pandas as pd
+    from service.data_timeframes import timeframe_to_milliseconds
+
+    key = ("condition_frame", length)
+    if key not in context.memo:
+        frame = await context.indicators.condition_frame(
+            context.symbol, context.timeframe, length
+        )
+        if not frame.empty:
+            if context.candle_index is not None:
+                # Replay indexes refer to the provider's full resampled history.
+                frame = _slice_series(frame, context.candle_index)
+            frame = frame.copy()
+            frame.index = frame.index.as_unit("ms").astype(
+                "int64"
+            ) + timeframe_to_milliseconds(context.timeframe)
+            if context.candle_index is None:
+                frame = frame.loc[frame.index <= int(time.time() * 1000)]
+        context.memo[key] = frame if frame is not None else pd.DataFrame()
+    return context.memo[key]
 
 
 async def _resolve_ema_value(

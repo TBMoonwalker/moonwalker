@@ -378,6 +378,37 @@ export function useStrategyBuilderWorkspace(
         detail.ir.description = draftDescription.value.trim()
     }
 
+    function updateAccumulationSettings(key: string, value: unknown): void {
+        const detail = selectedDetail.value
+        if (!detail || isReadOnly.value) {
+            return
+        }
+        if (key === 'enabled') {
+            if (value) {
+                detail.ir.accumulation = {
+                    timeframe: '1h',
+                    peak_length: 168,
+                    atr_length: 14,
+                    entry_atr: '1.5',
+                    spacing_atr: '1',
+                    recovery_atr: '1',
+                    min_fraction: '0.02',
+                    slope: '0.03',
+                    max_fraction: '0.20',
+                }
+            } else {
+                delete detail.ir.accumulation
+            }
+        } else if (detail.ir.accumulation) {
+            Object.assign(detail.ir.accumulation, {
+                [key]: ['peak_length', 'atr_length'].includes(key)
+                    ? Number(value)
+                    : String(value),
+            })
+        }
+        scheduleDraftRefresh()
+    }
+
     function updateNodeParam(key: string, value: string): void {
         const detail = selectedDetail.value
         const node = selectedNode.value
@@ -419,7 +450,7 @@ export function useStrategyBuilderWorkspace(
         }
         if (
             indicator === 'ema' ||
-            indicator === 'rsi' ||
+            ['rsi', 'atr', 'adx', 'plus_di', 'minus_di', 'ema_slope', 'ema_distance_atr'].includes(indicator) ||
             indicator.startsWith('bollinger_')
         ) {
             delete nextParams.fast_period
@@ -450,6 +481,14 @@ export function useStrategyBuilderWorkspace(
             delete nextParams.fast_period
             delete nextParams.slow_period
             delete nextParams.signal_period
+        }
+        nextParams.timeframe ??= ''
+        if (['ema_slope', 'ema_distance_atr'].includes(indicator)) {
+            nextParams.atr_length ??= 14
+            if (indicator === 'ema_slope') nextParams.slope_period ??= 6
+        } else {
+            delete nextParams.atr_length
+            delete nextParams.slope_period
         }
         node.params = nextParams
         scheduleDraftRefresh()
@@ -581,6 +620,7 @@ export function useStrategyBuilderWorkspace(
         selectStrategy,
         setDecisionNode,
         strategies,
+        updateAccumulationSettings,
         updateIndicatorSelection,
         updateNodeParam,
         updateNodeParamValue,

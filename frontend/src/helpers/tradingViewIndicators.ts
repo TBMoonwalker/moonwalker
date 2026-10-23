@@ -60,6 +60,9 @@ export function getIndicatorPanes(
             ['rsi', 'RSI'],
             ['bandwidth', 'Bandwidth %'],
             ['macd', 'MACD'],
+            ['atr', 'ATR'],
+            ['dmi', 'ADX / directional movement'],
+            ['atr_units', 'ATR-normalized conditions'],
         ] as const
     )
         .map(([key, label]) => ({

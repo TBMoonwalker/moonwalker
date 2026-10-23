@@ -13,6 +13,7 @@ logging = helper.LoggerFactory.get_logger("logs/config.log", "strategy_capabilit
 
 # Strategy -> indicator methods required by its implementation.
 REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {
+    "regime_accumulation": ("calculate_condition_series",),
     "ema_down": ("calculate_ema",),
     "ema20_swing": ("calculate_ema", "get_close_price"),
     "ema20_swing_reverse": ("calculate_ema", "get_close_price"),
@@ -28,6 +29,7 @@ REQUIRED_INDICATOR_METHODS: dict[str, tuple[str, ...]] = {
 
 # Strategy -> minimum closed candles required before the strategy can run safely.
 MIN_HISTORY_CANDLES_BY_STRATEGY: dict[str, int] = {
+    "regime_accumulation": 1240,
     "ema_down": 200,
     "ema20_swing": 200,
     "ema20_swing_reverse": 200,

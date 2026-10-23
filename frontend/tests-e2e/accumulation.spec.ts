@@ -292,9 +292,9 @@ test('reviews manual sales and retains an uncertain request across reload', asyn
   await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-${testInfo.project.name}.png` })
 })
 
-test('creates an accumulation variant and explicitly switches a holding to its exact version', async ({ page }, testInfo) => {
+test('switches a holding to an existing exact strategy version only in Configuration', async ({ page }, testInfo) => {
   const parameters = { timeframe: '1h', peak_length: 168, atr_length: 14, entry_atr: '1.5', spacing_atr: '1', recovery_atr: '1', min_fraction: '0.02', slope: '0.03', max_fraction: '0.20' }
-  const versions: Array<Record<string, unknown>> = []
+  const versions: Array<Record<string, unknown>> = [{ id: 17, slug: 'simulated-variant', name: 'Accumulation dip', version: 1, parameters, required_history_candles: 253 }]
   const switches: Record<string, unknown>[] = []
   let pin = 5
   await page.route('**/config/all', route => route.fulfill({ json: {
@@ -329,13 +329,8 @@ test('creates an accumulation variant and explicitly switches a holding to its e
     return route.fulfill({ json: url.pathname.endsWith('/activations') ? { activations: [row], next_after: null } : row })
   })
   await page.goto('/control-center?mode=strategy-builder&target=strategy-builder')
-  const editor = page.getByRole('region', { name: 'Accumulation strategies', exact: true })
-  await expect(editor).toBeVisible()
-  await editor.getByRole('button', { name: 'Save as new accumulation strategy', exact: true }).click()
-  await expect(editor.getByText(/Existing holdings keep their current strategy/)).toBeVisible()
+  await expect(page.getByRole('region', { name: 'Accumulation strategies', exact: true })).toHaveCount(0)
   expect(pin).toBe(5)
-  await editor.screenshot({ path: `/private/tmp/moonwalker-accumulation-builder-${testInfo.project.name}.png` })
-  expect(await editor.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
   await page.goto('/control-center?mode=utilities')
   await expect(page.getByText('Inventory and history', { exact: true })).toHaveCount(0)
   await expect(page.locator('.accumulation-panel')).toHaveCount(0)

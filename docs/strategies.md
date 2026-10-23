@@ -118,3 +118,48 @@ Returns true only when every connected condition node returns true.
 ## Any Condition
 
 Returns true when at least one connected condition node returns true.
+
+## Shared strategies for DCA and accumulation
+
+Both modes use the same Strategy Builder, indicator library, graph conditions,
+and immutable saved versions. Enable **Use with accumulation** in a custom
+strategy's inspector to include its accumulation execution settings. Duplicate a
+built-in to edit it. Select the saved version in **Configuration → Trade modes**;
+saving a strategy does not change existing holdings' pinned versions.
+
+Accumulation-compatible graphs support indicator, price, numeric constant,
+comparison, All, and Any nodes. Stateful DCA nodes remain available for existing
+DCA strategies, but cannot be enabled for accumulation: accumulation owns its
+persistent opportunity, spacing, and recovery state. Existing ATR presets appear
+in the common library without rewriting their historical documents. Their graph
+preview allows ATR execution unconditionally; adding graph conditions filters
+subsequent buys. The ASAP signal still buys the initial base order immediately,
+subject to normal exchange, ownership and capital checks.
+
+Additional shared indicators are `atr`, `adx`, `plus_di`, `minus_di`,
+`ema_slope`, and `ema_distance_atr`. Length is configurable. EMA slope is
+`(EMA now − EMA N candles ago) / ATR`, using `slope_period` (default 6)
+and `atr_length` (default 14). EMA discount is `(EMA − close) / ATR`;
+positive values mean price is below the EMA. Zero ATR and insufficient history
+produce no signal.
+
+An indicator's **Timeframe** may use the base timeframe or an exact higher
+multiple. Higher-timeframe conditions use completed, contiguous candles only;
+a forming candle cannot change the current regime. Graphs using higher
+timeframes must use pure condition nodes. Warmup is validated and bounded at
+12,000 base candles. Required history is shown in the inspector. The same pure
+evaluator runs against closed snapshots in DCA, accumulation and historical
+replay; charts expose the added indicators in their normal indicator panes.
+
+**Downtrend / sideways accumulation** (`regime_accumulation`) is an experimental
+starting preset with a 1h base timeframe:
+
+- Downtrend: 4h EMA50 slope over six bars is below −0.1 ATR and −DI14 exceeds +DI14.
+- Sideways: that slope is between −0.1 and +0.1 ATR and ADX14 is below 20.
+- Either regime also requires the 1h close to be at least one ATR14 below EMA20.
+
+In accumulation, the existing declining-close, peak discount, opportunity spacing,
+recovery and dynamic budget sizing rules still apply. In Dynamic DCA the graph
+provides the signal while DCA owns sizing and exits. These thresholds describe a
+market filter, not a guarantee that prices will fall or that the strategy is
+profitable. Backtest a duplicate before choosing it for a holding.

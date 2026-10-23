@@ -100,7 +100,9 @@ async def list_accumulation_strategies(
         raise AccumulationStateError("Invalid strategy cursor.")
     if type(limit) is not int or not 1 <= limit <= 100:
         raise AccumulationStateError("limit must be between 1 and 100.")
-    await seed_builtin_accumulation_strategy()
+    from service.strategy_persistence import seed_builtin_strategies
+
+    await seed_builtin_strategies()
     async with in_transaction() as connection:
         # Scan bounded batches, including ordinary graphs, so catalog size cannot
         # turn one dashboard poll into unbounded JSON parsing or database work.
@@ -127,7 +129,10 @@ async def list_accumulation_strategies(
                     "slug": row.strategy_slug,
                     "name": names.get(row.strategy_slug, row.strategy_slug),
                     "version": row.version,
-                    "parameters": asdict(parameters),
+                    "parameters": {
+                        key: getattr(parameters, key)
+                        for key in AccumulationParameters.__dataclass_fields__
+                    },
                     "required_history_candles": parameters.history_length,
                 }
             )
