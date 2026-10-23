@@ -2,12 +2,6 @@ import axios from 'axios'
 import { buildMoonwalkerApiUrl } from '../helpers/configEditorDefaults'
 import { MOONWALKER_CLIENT_HEADER, MOONWALKER_CLIENT_HEADER_VALUE } from './client'
 import type { AccumulationCommand, AccumulationCommandResult, AccumulationDetail, AccumulationPage, AccumulationStrategyPage, AccumulationParameters } from '../types/accumulation'
-import type { AccumulationPerformance } from '../types/accumulation'
-
-export async function fetchAccumulationPerformance(): Promise<AccumulationPerformance> {
-  return (await axios.get<AccumulationPerformance>(buildMoonwalkerApiUrl('/accumulation/performance'))).data
-}
-
 export async function fetchAccumulationStrategies(afterId = 0): Promise<AccumulationStrategyPage> {
   return (await axios.get<AccumulationStrategyPage>(buildMoonwalkerApiUrl('/accumulation/strategies'), {
     params: { after_id: afterId, limit: 50 },

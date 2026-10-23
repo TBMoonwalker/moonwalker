@@ -1,8 +1,6 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useWebSocket } from '@vueuse/core'
 import { accumulationErrorStatus, fetchAccumulationDetail, fetchAccumulationPage, fetchAccumulationStrategies, sendAccumulationCommand } from '../api/accumulation'
-import { fetchAccumulationPerformance } from '../api/accumulation'
-import type { AccumulationPerformance } from '../types/accumulation'
 import { extractApiErrorMessage } from '../helpers/apiErrors'
 import { accumulationActions, accumulationClosePredecessor } from '../helpers/accumulation'
 import { createOrderOperationId } from '../helpers/orderMutations'
@@ -40,24 +38,6 @@ export function useAccumulationPanel(symbol?: string) {
   const available = ref(false)
   const rows = ref<AccumulationStatus[]>([])
   const portfolio = ref<AccumulationPortfolio | null>(null)
-  const performance = ref<AccumulationPerformance | null>(null)
-  const performanceLoading = ref(false)
-  const performanceError = ref('')
-
-  async function loadPerformance() {
-    if (performanceLoading.value) return
-    performanceLoading.value = true
-    performanceError.value = ''
-    try {
-      const result = await fetchAccumulationPerformance()
-      if (!Array.isArray(result.by_quote)) throw new Error('Invalid valuation response')
-      if (!disposed) performance.value = result
-    } catch (cause) {
-      if (!disposed) performanceError.value = extractApiErrorMessage(cause, 'Valuation is unavailable; no price or return has been guessed.')
-    } finally {
-      if (!disposed) performanceLoading.value = false
-    }
-  }
   const next = ref<string | null>(null)
   const selected = ref<string | null>(symbol ?? unresolvedRequest.value?.symbol ?? null)
   const detail = ref<AccumulationDetail | null>(null)
@@ -370,5 +350,5 @@ export function useAccumulationPanel(symbol?: string) {
 
   })
   onBeforeUnmount(() => { disposed = true; ++sequence; stream.close() })
-  return { confirmBlockedReason, pendingRequest, streamAvailable, streamStatus: stream.status, visible, available, rows, portfolio, performance, performanceLoading, performanceError, loadPerformance, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, quantity, csv, adjustmentDirection, adjustmentQuantity, adjustmentCost, adjustmentNote, ownershipConfirmation, ownershipNote, actions, disabled, loadPage, selectSymbol, refreshDetail, prepare, submit, strategies, strategyCursor, targetVersion, repairTarget, retirementTarget, strategyError, strategyLoading, loadStrategies }
+  return { confirmBlockedReason, pendingRequest, streamAvailable, streamStatus: stream.status, visible, available, rows, portfolio, next, selected, detail, loading, fresh, busy, error, notice, draft, uncertain, quantity, csv, adjustmentDirection, adjustmentQuantity, adjustmentCost, adjustmentNote, ownershipConfirmation, ownershipNote, actions, disabled, loadPage, selectSymbol, refreshDetail, prepare, submit, strategies, strategyCursor, targetVersion, repairTarget, retirementTarget, strategyError, strategyLoading, loadStrategies }
 }

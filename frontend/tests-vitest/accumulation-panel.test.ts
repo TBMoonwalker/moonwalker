@@ -1,7 +1,6 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, reactive } from 'vue'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import AccumulationPortfolioSummary from '../src/components/AccumulationPortfolioSummary.vue'
 import AccumulationOrderTimeline from '../src/components/AccumulationOrderTimeline.vue'
 import AccumulationPanel from '../src/components/AccumulationPanel.vue'
 import AccumulationTradeStatus from '../src/components/AccumulationTradeStatus.vue'
@@ -11,7 +10,7 @@ import { useAccumulationPanel } from '../src/composables/useAccumulationPanel'
 import { accumulationActions } from '../src/helpers/accumulation'
 import type { AccumulationDetail, AccumulationCommand } from '../src/types/accumulation'
 
-const api = vi.hoisted(() => ({ fetchAccumulationPage: vi.fn(), fetchAccumulationDetail: vi.fn(), fetchAccumulationStrategies: vi.fn(), fetchAccumulationPerformance: vi.fn(), sendAccumulationCommand: vi.fn(), accumulationErrorStatus: vi.fn() }))
+const api = vi.hoisted(() => ({ fetchAccumulationPage: vi.fn(), fetchAccumulationDetail: vi.fn(), fetchAccumulationStrategies: vi.fn(), sendAccumulationCommand: vi.fn(), accumulationErrorStatus: vi.fn() }))
 vi.mock('../src/api/accumulation', () => api)
 const routing = vi.hoisted(() => ({ route: null as any }))
 vi.mock('vue-router', async importOriginal => ({ ...await importOriginal<typeof import('vue-router')>(), useRoute: () => routing.route }))
@@ -56,18 +55,7 @@ async function click(wrapper: ReturnType<typeof mount>, text: string) {
 }
 
 describe('accumulation controls', () => {
-  it('loads exact valuation on demand and preserves unknown returns', async () => {
-    api.fetchAccumulationPerformance.mockResolvedValue({ complete: false, observed_at_ms: 1000, basis: 'fresh_bid_before_future_sale_fees', reason: null, by_quote: [{ quote: 'USDC', complete: false, unknown_deal_count: 1, live_holding_count: 1, market_value: '12.000000000000000001', realized: null, unrealized: null, total_return: null }] })
-    const { panel } = harness()
-    await flushPromises()
-    expect(api.fetchAccumulationPerformance).not.toHaveBeenCalled()
-    await panel.loadPerformance()
-    expect(panel.performance.value?.by_quote[0].market_value).toBe('12.000000000000000001')
-    expect(panel.performance.value?.by_quote[0].total_return).toBeNull()
-    api.fetchAccumulationPerformance.mockRejectedValueOnce(new Error('offline'))
-    await panel.loadPerformance()
-    expect(panel.performanceError.value).not.toBe('')
-  })
+
   it('reviews exact inventory corrections and retains the same declaration after a lost response', async () => {
     api.fetchAccumulationDetail.mockResolvedValue(snapshot({ state: 'paused', explicitly_paused: true }))
     const { panel } = harness()
@@ -235,7 +223,7 @@ describe('accumulation controls', () => {
     expect(api.sendAccumulationCommand.mock.calls[0][0]).toMatchObject({ action: 'switch_strategy', target_version_id: 17, expected_revision: 12 })
   })
 
-  it('keeps unknown portfolio cost and closed order history visible without inventing returns', async () => {
+  it('keeps closed order history without portfolio summaries or invented returns', async () => {
     api.fetchAccumulationDetail.mockResolvedValue(snapshot({
       state: 'stopped', holding: null, holding_integrity: 'unlinked',
       portfolio: { holding_count: 2, unverified_holding_count: 1, valuation_available: false, by_quote: [{ quote: 'USDC', holding_count: 2, known_remaining_cost: '0.300000000000000003', remaining_cost: null, unknown_cost_count: 1 }] },
@@ -246,9 +234,6 @@ describe('accumulation controls', () => {
     }))
     const { panel } = harness()
     await flushPromises()
-    const portfolio = mount(AccumulationPortfolioSummary, { props: { context: panel } })
-    expect(portfolio.text()).toContain('Known subtotal: 0.300000000000000003 USDC')
-    expect(portfolio.text()).toContain('1 holdings need ownership repair')
     const history = mount(AccumulationOrderTimeline, { props: { detail: panel.detail.value } })
     expect(history.text()).toContain('Earlier holding / unlinked manual sale')
     expect(history.text()).toContain('0.100000000000000001')

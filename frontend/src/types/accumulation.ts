@@ -116,14 +116,6 @@ export interface AccumulationWaitCondition {
   }>
 }
 
-export interface AccumulationPerformance {
-  complete: boolean
-  observed_at_ms: number
-  basis: string
-  reason: string | null
-  by_quote: Array<{ quote: string; complete: boolean; unknown_deal_count: number; live_holding_count: number; market_value: string | null; realized: string | null; unrealized: string | null; total_return: string | null }>
-}
-
 export interface AccumulationOrderCheckpoint {
   checkpoint_id: number
   placement_operation_id?: string

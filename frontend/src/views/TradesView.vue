@@ -304,7 +304,7 @@ const admissionToneClass = computed(() =>
       <Charts v-else :key="performanceRange" :period="profitPeriod" />
     </section>
     <section class="trades-metrics" aria-label="Portfolio exposure">
-      <Statistics :accumulation-context="accumulation" />
+      <Statistics />
     </section>
     </div>
 

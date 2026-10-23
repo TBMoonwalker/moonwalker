@@ -83,8 +83,8 @@ and audit records remain stored. Unknown execution values stay explicitly unknow
 Strategy information and reviewed action controls sit outside the timeline in the
 same order card.
 
-Portfolio-wide costs and valuation live in the existing **Portfolio exposure**
-card and explicitly cover all accumulation holdings. Registrations without an open
+The dashboard uses the existing **Portfolio exposure** card without separate
+accumulation holdings or valuation sections. Registrations without an open
 trade, including stopped records, remain expandable in Open trades with the same
 order timeline. Utilities contains no accumulation management.
 Strategy selection and changes live only in **Configuration → Trade modes**.
@@ -252,12 +252,13 @@ Schema 1/2 backups retain compatibility for their original data.
 
 ## Value, return history and scale
 
-Inventory summaries group exact remaining cost by quote currency. Unknown cost
-stays null, with a separate known subtotal. Recent order history shows cumulative
+The reporting API groups exact remaining cost by quote currency. Unknown cost
+stays null, with a separate known subtotal. Order reporting retains cumulative
 per-order quantities, costs, fees and inventory checkpoints, including fully
 closed holdings; it is not a list of assumed incremental fills.
 
-**Refresh valuation** uses bids at most ten seconds old, before future sale fees.
+The `/accumulation/performance` API uses bids at most ten seconds old, before
+future sale fees. The dashboard has no separate valuation refresh control.
 A shared cache lasts at most two seconds and expires before its marks. No legacy
 float price or foreign-exchange conversion is guessed. Market value can be known
 while historical return is unknown; a missing bid does not make inventory worthless.

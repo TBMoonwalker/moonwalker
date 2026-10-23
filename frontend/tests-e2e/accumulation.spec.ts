@@ -43,10 +43,6 @@ test('reviews an exact inventory declaration without adding it to order history'
   await page.goto('/?symbol=BTC%2FUSDC')
   const panel = page.getByRole('region', { name: 'BTC/USDC trade information', exact: true })
   await expect(panel.locator('.assigned-strategy')).toBeVisible()
-  await page.getByText('Accumulation value and returns', { exact: true }).click()
-  await page.getByRole('button', { name: 'Refresh valuation', exact: true }).click()
-  await expect(page.getByLabel('Accumulation portfolio accounting').getByText('15.000000000000000009', { exact: true })).toBeVisible()
-  await expect(page.getByLabel('Accumulation portfolio accounting').getByText(/These returns cannot be verified/)).toBeVisible()
   await panel.getByText('Inventory correction', { exact: true }).click()
   await panel.getByLabel('Correction quantity · BTC', { exact: true }).fill('0.000000000000000001')
   await panel.getByLabel('Acquisition cost of added coins · USDC', { exact: true }).fill('0.000000000000000009')
@@ -55,7 +51,6 @@ test('reviews an exact inventory declaration without adding it to order history'
   expect(requests).toHaveLength(0)
   await expect(panel.getByText(/this correction is not an exchange fill/)).toBeVisible()
   await panel.getByRole('button', { name: 'Confirm correct managed inventory', exact: true }).click()
-  await expect(panel.getByText('15.000000000000000009', { exact: true })).toHaveCount(0)
   expect(requests).toHaveLength(1)
   expect(requests[0]).toMatchObject({ action: 'adjust_inventory', direction: 'add', quantity: '0.000000000000000001', acquisition_cost: '0.000000000000000009', note: 'Correct imported net coins', expected_revision: 20 })
   await expect(panel.getByRole('button', { name: 'Resume accumulation', exact: true })).toBeEnabled()
@@ -204,7 +199,7 @@ test('reviews a restored order and retries the same evidence lookup after reload
   await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-repair-${testInfo.project.name}.png` })
 })
 
-test('shows exact portfolio cost and retained order evidence for a stopped holding', async ({ page }, testInfo) => {
+test('keeps retained order history without duplicate accumulation portfolio sections', async ({ page }, testInfo) => {
   await page.route('**/config/all', route => route.fulfill({ json: {
     timezone: 'Europe/Vienna', signal: 'csv_signal', signal_settings: JSON.stringify({ csv_source: 'signals.csv' }), exchange: 'binance',
     timeframe: '1h', key: 'test-only', secret: 'test-only', currency: 'USDC', max_bots: 2,
@@ -227,7 +222,11 @@ test('shows exact portfolio cost and retained order evidence for a stopped holdi
   await page.goto('/?symbol=BTC%2FUSDC')
   const panel = page.getByRole('region', { name: 'BTC/USDC trade information', exact: true })
   await expect(panel.locator('.assigned-strategy')).toBeVisible()
-  await expect(page.getByLabel('Accumulation portfolio accounting').getByText(/Known subtotal: 0.300000000000000003 USDC/)).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Portfolio exposure', exact: true })).toBeVisible()
+  await expect(page.getByLabel('Accumulation portfolio accounting')).toHaveCount(0)
+  await expect(page.getByText('All accumulation holdings', { exact: false })).toHaveCount(0)
+  await expect(page.getByText('Accumulation value and returns', { exact: true })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Refresh valuation', exact: true })).toHaveCount(0)
   await expect(panel.getByText('No managed inventory.', { exact: true })).toBeVisible()
   await expect(page.getByText('Order size: 12.000000000000000001 | Amount: 0.100000000000000001 | Price: Unknown', { exact: true })).toBeVisible()
   expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
