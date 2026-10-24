@@ -58,6 +58,20 @@ describe('accumulation operator outlook', () => {
     expect(accumulationOutlook(row({ reason: 'entry_validated', runtime_wait_reason: 'WAIT_DEPTH' }), true).title).toBe('Waiting for a deeper dip')
   })
 
+  it('explains a consumed buy signal as a candle wait in the table and trade details', () => {
+    const detail = row({ runtime_wait_reason: 'WAIT_CONSUMED' })
+    const table = mount(AccumulationOrderStatus, { props: { status: detail, fresh: true } })
+    expect(table.text()).toContain('Waiting for the next candle')
+    expect(table.text()).not.toContain('Trading check pending')
+    const card = mount(AccumulationOutlook, { props: { detail, fresh: true } })
+    expect(card.text()).toContain('This candle’s buy has filled.')
+    expect(card.text()).toContain('after the next candle closes')
+    expect(card.text()).not.toContain('A buy is not confirmed')
+    expect(card.find('.wait-levels').exists()).toBe(false)
+    expect(accumulationOutlook(detail, true).action).toBeUndefined()
+    expect(accumulationPendingStatus(detail, false)).toBe('Status needs refresh')
+  })
+
   it('uses a cautious fallback for new or unrecognized runtime reasons', () => {
     const outlook = accumulationOutlook(row({ runtime_wait_reason: 'WAIT_FUTURE_CHECK' }), true)
     expect(outlook.title).toBe('Trading check pending')

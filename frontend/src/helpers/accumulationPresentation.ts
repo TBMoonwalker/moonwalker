@@ -14,6 +14,7 @@ const waits: Record<string, [string, string]> = {
   WAIT_REBASE: ['Initializing accumulation strategy', 'Loading completed candles for subsequent accumulation buys.'],
   WAIT_DATA: ['Waiting for market history', 'A complete, continuous candle history is needed before the strategy can evaluate a buy.'],
   WAIT_NEW_CANDLE: ['Waiting for a candle close', 'The current candle is still open. The strategy evaluates completed candles.'],
+  WAIT_CONSUMED: ['Waiting for the next candle', 'This candle’s buy has filled. The strategy will check for another buy after the next candle closes.'],
   WAIT_DEPTH: ['Waiting for a deeper dip', 'The latest dip has not reached the strategy’s entry threshold.'],
   WAIT_DECLINE: ['Waiting for a declining close', 'The strategy needs a completed candle that closes lower.'],
   WAIT_REARM: ['Waiting for a fresh opportunity', 'A further decline or a recovery followed by a fresh correction must meet the strategy’s spacing rules.'],
