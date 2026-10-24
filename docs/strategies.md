@@ -130,10 +130,11 @@ saving a strategy does not change existing holdings' pinned versions.
 Accumulation-compatible graphs support indicator, price, numeric constant,
 comparison, All, and Any nodes. Stateful DCA nodes remain available for existing
 DCA strategies, but cannot be enabled for accumulation: accumulation owns its
-persistent opportunity, spacing, and recovery state. Existing ATR presets appear
-in the common library without rewriting their historical documents. Their graph
-preview allows ATR execution unconditionally; adding graph conditions filters
-subsequent buys. The ASAP signal still buys the initial base order immediately,
+persistent opportunity, spacing, and recovery state. Standalone Accumulation dip
+presets are retired and no longer appear in the library or selectors. Their
+immutable documents remain readable for existing pins and historical records.
+Create new accumulation strategies by duplicating a shared graph; its conditions
+filter subsequent buys. The ASAP signal still buys the initial base order immediately,
 subject to normal exchange, ownership and capital checks.
 
 Additional shared indicators are `atr`, `adx`, `plus_di`, `minus_di`,

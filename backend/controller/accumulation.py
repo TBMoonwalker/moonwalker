@@ -12,10 +12,7 @@ from litestar.exceptions import SerializationException, WebSocketDisconnect
 from litestar.handlers import get, post, websocket_stream
 from litestar.params import FromQuery
 from service import accumulation_runtime
-from service.accumulation_catalog import (
-    create_accumulation_strategy,
-    list_accumulation_strategies,
-)
+from service.accumulation_catalog import list_accumulation_strategies
 from service.accumulation_runtime import AccumulationRuntime
 from service.accumulation_state import AccumulationConflictError
 from service.accumulation_status import (
@@ -155,7 +152,7 @@ async def submit_repair(request: Request[Any, Any, Any]) -> Any:
 async def list_strategies(
     after_id: FromQuery[int] = 0, limit: FromQuery[int] = 50
 ) -> Any:
-    """List compatible versions, ensuring the built-in setup starter exists."""
+    """List compatible shared versions; retired dip presets stay out of selectors."""
     if _runtime(repair=True) is None:
         return _unavailable()
     try:
@@ -165,17 +162,17 @@ async def list_strategies(
 
 
 @post(path="/accumulation/strategies", status_code=200)
-async def create_strategy(request: Request[Any, Any, Any]) -> Any:
-    """Save a validated immutable variant; never rebind an activation."""
+async def create_strategy() -> Any:
+    """Reject the retired standalone preset writer; use the shared builder."""
     if _runtime() is None:
         return _unavailable()
-    try:
-        payload = await request.json()
-        return await create_accumulation_strategy(payload)
-    except AccumulationConflictError as exc:
-        return json_response({"error": str(exc), "code": "conflict"}, 409)
-    except (SerializationException, ValueError) as exc:
-        return json_response({"error": str(exc), "code": "invalid_request"}, 400)
+    return json_response(
+        {
+            "error": "Standalone accumulation dip presets are retired. Use Strategy Builder.",
+            "code": "retired_strategy_writer",
+        },
+        410,
+    )
 
 
 @get(path="/accumulation/performance")

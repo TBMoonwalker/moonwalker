@@ -27,12 +27,10 @@ version is an immutable pin, not an automatically updated strategy name.
 2. Select ASAP with a fixed symbol list, or CSV Signal for coins already owned.
    Symbols must use the configured quote currency. URL-based ASAP lists and other
    signal plugins are not supported for accumulation.
-3. Select **Accumulation dip (ATR) · v1 · 1h** as the initial strategy in
-   Configuration. This built-in exists before setup is complete; creating a custom
-   variant is optional. **Downtrend / sideways accumulation** is also available
-   as a shared graph preset for filtering subsequent buys. Neither preset is
-   performance optimized. Strategy Builder can duplicate them into a custom
-   immutable version.
+3. Select **Downtrend / sideways accumulation** as the initial strategy in
+   Configuration. This shared built-in exists before setup is complete; creating
+   a custom variant is optional. Its starting parameters are experimental and
+   not performance optimized. Duplicate it in Strategy Builder to customize it.
 4. ASAP uses the existing **Base order amount** (`bo`) for the first purchase,
    just as in Dynamic DCA. Later purchases use dynamic accumulation strategy
    sizing. Save the configuration. An incomplete draft may omit the strategy pin.
@@ -195,8 +193,8 @@ without network I/O inside the database transaction. Explicit sales remain avail
 
 ## Strategy execution parameters
 
-These defaults apply to the built-in ATR preset and the execution settings of the
-shipped downtrend/sideways graph. Custom versions persist a complete parameter
+These defaults apply to the execution settings of the shipped
+downtrend/sideways graph. Custom versions persist a complete parameter
 set; missing or unknown fields are rejected. Decimal values are serialized as
 strings in strategy documents. Graph conditions are additional requirements,
 not replacements for these execution rules. Decimal strings must be finite,
@@ -446,8 +444,11 @@ no separate accumulation management area in Utilities.
 
 Accumulation strategies now use the same [Strategy Builder](strategies.md#shared-strategies-for-dca-and-accumulation)
 as Dynamic DCA. The inspector contains accumulation execution settings alongside
-the shared graph. Existing versions and holding pins are preserved. The optional
-experimental downtrend/sideways preset filters subsequent buys; it does not delay
+the shared graph. The retired standalone **Accumulation dip** presets no longer
+appear in either strategy selector or the builder library and are no longer
+seeded. Their saved versions and holding pins remain readable for historical
+accounting and recovery. The downtrend/sideways preset filters subsequent buys;
+it does not delay
 the initial ASAP base order. Strategy assignment remains in Configuration.
 
 ### Archive an unsellable closing remainder

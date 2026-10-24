@@ -24,11 +24,10 @@ For a local simulation with no wallet or orders, use the
 2. Select the **ASAP** signal plugin and enter a fixed comma-separated symbol
    list such as `BTC/USDC,ETH/USDC` when the configured quote is USDC. URL lists
    are unsupported for accumulation.
-3. Select **Initial accumulation strategy version**. Choose the basic
-   **Accumulation dip (ATR)** preset for its dip rules, or the
-   **Downtrend / sideways accumulation** preset to add its market filter.
-   [The strategy reference](strategies.md#shared-strategies-for-dca-and-accumulation)
-   describes the difference. Select an exact version; names alone are not pins.
+3. Select **Initial accumulation strategy version**. The shared
+   **Downtrend / sideways accumulation** preset is available without creating a
+   strategy first. The [strategy reference](strategies.md#shared-strategies-for-dca-and-accumulation)
+   describes its conditions. Select an exact version; names alone are not pins.
 4. Set **Base order amount**, **Max managed symbols**, and your capital limit.
    Review the environment and save the configuration. If Moonwalker is globally
    paused, resume it when you intend to allow purchases.

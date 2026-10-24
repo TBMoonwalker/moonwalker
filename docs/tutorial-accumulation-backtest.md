@@ -8,8 +8,8 @@ you how the saved strategy behaves without submitting an exchange order.
 
 - A running Moonwalker installation. Follow the [README](../README.md#run-script-recommended).
 - A configured exchange and quote currency, with accessible public spot history.
-- A compatible saved strategy. The built-in **Accumulation dip (ATR)** and
-  **Downtrend / sideways accumulation** versions are available in the catalog.
+- A compatible saved strategy. **Downtrend / sideways accumulation** is available
+  in the common catalog before setup is complete.
 
 You do not need to switch the running bot's trade mode, adopt inventory or fund
 an exchange account for this simulation. Historical data still comes from the
@@ -21,9 +21,9 @@ Open **Backtest**, set **Trade mode** to **Accumulation**, and select a saved
 version under **Strategy**. Select a spot symbol in your configured quote.
 The strategy's saved timeframe appears automatically.
 
-Start with **Accumulation dip (ATR)** to see the basic dip rules. The
-**Downtrend / sideways accumulation** preset adds market conditions that can
-reject more candles. Both are experimental presets, not optimized settings.
+Select **Downtrend / sideways accumulation** to test its market conditions and
+dip execution rules together. It is an experimental preset, not optimized settings.
+Duplicate it in Strategy Builder to compare a customized version.
 
 ## Step 2: Run a historical comparison
 
@@ -44,8 +44,8 @@ Zero buys is a valid result when the strategy never qualifies.
 
 If the exchange does not cover warmup, choose an older listed market or a more
 recent start date with enough preceding history. Shorten an oversized range:
-the 20,000-candle limit includes warmup. The basic ATR preset needs 253 warmup
-candles; the shipped downtrend/sideways preset needs 1,240 on its 1h base.
+the 20,000-candle limit includes warmup. The shipped downtrend/sideways preset
+needs 1,240 warmup candles on its 1h base.
 
 ## Step 3: Read the result
 

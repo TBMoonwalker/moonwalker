@@ -110,7 +110,7 @@ fall back to live trading. Demo and live ownership scopes remain separate.
 | `GET` | `/accumulation/performance` | Read exact coverage-aware returns and fresh bid valuation, grouped by quote. |
 | `POST` | `/accumulation/replay` | Compare a saved accumulation version with equal-funded buy-and-hold and fixed-interval DCA using supplied completed candles. No wallet or order actions. |
 | `GET` | `/accumulation/strategies?limit=50&after_id=0` | Read a bounded catalog page of compatible immutable versions, template defaults and supported timeframes. |
-| `POST` | `/accumulation/strategies` | Save a new immutable accumulation variant without changing holdings. |
+| `POST` | `/accumulation/strategies` | Retired standalone dip writer; returns `410`. Create shared strategies through Strategy Builder. |
 
 Registry pages and individual activation reads include a `portfolio` snapshot
 covering all persisted accumulation holdings, independent of the page cursor.
@@ -281,15 +281,13 @@ parameters and required history. Use that ID as `target_version_id` in an explic
 then settles outstanding orders and validates fresh market/account evidence before
 rebinding. Switching preserves purchase consumption and a prior pause.
 
-Strategy saves require exactly `operation_id`, `name` (1–120 characters) and the
-complete `parameters` object from the template/catalog. Saves return `id`, `slug`,
-`name` and `version`. Each save creates a separate immutable variant at version 1;
-there is no in-place editing or automatic promotion of holdings. Repeating the
-same normalized save returns the same ID; changed reuse returns `409`. Historical
-versions remain intact. The shared Strategy Builder presents legacy ATR variants
-as graphs and can duplicate them into editable custom strategies without
-rewriting their historical documents. See the
-[shared strategy reference](strategies.md#shared-strategies-for-dca-and-accumulation).
+The standalone `POST /accumulation/strategies` writer is retired. It returns
+`410` with `code: "retired_strategy_writer"` while the runtime is available and
+does not create or change any records. Use the shared Strategy Builder instead.
+Legacy standalone dip presets are excluded from both selector catalogs; existing
+version IDs remain readable for historical pins, replay and recovery. Their
+immutable documents are not rewritten or removed from referenced history.
+See the [shared strategy reference](strategies.md#shared-strategies-for-dca-and-accumulation).
 
 ## Autopilot Memory
 

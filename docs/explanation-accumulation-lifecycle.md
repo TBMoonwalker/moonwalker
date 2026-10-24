@@ -72,8 +72,8 @@ and sizes the purchase from usable quote funds. Dynamic DCA can use the same
 pure graph while retaining its own safety-order sizing and exit behavior.
 
 The **Downtrend / sideways accumulation** preset uses a completed 4h regime
-filter and 1h EMA discount. The basic ATR preset does not have that regime gate.
-Neither predicts the next market move. Thresholds and indicator definitions are
+filter and 1h EMA discount. The old standalone ATR presets are retired; existing
+pinned versions remain readable for history. No indicator predicts the next move. Thresholds and indicator definitions are
 in the [strategy reference](strategies.md#shared-strategies-for-dca-and-accumulation).
 
 ### Why a later buy can cost more

@@ -41,9 +41,6 @@ async def status_db(tmp_path, monkeypatch):
     )
     promotion_lock = asyncio.Lock()
     monkeypatch.setattr(
-        "service.accumulation_catalog._STRATEGY_PROMOTION_LOCK", promotion_lock
-    )
-    monkeypatch.setattr(
         "service.strategy_persistence._STRATEGY_PROMOTION_LOCK", promotion_lock
     )
     await Tortoise.init(
@@ -304,45 +301,21 @@ async def test_status_rejects_unbounded_or_invalid_queries(
 
 
 @pytest.mark.asyncio
-async def test_strategy_variant_save_is_immutable_idempotent_and_isolated(
+async def test_retired_dip_writer_cannot_recreate_deleted_presets(
     api_client, runtime, status_db
 ):
-    from service.strategy_persistence import (
-        delete_custom_strategy,
-        get_strategy_detail,
-        list_strategy_summaries,
-        promote_strategy_version,
-    )
-
     payload = {
-        "operation_id": "save-variant",
-        "name": "Patient accumulation",
+        "operation_id": "old-dip-save",
+        "name": "Accumulation dip",
         "parameters": build_accumulation_strategy_document()["parameters"],
     }
-    first = await api_client.post("/accumulation/strategies", json=payload)
-    assert first.status_code == 200
-    saved = first.json()
-    assert (
-        await api_client.post("/accumulation/strategies", json=payload)
-    ).json() == saved
-    assert await model.StrategyVersion.all().count() == 1
-    assert await model.AccumulationActivation.all().count() == 0
-    changed = {**payload, "parameters": {**payload["parameters"], "spacing_atr": "2"}}
-    assert (
-        await api_client.post("/accumulation/strategies", json=changed)
-    ).status_code == 409
-    detail = await get_strategy_detail(saved["slug"])
-    assert detail["capabilities"] == ["accumulation"]
-    assert detail["ir"]["accumulation"] == payload["parameters"]
-    assert saved["slug"] in {row["slug"] for row in await list_strategy_summaries()}
-    _, status = await promote_strategy_version(
-        saved["slug"], detail["ir"], detail["lock_version"]
-    )
-    assert status == 200
-    with pytest.raises(PermissionError, match="immutable"):
-        await delete_custom_strategy(saved["slug"])
-    version = await model.StrategyVersion.get(id=saved["id"])
-    assert json.loads(version.ir_json)["parameters"]["spacing_atr"] == "1"
+    for _ in range(2):
+        response = await api_client.post("/accumulation/strategies", json=payload)
+        assert response.status_code == 410
+        assert response.json()["code"] == "retired_strategy_writer"
+    assert not await model.StrategyVersion.exists()
+    assert not await model.StrategyDefinition.exists()
+    assert not await model.AccumulationActivation.exists()
 
 
 @pytest.mark.asyncio
@@ -379,75 +352,13 @@ async def test_strategy_catalog_scan_pages_only_compatible_documents(
     assert [row["slug"] for row in seen] == [
         "strategy-1",
         "strategy-3",
-        "accumulation_variant_dip_atr",
         "regime_accumulation",
     ]
     assert seen[0]["required_history_candles"] == 253
     assert page["defaults"]["max_fraction"] == "0.20"
     from service.strategy_catalog import BUILTIN_STRATEGIES
 
-    assert await model.StrategyDefinition.all().count() == len(BUILTIN_STRATEGIES) + 1
-
-
-@pytest.mark.asyncio
-@pytest.mark.parametrize(
-    "change",
-    [
-        {"name": ""},
-        {"operation_id": "invalid space"},
-        {"parameters": {}},
-        {
-            "parameters": {
-                **build_accumulation_strategy_document()["parameters"],
-                "min_fraction": "0.5",
-                "max_fraction": "0.2",
-            }
-        },
-        {"account_scope": "untrusted"},
-    ],
-)
-async def test_invalid_strategy_variants_do_not_write(
-    api_client, runtime, status_db, change
-):
-    payload = {
-        "operation_id": "invalid-variant",
-        "name": "Test",
-        "parameters": build_accumulation_strategy_document()["parameters"],
-    }
-    assert (
-        await api_client.post("/accumulation/strategies", json={**payload, **change})
-    ).status_code == 400
-    assert await model.StrategyDefinition.all().count() == 0
-    assert await model.StrategyVersion.all().count() == 0
-
-
-@pytest.mark.asyncio
-async def test_concurrent_strategy_save_and_rollback_preserve_identity(
-    api_client, runtime, status_db, monkeypatch
-):
-    import asyncio
-
-    from service.accumulation_catalog import create_accumulation_strategy
-
-    payload = {
-        "operation_id": "concurrent-variant",
-        "name": "Test",
-        "parameters": build_accumulation_strategy_document()["parameters"],
-    }
-    first, second = await asyncio.gather(
-        create_accumulation_strategy(payload), create_accumulation_strategy(payload)
-    )
-    assert first == second and await model.StrategyVersion.all().count() == 1
-    monkeypatch.setattr(
-        model.StrategyVersion,
-        "create",
-        AsyncMock(side_effect=RuntimeError("disk failure")),
-    )
-    with pytest.raises(RuntimeError, match="disk failure"):
-        await create_accumulation_strategy(
-            {**payload, "operation_id": "rollback-variant"}
-        )
-    assert await model.StrategyDefinition.all().count() == 1
+    assert await model.StrategyDefinition.all().count() == len(BUILTIN_STRATEGIES)
 
 
 @pytest.mark.asyncio
@@ -702,14 +613,14 @@ async def test_fresh_setup_has_builtin_accumulation_without_configuration_or_bui
     response = await api_client.get("/accumulation/strategies")
     assert response.status_code == 200
     starter = response.json()["versions"][0]
-    assert starter["name"] == "Accumulation dip (ATR)"
+    assert starter["name"] == "Downtrend / sideways accumulation"
     assert starter["version"] == 1
     version = await model.StrategyVersion.get(id=starter["id"])
     original = version.ir_json
     definition = await model.StrategyDefinition.get(slug=starter["slug"])
     assert definition.is_builtin
     await seed_builtin_strategies()
-    assert starter["slug"] not in await list_strategy_options()
+    assert starter["slug"] in await list_strategy_options()
     second = (await api_client.get("/accumulation/strategies")).json()
     assert starter["id"] in [row["id"] for row in second["versions"]]
     assert (await model.StrategyVersion.get(id=starter["id"])).ir_json == original
@@ -729,12 +640,12 @@ async def test_global_builtin_seed_exposes_starter_before_accumulation_setup(
     from service.strategy_persistence import seed_builtin_strategies
 
     await seed_builtin_strategies()
-    definition = await model.StrategyDefinition.get(slug=BUILTIN_ACCUMULATION_SLUG)
-    assert definition.is_builtin and definition.active_version == 1
+    assert not await model.StrategyDefinition.filter(
+        slug=BUILTIN_ACCUMULATION_SLUG
+    ).exists()
     response = await api_client.get("/accumulation/strategies")
     assert response.status_code == 200
     assert [row["slug"] for row in response.json()["versions"]] == [
-        BUILTIN_ACCUMULATION_SLUG,
         "regime_accumulation",
     ]
     assert not await model.AppConfig.exists()
@@ -747,20 +658,18 @@ async def test_concurrent_setup_clients_seed_one_immutable_starter(
     import asyncio
 
     from service import accumulation_catalog
-    from service.accumulation_strategy import BUILTIN_ACCUMULATION_SLUG
 
-    monkeypatch.setattr(accumulation_catalog, "_BUILTIN_SEED_LOCK", asyncio.Lock())
+    monkeypatch.setattr(
+        "service.strategy_persistence._STRATEGY_SEED_LOCK", asyncio.Lock()
+    )
     await asyncio.gather(
         *(accumulation_catalog.list_accumulation_strategies() for _ in range(8))
     )
     assert (
-        await model.StrategyDefinition.filter(slug=BUILTIN_ACCUMULATION_SLUG).count()
-        == 1
+        await model.StrategyDefinition.filter(slug="regime_accumulation").count() == 1
     )
     assert (
-        await model.StrategyVersion.filter(
-            strategy_slug=BUILTIN_ACCUMULATION_SLUG
-        ).count()
+        await model.StrategyVersion.filter(strategy_slug="regime_accumulation").count()
         == 1
     )
 
@@ -941,3 +850,57 @@ async def test_disconnecting_stream_snapshot_does_not_strand_sqlite(
         connection = connections.get("default")
         if connection._lock.locked():
             connection._lock.release()
+
+
+@pytest.mark.asyncio
+async def test_retired_dip_presets_leave_catalogs_without_losing_pinned_history(
+    api_client, runtime, status_db
+):
+    from service.accumulation_strategy import BUILTIN_ACCUMULATION_SLUG, CATALOG_PREFIX
+    from service.strategy_persistence import (
+        get_strategy_detail,
+        list_strategy_summaries,
+    )
+    from service.strategy_runtime import load_accumulation_strategy_version
+
+    original = json.dumps(build_accumulation_strategy_document())
+    retained = []
+    for slug, builtin, symbol in [
+        (BUILTIN_ACCUMULATION_SLUG, True, "BTC/USDC"),
+        (CATALOG_PREFIX + "old_custom_dip", False, "ETH/USDC"),
+    ]:
+        await model.StrategyDefinition.create(
+            slug=slug,
+            name="Accumulation dip",
+            is_builtin=builtin,
+            active_version=1,
+            draft_version=1,
+            validation_status="valid",
+        )
+        version = await model.StrategyVersion.create(
+            strategy_slug=slug,
+            version=1,
+            ir_json=original,
+            validation_json=json.dumps({"status": "valid"}),
+            explanation="legacy",
+        )
+        await model.AccumulationActivation.create(
+            symbol=symbol,
+            account_scope="fixture",
+            state="stopped",
+            strategy_version_id=version.id,
+        )
+        retained.append(version)
+
+    page = (await api_client.get("/accumulation/strategies?limit=100")).json()
+    assert [row["slug"] for row in page["versions"]] == ["regime_accumulation"]
+    for include_hidden in (False, True):
+        summaries = await list_strategy_summaries(include_hidden=include_hidden)
+        assert not any(row["slug"].startswith(CATALOG_PREFIX) for row in summaries)
+    for version in retained:
+        assert (
+            await load_accumulation_strategy_version(version.id)
+        ).parameters.timeframe == "1h"
+        assert (await model.StrategyVersion.get(id=version.id)).ir_json == original
+        assert await get_strategy_detail(version.strategy_slug) is not None
+    assert await model.AccumulationActivation.filter(state="stopped").count() == 2

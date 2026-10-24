@@ -666,7 +666,7 @@ async def test_shared_accumulation_versions_keep_exact_pins_and_common_catalog()
 
     await seed_builtin_strategies()
     original = await model.StrategyVersion.get(
-        strategy_slug=BUILTIN_ACCUMULATION_SLUG, version=1
+        strategy_slug="regime_accumulation", version=1
     )
     before = original.ir_json
     custom = await duplicate_strategy("regime_accumulation", "Patient shared dip")

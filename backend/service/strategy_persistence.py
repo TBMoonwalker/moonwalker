@@ -764,9 +764,6 @@ async def seed_builtin_strategies() -> None:
 
 async def _seed_builtin_strategies() -> None:
     """Ensure built-ins exist without rewriting immutable version rows."""
-    from service.accumulation_catalog import seed_builtin_accumulation_strategy
-
-    await seed_builtin_accumulation_strategy()
     await _delete_retired_builtin_strategies()
     for spec in BUILTIN_STRATEGIES:
         ir = build_builtin_ir(spec)
@@ -909,6 +906,9 @@ async def list_strategy_summaries(include_hidden: bool = False) -> list[dict[str
     rows = await model.StrategyDefinition.all().order_by("is_builtin", "name")
     summaries: list[dict[str, Any]] = []
     for row in rows:
+        # Retired standalone dip presets remain readable for pinned history only.
+        if row.slug.startswith(CATALOG_PREFIX):
+            continue
         if not include_hidden and row.slug in _hidden_builtin_slugs():
             continue
         summaries.append(await _definition_summary(row))

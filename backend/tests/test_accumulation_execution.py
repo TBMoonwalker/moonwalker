@@ -2802,7 +2802,7 @@ async def test_http_staged_commands_use_snapshot_revision_and_explicit_validatio
 
 @pytest.mark.asyncio
 async def test_runtime_strategy_switch_retains_purchase_guard_and_pause(env):
-    from service.accumulation_catalog import create_accumulation_strategy
+    from service.shared_accumulation import legacy_accumulation_graph
 
     buy_id = await prepared(env)
     await AccumulationBuyExecutor(env[0]).execute(buy_id)
@@ -2817,14 +2817,18 @@ async def test_runtime_strategy_switch_retains_purchase_guard_and_pause(env):
         activation.consumption_revision,
         activation.strategy_version_id,
     )
-    parameters = build_accumulation_strategy_document()["parameters"]
-    target = await create_accumulation_strategy(
-        {
-            "operation_id": "switch-variant",
-            "name": "Patient dip",
-            "parameters": {**parameters, "spacing_atr": "2"},
-        }
+    document = build_accumulation_strategy_document(
+        AccumulationParameters(spacing_atr="2")
     )
+    graph = legacy_accumulation_graph(document, "custom_patient", "Patient dip", False)
+    version = await model.StrategyVersion.create(
+        strategy_slug="custom_patient",
+        version=1,
+        ir_json=json.dumps(graph),
+        validation_json=json.dumps({"status": "valid"}),
+        explanation="shared fixture",
+    )
+    target = {"id": version.id}
     runtime = AccumulationRuntime(env[0])
     assert await runtime.startup()
     result = await runtime.submit_command(
