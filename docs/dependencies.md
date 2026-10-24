@@ -307,6 +307,40 @@ checking debt and future-major deprecations remain documented in TODOS.md.
 Post-install outdated checks leave only CCXT-pinned Python dependencies,
 TypeScript 7 and Node 26 types; no other reviewed update is pending.
 
+## Zod security follow-up (2026-10-24)
+
+Zod is now exactly pinned to `4.6.7` via an npm override, replacing the
+`4.6.5` transitive dependency of Knip. The generated lock retains the verified
+registry SHA-512 integrity. This fixes
+[GHSA-mrhx-c7xc-m3w5](https://github.com/advisories/GHSA-mrhx-c7xc-m3w5),
+which affects versions before `4.6.6`.
+
+The [npm incident report and maintainer clarification](https://github.com/orgs/community/discussions/208477)
+state that the malicious Zod repository changes never reached npm publishing.
+The maintainer reports that history cleanup invalidated 4.6.6 provenance and
+published 4.6.7 afterward. Moonwalker avoids 4.6.6; it was not installed during
+this update. Vulnerability-advisory screening alone is not sufficient evidence
+of release provenance.
+
+Before installation, the 4.6.7 npm tarball was read as inert archive data. Its
+840 files had no install lifecycle hooks, symlinks or known incident indicators.
+The changes from the installed 4.6.5 artifact were inspected statically. Using
+npm's bundled Sigstore verifier, its SLSA provenance signature was verified
+against the GitHub Actions issuer and expected
+`colinhacks/zod/.github/workflows/release.yml@refs/heads/main` identity. The
+signed subject's SHA-512 digest matches the downloaded artifact and the lock;
+the source commit is `b500a2ee95134f81d74da7911d7378dd2853d042`, matching the
+[4.6.7 release](https://github.com/colinhacks/zod/releases/tag/v4.6.7).
+The attested trigger is `workflow_dispatch`. These checks establish the
+artifact's origin and exclude the known indicators; they are not a guarantee
+against unknown malicious code. Installs continue to disable lifecycle scripts.
+
+Validation: full CI passes with 1,860 backend tests, 266 frontend unit tests,
+the legacy frontend suite, coverage gates, builds, both vulnerability audits and
+npm registry-signature/attestation verification. The Knip JSON report is identical
+to the pre-update report (three unused exported types, no tool error). Browser
+E2E was not repeated for this dependency-only Knip transitive patch.
+
 ## Rollback
 
 Revert the dependency-only changeset and rerun `./run.sh start`. Startup builds
