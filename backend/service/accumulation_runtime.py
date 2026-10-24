@@ -40,7 +40,10 @@ from service.accumulation_repair import AccumulationOrderRepair
 from service.accumulation_sales import AccumulationCommandExecutor
 from service.accumulation_state import load_accumulation_context
 from service.accumulation_status_events import AccumulationStatusEvents
-from service.accumulation_strategy import AccumulationParameters
+from service.accumulation_strategy import (
+    AccumulationParameters,
+    effective_accumulation_parameters,
+)
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.order_requests import normalize_order_symbol
 from service.strategy_runtime import load_accumulation_strategy_version
@@ -184,6 +187,12 @@ class AccumulationRuntime:
     def _refresh_config(self) -> dict[str, Any]:
         config = self.adapter.config()
         if config != self._config:
+            if self._config is not None and config.get("timeframe") != self._config.get(
+                "timeframe"
+            ):
+                self._rebased.clear()
+                self._candle_closes.clear()
+                self.wait_conditions.clear()
             # A round prepared against older settings must not retain old offers.
             self._portfolio = AccumulationPortfolioCoordinator(
                 config, self.adapter.admission_inputs, clock_ms=self.adapter.clock_ms
@@ -381,15 +390,17 @@ class AccumulationRuntime:
                 str(activation.id), await self.adapter.account_scope(config)
             )
             version = await load_accumulation_strategy_version(
-                context.identity.strategy_version_id
+                context.identity.strategy_version_id, timeframe=config.get("timeframe")
             )
             candles = await self.adapter.candles(activation.symbol, version.parameters)
+            priority_parameters = effective_accumulation_parameters(
+                AccumulationParameters(), config.get("timeframe")
+            )
             priority = (
-                candles
-                if version.parameters == AccumulationParameters()
-                else await self.adapter.candles(
-                    activation.symbol, AccumulationParameters()
-                )
+                candles[-priority_parameters.history_length :]
+                if version.parameters.timeframe == priority_parameters.timeframe
+                and len(candles) >= priority_parameters.history_length
+                else await self.adapter.candles(activation.symbol, priority_parameters)
             )
             inputs = await self.adapter.read_inputs(activation.symbol, config)
             usable = await usable_accumulation_quote(
@@ -404,6 +415,7 @@ class AccumulationRuntime:
                 ask_price=inputs.ask_price,
                 quote_timestamp_ms=inputs.quote_timestamp_ms,
                 minimum_quote=inputs.minimum_quote,
+                timeframe=config.get("timeframe"),
             )
             self.status[activation.symbol] = decision.reason
             if decision.wait_condition is not None:
@@ -537,7 +549,8 @@ class AccumulationRuntime:
                 if activation.state == "enabled" and not activation.explicitly_paused:
                     try:
                         version = await load_accumulation_strategy_version(
-                            activation.strategy_version_id
+                            activation.strategy_version_id,
+                            timeframe=config.get("timeframe"),
                         )
                         close = version.parameters.latest_close(now)
                         if self._candle_closes.get(activation.symbol) != close:

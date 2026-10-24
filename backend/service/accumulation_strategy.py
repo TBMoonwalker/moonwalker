@@ -24,6 +24,7 @@ CATALOG_PREFIX = "accumulation_variant_"
 BUILTIN_ACCUMULATION_SLUG = CATALOG_PREFIX + "dip_atr"
 IMPLEMENTATION = "accumulation_dip_v1"
 PRIORITY_PROTOCOL = "peak_atr_v1"
+SIZING_POLICY = "fresh_decline_v1"
 SUPPORTED_TIMEFRAMES = frozenset({"1m", "5m", "15m", "30m", "1h", "4h", "1d", "1w"})
 
 
@@ -114,6 +115,32 @@ class GraphAccumulationParameters(AccumulationParameters):
     def history_length(self) -> int:
         """Include complete higher-timeframe indicator warmup in the base window."""
         return max(super().history_length, self.condition_history_candles)
+
+
+def effective_accumulation_parameters(
+    parameters: AccumulationParameters, timeframe: str | None
+) -> AccumulationParameters:
+    """Resolve the exchange base interval without changing immutable strategy rows."""
+    if timeframe is None:
+        return parameters
+    normalized = str(timeframe).strip().lower().replace("min", "m")
+    aliases = {"60m": "1h", "240m": "4h", "24h": "1d", "7d": "1w"}
+    normalized = aliases.get(normalized, normalized)
+    if normalized not in SUPPORTED_TIMEFRAMES:
+        raise AccumulationStateError("Unsupported exchange accumulation timeframe.")
+    if isinstance(parameters, GraphAccumulationParameters):
+        from service.strategy_conditions import graph_history
+
+        try:
+            history = graph_history(parameters.condition_graph or {}, normalized)
+        except ValueError as exc:
+            raise AccumulationStateError(
+                "Strategy indicator timeframes are incompatible with the exchange timeframe."
+            ) from exc
+        return replace(
+            parameters, timeframe=normalized, condition_history_candles=history
+        )
+    return replace(parameters, timeframe=normalized)
 
 
 def build_accumulation_strategy_document(
@@ -267,11 +294,16 @@ def calculate_accumulation_market(
 
 
 def canonical_accumulation_priority(
-    candles: Sequence[AccumulationCandle], *, close_ms: int
+    candles: Sequence[AccumulationCandle],
+    *,
+    close_ms: int,
+    timeframe: str | None = None,
 ) -> str:
-    """Use the same fixed hourly 168/14/252 severity for every candidate."""
+    """Compare every candidate with identical lengths on the exchange base interval."""
     return calculate_accumulation_market(
-        candles, AccumulationParameters(), close_ms=close_ms
+        candles,
+        effective_accumulation_parameters(AccumulationParameters(), timeframe),
+        close_ms=close_ms,
     ).severity
 
 
@@ -310,12 +342,24 @@ class AccumulationObservations:
     high_close: str | None = None
     atr_at_high: str | None = None
     recovery_ready: bool = False
+    timeframe: str | None = None
+    previous_close: str | None = None
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> AccumulationObservations:
         """Validate saved strategy-private state instead of silently bootstrapping."""
-        if not isinstance(value, dict) or set(value) != set(cls.__dataclass_fields__):
+        fields = set(cls.__dataclass_fields__)
+        optional = {"timeframe", "previous_close"}
+        if not isinstance(value, dict) or not fields - optional <= set(value) <= fields:
             raise AccumulationStateError("Invalid accumulation observations.")
+        value = {"timeframe": None, "previous_close": None, **value}
+        if (
+            value["timeframe"] is not None
+            and value["timeframe"] not in SUPPORTED_TIMEFRAMES
+        ):
+            raise AccumulationStateError("Invalid observation timeframe.")
+        if value["previous_close"] is not None:
+            _decimal(value["previous_close"])
         _timestamp(value["last_close_ms"])
         if (
             type(value["consumption_revision"]) is not int
@@ -344,10 +388,20 @@ def advance_accumulation_observations(
     if state.consumption_revision > revision or market.close_ms < state.last_close_ms:
         raise AccumulationStateError("Observations or consumption moved backward.")
     if state.consumption_revision != revision:
-        state = AccumulationObservations(state.last_close_ms, revision)
+        state = AccumulationObservations(
+            state.last_close_ms,
+            revision,
+            timeframe=parameters.timeframe,
+            previous_close=state.previous_close,
+        )
     if market.close_ms == state.last_close_ms:
         return state
-    state = replace(state, last_close_ms=market.close_ms)
+    state = replace(
+        state,
+        last_close_ms=market.close_ms,
+        timeframe=parameters.timeframe,
+        previous_close=market.previous_close,
+    )
     if guard is None or market.close_ms <= guard.signal_close_ms:
         return state
     if state.high_close is None or _decimal(market.close) > _decimal(state.high_close):
@@ -356,7 +410,7 @@ def advance_accumulation_observations(
         context.prec = 50
         threshold = _decimal(guard.signal_price) + _decimal(
             parameters.recovery_atr
-        ) * _decimal(guard.signal_atr)
+        ) * max(_decimal(guard.signal_atr), _decimal(market.atr))
         return replace(
             state,
             recovery_ready=state.recovery_ready
@@ -385,13 +439,41 @@ def accumulation_signal_reason(
         context.prec = 50
         if _decimal(market.close) <= _decimal(guard.signal_price) - _decimal(
             parameters.spacing_atr
-        ) * _decimal(guard.signal_atr):
+        ) * max(_decimal(guard.signal_atr), _decimal(market.atr)):
             return "BUY_FURTHER_DECLINE"
         if state.recovery_ready and _decimal(market.close) <= _decimal(
             state.high_close
         ) - _decimal(parameters.spacing_atr) * _decimal(state.atr_at_high):
             return "BUY_FRESH_CORRECTION"
     return "WAIT_REARM"
+
+
+def accumulation_step_severity(
+    price: str,
+    previous_close: str,
+    atr: str,
+    guard: AccumulationGuard | None,
+    parameters: AccumulationParameters,
+) -> str:
+    """Scale allocation by new downside, never repeatedly by an old peak discount.
+
+    The first imported-inventory signal uses its preceding completed close.
+    Later signals use the preceding consumed purchase anchor. Corrections above
+    that anchor retain the minimum fraction; substantial new declines can grow
+    toward the configured ceiling. Keep peak severity solely for eligibility and
+    portfolio priority. Use the larger ATR when volatility or base timeframe grows.
+    """
+    with localcontext() as context:
+        context.prec = 50
+        anchor = _decimal(guard.signal_price if guard else previous_close)
+        unit = (
+            max(_decimal(atr), _decimal(guard.signal_atr)) if guard else _decimal(atr)
+        )
+        new_depth = max(Decimal(0), (anchor - _decimal(price)) / unit)
+        return str(
+            _decimal(parameters.entry_atr)
+            + max(Decimal(0), new_depth - _decimal(parameters.spacing_atr))
+        )
 
 
 def accumulation_requested_quote(
@@ -435,6 +517,7 @@ def rebuild_accumulation_observations(
     state = AccumulationObservations(
         candles[length - 1].close_ms - parameters.interval_ms,
         guard.consumption_revision if guard else 0,
+        timeframe=parameters.timeframe,
     )
     # Rebuilding ownership/spacing observations never needs historical graph signals.
     market_parameters = (

@@ -29,6 +29,11 @@ from service.accumulation_exchange import (
     preflight_accumulation_precision,
 )
 from service.accumulation_portfolio import AccumulationAdmissionInputs
+from service.accumulation_strategy import (
+    SIZING_POLICY,
+    AccumulationParameters,
+    effective_accumulation_parameters,
+)
 from service.capital_budget import CapitalBudgetService
 from service.database import run_sqlite_write_with_retry
 from service.delisting_protection import DelistingProtectionService
@@ -125,6 +130,14 @@ class AccumulationBuyExecutor:
                     or opportunity.consumed_at is not None
                     or activation.state != "enabled"
                     or activation.explicitly_paused
+                ):
+                    return "WAIT_STATE"
+                if not opportunity.is_initial_entry and (
+                    identity.get("sizing_policy") != SIZING_POLICY
+                    or identity.get("timeframe")
+                    != effective_accumulation_parameters(
+                        AccumulationParameters(), config.get("timeframe")
+                    ).timeframe
                 ):
                     return "WAIT_STATE"
                 if now >= opportunity.expires_at_ms:

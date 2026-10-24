@@ -19,7 +19,7 @@ configured exchange.
 
 Open **Backtest**, set **Trade mode** to **Accumulation**, and select a saved
 version under **Strategy**. Select a spot symbol in your configured quote.
-The strategy's saved timeframe appears automatically.
+The timeframe from Exchange configuration appears automatically, matching live accumulation.
 
 Select **Downtrend / sideways accumulation** to test its market conditions and
 dip execution rules together. It is an experimental preset, not optimized settings.
@@ -45,7 +45,7 @@ Zero buys is a valid result when the strategy never qualifies.
 If the exchange does not cover warmup, choose an older listed market or a more
 recent start date with enough preceding history. Shorten an oversized range:
 the 20,000-candle limit includes warmup. The shipped downtrend/sideways preset
-needs 1,240 warmup candles on its 1h base.
+needs 1,240 warmup candles at a 1h exchange base or 310 at 4h.
 
 ## Step 3: Read the result
 

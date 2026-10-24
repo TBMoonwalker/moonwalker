@@ -37,6 +37,7 @@ interface StrategyListResponse {
 
 interface ConfigSnapshotResponse {
     currency?: string | null
+    timeframe?: string | null
 }
 
 interface ExchangeSymbolsResponse {
@@ -53,6 +54,7 @@ const isLoadingSymbols = ref(false)
 const errorMessage = ref('')
 const symbolLoadError = ref('')
 const configuredCurrency = ref('')
+const configuredTimeframe = ref(form.timeframe)
 const strategyOptions = ref<SelectOption[]>([])
 const symbolOptions = ref<SelectOption[]>([])
 const { versions: accumulationStrategies, cursor: accumulationCursor,
@@ -62,8 +64,8 @@ const { versions: accumulationStrategies, cursor: accumulationCursor,
 const isAccumulation = computed(() => form.tradeMode === 'accumulation')
 const selectedAccumulation = computed(() => accumulationStrategies.value.find(version => version.id === form.accumulationVersionId))
 const accumulationOptions = computed(() => accumulationStrategies.value.map(version => ({ value: version.id, label: `${version.name} · v${version.version} · ${version.parameters.timeframe}` })))
-watch([isAccumulation, selectedAccumulation], () => {
-    if (isAccumulation.value && selectedAccumulation.value) form.timeframe = selectedAccumulation.value.parameters.timeframe
+watch([isAccumulation, configuredTimeframe], () => {
+    if (isAccumulation.value) form.timeframe = configuredTimeframe.value
 })
 const lastRunAt = ref<number | null>(null)
 
@@ -336,6 +338,7 @@ async function loadExchangeSymbols(): Promise<void> {
         const config = await fetchJson<ConfigSnapshotResponse>('/config/all')
         const currency = String(config.currency ?? '').trim().toUpperCase()
         configuredCurrency.value = currency
+        configuredTimeframe.value = String(config.timeframe ?? form.timeframe)
 
         if (!currency) {
             symbolOptions.value = []
@@ -511,7 +514,7 @@ onMounted(() => {
                      </n-form-item>
 
                      <div class="control-grid two numeric-grid">
-                        <n-form-item label="Timeframe">
+                        <n-form-item :label="isAccumulation ? 'Timeframe · from Exchange configuration' : 'Timeframe'">
                             <n-select
                                 v-model:value="form.timeframe"
                                 :options="timeframeOptions"

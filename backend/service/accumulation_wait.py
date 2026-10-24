@@ -22,6 +22,11 @@ def accumulation_wait_condition(
     with localcontext() as context:
         context.prec = 50
         price = Decimal(market.close)
+        spacing_atr = (
+            max(Decimal(market.atr), Decimal(guard.signal_atr))
+            if guard
+            else Decimal(market.atr)
+        )
 
         def level(kind: str, direction: str, target: Decimal) -> dict[str, str]:
             return {
@@ -42,9 +47,10 @@ def accumulation_wait_condition(
                 levels.append(level("depth", "at_or_below", target))
         elif reason == "WAIT_REARM" and guard is not None:
             if market.close_ms > guard.signal_close_ms:
-                further = Decimal(guard.signal_price) - Decimal(
-                    parameters.spacing_atr
-                ) * Decimal(guard.signal_atr)
+                further = (
+                    Decimal(guard.signal_price)
+                    - Decimal(parameters.spacing_atr) * spacing_atr
+                )
                 if state.recovery_ready:
                     assert state.high_close is not None
                     assert state.atr_at_high is not None
@@ -57,9 +63,10 @@ def accumulation_wait_condition(
                 else:
                     if further > 0:
                         levels.append(level("further_decline", "at_or_below", further))
-                    recovery = Decimal(guard.signal_price) + Decimal(
-                        parameters.recovery_atr
-                    ) * Decimal(guard.signal_atr)
+                    recovery = (
+                        Decimal(guard.signal_price)
+                        + Decimal(parameters.recovery_atr) * spacing_atr
+                    )
                     levels.append(
                         level("recovery_then_correction", "at_or_above", recovery)
                     )

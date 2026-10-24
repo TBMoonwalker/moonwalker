@@ -10,6 +10,7 @@ from service.accumulation_strategy import (
     AccumulationCandle,
     AccumulationParameters,
     accumulation_requested_quote,
+    accumulation_step_severity,
     calculate_accumulation_market,
 )
 
@@ -75,7 +76,13 @@ def test_replay_preserves_budget_fees_and_equal_funding_without_account_access()
         parameters,
         close_ms=first["signal_close_ms"],
     )
-    _, principal = accumulation_requested_quote(market.severity, "1000", parameters)
+    _, principal = accumulation_requested_quote(
+        accumulation_step_severity(
+            market.close, market.previous_close, market.atr, None, parameters
+        ),
+        "1000",
+        parameters,
+    )
     assert Decimal(first["spent"]) == Decimal(principal)
     assert first["execution_open_ms"] == first["signal_close_ms"]
 

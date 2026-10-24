@@ -651,7 +651,9 @@ class AccumulationExchangeAdapter:
         scope = await self.account_scope(config)
         if request.account_scope != scope:
             raise AccumulationStateError("Activation account requires revalidation.")
-        version = await load_accumulation_strategy_version(request.target_version_id)
+        version = await load_accumulation_strategy_version(
+            request.target_version_id, timeframe=config.get("timeframe")
+        )
         rows = (
             []
             if request.initial_asap

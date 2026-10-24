@@ -15,6 +15,7 @@ import talib
 from service.accumulation_contracts import AccumulationStateError
 from service.accumulation_strategy import (
     AccumulationParameters,
+    effective_accumulation_parameters,
     parse_accumulation_strategy_document,
 )
 from service.database import run_sqlite_write_with_retry
@@ -181,6 +182,8 @@ class AccumulationStrategyVersion:
 
 async def load_accumulation_strategy_version(
     version_id: int,
+    *,
+    timeframe: str | None = None,
 ) -> AccumulationStrategyVersion:
     """Load and validate a pinned accumulation implementation without graph state."""
     if type(version_id) is not int or version_id < 1:
@@ -196,7 +199,9 @@ async def load_accumulation_strategy_version(
         row.id,
         row.strategy_slug,
         row.version,
-        parse_accumulation_strategy_document(document),
+        effective_accumulation_parameters(
+            parse_accumulation_strategy_document(document), timeframe
+        ),
     )
 
 

@@ -10,12 +10,14 @@ from uuid import UUID
 from service.accumulation_contracts import AccumulationStateError, canonical_decimal
 from service.accumulation_state import AccumulationConflictError
 from service.accumulation_strategy import (
+    SIZING_POLICY,
     AccumulationCandle,
     AccumulationGuard,
     AccumulationObservations,
     AccumulationParameters,
     accumulation_requested_quote,
     accumulation_signal_reason,
+    accumulation_step_severity,
     advance_accumulation_observations,
     calculate_accumulation_market,
 )
@@ -160,7 +162,13 @@ def replay_accumulation(
             )
             if pending is not None and contiguous:
                 _, requested = accumulation_requested_quote(
-                    pending.severity,
+                    accumulation_step_severity(
+                        pending.close,
+                        pending.previous_close,
+                        pending.atr,
+                        guard,
+                        parameters,
+                    ),
                     str(portfolios["accumulation"]["cash"]),
                     parameters,
                 )
@@ -218,6 +226,7 @@ def replay_accumulation(
             )
         return {
             "simulation_only": True,
+            "sizing_policy": SIZING_POLICY,
             "parameters": asdict(parameters),
             "funding": str(funding),
             "fee_bps": payload["fee_bps"],

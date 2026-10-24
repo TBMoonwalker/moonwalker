@@ -543,7 +543,7 @@ an order or change the trading strategy.
 `POST /backtest/run` is the shared simulation endpoint. Dynamic DCA accepts its
 existing `strategy_slug`, timeframe and DCA sizing/exit fields. Accumulation uses
 `trade_mode: "accumulation"`, `symbol`, exact `strategy_version_id`, `start_date`
-and `end_date`; its timeframe must match that saved version. Optional modeling
+and `end_date`; its timeframe must match the exchange configuration. Optional modeling
 inputs are `funding` (positive quote amount, default `"1000"`), `fee` (fraction,
 default `0.001`), `slippage_bps` (0–1000, default `"20"`) and
 `fixed_interval_candles` (integer 1–20000, default `24`). No live configuration,

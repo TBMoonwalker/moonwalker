@@ -57,7 +57,7 @@ def regime_accumulation_graph() -> dict[str, Any]:
         True,
     )
     graph["description"] = (
-        "Experimental 4h EMA-slope/ADX regime gate with a 1h ATR discount. Filters detected uptrends on subsequent buys; manual accumulation exits."
+        "Experimental 4h EMA-slope/ADX regime gate with an exchange-timeframe ATR discount. Filters detected uptrends on subsequent buys; manual accumulation exits."
     )
     graph["nodes"], graph["connections"] = [], []
 
@@ -142,7 +142,7 @@ def regime_accumulation_graph() -> dict[str, Any]:
     distance = node(
         "discount",
         "indicator",
-        "1h EMA20 discount / ATR",
+        "Base timeframe EMA20 discount / ATR",
         indicator="ema_distance_atr",
         length=20,
         atr_length=14,

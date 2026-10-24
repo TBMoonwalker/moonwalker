@@ -7,6 +7,7 @@ from typing import Any
 
 from service.accumulation_contracts import canonical_decimal
 from service.accumulation_replay import run_accumulation_replay
+from service.accumulation_strategy import effective_accumulation_parameters
 from service.backtest import (
     BacktestData,
     BacktestValidationError,
@@ -31,9 +32,16 @@ async def run_accumulation_backtest(
     if ":" in symbol or "/" not in symbol:
         raise BacktestValidationError("Accumulation backtests require a spot symbol.")
     version = await load_accumulation_strategy_version(data.get("strategy_version_id"))
-    parameters = version.parameters
-    if data.get("timeframe", parameters.timeframe) != parameters.timeframe:
-        raise BacktestValidationError("Use the saved strategy version's timeframe.")
+    parameters = effective_accumulation_parameters(
+        version.parameters, config.get("timeframe")
+    )
+    requested_timeframe = effective_accumulation_parameters(
+        version.parameters, data.get("timeframe", parameters.timeframe)
+    ).timeframe
+    if requested_timeframe != parameters.timeframe:
+        raise BacktestValidationError(
+            "Use the exchange-configured accumulation timeframe."
+        )
     funding = canonical_decimal(str(data.get("funding", "1000")), positive=True)
     slippage = canonical_decimal(str(data.get("slippage_bps", "20")))
     interval = data.get("fixed_interval_candles", 24)

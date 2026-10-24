@@ -153,11 +153,11 @@ evaluator runs against closed snapshots in DCA, accumulation and historical
 replay; charts expose the added indicators in their normal indicator panes.
 
 **Downtrend / sideways accumulation** (`regime_accumulation`) is an experimental
-starting preset with a 1h base timeframe:
+starting preset whose accumulation base timeframe follows Exchange configuration:
 
 - Downtrend: 4h EMA50 slope over six bars is below −0.1 ATR and −DI14 exceeds +DI14.
 - Sideways: that slope is between −0.1 and +0.1 ATR and ADX14 is below 20.
-- Either regime also requires the 1h close to be at least one ATR14 below EMA20.
+- Either regime also requires the base-timeframe close to be at least one ATR14 below EMA20.
 
 In accumulation, the existing declining-close, peak discount, opportunity spacing,
 recovery and dynamic budget sizing rules still apply. In Dynamic DCA the graph

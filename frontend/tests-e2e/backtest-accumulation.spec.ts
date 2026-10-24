@@ -2,13 +2,13 @@ import { expect, test } from '@playwright/test'
 
 test('runs accumulation in the existing Backtest form, chart and results tabs', async ({ page }, testInfo) => {
   await page.route('**/config/all', route => route.fulfill({ json: {
-    timezone: 'Europe/Vienna', signal: 'asap', symbol_list: 'BTC/USDC', exchange: 'binance', timeframe: '1h',
+    timezone: 'Europe/Vienna', signal: 'asap', symbol_list: 'BTC/USDC', exchange: 'binance', timeframe: '4h',
     key: 'fixture', secret: 'fixture', currency: 'USDC', max_bots: 2, bo: 10, tp: 1, capital_max_fund: 100,
     history_lookback_time: '180d', dca: false, dry_run: true, mstc: 4,
   } }))
   await page.route('**/strategies', route => route.fulfill({ json: { strategies: [{ slug: 'ema20_swing', name: 'EMA swing' }] } }))
   await page.route('**/data/exchange/symbols/USDC', route => route.fulfill({ json: { symbols: ['BTC/USDC'] } }))
-  await page.route('**/accumulation/strategies*', route => route.fulfill({ json: { versions: [{ id: 17, name: 'Patient dip', version: 1, parameters: { timeframe: '4h' } }], next_after_id: null } }))
+  await page.route('**/accumulation/strategies*', route => route.fulfill({ json: { versions: [{ id: 17, name: 'Patient dip', version: 1, parameters: { timeframe: '1h' } }], next_after_id: null } }))
   let commands = 0
   await page.route('**/accumulation/commands', route => { commands++; return route.abort() })
   const requests: Record<string, unknown>[] = []
@@ -29,7 +29,7 @@ test('runs accumulation in the existing Backtest form, chart and results tabs', 
   await page.getByLabel('Backtest trade mode', { exact: true }).click()
   await page.locator('.n-base-select-option').filter({ hasText: 'Accumulation' }).click()
   await expect(page.getByLabel('Backtest accumulation strategy', { exact: true })).toBeVisible()
-  await expect(page.getByText('Patient dip · v1 · 4h', { exact: true })).toBeVisible()
+  await expect(page.getByText('Patient dip · v1 · 1h', { exact: true })).toBeVisible()
   await expect(page.getByText('Take profit %', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Base order', { exact: true })).toHaveCount(0)
   await expect(page.getByText('Completed OHLC candles', { exact: true })).toHaveCount(0)

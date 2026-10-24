@@ -32,9 +32,11 @@ from service.accumulation_strategy import (
     AccumulationParameters,
     accumulation_requested_quote,
     accumulation_signal_reason,
+    accumulation_step_severity,
     advance_accumulation_observations,
     calculate_accumulation_market,
     canonical_accumulation_priority,
+    effective_accumulation_parameters,
 )
 from service.accumulation_wait import accumulation_wait_condition
 from service.database import run_sqlite_write_with_retry
@@ -161,6 +163,8 @@ def _proposal(
     minimum_quote: str | None,
     priority: str | None,
     priority_close_ms: int,
+    guard: AccumulationGuard | None = None,
+    previous_close: str | None = None,
 ) -> AccumulationDecision:
     with localcontext() as context:
         context.prec = 50
@@ -202,7 +206,16 @@ def _proposal(
         usable = canonical_decimal(usable_quote)
     except AccumulationStateError:
         return replace(result, reason="WAIT_BUDGET")
-    fraction, requested = accumulation_requested_quote(severity, usable, parameters)
+    if previous_close is None and guard is None:
+        return replace(result, reason="WAIT_REBASE")
+    step = accumulation_step_severity(
+        opportunity.signal_price,
+        previous_close or opportunity.signal_price,
+        opportunity.signal_atr,
+        guard,
+        parameters,
+    )
+    fraction, requested = accumulation_requested_quote(step, usable, parameters)
     result = replace(result, fraction=fraction, requested_quote=requested)
     if Decimal(requested) == 0:
         return replace(result, reason="WAIT_BUDGET")
@@ -255,6 +268,7 @@ async def evaluate_accumulation(
     ask_price: str | None,
     quote_timestamp_ms: int | None,
     minimum_quote: str | None,
+    timeframe: str | None = None,
 ) -> AccumulationDecision:
     """Advance one current candle and freeze its opportunity atomically.
 
@@ -262,7 +276,9 @@ async def evaluate_accumulation(
     requires bounded rebase; it never backfills buys. Missing data does not
     advance the stored candle or manufacture a fresh state.
     """
-    version = await load_accumulation_strategy_version(expected.strategy_version_id)
+    version = await load_accumulation_strategy_version(
+        expected.strategy_version_id, timeframe=timeframe
+    )
     if (
         version.slug != expected.strategy_slug
         or version.version != expected.strategy_version
@@ -276,10 +292,12 @@ async def evaluate_accumulation(
         )
     except AccumulationStateError:
         return AccumulationDecision(expected, "WAIT", "WAIT_DATA")
-    priority_close = AccumulationParameters().latest_close(now_ms)
+    priority_close = effective_accumulation_parameters(
+        AccumulationParameters(), timeframe
+    ).latest_close(now_ms)
     try:
         priority = canonical_accumulation_priority(
-            priority_candles, close_ms=priority_close
+            priority_candles, close_ms=priority_close, timeframe=timeframe
         )
     except AccumulationStateError:
         priority = None
@@ -304,6 +322,8 @@ async def evaluate_accumulation(
             if current.observations is None:
                 return AccumulationDecision(expected, "WAIT", "WAIT_REBASE")
             state = AccumulationObservations.from_dict(current.observations)
+            if state.timeframe is not None and state.timeframe != parameters.timeframe:
+                return AccumulationDecision(expected, "WAIT", "WAIT_REBASE")
             if state.last_close_ms != current.last_processed_close_ms:
                 raise AccumulationStateError(
                     "Observation candle identity is inconsistent."
@@ -428,6 +448,8 @@ async def evaluate_accumulation(
                 minimum_quote=minimum_quote,
                 priority=priority,
                 priority_close_ms=priority_close,
+                guard=guard,
+                previous_close=updated_state.previous_close,
             )
 
     activation = await model.AccumulationActivation.get(id=expected.activation_id)

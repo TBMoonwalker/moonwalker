@@ -32,10 +32,12 @@ from service.accumulation_state import _load_context
 from service.accumulation_strategy import (
     CAPABILITY,
     PRIORITY_PROTOCOL,
+    SIZING_POLICY,
     AccumulationCandle,
     AccumulationObservations,
     AccumulationParameters,
     canonical_accumulation_priority,
+    effective_accumulation_parameters,
 )
 from service.capital_budget import CapitalBudgetService
 from service.database import run_sqlite_write_with_retry
@@ -100,7 +102,9 @@ async def prepare_accumulation_buy(
     if config.get("trade_mode") != "accumulation":
         return wait("WAIT_STATE")
     initial = decision.reason == "BUY_INITIAL_ASAP"
-    priority_close = AccumulationParameters().latest_close(cutoff_ms)
+    priority_close = effective_accumulation_parameters(
+        AccumulationParameters(), config.get("timeframe")
+    ).latest_close(cutoff_ms)
     priority = "0"
     if not initial:
         if (
@@ -110,7 +114,9 @@ async def prepare_accumulation_buy(
         ):
             return wait("WAIT_DATA")
         priority = canonical_accumulation_priority(
-            offer.priority_candles, close_ms=priority_close
+            offer.priority_candles,
+            close_ms=priority_close,
+            timeframe=config.get("timeframe"),
         )
         if decision.priority_score is None or Decimal(
             canonical_decimal(decision.priority_score)
@@ -127,7 +133,7 @@ async def prepare_accumulation_buy(
     ):
         return wait("WAIT_ACCOUNT")
     version = await load_accumulation_strategy_version(
-        decision.identity.strategy_version_id
+        decision.identity.strategy_version_id, timeframe=config.get("timeframe")
     )
 
     async def persist() -> AccumulationAdmission:
@@ -137,7 +143,10 @@ async def prepare_accumulation_buy(
             now_ms = clock_ms()
             if (
                 not initial
-                and AccumulationParameters().latest_close(now_ms) != priority_close
+                and effective_accumulation_parameters(
+                    AccumulationParameters(), config.get("timeframe")
+                ).latest_close(now_ms)
+                != priority_close
             ):
                 return wait("WAIT_DATA")
             current = await _load_context(
@@ -148,7 +157,9 @@ async def prepare_accumulation_buy(
             await activation.refresh_from_db(using_db=conn)
             if activation.state != "enabled" or activation.explicitly_paused:
                 return wait("WAIT_LIFECYCLE")
-            _guard(activation.execution_guard_json, activation.consumption_revision)
+            guard = _guard(
+                activation.execution_guard_json, activation.consumption_revision
+            )
             if not initial and current.observations is None:
                 return wait("WAIT_REBASE")
             state = (
@@ -156,9 +167,9 @@ async def prepare_accumulation_buy(
                 if current.observations is not None
                 else None
             )
-            if (
-                state is not None
-                and state.last_close_ms != current.last_processed_close_ms
+            if state is not None and (
+                state.last_close_ms != current.last_processed_close_ms
+                or state.timeframe not in {None, version.parameters.timeframe}
             ):
                 return wait("WAIT_REBASE")
             if await _has_unsettled_execution(activation, conn):
@@ -228,6 +239,8 @@ async def prepare_accumulation_buy(
                     minimum_quote=inputs.minimum_quote,
                     priority=priority,
                     priority_close_ms=priority_close,
+                    guard=guard,
+                    previous_close=state.previous_close if state else None,
                 )
                 if proposal.action != "BUY" or proposal.requested_quote is None:
                     return wait(proposal.reason)
@@ -252,6 +265,8 @@ async def prepare_accumulation_buy(
                         "accumulation": {
                             "opportunity_id": opportunity_id,
                             "initial_entry": initial,
+                            "timeframe": version.parameters.timeframe,
+                            "sizing_policy": SIZING_POLICY,
                             "account_scope": funding.account_scope,
                             "strategy_version_id": version.id,
                             "generation": str(activation.generation),
@@ -376,7 +391,9 @@ class AccumulationPortfolioCoordinator:
         results = []
         try:
             ranked = []
-            close = AccumulationParameters().latest_close(cutoff)
+            close = effective_accumulation_parameters(
+                AccumulationParameters(), self._config.get("timeframe")
+            ).latest_close(cutoff)
             for offer in offers:
                 decision = offer.decision
                 row = await model.AccumulationOpportunity.get_or_none(
@@ -387,7 +404,9 @@ class AccumulationPortfolioCoordinator:
                 try:
                     score = Decimal(
                         canonical_accumulation_priority(
-                            offer.priority_candles, close_ms=close
+                            offer.priority_candles,
+                            close_ms=close,
+                            timeframe=self._config.get("timeframe"),
                         )
                     )
                     if decision.priority_score is None or score != Decimal(

@@ -153,3 +153,37 @@ async def test_backtest_applies_shared_graph_to_subsequent_buys(history):
         {}, {"symbol": "BTC/USDC", "strategy_version_id": 7}, start, end
     )
     assert allowed["accumulation"]["accumulation_trades"]
+
+
+@pytest.mark.asyncio
+async def test_backtest_uses_exchange_interval_instead_of_saved_base(history):
+    start, end, fetch, load = history
+    first = int(start.timestamp() * 1000)
+    interval = 4 * 3600000
+    warmup = load.return_value.parameters.history_length
+    fetch.return_value = [
+        OhlcvCandle(first + offset * interval, 100, 102, 98, 100, 1)
+        for offset in range(-warmup, 12)
+    ]
+    result = await adapter.run_accumulation_backtest(
+        {"timeframe": "4h"},
+        {"symbol": "BTC/USDC", "strategy_version_id": 7, "timeframe": "4h"},
+        start,
+        end,
+    )
+    assert fetch.await_args.args[2] == "4h"
+    assert load.return_value.parameters.timeframe == "1h"
+    assert result["stats"]["timeframe"] == "4h"
+    assert result["stats"]["candles_evaluated"] == 12
+
+
+@pytest.mark.asyncio
+async def test_exchange_timeframe_alias_is_consistent_with_backtest_request(history):
+    start, end, _, _ = history
+    result = await adapter.run_accumulation_backtest(
+        {"timeframe": "60min"},
+        {"symbol": "BTC/USDC", "strategy_version_id": 7, "timeframe": "60min"},
+        start,
+        end,
+    )
+    assert result["stats"]["timeframe"] == "1h"

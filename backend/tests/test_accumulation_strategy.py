@@ -545,3 +545,52 @@ async def test_peak_migration_preserves_pre_evaluator_opportunities_without_gues
     opportunity = await model.AccumulationOpportunity.get(id=first.opportunity_id)
     assert opportunity.signal_price == "97" and opportunity.signal_peak is None
     assert (await _evaluate(activation)).reason == "WAIT_DATA"
+
+
+def test_follow_up_sizing_uses_new_decline_not_old_peak_discount():
+    from service.accumulation_strategy import accumulation_step_severity
+
+    guard = _guard()
+    # Deep below an old peak, but only one more ATR below the previous purchase.
+    depth = accumulation_step_severity("95", "96", "2", guard, PARAMETERS)
+    fraction, quote = accumulation_requested_quote(depth, "1000", PARAMETERS)
+    assert Decimal(fraction) == Decimal("0.02")
+    assert Decimal(quote) == Decimal("20")
+    # A much larger fresh decline still increases allocation dynamically.
+    heavy = accumulation_step_severity("83", "96", "2", guard, PARAMETERS)
+    assert Decimal(
+        accumulation_requested_quote(heavy, "1000", PARAMETERS)[0]
+    ) == Decimal("0.20")
+
+
+def test_first_csv_dip_and_recovery_do_not_inherit_peak_maximum_size():
+    from service.accumulation_strategy import accumulation_step_severity
+
+    for guard, previous, close in [(None, "100", "99"), (_guard(), "106", "101")]:
+        depth = accumulation_step_severity(close, previous, "2", guard, PARAMETERS)
+        assert Decimal(
+            accumulation_requested_quote(depth, "1000", PARAMETERS)[0]
+        ) == Decimal("0.02")
+
+
+def test_exchange_timeframe_resolves_graph_warmup_without_rewriting_saved_graph():
+    from service.accumulation_strategy import effective_accumulation_parameters
+    from service.shared_accumulation import regime_accumulation_graph
+
+    graph = regime_accumulation_graph()
+    saved = parse_accumulation_strategy_document(graph)
+    effective = effective_accumulation_parameters(saved, "4h")
+    assert saved.timeframe == graph["accumulation"]["timeframe"] == "1h"
+    assert effective.timeframe == "4h"
+    assert effective.history_length == 310
+    assert saved.history_length == 1240
+    assert effective_accumulation_parameters(PARAMETERS, "60min").timeframe == "1h"
+    with pytest.raises(AccumulationStateError):
+        effective_accumulation_parameters(PARAMETERS, "invalid")
+
+
+def test_timeframe_change_does_not_reuse_smaller_old_atr_spacing():
+    guard = _guard()  # Previous hourly ATR 2, anchor 97.
+    market = replace(_market(94, 95), atr="8")
+    state = AccumulationObservations(market.close_ms, 1)
+    assert accumulation_signal_reason(market, state, guard, PARAMETERS) == "WAIT_REARM"

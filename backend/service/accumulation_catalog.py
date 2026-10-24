@@ -12,6 +12,7 @@ from service.accumulation_strategy import (
     CATALOG_PREFIX,
     SUPPORTED_TIMEFRAMES,
     AccumulationParameters,
+    effective_accumulation_parameters,
     parse_accumulation_strategy_document,
 )
 from tortoise.transactions import in_transaction
@@ -25,7 +26,7 @@ def _document(value: str) -> AccumulationParameters | None:
 
 
 async def list_accumulation_strategies(
-    *, after_id: int = 0, limit: int = 50
+    *, after_id: int = 0, limit: int = 50, timeframe: str | None = None
 ) -> dict[str, Any]:
     """Return a bounded ID page of compatible immutable versions, including history."""
     if type(after_id) is not int or not 0 <= after_id < 2**63:
@@ -57,6 +58,10 @@ async def list_accumulation_strategies(
             parameters = _document(row.ir_json)
             if parameters is None:
                 continue
+            try:
+                parameters = effective_accumulation_parameters(parameters, timeframe)
+            except AccumulationStateError:
+                continue
             versions.append(
                 {
                     "id": row.id,
@@ -73,6 +78,8 @@ async def list_accumulation_strategies(
         return {
             "versions": versions,
             "next_after_id": rows[limit - 1].id if len(rows) > limit else None,
-            "defaults": asdict(AccumulationParameters()),
+            "defaults": asdict(
+                effective_accumulation_parameters(AccumulationParameters(), timeframe)
+            ),
             "timeframes": sorted(SUPPORTED_TIMEFRAMES),
         }

@@ -62,6 +62,7 @@ async def configuration_mode_guard(current: Mapping[str, Any]) -> dict[str, Any]
 ENTRY_KEYS = frozenset(
     {
         "trade_mode",
+        "timeframe",
         "accumulation_strategy_version_id",
         "dca",
         "bo",
@@ -133,6 +134,14 @@ async def validate_accumulation_configuration(
         raise AccumulationStateError(
             "Unknown trade mode; select Dynamic DCA or Accumulation."
         )
+    if mode == "accumulation" and "timeframe" in changed_keys:
+        active_pins = await model.AccumulationActivation.exclude(
+            state="stopped"
+        ).values_list("strategy_version_id", flat=True)
+        for active_pin in set(active_pins):
+            await load_accumulation_strategy_version(
+                active_pin, timeframe=proposed.get("timeframe")
+            )
     pin = proposed.get("accumulation_strategy_version_id")
     if mode == "accumulation" or (
         "accumulation_strategy_version_id" in changed_keys
@@ -142,7 +151,9 @@ async def validate_accumulation_configuration(
         if not accumulation_available():
             raise AccumulationStateError("Accumulation is unavailable in this release.")
         if pin is not None:
-            await load_accumulation_strategy_version(pin)
+            await load_accumulation_strategy_version(
+                pin, timeframe=proposed.get("timeframe")
+            )
     if mode != current.get("trade_mode", "dynamic_dca"):
         if not mode_change_admitted:
             raise AccumulationStateError(

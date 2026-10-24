@@ -153,10 +153,15 @@ async def list_strategies(
     after_id: FromQuery[int] = 0, limit: FromQuery[int] = 50
 ) -> Any:
     """List compatible shared versions; retired dip presets stay out of selectors."""
-    if _runtime(repair=True) is None:
+    runtime = _runtime(repair=True)
+    if runtime is None:
         return _unavailable()
     try:
-        return await list_accumulation_strategies(after_id=after_id, limit=limit)
+        return await list_accumulation_strategies(
+            after_id=after_id,
+            limit=limit,
+            timeframe=runtime.adapter.config_provider().get("timeframe"),
+        )
     except ValueError as exc:
         return json_response({"error": str(exc), "code": "invalid_request"}, 400)
 

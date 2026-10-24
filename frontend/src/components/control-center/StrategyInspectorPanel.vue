@@ -48,7 +48,7 @@ const comparisonOperatorOptions = [
 ]
 
 const accumulationFields = [
-    ['timeframe', 'Base timeframe'], ['peak_length', 'Peak lookback (candles)'],
+    ['peak_length', 'Peak lookback (candles)'],
     ['atr_length', 'ATR length'], ['entry_atr', 'Minimum dip (ATR)'],
     ['spacing_atr', 'Buy spacing (ATR)'], ['recovery_atr', 'Recovery reset (ATR)'],
     ['min_fraction', 'Minimum budget fraction'], ['slope', 'Budget increase per ATR'],
@@ -207,15 +207,10 @@ function selectedInputSource(port: string): string | null {
                 <details v-if="detail.ir.accumulation" class="connection-editor">
                     <summary>Accumulation execution settings</summary>
                     <p class="empty-copy">The graph filters subsequent buys. ASAP still buys the initial base order. Assign saved versions in Configuration.</p>
+                    <p class="empty-copy">Base timeframe follows Exchange configuration. Budget increases apply to fresh downside since the preceding purchase.</p>
                     <label v-for="[key, label] in accumulationFields" :key="key">
                         {{ label }}
-                        <n-select v-if="key === 'timeframe'"
-                            :value="detail.ir.accumulation.timeframe"
-                            :options="timeframeOptions.filter(option => option.value)"
-                            :disabled="readOnly"
-                            @update:value="emit('update-accumulation', key, $event)"
-                        />
-                        <n-input v-else :value="String(detail.ir.accumulation[key])"
+                        <n-input :value="String(detail.ir.accumulation[key])"
                             :disabled="readOnly"
                             @update:value="emit('update-accumulation', key, $event)"
                         />

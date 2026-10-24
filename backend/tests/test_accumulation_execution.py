@@ -4836,3 +4836,128 @@ async def test_csv_origin_query_requires_exact_adopted_deal_not_substring_receip
     await receipt.save()
     result = await declared_purchase_history(other_deal)
     assert result["declared_purchases"] == []
+
+
+@pytest.mark.asyncio
+async def test_exchange_timeframe_drives_candles_rebase_and_priority_without_hourly_buys(
+    env, monkeypatch
+):
+    from service.data_timeframes import timeframe_to_milliseconds
+
+    adapter, client, clock, config, *_ = env
+    # Four-hour warmup needs more than the hourly fixture's 600-hour history.
+    clock[0] += 2400 * HOUR
+    activation, _ = await setup_activation(env)
+    calls = []
+
+    async def history(_config, _symbol, timeframe, **kwargs):
+        calls.append(timeframe)
+        interval = timeframe_to_milliseconds(timeframe)
+        close = clock[0] // interval * interval
+        count = kwargs["max_candles"]
+        rows = [
+            [close - (count - i) * interval, "98", "100", "98", "98", "1"]
+            for i in range(count)
+        ]
+        rows[-1] = [close - interval, "98", "98", "59", "60", "1"]
+        return rows
+
+    monkeypatch.setattr(
+        adapter.exchange,
+        "get_history_for_symbol_batched",
+        AsyncMock(side_effect=history),
+    )
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    old_epoch = (await model.AccumulationActivation.get()).observation_epoch
+    config["timeframe"] = "4h"
+    await runtime.tick()
+    await activation.refresh_from_db()
+    assert activation.observation_epoch > old_epoch
+    context = await load_accumulation_context(
+        str(activation.id), activation.account_scope
+    )
+    assert context.observations["timeframe"] == "4h"
+    assert not client.calls
+    calls.clear()
+    clock[0] += HOUR
+    runtime.notify(activation.symbol)
+    await runtime.tick()
+    assert not client.calls
+    assert all(value == "4h" for value in calls)
+    clock[0] += 3 * HOUR
+    await runtime.tick()
+    clock[0] += 5000
+    await runtime.tick()
+    assert len(client.calls) == 1
+    assert calls and all(value == "4h" for value in calls)
+    intent = await model.PlacementIntent.get()
+    policy = json.loads(json.loads(intent.request_json)["metadata_json"])[
+        "accumulation"
+    ]
+    assert policy["timeframe"] == "4h"
+    assert policy["sizing_policy"] == "fresh_decline_v1"
+    execution = await model.TradeExecutions.get()
+    assert execution.timeframe == "4h"
+    assert (
+        json.loads(execution.metadata_json)["accumulation"]["sizing_policy"]
+        == "fresh_decline_v1"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("changed", ["legacy_policy", "timeframe"])
+async def test_unsubmitted_old_sizing_or_timeframe_cannot_place_after_policy_change(
+    env, changed
+):
+    adapter, client, _, config, *_ = env
+    operation = await prepared(env)
+    row = await model.PlacementIntent.get(operation_id=operation)
+    if changed == "legacy_policy":
+        request = json.loads(row.request_json)
+        metadata = json.loads(request["metadata_json"])
+        metadata["accumulation"].pop("sizing_policy")
+        request["metadata_json"] = json.dumps(metadata)
+        row.request_json = json.dumps(request)
+        await row.save()
+    else:
+        config["timeframe"] = "4h"
+    result = await AccumulationBuyExecutor(adapter).execute(operation)
+    assert result.reason == "WAIT_STATE"
+    assert not client.calls
+    await row.refresh_from_db()
+    assert row.state == "rejected"
+
+
+@pytest.mark.asyncio
+async def test_small_fresh_drop_below_old_peak_does_not_place_maximum_buy(
+    env, monkeypatch
+):
+    adapter, client, clock, *_ = env
+
+    async def history(*args, **kwargs):
+        count = kwargs["max_candles"]
+        close = clock[0] // HOUR * HOUR
+        rows = [
+            [close - (count - i) * HOUR, "98", "100", "98", "98", "1"]
+            for i in range(count)
+        ]
+        rows[-2] = [close - 2 * HOUR, "98", "98", "59", "61", "1"]
+        rows[-1] = [close - HOUR, "61", "62", "59", "60", "1"]
+        return rows
+
+    monkeypatch.setattr(
+        adapter.exchange,
+        "get_history_for_symbol_batched",
+        AsyncMock(side_effect=history),
+    )
+    operation = await prepared(env)
+    intent = await model.PlacementIntent.get(operation_id=operation)
+    # Old peak sizing requested roughly 200 from this 1000-quote wallet.
+    # The new decline is only 61 -> 60, so request and real fill stay near 2%.
+    assert Decimal("19") < Decimal(str(intent.requested_quote)) <= Decimal("20")
+    result = await AccumulationBuyExecutor(adapter).execute(operation)
+    assert result.state == "completed"
+    checkpoint = await model.AccumulationFillCheckpoint.get()
+    assert Decimal("19") < Decimal(checkpoint.quote_cost) <= Decimal("20")
+    assert len(client.calls) == 1

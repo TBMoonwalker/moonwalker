@@ -88,8 +88,17 @@ requires a declining completed close, peak discount and spacing/recovery rules,
 and sizes the purchase from usable quote funds. Dynamic DCA can use the same
 pure graph while retaining its own safety-order sizing and exit behavior.
 
+The base candle interval follows Exchange configuration in live evaluation and
+Backtest. A timeframe change rebuilds observations and invalidates unsubmitted
+old-policy buys; it never backfills purchases. Explicit higher-timeframe graph
+conditions remain pinned and must be compatible with the base interval.
+
+Sizing grows with fresh downside from the preceding purchase anchor, rather than
+the continuing discount from an old peak. Small additional declines retain a
+small allocation even when the market remains far below that peak.
+
 The **Downtrend / sideways accumulation** preset uses a completed 4h regime
-filter and 1h EMA discount. The old standalone ATR presets are retired; existing
+filter and an EMA discount on the exchange base timeframe. The old standalone ATR presets are retired; existing
 pinned versions remain readable for history. No indicator predicts the next move. Thresholds and indicator definitions are
 in the [strategy reference](strategies.md#shared-strategies-for-dca-and-accumulation).
 

@@ -29,8 +29,10 @@ from service.accumulation_ownership_evidence import (
     retire_superseded_ownership_checks,
 )
 from service.accumulation_return_totals import record_return_delta
+from service.accumulation_strategy import SUPPORTED_TIMEFRAMES
 from service.database import run_sqlite_write_with_retry
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
+from service.placement_intents import deserialize_placement_payload
 from service.placement_workflow import PlacementWorkflow
 from tortoise.transactions import in_transaction
 
@@ -395,6 +397,24 @@ async def persist_accumulation_order(
                         if opportunity
                         else activation.strategy_version_id
                     ).using_db(conn)
+                    request = deserialize_placement_payload(placement.request_json)
+                    metadata = deserialize_placement_payload(
+                        request.get("metadata_json")
+                    )
+                    stored_policy = metadata.get("accumulation")
+                    policy = {
+                        key: value
+                        for key, value in (
+                            stored_policy.items()
+                            if isinstance(stored_policy, dict)
+                            else ()
+                        )
+                        if key in {"timeframe", "sizing_policy"}
+                        and isinstance(value, str)
+                        and len(value) <= 64
+                    }
+                    if policy.get("timeframe") not in SUPPORTED_TIMEFRAMES:
+                        policy.pop("timeframe", None)
                     await model.TradeExecutions.create(
                         using_db=conn,
                         deal_id=holding.deal_id,
@@ -412,9 +432,11 @@ async def persist_accumulation_order(
                         order_type=placement.order_type,
                         strategy_slug=version.strategy_slug,
                         strategy_version=version.version,
+                        timeframe=policy.get("timeframe"),
                         metadata_json=json.dumps(
                             {
                                 "accumulation": {
+                                    **policy,
                                     "operation_id": operation_id,
                                     "initial_entry": bool(
                                         opportunity and opportunity.is_initial_entry

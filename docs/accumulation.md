@@ -156,15 +156,17 @@ changing the global initial pin never changes existing registrations.
 ## Buying strategy and capital
 
 The initial implementation is `accumulation_dip_v1`, with configurable immutable
-variants. Its default completed-candle timeframe is one hour, peak reference is
+variants. The completed-candle base interval follows **Exchange → Timeframe**
+for live trading, warmup, portfolio ranking and Backtest. The peak reference is
 168 preceding candle highs, and volatility is Wilder ATR14. It requires an exact,
 contiguous bounded history window with deterministic initialization. Forming,
 missing, unordered or misaligned candles cannot produce a buy.
 
 A qualifying decline must close below the previous close and reach at least
 1.5 ATR below the rolling peak. After a consumed signal, another purchase needs a
-further decline of one frozen signal ATR, or a recovery of one signal ATR followed
-by a fresh correction. For ASAP, these distances also apply after the immediate
+further decline of one ATR, or a recovery followed by a fresh correction. The
+spacing unit uses the larger of the preceding signal ATR and current ATR, so a
+longer timeframe or higher volatility cannot reuse an old, smaller spacing unit. For ASAP, these distances also apply after the immediate
 base order: its actual gross fill price becomes the first anchor, with ATR frozen
 when fresh completed strategy data becomes available. The original ASAP request
 retains its zero ATR; no candle history is needed to submit that base order.
@@ -174,8 +176,11 @@ positive fill consumes an opportunity; partial and duplicate reports cannot
 consume it twice. Warmup, resume, restart and switching observe historical candles
 without backfilling purchases.
 
-Default sizing starts at 2% of usable funds, adds three percentage points for
-each additional ATR of depth and caps each opportunity at 20%. Strategy settings
+Default sizing starts at 2% of usable funds. It adds three percentage points per
+ATR of fresh decline beyond the spacing distance, capped at 20%. Follow-up size
+uses downside since the preceding consumed purchase, not the total discount from
+an older peak. The first CSV strategy buy uses its preceding completed close;
+corrections above the preceding purchase retain the minimum fraction. Strategy settings
 control these fractions; the engine does not impose a separate accumulation
 reserve. Amount and price precision can reduce execution, but cannot top up a
 small request to an exchange minimum or enlarge it to fit a budget.
@@ -211,31 +216,44 @@ All six decimal parameters must be strictly positive.
 
 | Parameter | Type / constraint | Default | Effect |
 | --- | --- | --- | --- |
-| `timeframe` | String: `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`, `1w` | `1h` | Completed-candle interval; weekly candles use Monday alignment. |
+| `timeframe` | Stored compatibility field | Exchange configuration | Live and Backtest use the exchange base interval; immutable saved rows retain their original value. Weekly candles use Monday alignment. |
 | `peak_length` | Integer, 2–1000 | `168` | Preceding candle highs used for the peak, excluding the current high. |
 | `atr_length` | Integer, 2–100 | `14` | Wilder average true range period. |
 | `entry_atr` | Positive decimal string | `"1.5"` | Required peak-to-close discount in ATR units. |
 | `spacing_atr` | Positive decimal string | `"1"` | Further-decline or fresh-correction distance. |
 | `recovery_atr` | Positive decimal string | `"1"` | Recovery distance needed to rearm a correction path. |
-| `min_fraction` | Positive decimal string | `"0.02"` | Fraction of usable funds at the entry threshold. |
-| `slope` | Positive decimal string | `"0.03"` | Added fraction per ATR beyond the entry threshold. |
+| `min_fraction` | Positive decimal string | `"0.02"` | Fraction of usable funds for a small eligible fresh decline. |
+| `slope` | Positive decimal string | `"0.03"` | Added fraction per fresh ATR beyond buy spacing. |
 | `max_fraction` | Decimal string, `min_fraction <= max_fraction <= 1` | `"0.20"` | Maximum fraction requested per opportunity. |
 
 Base history length is `max(252, peak_length, 18 * atr_length) + 1`, or 253
 candles at the defaults. Shared graph requirements can increase it; the shipped
-regime graph requires 1,240 base 1h candles. The complete graph warmup is bounded
+regime graph requires 1,240 base candles at 1h or 310 at 4h. The complete graph warmup is bounded
 at 12,000 base candles.
 
-For an eligible severity `d = (peak - close) / ATR`, sizing is:
+Peak-to-close discount determines eligibility and portfolio priority. It does
+not repeatedly force maximum allocation while price stays below an old high.
+For each eligible purchase, sizing uses:
 
 ```text
-fraction = min(max_fraction, min_fraction + slope * (d - entry_atr))
+anchor = preceding purchase signal price (preceding close for the first CSV dip)
+ATR unit = max(current ATR, preceding purchase ATR), or current ATR before first buy
+fresh depth = max(0, (anchor - signal close) / ATR unit)
+fraction = min(max_fraction, min_fraction + slope * max(0, fresh depth - spacing_atr))
 requested quote = fraction * usable quote
 ```
 
-With 1,000 usable quote units, depths of 1.5, 3.5 and 7.5 ATR request 20, 80 and
-200 units before final admission/precision checks. This formula does not size the
-initial ASAP base order, which uses `bo`.
+At the default settings with 1,000 usable quote units, fresh declines of 1, 3
+and 7 ATR request 20, 80 and 200 units. A small new decline does not receive the
+maximum merely because the rolling peak remains far above price. ASAP still uses
+`bo` for its initial purchase.
+
+Changing the exchange timeframe discards queued evaluations and rebuilds
+observations before another strategy signal. It waits when the new completed-bar
+boundary predates the previous baseline, rather than replaying missed purchases.
+Already submitted orders are reconciled normally; unsubmitted requests using an
+old timeframe or sizing policy cannot submit. Explicit indicator timeframes stay
+part of the saved graph and must be compatible higher multiples of the new base.
 
 The next buy is not required to be below the base order or all previous fills.
 A recovery and new correction can qualify above an earlier signal. See
@@ -376,7 +394,7 @@ bounded routine result sets. Registry/history pages are capped at 100 records.
 Open **Backtest**, select **Accumulation** as the trade mode and choose an exact
 saved strategy version. The existing symbol picker, date range, Run action,
 market chart and result tabs are shared with Dynamic DCA. The timeframe comes
-from the saved version. Set initial funding, fee, adverse buy slippage in basis
+from Exchange configuration, matching live accumulation. Set initial funding, fee, adverse buy slippage in basis
 points and the fixed DCA comparison interval. Market history, including warmup,
 is fetched automatically from the exchange; no candle paste is needed.
 The 20000-candle limit includes warmup. Only completed bars are evaluated.

@@ -55,6 +55,7 @@ async def status_db(tmp_path, monkeypatch):
 def runtime(monkeypatch):
     owner = SimpleNamespace(
         ready=True,
+        adapter=SimpleNamespace(config_provider=lambda: {}),
         notify=Mock(),
         status_events=SimpleNamespace(publish=Mock()),
         performance=AsyncMock(),

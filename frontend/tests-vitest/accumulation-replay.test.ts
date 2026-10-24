@@ -9,8 +9,8 @@ vi.mock('../src/api/accumulation', () => ({ fetchAccumulationStrategies: api.str
 
 beforeEach(() => {
   vi.clearAllMocks()
-  api.strategies.mockResolvedValue({ versions: [{ id: 17, name: 'Patient dip', version: 1, parameters: { timeframe: '4h' } }], next_after_id: null })
-  api.fetchJson.mockImplementation((path: string) => Promise.resolve(path === '/config/all' ? { currency: 'USDC' } : path === '/strategies' ? { strategies: [{ slug: 'ema20_swing' }] } : { symbols: ['BTC/USDC'] }))
+  api.strategies.mockResolvedValue({ versions: [{ id: 17, name: 'Patient dip', version: 1, parameters: { timeframe: '1h' } }], next_after_id: null })
+  api.fetchJson.mockImplementation((path: string) => Promise.resolve(path === '/config/all' ? { currency: 'USDC', timeframe: '4h' } : path === '/strategies' ? { strategies: [{ slug: 'ema20_swing' }] } : { symbols: ['BTC/USDC'] }))
 })
 function mountView() {
   return mount(BacktestView, { global: { stubs: { BacktestResultChart: true } } })
@@ -34,7 +34,7 @@ describe('accumulation in the shared Backtest workspace', () => {
     wrapper.unmount()
   })
 
-  it('uses the normal endpoint and saved timeframe, then displays unsold inventory without closed-trade profit', async () => {
+  it('uses the normal endpoint and exchange timeframe, then displays unsold inventory without closed-trade profit', async () => {
     const wrapper = mountView()
     await flushPromises()
     await selectAccumulation(wrapper)

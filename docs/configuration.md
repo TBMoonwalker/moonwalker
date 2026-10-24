@@ -93,7 +93,7 @@ are not exposed in the UI and must be set via the API.
 | `secret` | `string` | Exchange API secret. | `your-secret` |
 | `exchange_hostname` | `string` | Optional ccxt hostname override for exchange domains (advanced). | `bybit.eu` |
 | `market` | `string` | Market type. | `spot` |
-| `timeframe` | `string` | Ticker timeframe for watcher. | `1m` |
+| `timeframe` | `string` | Watcher interval and accumulation base candle interval for live evaluation, warmup, ranking and Backtest. Changes rebuild accumulation observations before further strategy buys. | `1m` |
 | `currency` | `string` | Quote currency for pairs. | `USDT` |
 | `dry_run` | `bool` | Enable CCXT demo trading mode (if supported by exchange). | `true` |
 | `watcher_ohlcv` | `bool` | Use OHLCV watcher mode. | `false` |
