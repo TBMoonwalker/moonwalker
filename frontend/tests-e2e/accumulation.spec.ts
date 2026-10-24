@@ -55,7 +55,7 @@ test('reviews an exact inventory declaration without adding it to order history'
   expect(requests[0]).toMatchObject({ action: 'adjust_inventory', direction: 'add', quantity: '0.000000000000000001', acquisition_cost: '0.000000000000000009', note: 'Correct imported net coins', expected_revision: 20 })
   await expect(panel.getByRole('button', { name: 'Resume accumulation', exact: true })).toBeEnabled()
   expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
-  await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-adjustment-${testInfo.project.name}.png` })
+  await panel.screenshot({ path: testInfo.outputPath(`moonwalker-accumulation-adjustment-${testInfo.project.name}.png`) })
 })
 
 test('reviews rotated credentials and keeps the holding paused after proof retry', async ({ page }, testInfo) => {
@@ -102,7 +102,7 @@ test('reviews rotated credentials and keeps the holding paused after proof retry
   expect(Object.keys(requests[0]).sort()).toEqual(['action', 'expected_revision', 'operation_id', 'symbol'])
   await expect(panel.getByRole('button', { name: 'Resume accumulation', exact: true })).toBeEnabled()
   expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
-  await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-account-rebind-${testInfo.project.name}.png` })
+  await panel.screenshot({ path: testInfo.outputPath(`moonwalker-accumulation-account-rebind-${testInfo.project.name}.png`) })
 })
 
 test('retires an unsent close while preserving Closing and requiring a separate sale request', async ({ page }, testInfo) => {
@@ -145,7 +145,7 @@ test('retires an unsent close while preserving Closing and requiring a separate 
   expect(requests[0]).toMatchObject({ path: '/accumulation/repair', payload: { action: 'retire_command', previous_operation_id: 'unsent-close', expected_revision: 20 } })
   await expect(panel.getByRole('button', { name: 'Resume accumulation', exact: true })).toHaveCount(0)
   expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
-  await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-retirement-${testInfo.project.name}.png` })
+  await panel.screenshot({ path: testInfo.outputPath(`moonwalker-accumulation-retirement-${testInfo.project.name}.png`) })
   await panel.getByRole('button', { name: 'Retry remaining sale', exact: true }).click()
   expect(requests).toHaveLength(1)
   await panel.getByRole('button', { name: 'Confirm retry remaining sale', exact: true }).click()
@@ -196,7 +196,7 @@ test('reviews a restored order and retries the same evidence lookup after reload
   expect(requests[0]).toMatchObject({ action: 'repair_order', placement_operation_id: 'restored-buy', expected_revision: 20 })
   await expect(panel.getByText(/Recorded outcome: applied/)).toBeVisible()
   expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
-  await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-repair-${testInfo.project.name}.png` })
+  await panel.screenshot({ path: testInfo.outputPath(`moonwalker-accumulation-repair-${testInfo.project.name}.png`) })
 })
 
 test('keeps sold-cycle orders out of an empty new accumulation trade', async ({ page }, testInfo) => {
@@ -231,7 +231,7 @@ test('keeps sold-cycle orders out of an empty new accumulation trade', async ({ 
   await expect(panel.locator('.accumulation-order-timeline')).toHaveCount(0)
   await expect(panel.getByText('Earlier holding', { exact: false })).toHaveCount(0)
   expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
-  await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-history-${testInfo.project.name}.png` })
+  await panel.screenshot({ path: testInfo.outputPath(`moonwalker-accumulation-history-${testInfo.project.name}.png`) })
 })
 
 test('reviews manual sales and retains an uncertain request across reload', async ({ page }, testInfo) => {
@@ -290,7 +290,7 @@ test('reviews manual sales and retains an uncertain request across reload', asyn
     const targets = await panel.getByRole('button').evaluateAll(buttons => buttons.map(button => button.getBoundingClientRect().height))
     expect(targets.every(height => height >= 44)).toBe(true)
   }
-  await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-${testInfo.project.name}.png` })
+  await panel.screenshot({ path: testInfo.outputPath(`moonwalker-accumulation-${testInfo.project.name}.png`) })
 })
 
 test('switches a holding to an existing exact strategy version only in Configuration', async ({ page }, testInfo) => {
@@ -385,7 +385,7 @@ test('selects accumulation and an exact initial pin in Configuration before entr
   await page.goto('/control-center?mode=setup&target=dca')
   await expect(page.locator('.n-select').filter({ has: selector }).getByText('Patient dip · v1 · 4h', { exact: true })).toBeVisible()
   await page.getByText('Accumulation', { exact: true }).scrollIntoViewIfNeeded()
-  await page.locator('.n-card').filter({ hasText: 'Trade modes' }).last().screenshot({ path: `/private/tmp/moonwalker-accumulation-config-${testInfo.project.name}.png` })
+  await page.locator('.n-card').filter({ hasText: 'Trade modes' }).last().screenshot({ path: testInfo.outputPath(`moonwalker-accumulation-config-${testInfo.project.name}.png`) })
 })
 
 for (const action of ['declare_ownership', 'restore_inventory', 'acknowledge_settlement', 'empty_stop'] as const) {
@@ -441,7 +441,7 @@ for (const action of ['declare_ownership', 'restore_inventory', 'acknowledge_set
     if (action === 'acknowledge_settlement') await expect(panel.getByRole('button', { name: 'Retry remaining sale', exact: true })).toBeEnabled()
     if (action === 'empty_stop') await expect(panel.getByRole('button', { name: 'Reactivate', exact: true })).toBeEnabled()
     expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
-    await panel.screenshot({ path: `/private/tmp/moonwalker-accumulation-${action}-${testInfo.project.name}.png` })
+    await panel.screenshot({ path: testInfo.outputPath(`moonwalker-accumulation-${action}-${testInfo.project.name}.png`) })
   })
 }
 
@@ -497,5 +497,5 @@ test('reviews and archives exact dust without a sale, then shows the preserved U
   await expect(page.getByText('0.0000048 BTC', { exact: true })).toBeVisible()
   await expect(page.getByText('Accumulation dust archived (unsold)', { exact: true })).toBeVisible()
   if (testInfo.project.name !== 'mobile-chromium') await expect(page.getByText('Unsold', { exact: true })).toBeVisible()
-  await page.screenshot({ path: `/private/tmp/moonwalker-dust-archive-${testInfo.project.name}.png`, fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath(`moonwalker-dust-archive-${testInfo.project.name}.png`), fullPage: true })
 })

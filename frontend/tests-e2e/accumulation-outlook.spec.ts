@@ -41,7 +41,7 @@ test('puts entry state and its reviewed next action before secondary information
   await expect(action).toBeEnabled()
   expect(await panel.evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
   if (testInfo.project.name === 'mobile-chromium') expect((await action.boundingBox())!.height).toBeGreaterThanOrEqual(44)
-  await panel.screenshot({ path: `/private/tmp/accumulation-outlook-${testInfo.project.name}.png` })
+  await panel.screenshot({ path: testInfo.outputPath(`accumulation-outlook-${testInfo.project.name}.png`) })
   // Preparing an action still requires the existing confirmation; reading never trades.
   await action.click()
   await expect(panel.getByRole('button', { name: 'Confirm retry entry check', exact: true })).toBeVisible()
@@ -79,6 +79,6 @@ test('puts entry state and its reviewed next action before secondary information
   await page.clock.fastForward(15000)
   expect(reads).toBe(0)
   await page.getByRole('button', { name: 'Dark theme', exact: true }).click()
-  await panel.screenshot({ path: `/private/tmp/accumulation-outlook-dark-${testInfo.project.name}.png` })
+  await panel.screenshot({ path: testInfo.outputPath(`accumulation-outlook-dark-${testInfo.project.name}.png`) })
   await page.getByRole('button', { name: 'Light theme', exact: true }).click()
 })

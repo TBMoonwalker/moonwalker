@@ -49,5 +49,5 @@ test('runs accumulation in the existing Backtest form, chart and results tabs', 
   expect(commands).toBe(0)
   expect(await page.locator('.backtest-page').evaluate(element => element.scrollWidth > element.clientWidth)).toBe(false)
   await page.evaluate(() => window.scrollTo(0, 0))
-  await page.screenshot({ animations: 'disabled', path: `/private/tmp/backtest-accumulation-${testInfo.project.name}.png`, fullPage: true })
+  await page.screenshot({ animations: 'disabled', path: testInfo.outputPath(`backtest-accumulation-${testInfo.project.name}.png`), fullPage: true })
 })

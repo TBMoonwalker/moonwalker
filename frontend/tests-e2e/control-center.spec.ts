@@ -586,7 +586,7 @@ test('surfaces every typed sell failure from the mounted Open Trades UI', async 
   expect(failureIndex).toBe(failures.length)
 })
 
-test('enables accumulation and edits shared indicators in the existing builder', async ({ page, isMobile }) => {
+test('enables accumulation and edits shared indicators in the existing builder', async ({ page, isMobile }, testInfo) => {
   test.skip(isMobile, 'graph editing uses desktop and tablet')
   await page.goto('/control-center?mode=strategy-builder&target=strategy-builder')
   await page.getByRole('button', { name: 'Duplicate selected' }).click()
@@ -600,6 +600,6 @@ test('enables accumulation and edits shared indicators in the existing builder',
   const request = await saved
   expect(request.postDataJSON().ir.accumulation).toMatchObject({ entry_atr: '2', timeframe: '1h' })
   await expect(page.getByText('Saved active version v2.')).toBeVisible()
-  await page.screenshot({ path: `/private/tmp/moonwalker-shared-builder-${page.viewportSize()?.width}.png`, fullPage: true })
+  await page.screenshot({ path: testInfo.outputPath(`moonwalker-shared-builder-${page.viewportSize()?.width}.png`), fullPage: true })
   await expect(page.getByRole('region', { name: 'Accumulation strategies', exact: true })).toHaveCount(0)
 })

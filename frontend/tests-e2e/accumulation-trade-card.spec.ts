@@ -96,7 +96,7 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await expect(card.getByText('Change strategy', { exact: true })).toHaveCount(0)
   await expect(card.getByLabel('Accumulation strategy', { exact: true })).toHaveCount(0)
   expect(commands).toBe(0)
-  await page.locator('.expanded-trade-container').screenshot({ path: `/private/tmp/accumulation-inline-${theme}-${testInfo.project.name}.png` })
+  await page.locator('.expanded-trade-container').screenshot({ path: testInfo.outputPath(`accumulation-inline-${theme}-${testInfo.project.name}.png`) })
   async function rowAction(label: string) {
     if (testInfo.project.name === 'mobile-chromium') {
       await page.locator('.open-trade-mobile-details .n-card-header__close').click()
