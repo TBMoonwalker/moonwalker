@@ -320,7 +320,8 @@ async def persist_accumulation_order(
                     activation.execution_guard_json = None
                     activation.observation_epoch += 1
                     activation.observations_initialized = False
-                    activation.baseline_close_ms = None
+                    # Retain the validated timestamp as the rebase floor. A null
+                    # baseline would make the strict decision identity unreadable.
                 if not opportunity.is_initial_entry:
                     activation.consumption_revision += 1
                     activation.execution_guard_json = json.dumps(

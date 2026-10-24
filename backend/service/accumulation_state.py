@@ -50,6 +50,12 @@ async def _load_context(
     ).using_db(connection)
     if version is None:
         raise AccumulationStateError("Activation has no pinned strategy version.")
+    baseline_close_ms = activation.baseline_close_ms
+    if baseline_close_ms is None and not activation.observations_initialized:
+        # Legacy first fills cleared the baseline while invalidating observations.
+        # Zero is only an in-memory floor for rebuilding from fresh inputs; the
+        # verified rebase persists a real candle baseline before evaluation.
+        baseline_close_ms = 0
     identity = AccumulationIdentity.from_dict(
         {
             "activation_id": str(activation.id),
@@ -61,7 +67,7 @@ async def _load_context(
             "strategy_slug": version.strategy_slug,
             "strategy_version": version.version,
             "observation_epoch": activation.observation_epoch,
-            "baseline_close_ms": activation.baseline_close_ms,
+            "baseline_close_ms": baseline_close_ms,
             "revision": activation.revision,
             "consumption_revision": activation.consumption_revision,
         }

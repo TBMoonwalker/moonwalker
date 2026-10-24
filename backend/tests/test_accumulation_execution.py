@@ -4200,6 +4200,7 @@ async def test_new_asap_cycle_buys_fresh_base_order_without_old_consumption_or_c
         activation.execution_guard_json = old_guard
         await activation.save()
     before = len(client.calls)
+    original_candles = adapter.candles
     history = AsyncMock(side_effect=AccumulationStateError("no fresh candles"))
     monkeypatch.setattr(adapter, "candles", history)
     restarted = AccumulationRuntime(adapter)
@@ -4224,6 +4225,16 @@ async def test_new_asap_cycle_buys_fresh_base_order_without_old_consumption_or_c
     )
     assert await model.AccumulationFillCheckpoint.filter(deal_id=old_deal).count() == 3
     await restarted.tick()
+    assert len(client.calls) == before + 1
+    # Restoring market inputs must let this new cycle initialize observations.
+    # A successful BO alone does not prove the strategy can run afterwards.
+    monkeypatch.setattr(adapter, "candles", original_candles)
+    client.balance["free"]["BTC"] = fresh.accumulation_net_quantity
+    restarted.notify(activation.symbol)  # Market-input recovery wakes the runtime.
+    await restarted.tick()
+    await activation.refresh_from_db()
+    assert activation.observations_initialized
+    assert type(activation.baseline_close_ms) is int
     assert len(client.calls) == before + 1
 
 
@@ -4364,3 +4375,59 @@ async def test_verified_dust_transfer_restores_dashboard_profit_and_chart_snapsh
     assert result["profit_history_scope"] == "all_verified_executions"
     points = await statistic.get_profit_overall_timeline()
     assert points and points[-1]["profit_overall"] == result["profit_overall"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("temporarily_unavailable", [False, True])
+async def test_restart_rebuilds_uninitialized_legacy_null_baseline_without_buying(
+    env, monkeypatch, temporarily_unavailable
+):
+    """Recover the exact post-BO state observed on the running installation."""
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, *_ = env
+    await service.asap()
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    assert len(client.calls) == 1
+    activation = await model.AccumulationActivation.get()
+    holding = await model.OpenTrades.get(id=activation.holding_id)
+    client.balance["free"]["BTC"] = holding.accumulation_net_quantity
+    activation.observation_epoch += 1
+    activation.observations_initialized = False
+    activation.baseline_close_ms = None
+    await activation.save()
+
+    original_candles = adapter.candles
+    if temporarily_unavailable:
+        monkeypatch.setattr(
+            adapter, "candles", AsyncMock(side_effect=AccumulationStateError("offline"))
+        )
+    restarted = AccumulationRuntime(adapter)
+    assert await restarted.startup()
+    if temporarily_unavailable:
+        await activation.refresh_from_db()
+        assert activation.baseline_close_ms is None
+        assert not activation.observations_initialized
+        assert len(client.calls) == 1
+        monkeypatch.setattr(adapter, "candles", original_candles)
+        await restarted.tick()
+    await activation.refresh_from_db()
+    assert activation.observations_initialized
+    assert activation.baseline_close_ms == 600 * HOUR
+    assert activation.consumption_revision == 0
+    assert activation.execution_guard_json is None
+    assert activation.holding_id == holding.id
+    await holding.refresh_from_db()
+    assert holding.accumulation_net_quantity == client.balance["free"]["BTC"]
+    await restarted.tick()
+    assert len(client.calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_initialized_observations_cannot_normalize_a_null_baseline(env):
+    activation, _ = await setup_activation(env)
+    activation.baseline_close_ms = None
+    await activation.save()
+    with pytest.raises(AccumulationStateError, match="Invalid baseline_close_ms"):
+        await load_accumulation_context(str(activation.id), activation.account_scope)
