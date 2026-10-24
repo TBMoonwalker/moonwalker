@@ -3,8 +3,8 @@
 import asyncio
 import copy
 import json
-from dataclasses import asdict
-from decimal import Decimal
+from dataclasses import asdict, replace
+from decimal import ROUND_DOWN, Decimal
 from unittest.mock import AsyncMock, patch
 
 import ccxt.async_support as ccxt
@@ -33,6 +33,7 @@ from service.accumulation_strategy import (
     AccumulationObservations,
     AccumulationParameters,
     build_accumulation_strategy_document,
+    calculate_accumulation_market,
 )
 from service.capital_budget import CapitalBudgetService, load_pending_capital
 from service.exchange import Exchange
@@ -3450,38 +3451,144 @@ async def test_asap_base_order_keeps_capital_pause_and_single_submission_guards(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("legacy_candidate", [False, True])
+@pytest.mark.parametrize("fill_price", ["60", "59.5"])
 async def test_initial_fill_then_strategy_rebase_and_dip_uses_normal_guard(
-    env, monkeypatch
+    env, monkeypatch, legacy_candidate, fill_price
 ):
+    """ASAP fills anchor spacing, including old candidates and a runtime restart."""
     service, _ = await _entry_service(env, monkeypatch, signal="asap")
     adapter, client, clock, config, *_ = env
     config["bo"] = 25
+
+    async def actual_fill():
+        symbol, _, side, amount, _, params = client.calls[-1]
+        client.response = {
+            "id": "initial-actual-fill",
+            "clientOrderId": params["clientOrderId"],
+            "symbol": symbol,
+            "side": side,
+            "status": "closed",
+            "filled": amount,
+            "cost": str(Decimal(amount) * Decimal(fill_price)),
+            "timestamp": clock[0],
+            "fees": [{"currency": "USDC", "cost": "0"}],
+        }
+
+    client.on_submit = actual_fill
     await service.asap()
     runtime = AccumulationRuntime(adapter)
     assert await runtime.startup()
     await runtime.tick()
     assert len(client.calls) == 1
-    client.balance["free"]["BTC"] = (
-        await model.OpenTrades.get()
-    ).accumulation_net_quantity
-    await runtime.tick()  # Strategy observations are initialized after the base order.
+    client.on_submit = None
+    client.response = None
+    holding = await model.OpenTrades.get()
+    client.balance["free"]["BTC"] = holding.accumulation_net_quantity
+    await runtime.tick()  # Warmup follows the immediate base order.
     activation = await model.AccumulationActivation.get()
     assert activation.observations_initialized
-    assert (
-        await model.AccumulationStrategyState.get()
-    ).last_processed_close_ms == 600 * HOUR
+    clock[0] += HOUR
+    if legacy_candidate:
+        rows = await adapter.candles(activation.symbol, AccumulationParameters())
+        market = calculate_accumulation_market(
+            rows, AccumulationParameters(), close_ms=601 * HOUR
+        )
+        await model.AccumulationOpportunity.create(
+            activation=activation,
+            generation=activation.generation,
+            strategy_version_id=activation.strategy_version_id,
+            observation_epoch=activation.observation_epoch,
+            signal_close_ms=market.close_ms,
+            expires_at_ms=market.close_ms + HOUR,
+            signal_price=market.close,
+            signal_atr=market.atr,
+            signal_peak=market.peak,
+        )
+    await runtime.tick()
+    clock[0] += 5000
+    await runtime.tick()
+    assert len(client.calls) == 1  # A decline from 98 to 60 is still at the BO price.
+    activation = await model.AccumulationActivation.get()
+    assert runtime.status["BTC/USDC"] == "WAIT_REARM"
+    assert runtime.wait_conditions["BTC/USDC"]["levels"]
+    assert activation.consumption_revision == 1
+    guard_json = activation.execution_guard_json
+    guard = json.loads(guard_json)
+    initial = await model.AccumulationOpportunity.get(is_initial_entry=True)
+    assert guard["opportunity_id"] == str(initial.id)
+    assert Decimal(guard["signal_price"]) == Decimal(fill_price)
+    assert Decimal(guard["signal_atr"]) > 0
+    assert guard["signal_close_ms"] == NOW
+    assert initial.consumption_revision == 1
+    assert initial.signal_atr == "0"  # The original ASAP evidence stays immutable.
+
+    restarted = AccumulationRuntime(adapter)
+    assert await restarted.startup()
+    await restarted.tick()
+    clock[0] += 5000
+    await restarted.tick()
+    assert len(client.calls) == 1
+    assert (await model.AccumulationActivation.get()).execution_guard_json == guard_json
+
+    # A genuinely deeper completed decline can buy after the restart.
+    original = adapter.candles
+    deeper = (
+        Decimal(guard["signal_price"]) - Decimal(guard["signal_atr"]) - 1
+    ).quantize(Decimal("0.01"), rounding=ROUND_DOWN)
+
+    async def declining_history(*args, **kwargs):
+        rows = list(await original(*args, **kwargs))
+        rows[-1] = replace(rows[-1], low=str(deeper - 1), close=str(deeper))
+        return rows
+
+    monkeypatch.setattr(adapter, "candles", declining_history)
+    client.ask = str(deeper)
+    clock[0] += HOUR
+    await restarted.tick()
+    clock[0] += 5000
+    await restarted.tick()
+    assert len(client.calls) == 2, restarted.status
+    activation = await model.AccumulationActivation.get()
+    assert activation.consumption_revision == 2
+    assert json.loads(activation.execution_guard_json)["opportunity_id"] != str(
+        initial.id
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["missing_checkpoint", "wrong_deal", "timestamp"])
+async def test_initial_spacing_requires_owned_settled_fill_evidence(
+    env, monkeypatch, invalid
+):
+    """Missing BO evidence cannot silently restore unspaced first-dip buying."""
+    service, _ = await _entry_service(env, monkeypatch, signal="asap")
+    adapter, client, clock, *_ = env
+    await service.asap()
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    holding = await model.OpenTrades.get()
+    client.balance["free"]["BTC"] = holding.accumulation_net_quantity
+    checkpoint = await model.AccumulationFillCheckpoint.get()
+    if invalid == "missing_checkpoint":
+        await checkpoint.delete()
+    elif invalid == "wrong_deal":
+        checkpoint.deal_id = "another-cycle"
+        await checkpoint.save()
+    else:
+        checkpoint.evidence_json = '{"timestamp_ms": null}'
+        await checkpoint.save()
+    await runtime.tick()
     clock[0] += HOUR
     await runtime.tick()
     clock[0] += 5000
     await runtime.tick()
-    # A fresh declining candle now belongs to the accumulation strategy.
-    assert len(client.calls) == 2
+    assert len(client.calls) == 1
+    assert runtime.status["BTC/USDC"] == "WAIT_DATA"
     activation = await model.AccumulationActivation.get()
-    assert activation.consumption_revision == 1
-    assert Decimal(json.loads(activation.execution_guard_json)["signal_atr"]) > 0
-    assert (
-        await model.AccumulationOpportunity.filter(is_initial_entry=True).count() == 1
-    )
+    assert activation.consumption_revision == 0
+    assert activation.execution_guard_json is None
 
 
 @pytest.mark.asyncio
@@ -4156,10 +4263,12 @@ async def test_new_asap_cycle_buys_fresh_base_order_without_old_consumption_or_c
 ):
     service, _ = await _entry_service(env, monkeypatch, signal="asap")
     adapter, client, clock, config, *_ = env
+    client.ask = "65"  # Leave a full ATR of spacing before the strategy dip at 60.
     await service.asap()
     runtime = AccumulationRuntime(adapter)
     assert await runtime.startup()
     await runtime.tick()
+    client.ask = "60"
     client.balance["free"]["BTC"] = (
         await model.OpenTrades.get()
     ).accumulation_net_quantity

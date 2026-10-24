@@ -60,9 +60,15 @@ ASAP is authorization to attempt the configured base order as soon as normal
 execution checks pass. It does not require a dip, graph match, strategy warmup
 or portfolio ranking round. Its fill has no invented ATR anchor.
 
-After that fill, completed history initializes strategy observations. Only fresh
-qualifying signals can propose later purchases. CSV starts from declared existing
-inventory instead, so it does not submit an initial purchase.
+After that fill, completed history initializes strategy observations. Before a
+later purchase, the runtime freezes a spacing anchor from the base order's actual
+gross execution price and the first fresh, validated completed-candle ATR. A
+further decline or recovery followed by a fresh correction must satisfy the
+configured ATR distances from that anchor, as well as the strategy conditions.
+The anchor survives restart and prevents an older pending first-dip candidate
+from bypassing spacing. Missing or unresolved fill evidence blocks further buys.
+CSV starts from declared existing inventory instead, so it does not submit an
+initial purchase or manufacture a base-order anchor.
 
 ### Why conditions and execution settings are separate
 

@@ -27,6 +27,7 @@ from service.accumulation_strategy import (
     PRIORITY_PROTOCOL,
     AccumulationCandle,
     AccumulationGuard,
+    AccumulationMarket,
     AccumulationObservations,
     AccumulationParameters,
     accumulation_requested_quote,
@@ -73,6 +74,79 @@ def _guard(raw: str | None, revision: int) -> AccumulationGuard | None:
     if result.consumption_revision != revision:
         raise AccumulationStateError("Execution guard consumption revision changed.")
     return result
+
+
+async def _anchor_initial_fill(
+    activation: model.AccumulationActivation,
+    market: AccumulationMarket,
+    conn: Any,
+) -> AccumulationGuard | None:
+    """Freeze spacing from settled BO execution and the first validated ATR.
+
+    ASAP needs no market history to buy. Its immutable signal records the ask
+    and zero ATR, so only its owned fill checkpoint can establish this anchor.
+    Imported inventory without an ASAP opportunity retains first-dip behavior.
+    """
+    initial = (
+        await model.AccumulationOpportunity.filter(
+            activation=activation,
+            generation=activation.generation,
+            is_initial_entry=True,
+            consumed_at__isnull=False,
+        )
+        .using_db(conn)
+        .get_or_none()
+    )
+    if initial is None:
+        return None
+    holding = await model.OpenTrades.get_or_none(id=activation.holding_id).using_db(
+        conn
+    )
+    checkpoints = await model.AccumulationFillCheckpoint.filter(
+        activation=activation,
+        placement__accumulation_attempt__opportunity_id=initial.id,
+    ).using_db(conn)
+    checkpoints = [
+        checkpoint
+        for checkpoint in checkpoints
+        if Decimal(canonical_decimal(checkpoint.filled)) > 0
+    ]
+    if (
+        holding is None
+        or len(checkpoints) != 1
+        or checkpoints[0].deal_id != holding.deal_id
+        or not checkpoints[0].terminal
+        or not checkpoints[0].fees_complete
+    ):
+        raise AccumulationStateError("Settled initial fill evidence is required.")
+    checkpoint = checkpoints[0]
+    filled = Decimal(canonical_decimal(checkpoint.filled, positive=True))
+    cost = Decimal(canonical_decimal(checkpoint.quote_cost, positive=True))
+    try:
+        evidence = json.loads(checkpoint.evidence_json)
+        timestamp = evidence["timestamp_ms"]
+    except (ValueError, KeyError, TypeError) as exc:
+        raise AccumulationStateError("Initial fill timestamp is missing.") from exc
+    if type(timestamp) is not int or timestamp < 0:
+        raise AccumulationStateError("Initial fill timestamp is invalid.")
+    with localcontext() as context:
+        context.prec = 50
+        price = canonical_decimal(str(cost / filled), positive=True)
+    guard = AccumulationGuard.from_dict(
+        {
+            "opportunity_id": str(initial.id),
+            "signal_close_ms": timestamp,
+            "signal_price": price,
+            "signal_atr": canonical_decimal(market.atr, positive=True),
+            "strategy_version_id": initial.strategy_version_id,
+            "consumption_revision": 1,
+        }
+    )
+    activation.consumption_revision = guard.consumption_revision
+    activation.execution_guard_json = json.dumps(asdict(guard), sort_keys=True)
+    initial.consumption_revision = guard.consumption_revision
+    await initial.save(using_db=conn, update_fields=["consumption_revision"])
+    return guard
 
 
 def _proposal(
@@ -248,10 +322,15 @@ async def evaluate_accumulation(
                 or market.close_ms > state.last_close_ms + parameters.interval_ms
             ):
                 return AccumulationDecision(expected, "WAIT", "WAIT_REBASE")
+            unsettled = await _has_unsettled_execution(activation, conn)
+            if guard is None and not unsettled:
+                guard = await _anchor_initial_fill(activation, market, conn)
             updated_state = advance_accumulation_observations(
                 state, market, guard, parameters
             )
-            identity = expected
+            identity = replace(
+                expected, consumption_revision=activation.consumption_revision
+            )
             if updated_state != state:
                 activation.revision += 1
                 await activation.save(using_db=conn)
@@ -268,15 +347,29 @@ async def evaluate_accumulation(
                         revision=activation.revision,
                     )
                 )
-                identity = replace(expected, revision=activation.revision)
-            if await _has_unsettled_execution(activation, conn):
+                identity = replace(identity, revision=activation.revision)
+            if unsettled:
                 return AccumulationDecision(identity, "WAIT", "WAIT_ORDER")
             opportunity = await model.AccumulationOpportunity.get_or_none(
                 activation=activation,
                 observation_epoch=expected.observation_epoch,
                 signal_close_ms=market.close_ms,
             ).using_db(conn)
-            if opportunity is None:
+            initial_anchor = (
+                guard is not None
+                and await model.AccumulationOpportunity.filter(
+                    id=guard.opportunity_id,
+                    activation=activation,
+                    generation=activation.generation,
+                    is_initial_entry=True,
+                )
+                .using_db(conn)
+                .exists()
+            )
+            # An old pending first-dip candidate must also respect the BO anchor.
+            if opportunity is None or (
+                initial_anchor and opportunity.consumed_at is None
+            ):
                 reason = accumulation_signal_reason(
                     market, updated_state, guard, parameters
                 )
@@ -289,6 +382,7 @@ async def evaluate_accumulation(
                             market, updated_state, guard, parameters, reason
                         ),
                     )
+            if opportunity is None:
                 if market.close_ms == state.last_close_ms:
                     return AccumulationDecision(
                         identity,

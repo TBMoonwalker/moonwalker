@@ -161,7 +161,12 @@ missing, unordered or misaligned candles cannot produce a buy.
 A qualifying decline must close below the previous close and reach at least
 1.5 ATR below the rolling peak. After a consumed signal, another purchase needs a
 further decline of one frozen signal ATR, or a recovery of one signal ATR followed
-by a fresh correction. There is no extra elapsed-time cooldown. Only a confirmed
+by a fresh correction. For ASAP, these distances also apply after the immediate
+base order: its actual gross fill price becomes the first anchor, with ATR frozen
+when fresh completed strategy data becomes available. The original ASAP request
+retains its zero ATR; no candle history is needed to submit that base order.
+Restarts preserve the anchor. CSV imports without an ASAP base order retain the
+first qualifying dip behavior. There is no extra elapsed-time cooldown. Only a confirmed
 positive fill consumes an opportunity; partial and duplicate reports cannot
 consume it twice. Warmup, resume, restart and switching observe historical candles
 without backfilling purchases.
