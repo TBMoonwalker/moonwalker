@@ -19,6 +19,7 @@ def test_is_matching_order_id_handles_mixed_types() -> None:
 def test_aggregate_matched_trades_combines_partial_fills() -> None:
     matched_orders = [
         {
+            "id": "fill-1",
             "amount": 1.5,
             "cost": 150.0,
             "timestamp": 1000,
@@ -29,6 +30,7 @@ def test_aggregate_matched_trades_combines_partial_fills() -> None:
             "fee": {"cost": 0.01, "currency": "BTC"},
         },
         {
+            "id": "fill-2",
             "amount": 0.5,
             "cost": 55.0,
             "timestamp": 2000,

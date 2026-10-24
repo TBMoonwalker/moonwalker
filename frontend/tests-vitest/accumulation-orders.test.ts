@@ -45,3 +45,19 @@ it('numbers the new base order independently of all previous-cycle buys and sale
   expect(orders).toHaveLength(1)
   expect(orders[0]).toMatchObject({ title: 'Base order', base: true, checkpoint: { deal_id: 'current' } })
 })
+
+
+it('shows declared CSV base then native accumulation purchases without mixing cycles', () => {
+  const declared = { key: 'csv-1', deal_id: 'current', symbol: 'BTC/USDC', timestamp: '100', price: '81.000000000000000001', amount: '0.01227109', ordersize: '1000.139592', fees: { BTC: '0.00003075' }, fees_known: true, provenance: 'csv_declaration' as const }
+  const orders = accumulationOrders([checkpoint()], [execution(1)], 'current', [], [declared, { ...declared, key: 'old', deal_id: 'sold' }])
+  expect(orders.map(row => row.title)).toEqual(['Base order · CSV', 'Accumulation order 1'])
+  expect(orders[0].content).toContain('Price: 81.000000000000000001')
+  expect(orders[1].checkpoint?.placement_operation_id).toBe('buy-1')
+  expect(accumulationOrders([], [], null, [], [declared])).toEqual([{ key: 'registration', title: 'Entry registration', base: true }])
+})
+
+it('keeps corrupt declaration history unavailable instead of calling a later native buy the base', () => {
+  const orders = accumulationOrders([checkpoint()], [execution(1)], 'current', [], [], true)
+  expect(orders.find(row => row.checkpoint)?.title).toBe('Accumulation order 1')
+  expect(orders.some(row => row.title === 'Base order')).toBe(false)
+})

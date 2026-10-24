@@ -1,5 +1,6 @@
 """Sell execution orchestration helpers."""
 
+import asyncio
 from typing import Any, cast
 
 import ccxt.async_support as ccxt
@@ -34,7 +35,37 @@ class ExchangeSellManager:
         exchange = self._get_exchange()
         if exchange is None:
             raise RuntimeError("Exchange client is unavailable.")
-        return await exchange.create_market_sell_order(symbol, amount, params)
+        client_order_id = params.get("clientOrderId", "unavailable")
+        self._logger.info(
+            "Submitting journaled sell symbol=%s amount=%s client_order_id=%s",
+            symbol,
+            amount,
+            client_order_id,
+        )
+        try:
+            result = await exchange.create_market_sell_order(symbol, amount, params)
+        except (
+            asyncio.CancelledError,
+            ccxt.BaseError,
+            TimeoutError,
+            OSError,
+            ValueError,
+            TypeError,
+            RuntimeError,
+        ) as exc:
+            self._logger.warning(
+                "Journaled sell requires reconciliation symbol=%s client_order_id=%s failure=%s",
+                symbol,
+                client_order_id,
+                type(exc).__name__,
+            )
+            raise
+        self._logger.info(
+            "Journaled sell request returned symbol=%s client_order_id=%s",
+            symbol,
+            client_order_id,
+        )
+        return result
 
     async def create_spot_sell(
         self,

@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import asdict, dataclass
-from decimal import Decimal, InvalidOperation
 from enum import StrEnum
 from typing import Any
 from uuid import UUID
+
+from service.exchange_types import canonical_decimal as exchange_canonical_decimal
 
 MAX_OBSERVATION_BYTES = 32_768
 OBSERVATION_SCHEMA_VERSION = 1
@@ -31,18 +32,11 @@ class AccumulationStateError(ValueError):
 
 
 def canonical_decimal(value: str, *, positive: bool = False) -> str:
-    """Validate exact monetary strings without accepting binary float inputs."""
-    if not isinstance(value, str) or not value or len(value) > 128:
-        raise AccumulationStateError("Expected a bounded decimal string.")
+    """Validate exact monetary strings with the legacy accumulation exception."""
     try:
-        parsed = Decimal(value)
-    except InvalidOperation as exc:
-        raise AccumulationStateError("Invalid decimal string.") from exc
-    if not parsed.is_finite() or parsed < 0 or (positive and parsed == 0):
-        raise AccumulationStateError("Decimal must be finite and nonnegative.")
-    if abs(parsed.as_tuple().exponent) > 128:
-        raise AccumulationStateError("Decimal exponent is out of bounds.")
-    return format(parsed, "f") if parsed else "0"
+        return exchange_canonical_decimal(value, positive=positive)
+    except ValueError as exc:
+        raise AccumulationStateError(str(exc)) from exc
 
 
 def _integer(payload: dict[str, Any], name: str, minimum: int = 0) -> int:

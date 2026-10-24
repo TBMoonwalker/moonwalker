@@ -239,6 +239,7 @@ async def prepare_accumulation_buy(
                 mirror = math.nextafter(mirror, math.inf)
             order = {
                 "symbol": activation.symbol,
+                "_execution_scope": funding.account_scope,
                 "side": "buy",
                 "ordertype": "limit",
                 "ordersize": proposal.requested_quote,

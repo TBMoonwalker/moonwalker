@@ -32,12 +32,14 @@ from service.accumulation_portfolio import AccumulationAdmissionInputs
 from service.capital_budget import CapitalBudgetService
 from service.database import run_sqlite_write_with_retry
 from service.delisting_protection import DelistingProtectionService
+from service.exchange_capabilities import ExchangeSubmissionIndeterminate
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.placement_intents import (
     PlacementIntentService,
     PlacementIntentState,
     deserialize_placement_payload,
 )
+from service.placement_workflow import PlacementWorkflow
 from service.trading_controls import is_global_trading_paused
 from service.trading_maintenance import trading_maintenance_barrier
 from tortoise.transactions import in_transaction
@@ -274,61 +276,29 @@ class AccumulationBuyExecutor:
             await self.adapter.account_scope(config)
             outcome = await self._claim(operation_id, config, inputs, precision)
             if outcome == "claimed":
-                try:
-                    # The symbol stays guarded through this single bounded call;
-                    # no capital lock or DB transaction is held over the network.
+
+                async def submit_buy() -> dict[str, Any]:
                     async with asyncio.timeout(10):
-                        evidence = (
-                            await self.adapter.exchange.submit_preflighted_spot_buy(
-                                symbol=row.symbol,
-                                amount=precision.amount,
-                                price=precision.limit_price,
-                                client_order_id=row.client_order_id,
-                                config=config,
-                            )
+                        return await self.adapter.exchange.submit_preflighted_spot_buy(
+                            symbol=row.symbol,
+                            amount=precision.amount,
+                            price=precision.limit_price,
+                            client_order_id=row.client_order_id,
+                            config=config,
                         )
-                except asyncio.CancelledError:
-                    # SUBMITTING is already durable. Recovery looks up; never resend.
-                    raise
-                except (
-                    ccxt.BaseError,
-                    TimeoutError,
-                    OSError,
-                    ValueError,
-                    TypeError,
-                    RuntimeError,
-                ):
-                    await self.intents.transition(
+
+                try:
+                    evidence = await PlacementWorkflow(self.intents).submit(
                         operation_id,
-                        PlacementIntentState.INDETERMINATE,
-                        reason_code="accumulation_response_unknown",
+                        symbol=row.symbol,
+                        side="buy",
+                        submit=submit_buy,
+                        require_acknowledgement=True,
                     )
-                    logging.warning(
-                        "Accumulation buy %s requires lookup after an uncertain response.",
-                        operation_id,
-                    )
+                except ExchangeSubmissionIndeterminate:
                     return AccumulationExecutionResult(
                         operation_id, "indeterminate", "WAIT_RECONCILIATION"
                     )
-                if (
-                    not isinstance(evidence, dict)
-                    or not isinstance(evidence.get("id"), str)
-                    or not evidence["id"]
-                ):
-                    await self.intents.transition(
-                        operation_id,
-                        PlacementIntentState.INDETERMINATE,
-                        reason_code="accumulation_ack_missing_identity",
-                    )
-                    return AccumulationExecutionResult(
-                        operation_id, "indeterminate", "WAIT_RECONCILIATION"
-                    )
-                await self.intents.transition(
-                    operation_id,
-                    PlacementIntentState.ACCEPTED,
-                    exchange_order_id=evidence["id"],
-                    result=evidence,
-                )
         if outcome != "claimed":
             if outcome.startswith(("WAIT_", "blocked_")):
                 return await self._reject_prepared(operation_id, config, outcome)

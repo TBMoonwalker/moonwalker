@@ -32,9 +32,13 @@ from service.accumulation_lifecycle import (
 from service.accumulation_recovery import AccumulationPlacementRecovery
 from service.accumulation_state import AccumulationConflictError
 from service.database import run_sqlite_write_with_retry
-from service.exchange_capabilities import build_client_order_id
+from service.exchange_capabilities import (
+    ExchangeSubmissionIndeterminate,
+    build_client_order_id,
+)
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
 from service.placement_intents import PlacementIntentService, PlacementIntentState
+from service.placement_workflow import PlacementWorkflow
 from service.trading_maintenance import trading_maintenance_barrier
 from tortoise.transactions import in_transaction
 
@@ -225,6 +229,7 @@ class AccumulationCommandExecutor:
                     request_json=json.dumps(
                         {
                             "symbol": activation.symbol,
+                            "_execution_scope": activation.account_scope,
                             "amount": inputs.amount,
                             "accumulation_operation_id": operation_id,
                             "accumulation_action": operation.action,
@@ -385,51 +390,28 @@ class AccumulationCommandExecutor:
                 return AccumulationExecutionResult(
                     operation_id, "pending", "ALREADY_CLAIMED"
                 )
-            try:
+
+            async def submit_sell() -> dict[str, Any]:
                 async with asyncio.timeout(10):
-                    evidence = await self.adapter.exchange.submit_preflighted_spot_sell(
+                    return await self.adapter.exchange.submit_preflighted_spot_sell(
                         symbol=row.symbol,
                         amount=inputs.amount,
                         client_order_id=row.client_order_id,
                         config=config,
                     )
-            except asyncio.CancelledError:
-                raise
-            except (
-                ccxt.BaseError,
-                TimeoutError,
-                OSError,
-                ValueError,
-                TypeError,
-                RuntimeError,
-            ):
-                await self.intents.transition(
+
+            try:
+                evidence = await PlacementWorkflow(self.intents).submit(
                     row.operation_id,
-                    PlacementIntentState.INDETERMINATE,
-                    reason_code="accumulation_sale_response_unknown",
+                    symbol=row.symbol,
+                    side="sell",
+                    submit=submit_sell,
+                    require_acknowledgement=True,
                 )
+            except ExchangeSubmissionIndeterminate:
                 return AccumulationExecutionResult(
                     row.operation_id, "indeterminate", "WAIT_RECONCILIATION"
                 )
-            if (
-                not isinstance(evidence, dict)
-                or not isinstance(evidence.get("id"), str)
-                or not evidence["id"]
-            ):
-                await self.intents.transition(
-                    row.operation_id,
-                    PlacementIntentState.INDETERMINATE,
-                    reason_code="accumulation_sale_ack_missing_identity",
-                )
-                return AccumulationExecutionResult(
-                    row.operation_id, "indeterminate", "WAIT_RECONCILIATION"
-                )
-            await self.intents.transition(
-                row.operation_id,
-                PlacementIntentState.ACCEPTED,
-                exchange_order_id=evidence["id"],
-                result=evidence,
-            )
         try:
             result = await persist_accumulation_order(
                 row.operation_id,

@@ -61,3 +61,24 @@ def test_client_order_id_is_stable_bounded_and_forwarded_to_ccxt() -> None:
     assert first.startswith("mw-")
     assert len(first) == 31
     assert build_client_order_params(first) == {"clientOrderId": first}
+
+
+@pytest.mark.parametrize("demo", [True, False])
+def test_execution_scope_binds_environment_and_account_without_exposing_keys(demo):
+    from service.exchange_capabilities import exchange_execution_scope
+
+    config = {"exchange": "binance", "dry_run": demo, "key": "scope-secret"}
+    scope = exchange_execution_scope(config)
+    assert "scope-secret" not in scope
+    assert scope == exchange_execution_scope(dict(config))
+    assert scope != exchange_execution_scope({**config, "dry_run": not demo})
+    assert scope != exchange_execution_scope({**config, "key": "other"})
+    assert scope != exchange_execution_scope({**config, "exchange_hostname": "other"})
+    assert (scope == exchange_execution_scope({**config, "sandbox": True})) == demo
+
+
+def test_execution_scope_rejects_ambiguous_environment():
+    from service.exchange_capabilities import exchange_execution_scope
+
+    with pytest.raises(ValueError, match="boolean"):
+        exchange_execution_scope({"exchange": "binance", "dry_run": "false"})

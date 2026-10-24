@@ -311,3 +311,42 @@ async def test_finalize_market_buy_uses_live_fee_when_not_dry_run() -> None:
     assert result["amount_fee"] == 0.0
     assert result["amount"] == 3.0
     assert exchange.fetch_trading_fee_calls == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [False, True])
+async def test_journaled_buy_logs_submission_without_raw_payload_or_resubmission(
+    caplog, failure
+):
+    import logging
+    from unittest.mock import AsyncMock
+
+    exchange = _DummyExchange()
+    logger = logging.getLogger("test.journaled_buy")
+    caplog.set_level(logging.INFO, logger=logger.name)
+    secret = "credential-that-must-not-appear"
+    exchange.create_order = AsyncMock(
+        side_effect=ccxt.RequestTimeout(secret) if failure else None,
+        return_value={"id": "buy-1", "info": {"secret": secret}},
+    )
+    manager = ExchangeBuyManager(logger, get_exchange=lambda: exchange)
+    params = {"clientOrderId": "mw-test", "timeInForce": "IOC", "secret": secret}
+    if failure:
+        with pytest.raises(ccxt.RequestTimeout):
+            await manager.submit_buy_once(
+                symbol="BTC/USDC",
+                order_type="limit",
+                amount="1",
+                price="60",
+                params=params,
+            )
+    else:
+        await manager.submit_buy_once(
+            symbol="BTC/USDC", order_type="limit", amount="1", price="60", params=params
+        )
+    assert exchange.create_order.await_count == 1
+    assert "Submitting journaled buy" in caplog.text
+    assert "BTC/USDC" in caplog.text and "mw-test" in caplog.text
+    assert ("requires reconciliation" in caplog.text) == failure
+    assert ("request returned" in caplog.text) == (not failure)
+    assert secret not in caplog.text

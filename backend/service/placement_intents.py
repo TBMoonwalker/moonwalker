@@ -14,7 +14,10 @@ from uuid import uuid4
 import helper
 import model
 from service.database import run_sqlite_write_with_retry
-from service.exchange_capabilities import build_client_order_id
+from service.exchange_capabilities import (
+    build_client_order_id,
+    exchange_execution_scope,
+)
 from tortoise.exceptions import IntegrityError
 
 logging = helper.LoggerFactory.get_logger(
@@ -166,6 +169,7 @@ _SAFE_REQUEST_KEYS = BUY_RECOVERY_CONTEXT_KEYS | frozenset(
         "source_operation_id",
         "accumulation_operation_id",
         "accumulation_action",
+        "_execution_scope",
     }
 )
 
@@ -205,11 +209,16 @@ class PlacementPreparation:
     blocked_by_conflict: bool = False
 
 
-def is_live_placement_enabled(config: dict[str, Any]) -> bool:
-    """Return whether the request can cause an external exchange side effect."""
-    return bool(str(config.get("exchange") or "").strip()) and not bool(
-        config.get("dry_run", True)
-    )
+def is_exchange_placement_enabled(config: dict[str, Any]) -> bool:
+    """Demo and live clients both cause real external exchange effects."""
+    return bool(str(config.get("exchange") or "").strip())
+
+
+def placement_scope_matches(intent: Any, config: dict[str, Any]) -> bool:
+    """Reject unproven legacy scope or a different configured client before I/O."""
+    request = deserialize_placement_payload(intent.request_json)
+    scope = request.get("_execution_scope")
+    return isinstance(scope, str) and scope == exchange_execution_scope(config)
 
 
 def ensure_operation_id(
@@ -294,13 +303,14 @@ class PlacementIntentService:
         exchange_order_id: str | None = None,
     ) -> PlacementPreparation:
         """Create the durable intent, or return the existing operation safely."""
-        if not is_live_placement_enabled(config):
+        if not is_exchange_placement_enabled(config):
             return PlacementPreparation(
                 intent=None,
                 operation_id=None,
                 client_order_id=None,
             )
 
+        order["_execution_scope"] = exchange_execution_scope(config)
         operation_id = ensure_operation_id(order, action)
         client_order_id = build_client_order_id(operation_id)
         exchange_name = str(config.get("exchange") or "").strip().lower()
@@ -595,6 +605,17 @@ class PlacementIntentService:
         request_json: str,
     ) -> None:
         """Reject accidental reuse of an operation identity for another effect."""
+        original_scope = deserialize_placement_payload(intent.request_json).get(
+            "_execution_scope"
+        )
+        if (
+            original_scope is not None
+            and original_scope
+            != deserialize_placement_payload(request_json).get("_execution_scope")
+        ):
+            raise ValueError(
+                "Placement identity belongs to another account/environment."
+            )
         expected = (
             exchange_name,
             symbol,

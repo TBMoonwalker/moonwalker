@@ -62,7 +62,7 @@ from service.placement_intents import (
     PlacementIntentState,
     build_derived_operation_id,
     ensure_operation_id,
-    is_live_placement_enabled,
+    is_exchange_placement_enabled,
     is_terminal_placement_state,
 )
 from service.placement_reconciliation import (
@@ -434,7 +434,11 @@ class Orders:
         placement_operation_id: str | None = None,
     ) -> bool:
         """Persist a filled buy order and emit monitoring."""
-        logging.debug(order_status)
+        logging.debug(
+            "Finalizing buy symbol=%s order_id=%s",
+            order_status.get("symbol"),
+            order_status.get("id") or order_status.get("orderid"),
+        )
         if not self._has_valid_buy_fill(order_status):
             logging.error(
                 "Skipping trade creation for %s: invalid order status.",
@@ -494,6 +498,14 @@ class Orders:
             order_status["symbol"],
             payload,
             **persistence_options,
+        )
+        self.placement_workflow.log_persisted(
+            placement_operation_id,
+            symbol=order_status["symbol"],
+            side="buy",
+            order_id=str(order_status.get("id") or order_status.get("orderid") or ""),
+            amount=str(order_status.get("amount") or "0"),
+            quote_cost=str(order_status.get("ordersize") or "0"),
         )
         await self._reset_unsellable_state(order_status["symbol"])
         await self.monitoring.notify_trade(
@@ -603,6 +615,16 @@ class Orders:
             order_status["symbol"],
             close_context["payload"],
             **close_options,
+        )
+        self.placement_workflow.log_persisted(
+            placement_operation_id,
+            symbol=order_status["symbol"],
+            side="sell",
+            order_id=str(order_status.get("id") or ""),
+            amount=str(
+                order_status.get("amount") or order_status.get("total_amount") or "0"
+            ),
+            quote_cost=str(order_status.get("ordersize") or "0"),
         )
         await self.trades.invalidate_trade_caches()
         await self.monitoring.notify_trade(
@@ -983,37 +1005,15 @@ class Orders:
                 return False
             try:
                 try:
-                    order_status = await self.exchange.place_spot_limit_sell(
-                        order,
-                        config,
-                    )
-                except ExchangePostSubmissionFailure as exc:
-                    active_operation_id = str(
-                        exc.operation_id or placement.operation_id or ""
-                    )
-                    await self.placement_intents.transition(
-                        active_operation_id,
-                        PlacementIntentState.ACCEPTED,
-                        exchange_order_id=str(exc.order.get("id") or "") or None,
-                        result=exc.order,
-                        reason_code="local_finalization_pending",
-                        error_message=str(exc.cause or exc),
-                    )
-                    logging.error(
-                        "Sell submission for %s was accepted but could not be "
-                        "finalized locally; operation=%s requires reconciliation.",
-                        order.get("symbol"),
-                        active_operation_id,
-                        exc_info=True,
-                    )
-                    return False
-                except ExchangeSubmissionIndeterminate as exc:
-                    await self.placement_intents.transition(
+                    order_status = await self.placement_workflow.submit(
                         placement.operation_id,
-                        PlacementIntentState.INDETERMINATE,
-                        reason_code="exchange_response_lost",
-                        error_message=str(exc),
+                        symbol=symbol,
+                        side="sell",
+                        submit=lambda: self.exchange.place_spot_limit_sell(
+                            order, config
+                        ),
                     )
+                except (ExchangePostSubmissionFailure, ExchangeSubmissionIndeterminate):
                     return False
                 if not order_status or order_status.get("requires_market_fallback"):
                     await self.placement_intents.transition(
@@ -1044,7 +1044,7 @@ class Orders:
                     logging.info(
                         "Proactive TP limit order for %s was not armed: %s",
                         symbol,
-                        order_status,
+                        (order_status or {}).get("fallback_reason"),
                     )
                     return False
 
@@ -1307,60 +1307,23 @@ class Orders:
                     )
                     return False
                 try:
-                    if sell_order_type == "limit":
-                        order_status = await self.exchange.create_spot_sell(
-                            order,
-                            config,
-                            create_market_fallback=(
-                                self._create_durable_market_fallback
-                            ),
-                        )
-                    else:
-                        order_status = await self.exchange.create_spot_sell(
-                            order,
-                            config,
-                        )
-                except ExchangePostSubmissionFailure as exc:
-                    active_operation_id = str(
-                        exc.operation_id or placement.operation_id or ""
-                    )
-                    await self.placement_intents.transition(
-                        active_operation_id,
-                        PlacementIntentState.ACCEPTED,
-                        exchange_order_id=str(exc.order.get("id") or "") or None,
-                        result=exc.order,
-                        reason_code="local_finalization_pending",
-                        error_message=str(exc.cause or exc),
-                    )
-                    logging.error(
-                        "Sell submission for %s was accepted but could not be "
-                        "finalized locally; operation=%s requires reconciliation.",
-                        order.get("symbol"),
-                        active_operation_id,
-                        exc_info=True,
-                    )
-                    return False
-                except ExchangeSubmissionIndeterminate as exc:
-                    if exc.operation_id and exc.operation_id != placement.operation_id:
-                        logging.error(
-                            "Market fallback for %s is indeterminate; "
-                            "child operation=%s will be reconciled before retry.",
-                            order.get("symbol"),
-                            exc.operation_id,
-                        )
-                        return False
-                    await self.placement_intents.transition(
+
+                    async def submit_sell() -> dict[str, Any] | None:
+                        if sell_order_type == "limit":
+                            return await self.exchange.create_spot_sell(
+                                order,
+                                config,
+                                create_market_fallback=self._create_durable_market_fallback,
+                            )
+                        return await self.exchange.create_spot_sell(order, config)
+
+                    order_status = await self.placement_workflow.submit(
                         placement.operation_id,
-                        PlacementIntentState.INDETERMINATE,
-                        reason_code="exchange_response_lost",
-                        error_message=str(exc),
+                        symbol=order["symbol"],
+                        side="sell",
+                        submit=submit_sell,
                     )
-                    logging.error(
-                        "Sell submission for %s is indeterminate; operation=%s "
-                        "will be reconciled before any retry.",
-                        order.get("symbol"),
-                        placement.operation_id,
-                    )
+                except (ExchangePostSubmissionFailure, ExchangeSubmissionIndeterminate):
                     return False
 
                 if not order_status:
@@ -1880,9 +1843,10 @@ class Orders:
         config: dict[str, Any],
     ) -> tuple[bool, dict[str, Any] | None]:
         """Run capital-budget preflight, exchange buy, and persistence."""
-        if config.get("exchange") in {"bybit", "bybiteu"} and is_live_placement_enabled(
-            config
-        ):
+        if config.get("exchange") in {
+            "bybit",
+            "bybiteu",
+        } and is_exchange_placement_enabled(config):
             for pending in await self.placement_intents.list_nonterminal():
                 if (
                     str(pending.exchange_name) == config.get("exchange")
@@ -1977,55 +1941,24 @@ class Orders:
                 )
 
             try:
-                order_status = await self.exchange.create_spot_market_buy(
-                    order,
-                    config,
-                )
-            except ExchangePostSubmissionFailure as exc:
-                await self.placement_intents.transition(
+                order_status = await self.placement_workflow.submit(
                     placement.operation_id,
-                    PlacementIntentState.ACCEPTED,
-                    exchange_order_id=str(exc.order.get("id") or "") or None,
-                    result=exc.order,
-                    reason_code="local_finalization_pending",
-                    error_message=str(exc.cause or exc),
+                    symbol=order["symbol"],
+                    side="buy",
+                    submit=lambda: self.exchange.create_spot_market_buy(order, config),
                 )
-                logging.error(
-                    "Buy submission for %s was accepted but could not be "
-                    "finalized locally; operation=%s requires reconciliation.",
-                    order.get("symbol"),
-                    placement.operation_id,
-                    exc_info=True,
-                )
-                return (
-                    False,
-                    {
-                        "ok": False,
-                        "reason": "placement_reconciliation_pending",
-                        "symbol": str(order.get("symbol") or ""),
-                    },
-                )
-            except ExchangeSubmissionIndeterminate as exc:
-                await self.placement_intents.transition(
-                    placement.operation_id,
-                    PlacementIntentState.INDETERMINATE,
-                    reason_code="exchange_response_lost",
-                    error_message=str(exc),
-                )
-                logging.error(
-                    "Buy submission for %s is indeterminate; operation=%s will "
-                    "be reconciled before any retry.",
-                    order.get("symbol"),
-                    placement.operation_id,
-                )
-                return (
-                    False,
-                    {
-                        "ok": False,
-                        "reason": "placement_indeterminate",
-                        "symbol": str(order.get("symbol") or ""),
-                    },
-                )
+            except ExchangePostSubmissionFailure:
+                return False, {
+                    "ok": False,
+                    "reason": "placement_reconciliation_pending",
+                    "symbol": str(order.get("symbol") or ""),
+                }
+            except ExchangeSubmissionIndeterminate:
+                return False, {
+                    "ok": False,
+                    "reason": "placement_indeterminate",
+                    "symbol": str(order.get("symbol") or ""),
+                }
             if not order_status:
                 precheck = self.exchange.get_last_buy_precheck_result()
                 await self.placement_intents.transition(

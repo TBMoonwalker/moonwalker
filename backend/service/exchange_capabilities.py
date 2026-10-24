@@ -3,9 +3,36 @@
 from __future__ import annotations
 
 import hashlib
+import json
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
+
+
+def exchange_execution_scope(config: dict[str, Any]) -> str:
+    """Fingerprint server-owned client configuration, never authenticate a label.
+
+    Empty credentials still identify an unconfigured client; authentication is
+    required separately before an exchange effect. Retain existing accumulation
+    hashes so adopting this shared boundary does not rebind stored holdings.
+    """
+    demo = config.get("dry_run", True)
+    if type(demo) is not bool:
+        raise ValueError("An explicit demo/live boolean is required.")
+    identity = [
+        str(config.get("exchange") or "").strip().lower(),
+        config.get("key") or "",
+        config.get("exchange_hostname") or "",
+        bool(config.get("sandbox", False)) if not demo else False,
+        str(config.get("market") or "spot").strip().lower(),
+    ]
+    prefix = "credential-demo-v1:" if demo else "credential-v1:"
+    return (
+        prefix
+        + hashlib.sha256(
+            json.dumps(identity, separators=(",", ":")).encode()
+        ).hexdigest()
+    )
 
 
 class UnsupportedExchangeCapability(ValueError):

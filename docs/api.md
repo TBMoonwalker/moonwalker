@@ -406,6 +406,17 @@ These streams are fan-out based: one producer loop refreshes shared data every
 | `POST` | `/trades/mission/pause/{symbol}` | Pause automation for one open mission. |
 | `POST` | `/trades/mission/resume/{symbol}` | Resume automation for one open mission. |
 
+The executions response retains its native `result` array and additionally returns
+`declared_purchases` and `declaration_status` (`none`, `available`, or `unavailable`).
+Accumulation CSV purchases include exact decimal strings for price, net amount,
+fee-inclusive order size, per-currency fees, whether fees are known, and
+`provenance: "csv_declaration"`. These are declarations of prior purchases, not
+exchange executions. Only validated adopted receipts bound to this exact deal
+are returned. Ambiguous or corrupt receipts yield no declared rows and an
+unavailable status; they never borrow purchases from an earlier holding cycle.
+The dashboard loads this history when expanding the existing trade card, rather
+than broadcasting CSV rows in routine status updates.
+
 The replay indicator response uses the strategies recorded in the deal's
 execution history. For an open deal, it also includes the currently configured
 `dca_strategy`, even before a safety order executes. The `source` field is

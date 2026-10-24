@@ -11,8 +11,19 @@ or other automatic exits. Treating every signal as an independent buy would lose
 the relationship between inventory, available capital and outstanding orders.
 A lost exchange response could then create a duplicate purchase after restart.
 
-Moonwalker therefore shares the Strategy Builder and execution infrastructure,
-while keeping accumulation's inventory and purchase lifecycle explicit.
+Moonwalker shares the Strategy Builder, exchange buy/sell managers, exact
+`ExchangeOrderReport` parser, private-fill fee hydration and `PlacementWorkflow`
+submission journal. Strategy decisions and mode-specific accounting remain
+separate: DCA manages deals and exits; accumulation manages owned inventory and
+operator-authorized sales.
+
+Both live and exchange demo orders are real exchange effects and use the durable
+journal. A server-owned account/environment fingerprint is recorded before
+submission and checked before recovery, including replay of saved results.
+Changing credentials, hostname, sandbox or demo/live environment cannot replay an
+order into another account. Historical unscoped DCA records remain unresolved
+until ownership can be established; recovery does not invent a scope or rewrite
+the original request.
 
 ## The approach
 
@@ -149,3 +160,24 @@ keeps the holding in Closing.
 Use [the operating guide](howto-operate-accumulation.md) for actions,
 [the recovery guide](howto-recover-accumulation.md) for blocked states, and
 [the accumulation reference](accumulation.md) for exact contracts.
+
+
+## Execution evidence and operator history
+
+The shared workflow records acknowledgement before mode-specific accounting.
+Acknowledgement is not proof of a fill: requested quantity, actual filled
+quantity, cumulative quote cost, per-currency fees and terminal status remain
+separate facts. Missing fees remain unknown; explicit zero fees are valid
+complete evidence. Uncertain or cancelled submission is recovered by lookup,
+never by blindly resending the operation.
+
+Both modes report submissions and acknowledgements in the normal exchange/order
+logs. Fill messages follow committed accounting; replaying unchanged accumulation
+evidence does not emit another committed-fill message. Logs use allowlisted
+identities and quantities rather than raw exchange payloads or exception bodies.
+
+CSV imports adopt existing inventory without an exchange order. Their validated
+purchase rows appear as CSV entries in the existing base/accumulation order
+history, before subsequent native buys. The chart includes those purchase dates
+and markers. Each receipt belongs to one deal, so closing and starting a new
+holding cannot carry earlier purchase rows into the new cycle.

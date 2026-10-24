@@ -31,6 +31,7 @@ from service.accumulation_ownership_evidence import (
 from service.accumulation_return_totals import record_return_delta
 from service.database import run_sqlite_write_with_retry
 from service.lifecycle_mutation import lifecycle_mutation_coordinator
+from service.placement_workflow import PlacementWorkflow
 from tortoise.transactions import in_transaction
 
 
@@ -139,7 +140,7 @@ async def persist_accumulation_order(
     """
     report = AccumulationFill.from_order(order)
 
-    async def persist() -> AccumulationAccountingResult:
+    async def persist() -> tuple[AccumulationAccountingResult, bool]:
         async with in_transaction() as conn:
             placement = await model.PlacementIntent.get_or_none(
                 operation_id=operation_id
@@ -164,7 +165,10 @@ async def persist_accumulation_order(
                 ):
                     raise AccumulationStateError("Repair ownership does not match.")
                 if repair.status == "applied":
-                    return AccumulationAccountingResult(operation_id, True, False, None)
+                    return (
+                        AccumulationAccountingResult(operation_id, True, False, None),
+                        False,
+                    )
                 if (
                     repair.status != "quarantined"
                     or repair.result_revision != activation.revision
@@ -239,13 +243,16 @@ async def persist_accumulation_order(
                 if repair is not None:
                     activation.revision += 1
                     await _finish_repair(repair, activation, placement, operation, conn)
-                return AccumulationAccountingResult(
-                    operation_id,
-                    checkpoint.terminal and checkpoint.fees_complete,
-                    bool(opportunity and opportunity.consumed_at),
-                    json.loads(checkpoint.inventory_json)
-                    if checkpoint.inventory_json
-                    else None,
+                return (
+                    AccumulationAccountingResult(
+                        operation_id,
+                        checkpoint.terminal and checkpoint.fees_complete,
+                        bool(opportunity and opportunity.consumed_at),
+                        json.loads(checkpoint.inventory_json)
+                        if checkpoint.inventory_json
+                        else None,
+                    ),
+                    False,
                 )
             if repair is None and placement.state not in {
                 "submitting",
@@ -409,6 +416,9 @@ async def persist_accumulation_order(
                             {
                                 "accumulation": {
                                     "operation_id": operation_id,
+                                    "initial_entry": bool(
+                                        opportunity and opportunity.is_initial_entry
+                                    ),
                                     "delta": delta,
                                     "inventory": json.loads(inventory.serialize()),
                                     "fees_complete": report.fees_complete,
@@ -482,18 +492,30 @@ async def persist_accumulation_order(
             await placement.save(using_db=conn)
             if repair is not None:
                 await _finish_repair(repair, activation, placement, operation, conn)
-            return AccumulationAccountingResult(
-                operation_id,
-                settled,
-                bool(opportunity and opportunity.consumed_at),
-                json.loads(inventory.serialize()) if holding else None,
+            return (
+                AccumulationAccountingResult(
+                    operation_id,
+                    settled,
+                    bool(opportunity and opportunity.consumed_at),
+                    json.loads(inventory.serialize()) if holding else None,
+                ),
+                True,
             )
 
     async with lifecycle_mutation_coordinator.mutation(report.symbol) as admitted:
         if not admitted:
             raise AccumulationStateError("Accounting is paused during maintenance.")
-        result = await run_sqlite_write_with_retry(
+        result, accounting_changed = await run_sqlite_write_with_retry(
             persist, "persisting accumulation fill"
+        )
+    if accounting_changed:
+        PlacementWorkflow.log_persisted(
+            operation_id,
+            symbol=report.symbol,
+            side=report.side,
+            order_id=report.order_id,
+            amount=report.filled,
+            quote_cost=report.quote_cost,
         )
     accumulation_input_notifications.publish()
     return result

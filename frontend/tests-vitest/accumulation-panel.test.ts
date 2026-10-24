@@ -604,3 +604,59 @@ describe('accumulation controls', () => {
   })
 
 })
+
+
+it('renders CSV purchase evidence in the existing timeline before the native accumulation order', () => {
+  const history = mount(AccumulationOrderTimeline, { props: {
+    detail: null, dealId: 'current',
+    declarations: [{ key: 'csv-1', deal_id: 'current', symbol: 'BTC/USDC', timestamp: '1000', price: '81.123456789123456789', amount: '0.01227109', ordersize: '1000.139592', fees: {}, fees_known: false, provenance: 'csv_declaration' }],
+    executions: [{ id: 1, deal_id: 'current', symbol: 'BTC/USDC', side: 'buy', role: 'accumulation_buy', timestamp: '2000', price: 80, amount: 0.01, ordersize: 0.8, fee: 0, metadata_json: '{"accumulation":{"operation_id":"native"}}' }],
+  } })
+  expect(history.text()).toContain('Base order · CSV')
+  expect(history.text()).toContain('Accumulation order 1')
+  expect(history.text()).toContain('Price: 81.123456789123456789')
+  expect(history.text()).not.toContain('Current holding')
+  expect(history.findAll('button')).toHaveLength(0)
+})
+
+
+it('reloads CSV chart context on a new deal and ignores a late older history response', async () => {
+  const apiClient = await import('../src/api/client')
+  const { default: ExpandedRow } = await import('../src/components/OpenTradeExpandedRow.vue')
+  let finishOld!: (value: any) => void
+  const oldResponse = new Promise(resolve => { finishOld = resolve })
+  const declaration = { key: 'csv-new', deal_id: 'new', symbol: 'BTC/USDC', timestamp: '1000', price: '81.123456789', amount: '0.1', ordersize: '8.1123456789', fees: {}, fees_known: false, provenance: 'csv_declaration' }
+  const history = vi.spyOn(apiClient, 'fetchJson').mockImplementationOnce(() => oldResponse as any).mockResolvedValueOnce({ result: [], declared_purchases: [declaration], declaration_status: 'available' })
+  api.fetchAccumulationDetail.mockResolvedValue(snapshot())
+  const Chart = defineComponent({ props: ['startTimestamp', 'markers'], template: '<div class="chart-context" />' })
+  const rowData = { symbol: 'BTC/USDC', lifecycle_mode: 'accumulation', deal_id: 'old', tp_price: 0, precision: 2 }
+  const wrapper = mount(ExpandedRow, { props: { rowData, minTimeframe: { timerange: '60min', seconds: 3600 } }, global: { stubs: { TradeReplayChart: Chart, AccumulationTradeStatus: true, AccumulationOutlook: true } } })
+  try {
+    await wrapper.setProps({ rowData: { ...rowData, deal_id: 'new' } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Base order · CSV')
+    expect(wrapper.getComponent(Chart).props('startTimestamp')).toBe('1000')
+    expect(wrapper.getComponent(Chart).props('markers')).toEqual([expect.objectContaining({ timestamp: '1000', text: 'Buy · CSV' })])
+    finishOld({ result: [], declared_purchases: [{ ...declaration, key: 'csv-old', deal_id: 'old', timestamp: '1' }], declaration_status: 'available' })
+    await flushPromises()
+    expect(wrapper.getComponent(Chart).props('startTimestamp')).toBe('1000')
+    expect(wrapper.text()).not.toContain('Loading order history')
+    expect(history).toHaveBeenCalledWith('/trades/executions/new')
+
+    history.mockResolvedValueOnce({ result: [{ id: 1, deal_id: 'new', symbol: 'BTC/USDC', side: 'buy', role: 'accumulation_buy', timestamp: '2000', price: 80, amount: 0.01, ordersize: 0.8, fee: 0, metadata_json: '{"accumulation":{"operation_id":"pushed-buy"}}' }], declared_purchases: [declaration], declaration_status: 'available' })
+    const pushed = snapshot({ revision: 13, orders: [{ checkpoint_id: 1, placement_operation_id: 'pushed-buy', deal_id: 'new', side: 'buy', filled_quantity: '0.01', quote_cost: '0.8', fees: {}, fees_complete: true, terminal: true, updated_at: '2026-10-24T18:00:00Z', inventory_at_update: null }] })
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [pushed], next_after: null }, detail: pushed }) })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Accumulation order 1')
+    expect(wrapper.text()).toContain('Price: 80')
+    expect(wrapper.getComponent(Chart).props('markers')).toHaveLength(2)
+    const requests = history.mock.calls.length
+    // Status-only pushes do not reload order history or introduce polling.
+    live.options.onMessage(live.socket, { data: JSON.stringify({ type: 'snapshot', page: { activations: [pushed], next_after: null }, detail: { ...pushed, revision: 14 } }) })
+    await flushPromises()
+    expect(history.mock.calls).toHaveLength(requests)
+  } finally {
+    wrapper.unmount()
+    history.mockRestore()
+  }
+})

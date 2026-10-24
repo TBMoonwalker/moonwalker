@@ -37,3 +37,9 @@ dashboard clients can connect to that instance.
 This index describes maintained documentation. Temporary agent plans and local
 audit reports are archived separately; their durable decisions and outstanding
 work are retained in the developer notes and backlog.
+
+
+For shared exchange execution ownership, see [development](development.md#shared-order-execution-ownership).
+The [accumulation lifecycle](explanation-accumulation-lifecycle.md) explains the
+mode-specific accounting boundary and CSV purchase history; the
+[API reference](api.md) documents the additive trade-history fields.

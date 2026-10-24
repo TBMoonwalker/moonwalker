@@ -81,9 +81,13 @@ class DurableSellFallback:
             return None
 
         try:
-            market_status = await self.exchange.create_spot_market_sell(
-                child_order,
-                config,
+            market_status = await self.workflow.submit(
+                child.operation_id,
+                symbol=child_order["symbol"],
+                side="sell",
+                submit=lambda: self.exchange.create_spot_market_sell(
+                    child_order, config
+                ),
             )
         except ExchangeSubmissionIndeterminate as exc:
             await self.workflow.intents.transition(

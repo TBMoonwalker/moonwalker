@@ -237,3 +237,100 @@ async def test_existing_restored_quarantine_keeps_startup_blocked(tmp_path) -> N
         assert exchange.calls == []
     finally:
         await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("state", ["submitting", "filled", "persisted"])
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"dry_run": True},
+        {"key": "other-account"},
+        {"exchange_hostname": "other.example"},
+        {"sandbox": True},
+    ],
+)
+async def test_scope_change_blocks_lookup_and_saved_result_replay(
+    tmp_path, state, change
+):
+    await _init_database(tmp_path)
+    try:
+        service = PlacementIntentService()
+        config = {
+            "exchange": "binance",
+            "market": "spot",
+            "dry_run": False,
+            "key": "original-account",
+            "secret": "private-scope-sentinel",
+        }
+        prepared = await service.prepare(
+            {"operation_id": "scoped-buy", "symbol": "BTC/USDC", "amount": 1},
+            config,
+            action=PlacementAction.BUY,
+            side="buy",
+            order_type="market",
+        )
+        assert await service.claim_submission(prepared.operation_id)
+        if state in {"filled", "persisted"}:
+            await service.transition(
+                prepared.operation_id,
+                PlacementIntentState.FILLED,
+                result={"id": "accepted-order"},
+            )
+        if state == "persisted":
+            await service.transition(
+                prepared.operation_id, PlacementIntentState.PERSISTED
+            )
+        original = await service.get(prepared.operation_id)
+        original_json = original.request_json
+        client_id = original.client_order_id
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(
+                ExchangeOrderLookupStatus.FOUND, {"id": "accepted-order"}
+            )
+        )
+        summary = await PlacementReconciler(
+            exchange, _reject_resume, service
+        ).reconcile({**config, **change})
+        row = await service.get(prepared.operation_id)
+        assert not summary.ready and summary.action_required == ("scoped-buy",)
+        assert row.state == "quarantined"
+        assert row.reason_code == "reconciliation_account_scope_unverified"
+        assert row.request_json == original_json and row.client_order_id == client_id
+        assert exchange.calls == []
+        assert "private-scope-sentinel" not in row.request_json
+    finally:
+        await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+async def test_legacy_unscoped_result_stays_unresolved_without_invented_binding(
+    tmp_path,
+):
+    await _init_database(tmp_path)
+    try:
+        row = await model.PlacementIntent.create(
+            operation_id="old-buy",
+            client_order_id="original-client",
+            symbol="BTC/USDC",
+            exchange_name="binance",
+            action="buy",
+            side="buy",
+            order_type="market",
+            state="filled",
+            request_json='{"symbol":"BTC/USDC"}',
+            result_json='{"id":"old-accepted-order"}',
+        )
+        exchange = _FakeExchange(
+            ExchangeOrderLookupResult(ExchangeOrderLookupStatus.FOUND)
+        )
+        summary = await PlacementReconciler(exchange, _reject_resume).reconcile(
+            {"exchange": "binance", "dry_run": False}
+        )
+        await row.refresh_from_db()
+        assert not summary.ready and row.state == "quarantined"
+        assert row.request_json == '{"symbol":"BTC/USDC"}'
+        assert row.result_json == '{"id":"old-accepted-order"}'
+        assert exchange.calls == []
+    finally:
+        await Tortoise.close_connections()

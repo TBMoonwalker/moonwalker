@@ -12,98 +12,39 @@ from decimal import ROUND_DOWN, Decimal, localcontext
 from typing import Any
 
 from service.accumulation_contracts import AccumulationStateError, canonical_decimal
-from service.order_requests import normalize_order_symbol
-
-TERMINAL_ORDER_STATUSES = frozenset(
-    {"closed", "filled", "canceled", "cancelled", "expired", "rejected"}
+from service.exchange_types import (
+    ExchangeOrderReport,
 )
+from service.exchange_types import decimal_evidence as exchange_decimal_evidence
 
 
 def decimal_evidence(value: Any) -> str:
-    """Preserve a reported number's decimal spelling; reject absent/invalid data."""
-    if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
-        raise AccumulationStateError("Missing or invalid decimal evidence.")
-    return canonical_decimal(str(value))
+    """Read shared exact execution values with the legacy domain exception."""
+    try:
+        return exchange_decimal_evidence(value)
+    except ValueError as exc:
+        raise AccumulationStateError(str(exc)) from exc
 
 
-@dataclass(frozen=True)
-class AccumulationFill:
-    """Validated cumulative order report from a trusted exchange lookup adapter."""
-
-    order_id: str
-    symbol: str
-    side: str
-    filled: str
-    quote_cost: str
-    fees: dict[str, str]
-    fees_complete: bool
-    terminal: bool
-    timestamp_ms: int
+class AccumulationFill(ExchangeOrderReport):
+    """Compatibility boundary for existing exact inventory/checkpoint consumers."""
 
     @classmethod
     def from_order(cls, order: dict[str, Any]) -> AccumulationFill:
-        """Read raw CCXT order totals without guessing missing fees or cost."""
-        if not isinstance(order, dict):
-            raise AccumulationStateError("An order evidence object is required.")
-        order_id = order.get("id")
-        if not isinstance(order_id, str) or not order_id or len(order_id) > 128:
-            raise AccumulationStateError("An exchange order identity is required.")
-        symbol = order.get("symbol")
-        if not isinstance(symbol, str) or len(symbol.split("/")) != 2 or ":" in symbol:
-            raise AccumulationStateError("A spot symbol is required.")
-        side = order.get("side")
-        if not isinstance(side, str) or side not in {"buy", "sell"}:
-            raise AccumulationStateError("An explicit fill side is required.")
-        status = order.get("status")
-        if not isinstance(status, str) or status not in TERMINAL_ORDER_STATUSES | {
-            "open"
-        }:
-            raise AccumulationStateError("Unknown order status is not fill evidence.")
-        filled, cost = (
-            decimal_evidence(order.get("filled")),
-            decimal_evidence(order.get("cost")),
-        )
-        if (Decimal(filled) > 0) != (Decimal(cost) > 0):
-            raise AccumulationStateError("Filled quantity and cost must agree.")
-        if status in {"closed", "filled"} and Decimal(filled) == 0:
-            raise AccumulationStateError("A closed order needs positive fill evidence.")
-        timestamp = order.get("lastTradeTimestamp") or order.get("timestamp")
-        if type(timestamp) is not int or not 0 <= timestamp < 2**63:
-            raise AccumulationStateError("A valid execution timestamp is required.")
-        raw_fees = order.get("fees")
-        if not raw_fees:
-            raw_fees = [order["fee"]] if order.get("fee") else []
-        if not isinstance(raw_fees, list) or len(raw_fees) > 32:
-            raise AccumulationStateError("Invalid or oversized fee evidence.")
-        fees: dict[str, str] = {}
-        with localcontext() as context:
-            context.prec = 512
-            for fee in raw_fees:
-                if not isinstance(fee, dict):
-                    raise AccumulationStateError("Invalid fee evidence.")
-                currency = fee.get("currency")
-                if not isinstance(currency, str) or not currency or len(currency) > 32:
-                    raise AccumulationStateError("Fee currency is required.")
-                currency = currency.upper()
-                value = Decimal(decimal_evidence(fee.get("cost")))
-                fees[currency] = format(Decimal(fees.get(currency, "0")) + value, "f")
-        if Decimal(filled) == 0 and any(Decimal(value) for value in fees.values()):
-            raise AccumulationStateError("Zero-fill fees require explicit repair.")
-        return cls(
-            order_id,
-            normalize_order_symbol(symbol),
-            side,
-            filled,
-            cost,
-            fees,
-            bool(raw_fees) or Decimal(filled) == 0,
-            status in TERMINAL_ORDER_STATUSES,
-            timestamp,
-        )
+        """Preserve accumulation's explicit-status requirement and exception type."""
+        try:
+            if not isinstance(order, dict) or order.get("status") is None:
+                raise ValueError("Unknown order status is not fill evidence.")
+            return super().from_order(order)
+        except ValueError as exc:
+            raise AccumulationStateError(str(exc)) from exc
 
     def serialize(self) -> str:
-        """Return a stable checkpoint representation."""
-        return json.dumps(asdict(self), sort_keys=True, separators=(",", ":"))
+        """Retain the existing checkpoint shape; raw evidence keeps request data."""
+        data = asdict(self)
+        data.pop("requested_quantity", None)
+        data.pop("order_status", None)
+        return json.dumps(data, sort_keys=True, separators=(",", ":"))
 
 
 @dataclass(frozen=True)

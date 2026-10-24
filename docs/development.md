@@ -143,3 +143,25 @@ Follow [AGENTS.md](../AGENTS.md), [dependency policy](dependencies.md), and the
 After code changes, run `./ci.sh` from `scripts/`; on macOS, put Homebrew
 `node@24` on PATH as documented in AGENTS.md. Documentation-only changes should
 verify relative links, source-backed claims, and `git diff --check`.
+
+
+### Shared order execution ownership
+
+`PlacementWorkflow.begin` prepares and claims classic orders; accumulation retains
+its transactional activation/capital checks when claiming its orders. Once claimed,
+both modes use `PlacementWorkflow.submit` to journal accepted evidence or uncertain
+outcomes. Exchange buy/sell managers own transport and existing exchange-specific
+bounded handling. `ExchangeOrderReport` in `exchange_types.py` owns exact cumulative
+fill facts; the DCA lookup adapter preserves its existing output fields. Accumulation
+inventory arithmetic and DCA deal/exit accounting remain their respective handlers.
+The common workflow does not choose strategies, acquire capital or authorize sales.
+
+Demo mode uses exchange demo accounts and therefore journals orders like live mode.
+Recovery must validate the persisted account/environment scope before private
+lookup or saved-result replay. Preserve historical identities and payload shapes;
+an unscoped legacy record is unresolved evidence, not permission to bind the current
+account. Do not migrate historical financial data to make recovery pass.
+
+`GET /trades/executions/{deal_id}` projects adopted CSV purchases separately from
+native fills. Keep CSV rows out of the execution ledger and routine WebSocket
+status snapshots. Validate their receipt's exact deal identity on every read.

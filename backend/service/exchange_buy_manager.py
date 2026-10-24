@@ -39,9 +39,49 @@ class ExchangeBuyManager:
         exchange = self._get_exchange()
         if exchange is None:
             raise RuntimeError("Exchange client is unavailable.")
-        return await exchange.create_order(
-            symbol, order_type, "buy", amount, price, params
+        client_order_id = params.get(
+            "clientOrderId", params.get("newClientOrderId", "unavailable")
         )
+        self._logger.info(
+            "Submitting journaled buy symbol=%s type=%s amount=%s price=%s client_order_id=%s",
+            symbol,
+            order_type,
+            amount,
+            price,
+            client_order_id,
+        )
+        try:
+            result = await exchange.create_order(
+                symbol, order_type, "buy", amount, price, params
+            )
+        except asyncio.CancelledError:
+            self._logger.warning(
+                "Journaled buy requires reconciliation symbol=%s client_order_id=%s failure=CancelledError",
+                symbol,
+                client_order_id,
+            )
+            raise
+        except (
+            ccxt.BaseError,
+            TimeoutError,
+            OSError,
+            ValueError,
+            TypeError,
+            RuntimeError,
+        ) as exc:
+            self._logger.warning(
+                "Journaled buy requires reconciliation symbol=%s client_order_id=%s failure=%s",
+                symbol,
+                client_order_id,
+                type(exc).__name__,
+            )
+            raise
+        self._logger.info(
+            "Journaled buy request returned symbol=%s client_order_id=%s",
+            symbol,
+            client_order_id,
+        )
+        return result
 
     async def execute_market_buy(
         self, order: ExchangeOrderPayload
@@ -272,7 +312,11 @@ class ExchangeBuyManager:
         if exchange is None:
             return None
 
-        self._logger.info("Opened trade: %s", order)
+        self._logger.debug(
+            "Normalizing buy symbol=%s order_id=%s",
+            order.get("symbol"),
+            order.get("id"),
+        )
 
         order_status: ParsedOrderStatus = await context.parse_order_status(order)
         if "timestamp" in order_status:

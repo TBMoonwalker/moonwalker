@@ -394,3 +394,43 @@ async def test_create_spot_market_sell_skips_below_fallback_min_price() -> None:
     assert result["symbol"] == "XPL/USDC"
     assert result["remaining_amount"] == pytest.approx(101.9)
     assert exchange.market_sell_calls == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", [False, True])
+async def test_sell_transport_logs_only_safe_fields_without_retry(caplog, failure):
+    import logging
+    from unittest.mock import AsyncMock
+
+    import ccxt.async_support as ccxt
+
+    secret = "private-exchange-payload-sentinel"
+    client = AsyncMock()
+    if failure:
+        client.create_market_sell_order.side_effect = ccxt.RequestTimeout(secret)
+    else:
+        client.create_market_sell_order.return_value = {
+            "id": "sell-ack",
+            "info": {"secret": secret},
+        }
+    logger = logging.getLogger("safe-sell-test")
+    caplog.set_level(logging.INFO, logger="safe-sell-test")
+    manager = ExchangeSellManager(logger, lambda: client)
+    if failure:
+        with pytest.raises(ccxt.RequestTimeout):
+            await manager.submit_market_sell_once(
+                symbol="BTC/USDC",
+                amount="1",
+                params={"clientOrderId": "client-sell", "private": secret},
+            )
+    else:
+        await manager.submit_market_sell_once(
+            symbol="BTC/USDC",
+            amount="1",
+            params={"clientOrderId": "client-sell", "private": secret},
+        )
+    client.create_market_sell_order.assert_awaited_once()
+    assert "client-sell" in caplog.text
+    assert ("requires reconciliation" in caplog.text) == failure
+    assert ("request returned" in caplog.text) == (not failure)
+    assert secret not in caplog.text

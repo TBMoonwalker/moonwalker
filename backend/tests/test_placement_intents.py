@@ -404,17 +404,32 @@ async def test_indeterminate_buy_reservation_survives_process_lease(tmp_path) ->
 
 
 @pytest.mark.asyncio
-async def test_dry_run_does_not_require_a_durable_exchange_intent() -> None:
-    preparation = await PlacementIntentService().prepare(
-        {"symbol": "BTC/USDC"},
-        {"exchange": "binance", "dry_run": True},
-        action=PlacementAction.BUY,
-        side="buy",
-        order_type="market",
-    )
-
-    assert preparation.intent is None
-    assert preparation.operation_id is None
+async def test_exchange_demo_requires_a_scoped_durable_intent(tmp_path) -> None:
+    await _init_database(tmp_path)
+    try:
+        service = PlacementIntentService()
+        preparation = await service.prepare(
+            {"symbol": "BTC/USDC"},
+            {
+                "exchange": "binance",
+                "dry_run": True,
+                "key": "demo-key",
+                "secret": "private-scope-sentinel",
+            },
+            action=PlacementAction.BUY,
+            side="buy",
+            order_type="market",
+        )
+        assert preparation.intent is not None
+        assert preparation.operation_id
+        assert preparation.client_order_id
+        stored = await service.get(preparation.operation_id)
+        assert stored.state == "prepared"
+        assert "credential-demo-v1:" in stored.request_json
+        assert "demo-key" not in stored.request_json
+        assert "private-scope-sentinel" not in stored.request_json
+    finally:
+        await Tortoise.close_connections()
 
 
 @pytest.mark.asyncio
@@ -571,3 +586,132 @@ async def test_prepared_cross_action_conflict_cannot_be_claimed(tmp_path) -> Non
         assert await model.PlacementIntent.all().count() == 1
     finally:
         await Tortoise.close_connections()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("side", ["buy", "sell"])
+async def test_shared_submission_journals_acknowledgement_before_accounting(side):
+    from unittest.mock import AsyncMock
+
+    intents = AsyncMock()
+    evidence = {"id": "exchange-1", "filled": "0.4", "cost": "40"}
+    submit = AsyncMock(return_value=evidence)
+    result = await PlacementWorkflow(intents).submit(
+        "operation-1",
+        symbol="BTC/USDC",
+        side=side,
+        submit=submit,
+        require_acknowledgement=True,
+    )
+    assert result == evidence
+    submit.assert_awaited_once()
+    intents.transition.assert_awaited_once_with(
+        "operation-1",
+        PlacementIntentState.ACCEPTED,
+        exchange_order_id="exchange-1",
+        result=evidence,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "failure",
+    [
+        "timeout",
+        "cancel",
+        "post_submission",
+        "lost_response",
+        "malformed",
+        "empty",
+        "rejected",
+    ],
+)
+async def test_shared_submission_never_retries_uncertainty_or_invents_a_fill(failure):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from service.exchange_capabilities import (
+        ExchangePostSubmissionFailure,
+        ExchangeSubmissionIndeterminate,
+    )
+
+    intents = AsyncMock()
+    submit = AsyncMock()
+    if failure == "timeout":
+        submit.side_effect = TimeoutError("private-payload")
+    elif failure == "cancel":
+        submit.side_effect = asyncio.CancelledError()
+    elif failure == "post_submission":
+        submit.side_effect = ExchangePostSubmissionFailure(
+            action="buy",
+            symbol="BTC/USDC",
+            order={"id": "ack"},
+            operation_id="child-1",
+        )
+    elif failure == "lost_response":
+        submit.side_effect = ExchangeSubmissionIndeterminate(
+            action="buy",
+            symbol="BTC/USDC",
+            client_order_id="client-1",
+        )
+    else:
+        submit.return_value = {"amount": "1"} if failure == "malformed" else None
+    workflow = PlacementWorkflow(intents)
+    if failure == "rejected":
+        assert (
+            await workflow.submit("op", symbol="BTC/USDC", side="buy", submit=submit)
+            is None
+        )
+        intents.transition.assert_not_awaited()
+    else:
+        expected = (
+            asyncio.CancelledError
+            if failure == "cancel"
+            else ExchangePostSubmissionFailure
+            if failure == "post_submission"
+            else ExchangeSubmissionIndeterminate
+        )
+        with pytest.raises(expected):
+            await workflow.submit(
+                "op",
+                symbol="BTC/USDC",
+                side="buy",
+                submit=submit,
+                require_acknowledgement=True,
+            )
+        if failure == "cancel":
+            intents.transition.assert_not_awaited()
+        else:
+            state = intents.transition.await_args.args[1]
+            assert state == (
+                PlacementIntentState.ACCEPTED
+                if failure == "post_submission"
+                else PlacementIntentState.INDETERMINATE
+            )
+            assert "private-payload" not in str(intents.transition.await_args)
+    submit.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_workflow_does_not_complete_unscoped_saved_result(tmp_path):
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    intents = AsyncMock()
+    # A historical record cannot acquire a new account binding on read.
+    intents.prepare.return_value = SimpleNamespace(
+        operation_id="old",
+        client_order_id="client-old",
+        intent=SimpleNamespace(state="persisted", request_json='{"symbol":"BTC/USDC"}'),
+    )
+    start = await PlacementWorkflow(intents).begin(
+        {"symbol": "BTC/USDC"},
+        {"exchange": "binance", "dry_run": False},
+        action=PlacementAction.BUY,
+        side="buy",
+        order_type="market",
+    )
+    assert not start.claimed and not start.completed
+    assert start.state == "scope_unverified"
+    intents.transition.assert_not_awaited()
+    intents.claim_submission.assert_not_awaited()

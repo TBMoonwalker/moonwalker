@@ -8,7 +8,6 @@ Credentials come only from the server config provider, never a dashboard label.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import time
 from collections.abc import Callable
@@ -41,7 +40,10 @@ from service.accumulation_strategy import (
     rebuild_accumulation_observations,
 )
 from service.exchange import Exchange
-from service.exchange_capabilities import require_exchange_placement_capabilities
+from service.exchange_capabilities import (
+    exchange_execution_scope,
+    require_exchange_placement_capabilities,
+)
 from service.exchange_risk import get_min_notional_for_market
 from service.strategy_runtime import load_accumulation_strategy_version
 
@@ -92,22 +94,7 @@ def accumulation_account_scope(config: dict[str, Any]) -> str:
     ):
         raise AccumulationStateError("Exchange credentials are unavailable.")
     require_exchange_placement_capabilities(config, order_type="limit")
-    identity = [
-        config["exchange"].strip().lower(),
-        config["key"],
-        config.get("exchange_hostname") or "",
-        bool(config.get("sandbox", False)) if not config["dry_run"] else False,
-        "spot",
-    ]
-    prefix = "credential-v1:"
-    if config["dry_run"]:
-        prefix = "credential-demo-v1:"
-    return (
-        prefix
-        + hashlib.sha256(
-            json.dumps(identity, separators=(",", ":")).encode()
-        ).hexdigest()
-    )
+    return exchange_execution_scope(config)
 
 
 @dataclass(frozen=True)

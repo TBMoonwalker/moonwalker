@@ -19,7 +19,8 @@ from service.placement_intents import (
     PlacementAction,
     PlacementIntentService,
     PlacementIntentState,
-    is_live_placement_enabled,
+    is_exchange_placement_enabled,
+    placement_scope_matches,
 )
 
 logging = helper.LoggerFactory.get_logger(
@@ -143,6 +144,13 @@ class PlacementReconciler:
                 reason_code="startup_confirmed_never_submitted",
             )
             return PlacementIntentState.REJECTED.value
+        if not placement_scope_matches(intent, config):
+            await self._quarantine(
+                operation_id,
+                reason_code="reconciliation_account_scope_unverified",
+                error_message="Order account/environment does not match verified server configuration.",
+            )
+            return PlacementIntentState.QUARANTINED.value
         if state == PlacementIntentState.PERSISTED.value:
             await self.intents.transition(
                 operation_id,
@@ -153,7 +161,7 @@ class PlacementReconciler:
             return await self._resume_or_quarantine(intent, {}, config)
 
         if (
-            not is_live_placement_enabled(config)
+            not is_exchange_placement_enabled(config)
             or str(config.get("exchange") or "").strip().lower()
             != str(intent.exchange_name).strip().lower()
         ):

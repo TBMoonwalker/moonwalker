@@ -7,6 +7,7 @@ test(`integrates accumulation with order status and trade details with pushed wa
   const pageErrors: string[] = []
   page.on('pageerror', error => pageErrors.push(error.message))
   page.on('console', message => { if (message.type() === 'error' && /TypeError|Cannot read properties/.test(message.text())) pageErrors.push(message.text()) })
+  const imported = theme === 'dark'
   const stamp = Date.now() - 3600000
   const order = { id: 1, timestamp: String(stamp), ordersize: 10, amount: 0.1, symbol: 'BTC/USDC', price: 100 }
   const trade = { id: 1, key: 1, symbol: 'BTC/USDC', lifecycle_mode: 'accumulation', deal_id: 'fixture-holding',
@@ -52,7 +53,7 @@ test(`integrates accumulation with order status and trade details with pushed wa
     return route.fulfill({ json: path.endsWith('/strategies') ? { versions: [{ id: 7, name: 'Patient dip', version: 1, parameters: { timeframe: '1h' } }, { id: 8, name: 'Deeper dip', version: 2, parameters: { timeframe: '4h' } }], next_after_id: null }
       : path.endsWith('/activations') ? { activations: [detail], next_after: null } : detail })
   })
-  await page.route('**/trades/executions/**', route => route.fulfill({ json: { result: [1, 2].map(index => ({ ...order, id: index, timestamp: String(stamp + index * 1000), deal_id: 'fixture-holding', side: 'buy', role: 'accumulation_buy', metadata_json: JSON.stringify({ accumulation: { operation_id: `buy-${index}` } }) })) } }))
+  await page.route('**/trades/executions/**', route => route.fulfill({ json: { declaration_status: imported ? 'available' : 'none', declared_purchases: imported ? [{ key: 'csv-origin', deal_id: 'fixture-holding', symbol: 'BTC/USDC', timestamp: String(stamp - 3600000), price: '101.123456789123456789', amount: '0.1', ordersize: '10.1123456789123456789', fees: {}, fees_known: false, provenance: 'csv_declaration' }] : [], result: [1, 2].map(index => ({ ...order, id: index, timestamp: String(stamp + index * 1000), deal_id: 'fixture-holding', side: 'buy', role: 'accumulation_buy', metadata_json: JSON.stringify({ accumulation: { operation_id: `buy-${index}` } }) })) } }))
   await page.route('**/data/ohlcv/**', route => route.fulfill({ json: [] }))
   await page.route('**/trades/*/length', route => route.fulfill({ json: { result: 1 } }))
   await page.goto('/')
@@ -70,8 +71,9 @@ test(`integrates accumulation with order status and trade details with pushed wa
   await openDetails.click()
   const card = page.getByRole('region', { name: 'BTC/USDC accumulation', exact: true })
   await expect(card.getByRole('button', { name: 'Confirm close holding', exact: true })).toBeVisible()
-  await expect(page.locator('.expanded-order-card').getByText('Base order', { exact: true })).toBeVisible()
+  await expect(page.locator('.expanded-order-card').getByText(imported ? 'Base order · CSV' : 'Base order', { exact: true })).toBeVisible()
   await expect(page.locator('.expanded-order-card').getByText('Accumulation order 1', { exact: true })).toBeVisible()
+  if (imported) await expect(page.locator('.expanded-order-card').getByText('Order size: 10.1123456789123456789 | Amount: 0.1 | Price: 101.123456789123456789', { exact: true })).toBeVisible()
   expect(pageErrors).toEqual([])
   await expect(page.locator('.expanded-order-card').getByText('Order size: 4.9 | Amount: 0.050000000000000001 | Price: 100', { exact: true })).toBeVisible()
   await expect(page.locator('.accumulation-order-timeline details')).toHaveCount(0)

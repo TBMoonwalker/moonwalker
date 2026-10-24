@@ -4670,3 +4670,169 @@ async def test_classic_csv_fee_import_persists_net_coins_and_fee_inclusive_cost(
     assert Decimal(str(trade.ordersize)) == Decimal(cost)
     assert trade.fee == pytest.approx(float(Decimal(fee) / Decimal("60")))
     assert not env[1].calls
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("uncertain", [False, True])
+async def test_accumulation_order_logs_report_real_effects_without_duplicate_fills(
+    env, monkeypatch, caplog, uncertain
+):
+    import logging
+
+    adapter, client, _, config, *_ = env
+    operation = await prepared(env)
+    logger = logging.getLogger("orders")
+    monkeypatch.setattr(logger, "propagate", True)
+    caplog.set_level(logging.INFO, logger="orders")
+    if uncertain:
+        client.failure = ccxt.RequestTimeout("credential-that-must-not-appear")
+    executor = AccumulationBuyExecutor(adapter)
+    result = await executor.execute(operation)
+    records = [item.getMessage() for item in caplog.records if item.name == "orders"]
+    assert any("Order submitting" in text and operation in text for text in records)
+    if uncertain:
+        assert result.state == "indeterminate"
+        assert any("requires reconciliation" in text for text in records)
+        assert not any("fill persisted" in text for text in records)
+    else:
+        assert result.state == "completed"
+        assert any(
+            "Order fill persisted" in text and "199.98" in text for text in records
+        )
+        assert (await model.AccumulationFillCheckpoint.get()).terminal
+        intent = await model.PlacementIntent.get(operation_id=operation)
+        await persist_accumulation_order(
+            operation,
+            json.loads(intent.result_json),
+            account_scope=accumulation_account_scope(config),
+            exchange_name="binance",
+        )
+    before = len([item for item in caplog.records if item.name == "orders"])
+    await executor.execute(operation)
+    assert len([item for item in caplog.records if item.name == "orders"]) == before
+    assert len(client.calls) == 1
+    assert "credential-that-must-not-appear" not in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_failed_accounting_does_not_log_committed_fill(env, monkeypatch, caplog):
+    import logging
+
+    adapter, *_ = env
+    operation = await prepared(env)
+    monkeypatch.setattr(logging.getLogger("orders"), "propagate", True)
+    caplog.set_level(logging.INFO, logger="orders")
+    monkeypatch.setattr(
+        model.AccumulationFillCheckpoint,
+        "update_or_create",
+        AsyncMock(side_effect=OperationalError("disk failure")),
+    )
+    with pytest.raises(OperationalError):
+        await AccumulationBuyExecutor(adapter).execute(operation)
+    assert not any(
+        "Order fill persisted" in record.getMessage() for record in caplog.records
+    )
+    assert not await model.AccumulationFillCheckpoint.exists()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fee_columns", [False, True])
+async def test_csv_purchase_history_keeps_declared_base_and_native_buy_separate(
+    env, monkeypatch, fee_columns
+):
+    from service.accumulation_csv_accounting import declared_purchase_history
+    from service.trades import Trades
+
+    service, _ = await _entry_service(env, monkeypatch)
+    env[1].balance["free"]["BTC"] = "5"
+    header = "date;symbol;price;amount" + (";fee;fee_currency" if fee_columns else "")
+    row = "1970-01-02;BTC/USDC;60;1" + (";0.1;USDC" if fee_columns else "")
+    await service.csv(header + "\n" + row)
+    holding = await model.OpenTrades.get()
+    history = await declared_purchase_history(holding.deal_id)
+    assert history["declaration_status"] == "available"
+    declared = history["declared_purchases"]
+    assert len(declared) == 1
+    assert declared[0]["provenance"] == "csv_declaration"
+    assert declared[0]["price"] == "60"
+    assert declared[0]["amount"] == "1"
+    assert Decimal(declared[0]["ordersize"]) == Decimal("60.1" if fee_columns else "60")
+    assert declared[0]["fees_known"] == fee_columns
+    # CSV imports stay declarations, never invented exchange execution rows.
+    assert await Trades().get_trade_executions(holding.deal_id) == []
+    from uuid import uuid4
+
+    assert (await declared_purchase_history(str(uuid4())))["declared_purchases"] == []
+    assert (await declared_purchase_history("bad-deal"))["declared_purchases"] == []
+
+    receipt = await model.AccumulationLifecycleOperation.get(action="activate")
+    original = receipt.request_json
+    request = json.loads(original)
+    request["imported_inventory"]["entries"][0][1] = "999"
+    receipt.request_json = json.dumps(request)
+    await receipt.save()
+    invalid = await declared_purchase_history(holding.deal_id)
+    assert invalid == {"declared_purchases": [], "declaration_status": "unavailable"}
+    # A subsequent deal cannot borrow the unchanged receipt from the older cycle.
+    await model.OpenTrades.filter(id=holding.id).update(deal_id=str(uuid4()))
+    assert (await declared_purchase_history((await model.OpenTrades.get()).deal_id))[
+        "declared_purchases"
+    ] == []
+
+
+@pytest.mark.asyncio
+async def test_csv_history_accepts_large_valid_declaration_without_status_payload_growth(
+    env, monkeypatch
+):
+    from dataclasses import replace
+
+    import service.accumulation_csv_accounting as csv_accounting
+    from service.accumulation_csv_accounting import (
+        csv_inventory_origins,
+        declared_purchase_history,
+    )
+    from service.accumulation_import import AccumulationImport
+
+    service, _ = await _entry_service(env, monkeypatch)
+    env[1].balance["free"]["BTC"] = "5"
+    await service.csv("date;symbol;price;amount\n1970-01-02;BTC/USDC;60;1")
+    holding = await model.OpenTrades.get()
+    origins = await csv_inventory_origins(None, deal_id=holding.deal_id)
+    key, origin = next(iter(origins.items()))
+    declaration = AccumulationImport.from_dict(
+        {
+            "symbol": "BTC/USDC",
+            "entries": [(86400000 + index, "1", "1") for index in range(10000)],
+            "quantity": "10000",
+            "cost": "10000",
+        }
+    )
+    monkeypatch.setattr(
+        csv_accounting,
+        "csv_inventory_origins",
+        AsyncMock(return_value={key: replace(origin, declaration=declaration)}),
+    )
+    history = await declared_purchase_history(holding.deal_id)
+    assert len(history["declared_purchases"]) == 10000
+    assert history["declared_purchases"][-1]["timestamp"] == "86409999"
+
+
+@pytest.mark.asyncio
+async def test_csv_origin_query_requires_exact_adopted_deal_not_substring_receipt_match(
+    env, monkeypatch
+):
+    from uuid import uuid4
+
+    from service.accumulation_csv_accounting import declared_purchase_history
+
+    service, _ = await _entry_service(env, monkeypatch)
+    env[1].balance["free"]["BTC"] = "5"
+    await service.csv("date;symbol;price;amount\n1970-01-02;BTC/USDC;60;1")
+    receipt = await model.AccumulationLifecycleOperation.get(action="activate")
+    request = json.loads(receipt.request_json)
+    other_deal = str(uuid4())
+    request["note"] = other_deal
+    receipt.request_json = json.dumps(request)
+    await receipt.save()
+    result = await declared_purchase_history(other_deal)
+    assert result["declared_purchases"] == []

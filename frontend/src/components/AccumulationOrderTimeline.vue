@@ -3,15 +3,17 @@ import { computed } from 'vue'
 import { NTimeline, NTimelineItem } from 'naive-ui'
 import type { AccumulationDetail } from '../types/accumulation'
 import type { TradeExecutionRow } from '../stores/trades'
-import { accumulationOrders } from '../helpers/accumulationOrders'
+import { accumulationOrders, type DeclaredPurchase } from '../helpers/accumulationOrders'
 import { formatTradingViewDate } from '../helpers/date'
 const props = defineProps<{
   detail: AccumulationDetail | null
   executions?: TradeExecutionRow[]
+  declarations?: DeclaredPurchase[]
+  declarationUnavailable?: boolean
   dealId?: string | null
   fallback?: Array<{ key: string; title: string; content: string; timestamp: string | number }>
 }>()
-const items = computed(() => accumulationOrders(props.detail?.orders ?? [], props.executions ?? [], props.dealId ?? props.detail?.holding?.deal_id, props.fallback))
+const items = computed(() => accumulationOrders(props.detail?.orders ?? [], props.executions ?? [], props.dealId ?? props.detail?.holding?.deal_id, props.fallback, props.declarations, props.declarationUnavailable))
 function date(value?: string | number) {
   if (!value) return undefined
   const timestamp = typeof value === 'string' && !/^\d+$/.test(value) ? Date.parse(value) : Number(value)
