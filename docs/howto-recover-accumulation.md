@@ -119,9 +119,11 @@ it must not replay missed buys.
   fees. An exchange response with missing evidence cannot release the commitment.
 - **Revisions changed:** cancel the stale review and inspect fresh state before
   preparing another action. Keep uncertain submitted requests under their old ID.
-- **Profit remains unavailable:** CSV fees, declared ownership, unknown basis,
-  incomplete native history, mixed quotes or unavailable marks can prevent a
-  verified return. Do not substitute zeros.
+- **Profit remains unavailable:** missing CSV fees or unvalued third-currency
+  fees, declared ownership, unknown basis, incomplete native history, mixed quotes
+  or unavailable marks can prevent a complete return. Fee-complete CSV imports
+  support declared returns; they do not become exchange-verified historical fills.
+  Do not substitute zeros. See the [CSV fee format](signals.md#csv-signal-setup).
 - **New cycle shows old fills:** confirm that reactivation created a new deal and
   that the running installation has the current frontend and backend. The ledger
   retains old fills; the new deal's order timeline excludes them.
