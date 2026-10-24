@@ -29,8 +29,9 @@ This file provides guidance to agentic coding agents (such as Claude Code) when 
 - If updates are found, record them in the task summary and explicitly classify each as:
   - patch/minor (safe candidate)
   - major (needs compatibility review)
-- check updates against online services to check if they are safe or have been compromised or are vulnerable
-- if they are not safe do not classify them as updateable
+- Before updating any direct or transitive dependency, research the web for known vulnerabilities, malicious releases, compromised repositories or registries, and maintainer account incidents affecting the package and exact proposed version. Check official maintainer statements, registry notices, and security advisories; follow credible incident reports to primary sources.
+- A clean vulnerability audit, a patch/minor version number, or a valid registry signature alone does not establish that a release is trustworthy. When a compromise is reported, verify the actual release artifact against its expected source commit and signed build provenance where available, inspect lifecycle hooks and reported malicious indicators, and prefer a verified post-incident release. Keep package lifecycle scripts disabled during inspection and initial installation.
+- Do not install or classify a release as updateable while its involvement in a reported compromise remains unresolved. Record the research links, exact target version, verification evidence, and update/hold decision in the task summary.
 - Apply dependency updates (only if safe) only in dedicated dependency PRs/changesets unless the task explicitly asks for version upgrades.
 
 ### Backend (Python)
