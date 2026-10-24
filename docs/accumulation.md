@@ -58,7 +58,10 @@ fill is recorded, the selected accumulation strategy initializes its observation
 and controls subsequent purchases. Unrelated wallet coins remain unmanaged. CSV declarations use
 `date;symbol;price;amount`, with each row representing already-owned inventory.
 The entire declaration is staged before adoption and must fit fresh free wallet
-balance. Historical CSV fees are unknown, even when acquisition cost is declared.
+balance. Optional fee columns support base, quote and explicitly quote-valued
+third-currency fees. `amount` defaults to net owned coins; `amount_type=gross`
+deducts base-coin fees once. Four-column purchases retain unknown historical fees.
+See the [CSV format](signals.md#csv-signal-setup).
 The runtime continues pending, unadopted ASAP entries when it starts or receives
 updated inputs, using the same operation ID. A recovered entry then opens its BO;
 it does not wait for a strategy signal. Explicitly stopped, quarantined or
@@ -350,7 +353,10 @@ while historical return is unknown; a missing bid does not make inventory worthl
 Realized return is disposal proceeds plus remaining basis minus total acquisition
 cost including recorded quote fees. Unrealized return is remaining bid value
 minus remaining basis. Native coverage requires complete terminal fee evidence,
-consistent ledger totals, intact ownership and verified history. CSV fees, external
+consistent ledger totals, intact ownership and verified history. Fee-complete CSV
+purchases can also establish a declared acquisition basis, retained in their
+cycle-bound adoption receipt without inventing exchange executions. These returns
+are labelled as including CSV-declared costs and fees. Missing CSV fees, external
 unvalued fees, ownership declarations and inventory corrections remain explicit
 unknowns. Dated execution deltas must reconcile with cumulative returns before
 entering charts. Verified single-quote native returns join Dynamic DCA totals;

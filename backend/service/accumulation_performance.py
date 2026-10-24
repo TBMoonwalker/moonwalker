@@ -13,7 +13,9 @@ import ccxt.async_support as ccxt
 import model
 from service.accumulation_accounting import _inventory as holding_inventory
 from service.accumulation_contracts import canonical_decimal
-from service.accumulation_reporting import _inventory
+from service.accumulation_csv_accounting import csv_inventory_origins
+from service.accumulation_import import CSV_RETURN_BASIS, RETURN_BASES
+from service.accumulation_reporting import _amount, _inventory
 from service.trading_maintenance import trading_maintenance_barrier
 from tortoise.transactions import in_transaction
 
@@ -44,9 +46,8 @@ def _same_inventory(left: dict[str, Any] | None, right: dict[str, Any] | None) -
             and {key: Decimal(value) for key, value in left["fees"].items()}
             == {key: Decimal(value) for key, value in right["fees"].items()}
             and left["pending_fee_reports"] == right["pending_fee_reports"] == 0
-            and left["basis_provenance"]
-            == right["basis_provenance"]
-            == "exchange_fills"
+            and left["basis_provenance"] == right["basis_provenance"]
+            and left["basis_provenance"] in RETURN_BASES
         )
     except (ValueError, TypeError, KeyError, AttributeError):
         return False
@@ -95,6 +96,14 @@ async def _archived_transfers(
                 .order_by("-updated_at", "-id")
                 .first()
             )
+            origins = await csv_inventory_origins(
+                conn, activation_id=operation.activation_id, deal_id=deal_id
+            )
+            declared = origins.get((operation.activation.symbol, deal_id))
+            declared_complete = (
+                declared is not None
+                and declared.inventory.basis_provenance == CSV_RETURN_BASIS
+            )
             if (
                 evidence["schema_version"] != 1
                 or evidence["activation_id"] != owner
@@ -103,7 +112,7 @@ async def _archived_transfers(
                 or evidence["symbol"] != record["symbol"]
                 or evidence["operation_id"] != operation.operation_id
                 or evidence != json.loads(record["accumulation_inventory_json"])
-                or not record["execution_history_complete"]
+                or not (record["execution_history_complete"] or declared_complete)
                 or inventory is None
                 or latest is None
                 or not latest.terminal
@@ -155,7 +164,17 @@ async def _historical_state(conn: Any) -> tuple[list[dict[str, Any]], str]:
         ).using_db(conn)
     }
     transfers, invalid_transfers = await _archived_transfers(conn)
-    deals: dict[tuple[str, str], dict[str, Any]] = {}
+    origins = await csv_inventory_origins(conn)
+    deals: dict[tuple[str, str], dict[str, Any]] = {
+        key: {
+            "acquired": Decimal(origin.inventory.remaining_cost),
+            "principal": Decimal(origin.inventory.contributed_quote),
+            "complete": origin.inventory.basis_provenance == CSV_RETURN_BASIS,
+            "latest": None,
+            "inventory": _inventory(origin.inventory.serialize()),
+        }
+        for key, origin in origins.items()
+    }
     cursor = 0
     with localcontext() as context:
         context.prec = 512
@@ -243,7 +262,7 @@ async def _historical_state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                 deal["complete"]
                 and inv is not None
                 and inv["pending_fee_reports"] == 0
-                and inv["basis_provenance"] == "exchange_fills"
+                and inv["basis_provenance"] in RETURN_BASES
             )
             owner = owners.get(symbol)
             transferred_cost = Decimal(0)
@@ -257,8 +276,8 @@ async def _historical_state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                     holding.accumulation_remaining_cost,
                 )
                 complete &= (
-                    holding.execution_history_complete
-                    and holding.accumulation_basis_provenance == "exchange_fills"
+                    (holding.execution_history_complete or (symbol, deal_id) in origins)
+                    and holding.accumulation_basis_provenance in RETURN_BASES
                     and owned
                 )
                 complete &= (
@@ -558,6 +577,27 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
             .first()
         )
         inv = _inventory(latest.inventory_json) if latest else None
+        origin = None
+        declared_basis = (
+            holding.accumulation_basis_provenance
+            if holding
+            else inv.get("basis_provenance")
+            if inv
+            else None
+        ) == CSV_RETURN_BASIS
+        if declared_basis:
+            deal_id = holding.deal_id if holding else latest.deal_id
+            origin = (
+                await csv_inventory_origins(
+                    conn, activation_id=owner.id, deal_id=deal_id
+                )
+            ).get((owner.symbol, deal_id))
+            complete &= (
+                origin is not None
+                and origin.inventory.basis_provenance == CSV_RETURN_BASIS
+            )
+        if inv is None and origin is not None:
+            inv = _inventory(origin.inventory.serialize())
         owned = holding is not None and owner.holding_id == holding.id
         quantity, cost = "0", "0"
         live = holding is not None or owner.holding_id is not None
@@ -567,8 +607,8 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
                 quantity, cost = current.quantity, current.remaining_cost
                 complete &= (
                     owned
-                    and holding.execution_history_complete
-                    and current.basis_provenance == "exchange_fills"
+                    and (holding.execution_history_complete or origin is not None)
+                    and current.basis_provenance in RETURN_BASES
                     and current.pending_fee_reports == 0
                 )
                 complete &= (
@@ -587,7 +627,7 @@ async def _state(conn: Any) -> tuple[list[dict[str, Any]], str]:
         elif (
             owner.holding_id is not None
             or cached is not None
-            and cached.last_quantity != "0"
+            and _amount(cached.last_quantity) != "0"
             or inv is not None
             and inv["net_quantity"] not in {None, "0"}
         ):
@@ -651,6 +691,13 @@ async def accumulation_performance(adapter: Any) -> dict[str, Any]:
     await ensure_return_totals()
     async with in_transaction() as conn:
         rows, token = await _state(conn)
+        includes_csv = (
+            await model.AccumulationLifecycleOperation.filter(
+                status="applied", request_json__contains='"_csv_deal_id"'
+            )
+            .using_db(conn)
+            .exists()
+        )
         history_complete = all(
             row["complete"] and row["history_complete"] for row in rows
         )
@@ -767,6 +814,7 @@ async def accumulation_performance(adapter: Any) -> dict[str, Any]:
         "observed_at_ms": now,
         "valid_until_ms": valid_until,
         "basis": "fresh_bid_before_future_sale_fees",
+        "includes_csv_declarations": includes_csv,
         "by_quote": output,
         "history_complete": stable and history_complete,
         "realized_by_date": history if stable and history_complete else [],

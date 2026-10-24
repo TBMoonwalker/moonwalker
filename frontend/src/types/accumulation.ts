@@ -54,6 +54,8 @@ export interface AccumulationDetail extends AccumulationStatus {
       acquisition_cost: string
       row_count: number
       historical_fees_known: boolean
+      fees?: Record<string, string>
+      fee_values_known?: boolean
     }
   })
   operations: AccumulationOperation[]

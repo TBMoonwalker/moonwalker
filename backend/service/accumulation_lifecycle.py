@@ -620,7 +620,9 @@ class AccumulationLifecycleService:
         ).using_db(connection)
         if prior is None:
             return None
-        if prior.request_json != request_json:
+        prior_request = json.loads(prior.request_json)
+        prior_request.pop("_csv_deal_id", None)
+        if prior_request != json.loads(request_json):
             raise AccumulationConflictError(
                 "operation_id was already used for a different request."
             )
@@ -760,6 +762,7 @@ class AccumulationLifecycleService:
                     await ready.validate_commit()
                 if request.imported_inventory is not None:
                     imported = request.imported_inventory
+                    inventory = imported.inventory()
                     if (
                         activation.holding_id is not None
                         or await model.OpenTrades.filter(symbol=activation.symbol)
@@ -788,19 +791,31 @@ class AccumulationLifecycleService:
                         ),
                         accumulation_net_quantity=imported.quantity,
                         accumulation_remaining_cost=imported.cost,
-                        accumulation_contributed_quote=imported.cost,
+                        accumulation_contributed_quote=inventory.contributed_quote,
                         accumulation_disposal_proceeds="0",
                         accumulation_fees_json=json.dumps(
-                            {"totals": {}, "pending_reports": len(imported.entries)}
+                            {
+                                "totals": inventory.fees,
+                                "pending_reports": inventory.pending_fee_reports,
+                            }
                         ),
-                        accumulation_basis_provenance="csv_declared_fees_unknown",
+                        accumulation_basis_provenance=inventory.basis_provenance,
                     )
                     activation.holding_id = holding.id
+                    # Bind the declared origin to this cycle without fabricating an exchange fill.
+                    operation.request_json = json.dumps(
+                        {
+                            **json.loads(operation.request_json),
+                            "_csv_deal_id": holding.deal_id,
+                        },
+                        sort_keys=True,
+                    )
                     await (
                         model.AccumulationReturnTotals.filter(activation=activation)
                         .using_db(connection)
                         .update(
-                            provenance_complete=False,
+                            provenance_complete=inventory.basis_provenance
+                            == "csv_declared_fees",
                             last_quantity=imported.quantity,
                             last_cost=imported.cost,
                         )

@@ -117,7 +117,10 @@ async def _snapshot(
         or holding.symbol != command.symbol
         or holding.lifecycle_mode != "accumulation"
         or not holding.deal_id
-        or not holding.execution_history_complete
+        or not (
+            holding.execution_history_complete
+            or holding.accumulation_basis_provenance == "csv_declared_fees"
+        )
     ):
         raise AccumulationConflictError("A verified accumulation holding is required.")
     inventory = _inventory(holding)

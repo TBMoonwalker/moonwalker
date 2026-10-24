@@ -95,6 +95,7 @@
             </template>
 
             <template v-if="signal.signal === 'csv_signal'">
+                <n-text depth="3">CSV: date;symbol;price;amount, optionally followed by fee;fee_currency;amount_type;fee_quote_value. Amount defaults to net owned coins; use gross for amounts before base-coin fees. Third-currency fees need their quote value for returns.</n-text>
                 <n-form-item label="CSV input mode" path="csv_signal_mode">
                     <n-radio-group v-model:value="signal.csvsignal_mode">
                         <n-space>
@@ -122,7 +123,7 @@
                                 minRows: 6,
                                 maxRows: 16,
                             }"
-                            placeholder="date;symbol;price;amount&#10;18/08/2025 19:32:00;BTC/USDC;117644.41;0.00099153"
+                            placeholder="date;symbol;price;amount;fee;fee_currency&#10;18/08/2025 19:32:00;BTC/USDC;117644.41;0.00099153;0.000001;BTC"
                         />
                     </n-form-item>
                     <n-form-item label="CSV file upload">

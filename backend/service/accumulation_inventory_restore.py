@@ -78,17 +78,8 @@ async def _evidence(activation: Any, conn: Any) -> dict[str, Any]:
             imported = AccumulationImport.from_dict(request["imported_inventory"])
             if imported.symbol != activation.symbol:
                 raise ValueError("Wrong symbol")
-            values = asdict(
-                AccumulationInventory(
-                    imported.quantity,
-                    imported.cost,
-                    imported.cost,
-                    "0",
-                    {},
-                    len(imported.entries),
-                    "csv_declared_fees_unknown",
-                )
-            )
+            values = asdict(imported.inventory())
+            deal_id = request.get("_csv_deal_id")
         if not isinstance(values, dict) or set(values) != set(
             AccumulationInventory.__dataclass_fields__
         ):

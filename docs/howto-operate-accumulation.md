@@ -54,7 +54,19 @@ configuration or strategy is not a guarantee that an exchange order will pass.
 
    Use your own past date, acquisition price and net owned amount. Do not submit
    the example as invented inventory. Each row declares already-owned coins;
-   the import does not purchase them. Historical fees remain unknown.
+   the import does not purchase them. Four-column imports retain unknown fees.
+   To calculate returns, supply the [fee-aware columns](signals.md#csv-signal-setup):
+
+   ```csv
+   date;symbol;price;amount;fee;fee_currency;amount_type
+   2026-01-15 12:00:00;BTC/USDC;90000;0.001;0.000001;BTC;net
+   ```
+
+   `net` keeps 0.001 BTC owned and reconstructs the gross purchase cost from
+   0.001001 BTC. Use `gross` only when `amount` is the pre-fee quantity. Quote fees
+   increase cost, and third-currency fees need `fee_quote_value` as the eighth
+   column. Explicit zero fees are supported. The resulting returns use declared
+   purchases and fees, not exchange-verified historical fills.
 3. Save and inspect the entry in **Open trades**. Fresh free wallet inventory
    must cover the declaration, accounting for other managed holdings. If validation
    fails, correct the cause and use **Retry entry check**. A corrected declaration

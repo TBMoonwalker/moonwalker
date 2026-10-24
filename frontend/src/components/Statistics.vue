@@ -9,6 +9,7 @@
                     <div class="profit-label">Net profit &amp; loss</div>
                     <n-statistic :class="hasStatisticsData && performanceComplete ? profit_class : undefined" :value="hasStatisticsData && performanceComplete ? formatFixed2(profit_overall) : 'Unavailable'" />
                     <div v-if="hasStatisticsData && performanceComplete" class="stat-detail">Realized {{ formatFixed2(profit_overall - upnl) }} · Unrealized {{ formatFixed2(upnl) }}</div>
+                    <div v-if="includesCsvDeclarations" class="stat-detail">Includes CSV-declared purchase costs and fees.</div>
                     <div v-if="!performanceComplete" class="stat-detail">Accumulation returns are not included in the legacy performance totals.</div>
                 </div>
                 <template v-if="exposure">
@@ -43,6 +44,7 @@ import { resolveBudgetAllocation } from '../helpers/portfolioExposure'
 const statistics_store = useWebSocketDataStore("statistics")
 const statistics_data = storeToRefs(statistics_store)
 const configSnapshotStore = useSharedConfigSnapshot()
+const includesCsvDeclarations = computed(() => Boolean(statistics_data.data.value?.accumulation_performance?.includes_csv_declarations))
 const hasStatisticsData = computed(() => statistics_data.hasReceivedData.value)
 const performanceComplete = ref(true)
 const profit_overall = ref(0)

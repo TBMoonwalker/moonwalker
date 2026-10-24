@@ -51,6 +51,26 @@ date;symbol;price;amount
 24/08/2025 15:04:00;BTC/USDC;112170.19;0.03863000
 ```
 
+Fee-aware format (also accepted without a header):
+
+```csv
+date;symbol;price;amount;fee;fee_currency;amount_type;fee_quote_value
+18/08/2025 19:32:00;BTC/USDC;117644.41;0.00099153;0.000001;BTC;net;
+24/08/2025 15:04:00;BTC/USDC;112170.19;0.03863000;0.5;USDC;gross;
+```
+
+The first four columns remain required. Append `fee;fee_currency` for six columns;
+`amount_type` and `fee_quote_value` are optional seventh and eighth columns.
+`amount_type` defaults to `net`: already-owned coins after base-coin fees. For
+`gross`, base-coin fees are deducted once. Quote fees increase acquisition cost;
+base fees reconstruct the gross purchase cost when the amount is net. `price`
+is the execution price before fees. An explicit zero fee is supported; blank fee
+fields mean unknown fees, not zero. Negative fees and rebates are not supported.
+Third-currency fees, such as BNB on BTC/USDC, require their actual total value in
+USDC in `fee_quote_value` to calculate returns. Accumulation retains unvalued
+third-currency fees with returns unavailable; Dynamic DCA rejects them until the
+quote value is supplied. No historical exchange rate is guessed.
+
 Dynamic DCA rules:
 - Oldest row per symbol is imported as base order.
 - Following rows are imported as safety orders.
@@ -62,9 +82,15 @@ Dynamic DCA rules:
 
 In accumulation mode, CSV declares already-owned net inventory instead of
 reconstructing Dynamic DCA base/safety orders. Fresh wallet ownership must cover
-the complete declaration; historical fees remain unknown. Failed adoption needs
+the complete net declaration. Four-column purchases retain unknown fees.
+Fee-complete, quote-valued declarations enable returns based on those declared
+purchases and fees, labelled separately from exchange-confirmed fills. Failed adoption needs
 an explicit entry retry. See [accumulation setup](howto-operate-accumulation.md#adopt-coins-already-owned-with-csv)
 and [recovery](howto-recover-accumulation.md).
+
+Changing the source does not rewrite an already-adopted holding. Correct a staged
+CSV before adoption; existing historical fees are never inferred or silently
+applied again to a running position.
 
 ## WebSocket Signal Setup
 Select `websocket_signal` in the signal field for a plain WebSocket feed that

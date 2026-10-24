@@ -4544,3 +4544,129 @@ async def test_initialized_observations_cannot_normalize_a_null_baseline(env):
     await activation.save()
     with pytest.raises(AccumulationStateError, match="Invalid baseline_close_ms"):
         await load_accumulation_context(str(activation.id), activation.account_scope)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fee_fields", ["0.001;BTC;net;", "0.1;USDC;gross;", "0.01;BNB;net;0.2"]
+)
+async def test_fee_aware_csv_returns_survive_buy_close_and_cache_rebuild(
+    env, monkeypatch, fee_fields
+):
+    """Declared purchase basis participates in returns without inventing native fills."""
+    from service.accumulation_performance import accumulation_performance
+
+    service, _ = await _entry_service(env, monkeypatch)
+    adapter, client, clock, *_ = env
+    client.balance["free"]["BTC"] = "5"
+    csv = (
+        "date;symbol;price;amount;fee;fee_currency;amount_type;fee_quote_value\n1970-01-02;BTC/USDC;60;1;"
+        + fee_fields
+    )
+    result = (await service.csv(csv))[0]
+    assert result.reason == "ENABLED"
+    assert (await service.csv(csv))[0].reason == "ALREADY_REGISTERED"
+    holding = await model.OpenTrades.get()
+    assert holding.accumulation_basis_provenance == "csv_declared_fees"
+    assert (
+        not holding.execution_history_complete
+    )  # Still a declaration, not exchange evidence.
+    assert not await model.TradeExecutions.exists()
+    assert not await model.AccumulationFillCheckpoint.exists()
+    report = await accumulation_performance(adapter)
+    assert report["complete"] and report["history_complete"], report
+    assert report["includes_csv_declarations"]
+    expected = Decimal(holding.accumulation_net_quantity) * 60 - Decimal(
+        holding.accumulation_remaining_cost
+    )
+    assert Decimal(report["by_quote"][0]["total_return"]) == expected
+
+    runtime = AccumulationRuntime(adapter)
+    assert await runtime.startup()
+    await runtime.tick()
+    clock[0] += HOUR
+    await runtime.tick()
+    clock[0] += 5000
+    await runtime.tick()
+    assert len(client.calls) == 1
+    assert await model.TradeExecutions.all().count() == 1  # Only the new exchange buy.
+    holding = await model.OpenTrades.get()
+    report = await accumulation_performance(adapter)
+    assert report["complete"], report
+    expected = Decimal(holding.accumulation_net_quantity) * 60 - Decimal(
+        holding.accumulation_remaining_cost
+    )
+    assert Decimal(report["by_quote"][0]["total_return"]) == expected
+
+    client.balance["free"]["BTC"] = holding.accumulation_net_quantity
+    activation = await model.AccumulationActivation.get()
+    await runtime.submit_command(
+        dict(
+            symbol=activation.symbol,
+            action="close",
+            operation_id="csv-fee-close",
+            expected_revision=activation.revision,
+        )
+    )
+    await runtime.tick()
+    report = await accumulation_performance(adapter)
+    assert report["complete"] and report["history_complete"], report
+    realized = report["by_quote"][0]["realized"]
+    assert Decimal(realized) < 0  # The exchange rounds the sale quantity down.
+    assert not await model.OpenTrades.exists()
+    await model.AccumulationReturnTotals.all().delete()
+    rebuilt = await accumulation_performance(adapter)
+    assert rebuilt["complete"] and rebuilt["history_complete"], rebuilt
+    assert rebuilt["by_quote"][0]["realized"] == realized
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["missing_origin", "changed_fee"])
+async def test_fee_aware_csv_does_not_trust_missing_or_inconsistent_origin(
+    env, monkeypatch, fault
+):
+    from service.accumulation_performance import accumulation_performance
+
+    service, _ = await _entry_service(env, monkeypatch)
+    env[1].balance["free"]["BTC"] = "5"
+    await service.csv(
+        "date;symbol;price;amount;fee;fee_currency\n1970-01-02;BTC/USDC;60;1;0.1;USDC"
+    )
+    assert (await accumulation_performance(env[0]))["complete"]
+    operation = await model.AccumulationLifecycleOperation.get(action="activate")
+    receipt = json.loads(operation.request_json)
+    if fault == "missing_origin":
+        del receipt["_csv_deal_id"]
+    else:
+        receipt["imported_inventory"]["entries"][0][3] = "0.2"
+    operation.request_json = json.dumps(receipt)
+    await operation.save()
+    assert not (await accumulation_performance(env[0]))["complete"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "fields,quantity,cost,fee",
+    [
+        ("0.99;0.01;BTC;net;", "0.99", "60", "0.6"),
+        ("1;0.1;USDC;gross;", "1", "60.1", "0.1"),
+        ("1;0.01;BNB;net;0.2", "1", "60.2", "0.2"),
+    ],
+)
+async def test_classic_csv_fee_import_persists_net_coins_and_fee_inclusive_cost(
+    env, fields, quantity, cost, fee
+):
+    from service.csv_signal_import import CSVSignalImportService
+
+    content = (
+        "date;symbol;price;amount;fee;fee_currency;amount_type;fee_quote_value\n1970-01-02;BTC/USDC;60;"
+        + fields
+    )
+    await CSVSignalImportService().import_from_csv(content, "USDC", 1)
+    holding = await model.OpenTrades.get()
+    trade = await model.Trades.get()
+    assert Decimal(str(holding.amount)) == Decimal(quantity)
+    assert Decimal(str(holding.cost)) == Decimal(cost)
+    assert Decimal(str(trade.ordersize)) == Decimal(cost)
+    assert trade.fee == pytest.approx(float(Decimal(fee) / Decimal("60")))
+    assert not env[1].calls

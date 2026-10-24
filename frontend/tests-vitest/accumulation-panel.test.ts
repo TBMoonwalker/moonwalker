@@ -121,6 +121,18 @@ describe('accumulation controls', () => {
     expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
   })
 
+  it.each([0, 1])('labels declared CSV returns and preserves pending native fee warnings (%i)', async pending => {
+    const detail = snapshot({ holding: { ...snapshot().holding!, basis_provenance: 'csv_declared_fees', fees: { totals: { USDC: '0.1' }, pending_reports: pending } } })
+    api.fetchAccumulationPage.mockResolvedValue({ activations: [detail], next_after: null })
+    api.fetchAccumulationDetail.mockResolvedValue(detail)
+    const wrapper = mount(AccumulationPanel)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Returns use CSV-declared purchases and fees.')
+    expect(wrapper.text()).toContain('Historical purchases are not exchange-verified.')
+    expect(wrapper.text().includes('Fee or execution history is incomplete')).toBe(pending > 0)
+    expect(api.sendAccumulationCommand).not.toHaveBeenCalled()
+  })
+
   it('keeps holding summaries out of history and reviews a close before journaling', async () => {
     const wrapper = mount(AccumulationPanel)
     await flushPromises()

@@ -8,6 +8,7 @@ from typing import Any
 
 import model
 from service.accumulation_contracts import canonical_decimal
+from service.accumulation_import import RETURN_BASES
 
 
 async def record_return_delta(
@@ -33,7 +34,7 @@ async def record_return_delta(
         totals = await model.AccumulationReturnTotals.create(
             using_db=connection, activation=activation
         )
-    totals.provenance_complete &= inventory.basis_provenance == "exchange_fills"
+    totals.provenance_complete &= inventory.basis_provenance in RETURN_BASES
     totals.last_quantity, totals.last_cost = (
         inventory.quantity,
         inventory.remaining_cost,

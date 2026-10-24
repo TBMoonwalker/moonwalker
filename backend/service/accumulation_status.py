@@ -283,7 +283,11 @@ def _entry(
                 "acquisition_cost": declaration.cost,
                 "row_count": len(declaration.entries),
                 "first_purchase_ms": declaration.entries[0][0],
-                "historical_fees_known": False,
+                "historical_fees_known": declaration.inventory().pending_fee_reports
+                == 0,
+                "fees": declaration.inventory().fees,
+                "fee_values_known": declaration.inventory().basis_provenance
+                == "csv_declared_fees",
             }
     except (ValueError, TypeError, KeyError):
         result["declaration_invalid"] = True

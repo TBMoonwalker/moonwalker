@@ -119,14 +119,15 @@ watch([() => props.intent?.id, fresh], async () => {
     <template v-if="detail">
       <p v-if="detail.inventory_restore_required">Recorded inventory is missing from its holding link. Restore it from audit evidence before trading.</p>
       <p v-else-if="!detail.holding && detail.holding_integrity !== 'invalid' && detail.observations_initialized">No managed inventory.</p>
-      <p v-if="detail.holding && (!detail.holding.fees || detail.holding.fees.pending_reports > 0 || !detail.holding.execution_history_complete)">
+      <p v-if="detail.holding?.basis_provenance === 'csv_declared_fees'">Returns use CSV-declared purchases and fees. Historical purchases are not exchange-verified.</p>
+      <p v-if="detail.holding && (!detail.holding.fees || detail.holding.fees.pending_reports > 0 || (!detail.holding.execution_history_complete && detail.holding.basis_provenance !== 'csv_declared_fees'))">
         Fee or execution history is incomplete. These amounts do not represent a fully verified net return.
       </p>
       <dl v-if="detail.entry?.declaration && !detail.observations_initialized" class="accumulation-values">
         <div><dt>Declared quantity · {{ base }}</dt><dd>{{ detail.entry.declaration.net_quantity }}</dd></div>
         <div><dt>Declared cost · {{ quote }}</dt><dd>{{ detail.entry.declaration.acquisition_cost }}</dd></div>
       </dl>
-      <p v-if="!detail.observations_initialized && detail.entry?.source === 'csv'">CSV amounts declare net owned coins. Historical fees remain unknown. Correction does not enable buys.</p>
+      <p v-if="!detail.observations_initialized && detail.entry?.source === 'csv'">CSV amounts declare already-owned coins. {{ detail.entry.declaration?.historical_fees_known ? 'Historical fees are declared in the CSV.' : 'Historical fees remain unknown.' }} Correction does not enable buys.</p>
       <div v-if="actions.includes('correct_import')" class="accumulation-input">
         <label :for="fieldId('accumulation-csv')">Corrected CSV for {{ detail.symbol }}</label>
         <n-input v-model:value="csv" type="textarea" :disabled="disabled" :input-props="{ id: fieldId('accumulation-csv') }" placeholder="date;symbol;price;amount" :autosize="{ minRows: 3, maxRows: 8 }" />

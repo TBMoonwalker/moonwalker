@@ -3,10 +3,16 @@
 import csv
 import io
 from collections import defaultdict
+from decimal import Decimal, localcontext
 from typing import Any
 
 import helper
 import model
+from service.accumulation_import import (
+    _declaration,
+    normalize_csv_symbol,
+    parse_accumulation_csv,
+)
 from service.database import run_sqlite_write_with_retry
 from service.trade_math import (
     calculate_order_size,
@@ -81,7 +87,11 @@ class CSVSignalImportService:
             for index, entry in enumerate(entries):
                 amount = float(entry["amount"])
                 price = float(entry["price"])
-                ordersize = calculate_order_size(price=price, amount=amount)
+                ordersize = (
+                    float(entry["cost"])
+                    if "cost" in entry
+                    else calculate_order_size(price=price, amount=amount)
+                )
                 total_amount += amount
                 total_cost += ordersize
 
@@ -97,10 +107,10 @@ class CSVSignalImportService:
                     model.Trades(
                         timestamp=str(entry["timestamp"]),
                         ordersize=ordersize,
-                        fee=0.0,
+                        fee=float(entry.get("fee_rate", 0)),
                         precision=entry["precision"],
                         amount=amount,
-                        amount_fee=0.0,
+                        amount_fee=float(entry.get("base_fee", 0)),
                         price=price,
                         symbol=symbol,
                         orderid=(
@@ -183,6 +193,49 @@ class CSVSignalImportService:
         if first_row is None:
             raise ValueError("CSV is empty.")
 
+        if any(
+            len(row) >= 6
+            for row in csv.reader(io.StringIO(normalized_content), delimiter=";")
+        ):
+            grouped: dict[str, list[dict[str, Any]]] = {}
+            for imported in parse_accumulation_csv(
+                normalized_content, quote_currency, now_ms=2**63 - 1
+            ):
+                entries = []
+                for raw in imported.entries:
+                    row = _declaration(imported.symbol, [raw])
+                    inventory = row.inventory()
+                    if inventory.basis_provenance == "unvalued_external_fees":
+                        raise ValueError(
+                            "CSV fees in a third currency require fee_quote_value for Dynamic DCA."
+                        )
+                    base, quote = imported.symbol.split("/")
+                    fees = inventory.fees
+                    base_fee = Decimal(fees.get(base, "0"))
+                    # Cost already includes fees once. This field is a display total only.
+                    with localcontext() as context:
+                        context.prec = 512
+                        fee_quote = (
+                            Decimal(row.cost)
+                            - Decimal(inventory.contributed_quote)
+                            + base_fee * Decimal(raw[1])
+                        )
+                        fee_rate = fee_quote / Decimal(inventory.contributed_quote)
+                    entries.append(
+                        {
+                            "timestamp": raw[0],
+                            "price": float(raw[1]),
+                            "amount": float(row.quantity),
+                            "precision": count_decimal_places(row.quantity),
+                            "cost": row.cost,
+                            "base_fee": str(base_fee),
+                            "fee_quote": str(fee_quote),
+                            "fee_rate": str(fee_rate),
+                        }
+                    )
+                grouped[imported.symbol] = entries
+            return grouped
+
         expected_header = ["date", "symbol", "price", "amount"]
         normalized_first_row = [column.strip().lower() for column in first_row]
         has_header = normalized_first_row == expected_header
@@ -251,26 +304,4 @@ class CSVSignalImportService:
 
     def _normalize_symbol(self, symbol_raw: str, quote_currency: str) -> str:
         """Normalize symbol to `BASE/QUOTE` format."""
-        symbol = symbol_raw.strip().upper().replace(" ", "")
-        symbol = symbol.replace("_", "/")
-        if "-" in symbol and "/" not in symbol:
-            symbol = symbol.replace("-", "/")
-
-        if "/" in symbol:
-            parts = symbol.split("/")
-            if len(parts) != 2 or not parts[0] or not parts[1]:
-                raise ValueError(f"Invalid symbol '{symbol_raw}'.")
-            base, quote = parts[0], parts[1]
-            return f"{base}/{quote}"
-
-        if quote_currency and symbol.endswith(quote_currency):
-            base = symbol[: -len(quote_currency)]
-            if base:
-                return f"{base}/{quote_currency}"
-
-        if "/" not in symbol and "-" not in symbol:
-            return f"{symbol}/{quote_currency}"
-
-        raise ValueError(
-            f"Invalid symbol '{symbol_raw}'. Use BASE/QUOTE or BASE-{quote_currency}."
-        )
+        return normalize_csv_symbol(symbol_raw, quote_currency.upper().strip())

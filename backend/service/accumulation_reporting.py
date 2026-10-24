@@ -57,6 +57,7 @@ def _inventory(value: str | None) -> dict[str, Any] | None:
                 in {
                     "exchange_fills",
                     "csv_declared_fees_unknown",
+                    "csv_declared_fees",
                     "unvalued_external_fees",
                     "unknown",
                 }
