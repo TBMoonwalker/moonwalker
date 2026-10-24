@@ -3,6 +3,14 @@
 Moonwalker uses reproducible dependency locks and fails closed when an
 automated install encounters an unreviewed artifact or lifecycle hook.
 
+For the task-by-task procedure, use
+[How to update dependencies after supply-chain review](howto-update-dependencies.md).
+Before any direct or transitive update, research web compromise reports and
+version-specific advisories. An unresolved incident blocks installation; clean
+audits, semver labels and registry signatures alone do not establish trust.
+Record primary-source links and artifact/provenance evidence when applicable.
+This manual pre-install review complements the automated gates below.
+
 ## Runtime baseline
 
 - Python `3.14.x`; `.python-version` records the verified patch release.

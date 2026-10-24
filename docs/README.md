@@ -3,8 +3,14 @@
 Moonwalker runs as a single-node, single-instance application. Multiple
 dashboard clients can connect to that instance.
 
+## Tutorials
+
+- [Compare accumulation strategies before starting a holding](tutorial-accumulation-backtest.md)
+
 ## Operator guides
 
+- [Start, manage and close an accumulation holding](howto-operate-accumulation.md)
+- [Recover an accumulation holding](howto-recover-accumulation.md)
 - [Configuration and settings reference](configuration.md)
 - [Expert safeguards and safety-order sizing modes](dynamic-so.md)
 - [AI Trust local calibration](ai-trust.md)
@@ -21,6 +27,8 @@ dashboard clients can connect to that instance.
 - [Accumulation mode: setup, strategy, manual exits, recovery and replay](accumulation.md)
 - [Dashboard history loading](designs/delta-loading.md)
 - [Dependency management and supply-chain policy](dependencies.md)
+- [Update dependencies after supply-chain review](howto-update-dependencies.md)
+- [Why accumulation has its own lifecycle](explanation-accumulation-lifecycle.md)
 - [Product record](../PRODUCT.md)
 - [Design system](../DESIGN.md)
 - [Project backlog](../TODOS.md)

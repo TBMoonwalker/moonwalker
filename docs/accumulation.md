@@ -10,6 +10,17 @@ available funds can be spent while accumulation is enabled. A prolonged decline
 can consume most of the available budget. Pause Moonwalker or a registration to
 block new buys; reconciliation and explicit sales remain available.
 
+## Documentation paths
+
+- Learn through the [backtest tutorial](tutorial-accumulation-backtest.md).
+- Start, pause, switch and sell with the [operating guide](howto-operate-accumulation.md).
+- Resolve blocked work with the [recovery guide](howto-recover-accumulation.md).
+- Understand [lifecycle and price anchors](explanation-accumulation-lifecycle.md).
+- Integrate using the [API reference](api.md#accumulation).
+
+The sections below describe the current contracts and limits. A saved strategy
+version is an immutable pin, not an automatically updated strategy name.
+
 ## Set up a holding
 
 1. Use spot markets and enable trade mode management. Disable Autopilot.
@@ -18,14 +29,16 @@ block new buys; reconciliation and explicit sales remain available.
    signal plugins are not supported for accumulation.
 3. Select **Accumulation dip (ATR) · v1 · 1h** as the initial strategy in
    Configuration. This built-in exists before setup is complete; creating a custom
-   variant is optional. Its experimental starting parameters are not optimized or
-   a claim of profitable performance. Strategy Builder can copy them into a new
-   immutable variant.
+   variant is optional. **Downtrend / sideways accumulation** is also available
+   as a shared graph preset for filtering subsequent buys. Neither preset is
+   performance optimized. Strategy Builder can duplicate them into a custom
+   immutable version.
 4. ASAP uses the existing **Base order amount** (`bo`) for the first purchase,
    just as in Dynamic DCA. Later purchases use dynamic accumulation strategy
-   sizing. Save the configuration. An incomplete draft may omit the strategy pin. Demo and live entry
-   requires credentials, an exact compatible pin and successful ownership, market
-   and candle validation.
+   sizing. Save the configuration. An incomplete draft may omit the strategy pin.
+   Demo and live execution require credentials, an exact compatible pin and
+   successful ownership and market checks. The ASAP base order does not require
+   strategy candle warmup; subsequent purchases do.
 5. Manage the registration from **Open trades** in Trading Overview.
 
 The dry-run switch routes accumulation to the exchange demo trading environment,
@@ -35,7 +48,7 @@ ASAP registration opens with its configured base order in demo mode. An incomple
 without credentials or a strategy cannot trade. Demo and live ownership are
 separate: changing modes cannot reuse or rebind the other environment's holdings
 or orders. Use separate installations/databases when keeping demo history alongside live trading.
-Use **Historical strategy comparison** for an isolated local simulation without
+Use **Backtest → Accumulation** for an isolated simulation without
 an exchange account. Creating a strategy does not itself submit a purchase.
 
 ASAP immediately opens a managed holding with the configured base-order amount.
@@ -130,8 +143,10 @@ request**; it never automatically resubmits it under a new ID.
 The first entry check runs automatically. Staged entries that have not completed
 it have **Retry entry check**, **Correct CSV**, and **Abandon entry**. Retrying
 checks exchange access, ownership, strategy and market history. The check itself
-does not submit an order; passing enables strategy-driven buying.
-Correction stays paused until explicitly validated. Abandonment leaves the coins
+does not submit an order; the runtime executes eligible purchases afterward.
+For ASAP, successful validation permits the immediate base order without a
+strategy signal. For CSV, validation adopts the declared inventory before
+strategy-driven buying. Correction stays paused until explicitly validated. Abandonment leaves the coins
 unmanaged and the registration stopped, without selling. A never-adopted abandoned
 entry can later be explicitly validated again or given a corrected CSV declaration.
 A compatible replacement strategy can be reviewed in Trade modes configuration;
@@ -177,6 +192,67 @@ protection is enabled, accumulation buys use the same shared exchange schedule
 and market checks as Dynamic DCA. Scheduled delistings and unavailable required
 schedule evidence block new buys; the final claim rechecks the cached decision
 without network I/O inside the database transaction. Explicit sales remain available.
+
+## Strategy execution parameters
+
+These defaults apply to the built-in ATR preset and the execution settings of the
+shipped downtrend/sideways graph. Custom versions persist a complete parameter
+set; missing or unknown fields are rejected. Decimal values are serialized as
+strings in strategy documents. Graph conditions are additional requirements,
+not replacements for these execution rules. Decimal strings must be finite,
+at most 128 characters, and have an absolute decimal exponent no greater than 128.
+All six decimal parameters must be strictly positive.
+
+| Parameter | Type / constraint | Default | Effect |
+| --- | --- | --- | --- |
+| `timeframe` | String: `1m`, `5m`, `15m`, `30m`, `1h`, `4h`, `1d`, `1w` | `1h` | Completed-candle interval; weekly candles use Monday alignment. |
+| `peak_length` | Integer, 2–1000 | `168` | Preceding candle highs used for the peak, excluding the current high. |
+| `atr_length` | Integer, 2–100 | `14` | Wilder average true range period. |
+| `entry_atr` | Positive decimal string | `"1.5"` | Required peak-to-close discount in ATR units. |
+| `spacing_atr` | Positive decimal string | `"1"` | Further-decline or fresh-correction distance. |
+| `recovery_atr` | Positive decimal string | `"1"` | Recovery distance needed to rearm a correction path. |
+| `min_fraction` | Positive decimal string | `"0.02"` | Fraction of usable funds at the entry threshold. |
+| `slope` | Positive decimal string | `"0.03"` | Added fraction per ATR beyond the entry threshold. |
+| `max_fraction` | Decimal string, `min_fraction <= max_fraction <= 1` | `"0.20"` | Maximum fraction requested per opportunity. |
+
+Base history length is `max(252, peak_length, 18 * atr_length) + 1`, or 253
+candles at the defaults. Shared graph requirements can increase it; the shipped
+regime graph requires 1,240 base 1h candles. The complete graph warmup is bounded
+at 12,000 base candles.
+
+For an eligible severity `d = (peak - close) / ATR`, sizing is:
+
+```text
+fraction = min(max_fraction, min_fraction + slope * (d - entry_atr))
+requested quote = fraction * usable quote
+```
+
+With 1,000 usable quote units, depths of 1.5, 3.5 and 7.5 ATR request 20, 80 and
+200 units before final admission/precision checks. This formula does not size the
+initial ASAP base order, which uses `bo`.
+
+The next buy is not required to be below the base order or all previous fills.
+A recovery and new correction can qualify above an earlier signal. See
+[price anchors](explanation-accumulation-lifecycle.md#why-a-later-buy-can-cost-more)
+and the [shared condition graph reference](strategies.md#shared-strategies-for-dca-and-accumulation).
+
+## Lifecycle state reference
+
+| State | Meaning |
+| --- | --- |
+| `validating` | Entry or lifecycle readiness checks are not complete. |
+| `enabled` | Eligible for evaluation, subject to pause, data, account and capital checks; it does not promise a buy. |
+| `paused` | New buys are blocked until explicit validated resume. |
+| `blocked` | A lifecycle/integrity condition prevents buying. |
+| `switching` | Outstanding buys are settling before a new pinned strategy is initialized. |
+| `selling_partial` | An explicit partial sale is settling; new buys wait. |
+| `closing` | Full close is latched; buys remain blocked until settlement and sale or verified dust archival finish. |
+| `stopped` | The cycle has ended or entry was abandoned. Plugin scheduling cannot reactivate it. |
+
+Runtime reasons such as `WAIT_REBASE`, `WAIT_CONDITIONS`, `WAIT_DEPTH`,
+`WAIT_PRICE`, `WAIT_BUDGET` and `WAIT_ORDER` refine the state; they do not replace
+it. The [operating guide](howto-operate-accumulation.md) covers the normal actions;
+the [recovery guide](howto-recover-accumulation.md) maps blockers to repairs.
 
 ## Recovery and inventory repair
 
@@ -360,9 +436,11 @@ Runtime candle-boundary and execution-recovery timers are separate from dashboar
 updates. Repair-only startup retains explicit HTTP refresh and recovery controls;
 its `stream_available` flag is false because ordinary WebSockets remain disabled.
 
-Inventory, strategies, history and comparison controls are under **Manage
-accumulation**. Action confirmations and critical selected-holding warnings remain
-outside that disclosure.
+The current wait and executed orders belong to the expanded Open trades entry.
+Row actions own pause, sales and reactivation; required recovery controls appear
+in the same trade information. Strategy assignment is only in Configuration,
+strategy editing is in Strategy Builder, and simulation is in Backtest. There is
+no separate accumulation management area in Utilities.
 
 ### Shared Strategy Builder
 

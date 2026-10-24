@@ -84,6 +84,9 @@ Notes:
 
 ## Accumulation
 
+Use the [operating guide](howto-operate-accumulation.md) for the dashboard flow and
+the [accumulation reference](accumulation.md) for execution parameters and states.
+
 These routes return `503` when the lifespan-owned accumulation runtime is not ready.
 They do not construct a runtime or activate live trading. Configuration and Strategy
 Builder include mode/pin selection and immutable-variant editing. `/config/all`
@@ -101,7 +104,7 @@ fall back to live trading. Demo and live ownership scopes remain separate.
 | --- | --- | --- |
 | `GET` | `/accumulation/activations?limit=50&after=BTC%2FUSDC` | Read a symbol-ordered registry page; `limit` is 1–100 and `next_after` supplies the next cursor. |
 | `GET` | `/accumulation/activation?symbol=BTC%2FUSDC` | Read one current activation, latest entry declaration summary and up to 20 recent lifecycle operations. |
-| `POST` | `/accumulation/commands` | Journal revisioned pause, resume, strategy switch, partial sale, close, close retry or reactivation intent. |
+| `POST` | `/accumulation/commands` | Journal revisioned lifecycle intent or archive verified closing dust; see action fields below. |
 | `POST` | `/accumulation/entry/commands` | Correct, explicitly retry or abandon a staged entry. |
 | `POST` | `/accumulation/repair` | Reconcile an existing order, retire unplaced intent, acknowledge recorded settlement, rebind or declare ownership, restore an inventory link, or record a paused correction. |
 | `GET` | `/accumulation/performance` | Read exact coverage-aware returns and fresh bid valuation, grouped by quote. |
@@ -235,10 +238,24 @@ documents and exchange payloads are not returned.
 Both command endpoints require `symbol`, `action`, a stable `operation_id` and
 `expected_revision` from the current activation snapshot. Unknown fields are
 rejected; account identity comes from the server. Lifecycle actions are `pause`,
-`resume`, `close`, `retry_close`, `sell_partial`, `switch_strategy` and `reactivate`.
-`retry_close` also requires `previous_operation_id`; `sell_partial` requires an
-exact decimal-string `quantity`; `switch_strategy` requires `target_version_id`.
+`resume`, `close`, `retry_close`, `archive_dust`, `sell_partial`, `switch_strategy`
+and `reactivate`. `operation_id` must match `^[A-Za-z0-9._:-]{1,64}$`;
+`expected_revision` is an integer from 0 through `2**63 - 2` (booleans rejected).
+
+| Lifecycle action | Additional required fields |
+| --- | --- |
+| `pause`, `resume`, `close`, `reactivate` | None. |
+| `retry_close`, `archive_dust` | `previous_operation_id`: valid operation ID of the reviewed close predecessor. |
+| `sell_partial` | `quantity`: finite positive decimal string, at most 128 characters, leaving positive inventory. |
+| `switch_strategy` | `target_version_id`: integer in `1..2**63 - 1`, identifying an exact compatible version. |
+
 Sales remain explicit operator actions and execute only in the runtime worker.
+`archive_dust` uses the same command endpoint but places no order. It atomically
+moves only a verified unsellable full-close remainder into Unsellable trades and
+stops the registration. Sellable inventory, stale or changed ownership, unsettled
+execution and incomplete fees block archival. Full-close workers also invoke this
+archival automatically after verifying the same evidence. Partial sales do not.
+See [the recovery guide](howto-recover-accumulation.md#finish-a-full-close).
 
 Entry actions are `retry_entry`, `correct_import` and `abandon_entry`. Each also
 requires `previous_operation_id` from the latest entry operation. Correction
@@ -268,8 +285,11 @@ Strategy saves require exactly `operation_id`, `name` (1–120 characters) and t
 complete `parameters` object from the template/catalog. Saves return `id`, `slug`,
 `name` and `version`. Each save creates a separate immutable variant at version 1;
 there is no in-place editing or automatic promotion of holdings. Repeating the
-same normalized save returns the same ID; changed reuse returns `409`. Ordinary
-graph-editor endpoints do not list, edit, duplicate or delete these variants.
+same normalized save returns the same ID; changed reuse returns `409`. Historical
+versions remain intact. The shared Strategy Builder presents legacy ATR variants
+as graphs and can duplicate them into editable custom strategies without
+rewriting their historical documents. See the
+[shared strategy reference](strategies.md#shared-strategies-for-dca-and-accumulation).
 
 ## Autopilot Memory
 

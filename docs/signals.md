@@ -51,7 +51,7 @@ date;symbol;price;amount
 24/08/2025 15:04:00;BTC/USDC;112170.19;0.03863000
 ```
 
-Rules:
+Dynamic DCA rules:
 - Oldest row per symbol is imported as base order.
 - Following rows are imported as safety orders.
 - Import is blocked when open trades already exist.
@@ -59,6 +59,12 @@ Rules:
   `csv_signal` is also blocked while open trades still exist.
 - The plugin prefills missing history for imported symbols before it creates the
   restored trade rows.
+
+In accumulation mode, CSV declares already-owned net inventory instead of
+reconstructing Dynamic DCA base/safety orders. Fresh wallet ownership must cover
+the complete declaration; historical fees remain unknown. Failed adoption needs
+an explicit entry retry. See [accumulation setup](howto-operate-accumulation.md#adopt-coins-already-owned-with-csv)
+and [recovery](howto-recover-accumulation.md).
 
 ## WebSocket Signal Setup
 Select `websocket_signal` in the signal field for a plain WebSocket feed that

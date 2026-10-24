@@ -60,7 +60,8 @@ with spot markets, fixed ASAP symbols or CSV imports, and Autopilot disabled.
 Changing trade modes drains active order work and requires no open holdings,
 non-stopped accumulation registrations or unresolved placements. A live instance
 must first be globally paused. These conditions are checked again when saving.
-See [accumulation mode](accumulation.md) for setup, recovery and historical comparison.
+Follow the [accumulation operating guide](howto-operate-accumulation.md) for setup
+and manual exits, or the [accumulation reference](accumulation.md) for exact rules.
 
 Moonwalker now exposes and accepts `trade_mode` as the only supported
 operator-facing lifecycle field. Older stored rows and backup payloads that
